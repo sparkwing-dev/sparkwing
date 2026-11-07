@@ -3,14 +3,12 @@ package wingd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func controllerHTTPRequest(t *testing.T, method, path, body string, socket bool) *http.Request {
@@ -61,28 +59,6 @@ func TestControllerHTTPReportsOwnerState(t *testing.T) {
 	}
 }
 
-func TestControllerHTTPDashboardReturnsReadinessFailureAndPolicy(t *testing.T) {
-	d, err := New(Config{Home: t.TempDir(), Version: "test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.localDashboard = func(ctx context.Context, address string, readOnly bool) error {
-		if ctx.Err() != nil || address != "127.0.0.1:4000" || !readOnly {
-			t.Errorf("dashboard input: address=%q readonly=%t error=%v", address, readOnly, ctx.Err())
-		}
-		return errors.New("dashboard bind failed")
-	}
-	recorder := httptest.NewRecorder()
-	d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(recorder, controllerHTTPRequest(t, http.MethodPost, "dashboard", `{"address":"127.0.0.1:4000","read_only":true}`, true))
-	var result wingwire.LocalDashboardAck
-	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Error != "dashboard bind failed" || !result.ReadOnly {
-		t.Fatalf("dashboard result: %+v", result)
-	}
-}
-
 func TestControllerHTTPDrainPersistenceFailureStopsDaemon(t *testing.T) {
 	persistence := &admissionMemoryStore{}
 	d := newHTTPAdmissionTest(t, persistence)
@@ -96,5 +72,21 @@ func TestControllerHTTPDrainPersistenceFailureStopsDaemon(t *testing.T) {
 	case <-d.quit:
 	default:
 		t.Fatal("failed drain retained the elected daemon")
+	}
+}
+
+func TestControllerHTTPNamesTheRemovedDashboardRoute(t *testing.T) {
+	d, err := New(Config{Home: t.TempDir(), Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(recorder, controllerHTTPRequest(t, http.MethodPost, "dashboard", `{"address":"127.0.0.1:4343"}`, true))
+	var envelope struct {
+		Error struct{ Code, Message, Hint string } `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil || recorder.Code != http.StatusNotFound || envelope.Error.Code != "unsupported_route" ||
+		!strings.Contains(envelope.Error.Message, "removed") || !strings.Contains(envelope.Error.Hint, "sparkwing dashboard open") {
+		t.Fatalf("removed route: %d %s %v", recorder.Code, recorder.Body.String(), err)
 	}
 }

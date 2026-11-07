@@ -448,6 +448,20 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 		out.Controller.Digest, out.Runner.Digest = ctl, run
 		return out, nil
 	}
+	if err := d.act(ctx, "check that both runtime bases are available before building", func() error {
+		for _, ref := range []string{d.cfg.ControllerBase, d.cfg.RunnerBase} {
+			digest, err := d.tools.registry.digest(ctx, d.ecrPass, ref)
+			if err != nil {
+				return fmt.Errorf("read runtime base %s: %w", ref, err)
+			}
+			if digest == "" {
+				return fmt.Errorf("runtime base %s is missing; restore the pinned manifest or select an available runtime base before retrying", ref)
+			}
+		}
+		return nil
+	}); err != nil {
+		return out, err
+	}
 	dist := filepath.Join(d.repoDir, "dist")
 	if err := d.act(ctx, "build the dashboard with bin/build-web.sh", func() error {
 		if err := removeDeployDir(dist); err != nil {

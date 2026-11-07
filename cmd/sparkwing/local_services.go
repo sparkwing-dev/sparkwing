@@ -98,10 +98,14 @@ func resolveLocalRuntimeConfig(home string) (wingd.LocalRuntimeConfig, error) {
 	if err != nil {
 		return wingd.LocalRuntimeConfig{}, err
 	}
+	dashboard, err := wingd.ResolveDashboardSettings()
+	if err != nil {
+		return wingd.LocalRuntimeConfig{}, err
+	}
 	return wingd.LocalRuntimeConfig{Admission: wingd.Config{
 		Home: home, Version: installedVersion(), Budget: budget.Budget,
 		BudgetSource: budget.Source, BudgetOrigin: budget.Origin, AdmissionPolicy: &policy,
-	}, Open: openLocalController}, nil
+	}, Dashboard: dashboard, Open: openLocalController}, nil
 }
 
 func openLocalController(ctx context.Context, home string) (wingd.LocalController, error) {
@@ -264,6 +268,13 @@ func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, 
 	result.options = wingd.LocalStartOptions{Home: home, Executable: host.Binary, Version: host.Version}
 	result.mintLogin = func(ctx context.Context) (wingd.DashboardLogin, error) {
 		return wingdclient.MintDashboardLogin(ctx, home)
+	}
+	result.retireRunner = func(ctx context.Context) error {
+		err := wingdclient.Stop(ctx, wingdclient.Options{Home: home, RetireRunner: true})
+		if errors.Is(err, wingdclient.ErrNoDaemon) {
+			return nil
+		}
+		return err
 	}
 	return result, nil
 }

@@ -60,8 +60,7 @@ sparkwing pipeline new --pipeline hello
 git add -A && git commit -m "add hello pipeline"
 sparkwing run hello
 
-# Dashboard lifecycle (requires the native runtime binding)
-sparkwing dashboard start
+# Sign in to the local dashboard on 127.0.0.1:4343
 sparkwing dashboard open    # one-time browser sign-in link
 ```
 
@@ -162,7 +161,7 @@ cadence.
 
 The controller's HTTP API (served by `sparkwing-controller` in
 cluster mode and embedded in the `sparkwing` CLI for laptop mode
-via `sparkwing dashboard start`) is documented as an OpenAPI 3.1
+behind `sparkwing dashboard open`) is documented as an OpenAPI 3.1
 spec at
 [`api/openapi.yaml`](./api/openapi.yaml). Every route and its
 authorization policy (`x-sparkwing-policy`) is listed there; routes with

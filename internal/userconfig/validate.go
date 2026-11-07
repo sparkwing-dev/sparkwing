@@ -2,7 +2,9 @@ package userconfig
 
 import (
 	"math"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +46,11 @@ func ValidateConfig(cfg Config) error {
 			return err
 		}
 	}
+	if cfg.Dashboard != nil && cfg.Dashboard.Address != nil {
+		if err := validateDashboardAddress(*cfg.Dashboard.Address); err != nil {
+			return err
+		}
+	}
 	if cfg.Cache != nil {
 		if cfg.Cache.MaxEntries != nil && *cfg.Cache.MaxEntries < 0 {
 			return Invalid("cache.max_entries", "must be non-negative")
@@ -81,6 +88,18 @@ func ValidateConfig(cfg Config) error {
 		if err := procenv.ValidateSubmitEnvAllow(cfg.Run.SubmitEnvAllow); err != nil {
 			return Invalid("run.submit_env_allow", strings.TrimPrefix(err.Error(), "run.submit_env_allow "))
 		}
+	}
+	return nil
+}
+
+// safety: the dashboard binds loopback only; a remote browser reaches it through an SSH port forward.
+// Port 0 lets an isolated home pick a free port instead of contending for the shared default.
+func validateDashboardAddress(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	number, portErr := strconv.Atoi(port)
+	ip := net.ParseIP(host)
+	if err != nil || portErr != nil || number < 0 || number > 65535 || ip == nil || !ip.IsLoopback() {
+		return Invalid("dashboard.address", "expected a loopback IP and port such as 127.0.0.1:4343")
 	}
 	return nil
 }

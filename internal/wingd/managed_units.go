@@ -132,7 +132,7 @@ func (m *nativeUnits) validate(ctx context.Context, executable, version string) 
 		return err
 	}
 	if m.host.GOOS == "windows" {
-		return errors.New("wingd: Windows supports dashboard start and daemon schedules; native service installation is unavailable")
+		return errors.New("wingd: Windows starts the controller on demand and supports daemon schedules; native service installation is unavailable")
 	}
 	if !filepath.IsAbs(executable) || strings.ContainsAny(executable, "\r\n\x00") || version == "" || strings.ContainsAny(version, "\r\n<>\x00") {
 		return errors.New("wingd: an absolute executable and a one-line release version are required")
@@ -151,8 +151,8 @@ func (m *nativeUnits) InstallController(ctx context.Context, opts LocalStartOpti
 	if err := m.validate(ctx, opts.Executable, opts.Version); err != nil {
 		return err
 	}
-	if !filepath.IsAbs(opts.Home) || filepath.Clean(opts.Home) != m.host.SparkwingHome || opts.Standalone || opts.DashboardAddress != "" {
-		return errors.New("wingd: installation requires the captured home; start the dashboard through its lifecycle client")
+	if !filepath.IsAbs(opts.Home) || filepath.Clean(opts.Home) != m.host.SparkwingHome || opts.Standalone {
+		return errors.New("wingd: installation requires the captured home")
 	}
 	unit, _, exists, err := m.controller()
 	if err != nil {
@@ -245,7 +245,7 @@ func (m *nativeUnits) UninstallController(ctx context.Context) error {
 	}
 	defer func() { <-m.gate }()
 	if m.host.GOOS == "windows" {
-		return errors.New("wingd: Windows supports dashboard start; there is no installed controller service")
+		return errors.New("wingd: Windows starts the controller on demand; there is no installed controller service")
 	}
 	unit, _, exists, err := m.controller()
 	if err != nil || !exists {

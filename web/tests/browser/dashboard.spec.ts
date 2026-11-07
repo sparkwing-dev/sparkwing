@@ -2135,10 +2135,10 @@ test("says how to fix an admission daemon that does not answer", async ({ page }
   await page.route("**/api/v1/queue", (route) =>
     route.fulfill({
       status: 503,
-      json: { error: { code: "unavailable", message: "The local admission daemon did not answer.", hint: "Stop the sparkwing process 4242 by hand (for example `kill 4242`), then run `sparkwing dashboard start`." } },
+      json: { error: { code: "unavailable", message: "The local admission daemon did not answer.", hint: "Stop the sparkwing process 4242 by hand (for example `kill 4242`), then run `sparkwing dashboard open`." } },
     }),
   );
-  const said = "The local admission daemon did not answer. Stop the sparkwing process 4242 by hand (for example `kill 4242`), then run `sparkwing dashboard start`.";
+  const said = "The local admission daemon did not answer. Stop the sparkwing process 4242 by hand (for example `kill 4242`), then run `sparkwing dashboard open`.";
   await page.goto("/queue");
   await expect(page.getByText(said)).toBeVisible();
   await page.goto("/capacity");

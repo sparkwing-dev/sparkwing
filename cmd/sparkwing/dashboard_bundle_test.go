@@ -9,9 +9,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
-func TestDashboardStartRefusesABuildWithoutItsBundle(t *testing.T) {
+func TestDashboardOpenRefusesABuildWithoutItsBundle(t *testing.T) {
 	missing := func() error { return errors.New("missing") }
-	for _, args := range [][]string{{"dashboard", "start"}, {"dashboard", "open"}} {
+	for _, args := range [][]string{{"dashboard", "open"}} {
 		inv, err := clisurface.Parse("sparkwing", args)
 		if err != nil {
 			t.Fatal(err)

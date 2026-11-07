@@ -95,7 +95,7 @@ func (l *runtimeListener) Addr() net.Addr            { return &net.UnixAddr{Name
 func newRuntimeFixture(t *testing.T, controller *runtimeControllerFixture) *localRuntime {
 	t.Helper()
 	controller.home = t.TempDir()
-	runtime, err := NewLocalRuntime(LocalRuntimeConfig{Admission: Config{Home: controller.home, Sampler: runtimeSampler{}}, Open: func(_ context.Context, home string) (LocalController, error) {
+	runtime, err := NewLocalRuntime(LocalRuntimeConfig{Admission: Config{Home: controller.home, Sampler: runtimeSampler{}}, Dashboard: DashboardSettings{Address: "127.0.0.1:0"}, Open: func(_ context.Context, home string) (LocalController, error) {
 		held, err := LockHeld(home)
 		if err != nil || !held {
 			return nil, errors.New("store opened before ownership")
@@ -145,7 +145,7 @@ func TestLocalRuntimeOwnsStoreUntilAllServicesJoin(t *testing.T) {
 	}
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)
-	status, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"})
+	status, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"})
 	if err != nil || !status.Running || status.PID == 0 {
 		t.Fatalf("start: %+v, %v", status, err)
 	}
@@ -253,7 +253,7 @@ func TestLocalRuntimeReadinessWaitsForReconciliation(t *testing.T) {
 }
 
 func TestLocalRuntimeStartupFailuresReleaseOwnership(t *testing.T) {
-	for _, stage := range []string{"reconcile", "api_bind", "api_serve", "dashboard_bind", "consumer"} {
+	for _, stage := range []string{"reconcile", "api_bind", "api_serve", "consumer"} {
 		t.Run(stage, func(t *testing.T) {
 			failure := errors.New(stage + " failed")
 			f := &runtimeControllerFixture{}
@@ -276,17 +276,10 @@ func TestLocalRuntimeStartupFailuresReleaseOwnership(t *testing.T) {
 					}
 					return listener, nil
 				}
-			case "dashboard_bind":
-				r.listen = func(network, _ string) (net.Listener, error) {
-					if network == "tcp" {
-						return nil, failure
-					}
-					return &runtimeListener{closed: make(chan struct{})}, nil
-				}
 			case "consumer":
 				f.background = func(context.Context, func(LocalActivity) error) error { return failure }
 			}
-			err := r.Run(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"})
+			err := r.Run(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"})
 			if !errors.Is(err, failure) {
 				t.Fatalf("failure: %v", err)
 			}
@@ -520,7 +513,8 @@ func TestLocalRuntimeDefersConsumersUntilPrivateAPIReady(t *testing.T) {
 		}
 		r := newRuntimeFixture(t, f)
 		done := make(chan error, 1)
-		go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1"}) }()
+		// safety: standalone binds no dashboard, so the API is the only HTTP() caller this hook gates.
+		go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1", Standalone: true}) }()
 		t.Cleanup(func() {
 			cancel()
 			if err := <-done; err != nil {
