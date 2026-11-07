@@ -47,10 +47,10 @@ export const docker = {
       out = (cause as { result?: { stdout: string; stderr: string } }).result ?? { stdout: "", stderr: "" };
     }
 
-    if (stdout) stdout(Buffer.from(out.stdout));
-    else if (out.stdout) ctx.log.info(out.stdout);
-    if (stderr) stderr(Buffer.from(out.stderr));
-    else if (out.stderr) ctx.log.info(out.stderr);
+    if (stdout) stdout(Buffer.from(out.stdout, "base64"));
+    else if (out.stdout) ctx.log.info(Buffer.from(out.stdout, "base64").toString("utf8"));
+    if (stderr) stderr(Buffer.from(out.stderr, "base64"));
+    else if (out.stderr) ctx.log.info(Buffer.from(out.stderr, "base64").toString("utf8"));
     if (error) throw error;
   },
   computeTags: (ctx: Context) => computeTagsIn(ctx, ctx.run.git.workDir()),

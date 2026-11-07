@@ -121,6 +121,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if err != nil {
 		return err
 	}
+	//nolint:errcheck // A failed removal stays registered for process cleanup.
 	defer func() { _ = helperruntime.Release(context.WithoutCancel(ctx), id) }()
 
 	if _, err := runDocker(ctx, nil, createArgs...); err != nil {

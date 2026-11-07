@@ -55,7 +55,7 @@ func (s *routeServices) call(ctx context.Context, method, path string, body, out
 	if dial == nil {
 		dial = dialLoopback
 	}
-	responseLimit := int64(limits.NodeOutputBytes + limits.ProtocolEnvelopeBytes)
+	responseLimit := limits.NodeOutputBytes + limits.ProtocolEnvelopeBytes
 	if path == "/node/v1/helpers" {
 		responseLimit = math.MaxInt64 - 1
 	}

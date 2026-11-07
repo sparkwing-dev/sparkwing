@@ -114,6 +114,7 @@ func withServices(ctx context.Context, guard string, services []Service, fn func
 	if err != nil {
 		return err
 	}
+	//nolint:errcheck // A failed removal stays registered for process cleanup.
 	defer func() { _ = Stop(context.WithoutCancel(ctx), addrs) }()
 	return fn(ctx, addrs)
 }
@@ -157,7 +158,7 @@ func Start(ctx context.Context, services []Service) (addrs []Addr, err error) {
 	owned := addrs
 	defer func() {
 		if err != nil {
-			_ = Stop(context.WithoutCancel(ctx), owned)
+			_ = Stop(context.WithoutCancel(ctx), owned) //nolint:errcheck // Keep the startup error; host cleanup retries failed removals.
 		}
 	}()
 	for i := range resolved {

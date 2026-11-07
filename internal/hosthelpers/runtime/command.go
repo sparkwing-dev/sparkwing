@@ -30,12 +30,11 @@ func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 	}
 	path, err := procenv.LookupCommand(name, e.env, e.dir)
 	if err != nil {
-		cmd := exec.CommandContext(ctx, name, args...)
+		cmd := procenv.SDKCommandContext(ctx, e.env, name, args...)
 		cmd.Err = err
 		return cmd
 	}
-	command := exec.CommandContext(ctx, path, args...)
-	command.Env = procenv.SDKCommand(e.env, path, args...).Env
+	command := procenv.SDKCommandContext(ctx, e.env, path, args...)
 	command.Dir = e.dir
 	return command
 }
@@ -45,7 +44,11 @@ func LookPath(ctx context.Context, name string) (string, error) {
 	e, ok := ctx.Value(key{}).(environment)
 	if !ok {
 		e.env = os.Environ()
-		e.dir, _ = os.Getwd()
+		dir, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		e.dir = dir
 	}
 	return procenv.LookupCommand(name, e.env, e.dir)
 }
@@ -97,7 +100,9 @@ func Path(ctx context.Context, path string) string {
 func Environment(ctx context.Context) (string, []string) {
 	e, ok := ctx.Value(key{}).(environment)
 	if !ok {
-		e.dir, _ = os.Getwd()
+		if dir, err := os.Getwd(); err == nil {
+			e.dir = dir
+		}
 		e.env = os.Environ()
 	}
 	return e.dir, e.env

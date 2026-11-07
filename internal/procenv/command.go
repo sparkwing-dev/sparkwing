@@ -26,7 +26,19 @@ func CommandContext(ctx context.Context, environment Env, name string, args ...s
 // pipeline's own changes still apply; engine-minted credentials never reach it.
 func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
 	cmd := exec.Command(name, args...)
-	cmd.Env = make([]string, 0, len(environment))
+	cmd.Env = sdkCommandEnvironment(environment)
+	return cmd
+}
+
+// SDKCommandContext applies SDK child environment policy with context cancellation.
+func SDKCommandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = sdkCommandEnvironment(environment)
+	return cmd
+}
+
+func sdkCommandEnvironment(environment []string) []string {
+	filtered := make([]string, 0, len(environment))
 	for _, entry := range environment {
 		key, _, _ := strings.Cut(entry, "=")
 		// perf: every engine credential row shares this prefix, so other names skip the registry scan.
@@ -35,9 +47,9 @@ func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
 				continue
 			}
 		}
-		cmd.Env = append(cmd.Env, entry)
+		filtered = append(filtered, entry)
 	}
-	return cmd
+	return filtered
 }
 
 const engineCredentialPrefix = "SPARKWING_"

@@ -284,7 +284,7 @@ func Run(ctx context.Context, req nodeproto.HelperRequest) nodeproto.HelperRespo
 			}
 		}
 		err = docker.Run(ctx, a0)
-		result = map[string]string{"stdout": stdout.String(), "stderr": stderr.String()}
+		result = map[string][]byte{"stdout": stdout.Bytes(), "stderr": stderr.Bytes()}
 	case "docker.ComputeTags":
 		if len(args) != 0 {
 			return failed(errors.New("invalid helper argument count"))

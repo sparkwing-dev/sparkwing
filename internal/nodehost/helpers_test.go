@@ -56,7 +56,7 @@ func TestHostContainerHelperJoinsCleanupAndFiltersEngineEnvironment(t *testing.T
 	testshell.Install(t, filepath.Join(dir, "docker"), `#!/bin/sh
 printf '%s|%s\n' "$*" "${SPARKWING_API_TOKEN-unset}" >> "$HELPER_RECORD"
 case "$1" in
- start) printf 'container output';;
+ start) printf '\377\000container output';;
  login) cat >&2; exit 1;;
 esac
 `)
@@ -78,7 +78,11 @@ esac
 		return response
 	}
 	response := invoke("docker.Run", `[{"image":"fixture","captureOutput":true}]`)
-	if response.Error != "" || !strings.Contains(string(response.Result), "container output") {
+	var captured struct{ Stdout, Stderr []byte }
+	if err := json.Unmarshal(response.Result, &captured); err != nil {
+		t.Fatal(err)
+	}
+	if response.Error != "" || string(captured.Stdout) != "\xff\x00container output" {
 		t.Fatalf("container result=%+v", response)
 	}
 	service.Cleanups.mu.Lock()

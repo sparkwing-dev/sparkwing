@@ -178,7 +178,7 @@ type RunOptions struct {
 // The docker daemon at DOCKER_HOST need not share a filesystem with
 // the caller; all I/O moves through the docker API.
 func Run(ctx context.Context, opts RunOptions) error {
-	var out struct{ Stdout, Stderr string }
+	var out struct{ Stdout, Stderr []byte }
 	err := sdkserve.Helper(ctx, "docker.Run", []any{struct {
 		RunOptions
 		CaptureOutput bool `json:"captureOutput"`
@@ -190,8 +190,8 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	_, outErr := io.WriteString(stdout, out.Stdout)
-	_, errErr := io.WriteString(stderr, out.Stderr)
+	_, outErr := stdout.Write(out.Stdout)
+	_, errErr := stderr.Write(out.Stderr)
 	return errors.Join(err, outErr, errErr)
 }
 

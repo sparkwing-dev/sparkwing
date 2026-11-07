@@ -65,3 +65,25 @@ test("services preserve callback and host cleanup failures", async () => {
     },
   );
 });
+
+test("Docker capture preserves binary bytes when the host command fails", async () => {
+  const { ctx } = fakeContext(() => "");
+  const bytes = Buffer.from([255, 0, 128, 10]);
+  const cause = Object.assign(new Error("container failed"), { result: { stdout: bytes.toString("base64"), stderr: "" } });
+  registerHelpers(ctx, {
+    async helper() {
+      throw cause;
+    },
+  } as unknown as HostServices);
+  let captured = Buffer.alloc(0);
+  await assert.rejects(
+    docker.run(ctx, {
+      image: "fixture",
+      stdout: (chunk) => {
+        captured = Buffer.from(chunk);
+      },
+    }),
+    cause,
+  );
+  assert.deepEqual(captured, bytes);
+});

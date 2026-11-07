@@ -301,9 +301,12 @@ func closeFiles(files ...io.Closer) {
 
 // ExecuteCommand runs a command for an in-process SDK host and joins its process tree.
 func ExecuteCommand(ctx context.Context, req nodeproto.ExecRequest, sink func(string, []byte, bool) error) nodeproto.ExecDone {
+	//nolint:contextcheck // The host command observes cancellation through its joined kill and closed channels.
 	done, session := runHostCommand(req, secrets.NewMasker(), ctx.Done(), ctx.Done(), sink)
 	if session != nil {
-		_ = endCommandSessions([]*commandSession{session})
+		if err := endCommandSessions([]*commandSession{session}); err != nil {
+			done.StartError = err.Error()
+		}
 	}
 	return done
 }

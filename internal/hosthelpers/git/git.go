@@ -221,6 +221,7 @@ func listGitFiles(ctx context.Context, repoDir string) ([]string, error) {
 	return files[:len(files)-1], nil
 }
 
+//nolint:errcheck,nilerr // This fallback skips unreadable entries, matching the existing fileset contract.
 func listFilesystemFiles(repoDir string) []string {
 	root := repoDir
 	if root == "" {

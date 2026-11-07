@@ -44,8 +44,9 @@ type ProcessServices struct {
 	AwaitChild     func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error)
 	Cleanups       *ProcessCleanups
 	HelperStream   func(context.Context, string, nodeproto.FrameLog, []byte, bool) error
-	helperSequence atomic.Uint64
 }
+
+var helperSequence atomic.Uint64
 
 // ProcessEndpointRegistrar is implemented by the common policy router.
 type ProcessEndpointRegistrar interface {
@@ -218,7 +219,7 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 				if s.HelperStream == nil {
 					return nil, 0, serviceUnavailable()
 				}
-				key := fmt.Sprintf("helper:%d:", s.helperSequence.Add(1))
+				key := fmt.Sprintf("helper:%d:", helperSequence.Add(1))
 				writer := func(stream string) helperOutputWriter {
 					return func(chunk []byte) (int, error) {
 						base := nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Step: body.Step, Event: "exec_line"}
