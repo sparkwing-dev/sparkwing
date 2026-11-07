@@ -74,3 +74,19 @@ func TestControllerHTTPDrainPersistenceFailureStopsDaemon(t *testing.T) {
 		t.Fatal("failed drain retained the elected daemon")
 	}
 }
+
+func TestControllerHTTPNamesTheRemovedDashboardRoute(t *testing.T) {
+	d, err := New(Config{Home: t.TempDir(), Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(recorder, controllerHTTPRequest(t, http.MethodPost, "dashboard", `{"address":"127.0.0.1:4343"}`, true))
+	var envelope struct {
+		Error struct{ Code, Message, Hint string } `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil || recorder.Code != http.StatusNotFound || envelope.Error.Code != "unsupported_route" ||
+		!strings.Contains(envelope.Error.Message, "removed") || !strings.Contains(envelope.Error.Hint, "sparkwing dashboard open") {
+		t.Fatalf("removed route: %d %s %v", recorder.Code, recorder.Body.String(), err)
+	}
+}

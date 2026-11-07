@@ -63,6 +63,13 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 				return
 			}
 			writeControllerHTTP(w, d.localControl())
+		case "dashboard":
+			// safety: a pre-step-5 CLI posts here to start the dashboard; name the cut instead of a bare 404.
+			writeLoginFailure(w, &apierr.Error{
+				Code:    apierr.UnsupportedRoute,
+				Message: "this local controller removed POST /api/v1/local/controller/dashboard; it serves the dashboard whenever it runs",
+				Hint:    "run sparkwing dashboard open from a current CLI: sparkwing update for the installed one, sparkwing pipeline upgrade for a repository pin",
+			})
 		case "drain":
 			d.recordJournal("drain_begin", nil, nil)
 			remaining, err := d.beginDrain()
