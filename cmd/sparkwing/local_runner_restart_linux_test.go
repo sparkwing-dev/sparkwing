@@ -51,7 +51,9 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(user, "secrets.key"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
 	cli := buildSubmitCLI(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	// safety: the waiting owner's RunAndAwait outlives every outage below, so
+	// both deadlines come from one budget sized for a loaded shared machine.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	var registry *wingdclient.LocalRunnerClient
 	logPath := filepath.Join(user, "controllers.log")
@@ -62,7 +64,7 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	defer log.Close()
 	var controller *exec.Cmd
 	var controllerUnit string
-	var controllerPID, sequence int
+	var controllerPID, sequence, restartedPID int
 	manager := func(args ...string) error {
 		managerCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stop()
@@ -76,6 +78,12 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	var instances []localhostwire.LocalRunnerInstance
 	var run, marker string
 	stopController := func() {
+		if restartedPID != 0 {
+			if process, err := os.FindProcess(restartedPID); err == nil {
+				_ = process.Kill()
+			}
+			restartedPID = 0
+		}
 		if controllerUnit != "" {
 			if err := manager("kill", "--signal=KILL", controllerUnit); err != nil {
 				t.Logf("controller service cleanup: %v", err)
@@ -272,8 +280,46 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	if err := errors.Join(copyErr, markerErr, output.Close(), source.Close()); err != nil {
 		t.Fatal(err)
 	}
-	stopController()
-	rolled := start(next)
+	restartOnto := func(binary string) {
+		var stdout, stderr bytes.Buffer
+		command := procenv.ControlCommandContext(ctx, os.Environ(), binary, "daemon", "restart", "--force", "-o", "json")
+		command.Stdout, command.Stderr = &stdout, &stderr
+		if err := command.Run(); err != nil {
+			t.Fatalf("daemon restart: %v: %s", err, stderr.String())
+		}
+		var result struct {
+			Restarted       bool   `json:"restarted"`
+			State           string `json:"state"`
+			PID             int    `json:"pid"`
+			PreviousVersion string `json:"previous_version"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatalf("daemon restart output %q: %v", stdout.String(), err)
+		}
+		if result.PID > 0 {
+			restartedPID = result.PID
+		}
+		if !result.Restarted || result.State != "running" || result.PID <= 0 || result.PID == controllerPID || result.PreviousVersion == "" {
+			t.Fatalf("daemon restart did not replace the controller: %+v (previous pid %d)", result, controllerPID)
+		}
+		if controller != nil {
+			if err := <-waited; err != nil {
+				t.Fatalf("drained controller exited with %v", err)
+			}
+			controller = nil
+		}
+		if controllerUnit != "" {
+			if manager("is-active", "--quiet", controllerUnit) == nil {
+				t.Fatalf("drained controller unit %s is still active", controllerUnit)
+			}
+			controllerUnit = ""
+		}
+		controllerPID = result.PID
+	}
+	// safety: the build roll goes through the graceful drain users run, so held
+	// jobs and waiting owners must survive it as well as the kills above.
+	restartOnto(next)
+	rolled := first
 	awaitLocalRunnerCondition(t, ctx, func() bool {
 		var err error
 		rolled, err = registry.Active(ctx)
@@ -452,7 +498,8 @@ func(child) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)erro
 type parent struct{sw.Base}
 func(parent) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{
  awaited:=sw.Job(p,"await",func(ctx context.Context)error{
-  got,err:=sw.RunAndAwait[out,sw.NoInputs](ctx,"child","held",sw.WithFreshTimeout(90*time.Second));if err!=nil{return err};return os.WriteFile(os.Getenv("HOLD_MARKER")+".await",[]byte(got.Value),0600)
+  budget,err:=time.ParseDuration(os.Getenv("HOLD_AWAIT_TIMEOUT"));if err!=nil{return err}
+  got,err:=sw.RunAndAwait[out,sw.NoInputs](ctx,"child","held",sw.WithFreshTimeout(budget));if err!=nil{return err};return os.WriteFile(os.Getenv("HOLD_MARKER")+".await",[]byte(got.Value),0600)
  }).StartsChildren("child").Cores(0.25)
  sw.Job(p,"after",func(ctx context.Context)error{
   data,err:=os.ReadFile("/proc/self/cgroup");if err!=nil{return err};if _,err=sw.Bash(ctx,"echo successor-after").Run();err!=nil{return err};return os.WriteFile(os.Getenv("HOLD_MARKER")+".after",data,0600)
@@ -465,7 +512,12 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return parent{}});sw
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-qm", "parent awaits child")
 	marker := filepath.Join(home, "held")
-	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "HOLD_MARKER="+marker), binary, "run", "ci", "--sw-detached", "--sw-no-update", "-o", "json")
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("the awaiting owner needs the test's deadline")
+	}
+	await := "HOLD_AWAIT_TIMEOUT=" + time.Until(deadline).Round(time.Second).String()
+	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "HOLD_MARKER="+marker, await), binary, "run", "ci", "--sw-detached", "--sw-no-update", "-o", "json")
 	command.Dir = repo
 	var stderr bytes.Buffer
 	command.Stderr = &stderr

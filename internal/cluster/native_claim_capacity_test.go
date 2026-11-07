@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"slices"
@@ -176,5 +177,27 @@ func TestNativeClaimCapacityLeavesAdmissionAuthoritativeWithoutDaemon(t *testing
 	_, err = controller.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", FreeSlots: new(1), Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}})
 	if err != nil || calls != 1 {
 		t.Fatalf("claim could not reach authoritative admission without daemon: calls=%d error=%v", calls, err)
+	}
+}
+
+func TestRunnerWarnsOncePerUnusableLocalControllerCause(t *testing.T) {
+	var logged strings.Builder
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	options := client.EngineOptions{URL: "http://controller.invalid", Bearer: fixedBearer("runner"), HTTP: &http.Client{Transport: productionTransport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})}}
+	controller, err := nativeCapacityClient(t.TempDir(), "v1.2.3")(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := controller.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", FreeSlots: new(1), Kinds: []capability.UnitKind{capability.UnitNode}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Count(logged.String(), "level=WARN"); got != 1 || !strings.Contains(logged.String(), "sparkwing dashboard open") {
+		t.Fatalf("runner logged %d warnings for one missing controller:\n%s", got, logged.String())
 	}
 }
