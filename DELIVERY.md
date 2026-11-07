@@ -490,8 +490,10 @@ fails with its reference and a repair hint. Reusing published candidate images n
 `staging-deploy` pins the
 digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
-same for the launcher with every other chart change. `staging-gate` starts `example` and the
-`sparkwing-ci-smoke` reference pipeline before waiting for both on staging Cloud. `production`
+same for the launcher with every other chart change. Each GitOps push requests a hard
+Argo refresh before waiting, requiring patch permission on the named Application.
+`staging-gate` starts `deploy-smoke` and the `sparkwing-ci-smoke` reference pipeline
+before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
 `deploy-smoke` in `qa-team` and `qa-team-b` (one NodeClaim each, no controller or launcher WARN or
 ERROR). Each environment's deployed and previous digests are its job output. Credentials come
@@ -503,6 +505,20 @@ The deploy takes no deploy-time snapshot. Recovery is RDS point-in-time recovery
 a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before a risky
 migration. Checking that automated backups are on belongs to external verification through
 stormwing, not the deploy. The deploy role has no RDS permission.
+
+After a successful staging gate or production smoke, the deploy submits a detached
+`deploy-scan` at the deployed commit and digests. The scan runs the full `example`
+and records its result in the runner user's normal Bitwing ledger. Promotion does
+not wait for it, and its environment-specific concurrency group is separate from
+the deploy group. Bitwing must be installed on that user's PATH. The scan also
+requires the runner label and trust conditions documented below.
+
+The deploy reads `/kikd-prod/sparkwing/deploy/scan-submit-token` to submit the scan
+on the production controller. The `deploy-scan` pipeline there receives the scoped
+`DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` secrets. Each value
+is a token for its target fixture team with permission to start and observe the
+example and read its logs. Missing prerequisites report that the scan could not
+run, rather than clearing prior Bitwing findings.
 
 A failed production deploy or smoke reverts this run's GitOps commits, launcher first, even
 after cancellation. Image rollback does not undo a forward migration. If recovery needs an

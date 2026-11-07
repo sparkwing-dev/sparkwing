@@ -742,7 +742,7 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 	if err := d.act(ctx, "refresh Argo application "+env.ArgoApp+" after GitOps push "+commit, func() error {
 		_, err := d.kubectl(ctx, "-n", "argocd", "annotate", "application", env.ArgoApp, "argocd.argoproj.io/refresh=hard", "--overwrite")
 		if err != nil {
-			return fmt.Errorf("Argo refresh needs patch permission on application %s: %w", env.ArgoApp, err)
+			return fmt.Errorf("refreshing Argo needs patch permission on application %s: %w", env.ArgoApp, err)
 		}
 		return nil
 	}); err != nil {
