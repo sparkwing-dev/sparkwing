@@ -34,3 +34,28 @@ func TestPlacementWaitProjectsEachTierFromCommittedState(t *testing.T) {
 		t.Fatalf("cloud tier=%+v, want it to open in 4s", wait.Tiers[1])
 	}
 }
+
+func TestPlacementWaitIgnoresATierTheRankingExcludes(t *testing.T) {
+	f := rankingFixture(t, true)
+	finishRankingTrigger(t, f)
+	if err := f.Rank(t, f.Admin, "cloud"); err != nil {
+		t.Fatal(err)
+	}
+	f.Place(t, runspec.RepositoryPlacement{Prefer: tiers(team(5*time.Second, "os=darwin"), cloud(0))})
+	f.RequireOnJobs(t, "class=cloud,os=darwin")
+	f.At(-time.Second)
+	f.PollLabels(t, f.Self, "os=darwin")
+	f.At(time.Second)
+	tenant, err := f.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := tenant.ReadRunView(t.Context(), "run")
+	if err != nil || len(view.PlacementWaits) != 1 {
+		t.Fatalf("waits=%+v %v", view.PlacementWaits, err)
+	}
+	if tiers := view.PlacementWaits[0].Tiers; tiers[1].OpensIn != 0 || tiers[0].Unavailable == "" {
+		t.Fatalf("a runner the ranking excludes shows as holding Cloud: %+v", tiers)
+	}
+	wantJob(t, f, f.Launcher)
+}

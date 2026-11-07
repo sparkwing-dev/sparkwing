@@ -121,9 +121,9 @@ func readPlacementWaitsTx(ctx context.Context, tx *storeTx, team Team, run RunRo
 	return waits, nil
 }
 
-// safety: mirrors the claim query's hold; a claimant counts in its earliest matching tier only, a tier opens
-// once every earlier tier with an admissible claimant has passed its cumulative deadline, and an on-demand
-// launcher never holds.
+// safety: mirrors the claim query's hold; a tier the ranking excludes holds nothing, a claimant counts in its
+// earliest matching tier only, a tier opens once every earlier tier with an admissible claimant has passed its
+// cumulative deadline, and an on-demand launcher never holds.
 func placementTierWaits(tiers []runspec.RepositoryTier, candidates []placementCandidate, ranking []string, ready, now time.Time) []PlacementTierWait {
 	out := make([]PlacementTierWait, len(tiers))
 	var deadline, blocked time.Time
@@ -135,6 +135,10 @@ func placementTierWaits(tiers []runspec.RepositoryTier, candidates []placementCa
 		deadline = ready
 		for _, earlier := range tiers[:i+1] {
 			deadline = deadline.Add(earlier.Hold)
+		}
+		if len(ranking) > 0 && !slices.Contains(ranking, rankingTier(tier.Target)) {
+			out[i].Unavailable = "off in this team's runner ranking"
+			continue
 		}
 		var funding, matched bool
 		for _, c := range candidates {
@@ -157,8 +161,6 @@ func placementTierWaits(tiers []runspec.RepositoryTier, candidates []placementCa
 			blocked = deadline
 		}
 		switch {
-		case len(ranking) > 0 && !slices.Contains(ranking, rankingTier(tier.Target)):
-			out[i].Unavailable = "off in this team's runner ranking"
 		case len(out[i].Live) > 0 || out[i].Busy > 0 || out[i].OnDemand:
 		case funding:
 			out[i].Unavailable = "Cloud credits cannot fund it"
