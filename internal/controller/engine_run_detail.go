@@ -289,6 +289,7 @@ func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView
 	if unclaimed := unclaimedNotice(view); unclaimed != nil {
 		facts.Notices = append(facts.Notices, *unclaimed)
 	}
+	facts.Notices = append(facts.Notices, placementNotices(view)...)
 	if view.CloudCapacitySince != nil {
 		elapsed := max(time.Duration(0), view.Snapshot.StoreNow.Sub(*view.CloudCapacitySince)).Truncate(time.Second)
 		facts.Notices = append(facts.Notices, engineid.Notice{Kind: engineid.NoticeCloudCapacity, Reason: fmt.Sprintf("Waiting for dedicated Cloud capacity (elapsed %s)", elapsed), Hint: "The credit hold reserves capacity. Usage billing starts when execution begins. You can cancel this run."})

@@ -24,8 +24,10 @@ type RunView struct {
 	Logs     []blob.LogSubject
 	Failures []RunFailure
 	// JobResults holds each job's masked summary and annotations from its current attempt.
-	JobResults         []JobResult
-	Waiting            *UnclaimedUnit
+	JobResults []JobResult
+	Waiting    *UnclaimedUnit
+	// PlacementWaits explains each ready job that follows a repository tier list.
+	PlacementWaits     []PlacementWait
 	CloudCapacitySince *time.Time
 	// HostIneligible maps each ready job the hosting machine of a local run cannot execute to why it waits.
 	HostIneligible map[string]string
@@ -96,6 +98,9 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 		return RunView{}, err
 	}
 	if view.Waiting, err = readUnclaimedUnitTx(ctx, tx, team, view.Snapshot.Run); err != nil {
+		return RunView{}, err
+	}
+	if view.PlacementWaits, err = readPlacementWaitsTx(ctx, tx, team, view.Snapshot.Run); err != nil {
 		return RunView{}, err
 	}
 	if view.CloudCapacitySince, err = readCloudCapacityWaitTx(ctx, tx, team, view.Snapshot.Run); err != nil {

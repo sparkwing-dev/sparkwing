@@ -100,6 +100,25 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 		}
 		standings = append(standings, standing)
 	}
+	launchers, err := unobservedLaunchersTx(ctx, tx, observed)
+	if err != nil {
+		return nil, err
+	}
+	for _, prefix := range launchers {
+		standing, err := explainUnitEligibilityTx(ctx, tx, team, unit, UnitDemand{CapabilityPrefix: prefix})
+		if err != nil {
+			return nil, err
+		}
+		if standing.launcher {
+			standing.unobserved = true
+			standings = append(standings, standing)
+		}
+	}
+	return standings, nil
+}
+
+// safety: a live launcher credential with no claim observation still launches on demand.
+func unobservedLaunchersTx(ctx context.Context, tx *storeTx, observed map[string]bool) ([]string, error) {
 	now := tx.now(ctx)
 	rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY prefix LIMIT ?`, "", now.UnixNano(), now.UnixNano(), limits.RankingObservations)
 	if err != nil {
@@ -115,20 +134,7 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 			launchers = append(launchers, prefix)
 		}
 	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	for _, prefix := range launchers {
-		standing, err := explainUnitEligibilityTx(ctx, tx, team, unit, UnitDemand{CapabilityPrefix: prefix})
-		if err != nil {
-			return nil, err
-		}
-		if standing.launcher {
-			standing.unobserved = true
-			standings = append(standings, standing)
-		}
-	}
-	return standings, nil
+	return launchers, errors.Join(rows.Err(), rows.Close())
 }
 
 var tierNames = map[string]string{tierHere: "The submitting machine", tierPersonal: "Personal machines", tierActions: "GitHub Actions runners", tierSelfHosted: "Self-hosted runners", TierCloud: "Cloud"}
