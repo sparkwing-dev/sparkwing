@@ -184,7 +184,15 @@ func startLocalRunnerDarwin(ctx context.Context, host crontimer.Host, id string)
 	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
 		return err
 	}
-	return runnerManagerCommand(ctx, host, "launchctl", "bootstrap", fmt.Sprintf("gui/%d", host.UID), path)
+	gui := runnerManagerCommand(ctx, host, "launchctl", "bootstrap", fmt.Sprintf("gui/%d", host.UID), path)
+	if gui == nil {
+		return nil
+	}
+	// safety: an account without a GUI login, such as an SSH-only Mac, has no gui domain but always has its user domain.
+	if err := runnerManagerCommand(ctx, host, "launchctl", "bootstrap", fmt.Sprintf("user/%d", host.UID), path); err != nil {
+		return errors.Join(gui, err)
+	}
+	return nil
 }
 
 func localRunnerAgent(host crontimer.Host, id, log string) (string, error) {

@@ -213,8 +213,13 @@ an outage.
 A systemd-booted Linux host requires a working user manager. Each runner has its
 own systemd user service and cgroup, separate from the controller. A Linux host
 without systemd uses a separate process session and stdio. macOS uses a separate
-launchd agent for each instance. Windows uses an embedded runner loop and does
-not have this process separation.
+launchd agent for each instance, in the login session's GUI domain or, on an
+SSH-only account with no GUI login, the user domain. Windows uses an embedded
+runner loop and does not have this process separation.
+
+A runner that cannot start does not stop the controller. Runs the CLI hosts,
+including `--sw-allow-unadmitted`, keep working. Queued jobs wait, and the
+controller log reports the cause while it retries with backoff of up to a minute.
 
 Installation drains and joins the existing owner before activating the managed
 service, then waits for the successor to acquire the same home and become ready.

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+)
+
+const (
+	localRunnerCheckInterval = time.Second
+	localRunnerMaxRetry      = time.Minute
 )
 
 type localRunnerDiscovery interface {
@@ -62,17 +68,21 @@ func superviseLocalRunnerProcess(ctx context.Context, host crontimer.Host) error
 }
 
 func (s localRunnerProcessSupervisor) run(ctx context.Context) error {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	delay := localRunnerCheckInterval
 	for {
-		if err := s.ensure(ctx); err != nil {
-			return err
+		// safety: runs hosted by the CLI need no runner, so a runner that cannot start must not stop
+		// the controller; queued jobs wait and the controller log names the cause.
+		if err := s.ensure(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("local runner unavailable; queued jobs wait until it starts", "err", err, "retry_in", delay)
+			delay = min(2*delay, localRunnerMaxRetry)
+		} else {
+			delay = localRunnerCheckInterval
 		}
 		select {
 		case <-ctx.Done():
 			// safety: controller replacement must leave runner-owned hosts and services alive.
 			return ctx.Err()
-		case <-ticker.C:
+		case <-time.After(delay):
 		}
 	}
 }

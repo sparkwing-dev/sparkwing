@@ -234,3 +234,25 @@ func TestLocalRunnerStartupEnvironmentRetiresWithoutRemovingLogs(t *testing.T) {
 		t.Fatalf("cleanup removed log: %q %v", data, err)
 	}
 }
+
+func TestLocalRunnerLaunchdFallsBackToUserDomainWithoutGUILogin(t *testing.T) {
+	host := runnerSupervisorHost(t)
+	host.GOOS = "darwin"
+	var domains []string
+	host.Exec = func(_ context.Context, name string, args ...string) (string, error) {
+		domains = append(domains, args[1])
+		if args[1] == "gui/501" {
+			return "Bootstrap failed: 125: Domain does not support specified action", errors.New("exit status 125")
+		}
+		return "", nil
+	}
+	if err := StartLocalRunnerProcess(t.Context(), host, "instance"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(domains, []string{"gui/501", "user/501"}) {
+		t.Fatalf("launchd domains = %q", domains)
+	}
+	if _, err := os.Stat(filepath.Join(host.SparkwingHome, "runners", LocalRunnerServiceName(host.SparkwingHome, "instance"), "runner.plist")); err != nil {
+		t.Fatalf("user-domain agent lost its plist: %v", err)
+	}
+}

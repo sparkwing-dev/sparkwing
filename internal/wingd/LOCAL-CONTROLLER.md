@@ -177,7 +177,10 @@ runs in a separate `systemd-run --user` service with `KillMode=mixed` and
 `TimeoutStopSec=infinity`; controller service shutdown cannot reach its cgroup.
 A confirmed no-systemd host uses a separate session, separate stdio and no
 parent-death signal. macOS uses a separate per-instance launchd agent with no
-forced drain timeout. Captured environment overrides the manager environment,
+forced drain timeout, bootstrapped into `gui/<uid>` or, when that domain is
+absent on a headless account, `user/<uid>`. Supervisor failures are logged and
+retried with backoff capped at a minute; they never stop the controller, because
+CLI-hosted runs need no runner. Captured environment overrides the manager environment,
 and each instance has its own log under `<home>/runners`. Services do not
 restart a retired instance after a crash; the controller starts a new identity.
 Accepted Go replacement identities retain their exact executable in

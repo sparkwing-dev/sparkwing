@@ -144,3 +144,22 @@ func TestLocalRunnerSupervisorBoundsActivationWithoutKillingProcess(t *testing.T
 		}
 	})
 }
+
+func TestLocalRunnerSupervisorBacksOffFailedStartupWithoutStoppingController(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		starts := 0
+		supervisor := localRunnerProcessSupervisor{
+			registry: runnerDiscoveryFixture{}, version: "v1", build: "build",
+			alive: func(localhostwire.LocalRunnerInstance) (bool, error) { return true, nil },
+			start: func(context.Context, string) error { starts++; return errors.New("launchd domain unavailable") },
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+		defer cancel()
+		if err := supervisor.run(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("supervisor stopped before its controller: %v", err)
+		}
+		if starts != 7 {
+			t.Fatalf("startup attempts = %d, want 7 (0, 2, 6, 14, 30, 62, 122s)", starts)
+		}
+	})
+}
