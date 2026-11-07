@@ -462,6 +462,14 @@ images with buildx under QEMU and joins both architectures under one index per t
 
 ### Deploying Sparkwing Cloud
 
+The default runtime bases in `.sparkwing/jobs/deploy_env.go` must keep both
+`cloud-*` and `commit-*` tags on their multi-architecture indexes. The ECR
+retention rule matches both patterns and keeps those images outside the rolling
+100-image release window. Digest pins alone do not protect an index from
+expiration. Keep the platform manifests referenced by each retained index.
+When replacing a base, publish its retention tags before updating the pin and
+verify that both Linux architectures resolve through that digest.
+
 Production deploys follow main. Releases are separate and occasional: the release tag, 38 CLI
 assets, npm packages, signed version index and site publication stay in the release workflow.
 The `deploy` pipeline builds its own service images and needs no tag at HEAD or GitHub release run.

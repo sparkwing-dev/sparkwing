@@ -52,6 +52,8 @@ unlock.
 
 ### Fixed
 
+- **deploy:** Restore the controller runtime base index after registry retention expired it. Keep both runtime bases under the existing retention tags so a pinned digest survives the rolling release-image window.
+
 - **controller:** A request the controller abandons while stopping is answered as `unavailable` instead of `internal`, so held reads retry against its successor. Jobs waiting on child runs survived controller kills but failed with `request failed` when `sparkwing daemon restart` drained the controller.
 - **runners:** A `sparkwing-runner` with `runner.local_admission: true` explains a local controller it cannot use. With no controller running, a claimed job fails naming `sparkwing dashboard start`, `sparkwing dashboard install` and `local_admission: false` instead of a failed daemon spawn followed by an earlier daemon's log. A controller on an incompatible build names both builds and the same remedies. The runner logs one warning per cause while either lasts, and a controller refusing a pre-HTTP runner names the runner remedy and records `handshake_refused` in `sparkwing daemon events`.
 
