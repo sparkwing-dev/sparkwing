@@ -21,10 +21,12 @@ import (
 )
 
 const (
-	CloudClassLabel      = "node-restriction.kubernetes.io/sparkwing-cloud-class"
-	PoolNamespaceLabel   = "sparkwing.dev/launcher-namespace"
-	WarmNamespaceLabel   = "sparkwing.dev/warm-namespace"
-	DedicatedTaint       = "sparkwing.dev/dedicated"
+	CloudClassLabel    = "node-restriction.kubernetes.io/sparkwing-cloud-class"
+	PoolNamespaceLabel = "sparkwing.dev/launcher-namespace"
+	WarmNamespaceLabel = "sparkwing.dev/warm-namespace"
+	DedicatedTaint     = "sparkwing.dev/dedicated"
+	// NodeClassLabel is the label Karpenter sets on every node from its NodePool's EC2NodeClass.
+	NodeClassLabel       = "karpenter.k8s.aws/ec2nodeclass"
 	WarmPlaceholderLabel = "sparkwing.dev/warm-placeholder"
 	WarmPriorityClass    = "sparkwing-cloud-warm"
 	usedTeamLabel        = "node-restriction.kubernetes.io/sparkwing-used-team"
@@ -186,11 +188,11 @@ func (b *KubernetesBoundary) nodeClaim(ctx context.Context, node *corev1.Node) (
 		name, _, _ := unstructured.NestedString(claim.Object, "status", "nodeName")
 		provider, _, _ := unstructured.NestedString(claim.Object, "status", "providerID")
 		if claim.GetUID() != owner.UID || name != node.Name || provider == "" || provider != node.Spec.ProviderID {
-			return nil, ErrNoDedicatedNode
+			return nil, refuseNode("node's NodeClaim does not match the node")
 		}
 		return claim, nil
 	}
-	return nil, ErrNoDedicatedNode
+	return nil, refuseNode("node has no Karpenter NodeClaim")
 }
 
 func cpuClass(cores float64) string {
@@ -220,23 +222,23 @@ func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.No
 	// safety: an incomplete or foreign binding must never become fresh again; all three labels bind atomically.
 	if teamUsed || runUsed || teamBound {
 		if usedTeam != value || usedRun == "" || nodeTeam != value {
-			return ErrNoDedicatedNode
+			return refuseNode("node is bound to another team or carries an incomplete binding")
 		}
 	}
 	class := node.Labels[CloudClassLabel]
 	if class == "" || node.Labels[PoolNamespaceLabel] != b.Namespace || !hasDedicatedTaint(node.Spec.Taints) {
-		return ErrNoDedicatedNode
+		return refuseNode("node lacks this launcher's class, namespace or dedicated taint")
 	}
 	claim, err := b.nodeClaim(ctx, node)
 	if apierrors.IsNotFound(err) {
-		return ErrNoDedicatedNode
+		return refuseNode("node's NodeClaim is gone")
 	}
 	if err != nil {
 		return err
 	}
 	_, claimTeamLabelPresent := claim.GetLabels()[TeamNodeLabel]
 	if claim.GetDeletionTimestamp() != nil || claimTeamLabelPresent {
-		return ErrNoDedicatedNode
+		return refuseNode("node's NodeClaim is deleting or belongs to a team pool")
 	}
 	for _, owner := range claim.GetOwnerReferences() {
 		if owner.APIVersion != "karpenter.sh/v1" || owner.Kind != "NodePool" || owner.Name == "" || owner.UID == "" {
@@ -244,7 +246,7 @@ func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.No
 		}
 		pool, err := b.Karpenter.Resource(nodePools).Get(ctx, owner.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
-			return ErrNoDedicatedNode
+			return refuseNode(fmt.Sprintf("NodePool %s is gone", owner.Name))
 		}
 		if err != nil {
 			return err
@@ -257,17 +259,44 @@ func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.No
 		if err != nil {
 			return err
 		}
-		if pool.GetUID() != owner.UID || pool.GetDeletionTimestamp() != nil || claim.GetLabels()["karpenter.sh/nodepool"] != owner.Name || !compatible {
-			return ErrNoDedicatedNode
+		if pool.GetUID() != owner.UID || pool.GetDeletionTimestamp() != nil || claim.GetLabels()["karpenter.sh/nodepool"] != owner.Name {
+			return refuseNode(fmt.Sprintf("NodePool %s was replaced or is deleting", owner.Name))
+		}
+		if !compatible {
+			return refuseNode(fmt.Sprintf("NodePool %s is not a dedicated shared pool of EC2NodeClass %s for namespace %s and class %s", owner.Name, b.NodeClassName, b.Namespace, class))
 		}
 		for _, key := range []string{CloudClassLabel, PoolNamespaceLabel, WarmNamespaceLabel} {
 			if node.Labels[key] != labels[key] || claim.GetLabels()[key] != labels[key] {
-				return ErrNoDedicatedNode
+				return refuseNode(fmt.Sprintf("node label %s differs from NodePool %s", key, owner.Name))
 			}
 		}
 		return nil
 	}
-	return ErrNoDedicatedNode
+	return refuseNode("node's NodeClaim has no owning NodePool")
+}
+
+func refuseNode(reason string) error {
+	return fmt.Errorf("%w: %s", ErrNoDedicatedNode, reason)
+}
+
+// CapacityNodeRefusal names why a Ready node holding a capacity request can never
+// be reserved for team, or returns "" when the node is acceptable or not yet judged.
+func (b *KubernetesBoundary) CapacityNodeRefusal(ctx context.Context, name, team string) (string, error) {
+	node, err := b.Kube.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !nodeReady(*node) || quarantined(*node) {
+		return "", nil
+	}
+	err = b.verifyNodeTeam(ctx, node, team)
+	if errors.Is(err, ErrNoDedicatedNode) {
+		return err.Error(), nil
+	}
+	return "", err
 }
 
 func hasDedicatedTaint(taints []corev1.Taint) bool {

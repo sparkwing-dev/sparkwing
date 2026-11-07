@@ -71,6 +71,9 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 	b := d.Binding
 	requests := budget.DeepCopy()
 	requests[corev1.ResourceEphemeralStorage] = *resource.NewQuantity(limits.JobScratchBytes, resource.BinarySI)
+	// safety: pools of another EC2NodeClass can share the class labels and taint, but
+	// the launcher reserves only its own class's nodes; demand landing there waits forever.
+	nodeClass := corev1.NodeSelectorRequirement{Key: NodeClassLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{cfg.NodeClassName}}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: capacityName(b), Namespace: cfg.Namespace,
@@ -83,8 +86,8 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 			// being placed there, and Karpenter would add no node for it.
 			Affinity: &corev1.Affinity{
 				NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
-					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpDoesNotExist}}},
-					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{runNodeValue(cfg.Namespace, b.RunID)}}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{nodeClass, {Key: usedRunLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpDoesNotExist}}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{nodeClass, {Key: usedRunLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{runNodeValue(cfg.Namespace, b.RunID)}}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}}},
 				}}},
 				// safety: Karpenter provisions a node per team's demand, so one fresh node
 				// never carries two teams' requests that each refuse to bind it.
@@ -249,7 +252,16 @@ func (l *Launcher) requestCapacity(ctx context.Context, award CloudJobAward) err
 	if displaced {
 		return l.deleteCapacityPod(ctx, admitted)
 	}
-	return nil
+	if admitted.Spec.NodeName == "" {
+		return nil
+	}
+	// safety: a replacement would bind the same emptied node again, so a refused node
+	// is reported on every pass for an operator to fix its pool instead.
+	refusal, err := l.Boundary.CapacityNodeRefusal(ctx, admitted.Spec.NodeName, d.Binding.Team)
+	if err == nil && refusal != "" {
+		l.logger().Warn("capacity Pod is bound to a node the launcher cannot reserve; fix the node's NodePool or EC2NodeClass", "pod", admitted.Name, "node", admitted.Spec.NodeName, "team", d.Binding.Team, "node_class", l.Config.NodeClassName, "reason", refusal, "support_reference", d.Binding.RunID)
+	}
+	return err
 }
 
 func (l *Launcher) capacityDisplaced(ctx context.Context, pod *corev1.Pod, binding CloudJobBinding) (bool, error) {

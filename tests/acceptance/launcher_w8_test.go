@@ -26,6 +26,10 @@ type cloudBoundaryFake struct {
 	released  int
 }
 
+func (*cloudBoundaryFake) CapacityNodeRefusal(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (*cloudBoundaryFake) CapacityConfigured(context.Context, corev1.ResourceList) (bool, error) {
 	return true, nil
 }

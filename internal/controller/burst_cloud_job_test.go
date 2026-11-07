@@ -177,6 +177,10 @@ func (w *burstLauncherWire) Claim(ctx context.Context, request controllerwire.Cl
 
 type burstCloudBoundary struct{ releases int }
 
+func (*burstCloudBoundary) CapacityNodeRefusal(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (*burstCloudBoundary) CapacityConfigured(context.Context, corev1.ResourceList) (bool, error) {
 	return true, nil
 }

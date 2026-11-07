@@ -47,6 +47,10 @@ func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string
 	return CloudNodeReservation{RequestedClass: placement.RequestedClass, GrantedClass: placement.RequestedClass, WaitedForFreshNode: placement.WaitedForFreshNode, NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation", Award: a.LeaseRef()}, nil
 }
 
+func (*boundaryFake) CapacityNodeRefusal(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (b *boundaryFake) CapacityConfigured(context.Context, corev1.ResourceList) (bool, error) {
 	return true, nil
 }
@@ -141,7 +145,7 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 		}
 		return true, list, nil
 	})
-	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
+	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: CloudJobConfig{Namespace: "cloud", NodeClassName: "sparkwing-jobs", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
 	installAdmission(kube, l.Config)
 	return l, kube, boundary, control
 }

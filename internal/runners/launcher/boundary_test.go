@@ -26,7 +26,7 @@ func boundaryBinding(team string) CloudJobBinding {
 }
 
 func boundaryFixture() (*KubernetesBoundary, *fake.Clientset) {
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: "uid", ResourceVersion: "1", OwnerReferences: []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim", UID: "claim-uid"}}, Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm"}}, Spec: corev1.NodeSpec{ProviderID: "aws:///zone/i-node", Taints: []corev1.Taint{{Key: DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: "uid", ResourceVersion: "1", OwnerReferences: []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim", UID: "claim-uid"}}, Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm", NodeClassLabel: "sparkwing-jobs"}}, Spec: corev1.NodeSpec{ProviderID: "aws:///zone/i-node", Taints: []corev1.Taint{{Key: DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	kube := fake.NewClientset(node)
 	var mu sync.Mutex
 	kube.PrependReactor("update", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
@@ -511,7 +511,7 @@ func TestBoundaryReusesAWarmNodeOnlyWithinItsRun(t *testing.T) {
 // A capacity request selects only an unused node or its own run's node, so it
 // never parks on another run's warm node where reservation would refuse it.
 func TestCapacityRequestAvoidsOtherRunsNodes(t *testing.T) {
-	pod, err := capacityPod(CloudJobConfig{Namespace: "cloud", CPUCeiling: 2, MemoryCeiling: 8 << 30}, capacityDemand{Binding: boundaryBinding("team"), CPUCores: 2, Memory: 1 << 30})
+	pod, err := capacityPod(CloudJobConfig{Namespace: "cloud", NodeClassName: "sparkwing-jobs", CPUCeiling: 2, MemoryCeiling: 8 << 30}, capacityDemand{Binding: boundaryBinding("team"), CPUCores: 2, Memory: 1 << 30})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,10 +536,10 @@ func TestCapacityRequestAvoidsOtherRunsNodes(t *testing.T) {
 		}
 		return false
 	}
-	if !matches(map[string]string{}) || !matches(map[string]string{usedRunLabel: runNodeValue("cloud", "run"), usedTeamLabel: TeamNodeValue("cloud", "team"), TeamNodeLabel: TeamNodeValue("cloud", "team")}) {
+	if !matches(map[string]string{NodeClassLabel: "sparkwing-jobs"}) || !matches(map[string]string{NodeClassLabel: "sparkwing-jobs", usedRunLabel: runNodeValue("cloud", "run"), usedTeamLabel: TeamNodeValue("cloud", "team"), TeamNodeLabel: TeamNodeValue("cloud", "team")}) {
 		t.Fatal("capacity request refused a fresh node or its own run's node")
 	}
-	if matches(map[string]string{usedRunLabel: runNodeValue("cloud", "other-run")}) {
+	if matches(map[string]string{NodeClassLabel: "sparkwing-jobs", usedRunLabel: runNodeValue("cloud", "other-run")}) {
 		t.Fatal("capacity request selected another run's node")
 	}
 }

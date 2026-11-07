@@ -516,6 +516,10 @@ func (h cloudDispatchHost) Host(ctx context.Context, unit controllerwire.Claimed
 
 type cloudDispatchBoundary struct{}
 
+func (cloudDispatchBoundary) CapacityNodeRefusal(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (cloudDispatchBoundary) CapacityConfigured(context.Context, corev1.ResourceList) (bool, error) {
 	return true, nil
 }

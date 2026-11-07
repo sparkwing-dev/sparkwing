@@ -720,7 +720,9 @@ the controller is upgraded, without a capacity failure or refund.
 
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
-launcher namespace selectors, the generic dedicated toleration, the award's CPU,
+launcher namespace selectors, required node affinity on the launcher's
+`--node-class` through Karpenter's `karpenter.k8s.aws/ec2nodeclass` node label,
+the generic dedicated toleration, the award's CPU,
 memory and scratch requests, the runner image's `/bin/sh` sleeping for the
 remaining award budget and exiting on SIGTERM, and no volumes, environment or
 service account token. A bare `sleep` as PID 1 ignores SIGTERM, so every delete
@@ -740,7 +742,11 @@ namespace, so Karpenter adds one node per team's demand.
 - A request, running or stopped, is replaced, UID-fenced, only when its node holds another
   team's Pod or is bound to another team or run. Otherwise the launcher waits,
   because recreating requests on an incompatible pool would keep provisioning
-  unusable nodes. Adoption waits for a terminating old request to leave before
+  unusable nodes. The node-class affinity keeps requests off pools of another
+  EC2NodeClass that share the class labels and taint. A request on a Ready node
+  the boundary still refuses logs a WARN on every pass naming the node and the
+  refusal, so the misconfigured pool is visible before the award's deadline.
+  Adoption waits for a terminating old request to leave before
   creating its replacement. `TestTwoTeamsOnAnEmptyPoolEachGetTheirOwnNode`
   (grid cell R21C01), `TestCapacityArrivalBetweenReserveAndConsumeDefersJobUntilPodLeaves`,
   `TestIncompatibleCapacityNodeDoesNotChurnRequests`, and
