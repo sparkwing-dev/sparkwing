@@ -20,11 +20,13 @@ func (f *cleanupFixture) RegisterCleanup(_ context.Context, argv []string, descr
 	f.description = description
 	return "owned", nil
 }
+
 func (f *cleanupFixture) ReleaseCleanup(ctx context.Context, id string) error {
 	f.released = id == "owned"
 	f.releaseErr = ctx.Err()
 	return nil
 }
+
 func TestCleanupRelaysToHostAndReleasesAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	host := &cleanupFixture{}
@@ -39,11 +41,13 @@ func TestCleanupRelaysToHostAndReleasesAfterCancellation(t *testing.T) {
 		t.Fatalf("host=%+v", host)
 	}
 }
+
 func TestCleanupRequiresHost(t *testing.T) {
 	if _, err := Register(t.Context(), Spec{Argv: []string{"cleanup"}}); err == nil {
 		t.Fatal("cleanup registered without a host")
 	}
 }
+
 func TestEmptyCleanupNeedsNoHost(t *testing.T) {
 	release, err := Register(t.Context(), Spec{})
 	if err != nil {

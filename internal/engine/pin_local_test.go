@@ -29,8 +29,10 @@ func TestReadTypeScriptLocalPin(t *testing.T) {
 					packages["sdk"] = map[string]string{"version": "0.68.0-qa.16"}
 				}
 				writeJSONFixture(t, dir, "package.json", map[string]any{"dependencies": map[string]string{typeScriptPackage: spec}})
-				writeJSONFixture(t, dir, "package-lock.json", map[string]any{"lockfileVersion": lockVersion, "packages": packages,
-					"dependencies": map[string]any{typeScriptPackage: map[string]string{"version": spec, "resolved": resolved}}})
+				writeJSONFixture(t, dir, "package-lock.json", map[string]any{
+					"lockfileVersion": lockVersion, "packages": packages,
+					"dependencies": map[string]any{typeScriptPackage: map[string]string{"version": spec, "resolved": resolved}},
+				})
 				pin, err := ReadPin(dir, engineid.TypeScriptSDK)
 				if err != nil {
 					t.Fatal(err)
@@ -117,9 +119,10 @@ func TestReadTypeScriptLocalPinRejectsConflictingSources(t *testing.T) {
 			dir := t.TempDir()
 			localSDK(t, dir, "0.68.0")
 			writeFixture(t, dir, "package.json", []byte(`{"dependencies":{"@sparkwing/sdk":"file:sdk.tgz"}}`))
-			writeJSONFixture(t, dir, "package-lock.json", map[string]any{"lockfileVersion": 2,
-				"packages":     map[string]any{"": map[string]any{"dependencies": map[string]string{typeScriptPackage: "file:sdk.tgz"}}, "node_modules/" + typeScriptPackage: map[string]string{"version": "0.68.0", "resolved": tc.source}},
-				"dependencies": map[string]any{typeScriptPackage: map[string]string{"version": tc.legacyVersion, "resolved": tc.legacySource}},
+			writeJSONFixture(t, dir, "package-lock.json", map[string]any{
+				"lockfileVersion": 2,
+				"packages":        map[string]any{"": map[string]any{"dependencies": map[string]string{typeScriptPackage: "file:sdk.tgz"}}, "node_modules/" + typeScriptPackage: map[string]string{"version": "0.68.0", "resolved": tc.source}},
+				"dependencies":    map[string]any{typeScriptPackage: map[string]string{"version": tc.legacyVersion, "resolved": tc.legacySource}},
 			})
 			if _, err := ReadPin(dir, engineid.TypeScriptSDK); err == nil {
 				t.Fatal("conflicting local source accepted")

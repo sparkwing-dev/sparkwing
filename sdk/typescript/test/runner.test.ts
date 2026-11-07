@@ -33,6 +33,7 @@ function fakeServices(overrides: Partial<HostServices> = {}): HostServices {
     throw new Error("unexpected host service");
   };
   return {
+    helper: unavailable,
     secret: unavailable,
     output: unavailable,
     latest: unavailable,

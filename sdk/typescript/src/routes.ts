@@ -8,6 +8,14 @@ export interface ProcessRoutes {
   bearer: string;
 }
 export interface HostServices {
+  helper(
+    operation: string,
+    args: readonly unknown[],
+    dir: string,
+    signal: AbortSignal,
+    environment: readonly string[],
+    step?: string,
+  ): Promise<unknown>;
   secret(name: string, signal: AbortSignal, variable?: boolean): Promise<string>;
   output<T>(job: string, signal: AbortSignal): Promise<T | undefined>;
   latest<T>(ref: PipelineRef<T>, signal: AbortSignal): Promise<T>;
@@ -20,11 +28,18 @@ export interface HostServices {
 }
 
 export class NodeRoutes implements HostServices {
- async helper(operation: string, args: readonly unknown[], dir: string, signal: AbortSignal, environment: readonly string[]): Promise<unknown> {
- const data=await this.#request("POST","/node/v1/helpers",signal,{operation,args,dir,env:environment});
- if(data.error)throw Object.assign(new Error(String(data.error)),{code:data.code,result:data.result});
- return data.result;
- }
+  async helper(
+    operation: string,
+    args: readonly unknown[],
+    dir: string,
+    signal: AbortSignal,
+    environment: readonly string[],
+    step?: string,
+  ): Promise<unknown> {
+    const data = await this.#request("POST", "/node/v1/helpers", signal, { operation, args, dir, env: environment, step });
+    if (data.error) throw Object.assign(new Error(String(data.error)), { code: data.code, result: data.result });
+    return data.result;
+  }
 
   readonly #base: string;
   readonly #bearer: string;
@@ -85,7 +100,7 @@ export class NodeRoutes implements HostServices {
     return data;
   }
   async secret(name: string, signal: AbortSignal, variable?: boolean): Promise<string> {
-    const data = await this.#request("GET", `/node/v1/secrets/${encodeURIComponent(name)}${variable?"?variable=true":""}`, signal);
+    const data = await this.#request("GET", `/node/v1/secrets/${encodeURIComponent(name)}${variable ? "?variable=true" : ""}`, signal);
     if (typeof data.value !== "string") throw failure("protocol_error", "secret response requires a string value");
     return data.value;
   }

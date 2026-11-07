@@ -80,6 +80,7 @@ func TestCommandRelaysArgumentsEnvironmentAndCapture(t *testing.T) {
 		t.Fatal("environment missing")
 	}
 }
+
 func TestUnixCommandRequiresHost(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows owns command execution")

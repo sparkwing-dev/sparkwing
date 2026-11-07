@@ -4,11 +4,12 @@ package nodehost
 
 import (
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 // The host searches as Node's spawn does; Go SDKs send the path they resolved.

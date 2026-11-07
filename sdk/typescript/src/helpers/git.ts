@@ -2,21 +2,24 @@ import * as paths from "node:path";
 import type { Context, GitInfo, git as GitAPI } from "../../index.d.ts";
 import { projectRoot } from "../scope.ts";
 import { helper } from "./host.ts";
-export const git={
-clone:(ctx:Context,url: string, destDir: string, options: GitAPI.CloneOptions = {}):Promise<void>=>helper(ctx,"git.Clone",[url, destDir, options.depth ?? 0]),
-fetch:(ctx:Context,directory: string):Promise<void>=>helper(ctx,"git.Fetch",[directory]),
-shortCommit:(ctx:Context,directory: string):Promise<string>=>helper(ctx,"git.ShortCommit",[directory]),
-currentSHA:(ctx:Context,directory: string):Promise<string>=>helper(ctx,"git.CurrentSHA",[directory]),
-currentBranch:(ctx:Context,directory: string):Promise<string>=>helper(ctx,"git.CurrentBranch",[directory]),
-defaultBranch:(ctx:Context,directory: string):Promise<string>=>helper(ctx,"git.DefaultBranch",[directory]),
-remoteOriginURL:(ctx:Context,directory: string):Promise<string>=>helper(ctx,"git.RemoteOriginURL",[directory]),
-isDirty:(ctx:Context,directory: string):Promise<boolean>=>helper(ctx,"git.IsDirty",[directory]),
-filesetHash:(ctx:Context,directory: string):Promise<string>=>helper(ctx,"git.FilesetHash",[directory]),
-changedFiles:(ctx:Context,directory: string, since: string):Promise<string[]>=>helper(ctx,"git.ChangedFiles",[directory,since]),
-tagsAtHead:(ctx:Context,directory: string):Promise<string[]>=>helper(ctx,"git.TagsAtHead",[directory]),
-latestTag:(ctx:Context,directory: string, prefix: string):Promise<string>=>helper(ctx,"git.LatestTag",[directory,prefix]),
-tagExistsOnRemote:(ctx:Context,directory: string, tag: string):Promise<boolean>=>helper(ctx,"git.TagExistsOnRemote",[directory,tag]),
-pushTag:(ctx:Context,directory: string, tag: string, message: string):Promise<void>=>helper(ctx,"git.PushTag",[directory,tag,message]),
+export const git = {
+  clone: (ctx: Context, url: string, destDir: string, options: GitAPI.CloneOptions = {}): Promise<void> =>
+    helper(ctx, "git.Clone", [url, destDir, options.depth ?? 0]),
+  fetch: (ctx: Context, directory: string): Promise<void> => helper(ctx, "git.Fetch", [directory]),
+  shortCommit: (ctx: Context, directory: string): Promise<string> => helper(ctx, "git.ShortCommit", [directory]),
+  currentSHA: (ctx: Context, directory: string): Promise<string> => helper(ctx, "git.CurrentSHA", [directory]),
+  currentBranch: (ctx: Context, directory: string): Promise<string> => helper(ctx, "git.CurrentBranch", [directory]),
+  defaultBranch: (ctx: Context, directory: string): Promise<string> => helper(ctx, "git.DefaultBranch", [directory]),
+  remoteOriginURL: (ctx: Context, directory: string): Promise<string> => helper(ctx, "git.RemoteOriginURL", [directory]),
+  isDirty: (ctx: Context, directory: string): Promise<boolean> => helper(ctx, "git.IsDirty", [directory]),
+  filesetHash: (ctx: Context, directory: string): Promise<string> => helper(ctx, "git.FilesetHash", [directory]),
+  changedFiles: (ctx: Context, directory: string, since: string): Promise<string[]> => helper(ctx, "git.ChangedFiles", [directory, since]),
+  tagsAtHead: (ctx: Context, directory: string): Promise<string[]> => helper(ctx, "git.TagsAtHead", [directory]),
+  latestTag: (ctx: Context, directory: string, prefix: string): Promise<string> => helper(ctx, "git.LatestTag", [directory, prefix]),
+  tagExistsOnRemote: (ctx: Context, directory: string, tag: string): Promise<boolean> =>
+    helper(ctx, "git.TagExistsOnRemote", [directory, tag]),
+  pushTag: (ctx: Context, directory: string, tag: string, message: string): Promise<void> =>
+    helper(ctx, "git.PushTag", [directory, tag, message]),
 };
 export class Git implements GitInfo {
   readonly repo: string;

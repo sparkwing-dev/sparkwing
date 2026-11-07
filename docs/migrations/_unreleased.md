@@ -306,8 +306,8 @@ TypeScript `path`, `readFile`, `writeFile` and `glob` exports with `node:path` a
 Both command clients resolve the command environment's `PATH` in its requested
 working directory. This makes Go respect command-level `PATH` overrides.
 Executable text without a shebang runs through `/bin/sh` on Unix for both SDKs.
-Docker container output is logged by the host after the helper finishes. Custom
-output callbacks receive their captured bytes after completion.
+Docker container output streams through host masking. Custom output callbacks
+receive their captured bytes after completion.
 Local TypeScript `file:` packages select the installed candidate engine, as a Go
 module replacement does. Both paths report that release pinning is disabled.
 

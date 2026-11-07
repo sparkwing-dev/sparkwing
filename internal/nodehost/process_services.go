@@ -209,7 +209,7 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 				}
 			}
 		}
-		response := hosthelpers.Run(ctx, body)
+		var finishOutput func() error
 		if body.Operation == "docker.Run" {
 			var args []struct {
 				CaptureOutput bool `json:"captureOutput"`
@@ -218,18 +218,29 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 				if s.HelperStream == nil {
 					return nil, 0, serviceUnavailable()
 				}
-				var output struct{ Stdout, Stderr string }
-				if err := json.Unmarshal(response.Result, &output); err != nil {
-					return nil, 0, err
-				}
 				key := fmt.Sprintf("helper:%d:", s.helperSequence.Add(1))
-				for stream, data := range map[string]string{"stdout": output.Stdout, "stderr": output.Stderr} {
-					base := nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Event: "exec_line"}
-					if err := s.HelperStream(ctx, key+stream, base, []byte(data), true); err != nil {
-						return nil, 0, err
+				writer := func(stream string) helperOutputWriter {
+					return func(chunk []byte) (int, error) {
+						base := nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Step: body.Step, Event: "exec_line"}
+						err := s.HelperStream(ctx, key+stream, base, chunk, false)
+						return len(chunk), err
 					}
 				}
-				response.Result = json.RawMessage(`{"stdout":"","stderr":""}`)
+				ctx = helperruntime.WithOutput(ctx, writer("stdout"), writer("stderr"))
+				finishOutput = func() error {
+					for _, stream := range []string{"stdout", "stderr"} {
+						if err := s.HelperStream(ctx, key+stream, nodeproto.FrameLog{Level: "info", Step: body.Step, Event: "exec_line"}, nil, true); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
+			}
+		}
+		response := hosthelpers.Run(ctx, body)
+		if finishOutput != nil {
+			if err := finishOutput(); err != nil {
+				return nil, 0, err
 			}
 		}
 		response.Error = s.Masks.mask(response.Error)
@@ -378,3 +389,7 @@ func decodeService(request *http.Request, target any) error {
 	}
 	return nil
 }
+
+type helperOutputWriter func([]byte) (int, error)
+
+func (write helperOutputWriter) Write(chunk []byte) (int, error) { return write(chunk) }

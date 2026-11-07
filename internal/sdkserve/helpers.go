@@ -26,7 +26,7 @@ func Helper(ctx context.Context, operation string, args []any, result any) error
 	if err != nil {
 		return err
 	}
-	return service.Helper(ctx, nodeproto.HelperRequest{Operation: operation, Dir: dir, Env: os.Environ(), Args: raw}, result)
+	return service.Helper(ctx, nodeproto.HelperRequest{Step: HelperStep(ctx), Operation: operation, Dir: dir, Env: os.Environ(), Args: raw}, result)
 }
 
 func (s *routeServices) Helper(ctx context.Context, request nodeproto.HelperRequest, out any) error {
@@ -50,3 +50,16 @@ type HelperError struct{ Code, Message string }
 
 func (e *HelperError) Error() string        { return e.Message }
 func (e *HelperError) Is(target error) bool { return e.Code != "" && e.Code == target.Error() }
+
+type helperStepKey struct{}
+
+// WithHelperStep carries the active SDK step into host helper logs.
+func WithHelperStep(ctx context.Context, step string) context.Context {
+	return context.WithValue(ctx, helperStepKey{}, step)
+}
+
+// HelperStep returns the helper's active step, if any.
+func HelperStep(ctx context.Context) string {
+	step, _ := ctx.Value(helperStepKey{}).(string)
+	return step
+}

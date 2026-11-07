@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // RunContext is the typed environment every Plan and Job sees, populated by
@@ -166,7 +168,7 @@ func nodeFromContext(ctx context.Context) string {
 // start and end events render at the node level instead, so the
 // breadcrumb does not repeat the step name.
 func withStep(ctx context.Context, stepID string) context.Context {
-	return context.WithValue(ctx, keyStep, stepID)
+	return sdkserve.WithHelperStep(context.WithValue(ctx, keyStep, stepID), stepID)
 }
 
 // StepFromContext returns the active step ID, or "" outside a step.

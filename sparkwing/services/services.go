@@ -12,8 +12,10 @@ import (
 
 var ErrDockerUnavailable = docker.ErrDockerUnavailable
 
-const DefaultReadyTimeout = 30 * time.Second
-const AutoPort = -1
+const (
+	DefaultReadyTimeout = 30 * time.Second
+	AutoPort            = -1
+)
 
 type Service struct {
 	// Image is the fully-qualified image reference, e.g. "postgres:15-alpine".

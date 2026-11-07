@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,11 +50,13 @@ func LookPath(ctx context.Context, name string) (string, error) {
 	return procenv.LookupCommand(name, e.env, e.dir)
 }
 
-type cleanupKey struct{}
-type cleanups struct {
-	register func([]string, string) (string, error)
-	release  func(context.Context, string) error
-}
+type (
+	cleanupKey struct{}
+	cleanups   struct {
+		register func([]string, string) (string, error)
+		release  func(context.Context, string) error
+	}
+)
 
 // WithCleanups binds resources to the host's process cleanup ledger.
 func WithCleanups(ctx context.Context, register func([]string, string) (string, error), release func(context.Context, string) error) context.Context {
@@ -98,4 +101,20 @@ func Environment(ctx context.Context) (string, []string) {
 		e.env = os.Environ()
 	}
 	return e.dir, e.env
+}
+
+type (
+	outputKey struct{}
+	output    struct{ stdout, stderr io.Writer }
+)
+
+// WithOutput binds default helper output to the host's masked log streams.
+func WithOutput(ctx context.Context, stdout, stderr io.Writer) context.Context {
+	return context.WithValue(ctx, outputKey{}, output{stdout, stderr})
+}
+
+// Output returns the host-owned default streams for this helper.
+func Output(ctx context.Context) (io.Writer, io.Writer) {
+	streams, _ := ctx.Value(outputKey{}).(output)
+	return streams.stdout, streams.stderr
 }

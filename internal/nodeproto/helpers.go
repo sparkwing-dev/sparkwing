@@ -4,6 +4,7 @@ import "encoding/json"
 
 // HelperRequest invokes host behavior with the pipeline process's environment.
 type HelperRequest struct {
+	Step      string          `json:"step,omitempty"`
 	Operation string          `json:"operation"`
 	Dir       string          `json:"dir"`
 	Env       []string        `json:"env"`

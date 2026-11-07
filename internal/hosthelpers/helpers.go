@@ -275,7 +275,14 @@ func Run(ctx context.Context, req nodeproto.HelperRequest) nodeproto.HelperRespo
 			return failed(e)
 		}
 		var stdout, stderr bytes.Buffer
-		a0.Stdout, a0.Stderr = &stdout, &stderr
+		if a0.CaptureOutput {
+			a0.Stdout, a0.Stderr = &stdout, &stderr
+		} else {
+			a0.Stdout, a0.Stderr = helperruntime.Output(ctx)
+			if a0.Stdout == nil || a0.Stderr == nil {
+				return failed(errors.New("host helper output unavailable"))
+			}
+		}
 		err = docker.Run(ctx, a0)
 		result = map[string]string{"stdout": stdout.String(), "stderr": stderr.String()}
 	case "docker.ComputeTags":

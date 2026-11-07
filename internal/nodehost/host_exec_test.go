@@ -209,12 +209,12 @@ func hostExecCommand(t testing.TB, lang string) []string {
 	return []string{exe, "-test.run=^TestHostExecSDKChild$", "--", "hostexec-sdk"}
 }
 
-func startHostExecHarness(t testing.TB, lang string, dir string, extraEnv ...string) *hostExecHarness {
+func startHostExecHarness(t testing.TB, lang, dir string, extraEnv ...string) *hostExecHarness {
 	t.Helper()
 	return startHostExecHarnessWithSink(t, lang, "job", dir, nil, extraEnv...)
 }
 
-func startHostExecHarnessWithSink(t testing.TB, lang, job string, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
+func startHostExecHarnessWithSink(t testing.TB, lang, job, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
 	t.Helper()
 	var err error
 	masker := secrets.NewMasker()

@@ -125,7 +125,7 @@ func TestHostHelperMasksCompleteOutputBeforeLogLimits(t *testing.T) {
 	service.Cleanups = &ProcessCleanups{}
 	output := strings.Repeat("x", (64<<10)-3) + secret + "\n"
 	env := append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_BYTES="+output)
-	body, _ := json.Marshal(nodeproto.HelperRequest{Operation: "docker.Run", Dir: dir, Env: env, Args: json.RawMessage(`[{"image":"fixture"}]`)})
+	body, _ := json.Marshal(nodeproto.HelperRequest{Step: "container", Operation: "docker.Run", Dir: dir, Env: env, Args: json.RawMessage(`[{"image":"fixture"}]`)})
 	response, err := callService(t, routes, auth, "/node/v1/helpers", string(body))
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +140,9 @@ func TestHostHelperMasksCompleteOutputBeforeLogLimits(t *testing.T) {
 		t.Fatal("helper output was not logged")
 	}
 	for _, record := range records {
+		if record.Step != "container" {
+			t.Fatalf("helper step lost: %q", record.Step)
+		}
 		if strings.Contains(record.Message, "private-suffix") || strings.Contains(record.Message, "helper-boundary") {
 			t.Fatalf("partial secret in bounded log: %q", record.Message)
 		}
