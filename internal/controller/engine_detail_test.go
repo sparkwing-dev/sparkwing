@@ -12,9 +12,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -181,4 +183,22 @@ func must[T any](v T, err error) T {
 		panic(err)
 	}
 	return v
+}
+
+func TestEngineRunDetailSkipsVersionPolicyForSDKReplacement(t *testing.T) {
+	const pseudo = "v0.69.3-0.20261107014522-42431b0cefba"
+	request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Team: "a"}}
+	identity := engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.69.1", Replacement: ".."}, Version: pseudo}
+	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "run", Request: request, Spec: &runspec.Spec{Request: request, Resolved: runspec.Resolved{Engine: identity}}}}}}
+	policy := &engineVersionFake{evaluateErr: &apierr.Error{Code: apierr.InvalidArgs, Message: "invalid release version"}}
+	server := EngineController{VersionPolicy: engineVersionPolicy(policy)}
+	got, err := server.runViewStatus(t.Context(), view)
+	if err != nil || policy.evaluated != "" || !reflect.DeepEqual(got.Notices, []engineid.Notice{engine.PinDisabledNotice(pseudo)}) {
+		t.Fatalf("replacement status notices=%+v evaluated=%q err=%v", got.Notices, policy.evaluated, err)
+	}
+	identity.Pin.Replacement = ""
+	view.Snapshot.Run.Spec.Resolved.Engine = identity
+	if _, err := server.runViewStatus(t.Context(), view); err == nil || policy.evaluated != pseudo {
+		t.Fatalf("a pinned engine skipped version policy: evaluated=%q err=%v", policy.evaluated, err)
+	}
 }

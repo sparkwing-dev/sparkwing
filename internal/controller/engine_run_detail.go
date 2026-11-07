@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -271,11 +272,15 @@ func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.T
 
 func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView) (RunStatusFacts, error) {
 	facts := RunStatusFacts{Reason: view.Reason, Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults, HostIneligible: view.HostIneligible}
-	if view.Snapshot.Run.Spec != nil {
+	if spec := view.Snapshot.Run.Spec; spec != nil && spec.Resolved.Engine.Pin.SDK == engineid.GoSDK && spec.Resolved.Engine.Pin.Replacement != "" {
+		// bug: a replacement runs the installed engine, which Resolve never holds to release policy, and a main
+		// build's engine version is a pseudo-version that Evaluate refuses as an invalid release.
+		facts.Notices = []engineid.Notice{engine.PinDisabledNotice(spec.Resolved.Engine.Version)}
+	} else if spec != nil {
 		if s.VersionPolicy == nil {
 			return RunStatusFacts{}, versionPolicyUnavailable()
 		}
-		notices, err := s.VersionPolicy.notices(ctx, view.Snapshot.Run.Spec.Resolved.Engine.Version)
+		notices, err := s.VersionPolicy.notices(ctx, spec.Resolved.Engine.Version)
 		if err != nil {
 			return RunStatusFacts{}, err
 		}
