@@ -1697,6 +1697,72 @@ file. Other syntax and workflow checks remain active.
   templates, integrations, browser behavior, or release assets when those
   surfaces changed.
 
+## Weekly SDK and CLI delivery
+
+`weekly-release` runs Monday at 09:00 America/Denver. It clones origin/main,
+skips when `[Unreleased]` has no entries, and requires the latest push run of
+`ci.yaml` at the selected commit to have completed successfully. It then runs
+the existing `release` pipeline in that private checkout with its own
+`SPARKWING_HOME`. Its default minor bump stays on v0.x. Release cuts are
+pre-approved. The scheduled entrypoint supplies the cut's
+`--sw-allow-risk destructive,prod` authorization.
+
+The cut retains its changelog, migration-guide, schema, wire and release-cut
+checks. It commits the rolled notes and atomically pushes main and the tag.
+That tag makes the Go SDK module available and starts the existing
+`.github/workflows/release.yaml` publication steps for signed CLI binaries,
+images and the TypeScript package. The weekly pipeline finishes after the cut.
+Inspect the tag workflow for publication completion. A failed cut retains the
+private checkout at the path printed in its job log.
+
+Run the same path sooner, or preview the cut:
+
+```sh
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release -- --bump patch
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release -- --version v0.70.0
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release --sw-dry-run
+```
+
+`owned-sdk-main` runs daily at 08:00 America/Denver. It resolves green
+Sparkwing main to an exact v0 Go module version. For each eligible repository,
+it sets both the SDK requirement and a versioned replacement to that version,
+tidies the pipeline module, commits only its go.mod and go.sum, and invokes
+`xwing env land`. The replacement lets development pipelines use the installed
+host without requesting an unpublished signed engine release.
+
+Eligible repos are immediate children of `~/code` with a Go pipeline module,
+a GitHub origin owned by `koreyGambill` or `sparkwing-dev`, and an Xwing policy
+with `landing.branch: main` and a verification command. Pull-request policies
+and Sparkwing itself are excluded. Xwing applies the repo's committed landing
+policy and verification. An unchanged pin is skipped. A failed update retains
+its Xwing environment for repair, while the pipeline tries the remaining repos
+and reports all failures. TypeScript repos keep their published SDK pins and
+can use `sparkwing pipeline upgrade` after a release.
+
+```sh
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main --sw-dry-run -- --repos-root "$HOME/code"
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main -- --repos-root "$HOME/code"
+```
+
+Arm both declarations from the main checkout on a host with Git push access,
+GitHub CLI authentication for CI reads, Go, Xwing and Sparkwing on PATH:
+
+```sh
+export SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery"
+export SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/secrets.key"
+sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-sdk-cli,owned-sdk-main --unpinned
+sparkwing schedules list
+```
+
+The dedicated state directory keeps release work out of the operational runs
+store. The private key-file provider also works on headless hosts. Use those
+same exports for manual runs. Keep HOME at the operator's home so Git signing and GitHub authentication
+remain available. Sparkwing owns cadence and overlap handling through its
+schedule evaluator and managed timer. `--unpinned` compiles the main checkout
+on each fire so later pipeline fixes take effect. This installation command
+selects only these schedules and preserves other installed schedules.
+
 ## Release failure policy
 
 Main may be red. If a change breaks it and the fix is not obvious, revert that

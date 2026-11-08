@@ -44,6 +44,7 @@ unlock.
 
 ### Added
 
+- **releases:** A weekly Sparkwing schedule cuts v0 SDK and CLI releases from green main when unreleased notes exist. Maintainers can run it sooner, and a daily pipeline updates owned Go repos to exact main SDK versions through their Xwing landing checks.
 - **local controller:** Before upgrading a SQLite store's schema, the binary copies the store beside it as `state.db.schema-<N>-<time>.bak` under the upgrade's write lock. After a successful upgrade, it keeps only the two newest schema backups. A failed copy refuses the upgrade and leaves the store unchanged. An older binary refusing a newer store names the backup to restore. PostgreSQL stores still need an operator snapshot. See [the migration guide](docs/migrations/_unreleased.md#local-stores-are-copied-before-schema-upgrades).
 - **Go SDK:** `StartChild(ctx, pipeline, args)` submits a same-revision child without waiting. It inherits the parent's verified repository identity and continues after the parent job ends or is cancelled. Declare its target with `StartsChildren`; ordinary `RunAndAwait` children keep their parent-cancellation behavior.
 
