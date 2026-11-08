@@ -58,16 +58,7 @@ func TestTemplateVerifierCompilesAndPlansFreshTemplate(t *testing.T) {
 	}
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	var manifest templates.Manifest
-	for _, candidate := range verifyTemplates {
-		if candidate.Manifest.Name == "lint-test-go" {
-			manifest = candidate.Manifest
-			break
-		}
-	}
-	if manifest.Name == "" {
-		t.Fatal("lint-test-go verification template is missing")
-	}
+	manifest := rendered["lint-test-go"].Manifest
 	manifest.Verify = templates.VerifyCompileOnly
 	outcome, err := verifyTemplate(ctx, manifest, verifyEnv{CLI: bin, Root: root, Templates: rendered})
 	if err != nil || outcome.Tier != templates.VerifyCompileOnly || outcome.Skipped {
@@ -377,17 +368,10 @@ func TestTemplateVerifierRendersLocalTextAndVerificationManifest(t *testing.T) {
 	if !strings.HasSuffix(got.Body, marker) || !slices.Equal(got.Manifest.VerifyTools, manifest.VerifyTools) {
 		t.Fatalf("local source was not rendered: %+v", got)
 	}
-	if err := checkVerifyRegistry(registry); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(bodyPath, []byte("{{ broken local template"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := renderVerifyTemplates(ctx, root, t.TempDir(), discoverSparksCore(root)); err == nil {
 		t.Fatal("invalid local template fell back to the published template")
-	}
-	delete(registry, "lint-test-go")
-	if err := checkVerifyRegistry(registry); err == nil {
-		t.Fatal("missing local template passed the registry check")
 	}
 }

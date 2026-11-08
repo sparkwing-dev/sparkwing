@@ -1448,9 +1448,9 @@ file. Other syntax and workflow checks remain active.
   job renders template text and verification manifests through the discovered
   local sparks-core templates module (SPARKWING_SPARKS_CORE_DIR, go.work, or a
   sibling checkout), or the pipeline module's published templates pin when no
-  checkout is found. Its annotation names the selected source. Added or removed
-  template names must match the pipeline module's templates pin or replacement;
-  a mismatch fails before verification instead of silently omitting a template.
+  checkout is found. Its annotation names the selected source. The selected
+  registry generates the verification jobs, so local additions and removals need
+  no pipeline module replacement.
   A local
   run reuses a recorded proof for any template whose proof inputs are
   byte-identical to a previous pass. The digest covers, in one hash per
@@ -1487,8 +1487,8 @@ file. Other syntax and workflow checks remain active.
   Any skipped execution is partial verification, including a body skipped as
   `no_dry_run_defined`. It reports no completed run step and records no proof.
   Missing or unreadable execution evidence fails verification.
-  Reuse never changes the plan: every template keeps its node, and the decision
-  is made inside it, so a digest miss cannot be lost in
+  Reuse never changes the generated fan-out: every selected template keeps its
+  node, and the decision is made inside it, so a digest miss cannot be lost in
   plan shaping. Third-party module resolution is outside the digest either way,
   which is the standing reason the boundary stays exhaustive: the release
   pipeline passes `--exhaustive`, and so should any manual run being used as a
