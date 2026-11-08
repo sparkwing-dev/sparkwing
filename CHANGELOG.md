@@ -20,15 +20,16 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.71.0] - 2026-11-08
 ### Changed
 
-- **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-36).
+- **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/v0.71.0.md#upgrade-the-store-in-place-to-schema-baseline-36).
 
-- **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/_unreleased.md#declare-upload-allowances-in-repository-config).
+- **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/v0.71.0.md#declare-upload-allowances-in-repository-config).
 
-- **local controller:** Windows queued work runs in a detached same-user runner that survives controller replacement. A matching live runner is reused; a new build starts a successor while held work drains. The enclosing Job Object must permit breakaway. `daemon stop` drains through the local API. See [the migration guide](docs/migrations/_unreleased.md#windows-local-runners-survive-controller-replacement).
+- **local controller:** Windows queued work runs in a detached same-user runner that survives controller replacement. A matching live runner is reused; a new build starts a successor while held work drains. The enclosing Job Object must permit breakaway. `daemon stop` drains through the local API. See [the migration guide](docs/migrations/v0.71.0.md#windows-local-runners-survive-controller-replacement).
 
-- **controller (Breaking):** The schema baseline advances to version 35, adding durable GitHub Actions approvals and dispatch receipts, upgrading recognized schema 34 stores in place. Explicit repository Actions tiers require a receipt from the approved workflow on a GitHub-hosted image. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-35).
+- **controller (Breaking):** The schema baseline advances to version 35, adding durable GitHub Actions approvals and dispatch receipts, upgrading recognized schema 34 stores in place. Explicit repository Actions tiers require a receipt from the approved workflow on a GitHub-hosted image. See [the migration guide](docs/migrations/v0.71.0.md#upgrade-the-store-in-place-to-schema-baseline-35).
 
 ### Fixed
 
