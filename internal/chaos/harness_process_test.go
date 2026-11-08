@@ -17,6 +17,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"k8s.io/utils/clock"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -105,7 +107,7 @@ func startReadyDescendant(inheritStdout bool) bool {
 }
 
 func waitForZombie(pid int) bool {
-	return pollProcessState(3*time.Second, 10*time.Millisecond, func() bool {
+	return pollProcessState(clock.RealClock{}, 3*time.Second, 10*time.Millisecond, func() bool {
 		processes, err := procgroup.List()
 		if err != nil {
 			return false
@@ -498,7 +500,7 @@ func TestProcessGuardAcceptsSoakScaleDescendantZombieBurst(t *testing.T) {
 		actors = append(actors, startGuardedActor(t, h, fmt.Sprintf("burst-%d", i), "zombie-parent", 0))
 	}
 	guard := newProcessGuard(h)
-	pollProcessState(30*time.Second, 20*time.Millisecond, func() bool {
+	pollProcessState(h.clock(), 30*time.Second, 20*time.Millisecond, func() bool {
 		guard.check()
 		return len(guard.since) == len(actors)
 	})
@@ -564,7 +566,7 @@ func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.
 	h.mu.Unlock()
 
 	guard := newProcessGuard(h)
-	pollProcessState(time.Second, 20*time.Millisecond, func() bool {
+	pollProcessState(h.clock(), time.Second, 20*time.Millisecond, func() bool {
 		guard.check()
 		return false
 	})
@@ -577,7 +579,7 @@ func awaitGuardViolation(t *testing.T, h *harness, bound time.Duration, fired <-
 	t.Helper()
 	guard := newProcessGuard(h)
 	var got string
-	if pollProcessState(bound, 20*time.Millisecond, func() bool {
+	if pollProcessState(h.clock(), bound, 20*time.Millisecond, func() bool {
 		guard.check()
 		select {
 		case violations := <-fired:
@@ -593,25 +595,19 @@ func awaitGuardViolation(t *testing.T, h *harness, bound time.Duration, fired <-
 	return ""
 }
 
-func pollProcessState(bound, interval time.Duration, predicate func() bool) bool {
-	deadlineAt := time.Now().Add(bound)
-	poll := time.NewTicker(interval)
-	defer poll.Stop()
-	deadline := time.NewTimer(time.Until(deadlineAt))
-	defer deadline.Stop()
-	for {
-		if !time.Now().Before(deadlineAt) {
-			return false
-		}
+func pollProcessState(source clock.Clock, bound, interval time.Duration, predicate func() bool) bool {
+	deadline := source.Now().Add(bound)
+	for source.Now().Before(deadline) {
 		if predicate() {
 			return true
 		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
+		remaining := deadline.Sub(source.Now())
+		if remaining <= 0 {
 			return false
 		}
+		source.Sleep(min(interval, remaining))
 	}
+	return false
 }
 
 func waitForActorLeader(t *testing.T, group *procgroup.Group, within time.Duration) {
