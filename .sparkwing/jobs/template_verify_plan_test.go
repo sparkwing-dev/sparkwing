@@ -2,18 +2,62 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 
+	templates "github.com/sparkwing-dev/sparks-core/templates"
+
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 func TestTemplateVerifyPlanUsesMeasuredResourcesAndBoundsFanout(t *testing.T) {
-	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (TemplateVerify{}).Plan(context.Background(), plan, TemplateVerifyArgs{}, sparkwing.RunContext{})
+	host, sourcePlan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (TemplateVerify{}).Plan(ctx, plan, TemplateVerifyArgs{}, sparkwing.RunContext{})
 	})
+	declaration, err := host.Plan(t.Context(), "TemplateVerify", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := declaration.Jobs[0].Closures.Generate[0]
+	if !slices.Equal(declaration.Jobs[1].NeedsGenerated, []string{generator}) {
+		t.Fatal("summary does not wait for every generated verification")
+	}
+	registry := map[string]templates.Template{
+		"new-local-template": {Manifest: templates.Manifest{Name: "new-local-template"}},
+		"another-template":   {Manifest: templates.Manifest{Name: "another-template"}},
+	}
+	raw, err := json.Marshal(verifyEnv{Templates: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expanded, err := host.Eval(t.Context(), sourcePlan, "build-cli", generator, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := decodePipeline(t, expanded)
+
+	summaryHost := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"build-cli": raw}})
+	summary, err := summaryHost.RunStep(t.Context(), sourcePlan, "summary", "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total TemplateVerifySummary
+	if err := json.Unmarshal(summary, &total); err != nil {
+		t.Fatal(err)
+	}
+	if total.Total != len(registry) {
+		t.Fatalf("summary total = %d, want %d", total.Total, len(registry))
+	}
+	emptyHost, emptyPlan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (TemplateVerify{}).Plan(ctx, plan, TemplateVerifyArgs{}, sparkwing.RunContext{})
+	})
+	if _, err := emptyHost.Eval(t.Context(), emptyPlan, "build-cli", generator, json.RawMessage(`{}`)); err == nil {
+		t.Fatal("empty registry produced a successful verification expansion")
+	}
 
 	count := 0
 	for _, node := range plan.Jobs {
@@ -29,8 +73,8 @@ func TestTemplateVerifyPlanUsesMeasuredResourcesAndBoundsFanout(t *testing.T) {
 			t.Fatalf("%s concurrency = %q %+v", node.ID, limit.Group, limit)
 		}
 	}
-	if count != len(verifyTemplates) {
-		t.Fatalf("bounded templates = %d, want %d", count, len(verifyTemplates))
+	if count != len(registry) {
+		t.Fatalf("bounded templates = %d, want %d", count, len(registry))
 	}
 }
 

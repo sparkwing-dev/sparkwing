@@ -26,14 +26,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
-type featureController struct {
+type localFeatureController struct {
 	t                              *testing.T
 	ctx                            context.Context
 	cli, root, home, repo, markers string
 	env                            []string
 }
 
-func newFeatureController(t *testing.T) *featureController {
+func newLocalFeatureController(t *testing.T) *localFeatureController {
 	t.Helper()
 	cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY")
 	if cli == "" {
@@ -49,7 +49,7 @@ func newFeatureController(t *testing.T) *featureController {
 	user := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
 	t.Cleanup(cancel)
-	f := &featureController{t: t, ctx: ctx, cli: cli, root: root, home: filepath.Join(user, "state"), repo: filepath.Join(user, "repo"), markers: filepath.Join(user, "markers")}
+	f := &localFeatureController{t: t, ctx: ctx, cli: cli, root: root, home: filepath.Join(user, "state"), repo: filepath.Join(user, "repo"), markers: filepath.Join(user, "markers")}
 	for _, key := range []string{"PATH", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "ASDF_DATA_DIR", "PLAYWRIGHT_BROWSERS_PATH"} {
 		if value, ok := os.LookupEnv(key); ok {
 			f.env = append(f.env, key+"="+value)
@@ -112,7 +112,7 @@ func featureWrite(t *testing.T, path, body string) {
 	}
 }
 
-func (f *featureController) command(args ...string) []byte {
+func (f *localFeatureController) command(args ...string) []byte {
 	f.t.Helper()
 	cmd := exec.CommandContext(f.ctx, f.cli, append(args, "-o", "json")...)
 	cmd.Env = f.env
@@ -128,7 +128,7 @@ func (f *featureController) command(args ...string) []byte {
 	return output
 }
 
-func (f *featureController) fixture() {
+func (f *localFeatureController) fixture() {
 	f.t.Helper()
 	dir := filepath.Join(f.repo, ".sparkwing")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -154,7 +154,7 @@ func (f *featureController) fixture() {
 	}
 }
 
-func (f *featureController) submit(name string) string {
+func (f *localFeatureController) submit(name string) string {
 	f.t.Helper()
 	var receipt struct {
 		RunID string `json:"run_id"`
@@ -165,7 +165,7 @@ func (f *featureController) submit(name string) string {
 	return receipt.RunID
 }
 
-func (f *featureController) await(label string, condition func() bool) {
+func (f *localFeatureController) await(label string, condition func() bool) {
 	f.t.Helper()
 	for !condition() {
 		select {
@@ -177,7 +177,7 @@ func (f *featureController) await(label string, condition func() bool) {
 	}
 }
 
-func (f *featureController) pid(name string) localhostwire.LocalRunnerInstance {
+func (f *localFeatureController) pid(name string) localhostwire.LocalRunnerInstance {
 	f.t.Helper()
 	var identity localhostwire.LocalRunnerInstance
 	f.await(name, func() bool {
@@ -205,7 +205,7 @@ func (f *featureController) pid(name string) localhostwire.LocalRunnerInstance {
 	return identity
 }
 
-func (f *featureController) alive(identity localhostwire.LocalRunnerInstance) bool {
+func (f *localFeatureController) alive(identity localhostwire.LocalRunnerInstance) bool {
 	f.t.Helper()
 	alive, err := wingd.LocalRunnerProcessAlive(identity)
 	if err != nil {
@@ -214,7 +214,7 @@ func (f *featureController) alive(identity localhostwire.LocalRunnerInstance) bo
 	return alive
 }
 
-func (f *featureController) success(run string) {
+func (f *localFeatureController) success(run string) {
 	f.t.Helper()
 	f.await("successful run "+run, func() bool {
 		var status struct {
@@ -233,7 +233,7 @@ func (f *featureController) success(run string) {
 
 func TestLocalControllerFeatureE2E(t *testing.T) {
 	t.Run("dashboard", func(t *testing.T) {
-		f := newFeatureController(t)
+		f := newLocalFeatureController(t)
 		cmd := exec.CommandContext(f.ctx, "node", filepath.Join(f.root, "web/scripts/local-controller-e2e.mjs"), f.cli)
 		cmd.Env = f.env
 		cmd.Dir = filepath.Join(f.root, "web")
@@ -244,7 +244,7 @@ func TestLocalControllerFeatureE2E(t *testing.T) {
 		}
 	})
 	t.Run("lifecycle", func(t *testing.T) {
-		f := newFeatureController(t)
+		f := newLocalFeatureController(t)
 		f.fixture()
 		run := f.submit("lifecycle")
 		running, child := f.pid("running.pid"), f.pid("child.pid")
@@ -292,7 +292,7 @@ func TestLocalControllerFeatureE2E(t *testing.T) {
 		}
 	})
 	t.Run("host-exec", func(t *testing.T) {
-		f := newFeatureController(t)
+		f := newLocalFeatureController(t)
 		f.fixture()
 		run := f.submit("host-exec")
 		background := f.pid("background.pid")
@@ -320,7 +320,7 @@ func TestLocalControllerFeatureE2E(t *testing.T) {
 		}
 	})
 	t.Run("schema-backup", func(t *testing.T) {
-		f := newFeatureController(t)
+		f := newLocalFeatureController(t)
 		cmd := exec.CommandContext(f.ctx, f.cli, "secrets", "set", "--secret", "PRESERVED", "-o", "json")
 		cmd.Env = f.env
 		cmd.Dir = f.repo

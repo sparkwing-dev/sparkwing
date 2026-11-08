@@ -256,3 +256,75 @@ func TestLatestRunOwnPipelineReadsOnlyReaderRepository(t *testing.T) {
 		t.Fatalf("reader repository with no run: want not found, got %v", err)
 	}
 }
+
+func TestLatestPipelineSummaryUsesReferenceRanking(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	tenant.s.clock = func() time.Time { return time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC) }
+	a := seedLatestRun(t, tenant, request, "same", "success", time.Hour, time.Minute)
+	b := seedLatestRun(t, tenant, request, "same", "failed", time.Hour, 30*time.Minute)
+	first, second := min(a, b), max(a, b)
+	// safety: lexical ID order competes with the run number at the same start time.
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET number=100 WHERE team=? AND id=?`, tenant.team, first)
+	latest, err := tenant.GetLatestRun(t.Context(), "same", nil, 0, true, "")
+	if err != nil || latest.ID != first {
+		t.Fatalf("reference ranking: %+v, %v", latest, err)
+	}
+	summaries, err := tenant.ListPipelines(t.Context(), 1)
+	if err != nil || len(summaries) != 1 || summaries[0].LastRunID != first || summaries[0].LastStatus != latest.Status {
+		t.Fatalf("pipeline summary differs from reference: %+v, %v (other run %s)", summaries, err, second)
+	}
+}
+
+func TestLatestRunRepositoryFilterOnlyNarrowsCandidates(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	own := seedLatestRun(t, tenant, request, "shared", "success", time.Hour, time.Minute)
+	foreign := seedLatestRun(t, tenant, request, "shared", "success", time.Minute, 0)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET repo_display='acme/own',repo_key='gh:1' WHERE team=? AND id=?`, tenant.team, own)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET repo_display='acme/other',repo_key='gh:2' WHERE team=? AND id=?`, tenant.team, foreign)
+	latest, err := tenant.GetLatestRun(t.Context(), "shared", nil, 0, true, "", "acme/own")
+	if err != nil || latest.ID != own {
+		t.Fatalf("repository selection: %+v, %v", latest, err)
+	}
+	if _, err := tenant.GetLatestRun(t.Context(), "shared", nil, 0, true, own, "acme/other"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("repository filter widened the own-pipeline read: %v", err)
+	}
+}
+
+func TestLatestSuccessPinPreservesFinishOrderingAndPublicationExclusion(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	first := seedLatestRun(t, tenant, request, "build", "success", time.Hour, 0)
+	second := seedLatestRun(t, tenant, request, "build", "success", time.Minute, 0)
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		id      string
+		at      time.Time
+		publish bool
+		want    string
+	}{
+		{first, now, false, first},
+		{second, now.Add(-time.Minute), false, first},
+		{second, now, false, first},
+		{second, now.Add(time.Minute), true, first},
+		{second, now.Add(time.Minute), false, second},
+	} {
+		row, err := tenant.ReadRun(t.Context(), tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.publish {
+			row.Request.Request.Mode = runspec.IntakePublish
+		}
+		if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error {
+			if err := advanceLatestSuccessPinTx(t.Context(), tx, tenant.team, row, tc.at); err != nil {
+				return err
+			}
+			pinned, err := latestSuccessPinTx(t.Context(), tx, tenant.team, "build", tc.want)
+			if err == nil && !pinned {
+				return errors.New("success pin changed its selection policy")
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -32,6 +32,21 @@ var approvedExternalBoundaries = []externalBoundary{
 		marker:   "// sleepcheck:external-boundary real CLI processes and filesystem markers need a paced poll",
 	},
 	{
+		file: "tests/acceptance/feature_e2e_test.go", function: "newFeatureController",
+		duration: "10 * time.Second",
+		marker:   "// sleepcheck:external-boundary a controller subprocess must exit before its private state is removed",
+	},
+	{
+		file: "tests/acceptance/feature_e2e_test.go", function: "await",
+		duration: "100 * time.Millisecond",
+		marker:   "// sleepcheck:external-boundary real controller processes and HTTP state need a paced poll",
+	},
+	{
+		file: "tests/acceptance/feature_scenarios_e2e_test.go", function: "delay",
+		duration: "duration",
+		marker:   "// sleepcheck:external-boundary placement holds and recovery sweeps run on the external controller's real clock",
+	},
+	{
 		file: "internal/nodehost/host_exec_stdin_unix_test.go", function: "TestHostCommandKeepsBufferedOutputPastASlowSink",
 		duration: "2 * commandDrainGrace",
 		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",
