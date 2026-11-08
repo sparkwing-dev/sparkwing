@@ -255,12 +255,9 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		if ref.Pipeline != c.pipeline || ref.Job != c.node {
 			continue
 		}
-		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM pipeline_success_pins WHERE team=? AND pipeline=? AND run_id=?", a.capability.Team, c.pipeline, c.run).Scan(&count); err != nil {
-			return edge, false, err
-		}
+		pinned, err := latestSuccessPinTx(ctx, tx, Team(a.capability.Team), c.pipeline, c.run)
 		edge.Kind = blob.EdgeDeclaredReference
-		return edge, count == 1, nil
+		return edge, pinned, err
 	}
 	return edge, false, nil
 }

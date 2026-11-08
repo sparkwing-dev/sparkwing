@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -157,34 +158,35 @@ func TestExec_CancelTerminatesTheStepJobAndClearsItsRecord(t *testing.T) {
 	p := paths.PathsAt(home)
 	ledger := sessionledger.Open(p.SessionLedgerDir())
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
+	ready := &windowsStepReady{ready: make(chan struct{})}
+	ctx = context.WithValue(ctx, keyLogger, ready)
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		_, _ = execCmd(ctx, "cmd", []string{"/c", `start /b ping -n 60 127.0.0.1 >nul & ping -n 60 127.0.0.1 >nul`}, t.TempDir(), nil)
+		_, _ = execCmd(ctx, "cmd", []string{"/c", `start /b ping -n 60 127.0.0.1 >nul & echo ready & ping -n 60 127.0.0.1 >nul`}, t.TempDir(), nil)
 	}()
 
-	var jobName string
-	deadline := time.Now().Add(10 * time.Second)
-	for jobName == "" {
-		if time.Now().After(deadline) {
-			t.Fatal("the running step was never recorded")
-		}
-		recs, _ := ledger.List()
-		if len(recs) == 1 {
-			jobName = recs[0].Handle.JobName
-		}
-		time.Sleep(20 * time.Millisecond)
+	select {
+	case <-ready.ready:
+	case <-finished:
+		t.Fatal("step exited before reporting readiness")
+	case <-ctx.Done():
+		t.Fatal("step never reported readiness")
 	}
-	if jobName == "" {
-		t.Fatal("record carries no job name")
+	recs, err := ledger.List()
+	if err != nil || len(recs) != 1 || recs[0].Handle.JobName == "" {
+		t.Fatalf("running step record = %+v, %v", recs, err)
 	}
+	jobName := recs[0].Handle.JobName
+	wait, stop := context.WithTimeout(t.Context(), 15*time.Second)
+	defer stop()
 
 	cancel()
 	select {
 	case <-finished:
-	case <-time.After(15 * time.Second):
+	case <-wait.Done():
 		t.Fatal("cancelled step did not return")
 	}
 	if recs, _ := ledger.List(); len(recs) != 0 {
@@ -192,6 +194,18 @@ func TestExec_CancelTerminatesTheStepJobAndClearsItsRecord(t *testing.T) {
 	}
 	if err := procgroup.TerminateJobByName(jobName); err != nil {
 		t.Fatalf("job %s still reachable after the step returned: %v", jobName, err)
+	}
+}
+
+type windowsStepReady struct {
+	nopLogger
+	ready chan struct{}
+	once  sync.Once
+}
+
+func (l *windowsStepReady) Emit(record LogRecord) {
+	if record.Event == "exec_line" && strings.Contains(string(record.streamData), "ready") {
+		l.once.Do(func() { close(l.ready) })
 	}
 }
 

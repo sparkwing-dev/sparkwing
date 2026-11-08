@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestPublishedProtocolSchemasMatchFinalWireTypes(t *testing.T) {
@@ -137,6 +141,31 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 				if result["protocol"] != nil {
 					resultDef = "helloResult"
 				}
+				if result["value"] != nil {
+					resultDef = "evalResult"
+					body, err := json.Marshal(value)
+					if err != nil {
+						t.Fatal(err)
+					}
+					frame, err := nodeproto.ParseFrame(body)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var generated nodeproto.EvalResult
+					if err := frame.Reply.Decode(&generated); err != nil {
+						t.Fatal(err)
+					}
+					if err := generated.ValidateValue("generate"); err != nil {
+						t.Fatal(err)
+					}
+					context := nodeproto.ValidationContext{
+						Expansion: true, Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker(), SourceJob: "build",
+						ExistingJobs: []nodeproto.JobSpec{{ID: "build", Closures: nodeproto.ClosureSpec{Generate: []string{"build/generate/0"}}}},
+					}
+					if _, err := nodeproto.ValidatePlan(generated.Value, context); err != nil {
+						t.Fatal(err)
+					}
+				}
 				shape, found = schema.Def(resultDef)
 				if !found {
 					t.Fatalf("missing %s", resultDef)
@@ -151,6 +180,76 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("guide contains no protocol examples")
 	}
+}
+
+func TestPublishedProtocolGuideMatchesWireFields(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "node-protocol.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !protocolGuideFieldsMatch(string(body)) {
+		t.Fatal("protocol guide operation fields differ from the wire types")
+	}
+	for _, change := range []struct{ from, to string }{
+		{"optional `binding`", "optional `binding`, `features`"},
+		{"`protocol`, `sdk` |", "`protocol`, `sdk`, `features` |"},
+		{"optional `error`, `arguments`, `declarations_known`", "optional `error`"},
+		{"| `cancel` |", "| `removed` |"},
+	} {
+		changed := strings.Replace(string(body), change.from, change.to, 1)
+		if changed == string(body) || protocolGuideFieldsMatch(changed) {
+			t.Errorf("guide drift was not rejected: %s", change.to)
+		}
+	}
+}
+
+func protocolGuideFieldsMatch(body string) bool {
+	results := map[nodeproto.Op]reflect.Type{
+		nodeproto.OpHello: reflect.TypeFor[nodeproto.HelloResult](), nodeproto.OpDescribe: reflect.TypeFor[nodeproto.DescribeDoc](),
+		nodeproto.OpPlan: reflect.TypeFor[nodeproto.PlanDoc](), nodeproto.OpRunStep: reflect.TypeFor[nodeproto.RunResult](),
+		nodeproto.OpEval: reflect.TypeFor[nodeproto.EvalResult](), nodeproto.OpCancel: nil,
+	}
+	quoted := regexp.MustCompile("`([a-z_]+)`")
+	fields := func(cell string) []string {
+		var names []string
+		for _, match := range quoted.FindAllStringSubmatch(cell, -1) {
+			names = append(names, match[1])
+		}
+		slices.Sort(names)
+		return names
+	}
+	seen := map[nodeproto.Op]bool{}
+	for _, line := range strings.Split(body, "\n") {
+		cells := strings.Split(line, "|")
+		if len(cells) != 5 {
+			continue
+		}
+		op := nodeproto.Op(strings.Trim(strings.TrimSpace(cells[1]), "`"))
+		result, found := results[op]
+		if !found {
+			continue
+		}
+		if seen[op] {
+			return false
+		}
+		seen[op] = true
+		request := nodeproto.RequestFields(op).Allowed
+		slices.Sort(request)
+		if !slices.Equal(fields(cells[2]), request) {
+			return false
+		}
+		var want []string
+		if result != nil {
+			for _, field := range protocolFields(result) {
+				want = append(want, strings.Split(field.Tag.Get("json"), ",")[0])
+			}
+		}
+		slices.Sort(want)
+		if !slices.Equal(fields(cells[3]), want) {
+			return false
+		}
+	}
+	return len(seen) == len(results)
 }
 
 // The published request schema and the host's decoder judge the same requests alike.

@@ -3,11 +3,13 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestRunReaderRoutesAndPublicShapes(t *testing.T) {
@@ -85,5 +87,25 @@ func TestRunReaderRejectsMalformedPageAndPrivateSteps(t *testing.T) {
 	})
 	if _, err := c.ReadSteps(t.Context(), "r1"); err == nil {
 		t.Fatal("old node step accepted")
+	}
+}
+
+func TestLatestPipelineReadsControllerSelectionInExactRepositories(t *testing.T) {
+	reader, err := NewRunReader(EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: engineTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/api/v1/pipelines/build/latest" || req.URL.Query().Get("from_any_run") != "true" || strings.Join(req.URL.Query()["repo"], ",") != "acme/a,acme/b" {
+			t.Fatalf("latest request: %s", req.URL)
+		}
+		body, err := json.Marshal(controllerwire.LatestRun{RunSummary: runstate.RunSummary{ID: "selected", Status: "failed"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+	})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err := reader.LatestPipeline(t.Context(), "build", []string{"acme/a", "acme/b"})
+	if err != nil || latest.ID != "selected" || latest.Status != "failed" {
+		t.Fatalf("controller selection: %+v, %v", latest, err)
 	}
 }

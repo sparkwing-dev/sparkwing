@@ -189,7 +189,9 @@ unavailable. It separates offline, busy, label mismatch, funding refusal and
 provider queue. Dispatch states are `requested`, `accepted`, `refused` with
 the masked reason, and `uncertain`. A GitHub run links once registration binds
 its ID. After award, the existing `placement_reason` shows the winning tier,
-and a losing fallback worker shows as "exited idle, lost to build-mac". This
+and dispatch history retains every generation, its receipt, state and provider
+URL after award, cancellation and completion. A losing fallback names the winning
+claim holder and counts toward the job's lost-race total. This
 extends `unclaimedNotice` in `internal/controller/unclaimed_notice.go` with a
 placement-hold notice kind; it is not a new view.
 

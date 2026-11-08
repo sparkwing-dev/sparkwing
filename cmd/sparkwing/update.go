@@ -248,7 +248,7 @@ func downloadFile(url, dst string, maxBytes int64) error {
 		}
 		return err
 	}
-	return os.WriteFile(dst, body, 0o600)
+	return os.WriteFile(dst, body, 0o600) // #nosec G703 -- safety: dst is a validated release filename beneath the updater's private MkdirTemp staging directory.
 }
 
 func sha256OfFile(path string) (string, error) {
