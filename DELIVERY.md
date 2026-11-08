@@ -1737,7 +1737,9 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
 skips when `[Unreleased]` has no entries, and requires the latest push run of
 `ci.yaml` at the selected commit to have completed successfully. It then runs
 the existing `release` pipeline in that private checkout with its own
-`SPARKWING_HOME`. Its default minor bump stays on v0.x. Release cuts are
+`SPARKWING_HOME`. The exact-source green CI receipt supplies the broad build,
+lint and test evidence; the desktop cut starts at `version-freshness` and keeps
+the release-specific guards instead of repeating broad suites. Its default minor bump stays on v0.x. Release cuts are
 pre-approved. The scheduled entrypoint supplies the cut's
 `--sw-allow-risk destructive,prod` authorization.
 

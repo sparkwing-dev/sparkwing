@@ -77,7 +77,7 @@ case "$*" in *--sw-dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 					t.Fatal(readErr)
 				}
 				text := string(got)
-				for _, want := range []string{"run\nrelease\n-C\n", "--version\nv0.1.0\n", head} {
+				for _, want := range []string{"run\nrelease\n-C\n", "--version\nv0.1.0\n", "--sw-start-at\nversion-freshness\n", head} {
 					if !strings.Contains(text, want) {
 						t.Fatalf("cut call lacks %q: %s", want, text)
 					}
