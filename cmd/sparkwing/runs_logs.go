@@ -129,6 +129,7 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 		wait = waitStatusPoll
 	}
 	seen := map[string]bool{query.Cursor: true}
+	progress := admissionProgressFor(inv, reader, query)
 	for {
 		page, err := reader.ReadLogs(ctx, inv.Value("run"), query)
 		if err != nil {
@@ -146,8 +147,17 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 		if page.NextCursor != "" && page.NextCursor != query.Cursor && seen[page.NextCursor] {
 			return invalidObservation("controller repeated an earlier log cursor")
 		}
+		liveProgress := !page.Complete || progress != nil && len(progress.waits) > 0
 		for _, record := range page.Records {
+			if liveProgress && progress.observe(record) {
+				continue
+			}
 			if err := writeLogRecord(out, record, runLogOutput(inv), false); err != nil {
+				return err
+			}
+		}
+		if !page.Truncated && !page.Complete {
+			if err := progress.write(ctx, out, runLogOutput(inv), time.Now()); err != nil {
 				return err
 			}
 		}

@@ -24,6 +24,10 @@ unlock.
 
 - **CLI:** List and download committed job files with `sparkwing runs artifacts`
   JSON emits one record per file. Downloads verify size and SHA-256 and write to a new destination.
+### Security
+
+- **Helm:** Confine launcher node updates and NodeClaim deletes to its Sparkwing capacity, allow only binding-label additions and reservation/quarantine taint changes, and disable API token automount on its ServiceAccount
+- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
 
 ### Changed
 
@@ -42,6 +46,11 @@ unlock.
 
 ### Fixed
 
+- **Local onboarding:** the welcome card calls out the initial commit, and the quick start explains run inspection, managed schedules and the daemon-owned dashboard.
+- **cli:** Show one admission-wait progress stream with holder charges, held and free capacity, external load and expected clear time. Print updates only for material queue changes at increasing intervals.
+- **template verification:** Accept unused failure recovery after a successful deploy. Skipped dry-run bodies and steps still prevent reusable proof.
+
+- **schedules:** Timer-started Linux controllers leave the timer's cgroup when the systemd user manager is available
 - **scheduling:** Run status and the run page keep GitHub Actions dispatch receipts, provider links and lost-race counts after award, cancellation and completion.
 - **billing:** Refuse checkout and card setup sessions whose Stripe mode differs from the controller's payment mode
 - **Security CI:** Identify the updater's private staging files to avoid path traversal false positives.
@@ -76,6 +85,8 @@ unlock.
 
 - **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
 - **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
+- **local execution:** Avoid rehashing unchanged engine digests across installed and retained paths. Reuse retained runner images without staging another executable, while checking every source and retained byte against the accepted engine digest.
+- **local execution:** Compute local Go replacement cache keys with two source listings on Unix when directories stay unchanged. Directory change times guard files created during enumeration; ignored files and embedded dot/underscore assets keep their existing rules.
 
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
@@ -141,6 +152,7 @@ unlock.
 
 - Jobs cancelled while queued for machine capacity report cancelled instead of an internal failure, without starting an attempt.
 
+- **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
 - **local runner:** Held jobs reconnect after controller restarts because cancelled admission polls return an unavailable response instead of an empty success.
@@ -150,6 +162,7 @@ unlock.
 
 - **CLI:** A foreground run keeps its confirmed terminal exit status when log observation loses its connection. The CLI warns with a command for reading retained logs. Permission, protocol and integrity refusals remain errors.
 - **scaffold:** Source-built CLIs pin fresh projects to the latest published SDK instead of an unavailable future release.
+- **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
 
 - **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
 - **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.
