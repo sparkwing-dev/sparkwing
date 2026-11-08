@@ -278,3 +278,8 @@ func validBillingPageURL(raw, host string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && u.Scheme == "https" && u.Host == host && u.User == nil
 }
+
+func validBillingSessionID(id string, mode capability.PaymentMode) bool {
+	prefix := "cs_" + string(mode) + "_"
+	return (mode == capability.PaymentTest || mode == capability.PaymentLive) && strings.HasPrefix(id, prefix) && len(id) > len(prefix)
+}

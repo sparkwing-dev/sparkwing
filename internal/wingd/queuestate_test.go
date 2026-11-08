@@ -137,17 +137,13 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	})
 
 	cl := ensure(t, home, "v1")
-	_, result := acquireAsync(t, cl, wingwire.AdmissionRequest{
+	positions, result := acquireAsync(t, cl, wingwire.AdmissionRequest{
 		RunID:       "heavy",
 		Resources:   wingwire.HostResources{MemoryBytes: 8 << 30},
 		CostSource:  wingwire.CostSourceMeasured,
 		SampleCount: 12,
 	})
-	select {
-	case r := <-result:
-		t.Fatalf("run was admitted (%v); it should queue on host pressure", r.err)
-	case <-time.After(300 * time.Millisecond):
-	}
+	waitQueued(t, positions, result)
 
 	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
 	if err != nil {
@@ -789,9 +785,6 @@ func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 }
 
 func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{os.Getpid(): {Fraction: 0.9}}}
 	startDaemon(t, wingd.Config{

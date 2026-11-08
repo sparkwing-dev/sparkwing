@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -59,7 +60,7 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 	if page.Kind != kind || page.Team != a.Target.Team || page.ReservationID == "" || kind == capability.BillingPageCredits && page.AmountCents != amount {
 		return routepolicy.MissingEndpointPolicy()
 	}
-	if page.URL != "" && !validBillingPageURL(page.URL, stripeCheckoutHost) {
+	if page.URL != "" && (!validBillingPageURL(page.URL, stripeCheckoutHost) || !validBillingSessionID(page.ProviderID, s.deployment.PaymentMode())) {
 		return routepolicy.MissingEndpointPolicy()
 	}
 	if page.URL == "" {
@@ -74,7 +75,11 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 				email = owners[0]
 			}
 		}
-		if err := s.checkout.openReservedPage(r.Context(), s.paymentDeployment, &page, email); err != nil {
+		err := s.checkout.openReservedPage(r.Context(), s.paymentDeployment, &page, email)
+		if err == nil && !validBillingSessionID(page.ProviderID, s.deployment.PaymentMode()) {
+			err = fmt.Errorf("%w: session id does not match controller payment mode %q", errCheckoutRefused, s.deployment.PaymentMode())
+		}
+		if err != nil {
 			recordErr := writer.RecordAuthorizedBillingPageFailure(r.Context(), a, page)
 			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the payment page could not be opened; try again"}, err, recordErr)
 		}

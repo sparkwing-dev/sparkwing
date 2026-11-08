@@ -109,6 +109,11 @@ Checkout page, and the credits land when the controller receives Stripe's
 signed webhook for the paid checkout. The billing page also saves a card through
 a Stripe setup page; a saved card is what automatic refill charges.
 
+Checkout and card setup refuse session IDs whose `cs_test_` or `cs_live_`
+prefix disagrees with the controller's `--payment-mode`. If a payment page
+cannot open, check that the checkout service's Stripe credentials match that
+mode, correct the service configuration, and retry the same request.
+
 Stripe holds every card detail. Sparkwing stores no card brand, last four digits,
 fingerprint, payment method ID or payer email. Per team it keeps only the Stripe
 customer ID and when a card setup last completed, plus the checkout, payment and
