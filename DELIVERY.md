@@ -661,6 +661,13 @@ wait are not established by this artifact. A missing handle produces an explicit
 unavailable record. Export/upload failures warn without changing the check verdict;
 an absent artifact is missing evidence, not a successful export.
 
+Failed canonical hosted jobs retain the full paged `runs logs` output in a
+`canonical-run-log-<lane>-<workflow-run>-<attempt>` artifact for 14 days. The
+console prints its last 500 lines. A failed log read retains partial output
+and its error in the artifact. Missing handles and failed uploads warn without
+changing the gate verdict. The artifact contains run output, not the runner's
+Sparkwing home, database or controller key.
+
 Pre-release records each check as a sequential WorkStep. A failed check does
 not suppress later checks; the parent reports the first failure, while the run
 logs and step states retain every individual failure. `--platform-cells` adds
