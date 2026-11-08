@@ -785,9 +785,6 @@ func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 }
 
 func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{os.Getpid(): {Fraction: 0.9}}}
 	startDaemon(t, wingd.Config{

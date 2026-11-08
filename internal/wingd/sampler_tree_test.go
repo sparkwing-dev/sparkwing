@@ -121,9 +121,6 @@ func TestProcSamplerCPUChild(t *testing.T) {
 }
 
 func TestProcSampler_IdleTreeIsZero(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
 	requireObservableProcCPU(t)
 	cmd := exec.Command("sh", "-c", `sleep 600 & printf r; wait`)
 	reader, writer, err := os.Pipe()
