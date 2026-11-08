@@ -38,6 +38,7 @@ unlock.
 
 - **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
 - **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
+- **local execution:** Avoid rehashing unchanged engine digests across installed and retained paths, and compare pinned runner bytes without a second SHA-256 pass.
 
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
@@ -101,6 +102,7 @@ unlock.
 
 - Jobs cancelled while queued for machine capacity report cancelled instead of an internal failure, without starting an attempt.
 
+- **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
 - **local runner:** Held jobs reconnect after controller restarts because cancelled admission polls return an unavailable response instead of an empty success.
@@ -110,6 +112,7 @@ unlock.
 
 - **CLI:** A foreground run keeps its confirmed terminal exit status when log observation loses its connection. The CLI warns with a command for reading retained logs. Permission, protocol and integrity refusals remain errors.
 - **scaffold:** Source-built CLIs pin fresh projects to the latest published SDK instead of an unavailable future release.
+- **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
 
 - **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
 - **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.

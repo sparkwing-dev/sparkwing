@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -175,12 +176,15 @@ func pinLocalRunnerExecutable(home, executable string) (_, _ string, result erro
 	}
 	path := filepath.Join(dir, name)
 	if existing, err := os.Open(path); err == nil {
-		found := sha256.New()
-		_, copyErr := io.Copy(found, existing)
-		if err := errors.Join(copyErr, existing.Close()); err != nil {
+		staged, err := os.Open(file.Name())
+		if err != nil {
+			return "", "", errors.Join(err, existing.Close())
+		}
+		equal, compareErr := sameExecutableBytes(staged, existing)
+		if err := errors.Join(compareErr, staged.Close(), existing.Close()); err != nil {
 			return "", "", err
 		}
-		if hex.EncodeToString(found.Sum(nil)) != build {
+		if !equal {
 			return "", "", errors.New("pinned local runner executable digest differs")
 		}
 	} else if errors.Is(err, os.ErrNotExist) {
@@ -191,4 +195,24 @@ func pinLocalRunnerExecutable(home, executable string) (_, _ string, result erro
 		return "", "", err
 	}
 	return path, build, nil
+}
+
+// perf: the staged bytes already supplied the digest; comparing them avoids hashing a large executable twice.
+func sameExecutableBytes(staged, existing io.Reader) (bool, error) {
+	var a, b [32 * 1024]byte
+	for {
+		na, ea := io.ReadFull(staged, a[:])
+		nb, eb := io.ReadFull(existing, b[:])
+		for _, err := range []error{ea, eb} {
+			if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+				return false, err
+			}
+		}
+		if !bytes.Equal(a[:na], b[:nb]) {
+			return false, nil
+		}
+		if ea != nil || eb != nil {
+			return ea == eb, nil
+		}
+	}
 }
