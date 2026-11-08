@@ -2,12 +2,11 @@ package jobs
 
 import (
 	"context"
-	"slices"
-
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
