@@ -62,7 +62,7 @@ func TestCloudGateToolInstallVerifiesDownloadsAndReusesInstalledTools(t *testing
 func TestCloudGateToolsCoverBothRunnerArchitectures(t *testing.T) {
 	for _, arch := range []string{"amd64", "arm64"} {
 		tools, err := cloudGateTools(arch)
-		if err != nil || len(tools) != 3 {
+		if err != nil || len(tools) != 4 {
 			t.Fatalf("%s tools=%+v error=%v", arch, tools, err)
 		}
 		for _, tool := range tools {

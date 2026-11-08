@@ -45,9 +45,12 @@ requires a successful Cloud receipt and an unchanged clean HEAD before and
 after the remote gate. The landing record's `gate_run` names the Cloud run.
 Each Cloud policy, gate and race job restores a Sparkwing tool cache keyed by
 `.sparkwing/jobs/gate_tools.go` and the host platform. Before checks start, it
-installs checksum-pinned golangci-lint 2.12.2 and pnpm 12.6.0 on a cache miss,
+installs checksum-pinned golangci-lint 2.12.2, native pnpm 12.6.0 and Zig 0.15.2
+on a cache miss,
 adds their private paths to PATH, and verifies the runner's Go, Node and npm.
-The image supplies Git, Bash, curl, tar and coreutils. Go module downloads and
+Zig supplies the C compiler and libc headers for race builds through
+`CGO_ENABLED=1` and `CC="zig cc"`. The image supplies Git, Bash, curl, tar and
+coreutils. Go module downloads and
 Go build/test results use Sparkwing dependency caches. Fresh workers can reuse
 the policy job's compiled dependencies and later runs can reuse those caches.
 Full scans still use `sparkwing run gate -- --full`.

@@ -83,7 +83,7 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 			})
 			if job.ID() != recordTreeJob {
 				job.Cache(sparkwing.Dir(gateToolsPath, sparkwing.KeyFromFile(".sparkwing/jobs/gate_tools.go")),
-					sparkwing.Dir(gateGoCachePath, sparkwing.KeyFromFile("go.sum")), sparkwing.GoModules())
+					sparkwing.Dir(gateGoCachePath, sparkwing.KeyFromFile(".sparkwing/jobs/gate_tools.go")), sparkwing.GoModules())
 				job.BeforeRun(prepareCloudGateTools)
 			}
 		}
