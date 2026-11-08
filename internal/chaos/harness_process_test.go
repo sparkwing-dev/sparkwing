@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"k8s.io/utils/clock"
+	clocktest "k8s.io/utils/clock/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -550,11 +551,13 @@ func TestProcessGuardFailsWhenALeaderAnchorNeverDrains(t *testing.T) {
 
 func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+		t.Skip("slow: real process fixture; the fast class runs under -short")
 	}
 	requireProcessGroups(t)
 	h, journal := soakScaleHarness(t)
 	defer journal.Close()
+	clock := clocktest.NewFakeClock(time.Now())
+	h.timeSource = clock
 	h.cfg.MaxZombieDrain = 50 * time.Millisecond
 	var reported []string
 	h.processFailure = func(violations []string) { reported = append(reported, violations...) }
@@ -566,10 +569,9 @@ func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.
 	h.mu.Unlock()
 
 	guard := newProcessGuard(h)
-	pollProcessState(h.clock(), time.Second, 20*time.Millisecond, func() bool {
-		guard.check()
-		return false
-	})
+	guard.check()
+	clock.Step(time.Second)
+	guard.check()
 	if len(reported) > 0 {
 		t.Fatalf("guard re-reported an already-reported cleanup failure: %s", strings.Join(reported, "; "))
 	}
