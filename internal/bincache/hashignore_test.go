@@ -127,7 +127,7 @@ func TestHashSkipsWhollyIgnoredDirectoriesButHashesTrackedFilesInThem(t *testing
 	}
 	var seen []string
 	keep := func(name string) bool { seen = append(seen, name); return true }
-	files, _, err := hashable(dir, keep, false)
+	files, _, err := hashable(dir, keep, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestHashableAgreesWithCheckIgnore(t *testing.T) {
 	if out, err := add.CombinedOutput(); err != nil {
 		t.Fatalf("git add: %v: %s", err, out)
 	}
-	files, _, err := hashable(dir, allFiles, false)
+	files, _, err := hashable(dir, allFiles, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestHashableAgreesWithCheckIgnore(t *testing.T) {
 	for _, path := range files {
 		kept[path] = true
 	}
-	all, _, err := walkHashable(dir, allFiles, nil)
+	all, _, err := walkHashable(dir, allFiles, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

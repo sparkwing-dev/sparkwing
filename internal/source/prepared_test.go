@@ -29,12 +29,13 @@ import (
 type preparedStorage struct {
 	blob.DataSigner
 	blob.RecordStore
-	intent  blob.UploadIntent
-	body    []byte
-	record  blob.Record
-	missing bool
-	corrupt bool
-	denied  error
+	intent    blob.UploadIntent
+	body      []byte
+	record    blob.Record
+	missing   bool
+	corrupt   bool
+	inherited bool
+	denied    error
 }
 
 func (s *preparedStorage) Upload(_ context.Context, in blob.UploadIntent) (blob.UploadTicket, error) {
@@ -75,7 +76,7 @@ func (s *preparedStorage) CommitRecord(_ context.Context, req blob.CommitRecordR
 }
 
 func (s *preparedStorage) LookupRecord(_ context.Context, _ blob.RecordLookup) (blob.RecordLookupResult, error) {
-	return blob.RecordLookupResult{Found: s.record.Digest != "", Record: s.record}, nil
+	return blob.RecordLookupResult{Found: s.record.Digest != "", PreparedParent: s.inherited, Record: s.record}, nil
 }
 
 type preparedFixture struct {
@@ -182,6 +183,46 @@ func TestAcquirePreparedRestoresExecutableWithoutSourceOrInstaller(t *testing.T)
 	}
 }
 
+func TestAcquirePreparationTimingsExcludeSourceAndDiagnostics(t *testing.T) {
+	f := newPreparedFixture(t, engineid.GoSDK)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	f.publish(t)
+	f.options.Prepared.Key.Scope.Key = "child-run"
+	f.options.Prepared.Key.Scope.Pipeline = "child-pipeline"
+	f.storage.record.Key = f.options.Prepared.Key
+	f.storage.inherited = true
+	f.options.Prepared.RequestHash = "child-seal"
+	entry, err := source.Acquire(t.Context(), f.spec, f.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := entry.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []string{"restore", "checkout", "engine", "sdk_install", "publish"} {
+		if !strings.Contains(logs.String(), `"stage":"`+stage+`"`) {
+			t.Fatalf("missing %s timing: %s", stage, &logs)
+		}
+	}
+	if f.installs != 1 || !strings.Contains(logs.String(), `"reused":true`) || strings.Contains(logs.String(), f.spec.LocalCheckout) {
+		t.Fatalf("installs=%d logs=%s", f.installs, &logs)
+	}
+	logs.Reset()
+	f.storage.record = blob.Record{}
+	f.options.InstallSDK = func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
+		return engine.SDKCommand{}, errors.New("private-compiler-diagnostic")
+	}
+	if _, err := source.Acquire(t.Context(), f.spec, f.options); err == nil {
+		t.Fatal("failed install succeeded")
+	}
+	if strings.Contains(logs.String(), "private-compiler-diagnostic") || !strings.Contains(logs.String(), `"success":false`) {
+		t.Fatalf("unsafe or missing failure timing: %s", &logs)
+	}
+}
+
 func TestAcquirePreparedRestoresWithExpandedCheckoutDefaults(t *testing.T) {
 	f := newPreparedFixture(t, engineid.GoSDK)
 	if err := json.Unmarshal([]byte(`{"policy":{},"origins":null}`), &f.spec.Checkout); err != nil {
@@ -279,6 +320,58 @@ func TestAcquirePreparedRejectsCorruptOrUnauthorizedBytesBeforeInstall(t *testin
 	}
 }
 
+func TestAcquireParentPreparationRebuildsMismatchesAndRejectsCorruption(t *testing.T) {
+	for _, change := range []string{"environment", "source", "checkout policy", "engine", "target", "corrupt"} {
+		t.Run(change, func(t *testing.T) {
+			f := newPreparedFixture(t, engineid.GoSDK)
+			f.publish(t)
+			f.storage.inherited = true
+			f.options.Prepared.RequestHash = "child-seal"
+			switch change {
+			case "environment":
+				f.options.Base.Captured = append(f.options.Base.Captured, "HOME="+t.TempDir())
+			case "source":
+				f.spec.HashAllFiles = true
+			case "checkout policy":
+				f.spec.Checkout.Policy.Tags = new(true)
+			case "engine":
+				identity := f.resolver.resolved.Identity
+				identity.ManifestDigest = "another-engine"
+				f.spec.Engine = &identity
+				f.resolver.resolved.Identity = identity
+			case "target":
+				f.options.Target.GOARCH = "arm64"
+				f.resolver.resolved.Target = f.options.Target
+			case "corrupt":
+				f.storage.corrupt = true
+			}
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			entry, err := source.Acquire(t.Context(), f.spec, f.options)
+			if change == "corrupt" {
+				if !errors.Is(err, blob.ErrIntegrity) || entry != nil || f.installs != 1 {
+					t.Fatalf("corrupt preparation: entry=%v err=%v installs=%d", entry, err, f.installs)
+				}
+				return
+			}
+			if err != nil || entry == nil || f.installs != 2 {
+				t.Fatalf("changed %s: entry=%v err=%v installs=%d", change, entry, err, f.installs)
+			}
+			defer func() {
+				if err := entry.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			assertPreparedExecution(t, entry)
+			if !strings.Contains(logs.String(), "skipping parent preparation:") {
+				t.Fatalf("changed %s has no mismatch reason: %s", change, &logs)
+			}
+		})
+	}
+}
+
 func TestAcquirePreparedPreservesSeparatePipelineSource(t *testing.T) {
 	f := newPreparedFixture(t, engineid.GoSDK)
 	pipelineSHA := f.spec.SHA
@@ -358,6 +451,13 @@ func TestAcquirePreparedRealGoBuildTiming(t *testing.T) {
 	started := time.Now()
 	f.publish(t)
 	fresh := time.Since(started)
+	f.options.Prepared.Key.Scope.Key = "child-run"
+	f.options.Prepared.Key.Scope.Pipeline = "child-pipeline"
+	f.storage.record.Key = f.options.Prepared.Key
+	f.storage.inherited = true
+	f.options.Prepared.RequestHash = "child-seal"
+	f.options.Prepared.Publish = true
+	f.spec.Engine = nil
 	if err := os.RemoveAll(f.spec.LocalCheckout); err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +476,7 @@ func TestAcquirePreparedRealGoBuildTiming(t *testing.T) {
 	if f.installs != 1 {
 		t.Fatalf("installs=%d, want one real Go build", f.installs)
 	}
-	t.Logf("real Go fixture, shared warm build cache: fresh Acquire+publication=%s; restored Acquire=%s; installs=%d", fresh, restore, f.installs)
+	t.Logf("real Go fixture, shared warm build cache: parent Acquire+publication=%s; inherited child Acquire=%s; installs=%d", fresh, restore, f.installs)
 }
 
 func TestAcquirePreparedRestoresPlanningOwnerAfterRestart(t *testing.T) {
@@ -432,8 +532,8 @@ func TestAcquirePreparedSkipsUnsafeCheckout(t *testing.T) {
 				}
 				f.options.Prepared.Publish = false
 			}
-			if strings.Count(logs.String(), "level=INFO") != 1 {
-				t.Fatalf("expected one info log: %s", logs.String())
+			if strings.Count(logs.String(), "skipping prepared pipeline publication:") != 1 {
+				t.Fatalf("expected one skipped publication: %s", logs.String())
 			}
 		})
 	}

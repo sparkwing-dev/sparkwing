@@ -51,8 +51,6 @@ type repoPipeline struct {
 	Name       string `json:"name"`
 	LastRun    string `json:"last_run,omitempty"`
 	LastStatus string `json:"last_status,omitempty"`
-
-	lastNumber int64
 }
 
 func runReposInfo(inv clisurface.Invocation) error {
@@ -173,6 +171,7 @@ func buildRepoInfo(ctx context.Context, repo repos.Repo, latest string, reader c
 func pipelineStates(ctx context.Context, repo repos.Repo, reader controllerwire.RunReader) ([]repoPipeline, error) {
 	byName := map[string]*repoPipeline{}
 	var order []string
+	repositories := map[string]map[string]bool{}
 	add := func(name string) *repoPipeline {
 		p, ok := byName[name]
 		if !ok {
@@ -194,14 +193,12 @@ func pipelineStates(ctx context.Context, repo repos.Repo, reader controllerwire.
 			if !repos.RunMatchesRepo(repos.RunObservation{Repo: run.Inputs.Git.Repository.Display}, repo) {
 				continue
 			}
-			p := add(run.Inputs.Pipeline)
-			if run.Number > p.lastNumber {
-				p.lastNumber, p.LastStatus = run.Number, run.Status
-				p.LastRun = ""
-				if run.StartedAt != nil {
-					p.LastRun = run.StartedAt.Format("2006-01-02 15:04")
-				}
+			name := run.Inputs.Pipeline
+			add(name)
+			if repositories[name] == nil {
+				repositories[name] = map[string]bool{}
 			}
+			repositories[name][run.Inputs.Git.Repository.Display] = true
 		}
 		return nil
 	})
@@ -210,7 +207,23 @@ func pipelineStates(ctx context.Context, repo repos.Repo, reader controllerwire.
 	}
 	out := make([]repoPipeline, 0, len(order))
 	for _, name := range order {
-		out = append(out, *byName[name])
+		p := byName[name]
+		if len(repositories[name]) > 0 {
+			var names []string
+			for repository := range repositories[name] {
+				names = append(names, repository)
+			}
+			sort.Strings(names)
+			latest, err := reader.LatestPipeline(ctx, name, names)
+			if err != nil {
+				return nil, err
+			}
+			p.LastStatus = latest.Status
+			if !latest.StartedAt.IsZero() {
+				p.LastRun = latest.StartedAt.Format("2006-01-02 15:04")
+			}
+		}
+		out = append(out, *p)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil

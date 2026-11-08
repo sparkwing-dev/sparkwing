@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -86,8 +88,9 @@ func TestNativeDataReaderRoutesAndSelectorIsolation(t *testing.T) {
 	}
 	engineSQL(t, st, `UPDATE capabilities SET subject_kind='account',subject_id='data-reader',repo_key='gh:1',authority_json=? WHERE prefix='data-reader'`, envelope)
 	h := e.Server.Handler()
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/data/has-many", `{"digests":[]}`, 400)
 	for _, request := range []struct{ method, path, body string }{
-		{"POST", "/api/v1/data/has-many", `{"digests":[]}`},
+		{"POST", "/api/v1/data/has-many", fmt.Sprintf(`{"digests":[],"deadline":%q}`, time.Now().Add(time.Minute).Format(time.RFC3339Nano))},
 		{"GET", "/api/v1/data/records?kind=memo&name=output&key=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&ref=main&pipeline=ci&job=build", ""},
 		{"POST", "/api/v1/data/memo/lookup", `{"pipeline":"ci","job":"build","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
 		{"POST", "/api/v1/data/depcache/lookup", `{"name":"absent","key":"none"}`},
@@ -163,4 +166,46 @@ func TestNativeDataWritesBindTicketsAndRecords(t *testing.T) {
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/data/records", `{"kind":"output","pipeline":"ci","job":"job","name":"result","key":"run/1/1","digest":"`+digest+`"}`, 200)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/data/download", `{"digest":"`+digest+`"}`, 200)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/data/memo/copy", `{"pipeline":"ci","job":"job","hash":"`+digest+`"}`, 200)
+}
+
+func TestNativeDataPresenceCancellationAfterFinalRead(t *testing.T) {
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test", SigningKey: []byte(strings.Repeat("k", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	e, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithDataObjects(objects) })
+	a := engineRuntimeClaim(t, e, capability.UnitNode)
+	raw := nativeClaimPresentation(t, e, a)
+	h := e.Server.Handler()
+	engineAdmitBearer(t, e.Store, raw)
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	authority, err := tenant.ResolveBlobAuthority(t.Context(), blob.Authority{CapabilityRef: a.Principal.Capability.Prefix}, capability.DataRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := dataResultUpload(t, tenant, objects, authority, authority.Upload.Value, "presence", []byte("payload"))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	read := e.Server.dataController.ReadBlob
+	readSucceeded := false
+	e.Server.dataController.ReadBlob = func(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error) {
+		metadata, err := read(ctx, authority, digest)
+		readSucceeded = err == nil && metadata.Digest == stored.Digest
+		cancel()
+		return metadata, err
+	}
+	body := fmt.Sprintf(`{"digests":[%q],"deadline":%q}`, stored.Digest, time.Now().Add(time.Minute).Format(time.RFC3339Nano))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/data/has-many", strings.NewReader(body)).WithContext(ctx)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer "+raw)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if !readSucceeded || w.Code == http.StatusOK || strings.Contains(w.Body.String(), string(stored.Digest)) {
+		t.Fatalf("final read succeeded=%t, cancelled presence response=%d: %s", readSucceeded, w.Code, w.Body)
+	}
 }

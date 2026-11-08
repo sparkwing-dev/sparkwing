@@ -76,6 +76,12 @@ built into the script, and installs nothing that fails. It needs OpenSSL
 3.0 or newer; on macOS run `brew install openssl@3`, because the system
 `openssl` is LibreSSL and cannot verify an ed25519 signature.
 
+If GitHub's release download route returns a server error or times out, the
+installer, updater, engine resolver and GitHub Actions fallback runner install
+fetch the same tag and asset through GitHub's REST asset API. Signature and
+checksum checks still apply. Anonymous API requests are subject to GitHub's
+rate limits.
+
 A hand-placed download skips every one of those checks. `SHA256SUMS`
 reaches you from the same origin as the binary, so comparing the two
 proves the transfer finished and nothing else. The check that carries a

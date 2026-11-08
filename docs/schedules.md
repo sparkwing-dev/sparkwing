@@ -150,6 +150,10 @@ the removed `crons` command with `sparkwing schedules install`.
 
 <!-- design:end -->
 
+On Linux, a controller started by a systemd tick runs in a separate transient
+scope, so it survives the tick without remaining in the timer's cgroup. If the
+scope cannot start, the tick starts the controller directly and keeps firing.
+
 Local schedule health reads the native timer registration and its activation
 state from systemd or launchd. `--no-timer` leaves automatic firing disabled
 unless a native timer was already installed and enabled. The local controller
