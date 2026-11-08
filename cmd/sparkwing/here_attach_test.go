@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -108,7 +109,7 @@ func TestHereAttachmentSecondInterruptJoinsEveryOperation(t *testing.T) {
 }
 
 func TestHereAttachmentLogFailureDoesNotAbandonHost(t *testing.T) {
-	logFailure := errors.New("log persistence unavailable")
+	logFailure := io.ErrUnexpectedEOF
 	logReturned := make(chan struct{})
 	hostJoined := false
 	completion, err := observeHereRun(hereObservationContext(t), "run", hereObservation{
@@ -125,8 +126,25 @@ func TestHereAttachmentLogFailureDoesNotAbandonHost(t *testing.T) {
 			return logFailure
 		},
 	}, nil)
-	if completion.Outcome != "success" || !hostJoined || !errors.Is(err, logFailure) || exitCodeFor(err) != 3 {
+	if completion.Outcome != "success" || !hostJoined || err != nil {
 		t.Fatalf("completion=%+v host=%v error=%v", completion, hostJoined, err)
+	}
+}
+
+func TestHereAttachmentLogRefusalsRemainErrorsAfterCompletion(t *testing.T) {
+	for _, code := range []apierr.Code{apierr.Forbidden, apierr.ProtocolError, apierr.IntegrityFailure} {
+		t.Run(string(code), func(t *testing.T) {
+			failure := &apierr.Error{Code: code, Message: "log read refused"}
+			completion, err := observeHereRun(hereObservationContext(t), "run", hereObservation{
+				host: func(context.Context) (nodehost.RunCompletion, error) {
+					return nodehost.RunCompletion{Outcome: "success"}, nil
+				},
+				follow: func(context.Context) error { return failure },
+			}, nil)
+			if completion.Outcome != "success" || !errors.Is(err, failure) || exitCodeFor(err) == 0 {
+				t.Fatalf("completion=%+v error=%v", completion, err)
+			}
+		})
 	}
 }
 

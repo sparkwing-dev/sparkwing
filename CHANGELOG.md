@@ -60,6 +60,8 @@ unlock.
 
 ### Fixed
 
+- **CLI:** A foreground run keeps its confirmed terminal exit status when log observation loses its connection. The CLI warns with a command for reading retained logs. Permission, protocol and integrity refusals remain errors.
+
 - **deploy:** production smoke checks controller and launcher logs after both rollouts complete, so recovered startup probe failures do not trigger rollback; warnings and errors after readiness still fail the gate.
 
 - **deploy:** Preserve the candidate commit's origin proof when fetching the previous controller schema from a shallow checkout, so production smoke can submit that candidate.

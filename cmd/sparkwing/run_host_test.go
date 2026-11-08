@@ -298,6 +298,34 @@ func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
 	}
 }
 
+func TestLocalForegroundLogFailureKeepsCommittedOutcome(t *testing.T) {
+	for _, outcome := range []string{"success", "failed"} {
+		t.Run(outcome, func(t *testing.T) {
+			var calls []string
+			deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+			resolve := deps.resolve
+			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+				runtime, err := resolve(ctx, options)
+				controller := runtime.controller.(localTestController)
+				controller.read = func(context.Context, string) (controllerwire.RunDetail, error) {
+					return controllerwire.RunDetail{ID: "local-run", Status: outcome}, nil
+				}
+				runtime.controller = controller
+				runtime.follow = func(context.Context, string, string, io.Writer, <-chan struct{}) error {
+					return io.ErrUnexpectedEOF
+				}
+				return runtime, err
+			}
+			var out bytes.Buffer
+			flags, args := parseRunFlagsArgs([]string{"--output=json", "--", "--password=private-value"})
+			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
+			if exitCodeFor(err) != exitCodeFor(statusExitCode(outcome)) || !strings.Contains(out.String(), `"event":"run_finish"`) || !strings.Contains(out.String(), `"status":"`+outcome+`"`) {
+				t.Fatalf("outcome=%s output=%s error=%v", outcome, &out, err)
+			}
+		})
+	}
+}
+
 func TestLocalRunNoUpdateReachesPreparation(t *testing.T) {
 	var calls []string
 	flags, args := parseRunFlagsArgs([]string{"--sw-no-update", "--", "--password=private-value"})
