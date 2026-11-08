@@ -293,10 +293,6 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 	} {
 		for _, mode := range []string{"real", "dry-run", "sw-dry-run"} {
 			t.Run(shape.name+"/"+mode, func(t *testing.T) {
-				var want []string
-				if mode == "real" {
-					want = []string{"deploy-kikd-prod"}
-				}
 				args := map[string]string{}
 				for key, value := range shape.args {
 					args[key] = value
@@ -314,6 +310,14 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 					t.Fatalf("got %d jobs, want %d", len(doc.Jobs), shape.jobs)
 				}
 				for _, job := range doc.Jobs {
+					inline := shape.name == "promote-proven" && job.ID == "staging-gate"
+					if job.Inline != inline {
+						t.Errorf("job %s inline = %v, want %v", job.ID, job.Inline, inline)
+					}
+					var want []string
+					if mode == "real" && !inline {
+						want = []string{"deploy-kikd-prod"}
+					}
 					if !slices.Equal(job.Requires, want) {
 						t.Errorf("job %s requires %v, want %v", job.ID, job.Requires, want)
 					}

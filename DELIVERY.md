@@ -706,6 +706,13 @@ wait are not established by this artifact. A missing handle produces an explicit
 unavailable record. Export/upload failures warn without changing the check verdict;
 an absent artifact is missing evidence, not a successful export.
 
+Failed canonical hosted jobs retain the full paged `runs logs` output in a
+`canonical-run-log-<lane>-<workflow-run>-<attempt>` artifact for 14 days. The
+console prints its last 500 lines. A failed log read retains partial output
+and its error in the artifact. Missing handles and failed uploads warn without
+changing the gate verdict. The artifact contains run output, not the runner's
+Sparkwing home, database or controller key.
+
 Pre-release records each check as a sequential WorkStep. A failed check does
 not suppress later checks; the parent reports the first failure, while the run
 logs and step states retain every individual failure. `--platform-cells` adds
@@ -756,6 +763,13 @@ file. Other syntax and workflow checks remain active.
   main runs `gate` and `race-touched` over the change since the push's previous
   commit (or the pull request base), and the full suite, `pre-release`, the
   store race lanes and Postgres conformance run nightly and on dispatch.
+  The full acceptance suite includes `TestFeatureE2E`, which exercises placement
+  deadlines, failed-only retries with outputs and artifacts, and child-run
+  cancellation against isolated local controller processes. Run just these with
+  `sparkwing run feature-e2e --sw-route local`. Its `--scenario` and `--repeat`
+  arguments select one scenario or repeat fresh environments. The
+  [acceptance runbook](tests/acceptance/README.md#feature-scenarios-against-a-local-controller)
+  names the real-time budgets, trust setting and runner-actor boundary.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` checks the active hook directory and compares
   each hook's presence, content, format version, and executability. Blocking
