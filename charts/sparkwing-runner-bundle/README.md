@@ -105,6 +105,7 @@ provisions only the job namespace, RBAC and admission policies for an externally
 managed launcher, which still needs `jobImage` and `dockerImage` and must run as
 `system:serviceaccount:<release namespace>:<launcher.serviceAccountName>`, the
 only launcher identity the policies admit.
+An externally managed launcher's Pod must set `automountServiceAccountToken: true` to mount its API token.
 Set `runner.enabled=false` when all work goes through Cloud Jobs.
 The launcher reads NodePools with `get` and `list` to distinguish a missing
 shared hardware class from scaling or exhaustion. Configure one shared pool per
@@ -182,10 +183,12 @@ to name this deployment's job namespace, a supported protected Cloud class, and
 a nonempty `karpenter.sh/nodepool` label. NodeClaims must lack the team-node
 label because the launcher uses shared pools. Operators and Karpenter establish those
 labels before the launcher reserves a fresh node. The launcher cannot add them
-to foreign nodes in the same write or change pool, class, namespace or NodeClass
-labels on its nodes. First reservation may add protected team/run labels.
-Reservation cleanup, quarantine and retirement may change annotations, taints
-and the cordon. Other Kubernetes identities retain their existing access.
+to foreign nodes in the same write. Every existing node label is immutable.
+First reservation may add only the protected team-node, used-team and used-run
+labels. The dedicated taint and all foreign taints stay unchanged. The launcher
+may add or remove its reservation taint and add its quarantine taint, both with
+`NoSchedule`. Annotations and the cordon remain writable for cleanup, quarantine
+and retirement. Other Kubernetes identities retain their existing access.
 Only the launcher Pod opts into API token mounting. Its ServiceAccount disables
 automount for other Pods that use it without an explicit choice.
 

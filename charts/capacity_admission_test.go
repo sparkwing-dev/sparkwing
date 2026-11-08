@@ -2,6 +2,8 @@ package charts
 
 import (
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,6 +22,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestLauncherCapacityAdmission(t *testing.T) {
@@ -66,6 +69,21 @@ func TestLauncherCapacityAdmission(t *testing.T) {
 			if !reflect.DeepEqual(policy.Spec.MatchConstraints.ResourceRules, wantRules) || len(policy.Spec.MatchConditions) != 0 || len(policy.Spec.MatchConstraints.ExcludeResourceRules) != 0 || policy.Spec.MatchConstraints.ObjectSelector != nil {
 				t.Fatalf("capacity writes must match without a label selector bypass: %+v", policy.Spec)
 			}
+			var classes []string
+			for _, v := range policy.Spec.Variables {
+				if v.Name == "cloudClasses" {
+					if err := yaml.Unmarshal([]byte(v.Expression), &classes); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			var wantClasses []string
+			for _, size := range match.CloudSizes() {
+				wantClasses = append(wantClasses, strconv.Itoa(int(size.Resources.Cores)))
+			}
+			if !reflect.DeepEqual(classes, wantClasses) {
+				t.Fatalf("capacity policy classes = %v, want CloudSizes %v", classes, wantClasses)
+			}
 			testCapacityPolicyCEL(t, &policy)
 		})
 	}
@@ -92,8 +110,11 @@ func testCapacityPolicyCEL(t *testing.T, policy *admissionv1.ValidatingAdmission
 	if err := validator.CompileError(); err != nil {
 		t.Fatal(err)
 	}
-	labels := map[string]string{launcher.PoolNamespaceLabel: "customer-jobs", launcher.CloudClassLabel: "2", launcher.WarmNamespaceLabel: "cloud-warm", "karpenter.sh/nodepool": "operator-pool"}
-	fresh := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "fresh", Labels: labels}, Spec: corev1.NodeSpec{Taints: []corev1.Taint{{Key: launcher.DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}}}
+	labels := map[string]string{launcher.PoolNamespaceLabel: "customer-jobs", launcher.CloudClassLabel: "2", launcher.WarmNamespaceLabel: "cloud-warm", "karpenter.sh/nodepool": "operator-pool", corev1.LabelHostname: "fresh", corev1.LabelTopologyZone: "us-west-2a"}
+	fresh := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "fresh", Labels: labels}, Spec: corev1.NodeSpec{Taints: []corev1.Taint{
+		{Key: launcher.DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule},
+		{Key: "example.com/operator", Value: "held", Effect: corev1.TaintEffectNoSchedule},
+	}}}
 	bound := fresh.DeepCopy()
 	bound.Labels[launcher.TeamNodeLabel] = launcher.TeamNodeValue("customer-jobs", "team")
 	bound.Labels["node-restriction.kubernetes.io/sparkwing-used-team"] = bound.Labels[launcher.TeamNodeLabel]
@@ -127,7 +148,7 @@ func testCapacityPolicyCEL(t *testing.T, policy *admissionv1.ValidatingAdmission
 			delete(n.Annotations, "sparkwing.dev/node-reservation")
 			delete(n.Annotations, "sparkwing.dev/reservation-namespace")
 			delete(n.Annotations, "sparkwing.dev/award-binding")
-			n.Spec.Taints = n.Spec.Taints[:1]
+			n.Spec.Taints = slices.DeleteFunc(n.Spec.Taints, func(taint corev1.Taint) bool { return taint.Key == "sparkwing.dev/cloud-reserved" })
 		},
 		"quarantine": func(n *corev1.Node) {
 			n.Annotations["sparkwing.dev/quarantined"] = "mismatch"
@@ -185,6 +206,57 @@ func testCapacityPolicyCEL(t *testing.T, policy *admissionv1.ValidatingAdmission
 			check(t, bound, next, identity, false)
 		})
 	}
+	for name, mutate := range map[string]func(*corev1.Node){
+		"strip dedicated taint": func(n *corev1.Node) {
+			n.Spec.Taints = slices.DeleteFunc(n.Spec.Taints, func(taint corev1.Taint) bool { return taint.Key == launcher.DedicatedTaint })
+		},
+		"change dedicated taint": func(n *corev1.Node) { n.Spec.Taints[0].Value = "false" },
+		"add arbitrary label":    func(n *corev1.Node) { n.Labels["example.com/placement"] = "foreign" },
+		"change topology label":  func(n *corev1.Node) { n.Labels[corev1.LabelTopologyZone] = "us-west-2b" },
+		"change hostname label":  func(n *corev1.Node) { n.Labels[corev1.LabelHostname] = "foreign" },
+		"remove hostname label":  func(n *corev1.Node) { delete(n.Labels, corev1.LabelHostname) },
+		"add foreign taint": func(n *corev1.Node) {
+			n.Spec.Taints = append(n.Spec.Taints, corev1.Taint{Key: "example.com/foreign", Effect: corev1.TaintEffectNoSchedule})
+		},
+		"remove foreign taint": func(n *corev1.Node) {
+			n.Spec.Taints = slices.DeleteFunc(n.Spec.Taints, func(taint corev1.Taint) bool { return taint.Key == "example.com/operator" })
+		},
+		"change foreign taint":      func(n *corev1.Node) { n.Spec.Taints[1].Effect = corev1.TaintEffectNoExecute },
+		"replace reservation taint": func(n *corev1.Node) { n.Spec.Taints[2].Value = "another-reservation" },
+		"quarantine with eviction": func(n *corev1.Node) {
+			n.Spec.Taints = append(n.Spec.Taints, corev1.Taint{Key: "sparkwing.dev/quarantined", Effect: corev1.TaintEffectNoExecute})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			next := bound.DeepCopy()
+			mutate(next)
+			check(t, bound, next, identity, false)
+		})
+	}
+	for _, key := range []string{launcher.TeamNodeLabel, "node-restriction.kubernetes.io/sparkwing-used-team", "node-restriction.kubernetes.io/sparkwing-used-run"} {
+		t.Run("preserve binding/"+key, func(t *testing.T) {
+			next := bound.DeepCopy()
+			next.Labels[key] = "another-binding"
+			check(t, bound, next, identity, false)
+			delete(next.Labels, key)
+			check(t, bound, next, identity, false)
+		})
+	}
+	t.Run("reservation with eviction", func(t *testing.T) {
+		next := fresh.DeepCopy()
+		next.Spec.Taints = append(next.Spec.Taints, corev1.Taint{Key: "sparkwing.dev/cloud-reserved", Value: "reservation", Effect: corev1.TaintEffectNoExecute})
+		check(t, fresh, next, identity, false)
+	})
+	t.Run("preserve quarantine", func(t *testing.T) {
+		old := bound.DeepCopy()
+		old.Spec.Taints = append(old.Spec.Taints, corev1.Taint{Key: "sparkwing.dev/quarantined", Effect: corev1.TaintEffectNoSchedule})
+		check(t, old, bound, identity, false)
+		next := old.DeepCopy()
+		next.Annotations["sparkwing.dev/quarantined"] = "another fault"
+		check(t, old, next, identity, true)
+		next.Spec.Taints[len(next.Spec.Taints)-1].Value = "changed"
+		check(t, old, next, identity, false)
+	})
 	t.Run("unlabeled node cannot self claim", func(t *testing.T) { old := fresh.DeepCopy(); old.Labels = nil; check(t, old, bound, identity, false) })
 	t.Run("unlabeled claim", func(t *testing.T) { old := claim.DeepCopy(); old.SetLabels(nil); check(t, old, nil, identity, false) })
 	t.Run("team pool claim", func(t *testing.T) {
