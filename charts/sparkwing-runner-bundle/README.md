@@ -175,6 +175,20 @@ and RoleBinding from the release namespace.
 by default). Pools must reference that name with group `karpenter.k8s.aws` and
 kind `EC2NodeClass`. The launcher never writes NodePools or NodeClasses.
 
+The chart also binds `sparkwing-cloud-capacity-<job namespace>` with Deny and
+`failurePolicy: Fail`. For the launcher identity, node updates (including patches)
+and NodeClaim deletes require the stored object's `sparkwing.dev/launcher-namespace`
+to name this deployment's job namespace, a supported protected Cloud class, and
+a nonempty `karpenter.sh/nodepool` label. NodeClaims must lack the team-node
+label because the launcher uses shared pools. Operators and Karpenter establish those
+labels before the launcher reserves a fresh node. The launcher cannot add them
+to foreign nodes in the same write or change pool, class, namespace or NodeClass
+labels on its nodes. First reservation may add protected team/run labels.
+Reservation cleanup, quarantine and retirement may change annotations, taints
+and the cordon. Other Kubernetes identities retain their existing access.
+Only the launcher Pod opts into API token mounting. Its ServiceAccount disables
+automount for other Pods that use it without an explicit choice.
+
 Upgrading from an install whose Jobs ran in another namespace: let Jobs and node
 reservations recorded under the old namespace drain first, or delete those Jobs
 and remove the `sparkwing.dev/node-reservation`, `sparkwing.dev/reservation-namespace`

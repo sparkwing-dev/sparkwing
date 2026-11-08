@@ -1,0 +1,55 @@
+{{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
+{{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
+{{- $launcher := printf "system:serviceaccount:%s:%s" .Release.Namespace (include "sparkwing-runner-bundle.launcher.serviceAccountName" .) }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sparkwing-cloud-capacity-{{ $jobs }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["nodes"]
+        scope: Cluster
+      - apiGroups: ["karpenter.sh"]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["nodeclaims"]
+        scope: Cluster
+  variables:
+    - name: launcher
+      expression: {{ $launcher | toJson | quote }}
+    - name: namespace
+      expression: {{ $jobs | toJson | quote }}
+    - name: labels
+      expression: "oldObject == null ? {} : oldObject.metadata.?labels.orValue({})"
+  validations:
+    # New-object labels would let the launcher claim a foreign node in the same write.
+    - expression: >-
+        request.userInfo.username != variables.launcher ||
+        oldObject != null &&
+        variables.labels[?'sparkwing.dev/launcher-namespace'].orValue('') == variables.namespace &&
+        variables.labels[?'node-restriction.kubernetes.io/sparkwing-cloud-class'].orValue('') in ['2', '4', '8', '16', '32', '64'] &&
+        variables.labels[?'karpenter.sh/nodepool'].orValue('') != '' &&
+        (request.operation != 'DELETE' || !('node-restriction.kubernetes.io/sparkwing-team-node' in variables.labels))
+      message: the launcher may only write capacity from its Sparkwing shared NodePools
+    - expression: >-
+        request.userInfo.username != variables.launcher || request.operation != 'UPDATE' ||
+        ['sparkwing.dev/launcher-namespace', 'sparkwing.dev/warm-namespace',
+         'node-restriction.kubernetes.io/sparkwing-cloud-class', 'karpenter.sh/nodepool',
+         'karpenter.k8s.aws/ec2nodeclass'].all(k,
+          object.metadata.?labels.orValue({})[?k] == variables.labels[?k])
+      message: the launcher must preserve node pool provenance
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sparkwing-cloud-capacity-{{ $jobs }}
+spec:
+  policyName: sparkwing-cloud-capacity-{{ $jobs }}
+  validationActions: [Deny]
+{{- end }}
