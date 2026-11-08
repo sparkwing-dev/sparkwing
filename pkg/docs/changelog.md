@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **run status:** Retry receipts list only completed reuse, excluding successful source jobs that had to execute again because their results could not be reused.
 - **Security CI:** Identify the updater's private staging files to avoid path traversal false positives.
 - **Cloud execution:** Exact-source child runs can reuse their direct parent's verified source and installed pipeline. Changed build inputs log the mismatch and prepare fresh. Corrupt artifacts fail, and host logs separate source preparation stages.
 - **deployment:** Smoke observation wakes when all runs finish and takes a final NodeClaim sample before checking claims and logs. Deploy status follows poll every second.
