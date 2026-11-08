@@ -93,6 +93,7 @@ type affectedTestPlan struct {
 	whole         bool
 	packages      []string
 	buildPackages []string
+	sources       []string
 	critical      map[string][]string
 }
 
@@ -148,13 +149,45 @@ func planAffectedModules(ctx context.Context, files []string, critical map[strin
 	}
 	byDir := map[string]string{}
 	var plans []affectedTestPlan
+	modulePackages := make(map[string][]modulePackage)
 	for _, module := range modules {
 		packages, err := listModulePackages(ctx, module)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", module, err)
 		}
 		addRepoPackages(byDir, module, packages)
+		modulePackages[module] = packages
 		plans = append(plans, planAffectedTests(module, modules, files, packages, critical[module]))
+	}
+	// safety: local replacements connect committed modules, so their importers
+	// join the same closure before commands are grouped by module.
+	affected := map[string]bool{}
+	for _, p := range plans {
+		for _, pkg := range p.sources {
+			affected[pkg] = true
+		}
+	}
+	var allPackages []modulePackage
+	for _, packages := range modulePackages {
+		allPackages = append(allPackages, packages...)
+	}
+	expandAffectedPackages(affected, allPackages)
+
+	for i := range plans {
+		selected := map[string]bool{}
+		for _, pkg := range plans[i].packages {
+			selected[pkg] = true
+		}
+		plans[i].buildPackages = nil
+		for _, pkg := range modulePackages[plans[i].module] {
+			if affected[pkg.importPath] {
+				selected[pkg.importPath] = true
+			}
+			if selected[pkg.importPath] && pkg.hasGo {
+				plans[i].buildPackages = append(plans[i].buildPackages, pkg.importPath)
+			}
+		}
+		plans[i].packages = mapKeys(selected)
 	}
 	return plans, byDir, nil
 }
@@ -270,27 +303,15 @@ func planAffectedTests(module string, modules, files []string, packages []module
 	// safety: test imports count too, because a package can exercise another
 	// package without importing it in production.
 	affected := changed
-	for added := true; added; {
-		added = false
-		for _, pkg := range packages {
-			if affected[pkg.importPath] {
-				continue
-			}
-			for _, dep := range pkg.imports {
-				if affected[dep] {
-					affected[pkg.importPath], added = true, true
-					break
-				}
-			}
-		}
-	}
-	for pkg := range readers {
-		affected[pkg] = true
-	}
+	expandAffectedPackages(affected, packages)
 	for _, pkg := range packages {
 		if p.whole {
 			affected[pkg.importPath] = true
 		}
+	}
+	p.sources = mapKeys(affected)
+	for pkg := range readers {
+		affected[pkg] = true
 	}
 	p.packages = mapKeys(affected)
 	for _, pkg := range packages {
@@ -307,6 +328,23 @@ func planAffectedTests(module string, modules, files []string, packages []module
 		p.critical[pkg] = tests
 	}
 	return p
+}
+
+func expandAffectedPackages(affected map[string]bool, packages []modulePackage) {
+	for added := true; added; {
+		added = false
+		for _, pkg := range packages {
+			if affected[pkg.importPath] {
+				continue
+			}
+			for _, dep := range pkg.imports {
+				if affected[dep] {
+					affected[pkg.importPath], added = true, true
+					break
+				}
+			}
+		}
+	}
 }
 
 // safety: modules nest, so a file belongs to the module with the longest

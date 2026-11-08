@@ -79,6 +79,11 @@ func newTestHost(t *testing.T, opts sparkwingtest.Options) sparkwingtest.Host {
 	return host
 }
 
+func commandTestContext(t *testing.T) context.Context {
+	t.Helper()
+	return newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
+}
+
 func decodePipeline(t *testing.T, value any) pipelineDocument {
 	t.Helper()
 	raw, err := json.Marshal(value)

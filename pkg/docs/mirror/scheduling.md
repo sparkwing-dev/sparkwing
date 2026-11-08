@@ -105,6 +105,75 @@ An explicit empty list clears that layer. The accepted resolved settings carry
 the winning requirements to claims and retries. Executors do not reread their
 own project or machine preferences to change them.
 
+### Repository placement
+
+A pipeline entry can order where its jobs run for GitHub App push, pull
+request and release deliveries, App-armed schedules (read when each fires) and
+Run now on a commit the controller fetched, including runs whose verification
+was unavailable. Each tier names a target and an optional hold:
+
+```yaml
+pipelines:
+  - name: pre-release
+    entrypoint: PreRelease
+    placement:
+      prefer:
+        - target: team
+          hold: 5s
+        - target: cloud
+    jobs:
+      macos:
+        placement:
+          prefer:
+            - target: team
+              labels: [os=darwin]
+```
+
+Targets are `team` (shared team runners, optionally narrowed by `labels`),
+`name=<runner>`, `cloud` and `github-actions` (last only, with an approved
+`workflow` and hosted `runner` image). A hold defaults to `0s`. Tier N opens
+when every earlier tier with a live runner that has a free slot has passed
+its deadline, which is the job's ready time plus the holds through that tier.
+An offline, busy, stale or mismatched runner never holds a later tier. Holds
+run from the time the job first became ready since its last started attempt:
+a returned award that never started keeps that time, and a retry after a
+started attempt starts a fresh one.
+
+The list is the whole allowed set: a target that is not listed never runs the
+job, so a list without `cloud` never spends Cloud credits on it. The list binds
+job IDs, not code: a job renamed to `macos` takes the `macos` override, and in a
+pipeline with only `jobs` overrides every other job keeps today's routing. A
+child run takes the list of the job that started it, unchanged, and never reads
+its own pipeline's list. The list is a cost and preference policy, not a
+confinement boundary: a child of a job without a list runs under today's
+routing, and a list in another repository's configuration does not apply to
+children started from this one. Requirements
+from the SDK and the pipeline's `requires` still apply in every tier, and tier
+labels narrow only their own tier. A job block replaces the pipeline list; an
+empty `prefer: []` gives that job the routing it would have without a list.
+With a list, the controller's preference hold and the team ranking's
+five-second window do not apply; the ranking still filters which claimant
+classes may take the job. SDK `Prefers` adds no hold inside a tier.
+
+Only the copy of `.sparkwing/sparkwing.yaml` on the default branch's head
+applies, sealed with that commit next to the run's own revision, so a branch
+or pull request cannot add a paid tier. An override for a job a plan does
+not contain is ignored. Plan and expansion acceptance refuse a job whose
+override names it while it is inline, and a job whose operating-system
+requirement no tier can meet, such as `os=darwin` with only `cloud` listed. Listing
+`cloud` or `github-actions` under a `run.route: local` pipeline is an error,
+and a GitHub App runner setting other than `anywhere` or an explicit
+`--runner` other than `here` refuses the run with both settings named.
+`--runner here` and burst runs read no list, because the controller fetched no
+commit for them, so they keep today's routing. When the
+default-branch file cannot be read or parsed, that pipeline's run is refused
+with the reason, and the rest of the delivery proceeds. `sparkwing pipeline lint` prints the resolved list for
+every declared job. `sparkwing runs status` and the run page show each held
+job's tiers, the runners live in each, and when the next tier opens. A job
+with no available tier waits under the existing queue policy. On-demand
+GitHub Actions dispatch is not available yet; a `github-actions` tier takes
+only an already running Actions runner.
+
 ## How runners advertise labels
 
 Runner enrollment accepts repeatable labels and an owner repository allow-list:

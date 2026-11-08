@@ -82,7 +82,7 @@ func TestStoreRaceExecIsolatesProductStateAndGoWorkspace(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", "operator-home")
 	t.Setenv("SPARKWING_AGENT_TOKEN", "operator-token")
 	t.Setenv("GOWORK", "operator-workspace")
-	result, err := raceExec(t.Context(), home, "env").Capture()
+	result, err := raceExec(commandTestContext(t), home, "env").Capture()
 	if err != nil {
 		t.Fatal(err)
 	}

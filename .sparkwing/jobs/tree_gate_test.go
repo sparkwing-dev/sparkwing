@@ -23,7 +23,7 @@ func treeGateRepo(t *testing.T) string {
 
 func TestRecordTreeOutputsAPassOnlyForACleanUnmovedCheckout(t *testing.T) {
 	root := treeGateRepo(t)
-	ctx := context.Background()
+	ctx := commandTestContext(t)
 	pass, err := recordTreePass(ctx, gateAffected)
 	if err != nil || !pass.Recorded || pass.Tree == "" || pass.Runner != "workstation" || pass.Mode != gateAffected {
 		t.Fatalf("clean checkout pass = %+v, %v", pass, err)
@@ -100,7 +100,7 @@ func TestOnlyAFullPassProvesItsTreeGateAndEngine(t *testing.T) {
 
 func TestTheGateSkipsOnlyWhenTheProvenLookupReturnsAFullMatchingPass(t *testing.T) {
 	treeGateRepo(t)
-	key, err := currentGateKey(context.Background())
+	key, err := currentGateKey(commandTestContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestTheGateSkipsOnlyWhenTheProvenLookupReturnsAFullMatchingPass(t *testing.
 				asked = append(asked, pipeline+"/"+job)
 				return latest(ctx, pipeline, job)
 			}})
-			ctx := host.Context(t.Context())
+			ctx := host.Context(commandTestContext(t))
 			if got := skipWhenTreePassed(provenGatePass("gate"))(ctx); got != tc.skip {
 				t.Fatalf("skip = %v, want %v", got, tc.skip)
 			}
@@ -172,7 +172,7 @@ func TestGateModeFollowsTheFullFlag(t *testing.T) {
 
 func TestChangingThePipelineModuleChangesTheFingerprint(t *testing.T) {
 	root := treeGateRepo(t)
-	ctx := context.Background()
+	ctx := commandTestContext(t)
 	before, err := currentGateKey(ctx)
 	if err != nil {
 		t.Fatal(err)

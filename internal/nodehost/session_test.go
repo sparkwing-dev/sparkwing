@@ -69,7 +69,7 @@ func fakeSDK() {
 	handle := func(req nodeproto.Request) {
 		switch {
 		case req.Op == nodeproto.OpHello:
-			ok(req.ID, nodeproto.HelloResult{Protocol: 2, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}, Features: []string{}})
+			ok(req.ID, nodeproto.HelloResult{Protocol: 2, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}})
 		case req.Op == nodeproto.OpDescribe:
 			ok(req.ID, map[string]any{"pipelines": []any{}})
 		case req.Op == nodeproto.OpEval && barrier(req.Closure, ""):

@@ -33,7 +33,7 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 			sendProtocolProbe(t, process, hello)
 			var greeting nodeproto.HelloResult
 			decodeProtocolProbe(t, protocolProbeReply(t, process, "hello"), &greeting)
-			if greeting.Protocol != 2 || greeting.SDK.Language != "go" || greeting.SDK.Version == "" || greeting.Features == nil {
+			if greeting.Protocol != 2 || greeting.SDK.Language != "go" || greeting.SDK.Version == "" {
 				t.Fatalf("hello result = %+v", greeting)
 			}
 			sendProtocolProbe(t, process, nodeproto.Request{ID: "describe", Op: nodeproto.OpDescribe})

@@ -192,3 +192,25 @@ func (f *RankingFixture) PollWithSlots(t *testing.T, prefix string, slots int) {
 		t.Fatal(err)
 	}
 }
+
+// PollLabels records a claimant offering one free slot with the given labels.
+func (f *RankingFixture) PollLabels(t *testing.T, prefix string, labels ...string) {
+	t.Helper()
+	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Labels: labels}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ClaimLabels polls with labels and then claims a job.
+func (f *RankingFixture) ClaimLabels(t *testing.T, prefix string, labels ...string) (UnitClaim, error) {
+	t.Helper()
+	f.PollLabels(t, prefix, labels...)
+	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Labels: labels})
+}
+
+// Place seals an App run carrying a repository placement policy.
+func (f *RankingFixture) Place(t *testing.T, policy runspec.RepositoryPlacement) {
+	t.Helper()
+	policy.Revision = rankingSHA
+	f.Request(t, func(r *runspec.Request) { r.Origin, r.Placement = runspec.OriginApp, &policy })
+}

@@ -10,7 +10,7 @@ func TestAutoBumpLeavesThePinAloneAtTheTagBeingReleased(t *testing.T) {
 	repo := seedReleaseRepo(t)
 	gitRun(t, repo, "tag", "v0.2.0")
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(commandTestContext(t), repo)
 	if err != nil {
 		t.Fatalf("autoBumpSparkwingPinIfStale at the release tag: %v", err)
 	}

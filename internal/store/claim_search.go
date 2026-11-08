@@ -369,7 +369,7 @@ func claimPlacementFreeTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	if err := json.Unmarshal(execution, &settings); err != nil {
 		return false, false, err
 	}
-	preferencesFree := unit.Kind != capability.UnitNode || sealed.Request.Burst == nil && len(settings.Prefers.Value) == 0 && len(policy.Preferences) == 0
+	preferencesFree := unit.Kind != capability.UnitNode || sealed.Request.Burst == nil && len(settings.Prefers.Value) == 0 && len(policy.Preferences) == 0 && !repositoryPlacementApplies(sealed.Request, unit)
 	return preferencesFree && !runAnywhere(sealed.Request), preferencesFree, nil
 }
 

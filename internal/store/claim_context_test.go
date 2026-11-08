@@ -39,7 +39,7 @@ func TestClaimContextsDistinguishPlacementPolicy(t *testing.T) {
 		var id string
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
 			var err error
-			id, err = persistClaimContextTx(t.Context(), tx, "a", "run", kind, "", []byte(execution))
+			id, err = persistClaimContextTx(t.Context(), tx, "a", "run", "job", kind, "", []byte(execution))
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -124,7 +124,7 @@ func TestClaimContextHoldsDoNotHideYoungerDifferentPolicies(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					cc, err := persistClaimContextTx(t.Context(), tx, "a", run, capability.UnitNode, req, execution)
+					cc, err := persistClaimContextTx(t.Context(), tx, "a", run, "job", capability.UnitNode, req, execution)
 					if err != nil {
 						return err
 					}
@@ -161,7 +161,7 @@ func TestClaimContextsIgnoreRunSpecificExecutionInputs(t *testing.T) {
 		var id string
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
 			var err error
-			id, err = persistClaimContextTx(t.Context(), tx, "a", "run", capability.UnitNode, "", []byte(execution))
+			id, err = persistClaimContextTx(t.Context(), tx, "a", "run", "job", capability.UnitNode, "", []byte(execution))
 			return err
 		}); err != nil {
 			t.Fatal(err)

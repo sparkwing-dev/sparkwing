@@ -302,7 +302,7 @@ func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
 	gitRun(t, repo, "push", "origin", "v0.1.0")
 	before := gitRun(t, repo, "rev-parse", "HEAD")
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(commandTestContext(t), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestAutoBumpSparkwingPinIfStaleLeavesDetachedCheckoutUnchanged(t *testing.T
 	gitRun(t, repo, "checkout", "--detach", "HEAD")
 	before := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(commandTestContext(t), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestAutoBumpSparkwingPinIfStaleLeavesDetachedCheckoutUnchanged(t *testing.T
 	if status := strings.TrimSpace(gitRun(t, repo, "status", "--porcelain")); status != "" {
 		t.Fatalf("detached auto bump changed the tree or index:\n%s", status)
 	}
-	if err := CheckVersionsFreshness(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "v0.99.0") {
+	if err := CheckVersionsFreshness(commandTestContext(t), repo); err == nil || !strings.Contains(err.Error(), "v0.99.0") {
 		t.Fatalf("stale detached checkout freshness error = %v, want the available v0.99.0 release", err)
 	}
 }

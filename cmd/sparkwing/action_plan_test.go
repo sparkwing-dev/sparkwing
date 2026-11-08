@@ -32,7 +32,7 @@ func fakePlanSDK(t *testing.T, describe, plan, eval string) (bin, requests strin
 	t.Helper()
 	dir := t.TempDir()
 	bin, requests = filepath.Join(dir, "pipeline"), filepath.Join(dir, "requests")
-	for name, body := range map[string]string{"hello": `"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}`, "describe": describe, "plan": plan, "eval": eval} {
+	for name, body := range map[string]string{"hello": `"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"}}}`, "describe": describe, "plan": plan, "eval": eval} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}

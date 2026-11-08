@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -105,7 +106,7 @@ func TestDogfoodPipelineModuleIsTidy(t *testing.T) {
 
 func TestReplaceBanReadsEveryCommittedGoMod(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := commandTestContext(t)
 
 	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
 		t.Fatalf("a fixture with no replace lines must pass: %v", err)
@@ -122,7 +123,7 @@ func TestReplaceBanReadsEveryCommittedGoMod(t *testing.T) {
 
 func TestReplaceBanAllowsTheDogfoodSelfReplace(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := commandTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"),
 		"module fixture-pipelines\n\ngo 1.25\n\nreplace github.com/sparkwing-dev/sparkwing => ..\n")
@@ -180,5 +181,32 @@ func TestPreReleaseReferenceChecksPassOnTheCommittedTree(t *testing.T) {
 	}
 	if len(references) != 0 {
 		t.Fatalf("pre-release lost reference checks %v", references)
+	}
+}
+
+func TestPreReleasePlatformCellsAreOptInDispatchedJobs(t *testing.T) {
+	plan := inspectPipeline(t, "PreRelease", nil)
+	if len(plan.Jobs) != 1 {
+		t.Fatalf("default pre-release jobs = %+v, want only the check job", plan.Jobs)
+	}
+	plan = inspectPipeline(t, "PreRelease", map[string]string{"platform-cells": "true"})
+	want := map[string]string{"macos": "os=darwin", "windows": "os=windows"}
+	for _, job := range plan.Jobs {
+		if label, ok := want[job.ID]; ok {
+			if job.Inline || !slices.Equal(job.Requires, []string{label}) || job.Cores != 4 {
+				t.Fatalf("cell %s = %+v, want a dispatched job requiring %s", job.ID, job, label)
+			}
+			delete(want, job.ID)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing cells %v in %+v", want, plan.Jobs)
+	}
+}
+
+func TestMacOSVerifyDeclaresPlacementOnAnyPlanningHost(t *testing.T) {
+	plan := inspectPipeline(t, "macos-verify", nil)
+	if len(plan.Jobs) != 1 || !slices.Equal(plan.Jobs[0].Requires, []string{"os=darwin"}) || plan.Jobs[0].Cores != 4 {
+		t.Fatalf("macOS placement = %+v", plan.Jobs)
 	}
 }

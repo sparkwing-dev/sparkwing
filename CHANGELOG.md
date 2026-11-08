@@ -22,6 +22,10 @@ unlock.
 
 ### Breaking
 
+- **SDK (Breaking):** Git, Docker and services execute through host helpers. Generic file helpers and hello feature negotiation are removed. Unix commands require the current host. Local TypeScript packages use the installed candidate engine, matching Go replacements. `sparkwingtest` contexts run command and helper calls locally for library unit tests. See [the migration guide](docs/migrations/_unreleased.md#use-the-current-thin-sdk-contract).
+
+- **SDK (Breaking):** When the host runs a command, `Run` (Go `Cmd.Run`, TypeScript `run()`) returns only the last 64 KiB of each of stdout and stderr; the whole output stays in the job log. Pipelines that parse `Run` output should use `Capture`. See [the migration guide](docs/migrations/_unreleased.md#parse-command-output-with-capture).
+- **SDK (Breaking):** When the host runs a command, `Run` (Go `Cmd.Run`, TypeScript `run()`) returns only the last 64 KiB of each masked stdout and stderr stream; the whole masked output stays in the job log. Pipelines that parse `Run` output should use `Capture`. Go `ExecError.Cause` for host-run commands no longer wraps `*exec.ExitError`; use `ExecError.ExitCode` and `ExecError.Terminated`. See [the migration guide](docs/migrations/_unreleased.md#parse-command-output-with-capture).
 - **local controller (Breaking):** `sparkwing dashboard open` prints a link whose one-time code sits in the URL fragment; the page exchanges it with `POST /login` for a session token it keeps in `localStorage` and sends as `Authorization: Bearer`. No cookie is set or accepted. Sessions live only in controller memory, so Log out or any controller restart revokes them; they last at most 30 days. See [the migration guide](docs/migrations/_unreleased.md#sign-in-again-after-each-controller-restart).
 
 - **CLI (Breaking):** `sparkwing dashboard install` and `dashboard uninstall` move to `sparkwing daemon install` and `daemon uninstall`, because the login service runs the controller, not only the dashboard. The always-refused `--force` flag is removed. See [the migration guide](docs/migrations/_unreleased.md#the-controller-login-service-moves-under-daemon).
@@ -40,6 +44,8 @@ unlock.
 
 ### Added
 
+- **SDK protocol:** Hosts on Linux and macOS offer `host_exec` in hello. Go and TypeScript SDKs that see it hand `Exec`/`Bash` (`ctx.exec`/`ctx.bash`) commands to the host, which owns the process tree, writes output straight to the masked job log, relays captured output and kills commands on cancellation. Older SDKs and older hosts keep SDK-side execution. Host-run commands never receive engine-minted credentials such as `SPARKWING_NODE_TOKEN`, which Go SDKs previously passed through when a pipeline set them.
+- **scheduling:** Pipelines in `.sparkwing/sparkwing.yaml` can declare `placement.prefer`, an ordered list of `team`, `name=<runner>`, `cloud` and `github-actions` tiers with per-tier holds, and per-job overrides under `jobs`. GitHub App push, pull request and release runs, App-armed schedules and Run now on a fetched commit seal the list from the default branch's head; a branch cannot change it, a child run takes its parent job's list, and an App runner setting or `--runner` conflicts with it. The list is the whole allowed set, holds run from the job's queue start and open later tiers only while an earlier tier has a live runner with a free slot, and the controller and ranking holds do not apply to listed jobs. `sparkwing pipeline lint` previews each job's list, and `sparkwing runs status` and the run page show each held job's tiers with a `placement_hold` notice. See [scheduling](docs/scheduling.md#repository-placement).
 - **local controller:** Before upgrading a SQLite store's schema, the binary copies the store beside it as `state.db.schema-<N>-<time>.bak` under the upgrade's write lock. A failed copy refuses the upgrade and leaves the store unchanged. An older binary refusing a newer store names the backup to restore. PostgreSQL stores still need an operator snapshot. See [the migration guide](docs/migrations/_unreleased.md#local-stores-are-copied-before-schema-upgrades).
 
 - **local controller:** Verified socket peers register, activate, drain and observe runner instances under `/api/v1/local/runners`. `GET /api/v1/local/runners?state=active` discovers the persisted active instance for the socket account. Activation atomically enables a successor and stops the prior instance's new queue claims and owner self-claims. Held owners can await children while the successor executes newly ready dependencies. An independent lifecycle watch drains saturated loops while held awards finish. On Linux and macOS, queued work runs in a separate process or service that survives controller replacement. Matching live runners are reused; a new executable starts a successor while the old runner drains. Dependencies keep their accepted development engine from retained executable bytes. Windows queued hosting remains embedded. Foreground local runs without publication execute in the runner while the CLI observes persisted output, reconnects reads through controller outages, and preserves first-interrupt cancellation and second-interrupt detachment. Standalone, foreground publication and remote here execution retain CLI hosting. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
@@ -54,8 +60,6 @@ unlock.
 
 ### Changed
 
-- Cloud landing checks restore cached Go builds and checksum-pinned tools before running the affected gate against the public merge base, so unmerged main changes stay outside the branch diff.
-
 - Landing gates compile, vet and run fast tests across affected package dependencies, keep full critical checks and touched-package race checks, and leave PostgreSQL and long integration suites to full and release runs. Lint starts alongside tests, and affected race results can reuse Go's test cache.
 
 - **examples:** The `example` pipeline's memoized-step, cancellation and logs-history probes now run on Sparkwing Cloud instead of skipping. A new `lifecycle-cli` job builds the CLI from the checkout and signs in to `--api-controller` with the optional `EXAMPLE_PROBE_TOKEN` secret, and the deploy pipeline's staging gate passes the staging controller. Without a CLI on the host, a controller or that secret, the probes still skip with the reason.
@@ -63,6 +67,8 @@ unlock.
 - **storage:** The first 256 MiB of the prepared pipeline Sparkwing Cloud builds for a run no longer counts toward the team's per-run, monthly or object storage quotas, so free-tier teams can run Go pipelines whose binaries are 20 to 40 MB. Bytes past 256 MiB and further uploads from the run's planning credentials count as before. The prepared pipeline stays deduplicated by digest and retained-storage billing still counts it. The free tier's per-run limit rises from 10 MiB to 100 MiB; the paid tier and explicit operator quotas are unchanged. See [limits](docs/limits.md#uploads-and-storage-accounting).
 
 ### Fixed
+
+- **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.
 
 - **CI:** hosted gates and security scans provision a private controller key inside their temporary Sparkwing home, allowing headless checks to start.
 

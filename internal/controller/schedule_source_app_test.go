@@ -74,6 +74,8 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 					body = fmt.Sprintf(`{"token":"token","expires_at":%q}`, time.Now().Add(time.Hour).Format(time.RFC3339))
 				case "GET /installation/repositories":
 					body = `{"total_count":1,"repositories":[{"id":701,"full_name":"acme/widgets","owner":{"id":42,"login":"acme","type":"Organization"}}]}`
+				case "GET /repos/acme/widgets":
+					body = `{"id":701,"default_branch":"main"}`
 				case "GET /repositories/701":
 					body = `{"id":701,"full_name":"acme/widgets","default_branch":"main"}`
 				case "GET /repos/acme/widgets/git/ref/heads/main":
@@ -99,10 +101,10 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 				case "GET /repos/acme/widgets/git/ref/tags/code":
 					status = http.StatusNotFound
 				case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
-					if got := r.URL.Query().Get("ref"); got != selectedExecution {
-						t.Fatalf("configuration read at %q, want fire-time execution commit", got)
+					if got := r.URL.Query().Get("ref"); got != selectedExecution && got != execution {
+						t.Fatalf("configuration read at %q, want the fire-time execution commit or the default-branch head", got)
 					}
-					body = "pipelines:\n  - name: nightly\n    entrypoint: Nightly\n"
+					body = "pipelines:\n  - name: nightly\n    entrypoint: Nightly\n    placement:\n      prefer:\n        - target: team\n"
 					if tc.pin != "" {
 						body += "    source: " + tc.pin + "\n"
 					}
@@ -170,6 +172,9 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 				t.Fatal(err)
 			}
 			request := admitted.Request.Request
+			if request.Placement == nil || request.Placement.Revision != execution || len(request.Placement.Prefer) != 1 {
+				t.Fatalf("App schedule did not seal the default-branch placement at fire time: %+v", request.Placement)
+			}
 			wantSource := selectedExecution
 			if tc.pin != "" && tc.pin != "refs/heads/main" && !tc.matchingTag {
 				wantSource = pinned

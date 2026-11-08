@@ -106,7 +106,7 @@ func TestBuildTouchedCompilesThePackageTheChangeTouches(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "broken.go"), "package internal\n\nfunc Broken() int { return \"not an int\" }\n")
 	gitCommitAll(t, root, "a package that does not compile")
 
-	err := runBuildTouched(context.Background())
+	err := runBuildTouched(commandTestContext(t))
 	if err == nil {
 		t.Fatal("build-touched passed a package that does not compile")
 	}
@@ -144,7 +144,7 @@ func TestBuildTouchedIgnoresChangesGoBuildNeverReads(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "README.md"), "# fixture\n")
 	gitCommitAll(t, root, "a vendored, test-only and non-Go change")
 
-	if err := runBuildTouched(context.Background()); err != nil {
+	if err := runBuildTouched(commandTestContext(t)); err != nil {
 		t.Fatalf("build-touched judged a vendored, test-only, or non-Go change: %v", err)
 	}
 }
@@ -179,10 +179,10 @@ func TestVetTouchedJudgesTheTestFilesBuildNeverReads(t *testing.T) {
 		"package internal\n\nimport \"testing\"\n\nfunc TestBroken(t *testing.T) { var n int = \"not an int\"; _ = n }\n")
 	gitCommitAll(t, root, "a test that does not compile")
 
-	if err := runBuildTouched(context.Background()); err != nil {
+	if err := runBuildTouched(commandTestContext(t)); err != nil {
 		t.Fatalf("build-touched judged a test file: %v", err)
 	}
-	if err := runVetTouched(context.Background()); err == nil {
+	if err := runVetTouched(commandTestContext(t)); err == nil {
 		t.Error("vet-touched passed a test file that does not compile")
 	}
 }
@@ -224,14 +224,14 @@ func TestTouchedStepsPassAPackageOnlyTheQATrustFlavourBuilds(t *testing.T) {
 		"//go:build qatrust\n\npackage main\n")
 	gitCommitAll(t, root, "a command that builds only with the qatrust tag")
 
-	if err := runBuildTouched(context.Background()); err != nil {
+	if err := runBuildTouched(commandTestContext(t)); err != nil {
 		t.Errorf("build-touched refused a package the default build excludes: %v", err)
 	}
-	if err := runVetTouched(context.Background()); err != nil {
+	if err := runVetTouched(commandTestContext(t)); err != nil {
 		t.Errorf("vet-touched refused a package the default build excludes: %v", err)
 	}
 	requireGolangciLint(t)
-	if err := runFastLintTouched(context.Background()); err != nil {
+	if err := runFastLintTouched(commandTestContext(t)); err != nil {
 		t.Errorf("lint-touched refused a package the default build excludes: %v", err)
 	}
 }

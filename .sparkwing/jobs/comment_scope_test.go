@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +26,7 @@ func TestCommentStepGatesTheRangeWhenNothingIsStaged(t *testing.T) {
 		"package internal\n\nfunc committed() int { return 2 }\n")
 	gitCommitAll(t, root, "work the branch already carries")
 
-	command, scope, err := commentCheckCommand(context.Background())
+	command, scope, err := commentCheckCommand(commandTestContext(t))
 	if err != nil {
 		t.Fatalf("commentCheckCommand: %v", err)
 	}
@@ -49,7 +48,7 @@ func TestCommentStepGatesTheStagedDiffWhenACommitIsBeingBuilt(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "notes.md"), "# notes\n")
 	gitAddAll(t, root)
 
-	command, scope, err := commentCheckCommand(context.Background())
+	command, scope, err := commentCheckCommand(commandTestContext(t))
 	if err != nil {
 		t.Fatalf("commentCheckCommand: %v", err)
 	}
@@ -77,7 +76,7 @@ func TestCommentStepReadsTheIndexTheCommitIsBeingBuiltIn(t *testing.T) {
 	runTestGitWithIndex(t, root, index, "add", "internal/pending.go")
 	t.Setenv(gitenv.GateIndexVar, index)
 
-	command, _, err := commentCheckCommand(context.Background())
+	command, _, err := commentCheckCommand(commandTestContext(t))
 	if err != nil {
 		t.Fatalf("commentCheckCommand: %v", err)
 	}
@@ -100,7 +99,7 @@ func TestCommentStepLetsACallerBindItsOwnIndex(t *testing.T) {
 func TestCommentStepIncludesSnapshotFilesWhenTheBaselineIsMissing(t *testing.T) {
 	root := commentFixtureRepo(t)
 	runTestGit(t, root, "update-ref", "-d", "refs/remotes/"+gateBaselineRef)
-	command, scope, err := commentCheckCommand(t.Context())
+	command, scope, err := commentCheckCommand(commandTestContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}

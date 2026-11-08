@@ -628,8 +628,8 @@ type RepositoryFileSnapshot struct {
 	Found         bool
 }
 
-func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owner, repo, file string) (RepositoryFileSnapshot, error) {
-	tok, err := c.installationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
+func (c *Client) FileAtDefaultHead(ctx context.Context, installation, repository int64, owner, repo, file string) (RepositoryFileSnapshot, error) {
+	tok, err := c.InstallationTokenByIDs(ctx, installation, []int64{repository}, map[string]string{"contents": "read"})
 	if err != nil {
 		return RepositoryFileSnapshot{}, err
 	}

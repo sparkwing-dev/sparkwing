@@ -247,8 +247,8 @@ func TestGitHubAppCronRefusesManualScheduleAtOldRedirectedURL(t *testing.T) {
 		t.Fatal("schedule snapshot minted no token")
 	}
 	last := minted[len(minted)-1]
-	if len(last.Repositories) != 1 || last.Repositories[0] != "renamed" || len(last.Permissions) != 1 || last.Permissions["contents"] != "read" {
-		t.Fatalf("schedule snapshot token = %+v, want renamed with contents:read only", last)
+	if len(last.Repositories) != 0 || len(last.RepositoryIDs) != 1 || last.RepositoryIDs[0] != 701 || len(last.Permissions) != 1 || last.Permissions["contents"] != "read" {
+		t.Fatalf("schedule snapshot token = %+v, want repository 701 by ID with contents:read only", last)
 	}
 }
 

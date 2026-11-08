@@ -1,5 +1,29 @@
 # Migrating to the next release
 
+## Parse command output with Capture
+
+Hosts on Linux and macOS now run SDK commands themselves. A command run with `Run`
+writes its output straight to the masked job log, and its result keeps only the last
+64 KiB of masked stdout and stderr, enough for error messages. Masking happens
+before truncation so a secret crossing the cut cannot leak a suffix. Code that reads
+`Run`'s `Stdout` or `stdout` must switch to `Capture`, which returns every byte and
+writes nothing to the log:
+
+```go
+res, err := sparkwing.Exec(ctx, "go", "list", "./...").Capture()
+```
+
+```ts
+const res = await ctx.exec(["go", "list", "./..."]).capture();
+```
+
+`String`, `Lines`, `JSON` and `MustBeEmpty` (`string()`, `lines()`, `json()` and
+`mustBeEmpty()`) already capture and need no change.
+
+For host-run Go commands, `ExecError.Cause` no longer wraps `*exec.ExitError`.
+Use `errors.As` to read `*sparkwing.ExecError`, then inspect `ExitCode` and
+`Terminated`. Deadline causes remain available through `errors.Is`.
+
 ## Local stores are copied before schema upgrades
 
 A binary that upgrades a local SQLite store first copies it beside the store as
@@ -262,6 +286,38 @@ HTTPS source credentials or is rate limited. Without an explicit token, the CLI
 returns the controller's error and makes no anonymous GitHub request.
 No route, wire field or SDK surface is removed.
 
+## Use the current thin SDK contract
+
+Upgrade Go and TypeScript pins together with the host. Historical SDKs and older
+hosts are unsupported. Linux and macOS always execute SDK commands in the host.
+Windows keeps SDK command spawning. Hello carries no feature negotiation, and
+jobs always send their declared core requests.
+
+Git, Docker and sidecar functions keep their typed APIs and send host requests.
+The host owns command construction, filesystem inputs, environment filtering,
+secret classification, resource cleanup and plan validation. Generated jobs send
+a complete declaration so invalid expansion settings reach host validation.
+
+Replace Go `Path`, `ReadFile`, `WriteFile` and `Glob` calls with `path/filepath`
+and `os`. Resolve project-relative paths from `sparkwing.WorkDir()`. Replace the
+TypeScript `path`, `readFile`, `writeFile` and `glob` exports with `node:path` and
+`node:fs/promises`, using `workDir()` for project-relative paths.
+
+Both command clients resolve the command environment's `PATH` in its requested
+working directory. This makes Go respect command-level `PATH` overrides.
+Executable text without a shebang runs through `/bin/sh` on Unix for both SDKs.
+Docker container output streams through host masking. Custom output callbacks
+receive their captured bytes after completion.
+Local TypeScript `file:` packages select the installed candidate engine, as a Go
+module replacement does. Both paths report that release pinning is disabled.
+
+Plan setters relay numeric bounds, cache requirements, environment names and enum
+values to host validation. Invalid declarations fail at the host with field paths.
+`NeedsTools` relays tool selectors without a client-maintained tool list, so a new
+host-detected tool does not require an SDK update. Unmatched selectors wait for
+an eligible runner under the run's claim-wait policy. Cleanup registration also
+requires the bound host. Standalone SDK cleanup replay files are removed.
+
 ## Current contracts only
 
 Run submission and retries send agent labels and retry reasons once. A controller
@@ -325,3 +381,19 @@ Sign-in links now carry their code in the fragment (`/#code=...`). The page
 stores the session token and sends it as `Authorization: Bearer`; every write
 needs the dashboard's own `Origin`. Sessions live only in controller memory, so
 run `sparkwing dashboard open` again after any controller restart.
+
+
+## Run helper-library unit tests with sparkwingtest
+
+Use a `sparkwingtest.Host` context when testing library code that calls `Exec`,
+`Bash`, Git, Docker or services. The test runtime installs the host command and
+helper services automatically. Commands run locally through the host implementation.
+Call `Close` to join command sessions and helper cleanup. Ordinary background
+contexts have no host service.
+
+```go
+host := sparkwingtest.New(sparkwingtest.Options{})
+t.Cleanup(func() { _ = host.Close() })
+ctx := host.Context(t.Context())
+result, err := myLibraryHelper(ctx)
+```

@@ -19,11 +19,12 @@ landing goes through Sparkwing itself. From a clean work branch:
 
 ```bash
 sparkwing run land --sw-dry-run                           # preview; nothing is pushed
-sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod -- --cloud-profile cloud
-sparkwing run land --sw-allow-risk destructive,prod -- --cloud-profile cloud
+sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate and review, stop before the push
+sparkwing run land --sw-allow-risk destructive,prod                         # land on main
 ```
 
-Heavy landing checks run on Sparkwing Cloud. Use the `cloud` profile
+Our lands run on our own desktop hardware. Cloud is reserved for checks that
+prove Cloud itself. For an explicit Cloud-only check, use the `cloud` profile
 for team `korey-gam`:
 
 ```bash
@@ -33,31 +34,15 @@ sparkwing run land --sw-route local --sw-allow-risk destructive,prod -- --cloud-
 
 `--sw-route local` keeps land on the developer's machine. With `--cloud-profile`, its
 local policy job runs first, then a light `cloud-gate` job invokes
-`sparkwing run gate --sw-route cloud --profile cloud -o json -- --base SHA` while
+`sparkwing run gate --sw-route cloud --profile cloud -o json -- --full --base SHA` while
 the local review runs beside it. Cloud runs the policy, broad `gate`,
 `race-touched` and `record-tree` jobs. Each Cloud job fetches the exact public
-merge base of HEAD and the `origin/main` commit captured by preconditions, over
-HTTPS without developer credentials. That commit bounds policy and lint findings even though the uploaded
-snapshot has no ancestry. Main-only changes stay out of the branch diff. The affected fast dependency closure, full critical
-set and touched-package fast race class match local gate mode. Policy and both heavy jobs each
+`origin/main` commit captured by preconditions over HTTPS, without developer
+credentials. That commit bounds policy and lint findings even though the uploaded
+snapshot has no ancestry. Full mode runs every package. The two heavy jobs each
 request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
 requires a successful Cloud receipt and an unchanged clean HEAD before and
 after the remote gate. The landing record's `gate_run` names the Cloud run.
-Each Cloud policy, gate and race job restores a Sparkwing tool cache keyed by
-`.sparkwing/jobs/gate_tools.go` and the host platform. Before checks start, it
-installs checksum-pinned golangci-lint 2.12.2, native pnpm 12.6.0 and Zig 0.15.2
-on a cache miss,
-adds their private paths to PATH, and verifies the runner's Go, Node and npm.
-Zig supplies the C compiler and libc headers for race builds through
-`CGO_ENABLED=1` and `CC="zig cc"`. The image supplies Git, Bash, curl, tar and
-coreutils. Go module downloads and
-Go build/test results use Sparkwing dependency caches. Fresh workers can reuse
-the policy job's compiled dependencies and later runs can reuse those caches.
-Gate tests and race tests each keep a separate build cache because Sparkwing
-dependency caches save only on a miss. The policy seed contains no test or race
-objects. Cloud toolchain bootstrap sets CI and a four-core runtime budget before checks, so compiler
-steps use two workers instead of inheriting control-plane limits.
-Full scans still use `sparkwing run gate -- --full`.
 The wrapper passes this repository's tracked secret-shaped fixtures, listed in
 `cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
 that kind fails the Cloud upload until it is added there.
@@ -655,37 +640,10 @@ ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
 
 ### Check tiers
 
-| Historical SDK compatibility | `pre-commit` | `pre-push` | `gate` | `pre-release` |
-| --- | --- | --- | --- | --- |
-| Candidate nodehost against frozen released Go and TypeScript SDKs | None | None | Warm fixture preparation when host, SDK, protocol, environment, process, secret or pin code changes. `--full` always runs it. | Every cell with cold fixture preparation. |
-
-The `sdk-compat` step runs `TestHistoricalSDKCompatibility` through the candidate
-nodehost compiled into the test binary. It passes `-sdk-compat=warm` in `gate`
-and `-sdk-compat=cold` in `pre-release`, with `-count=1` so the candidate host runs
-every time. It bypasses engine selection and validates each released SDK's real
-hello identity. Acquisition failures fail the check. The test logs retain fixture
-identities, per-cell outcomes and raw preparation/execution timings.
-
-The affected selector lives in `.sparkwing/jobs/sdk_compat.go`. It includes the
-host and its protocol, process, environment, masking and pin dependencies, both
-SDK trees, fixture sources and the compatibility check itself. Documentation and
-unrelated UI or billing changes skip acquisition. Neither hook tier acquires
-historical SDK artifacts.
-
-Immutable fixture preparation is shared across cells in the worktree's
-`.sparkwing/cache/sdk-compat/` directory and cached by fixture source, released
-artifact, toolchain and platform. TypeScript installs also key on lock integrity
-and Node runtime. Candidate host source is excluded from that
-cache because every matrix invocation compiles and executes today's nodehost.
-Cold pre-release preparation rebuilds the fixtures to check artifact acquisition
-and compiler assumptions. npm uses a private empty download cache. Go retains
-its configured module and compiler caches. Linux measurements, raw per-cell
-records and the focused pipeline run are retained in
-`design/rewrite/proposals/thin-sdk-step1/REPORT.md`: 17.52 seconds warm and
-20.09 seconds with cold fixture preparation, including Go test setup.
-The matrix uses isolated homes, local workspaces and
-fake providers. This matrix does not replace production resolver routing or
-native platform checks.
+Current SDK verification runs the Go and TypeScript unit suites and the host
+execution scenarios in `TestHostExecMatchesSDKExecution`. Helpers run through the
+bound host service routes. Historical SDK acquisition and compatibility matrices
+are removed. Old SDK pins require an upgrade to the current contract.
 
 Canonical hosted jobs retain a `canonical-timings` JSON artifact for 30 days
 on success and failure. It contains run and step timestamps, outcomes, available
@@ -698,7 +656,25 @@ an absent artifact is missing evidence, not a successful export.
 
 Pre-release records each check as a sequential WorkStep. A failed check does
 not suppress later checks; the parent reports the first failure, while the run
-logs and step states retain every individual failure. The canonical timing
+logs and step states retain every individual failure. `--platform-cells` adds
+the `macos` and `windows` cells as dispatched jobs requiring `os=darwin` and
+`os=windows`; they run the `macos-verify` and `windows-verify` checks. A local
+run cannot place them and hosted CI does not pass the flag. Trigger the run on
+the team controller; each cell waits visibly for a team runner reporting its
+operating system:
+
+```bash
+sparkwing pipeline trigger pre-release --profile prod -- --platform-cells
+```
+
+Enroll each machine once as a shared team runner scoped to this repository,
+piping a dedicated administrator session to stdin, then keep its runner service
+running. The service reports `os=darwin` or `os=windows` itself:
+
+```bash
+sparkwing runners add --runner build-mac --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
+sparkwing runners add --runner build-windows --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
+``` The canonical timing
 artifact retains those step outcomes and durations but excludes their error text.
 
 Pinned actionlint v1.7.12 does not recognize GitHub's `concurrency.queue`.
@@ -791,7 +767,10 @@ file. Other syntax and workflow checks remain active.
   `go.sum` change runs its whole module's fast class and critical set.
   A store schema change selects `internal/store` and its importers.
   Long integration bodies guarded by `testing.Short()` and the PostgreSQL
-  suite run in `gate -- --full`, nightly CI and pre-release. A
+  suite run after deploy on our hardware with
+  `sparkwing run gate --sw-route local -- --full`, and remain in full nightly
+  and pre-release checks. The deploy scan trigger must invoke that command
+  outside the land and deploy critical paths. A
   file outside every package runs the packages whose tests read it, from the
   `nonPackageReaders` table in `.sparkwing/jobs/affected_tests.go` (`.github/`
   and `bin/` run `.sparkwing/jobs`, `docs/` runs `internal/doccheck` and

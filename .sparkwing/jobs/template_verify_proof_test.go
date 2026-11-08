@@ -166,7 +166,7 @@ func write(t *testing.T, path, body string) {
 }
 
 func TestCheckoutDigestTracksTrackedAndUntrackedChanges(t *testing.T) {
-	ctx := context.Background()
+	ctx := commandTestContext(t)
 	dir := seedGitCheckout(t)
 
 	clean, err := checkoutDigest(ctx, dir)
@@ -314,7 +314,7 @@ func TestToolReachabilityDistinguishesTheDockerDaemon(t *testing.T) {
 }
 
 func TestCheckoutDigestCoversGitignoredBuildInputs(t *testing.T) {
-	ctx := context.Background()
+	ctx := commandTestContext(t)
 	dir := seedGitCheckout(t)
 	write(t, filepath.Join(dir, ".gitignore"), "go.work\ninternal/web/next-out/\n")
 	commit(t, dir, "ignore build inputs")

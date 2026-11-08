@@ -5,20 +5,8 @@ import type * as API from "../index.d.ts";
 import { failure, SDKError } from "./errors.ts";
 import type { ClosureSpec, ConcurrencySpec, JobSpec, PlanDoc, StepSpec } from "./plan-wire.ts";
 
-function identifier(kind: string, value: string): void {
-  if (typeof value !== "string" || value.length === 0) throw new Error(`${kind} identifier must not be empty`);
-}
-const MIN_JOB_CORES = 0.25;
-function integer(name: string, value: number, min = 0): number {
-  if (!Number.isSafeInteger(value) || value < min) throw new Error(`${name} must be a ${min === 0 ? "nonnegative" : "positive"} integer`);
-  return value;
-}
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)];
-}
-function names(kind: string, values: readonly string[]): string[] {
-  for (const value of values) identifier(kind, value);
-  return unique(values);
 }
 function optionalField<T extends object, K extends keyof T>(target: T, key: K, value: T[K] | undefined): void {
   if (value === undefined) delete target[key];
@@ -37,9 +25,8 @@ export class ConcurrencyGroup implements API.ConcurrencyGroup {
   readonly name: string;
   readonly limit: Readonly<API.ConcurrencyLimit>;
   constructor(name: string, limit: API.ConcurrencyLimit = {}) {
-    identifier("concurrency group", name);
-    if (limit.capacity !== undefined) integer("concurrency capacity", limit.capacity, 1);
-    if (limit.queueTimeoutMs !== undefined) integer("concurrency queue timeout", limit.queueTimeoutMs);
+
+
     this.name = name;
     this.limit = Object.freeze({ ...limit });
   }
@@ -49,9 +36,7 @@ export class ConcurrencyGroup implements API.ConcurrencyGroup {
 }
 function concurrency(group: API.ConcurrencyGroup, cost: number | undefined): ConcurrencySpec {
   const limit = group.limit;
-  if (cost !== undefined) integer("concurrency cost", cost, 1);
-  if (cost !== undefined && limit.capacity !== undefined && cost > limit.capacity)
-    throw new Error(`cost ${cost} exceeds group capacity ${limit.capacity}`);
+
   const spec: ConcurrencySpec = { group: group.name };
   if (limit.scope !== undefined) spec.scope = limit.scope;
   if (limit.capacity !== undefined) spec.capacity = limit.capacity;
@@ -78,9 +63,8 @@ export function npm(): API.CacheSpec {
   return Object.freeze({ kind: "npm" });
 }
 export function dir(path: string, ...keyFiles: readonly string[]): API.CacheSpec {
-  identifier("cache path", path);
-  if (!keyFiles.length) throw new Error("directory cache needs at least one key file");
-  return Object.freeze({ kind: "dir", path, keyFiles: Object.freeze(names("cache key file", keyFiles)) });
+
+  return Object.freeze({ kind: "dir", path, keyFiles: Object.freeze(unique(keyFiles)) });
 }
 
 interface ClosureBase {
@@ -115,7 +99,7 @@ export class Step<T = unknown> implements API.Step<T> {
   #dryRun: API.Body<T> | undefined;
   #result = false;
   constructor(owner: Job<unknown>, id: string, body: API.Body<T>) {
-    identifier("step", id);
+
     this.owner = owner;
     this.id = id;
     this.body = body;
@@ -164,7 +148,7 @@ export class Step<T = unknown> implements API.Step<T> {
   }
   risk(...labels: readonly string[]): this {
     this.assertMutable();
-    this.#spec.risks = names("risk", [...(this.#spec.risks ?? []), ...labels]);
+    this.#spec.risks = unique([...(this.#spec.risks ?? []), ...labels]);
     return this;
   }
   addGroup(id: string): void {
@@ -219,7 +203,7 @@ export class Declaration {
   protected spec: JobSpec;
   protected callbacks: Closure[] = [];
   constructor(owner: Plan, id: string) {
-    identifier("job", id);
+
     this.owner = owner;
     this.id = id;
     this.spec = { id };
@@ -242,7 +226,7 @@ export class Declaration {
   skipIf(fn: API.Predicate, options: API.SkipOptions = {}): this {
     this.assertMutable();
     this.callbacks.push({ id: this.closureID("skip_if"), kind: "skip_if", fn, job: this });
-    if (options.budgetMs !== undefined) this.spec.skip_if_budget_ms = integer("skip budget", options.budgetMs);
+    if (options.budgetMs !== undefined) this.spec.skip_if_budget_ms = options.budgetMs;
     return this;
   }
   optional(): this {
@@ -304,29 +288,13 @@ class Approval extends Declaration implements API.Approval {
     super(owner, id);
     this.spec.approval = {};
     if (options.message !== undefined) this.spec.approval.message = options.message;
-    if (options.timeoutMs !== undefined) this.spec.approval.timeout_ms = integer("approval timeout", options.timeoutMs);
+    if (options.timeoutMs !== undefined) this.spec.approval.timeout_ms = options.timeoutMs;
     if (options.onTimeout !== undefined) {
-      if (!["fail", "deny", "approve"].includes(options.onTimeout)) throw new Error("invalid approval onTimeout");
+
       this.spec.approval.on_timeout = options.onTimeout;
     }
   }
 }
-
-const knownTools = new Set([
-  "aws",
-  "buildx",
-  "crane",
-  "docker",
-  "git",
-  "go",
-  "golangci-lint",
-  "helm",
-  "kubectl",
-  "node",
-  "npm",
-  "shellcheck",
-  "terraform",
-]);
 
 export class Job<T = unknown> extends Declaration implements API.Job<T> {
   #steps: Step<unknown>[] = [];
@@ -383,7 +351,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   }
   groupSteps(id: string, ...steps: readonly API.Step<unknown>[]): StepGroup {
     this.assertMutable();
-    identifier("step group", id);
+
     if (this.#stepGroups.has(id)) throw new Error(`duplicate step group ${id}`);
     const members = steps.map((step) => {
       if (!(step instanceof Step) || step.owner !== this) throw new Error("step group member belongs to another job");
@@ -395,30 +363,30 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   }
   failurePolicy(value: API.FailurePolicy): this {
     this.assertMutable();
-    if (!["fail_fast", "collect_all"].includes(value)) throw new Error("invalid failure policy");
+
     this.spec.failure_policy = value;
     return this;
   }
   retry(attempts: number, options: API.RetryOptions = {}): this {
     this.assertMutable();
-    const retry: NonNullable<JobSpec["retry"]> = { attempts: integer("retry attempts", attempts) };
-    if (options.backoffMs !== undefined) retry.backoff_ms = integer("retry backoff", options.backoffMs);
+    const retry: NonNullable<JobSpec["retry"]> = { attempts: attempts };
+    if (options.backoffMs !== undefined) retry.backoff_ms = options.backoffMs;
     this.spec.retry = retry;
     return this;
   }
   timeout(ms: number): this {
     this.assertMutable();
-    this.spec.timeout_ms = integer("timeout", ms);
+    this.spec.timeout_ms = ms;
     return this;
   }
   noProgressTimeout(ms: number): this {
     this.assertMutable();
-    this.spec.no_progress_timeout_ms = integer("no-progress timeout", ms);
+    this.spec.no_progress_timeout_ms = ms;
     return this;
   }
   cores(n: number): this {
     this.assertMutable();
-    if (!Number.isFinite(n) || n < MIN_JOB_CORES) throw new Error(`core request must be a finite number of at least ${MIN_JOB_CORES}`);
+
     this.spec.cores = n;
     return this;
   }
@@ -441,7 +409,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   memo(fn: API.MemoInput | API.MemoKeyFn, options: API.MemoOptions = {}): this {
     this.assertMutable();
     const memo: NonNullable<JobSpec["memo"]> = {};
-    if (options.ttlMs !== undefined) memo.ttl_ms = integer("memo TTL", options.ttlMs);
+    if (options.ttlMs !== undefined) memo.ttl_ms = options.ttlMs;
     this.spec.memo = memo;
     this.callbacks = this.callbacks.filter((c) => c.kind !== "memo_key");
     if (typeof fn === "function") this.callbacks.push({ id: this.closureID("memo_key"), kind: "memo_key", fn, job: this });
@@ -453,17 +421,15 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
     const entries = caches.map((cache) => {
       if (cache.kind === "go_modules") return { name: "go-modules", resolver: "go-modules", key_files: ["go.sum"] };
       if (cache.kind === "npm") return { name: "npm", resolver: "npm", key_files: ["package-lock.json"] };
-      if (cache.kind !== "dir" || !cache.path || !cache.keyFiles?.length)
-        throw new Error("directory cache needs a path and at least one key file");
-      const clean = posix.normalize(cache.path).replace(/(.)\/+$/, "$1");
-      return { name: posix.basename(clean), path: cache.path, key_scope: clean, key_files: names("cache key file", cache.keyFiles) };
+      const clean = posix.normalize(cache.path ?? "").replace(/(.)\/+$/, "$1");
+      return { name: posix.basename(clean), path: cache.path ?? "", key_scope: clean, key_files: unique(cache.keyFiles ?? []) };
     });
     (this.spec.caches ??= []).push(...entries);
     return this;
   }
   artifacts(...globs: readonly string[]): this {
     this.assertMutable();
-    this.spec.artifacts = names("artifact glob", [...(this.spec.artifacts ?? []), ...globs]);
+    this.spec.artifacts = unique([...(this.spec.artifacts ?? []), ...globs]);
     return this;
   }
   consumes(producer: API.Dependency, options: { into?: string } = {}): this {
@@ -481,7 +447,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   }
   needsTools(...values: readonly string[]): this {
     this.assertMutable();
-    for (const name of values) if (!knownTools.has(name)) throw new Error(`not a known tool: ${name}`);
+
     this.#tools = unique([...this.#tools, ...values.map((name) => `tool:${name}`)]);
     return this;
   }
@@ -502,7 +468,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   }
   env(name: string, value: string, option?: API.EnvOption): this {
     this.assertMutable();
-    if (!name || name.includes("=") || name.includes("\0") || value.includes("\0")) throw new Error("invalid environment variable");
+
     (this.spec.env ??= Object.create(null) as NonNullable<JobSpec["env"]>)[name] =
       option?.phase === "startup" ? { value, startup: true } : { value };
     return this;
@@ -645,7 +611,7 @@ export class Plan implements API.Plan {
   }
   groupJobs(id: string, ...jobs: readonly API.Job<unknown>[]): JobGroup {
     this.assertMutable();
-    identifier("job group", id);
+
     if (this.#groups.has(id)) throw new Error(`duplicate job group ${id}`);
     const members = jobs.map((job) => {
       if (!(job instanceof Job) || job.owner !== this) throw new Error("job group member belongs to another plan");
@@ -662,25 +628,25 @@ export class Plan implements API.Plan {
   }
   priority(value: number): this {
     this.assertMutable();
-    if (!Number.isSafeInteger(value)) throw new Error("priority must be an integer");
+
     this.settings.priority = value;
     return this;
   }
   claimWait(ms: number): this {
     this.assertMutable();
-    this.settings.claim_wait_ms = integer("claim wait", ms);
+    this.settings.claim_wait_ms = ms;
     return this;
   }
   admissionClass(value: string): this {
     this.assertMutable();
-    identifier("admission class", value);
+
     this.settings.admission_class = value;
     return this;
   }
   checkout(options: API.Checkout): this {
     this.assertMutable();
     const source: NonNullable<PlanDoc["source"]> = {};
-    if (options.depth !== undefined) source.depth = integer("checkout depth", options.depth);
+    if (options.depth !== undefined) source.depth = options.depth;
     if (options.fullHistory !== undefined) source.full_history = options.fullHistory;
     if (options.tags !== undefined) source.tags = options.tags;
     if (options.submodules !== undefined) source.submodules = options.submodules;
@@ -728,9 +694,7 @@ export class Generated extends Plan implements API.Generated {
     return super.add(job);
   }
   override toDoc(): PlanDoc {
-    if (Object.keys(this.settings).length) throw new Error("generated jobs cannot change plan settings");
-    const jobs = this.declarations.map((job) => job.toSpec());
-    return { jobs };
+    return super.toDoc();
   }
 }
 
@@ -748,9 +712,7 @@ export function refTo<T>(job: API.Job<T>): API.Ref<T> {
   };
 }
 export function refToLastRun<T>(pipeline: string, jobId: string, options: API.RefOptions = {}): API.PipelineRef<T> {
-  identifier("pipeline", pipeline);
-  identifier("job", jobId);
-  if (options.fromAnyRun && options.fromProvenRunAtCommit) throw new Error("a reference reads from any run or from a proven run at its commit, not both");
+
   const ref: API.PipelineRef<T> = {
     pipeline,
     jobId,
@@ -762,7 +724,7 @@ export function refToLastRun<T>(pipeline: string, jobId: string, options: API.Re
     },
     ...(options.fromAnyRun ? { fromAnyRun: true } : {}),
     ...(options.fromProvenRunAtCommit ? { fromProvenRunAtCommit: true } : {}),
-    ...(options.maxAgeMs === undefined ? {} : { maxAgeMs: integer("reference max age", options.maxAgeMs) }),
+    ...(options.maxAgeMs === undefined ? {} : { maxAgeMs: options.maxAgeMs }),
   };
   return Object.freeze(ref);
 }
@@ -777,7 +739,7 @@ async function tryReference<T>(read: () => Promise<T | undefined>): Promise<T | 
 
 const registry = new Map<string, API.PipelineDef>();
 export function definePipeline(definition: API.PipelineDef): API.PipelineDef {
-  identifier("pipeline", definition.name);
+
   if (registry.has(definition.name)) throw new Error(`pipeline ${definition.name} is already defined`);
   registry.set(definition.name, definition);
   return definition;

@@ -115,7 +115,7 @@ func callService(t *testing.T, routes *serviceRegistrar, authorized capability.A
 
 func TestProcessServicesAcknowledgeMaskAndPreserveBoundRecords(t *testing.T) {
 	routes, service, auth := serviceFixture(t)
-	if len(routes.endpoints) != 11 {
+	if len(routes.endpoints) != 12 {
 		t.Fatal("missing node service route")
 	}
 	out, err := callService(t, routes, auth, "/node/v1/masks", `{"value":"credential"}`)

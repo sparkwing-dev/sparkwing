@@ -107,7 +107,7 @@ func TestRaceTouchedPassesWhenNoGoFileChanged(t *testing.T) {
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 
-	if err := runRaceTouched(context.Background(), gateAffected, nil); err != nil {
+	if err := runRaceTouched(commandTestContext(t), gateAffected, nil); err != nil {
 		t.Fatalf("race-touched failed with nothing changed: %v", err)
 	}
 }
@@ -122,7 +122,7 @@ func TestRaceTouchedRunsTheRaceDetectorOnTheChangedPackage(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "racy_test.go"), racyTest)
 	gitAddAll(t, root)
 
-	err := runRaceTouched(context.Background(), gateAffected, nil)
+	err := runRaceTouched(commandTestContext(t), gateAffected, nil)
 	if err == nil {
 		t.Fatal("race-touched passed a package whose test races")
 	}
@@ -141,7 +141,7 @@ func TestSlowIntegration(t *testing.T) {
 }
 `)
 	gitCommitAll(t, root, "base")
-	if err := runAffectedRaceModules(context.Background(), map[string][]string{".": {"./internal"}}); err != nil {
+	if err := runAffectedRaceModules(commandTestContext(t), map[string][]string{".": {"./internal"}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -275,7 +275,7 @@ func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) { check(t) 
 func TestRetryHistoryTraversesLongChainsAndCycles(t *testing.T) { check(t) }
 `, raceTouchedPackageTimeout, filepath.Join(root, "internal", "ordinary-complete"), pkg, barrier.URL))
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(commandTestContext(t), 2*time.Minute)
 	defer cancel()
 	if err := raceModules(ctx, map[string][]string{".": append(slices.Clone(packages), "./internal/ordinary")}, t.TempDir(), t.TempDir(), nil); err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestRetryHistoryTraversesLongChainsAndCycles(t *testing.T) { check(t) }
 		}
 	}
 	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "race_test.go"), strings.Replace(racyTest, "package internal", "package shardtests", 1))
-	if err := raceModules(t.Context(), map[string][]string{".": {"./internal/nodehost"}}, t.TempDir(), t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "race shard") {
+	if err := raceModules(commandTestContext(t), map[string][]string{".": {"./internal/nodehost"}}, t.TempDir(), t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "race shard") {
 		t.Fatalf("racing shard=%v, want shard failure", err)
 	}
 }
@@ -362,7 +362,7 @@ func TestB(t *testing.T) { get(t, "/release") }
 `, barrier.URL))
 	ready := make(chan struct{})
 	done := make(chan error, 1)
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(commandTestContext(t), 2*time.Minute)
 	defer cancel()
 	go func() {
 		done <- runRaceShardsAtHome(ctx, t.TempDir(), ".", []racePackagePlan{{pkg: "./grow", shardCount: 2}}, raceWorkers{initial: 1, extra: 1, ready: ready}, gateRaceShardArgs)

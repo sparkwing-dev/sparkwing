@@ -177,7 +177,7 @@ func unregisteredPipeline(err error) bool {
 
 func TestPreCommitGofmtJudgesOnlyTheChange(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := commandTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, "internal", "legacy.go"),
 		"package internal\nfunc  Legacy( )  int { return 1 }\n")
@@ -234,7 +234,7 @@ func manyGoFiles(t *testing.T, root string) scopeFunc {
 
 func TestGofmtJudgesAChangeTooLargeForOneCommandLine(t *testing.T) {
 	root := gateFixtureRepo(t)
-	err := gofmtOverScope(context.Background(), manyGoFiles(t, root))
+	err := gofmtOverScope(commandTestContext(t), manyGoFiles(t, root))
 	if err == nil || !strings.Contains(err.Error(), "files need formatting") ||
 		!strings.Contains(err.Error(), "zz_unformatted.go") || strings.Contains(err.Error(), "sound_file_with_a_long_name") {
 		t.Fatalf("gofmt over a large change = %.300v, want it to name only zz_unformatted.go", err)
@@ -255,7 +255,7 @@ func TestFormattersJudgeAChangeTooLargeForOneCommandLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	err := formattersOverScope(context.Background(), manyGoFiles(t, root))
+	err := formattersOverScope(commandTestContext(t), manyGoFiles(t, root))
 	if err == nil || !strings.Contains(err.Error(), "do not match the configured formatters") ||
 		!strings.Contains(err.Error(), "zz_unformatted.go") || strings.Contains(err.Error(), "sound_file_with_a_long_name") {
 		t.Fatalf("formatters over a large change = %.300v, want them to name only zz_unformatted.go", err)

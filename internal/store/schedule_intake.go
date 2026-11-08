@@ -154,7 +154,11 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 
 	input.Team, input.Pipeline, input.Origin = string(t.team), schedule.Pipeline, runspec.OriginSchedule
 	input.RequestedArgs = schedule.Effective().Args
-	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input, SourceCredentialVerified: input.SourceCredentialVerified, UnverifiedReason: input.SourceUnverifiedReason, Intent: &intent}
+	// safety: the controller's source policy reads an App schedule's default-branch placement at fire time; it
+	// travels only on the server-side intake request.
+	placement := input.Placement
+	input.Placement = nil
+	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input, SourceCredentialVerified: input.SourceCredentialVerified, UnverifiedReason: input.SourceUnverifiedReason, Intent: &intent, RepositoryPlacement: placement}
 	request.Request.SourceCredentialVerified = false
 	request.Request.SourceUnverifiedReason = ""
 	var result AdmissionResult

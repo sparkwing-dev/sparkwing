@@ -25,7 +25,7 @@ func fakeSDK(t *testing.T, body string) (bin, requests string) {
 	bin, requests = filepath.Join(dir, "pipeline"), filepath.Join(dir, "requests")
 	script := "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --sw-node-protocol ] || exit 9\n" +
 		"read -r line <&3\n" +
-		"printf '%s\\n' '{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":2,\"sdk\":{\"language\":\"go\",\"version\":\"fixture\"},\"features\":[]}}' >&4\n" +
+		"printf '%s\\n' '{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":2,\"sdk\":{\"language\":\"go\",\"version\":\"fixture\"}}}' >&4\n" +
 		"read -r line <&3\nprintf '%s\\n' \"$line\" > " + requests + "\n" + body + "\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)

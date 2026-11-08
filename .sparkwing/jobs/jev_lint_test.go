@@ -86,7 +86,7 @@ func TestJevLintRefusesUntrackedSymlinkBeforeBuildingTypeSafeRequest(t *testing.
 	if err := os.Symlink(private, filepath.Join(root, "linked.go")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	change, err := collectJevLintChange(t.Context(), root, "HEAD", []string{"linked.go"}, []string{"linked.go"})
+	change, err := collectJevLintChange(commandTestContext(t), root, "HEAD", []string{"linked.go"}, []string{"linked.go"})
 	if err == nil {
 		if change != nil && strings.Contains(newJevLintChangeRequest(*change).State.Change.Diff, "fake private marker") {
 			t.Fatal("private source outside checkout would enter a TypeSafe request")

@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ func TestCloudGateFetchesTheExactPublicBaseForAParentlessSnapshot(t *testing.T) 
 	writeGoFile(t, filepath.Join(snapshot, "HISTORY.md"), "old "+trackerID+"\n")
 	writeGoFile(t, filepath.Join(snapshot, "changed.go"), "package fixture\n\nfunc Changed() {}\n")
 	gitCommitAll(t, snapshot, "uploaded")
-	ctx := context.Background()
+	ctx := commandTestContext(t)
 	if err := fetchGateBase(ctx, origin, base); err != nil {
 		t.Fatal(err)
 	}
@@ -48,20 +47,10 @@ func TestCloudGatePreparesTheBaselineInEveryJobWorkspace(t *testing.T) {
 		t.Fatalf("missing gate jobs: %+v", doc.Jobs)
 	}
 	for _, job := range doc.Jobs {
-
-		if (job.ID == "gate" || job.ID == "race-touched" || job.ID == policyJobID) && (job.Cores == nil || *job.Cores != overlappedGoSuiteCPUs) {
+		if (job.ID == "gate" || job.ID == "race-touched") && (job.Cores == nil || *job.Cores != overlappedGoSuiteCPUs) {
 			t.Fatalf("%s lost its hosted four-core allocation: %+v", job.ID, job.Cores)
 		}
-		want := 2
-		if job.ID == recordTreeJob {
-			want = 1
-		} else if len(job.Caches) != 3 {
-			t.Fatalf("%s has no tool, Go build and module caches: %+v", job.ID, job.Caches)
-		}
-		if job.ID == "race-touched" && job.Caches[1].Path == gateGoCachePath {
-			t.Fatal("race uses the immutable non-race policy seed")
-		}
-		if len(job.Closures.BeforeRun) != want {
+		if len(job.Closures.BeforeRun) != 1 {
 			t.Fatalf("%s has no baseline preparation: %+v", job.ID, job.Closures)
 		}
 	}

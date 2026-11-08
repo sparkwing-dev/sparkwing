@@ -63,7 +63,7 @@ func TestLocalAwardProcess(t *testing.T) {
 			if binding == nil || binding.JobID == "" || !strings.HasPrefix(binding.Routes.Bearer, capability.NodeHostPrefix) {
 				t.Fatal("process did not receive its node-host credential")
 			}
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.2.3"}, Features: []string{}}
+			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.2.3"}}
 		case nodeproto.OpPlan:
 			result = localAwardPlan()
 		case nodeproto.OpRunStep:
