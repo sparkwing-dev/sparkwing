@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -271,7 +270,7 @@ func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeprot
 	if req.Op == nodeproto.OpPlan || req.Op == nodeproto.OpDescribe {
 		services.binding = nil
 	}
-	if services.binding != nil && runtime.GOOS != "windows" {
+	if services.binding != nil {
 		ctx = WithHostExec(ctx, s.hostExec)
 	}
 	ctx = s.cfg.Operations.Context(ctx, rc, *s.hello.Runner, services)
