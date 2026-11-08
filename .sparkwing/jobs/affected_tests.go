@@ -294,10 +294,15 @@ func planAffectedTests(module string, modules, files []string, packages []module
 			p.whole, p.reason = true, why
 			continue
 		}
-		if pkg := owningPackage(rel, byDir); pkg != "" {
+		pkg := owningPackage(rel, byDir)
+		if strings.HasSuffix(rel, ".go") && !isTestdataPath(rel) {
+			pkg = byDir[path.Dir(rel)]
+			if pkg == "" {
+				p.whole, p.reason = true, "a changed Go file no longer has a package"
+			}
+		}
+		if pkg != "" {
 			changed[pkg] = true
-		} else if strings.HasSuffix(rel, ".go") {
-			p.whole, p.reason = true, "a changed Go file no longer has a package"
 		}
 	}
 	// safety: test imports count too, because a package can exercise another

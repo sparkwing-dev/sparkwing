@@ -186,11 +186,14 @@ pipeline binary's source key walks and removed with the worktree. A cache
 shared between trees replays findings under the other tree's paths, so it is
 never shared.
 
-The gate's `lint` step allows ten minutes (decision 96; both modules measure
+The full gate's `lint` step allows ten minutes (decision 96; both modules measure
 four to five minutes under load). It runs golangci-lint with
 `--allow-serial-runners`, so a neighbor's lint queues it on golangci-lint's own
 lock, `$TMPDIR/golangci-lint.lock`, and that wait counts against the ten
 minutes (Korey, 2026-11-04, replacing the gate's own lock manager).
+Affected landing lint keeps all configured linters, uses bounded workers and
+its private worktree cache, and passes `--allow-parallel-runners` to avoid
+queueing behind a full scan.
 
 When the lint step fails with "no result after" its deadline, look for the
 neighboring run with `ps -eo pid,etime,args | grep '[g]olangci-lint'`. Rerun
@@ -781,7 +784,10 @@ file. Other syntax and workflow checks remain active.
   `TestRepositoryUnreleasedSectionDeclaresEveryWireCut`, because the release
   wire-cut check reads the protocol and API surfaces outside its package.
   Lint starts independently of the test step because it has no test-result
-  dependency. Its lint step lints only the packages holding changed Go
+  dependency. Affected lint runs the full configured linter set with bounded
+  workers and its existing checkout cache, without waiting on the global
+  serial-runner lock. Full lint still waits for that lock. The real lint
+  integration fixture stays in the full test class. Its lint step lints only the packages holding changed Go
   files (every package when `go.mod`, `go.sum` or `.golangci.yml` changed),
   since `--new-from-rev` drops findings outside the change anyway. With
   `--full`, race tests cover every package but `internal/store` and the
@@ -789,8 +795,8 @@ file. Other syntax and workflow checks remain active.
   producer's `origin/main`. The broad job's 70-minute deadline already allows
   the full Go suite and the 30-minute PostgreSQL limit; hosted CI runs the race
   job without `--full` for pushes and pull requests, so it runs the fast race
-  class on touched packages. Nightly and dispatched race lanes pass `--full`
-  to retain long race tests across every package except the deferred store.
+  class on touched packages. Local post-deploy scans pass `--full` to retain long race tests across
+  every package except the deferred store.
   Affected race runs use the stable private test home and native Go test cache,
   without `-count=1`. Full race runs keep the uncached shard path. The Go build
   cache already survives runs, and hosted jobs restore and save it through

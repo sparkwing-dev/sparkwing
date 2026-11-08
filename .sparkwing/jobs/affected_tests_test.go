@@ -317,9 +317,9 @@ func TestAffectedBuildSkipsPackagesContainingOnlyTests(t *testing.T) {
 }
 
 func TestAffectedPackageDeletionKeepsItsImportersChecked(t *testing.T) {
-	packages := []modulePackage{{importPath: "m/reader", dir: "reader", imports: []string{"m/deleted"}, hasGo: true}}
+	packages := []modulePackage{{importPath: "m", dir: ".", hasGo: true}, {importPath: "m/reader", dir: "reader", imports: []string{"m/deleted"}, hasGo: true}}
 	p := planAffectedTests(".", []string{"."}, []string{"deleted/source.go"}, packages, nil)
-	if !p.whole || !slices.Equal(p.packages, []string{"m/reader"}) || !slices.Equal(p.buildPackages, []string{"m/reader"}) {
+	if !p.whole || !slices.Equal(p.packages, []string{"m", "m/reader"}) || !slices.Equal(p.buildPackages, p.packages) {
 		t.Fatalf("deleted package plan = %+v, want its remaining module checked", p)
 	}
 }

@@ -236,12 +236,7 @@ jobs:
 
       - name: Run canonical touched-package race
         if: matrix.gate == 'race-touched'
-        run: |
-          race_args=()
-          if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            race_args=(-- --full)
-          fi
-          "$RUNNER_TEMP/sparkwing" run gate --sw-only race-touched --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" "${race_args[@]}"
+        run: '"$RUNNER_TEMP/sparkwing" run gate --sw-only race-touched --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"'
 
       - name: Run canonical pre-release
         if: matrix.gate == 'pre-release'

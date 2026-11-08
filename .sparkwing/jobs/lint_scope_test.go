@@ -106,6 +106,9 @@ func TestLintCoversEveryCommittedModule(t *testing.T) {
 }
 
 func TestLintJudgesAllFilesWhenTheBaselineRefIsMissing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: real lint integration runs in full scans")
+	}
 	root := lintFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, ".golangci.yml"), lintBaselineFixtureConfig)
 	writeGoFile(t, filepath.Join(root, "internal", "bad.go"), ineffassignViolation("internal"))
