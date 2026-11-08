@@ -508,6 +508,18 @@ is a token for its target fixture team with permission to start and observe the
 example and read its logs. Missing prerequisites report that the scan could not
 run, rather than clearing prior Bitwing findings.
 
+Each target team must own a GitHub App installation covering
+`sparkwing-dev/sparkwing`, because the scan submits a repository-backed example.
+A token that can authenticate but belongs to an unrelated QA team cannot submit
+that source. An installation belongs to one team. Keep the source-owning team's
+installation bound there when repairing a fixture's access.
+
+Replace an ended scan credential in its existing target team, retaining
+`runs.read,logs.read,runs.write`, and save it under the same repository and
+`deploy` pipeline scope above. Create it from a signed-in account session. A token
+delegated from another token cannot outlive its parent. Record the replacement's
+expiry and verify authentication and repository access before the next scan.
+
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed
 production deploy or smoke reverts this run's GitOps commits, launcher first, only if the schema
