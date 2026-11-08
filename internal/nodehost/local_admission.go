@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -147,6 +148,9 @@ func observeAdmissionProcess(ctx context.Context, pid int) error {
 }
 
 func localAdmissionFailure(err error) error {
+	if errors.Is(err, context.Canceled) && waitFailure(err, context.Canceled) == nil {
+		return &admissionFailure{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled), Err: err}
+	}
 	var refused *wingdclient.AdmissionError
 	if errors.As(err, &refused) {
 		switch refused.Policy {
