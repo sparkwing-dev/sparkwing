@@ -179,6 +179,7 @@ type protocolSession struct {
 	commandSessions           []*commandSession
 	execSeq                   uint64
 	commands                  sync.WaitGroup
+	measureCommand            func(context.Context, int, string) error
 }
 
 var errProtocolSessionClosed = errors.New("SDK protocol session closed")
@@ -244,7 +245,7 @@ func startProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 		return nil, fmt.Errorf("start SDK process: %w", err)
 	}
 	logCtx, stopLogs := context.WithCancel(context.WithoutCancel(ctx))
-	s := &protocolSession{cfg: cfg, cmd: cmd, process: process, requests: parent[0], reads: parent[1:], pending: make(map[string]protocolCall), done: make(chan struct{}), joined: make(chan struct{}), framesDone: make(chan struct{}), logCtx: logCtx, stopLogs: stopLogs, executionCtx: lease.ExecutionContext(ctx)}
+	s := &protocolSession{cfg: cfg, cmd: cmd, process: process, requests: parent[0], reads: parent[1:], pending: make(map[string]protocolCall), done: make(chan struct{}), joined: make(chan struct{}), framesDone: make(chan struct{}), logCtx: logCtx, stopLogs: stopLogs, executionCtx: lease.ExecutionContext(ctx), measureCommand: commandMeasurement(ctx)}
 	cfg.output.mu.Lock()
 	cfg.output.fail = s.failProtocol
 	cfg.output.mu.Unlock()

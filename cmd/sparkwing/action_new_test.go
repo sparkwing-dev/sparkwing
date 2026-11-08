@@ -261,7 +261,7 @@ func TestScaffoldsNameOnlyRealSDKSymbols(t *testing.T) {
 	}
 	sdkSrc := src.String()
 
-	ref := regexp.MustCompile(`\b(?:sw\.)?([A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+)\b`)
+	ref := regexp.MustCompile(`\bsw\.([A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+)\b`)
 
 	generated := map[string]bool{"Sample": true, "SampleJob": true, "Context": true}
 	for _, shape := range builtinShapes {

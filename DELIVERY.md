@@ -23,7 +23,8 @@ sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate
 sparkwing run land --sw-allow-risk destructive,prod                         # land on main
 ```
 
-To keep the heavy checks off the developer's machine, use the `cloud` profile
+Our lands run on our own desktop hardware. Cloud is reserved for checks that
+prove Cloud itself. For an explicit Cloud-only check, use the `cloud` profile
 for team `korey-gam`:
 
 ```bash
@@ -102,7 +103,7 @@ push, the step fetches main and checks its ancestry. It merges main only when
 main is not an ancestor of the pushed commit. Otherwise it preserves the
 remote's reason and says the push can be retried. The job's output is the
 landing record (branch, the commit and tree pushed, the gated tree, base,
-merges, gate run, review record path and result). The gate's `test` step summary lists the slowest packages and tests.
+merges, gate run, review record path and result). The gate's `test` step reports the affected package count and critical tests.
 
 When `origin/main` is not an ancestor of HEAD at push time, the `push` step
 merges it into the branch in the checkout (`git merge --no-ff`, the default
@@ -129,6 +130,7 @@ landing record names both.
 A release is a tag push. The `release` pipeline resolves the version, renames
 `## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
 checks the section covers any schema or wire change since the previous tag,
+aligns scaffold and pipeline SDK pins to the chosen version with local replacements,
 then commits and atomically pushes that commit to `main` with an annotated
 `vX.Y.Z` tag. Run it from the sparkwing checkout under a temporary home,
 which the pipeline requires so a
@@ -185,11 +187,14 @@ pipeline binary's source key walks and removed with the worktree. A cache
 shared between trees replays findings under the other tree's paths, so it is
 never shared.
 
-The gate's `lint` step allows ten minutes (decision 96; both modules measure
+The full gate's `lint` step allows ten minutes (decision 96; both modules measure
 four to five minutes under load). It runs golangci-lint with
 `--allow-serial-runners`, so a neighbor's lint queues it on golangci-lint's own
 lock, `$TMPDIR/golangci-lint.lock`, and that wait counts against the ten
 minutes (Korey, 2026-11-04, replacing the gate's own lock manager).
+Affected landing lint keeps all configured linters, uses bounded workers and
+its private worktree cache, and passes `--allow-parallel-runners` to avoid
+queueing behind a full scan.
 
 When the lint step fails with "no result after" its deadline, look for the
 neighboring run with `ps -eo pid,etime,args | grep '[g]olangci-lint'`. Rerun
@@ -220,6 +225,10 @@ module proxy can already serve the immutable tag. A skipped follow-up surfaces
 only at the next cut, whose `version-freshness` step refuses with "scaffold
 fallback pin ... is behind latest release"; the fix then is this same command
 and a land before the cut, which is how v0.69.0 found v0.68.7's missing pin.
+
+The scaffold fallback refuses pins ahead of the local release tags unless
+the exact tag exists on origin. This also verifies hosted release fixtures
+whose selected release tag was removed locally.
 
 The local release pipeline ends at the tag push because the new module must
 exist before the pins can resolve it. Pre-release leaves the tag's own commit
@@ -490,8 +499,10 @@ fails with its reference and a repair hint. Reusing published candidate images n
 `staging-deploy` pins the
 digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
-same for the launcher with every other chart change. `staging-gate` starts `example` and the
-`sparkwing-ci-smoke` reference pipeline before waiting for both on staging Cloud. `production`
+same for the launcher with every other chart change. Each GitOps push requests a hard
+Argo refresh before waiting, requiring patch permission on the named Application.
+`staging-gate` starts `deploy-smoke` and the `sparkwing-ci-smoke` reference pipeline
+before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
 `deploy-smoke` once in the production team that owns the source repository installation, using
 the existing `/kikd-prod/sparkwing/deploy/scan-submit-token` (one NodeClaim, no controller or launcher
@@ -506,6 +517,23 @@ The deploy takes no deploy-time snapshot. Recovery is RDS point-in-time recovery
 a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before a risky
 migration. Checking that automated backups are on belongs to external verification through
 stormwing, not the deploy. The deploy role has no RDS permission.
+
+After a successful staging gate or production smoke, the deploy starts a detached child
+`deploy-scan` at the deployed commit and digests using `sparkwing.StartChild`.
+The child inherits verified-default provenance from the deploy, so the existing
+runner trust policy and repository-scoped scan secrets apply; it is exempt from
+the parent-completion child sweep. No manual trigger token is needed. The scan runs the full `example`
+and records its result in the runner user's normal Bitwing ledger. Promotion does
+not wait for it, and its environment-specific concurrency group is separate from
+the deploy group. Bitwing must be installed on that user's PATH. The scan also
+requires the runner label and trust conditions documented below.
+
+The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
+Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
+repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
+is a token for its target fixture team with permission to start and observe the
+example and read its logs. Missing prerequisites report that the scan could not
+run, rather than clearing prior Bitwing findings.
 
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed
@@ -751,33 +779,54 @@ file. Other syntax and workflow checks remain active.
   runs the `policy` job first; on a fresh runner its first compile of the
   checkers and the CLI is the cost. `sparkwing run gate` runs the policy job,
   then both jobs, locally. There
-  both keep the one-core admission charge while running half the machine's
-  cores, overcommitting like fixed runner slots; local admission counts their
+  both keep the one-core admission charge while running half the runtime's
+  CPU budget (the smaller of the machine CPU count and `GOMAXPROCS`), overcommitting like fixed runner slots; local admission counts their
   CPU as Sparkwing load, not external. The `preconditions`, `review`,
   `record-tree` and `land` jobs declare a quarter core (`Cores(0.25)`), so they
   start beside running gates instead of queueing behind them. A simulation of
   six concurrent lands found declaring 4 or 6 cores for the gate pair slower
   than this under external load.
-  Without
-  `--full` its test step runs the changed packages (importers still build and
-  vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
-  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. A
+  Without `--full`, vet and build cover the affected dependency closure. Its test step
+  runs `go test -short` on changed packages
+  and their reverse dependency closure, including production, internal-test
+  and external-test imports. The critical set runs separately without
+  `-short`, including critical tests in affected packages. A `go.mod` or
+  `go.sum` change runs its whole module's fast class and critical set.
+  A store schema change selects `internal/store` and its importers.
+  Long integration bodies guarded by `testing.Short()` and the PostgreSQL
+  suite run after deploy on our hardware with
+  `sparkwing run gate --sw-route local -- --full`, and remain in full nightly
+  and pre-release checks. The deploy scan trigger must invoke that command
+  outside the land and deploy critical paths. A
   file outside every package runs the packages whose tests read it, from the
   `nonPackageReaders` table in `.sparkwing/jobs/affected_tests.go` (`.github/`
   and `bin/` run `.sparkwing/jobs`, `docs/` runs `internal/doccheck` and
-  `cmd/sparkwing`, and so on); `CHANGELOG.md` is left to the docs-mirror and
-  changelog steps. Changes under `pkg/wingwire/`, `internal/controllerwire/`,
+  `cmd/sparkwing`, and so on); `CHANGELOG.md` and generated `pkg/docs/` Markdown and schema mirrors stay with the docs-mirror
+  and changelog steps. File readers select their own tests without charging
+  importers whose code did not change. Changes under `pkg/wingwire/`, `internal/controllerwire/`,
   `internal/apispec/` or `api/` also run `.sparkwing/jobs`, including
   `TestRepositoryUnreleasedSectionDeclaresEveryWireCut`, because the release
   wire-cut check reads the protocol and API surfaces outside its package.
-  Its lint step lints only the packages holding changed Go
+  Lint starts independently of the test step because it has no test-result
+  dependency. Affected lint runs the full configured linter set with bounded
+  workers and its existing checkout cache, without waiting on the global
+  serial-runner lock. Full lint still waits for that lock. The real lint
+  integration fixture stays in the full test class. Fixture-module dependency
+  changes do not widen product lint. Its lint step lints only the packages holding changed Go
   files (every package when `go.mod`, `go.sum` or `.golangci.yml` changed),
   since `--new-from-rev` drops findings outside the change anyway. With
   `--full`, race tests cover every package but `internal/store` and the
   PostgreSQL suite always runs, so a full pass does not depend on the
   producer's `origin/main`. The broad job's 70-minute deadline already allows
   the full Go suite and the 30-minute PostgreSQL limit; hosted CI runs the race
-  job without `--full`, so its touched-package budget is unchanged. After
+  job without `--full` for pushes and pull requests, so it runs the fast race
+  class on touched packages. Local post-deploy scans pass `--full` to retain long race tests across
+  every package except the deferred store.
+  Affected race runs use the stable private test home and native Go test cache,
+  without `-count=1`. Full race runs keep the uncached shard path. The Go build
+  cache already survives runs, and hosted jobs restore and save it through
+  their existing cache steps. No successful policy or review check is skipped
+  by a package cache hit. After
   both jobs run and pass on a clean checkout, `record-tree` outputs HEAD's tree, the
   `.sparkwing` definition fingerprint, the mode and the engine version. Each
   gate job reads that output through a `sw.FromProvenRunAtCommit()` reference
@@ -963,8 +1012,8 @@ file. Other syntax and workflow checks remain active.
   real-store risk-admission test that requires
   an unapproved submission to leave the queue empty. First-run compilation,
   ref selection and pinned-binary risk fixtures remain in the full class.
-  `gate` runs the suite without `-short`, which is where every guarded test is
-  still judged. On 2026-10-29, with the cut's `GOMAXPROCS=7 -p 7` on a shared
+  `gate -- --full` runs the suite without `-short`, which is where every
+  guarded test is still judged. Affected landing gates use the short class. On 2026-10-29, with the cut's `GOMAXPROCS=7 -p 7` on a shared
   16-core host at load 9 to 15, `cmd/sparkwing`, `internal/controller` and
   `internal/store` took 241 s, 832 s and 617 s under `-short`, two of them past
   Go's ten-minute package limit. The tests that measured 1 s or more there
@@ -1616,6 +1665,10 @@ file. Other syntax and workflow checks remain active.
   the committed SDK source from HEAD and rewrites that replace inside the
   uploaded repository so runner compilation needs no caller checkout.
 
+The hosted canonical gate installs `sdk/typescript` dependencies with
+`npm ci --ignore-scripts` before Go tests, because the native protocol and
+conformance tests compile the TypeScript SDK. Local runs need the same install.
+
 ## Decisions before landing
 
 - **Review:** use an independent reviewer for public SDK/CLI contracts, cache or
@@ -1677,6 +1730,84 @@ file. Other syntax and workflow checks remain active.
   be built at the same store schema as the real one. Verify SDK,
   templates, integrations, browser behavior, or release assets when those
   surfaces changed.
+
+## Weekly SDK and CLI delivery
+
+`weekly-release` runs Monday at 09:00 America/Denver. It clones origin/main,
+skips when `[Unreleased]` has no entries, and requires the latest push run of
+`ci.yaml` at the selected commit to have completed successfully. It then runs
+the existing `release` pipeline in that private checkout with its own
+`SPARKWING_HOME`. The exact-source green CI receipt supplies verification evidence. Under the
+pre-launch desktop-load waiver, the scheduled cut starts at `version-freshness`
+and keeps the release-specific guards; it skips the broader release build,
+lint and short-suite steps. Incremental push CI is not full-suite evidence. Its default minor bump stays on v0.x. Release cuts are
+pre-approved. The scheduled entrypoint supplies the cut's
+`--sw-allow-risk destructive,prod` authorization.
+
+The cut retains its changelog, migration-guide, schema, wire and release-cut
+checks. It prepares the scaffold fallback, API snapshot and both pipeline module pins
+for the chosen version using their local SDK replacements. It commits only the
+prepared notes and pin paths with `--no-verify` after the gates pass, then
+atomically pushes main and the tag.
+That tag makes the Go SDK module available and starts the existing
+`.github/workflows/release.yaml` publication steps for signed CLI binaries,
+images and the TypeScript package. Before cutting, the weekly pipeline starts
+or resumes the Bitwing `sparkwing-release` workflow using the version as its
+idempotency key. It records the cut's immutable tag and commit in a blocked
+`cut` handoff. The release owner resumes with `bitwing workflow next --run WR-N`
+to confirm hosted publication, publish matching sparkwing-product docs, verify
+production through kikd-infra, and reconcile downstream pins. The checklist
+stays open until every required step has evidence. A failed cut retains the
+private checkout at the path printed in its job log.
+
+Run the same path sooner, or preview the cut:
+
+```sh
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release -- --bump patch
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release -- --version v0.70.0
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release --sw-dry-run
+```
+
+`owned-sdk-main` runs daily at 08:00 America/Denver. It resolves green
+Sparkwing main to an exact v0 Go module version. For each eligible repository,
+it sets both the SDK requirement and a versioned replacement to that version,
+tidies the pipeline module, commits only its go.mod and go.sum, and invokes
+`xwing env land`. The replacement lets development pipelines use the installed
+host without requesting an unpublished signed engine release.
+
+Eligible repos are immediate children of `~/code` with a Go pipeline module,
+a GitHub origin owned by `koreyGambill` or `sparkwing-dev`, and an Xwing policy
+with `landing.branch: main` and a verification command. Pull-request policies
+and Sparkwing itself are excluded. Xwing applies the repo's committed landing
+policy and verification. An unchanged main pin is skipped. A retained candidate
+that already has the target pin still retries landing and its verification. A failed update retains
+its Xwing environment for repair, while the pipeline tries the remaining repos
+and reports all failures. TypeScript repos keep their published SDK pins and
+can use `sparkwing pipeline upgrade` after a release.
+
+```sh
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main --sw-dry-run -- --repos-root "$HOME/code"
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main -- --repos-root "$HOME/code"
+```
+
+Arm both declarations from the main checkout on a host with Git push access,
+GitHub CLI authentication for CI reads, Go, Bitwing, Xwing and Sparkwing on PATH:
+
+```sh
+export SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery"
+export SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/secrets.key"
+sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-release/weekly-sdk-cli,owned-sdk-main/owned-sdk-main --unpinned
+sparkwing schedules list
+```
+
+The dedicated state directory keeps release work out of the operational runs
+store. The private key-file provider also works on headless hosts. Use those
+same exports for manual runs. Keep HOME at the operator's home so Git signing and GitHub authentication
+remain available. Sparkwing owns cadence and overlap handling through its
+schedule evaluator and managed timer. `--unpinned` compiles the main checkout
+on each fire so later pipeline fixes take effect. This installation command
+selects only these schedules and preserves other installed schedules.
 
 ## Release failure policy
 

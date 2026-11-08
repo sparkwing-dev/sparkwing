@@ -51,6 +51,44 @@ var schemaUpgrades = []schemaUpgrade{
 		from: 33, release: "schema 33", digest: "b4ac52448bafd4ea378d1ed2e1d9aec0c610d3a5e27df4a7a780c178f425a47b",
 		statements: []string{`CREATE INDEX idx_runs_live_children ON runs(team,id) WHERE parent_run_id <> '' AND status IN ('pending','running')`},
 	},
+	{
+		from: 34, release: "schema 34", digest: "187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012",
+		statements: []string{`CREATE TABLE github_actions_approvals (
+    team TEXT NOT NULL,
+    repository_id BIGINT NOT NULL,
+    workflow TEXT NOT NULL,
+    runner TEXT NOT NULL,
+    workflow_ref TEXT NOT NULL,
+    approval_id TEXT NOT NULL UNIQUE,
+    PRIMARY KEY(team,repository_id,workflow,runner),
+    FOREIGN KEY(team,repository_id) REFERENCES github_runner_bindings(team,repository_id) ON DELETE CASCADE
+)`, `CREATE TABLE github_actions_dispatches (
+    receipt TEXT NOT NULL PRIMARY KEY,
+    team TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    queue_started_at BIGINT NOT NULL,
+    generation BIGINT NOT NULL,
+    approval_id TEXT NOT NULL,
+    installation_id BIGINT NOT NULL,
+    repository_id BIGINT NOT NULL,
+    repository_owner_id BIGINT NOT NULL,
+    repository TEXT NOT NULL,
+    workflow TEXT NOT NULL,
+    workflow_ref TEXT NOT NULL,
+    workflow_sha TEXT NOT NULL DEFAULT '',
+    runner TEXT NOT NULL,
+    policy_revision TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('requested','sending','accepted','refused','uncertain','cancelled')),
+    reason TEXT NOT NULL DEFAULT '',
+    send_until BIGINT NOT NULL DEFAULT 0,
+    provider_run_id TEXT NOT NULL DEFAULT '',
+    provider_attempt TEXT NOT NULL DEFAULT '',
+    cancel_sent BIGINT NOT NULL DEFAULT 0,
+    UNIQUE(team,run_id,node_id,queue_started_at,generation),
+    FOREIGN KEY(team,run_id,node_id) REFERENCES nodes(team,run_id,node_id) ON DELETE CASCADE
+)`, `CREATE INDEX idx_actions_dispatch_sender ON github_actions_dispatches(state,send_until) WHERE state IN ('requested','sending')`, `CREATE INDEX idx_actions_dispatch_live ON github_actions_dispatches(state) WHERE state<>'cancelled'`, `CREATE INDEX idx_actions_dispatch_cancellation ON github_actions_dispatches(state,cancel_sent) WHERE provider_run_id<>''`},
+	},
 }
 
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {

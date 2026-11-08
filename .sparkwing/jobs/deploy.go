@@ -31,13 +31,13 @@ func (Deploy) ShortHelp() string {
 func (Deploy) Help() string {
 	return "Turns the Sparkwing Cloud deploy lanes into one DAG. build-images builds linux/amd64 and linux/arm64 binaries with bin/build-release-target.sh and appends them to the runtime bases with publish-images, " +
 		"reusing images an earlier run already published for the same commit. staging-deploy and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
-		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate runs the example pipeline and the sparkwing-ci-smoke reference pipeline on staging Cloud. " +
+		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate runs deploy-smoke with a child run and the hello reference pipeline on staging Cloud. " +
 		"production requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in the " +
 		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs after both rollouts complete. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
 		"Take a manual snapshot before a risky migration. Each environment's deployed and previous digests are that job's output. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Every deploy job refuses a commit that is no longer the tip of origin/main, and " +
-		"production refuses a version below the one it runs, so retrying an old run cannot roll production back."
+		"production refuses a version below the one it runs, so retrying an old run cannot roll production back. After each successful environment smoke, deploy starts a detached deploy-scan child at the same revision and with the same verified lineage and links it in the job summary without awaiting it. Scans use their own concurrency group, leaving the deploy slot free when promotion finishes. Scan failures upsert a stable per-environment Bitwing finding; a clean scan resolves it. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. Bitwing resolves from the runner user's PATH and uses their existing ledger configuration; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
 }
 
 func (Deploy) Examples() []sparkwing.Example {
@@ -95,13 +95,13 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 		staging := sparkwing.Job(plan, "staging-deploy", &deployStagingJob{Job: base.named("staging-deploy"), Images: images}).
 			Needs(build).Requires(runnerLabels...).Timeout(cfg.stagingBudget())
 		gate = sparkwing.Job(plan, "staging-gate", &deployGateJob{Job: base.named("staging-gate"), Images: images}).
-			Needs(staging).Requires(runnerLabels...).Timeout(cfg.gateBudget())
+			Needs(staging).Requires(runnerLabels...).StartsChildren("deploy-scan").Timeout(cfg.gateBudget())
 		if in.StopAfter == "staging" {
 			return nil
 		}
 	}
 	prod := &deployProductionJob{Job: base.named("production"), Images: images, Gate: sparkwing.RefTo[stagingGateRecord](gate)}
-	sparkwing.Job(plan, "production", prod).Needs(build, gate).Requires(runnerLabels...).Timeout(cfg.productionBudget())
+	sparkwing.Job(plan, "production", prod).Needs(build, gate).Requires(runnerLabels...).StartsChildren("deploy-scan").Timeout(cfg.productionBudget())
 	return nil
 }
 
@@ -311,6 +311,7 @@ func (j *deployProductionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 		rec, err := d.promote(ctx, images)
 		if err == nil {
 			summarizeDeployment(ctx, rec)
+			rec.ScanRun, err = d.submitScan(ctx, d.cfg.Production, images)
 		}
 		return rec, err
 	}), nil
@@ -364,25 +365,26 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 	return rec, fmt.Errorf("production rolled back to controller %s and runner %s: %w", rec.Previous.Controller.Digest, rec.Previous.Launcher.Digest, err)
 }
 
+type DeploySmokeInputs struct {
+	Child bool `flag:"child" desc:"Include a child pipeline and output assertion in the staging smoke."`
+}
+
 type DeploySmoke struct{ sparkwing.Base }
 
 func (DeploySmoke) ShortHelp() string {
-	return "Two-job Cloud smoke the deploy pipeline runs in the production source-owning team"
+	return "Fast Cloud smoke with output assertions and an optional child run"
 }
 
-func (DeploySmoke) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	greet := sparkwing.Job(plan, "greet", func(ctx context.Context) error {
-		sparkwing.Info(ctx, "deploy smoke: greet")
-		return nil
-	})
-	sparkwing.Job(plan, "after", func(ctx context.Context) error {
-		sparkwing.Info(ctx, "deploy smoke: after")
-		return nil
-	}).Needs(greet)
+func (DeploySmoke) Plan(_ context.Context, plan *sparkwing.Plan, in DeploySmokeInputs, _ sparkwing.RunContext) error {
+	greet := sparkwing.Job(plan, "greet", &exampleValue{Value: "example-output-v1", Log: "deploy smoke: greet"})
+	sparkwing.Job(plan, "after", &exampleOutputJob{Source: sparkwing.RefTo[string](greet)}).Needs(greet)
+	if in.Child {
+		sparkwing.Job(plan, "child", weatherCheckFn).Inline().StartsChildren("weather-report").Timeout(5 * time.Minute)
+	}
 	return nil
 }
 
 func init() {
 	sparkwing.Register[DeployArgs]("Deploy", func() sparkwing.Pipeline[DeployArgs] { return &Deploy{} })
-	sparkwing.Register("DeploySmoke", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &DeploySmoke{} })
+	sparkwing.Register("DeploySmoke", func() sparkwing.Pipeline[DeploySmokeInputs] { return &DeploySmoke{} })
 }

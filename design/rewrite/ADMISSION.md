@@ -110,6 +110,11 @@ Job measurements keep CPU baselines separate from stall detection, so a scan of
 shared runner roots cannot shorten a job's measurement interval or alter its average.
 Jobs sharing a runner PID have no individual reading until their job processes
 are registered. Host-root CPU attribution for admission remains unchanged.
+Commands the host runs for the SDK are siblings of the SDK process, not
+descendants, so the host adds each one still running after a second with
+`POST /api/v1/local/admission/requests/{id}/command`. The controller verifies it
+like the root, keeps it in memory only, and sums its process tree into the job's
+reading until the command's leader exits.
 Existing host processes still own job execution and logical claim renewal.
 
 The liveness worker checks recorded execution roots outside the admission lock.
