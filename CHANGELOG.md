@@ -60,6 +60,8 @@ unlock.
 
 ### Fixed
 
+- **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
+
 - **deploy:** production smoke checks controller and launcher logs after both rollouts complete, so recovered startup probe failures do not trigger rollback; warnings and errors after readiness still fail the gate.
 
 - **deploy:** Preserve the candidate commit's origin proof when fetching the previous controller schema from a shallow checkout, so production smoke can submit that candidate.

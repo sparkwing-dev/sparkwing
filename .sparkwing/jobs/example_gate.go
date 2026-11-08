@@ -242,14 +242,7 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	if !in.FailOnce {
 		retry.SkipIf(exampleSkip("pass --fail-once to exercise the expected first-attempt failure"))
 	} else {
-		// safety: a retry carries its source run's request, so the probe learns its attempt only
-		// through the CLI on its own host.
-		retry.SkipIf(func(ctx context.Context) bool {
-			if _, err := exec.LookPath(in.CLI); err != nil {
-				return exampleSkip(fmt.Sprintf("--fail-once needs CLI %q on the probe run's host to observe its own attempt", in.CLI))(ctx)
-			}
-			return false
-		})
+		retry.SkipIf(exampleNeedsCLI(in, rc))
 	}
 	all = append(all, retry)
 	all = append(all, exampleProbe(plan, "cancellation", in, rc, cli, exampleCancelCheck).SkipIf(exampleNeedsCLI(in, rc)))
@@ -510,7 +503,7 @@ func exampleRetryCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.C
 		if detail.Status != "failed" {
 			return fmt.Errorf("failed-only-retry: initial status %s, want failed", detail.Status)
 		}
-		retryID, err := exampleCLI(ctx, in, "runs", "retry", "--run", run.id, "--failed", "--profile="+in.APIProfile, "-o", "plain")
+		retryID, err := exampleCLI(ctx, in, "runs", "retry", "--run", run.id, "--failed", "--reason", "Example probe intentionally fails the source run; retry must reuse its predecessors", "--profile="+in.APIProfile, "-o", "plain")
 		if err != nil {
 			return err
 		}
@@ -674,21 +667,21 @@ type ExampleProbeInputs struct {
 type ExampleProbe struct{ sparkwing.Base }
 
 func (ExampleProbe) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleProbeInputs, rc sparkwing.RunContext) error {
-	source := sparkwing.Job(plan, "source", &exampleValue{Value: in.Token, Log: "example-probe-output-ok"})
+	source := sparkwing.Job(plan, "source", &exampleValue{Value: rc.RunID, Log: "example-probe-output-ok"})
 	memo := sparkwing.Job(plan, "memo", &exampleValue{Value: in.Token}).Memo(inputs.Const(in.Token))
 	sparkwing.Job(plan, "probe", func(ctx context.Context) error {
-		if sparkwing.RefTo[string](source).Get(ctx) != in.Token || sparkwing.RefTo[string](memo).Get(ctx) != in.Token {
+		origin := sparkwing.RefTo[string](source).Get(ctx)
+		if origin == "" || sparkwing.RefTo[string](memo).Get(ctx) != in.Token {
 			return fmt.Errorf("probe: predecessor output was lost")
 		}
 		if in.FailOnce {
-			detail, err := exampleStatus(ctx, ExampleInputs{CLI: in.CLI, APIProfile: in.APIProfile}, rc.RunID, false)
-			if err != nil {
-				return err
+			// safety: the source output survives retry across hosts; the executing run ID belongs to this attempt.
+			run := os.Getenv("SPARKWING_RUN_ID")
+			if run == "" {
+				return fmt.Errorf("probe: executing run ID is missing")
 			}
-			for _, job := range detail.Jobs {
-				if job.ID == "probe" && job.Attempt == 1 && detail.Retry == nil {
-					return fmt.Errorf("requested deterministic failure on attempt 1")
-				}
+			if run == origin {
+				return fmt.Errorf("requested deterministic failure on the source run")
 			}
 		}
 		return nil
