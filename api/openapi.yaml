@@ -5664,6 +5664,8 @@ components:
     internal.runspec.Lineage:
       additionalProperties: true
       properties:
+        detached:
+          type: boolean
         parent_job_id:
           type: string
         parent_run_id:
