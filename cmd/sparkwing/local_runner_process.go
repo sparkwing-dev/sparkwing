@@ -226,7 +226,7 @@ func sameExecutableBytes(source, existing io.Reader) (bool, error) {
 			return false, nil
 		}
 		if ea != nil || eb != nil {
-			return ea == eb, nil
+			return errors.Is(ea, eb), nil
 		}
 	}
 }
