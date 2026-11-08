@@ -1444,7 +1444,14 @@ file. Other syntax and workflow checks remain active.
   API fixtures on OS-assigned local ports and does not replace that product
   exercise or exercise Kubernetes.
 - **Template verification proofs:** `template-verify` scaffolds, builds, lints,
-  and explains all 37 registry templates, and runs the runnable ones. A local
+  and explains all registry templates, and runs the runnable ones. The build-cli
+  job renders template text and verification manifests through the discovered
+  local sparks-core templates module (SPARKWING_SPARKS_CORE_DIR, go.work, or a
+  sibling checkout), or the pipeline module's published templates pin when no
+  checkout is found. Its annotation names the selected source. Added or removed
+  template names must match the pipeline module's templates pin or replacement;
+  a mismatch fails before verification instead of silently omitting a template.
+  A local
   run reuses a recorded proof for any template whose proof inputs are
   byte-identical to a previous pass. The digest covers, in one hash per
   template: the template's registry files (every file under its directory in

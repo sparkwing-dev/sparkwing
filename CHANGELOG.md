@@ -30,6 +30,8 @@ unlock.
 
 ### Fixed
 
+- **template verification:** Render local sparks-core template text and verification manifests when a checkout is discovered, and report the selected source.
+
 - **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
 - **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
 
