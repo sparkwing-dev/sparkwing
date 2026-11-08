@@ -32,7 +32,7 @@ func TestVerifiedPoolUsesLauncherWithoutPersistentRunner(t *testing.T) {
 		}
 		customer = customer || r.Kind == "ServiceAccount" && r.Metadata.Name == "sparkwing-customer-job"
 	}
-	if !launcher || policies != 4 || !customer || !strings.Contains(manifest, "name: \"pool-token\"") {
+	if !launcher || policies != 6 || !customer || !strings.Contains(manifest, "name: \"pool-token\"") {
 		t.Fatalf("pool must render launcher, pool credential, admission and customer identity: launcher=%v policies=%d customer=%v", launcher, policies, customer)
 	}
 }
