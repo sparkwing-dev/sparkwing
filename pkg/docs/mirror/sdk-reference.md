@@ -13,7 +13,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - [`sparkwing/git`](sdk-git.md)
 - [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs declares memo inputs for evaluation by the executing host.
 - [`sparkwing/services`](sdk-services.md) -- Package services manages host-owned sidecars for a callback.
-- [`sparkwing/sparkwingtest`](sdk-sparkwingtest.md) -- Package sparkwingtest supplies a fake protocol host without a controller or store.
+- [`sparkwing/sparkwingtest`](sdk-sparkwingtest.md) -- Package sparkwingtest supplies an in-process host for pipeline and helper-library tests.
 
 ## Functions
 

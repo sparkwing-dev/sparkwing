@@ -381,3 +381,19 @@ Sign-in links now carry their code in the fragment (`/#code=...`). The page
 stores the session token and sends it as `Authorization: Bearer`; every write
 needs the dashboard's own `Origin`. Sessions live only in controller memory, so
 run `sparkwing dashboard open` again after any controller restart.
+
+
+## Run helper-library unit tests with sparkwingtest
+
+Use a `sparkwingtest.Host` context when testing library code that calls `Exec`,
+`Bash`, Git, Docker or services. The test runtime installs the host command and
+helper services automatically. Commands run locally through the host implementation.
+Call `Close` to join command sessions and helper cleanup. Ordinary background
+contexts have no host service.
+
+```go
+host := sparkwingtest.New(sparkwingtest.Options{})
+t.Cleanup(func() { _ = host.Close() })
+ctx := host.Context(t.Context())
+result, err := myLibraryHelper(ctx)
+```

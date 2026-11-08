@@ -58,11 +58,10 @@ type Service struct {
 ## Constants
 
 ```
-const AutoPort = -1
-```
-
-```
-const DefaultReadyTimeout = 30 * time.Second
+const (
+    DefaultReadyTimeout = 30 * time.Second
+    AutoPort            = -1
+)
 ```
 
 ## Variables

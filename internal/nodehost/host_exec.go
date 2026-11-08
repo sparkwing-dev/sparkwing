@@ -299,15 +299,52 @@ func closeFiles(files ...io.Closer) {
 	}
 }
 
+// LocalCommands owns host-executed command sessions for an in-process runtime.
+// The caller cancels and joins active Execute calls before Close.
+type LocalCommands struct {
+	mu       sync.Mutex
+	masker   *secrets.Masker
+	sessions []*commandSession
+}
+
+// NewLocalCommands binds local test execution to the host command implementation.
+func NewLocalCommands(masker *secrets.Masker) *LocalCommands {
+	if masker == nil {
+		masker = secrets.NewMasker()
+	}
+	return &LocalCommands{masker: masker}
+}
+
+// Execute runs a command while retaining its background children until Close.
+//
+//nolint:contextcheck // Cancellation travels through the joined command channels.
+func (c *LocalCommands) Execute(ctx context.Context, req nodeproto.ExecRequest, sink func(string, []byte, bool) error) nodeproto.ExecDone {
+	done, session := runHostCommand(req, c.masker, ctx.Done(), ctx.Done(), sink)
+	if session != nil {
+		c.mu.Lock()
+		c.sessions = append(c.sessions, session)
+		c.mu.Unlock()
+	}
+	return done
+}
+
+// Close joins the command sessions after their callers have returned.
+func (c *LocalCommands) Close() error {
+	c.mu.Lock()
+	sessions := c.sessions
+	c.sessions = nil
+	c.mu.Unlock()
+	return endCommandSessions(sessions)
+}
+
 // ExecuteCommand runs a command for an in-process SDK host and joins its process tree.
 //
-//nolint:contextcheck // Cancellation travels through joined command channels; session cleanup bounds its own process-table read.
+//nolint:contextcheck // Session cleanup bounds its own process-table read.
 func ExecuteCommand(ctx context.Context, req nodeproto.ExecRequest, sink func(string, []byte, bool) error) nodeproto.ExecDone {
-	done, session := runHostCommand(req, secrets.NewMasker(), ctx.Done(), ctx.Done(), sink)
-	if session != nil {
-		if err := endCommandSessions([]*commandSession{session}); err != nil {
-			done.StartError = err.Error()
-		}
+	commands := NewLocalCommands(nil)
+	done := commands.Execute(ctx, req, sink)
+	if err := commands.Close(); err != nil {
+		done.StartError = err.Error()
 	}
 	return done
 }

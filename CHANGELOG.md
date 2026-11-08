@@ -22,7 +22,7 @@ unlock.
 
 ### Breaking
 
-- **SDK (Breaking):** Git, Docker and services execute through host helpers. Generic file helpers and hello feature negotiation are removed. Unix commands require the current host. Local TypeScript packages use the installed candidate engine, matching Go replacements. See [the migration guide](docs/migrations/_unreleased.md#use-the-current-thin-sdk-contract).
+- **SDK (Breaking):** Git, Docker and services execute through host helpers. Generic file helpers and hello feature negotiation are removed. Unix commands require the current host. Local TypeScript packages use the installed candidate engine, matching Go replacements. `sparkwingtest` contexts run command and helper calls locally for library unit tests. See [the migration guide](docs/migrations/_unreleased.md#use-the-current-thin-sdk-contract).
 
 - **SDK (Breaking):** When the host runs a command, `Run` (Go `Cmd.Run`, TypeScript `run()`) returns only the last 64 KiB of each of stdout and stderr; the whole output stays in the job log. Pipelines that parse `Run` output should use `Capture`. See [the migration guide](docs/migrations/_unreleased.md#parse-command-output-with-capture).
 - **SDK (Breaking):** When the host runs a command, `Run` (Go `Cmd.Run`, TypeScript `run()`) returns only the last 64 KiB of each masked stdout and stderr stream; the whole masked output stays in the job log. Pipelines that parse `Run` output should use `Capture`. Go `ExecError.Cause` for host-run commands no longer wraps `*exec.ExitError`; use `ExecError.ExitCode` and `ExecError.Terminated`. See [the migration guide](docs/migrations/_unreleased.md#parse-command-output-with-capture).

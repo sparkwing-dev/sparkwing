@@ -98,3 +98,25 @@ func (c *ProcessCleanups) finish(ctx context.Context, id string) error {
 	}
 	return c.release(id)
 }
+
+// HelperContext binds helper resources to this in-process runtime.
+func (c *ProcessCleanups) HelperContext(ctx context.Context) context.Context {
+	return helperruntime.WithCleanups(ctx, c.register, c.finish)
+}
+
+// CloseHelpers retries remaining helper cleanups after their callers have joined.
+func (c *ProcessCleanups) CloseHelpers(ctx context.Context) error {
+	c.mu.Lock()
+	items := slices.Clone(c.list.items)
+	c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+	var failures []error
+	for _, item := range slices.Backward(items) {
+		failures = append(failures, c.finish(ctx, item.id))
+	}
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+	return errors.Join(failures...)
+}
