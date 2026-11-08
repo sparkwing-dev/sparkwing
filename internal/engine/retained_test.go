@@ -21,7 +21,11 @@ func TestReplacementEnsureKeepsAcceptedLocalBuild(t *testing.T) {
 		Version: version, ManifestDigest: digest(body),
 	}
 	dir := t.TempDir()
-	path := filepath.Join(dir, identity.ManifestDigest)
+	name := identity.ManifestDigest
+	if target.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, body, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +126,11 @@ func TestReplacementEnsureRejectsUnusableRetainedBuild(t *testing.T) {
 				mode = 0o600
 			}
 			if failure != "missing" && failure != "unsafe-digest" {
-				if err := os.WriteFile(filepath.Join(dir, accepted.ManifestDigest), contents, mode); err != nil {
+				name := accepted.ManifestDigest
+				if target.GOOS == "windows" {
+					name += ".exe"
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), contents, mode); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -150,7 +158,11 @@ func TestReplacementEnsureRejectsForeignRetainedPlatform(t *testing.T) {
 		Version: version, ManifestDigest: digest(body),
 	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, identity.ManifestDigest), body, 0o700); err != nil {
+	name := identity.ManifestDigest
+	if target.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	resolver, err := NewResolver(Config{CacheDirectory: t.TempDir(), LocalBuildDirectory: dir})

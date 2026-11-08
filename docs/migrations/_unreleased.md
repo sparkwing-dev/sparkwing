@@ -75,16 +75,22 @@ keep awaiting children while a successor claims newly ready dependencies.
 Held renewals, reports, logs and child intake remain available. Earlier
 root-parented awards retain their existing ancestry.
 
-No existing HTTP route, wire field or SDK symbol is removed. Linux and macOS
-queues run in an independent runner. The controller reuses matching live process
+No existing HTTP route, wire field or SDK symbol is removed. Linux, macOS and
+Windows queues run in an independent runner. The controller reuses matching live process
 birth, version and executable digest, or starts a successor and atomically drains
 the previous instance. Each runner uses a digest-pinned executable and independent
 stdio. Systemd hosts require a working user manager; a missing manager is an
 error. Confirmed no-systemd Linux hosts use a separate session. macOS uses a
 per-instance launchd agent. No drain deadline kills held work. Dependencies
 keep the exact accepted development executable from retained builds, with native
-platform, embedded version and complete digest checked again before use. Windows queued
-hosting retains its existing process lifetime.
+platform, embedded version and complete digest checked again before use.
+Windows launches a detached runner as the same user, with independent stdio and
+Job Object breakaway. An enclosing Job Object must permit breakaway. Startup
+reports an error if it forbids it. The daemon records the runner's process birth
+and reuses it after restart, or starts a successor when it exits.
+`sparkwing daemon stop` drains the runner through the local API before stopping
+the controller. Idle runners exit. Held work keeps its existing drain behavior.
+Windows controllers start on demand. `daemon install` remains a Linux/macOS command.
 
 `GET /api/v1/local/runners?state=active` returns the verified socket account's
 current active instance, or `not_found` when none is active. A successor must
