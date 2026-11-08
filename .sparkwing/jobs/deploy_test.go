@@ -531,6 +531,9 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	if err := os.WriteFile(filepath.Join(f.repo, deployStoreSchema), []byte(schema), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(f.repo, "internal/store/store.go"), []byte("package store\nconst expectedSchemaVersion = 34\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	deployGitIn(t, f.repo, "init", "--quiet", "-b", "main")
 	deployGitIn(t, f.repo, "add", "-A")
 	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "source")
@@ -575,6 +578,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 
 func (f *fakeDeploy) candidate() deployImages {
 	c := f.old
+	c.Commit = f.head
 	c.Version = "v0.68.3-1-g" + f.head[:12]
 	c.Controller = imagePin{c.Controller.Repository, c.Version, testDigest("new-ctl")}
 	c.Runner = imagePin{c.Runner.Repository, c.Version, testDigest("new-run")}
@@ -715,6 +719,8 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 				}
 			}
 		}
+		return "", nil
+	case name == "bitwing":
 		return "", nil
 	case name == "go":
 		return "", nil
@@ -929,7 +935,7 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if prod.Environment != "production" || prod.Previous.Launcher != f.old.Runner || prod.WindowStart == "" {
 		t.Fatalf("production record = %+v", prod)
 	}
-	if runs := f.triggered("deploy-smoke"); fmt.Sprint(runs) != "[run-deploy-smoke-staging run-deploy-smoke-qa-team run-deploy-smoke-qa-team-b]" {
+	if runs := f.triggered("deploy-smoke"); fmt.Sprint(runs) != "[run-deploy-smoke-staging run-deploy-smoke-production-smoke]" {
 		t.Fatalf("smoke runs = %v", runs)
 	}
 
@@ -1099,7 +1105,7 @@ func TestDeployRollbackOutlivesCancelTimeoutAndSession(t *testing.T) {
 
 func TestDeploySmokeLogCheckRenewsAnExpiredSession(t *testing.T) {
 	f := newFakeDeploy(t)
-	// safety: both smoke runs are followed concurrently, so expiring on each status read
+	// safety: smoke observation may renew the role session, so expiring on each status read
 	// could expire the renewed session too, depending on which run reports first.
 	var once sync.Once
 	f.onSmoke = func(string) error {
@@ -1120,7 +1126,7 @@ func TestDeploySmokeLogCheckRenewsAnExpiredSession(t *testing.T) {
 
 func TestDeployRollsBackFailedProductionSmoke(t *testing.T) {
 	for name, breakIt := range map[string]func(*fakeDeploy){
-		"failed run":   func(f *fakeDeploy) { f.failRuns["run-deploy-smoke-qa-team-b"] = true },
+		"failed run":   func(f *fakeDeploy) { f.failRuns["run-deploy-smoke-production-smoke"] = true },
 		"extra claim":  func(f *fakeDeploy) { f.claimsPerRun = 2 },
 		"no claim":     func(f *fakeDeploy) { f.claimsPerRun = 0 },
 		"warning logs": func(f *fakeDeploy) { f.dirtyLogs = true },
@@ -1201,7 +1207,7 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		"build the candidate CLI", "add CLI profile staging", "trigger deploy-smoke", "trigger hello",
 		"is still the tip of origin/main", "is not older than the production version",
 		"pin the production controller", "wait for Argo application sparkwing to be", "pin the production launcher",
-		"add CLI profile qa-team ", "trigger deploy-smoke", "add CLI profile qa-team-b", "follow both smoke runs", "check each smoke run used one NodeClaim",
+		"add CLI profile production-smoke ", "trigger deploy-smoke", "follow production smoke runs", "check each smoke run used one NodeClaim",
 		"on a failed production deploy or smoke, would renew the role session and revert",
 	}
 	next := 0
@@ -1262,7 +1268,7 @@ func TestDeployBuildsUntaggedMainWithoutARelease(t *testing.T) {
 	}
 }
 
-func TestDeployRepositoryPushStopsAfterStaging(t *testing.T) {
+func TestDeployRepositoryPushRunsThroughProduction(t *testing.T) {
 	file, err := os.Open(filepath.Join("..", "sparkwing.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -1273,7 +1279,7 @@ func TestDeployRepositoryPushStopsAfterStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := cfg.Find("deploy")
-	if entry == nil || entry.Args["stop-after"] != "staging" || entry.On.Push == nil || !slices.Equal(entry.On.Push.Branches, []string{"main"}) {
+	if entry == nil || entry.Args["stop-after"] != "" || entry.On.Push == nil || !slices.Equal(entry.On.Push.Branches, []string{"main"}) {
 		t.Fatalf("push deploy configuration = %+v", entry)
 	}
 }
@@ -1299,5 +1305,124 @@ func TestDeployBuildsReleaseTagUnchanged(t *testing.T) {
 	}
 	if images.Version != "v0.69.2" || images.Controller.Tag != "v0.69.2" || images.Runner.Tag != "v0.69.2" || f.registry.published[0].Version != "v0.69.2" {
 		t.Fatalf("release version changed: %+v, publications=%+v", images, f.registry.published)
+	}
+}
+
+func TestDeploySchemaUpgradeNeverRollsBackOnSmokeOrFeedbackFailure(t *testing.T) {
+	f := newFakeDeploy(t)
+	if err := os.WriteFile(filepath.Join(f.repo, "internal/store/store.go"), []byte("package store\nconst expectedSchemaVersion = 35\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deployGitIn(t, f.repo, "add", "internal/store/store.go")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "upgrade schema")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+	f.failRuns["run-deploy-smoke-production-smoke"] = true
+	d := f.deployer(false)
+	run := d.tools.run
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		out, err := run(ctx, c)
+		if filepath.Base(c.Name) == "bitwing" {
+			return "", errors.New("trusted feedback helper unavailable")
+		}
+		return out, err
+	}
+	_, err := d.promote(t.Context(), f.candidate())
+	if err == nil || !strings.Contains(err.Error(), "roll forward") {
+		t.Fatalf("promote = %v", err)
+	}
+	if !strings.Contains(err.Error(), "trusted feedback helper unavailable") || !strings.Contains(strings.Join(f.said, "\n"), "bitwing rollback finding could not be recorded") {
+		t.Fatalf("missing feedback failure in log or deploy error: %v, %v", err, f.said)
+	}
+	got := f.pinsOnMain("sparkwing")
+	if got.Controller != f.candidate().Controller || got.Launcher != f.candidate().Runner {
+		t.Fatalf("unsafe rollback: %+v", got)
+	}
+	if !strings.Contains(strings.Join(f.calls, "\n"), "finding record --source sparkwing-production-rollback") {
+		t.Fatal("missing Bitwing finding")
+	}
+}
+
+func TestDeployMissingSchemaEvidenceLeavesProductionUntouched(t *testing.T) {
+	f := newFakeDeploy(t)
+	f.registry.revisions[f.old.Controller.Repository+"@"+f.old.Controller.Digest] = ""
+	_, err := f.deployer(false).promote(t.Context(), f.candidate())
+	if err == nil || !strings.Contains(err.Error(), "production was not changed") {
+		t.Fatalf("promote = %v", err)
+	}
+	if got := f.pinsOnMain("sparkwing"); got.Controller != f.old.Controller || got.Launcher != f.old.Runner {
+		t.Fatalf("production changed: %+v", got)
+	}
+}
+
+func TestDeploySchemaUpgradeKeepsCandidateAfterCancellation(t *testing.T) {
+	f := newFakeDeploy(t)
+	if err := os.WriteFile(filepath.Join(f.repo, "internal/store/store.go"), []byte("package store\nconst expectedSchemaVersion = 35\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deployGitIn(t, f.repo, "add", "internal/store/store.go")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "upgrade schema")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	f.onSmoke = func(string) error { cancel(); return context.Canceled }
+	_, err := f.deployer(false).promote(ctx, f.candidate())
+	if err == nil || !strings.Contains(err.Error(), "roll forward") {
+		t.Fatalf("promote = %v", err)
+	}
+	if got := f.pinsOnMain("sparkwing"); got.Controller != f.candidate().Controller || got.Launcher != f.candidate().Runner {
+		t.Fatalf("unsafe rollback: %+v", got)
+	}
+}
+
+func TestProductionSmokeUsesSourceOwnerToken(t *testing.T) {
+	cfg := defaultDeployConfig()
+	if fmt.Sprint(cfg.SmokeProfiles) != "[production-smoke]" || cfg.Params.SmokeToken != "/kikd-prod/sparkwing/deploy/scan-submit-token" {
+		t.Fatalf("production smoke config = %+v", cfg)
+	}
+	f := newFakeDeploy(t)
+	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Join(f.calls, "\n")
+	if !strings.Contains(calls, cfg.Params.SmokeToken) || strings.Contains(calls, "smoke-token-qa-team") {
+		t.Fatalf("wrong production smoke credential path: %s", calls)
+	}
+}
+
+func TestDeployRollbackFindingUsesTrustedToolchain(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.cfg.ToolDir = t.TempDir()
+	path := filepath.Join(d.cfg.ToolDir, "bitwing")
+	if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	run := d.tools.run
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		if c.Name != path || c.Env["PATH"] != d.cfg.ToolDir+":/usr/bin:/bin" || ctx.Err() != nil {
+			t.Fatalf("unsafe feedback command: %+v", c)
+		}
+		return run(ctx, c)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := d.recordUnsafeRollback(ctx, envDeployment{PreviousSchema: 30, CandidateSchema: 34}, errors.New("smoke failed")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeployRollbackFindingMissingTrustedHelperNeverUsesPATH(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.cfg.ToolDir = t.TempDir()
+	d.tools.lookPath = func(string) (string, error) { t.Fatal("finding fell back to PATH"); return "", nil }
+	err := d.recordUnsafeRollback(t.Context(), envDeployment{PreviousSchema: 30, CandidateSchema: 34}, errors.New("smoke failed"))
+	if err == nil || !strings.Contains(err.Error(), "bitwing is not in the deploy toolchain") {
+		t.Fatalf("missing feedback reason: %v", err)
+	}
+	if strings.Contains(strings.Join(f.calls, "\n"), "finding record") {
+		t.Fatal("executed untrusted finding helper")
 	}
 }

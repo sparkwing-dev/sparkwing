@@ -495,8 +495,9 @@ Argo refresh before waiting, requiring patch permission on the named Application
 `staging-gate` starts `deploy-smoke` and the `sparkwing-ci-smoke` reference pipeline
 before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
-`deploy-smoke` in `qa-team` and `qa-team-b` (one NodeClaim each, no controller or launcher WARN or
-ERROR). Each environment's deployed and previous digests are its job output. Credentials come
+`deploy-smoke` once in the production team that owns the source repository installation, using
+the existing `/kikd-prod/sparkwing/deploy/scan-submit-token` (one NodeClaim, no controller or launcher
+WARN or ERROR). The QA teams need no installation and are not used for this repository-backed smoke. Each environment's deployed and previous digests are its job output. Credentials come
 from the run's OIDC token through the `sparkwing-deploy` role in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
 
@@ -523,16 +524,20 @@ is a token for its target fixture team with permission to start and observe the
 example and read its logs. Missing prerequisites report that the scan could not
 run, rather than clearing prior Bitwing findings.
 
-A failed production deploy or smoke reverts this run's GitOps commits, launcher first, even
-after cancellation. Image rollback does not undo a forward migration. If recovery needs an
-older schema, recover the target database before reverting its images. Staging and production
-have separate database servers, so recovering one never touches the other.
+Before changing production, deploy compares the candidate source's controller schema version with
+the previous image's source revision. Missing evidence stops before changing image pins. A failed
+production deploy or smoke reverts this run's GitOps commits, launcher first, only if the schema
+version did not increase. When it increased, even a startup failure before migration is proven
+leaves the candidate pins in place and fails loudly with a roll-forward remedy and a Bitwing
+finding. This conservative rule also applies after cancellation and timeout; deploy does not query
+the live database to decide whether an older image might still work. No automatic database
+downgrade or restore runs. Staging and production have separate database servers.
+
+Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main` with
-`args: {stop-after: staging}`. The lead removes that argument after one watched staging deploy
-and gate, enabling the full staging-gate -> production flow on subsequent pushes. A terminal can
-preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push runs
+through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
 through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
 retried old run cannot roll production back.
 
@@ -603,7 +608,7 @@ below, enroll one with `sparkwing runners add --profile prod --runner korey-desk
 the account session described in the [runners add docs](docs/cli-runners.md#sparkwing-runners-add).
 Local `--dry-run` previews need no runner label.
 
-A real deploy runs `aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`, `node` and `pnpm` only from
+A real deploy runs `aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`, `node`, `pnpm` and `bitwing` only from
 `/opt/sparkwing-deploy/bin`, and gives every child process `PATH=/opt/sparkwing-deploy/bin:/usr/bin:/bin`.
 The directory must be owned by root and not writable by the runner's user, so another job on the same
 runner cannot plant a binary that a later deploy runs with production credentials. When the directory is
@@ -641,6 +646,8 @@ sudo mv /opt/sparkwing-deploy/node-v22.23.1-linux-x64 /opt/sparkwing-deploy/node
 sudo env PATH=/opt/sparkwing-deploy/node/bin:/usr/bin:/bin npm install -g --prefix /opt/sparkwing-deploy/node pnpm@12.5.1
 sudo ln -sf /opt/sparkwing-deploy/node/bin/node /opt/sparkwing-deploy/bin/node
 sudo ln -sf /opt/sparkwing-deploy/node/bin/pnpm /opt/sparkwing-deploy/bin/pnpm
+# Bitwing reporting uses the normal installed binary copied into the trusted toolchain
+sudo install -o root -g root -m 0755 "$(command -v bitwing)" /opt/sparkwing-deploy/bin/bitwing
 # git, ssh and bash from the root-owned system packages
 for t in git ssh bash; do sudo ln -sf "/usr/bin/$t" "/opt/sparkwing-deploy/bin/$t"; done
 sudo chown -R root:root /opt/sparkwing-deploy && sudo chmod -R go-w /opt/sparkwing-deploy

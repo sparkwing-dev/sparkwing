@@ -209,7 +209,7 @@ active, run `sparkwing daemon restart --force` with the required build, or use a
 separate `SPARKWING_HOME`.
 
 The controller remains running while idle. `sparkwing daemon stop` stops it.
-Linux and macOS support an installed login service through `dashboard install`.
+Linux and macOS support an installed login service through `daemon install`.
 Windows supports the foreground controller. Machine updates refresh managed
 controller and schedule units together. See [local dashboard](native-mode.md).
 
@@ -473,9 +473,12 @@ ownership and kernel peer credentials. Windows uses the account SID. An
 unauthenticated or foreign peer is refused. The dashboard's TCP listener needs
 a bearer session from a one-time link that `sparkwing dashboard open` mints over
 the socket; no cookie is used. The link works once within 60 seconds, and the
-browser tab then acts as the socket peer that minted it until 12 hours pass
-without a request, 24 hours pass since sign-in, the tab logs out, or the
-controller restarts. There is no separate dashboard store. Root and
+browser then acts as the socket peer that minted it until 30 days pass since
+sign-in, the session logs out, or the controller restarts. Idle time does not
+expire a session. Sign-in and sign-out bodies are limited to 4 KiB. Dashboard
+request headers and bodies, and browser sign-in and sign-out requests, have
+15-second timeouts. Replacing a session does not wait for the old session
+to sign out. There is no separate dashboard store. Root and
 same-account code remain inside the machine trust boundary. See
 [security](security.md#local-daemon-socket).
 
@@ -661,7 +664,7 @@ machine budget is full.
 With `local_admission` enabled, the runner never starts the local controller and
 must match its build. If no controller runs, or it runs a build the runner
 cannot speak to, each claimed job fails with the fix: `sparkwing dashboard
-open` or `sparkwing dashboard install` for a missing controller, matching
+open` or `sparkwing daemon install` for a missing controller, matching
 builds for a mismatch, or `local_admission: false` to stop sharing. The runner
 logs one warning per cause while it lasts.
 

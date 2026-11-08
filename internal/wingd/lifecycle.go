@@ -89,7 +89,7 @@ type ManagedUnit struct {
 	Home       string
 }
 
-// ManagedUnitManager is shared by update, dashboard installation and schedule installation.
+// ManagedUnitManager is shared by update, controller installation and schedule installation.
 type ManagedUnitManager interface {
 	InstallController(context.Context, LocalStartOptions) error
 	UninstallController(context.Context) error

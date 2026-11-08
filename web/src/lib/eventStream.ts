@@ -1,4 +1,4 @@
-import { localAuthHeaders, localSession } from "./localSession";
+import { ensureLocalSignIn, localAuthHeaders, localDashboard } from "./localSession";
 
 type Listener = (e: MessageEvent) => void;
 
@@ -10,8 +10,10 @@ export interface EventStream {
   close(): void;
 }
 
+// EventSource cannot send the local dashboard's bearer, so the local dashboard
+// reads streams with fetch; team and Cloud dashboards authenticate by cookie.
 export function openEventStream(url: string): EventStream {
-  if (!localSession()) {
+  if (!localDashboard()) {
     return new EventSource(url, {
       withCredentials: true,
     }) as unknown as EventStream;
@@ -100,6 +102,7 @@ export class FetchEventStream implements EventStream {
 
   private async connect(): Promise<boolean> {
     try {
+      await ensureLocalSignIn();
       const headers: Record<string, string> = {
         Accept: "text/event-stream",
         ...localAuthHeaders(),

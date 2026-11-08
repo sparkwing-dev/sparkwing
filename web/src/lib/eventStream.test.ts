@@ -71,7 +71,7 @@ describe("FetchEventStream", () => {
     const stored = new Map([["sparkwing.localSession", "held-session"]]);
     runtime.window = {
       __SPARKWING_REQUIRE_LOGIN__: "false",
-      sessionStorage: { getItem: (key: string) => stored.get(key) ?? null },
+      localStorage: { getItem: (key: string) => stored.get(key) ?? null },
       location: { hash: "" },
     };
     let auth: string | null = null;

@@ -256,7 +256,7 @@ func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]localhos
 			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "unit_version_skew", Unit: unit.Name, Message: fmt.Sprintf("managed unit version %q differs from CLI %q", unit.Version, version), Hint: "Run sparkwing update to refresh managed units."})
 		}
 		if !validUnitArguments(unit) {
-			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "removed_unit_verb", Unit: unit.Name, Message: fmt.Sprintf("managed unit has unsupported arguments %q", unit.Arguments), Hint: "Reinstall this unit with sparkwing dashboard install or sparkwing schedules install."})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "removed_unit_verb", Unit: unit.Name, Message: fmt.Sprintf("managed unit has unsupported arguments %q", unit.Arguments), Hint: "Reinstall this unit with sparkwing daemon install or sparkwing schedules install."})
 		}
 	}
 	return findings, nil

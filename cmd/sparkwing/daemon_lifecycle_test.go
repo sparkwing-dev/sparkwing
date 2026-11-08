@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
@@ -264,5 +266,63 @@ func TestDaemonStopRetiresTheRunnerAndRestartKeepsIt(t *testing.T) {
 	err := runDaemonLifecycleCommandArgs(t.Context(), []string{"stop", "-o", "json"}, &out, func(context.Context) (dashboardServices, error) { return services, nil })
 	if !errors.Is(err, failure) || out.Len() != 0 || !reflect.DeepEqual(fake.calls, []string{"status"}) {
 		t.Fatalf("failed retirement: calls=%v err=%v", fake.calls, err)
+	}
+}
+
+func TestDaemonInstallsAndRemovesTheControllerService(t *testing.T) {
+	for _, test := range []struct {
+		action       string
+		calls, units []string
+	}{
+		{"install", []string{"install"}, nil},
+		{"uninstall", []string{"status"}, []string{"uninstall"}},
+	} {
+		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Installed: test.action == "install", PID: 9, Version: "v2"}}
+		units := &dashboardUnitsFake{}
+		options := wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2"}
+		var out bytes.Buffer
+		err := runDaemonLifecycleCommandArgs(t.Context(), []string{test.action, "-o", "json"}, &out, func(context.Context) (dashboardServices, error) {
+			return dashboardServices{lifecycle: lifecycle, units: units, options: options}, nil
+		})
+		if err != nil || !reflect.DeepEqual(lifecycle.calls, test.calls) || !reflect.DeepEqual(units.calls, test.units) {
+			t.Fatalf("%s: lifecycle=%v units=%v err=%v", test.action, lifecycle.calls, units.calls, err)
+		}
+		if test.action == "install" && lifecycle.options != options {
+			t.Fatalf("install options: %+v", lifecycle.options)
+		}
+		var got dashboardResult
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Service != "controller" || got.Action != test.action || got.State != "running" {
+			t.Fatalf("%s receipt: %+v %v", test.action, got, err)
+		}
+	}
+	failure := errors.New("unit manager refused")
+	units := &dashboardUnitsFake{err: failure}
+	var out bytes.Buffer
+	err := runDaemonLifecycleCommandArgs(t.Context(), []string{"uninstall"}, &out, func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: &dashboardLifecycleFake{}, units: units}, nil
+	})
+	if !errors.Is(err, failure) || out.Len() != 0 {
+		t.Fatalf("uninstall failure: %v %q", err, &out)
+	}
+}
+
+func TestDaemonServiceRefusesWindowsBeforeResolvingServices(t *testing.T) {
+	for _, action := range []string{"install", "uninstall"} {
+		inv, err := clisurface.Parse("sparkwing", []string{"daemon", action})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		err = runDaemonLifecycleCommandOn(t.Context(), inv, &out, "windows", func(context.Context) (dashboardServices, error) {
+			t.Fatal("resolved services on Windows")
+			return dashboardServices{}, nil
+		})
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "sparkwing dashboard open") || out.Len() != 0 {
+			t.Fatalf("%s on Windows: %v", action, err)
+		}
+	}
+	if _, err := clisurface.Parse("sparkwing", []string{"daemon", "install", "--force"}); err == nil {
+		t.Fatal("daemon install accepted the removed --force flag")
 	}
 }

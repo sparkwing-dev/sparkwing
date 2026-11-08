@@ -56,7 +56,7 @@ func TestRunnerMachineAdmissionNamesTheFixWhenNoControllerRuns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	_, runnerErr := RunnerMachineAdmission(home, "v0.71.0").Daemon.Acquire(ctx, wingwire.AdmissionRequest{RunID: "run"}, nil)
-	for _, want := range []string{"sparkwing-runner v0.71.0", "runner.local_admission", "sparkwing dashboard open", "local_admission: false"} {
+	for _, want := range []string{"sparkwing-runner v0.71.0", "runner.local_admission", "sparkwing dashboard open", "sparkwing daemon install", "local_admission: false"} {
 		if runnerErr == nil || !strings.Contains(runnerErr.Error(), want) {
 			t.Fatalf("runner admission without a controller missing %q: %v", want, runnerErr)
 		}
