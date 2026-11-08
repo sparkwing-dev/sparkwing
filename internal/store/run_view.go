@@ -26,7 +26,7 @@ type RunView struct {
 	// JobResults holds each job's masked summary and annotations from its current attempt.
 	JobResults []JobResult
 	Waiting    *UnclaimedUnit
-	// PlacementWaits explains each ready job that follows a repository tier list.
+	// PlacementWaits retains dispatch history after a job stops waiting for its tiers.
 	PlacementWaits     []PlacementWait
 	CloudCapacitySince *time.Time
 	// HostIneligible maps each ready job the hosting machine of a local run cannot execute to why it waits.

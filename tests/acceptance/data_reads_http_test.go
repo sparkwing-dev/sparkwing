@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -141,7 +142,7 @@ func TestDataReadHTTPHasMany(t *testing.T) {
 			digests := []blob.Digest{denied, missing, dataDigest(), dataDigest()}
 			want := []blob.Digest{dataDigest()}
 			status, code := 200, apierr.Code("")
-			deadline := time.Time{}
+			deadline := time.Now().Add(time.Minute)
 			switch state {
 			case "empty":
 				digests, want = []blob.Digest{}, []blob.Digest{}
@@ -253,7 +254,7 @@ func TestDataReadHTTPRefusals(t *testing.T) {
 				}
 				body := `{"digest":"` + string(dataDigest()) + `"}`
 				if operation == "has-many" {
-					body = `{"digests":["` + string(dataDigest()) + `"]}`
+					body = fmt.Sprintf(`{"digests":[%q],"deadline":%q}`, dataDigest(), time.Now().Add(time.Minute).Format(time.RFC3339Nano))
 				}
 				w := authorityHTTP(f.handler(), b, "POST", "/api/v1/data/"+operation, body)
 				assertEngineError(t, w, status, code)
@@ -269,7 +270,7 @@ func TestDataReadHTTPInvalidBodiesAndMethods(t *testing.T) {
 	for _, operation := range []string{"download", "has-many"} {
 		valid := `{"digest":"` + string(dataDigest()) + `"}`
 		if operation == "has-many" {
-			valid = `{"digests":["` + string(dataDigest()) + `"]}`
+			valid = fmt.Sprintf(`{"digests":[%q],"deadline":%q}`, dataDigest(), time.Now().Add(time.Minute).Format(time.RFC3339Nano))
 		}
 		for _, body := range []string{`null`, `[]`, `{}`, `{} {}`, `{"kind":"log","key":"anything"}`, `{"digest":"../foreign"}`, `{"digests":["../foreign"]}`, valid[:len(valid)-1] + `,"authority":{"team":"foreign"}}`} {
 			t.Run(operation+"/"+body, func(t *testing.T) {
@@ -371,7 +372,7 @@ func FuzzDataReadHTTPReadSet(f *testing.F) {
 			fixture.edges.denyDigest = digest
 		}
 		h := fixture.handler()
-		w := authorityHTTP(h, fixture.boundary, "POST", "/api/v1/data/has-many", `{"digests":["`+string(digest)+`","`+string(digest)+`"]}`)
+		w := authorityHTTP(h, fixture.boundary, "POST", "/api/v1/data/has-many", fmt.Sprintf(`{"digests":[%q,%q],"deadline":%q}`, digest, digest, time.Now().Add(time.Minute).Format(time.RFC3339Nano)))
 		var presence struct {
 			Present []blob.Digest `json:"present"`
 		}
@@ -441,7 +442,7 @@ func TestDataReadHTTPRepoReadersAndOwner(t *testing.T) {
 			for _, operation := range []string{"download", "has-many"} {
 				body := `{"digest":"` + string(dataDigest()) + `"}`
 				if operation == "has-many" {
-					body = `{"digests":["` + string(dataDigest()) + `"]}`
+					body = fmt.Sprintf(`{"digests":[%q],"deadline":%q}`, dataDigest(), time.Now().Add(time.Minute).Format(time.RFC3339Nano))
 				}
 				w := authorityHTTP(h, b, "POST", "/api/v1/data/"+operation, body)
 				if class == "peer repo reader" {

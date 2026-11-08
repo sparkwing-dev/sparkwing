@@ -28,6 +28,15 @@ func (l *logCapture) logf(format string, args ...any) {
 	l.changed = make(chan struct{})
 }
 
+func (l *logCapture) updates() <-chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.changed == nil {
+		l.changed = make(chan struct{})
+	}
+	return l.changed
+}
+
 func (l *logCapture) contains(sub string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -86,12 +95,7 @@ func waitForLog(t *testing.T, log *logCapture, sub string) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	for {
-		log.mu.Lock()
-		if log.changed == nil {
-			log.changed = make(chan struct{})
-		}
-		changed := log.changed
-		log.mu.Unlock()
+		changed := log.updates()
 		if log.contains(sub) {
 			return
 		}

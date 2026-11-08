@@ -19,6 +19,8 @@ import (
 func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
 	for _, disconnected := range []bool{false, true} {
 		t.Run(map[bool]string{false: "funding_refused", true: "controller_lost"}[disconnected], func(t *testing.T) {
+			wait, cancelWait := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancelWait()
 			entered := make(chan int, 1)
 			release := make(chan struct{})
 			ready := make(chan struct{})
@@ -71,7 +73,7 @@ func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
 			case pid = <-entered:
 			case err := <-finished:
 				t.Fatalf("SDK never started child: %v", err)
-			case <-time.After(3 * time.Second):
+			case <-wait.Done():
 				t.Fatal("SDK never started child")
 			}
 			close(release)
@@ -81,7 +83,7 @@ func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
 				if err == nil {
 					t.Fatal("SDK ignoring cancellation succeeded")
 				}
-			case <-time.After(3 * time.Second):
+			case <-wait.Done():
 				t.Fatal("SDK survived its funded bound")
 			}
 			if time.Now().Before(expires) {
@@ -105,6 +107,8 @@ func (l cleanupPIDLog) Write(data []byte) (int, error) {
 func TestFundedBoundKillsUncooperativeCleanupTree(t *testing.T) {
 	for _, leaderExits := range []bool{false, true} {
 		t.Run(strconv.FormatBool(leaderExits), func(t *testing.T) {
+			wait, cancelWait := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancelWait()
 			bound := time.Now().Add(300 * time.Millisecond)
 			keeper := lease.Keeper{Lease: time.Minute, Interval: time.Second, Renew: func(context.Context) (lease.Beat, error) {
 				return lease.Beat{ExpiresAt: bound, CancelRequested: true}, nil
@@ -132,7 +136,7 @@ func TestFundedBoundKillsUncooperativeCleanupTree(t *testing.T) {
 				if err == nil {
 					t.Fatal("cleanup ignoring cancellation succeeded")
 				}
-			case <-time.After(3 * time.Second):
+			case <-wait.Done():
 				t.Fatal("cleanup survived its funded bound")
 			}
 			assertProcessStopped(t, pid)

@@ -29,6 +29,20 @@ run: {submit_env_allow: []}
 	}
 }
 
+func TestDashboardAllowedHosts(t *testing.T) {
+	for _, host := range []string{"desk.example.ts.net", "Desk.Example.TS.NET"} {
+		if _, err := Decode("machine.yaml", []byte("dashboard: {allowed_hosts: ["+host+"]}")); err != nil {
+			t.Fatalf("allowed host %q: %v", host, err)
+		}
+	}
+	for _, host := range []string{"", "localhost", "desk.localhost", "127.0.0.1", "[::1]", "https://desk.example", "desk.example:8443", "*.example", "desk.example/path", "desk.example.", "-desk.example", "desk..example", strings.Repeat("a", 64) + ".example"} {
+		_, err := Decode("machine.yaml", []byte(fmt.Sprintf("dashboard: {allowed_hosts: [%q]}", host)))
+		if err == nil || !strings.Contains(err.Error(), "dashboard.allowed_hosts") {
+			t.Fatalf("invalid host %q: %v", host, err)
+		}
+	}
+}
+
 func TestRejectMalformedMachine(t *testing.T) {
 	for _, raw := range []string{"machine: {box_id: ''}", "agent: {}", "logs: {}", "runner: {gitcache: x}", "runner: {allow_repos: []}", "run: {dispatch_wait: 1m}", "profiles: {p: {backend: x}}", "cache: null", "cache: {max_entries: 1, max_entries: 2}", "{}\n---\n{}", "runner: {max_concurrent: 0}", "runner: {lease: 0s}", "runner: {heartbeat: 0s}", "runner: {accept_working_tree: true}", "debug: {pause_timeout: 0s}", "admission: {mode: wrong}", "dashboard: {address: '0.0.0.0:4343'}", "dashboard: {address: 'localhost:4343'}", "dashboard: {address: '127.0.0.1'}", "dashboard: {bind: x}"} {
 		t.Run(raw, func(t *testing.T) {

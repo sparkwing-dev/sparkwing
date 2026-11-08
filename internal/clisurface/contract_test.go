@@ -80,7 +80,7 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 	required := map[string][]string{
 		"sparkwing run":              {"publish", "sw-cache-from", "sw-pause-before", "sw-no-memo", "sw-allow-risk"},
 		"sparkwing pipeline trigger": {"resume", "runner", "profile"},
-		"sparkwing dashboard open":   {},
+		"sparkwing dashboard open":   {"host"},
 		"sparkwing daemon install":   {}, "sparkwing daemon uninstall": {}, "sparkwing __tick": {},
 		"sparkwing schedules pause": {"schedule"}, "sparkwing schedules resume": {"schedule"},
 		"sparkwing runners add": {"repos", "reserved-for"}, "sparkwing pools allow": {"pool", "repo", "branch", "source", "route"},

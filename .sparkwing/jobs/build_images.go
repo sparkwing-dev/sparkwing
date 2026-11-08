@@ -20,7 +20,8 @@ type BuildImages struct {
 
 	args BuildImagesArgs
 
-	tag string
+	tag      string
+	revision string
 
 	refs []string
 }
@@ -116,6 +117,23 @@ func (p *BuildImages) ensureBuildxBuilder(ctx context.Context) error {
 }
 
 func (p *BuildImages) resolveTag(ctx context.Context) error {
+	if !p.args.RuntimeBase {
+		status, err := sparkwing.Exec(ctx, "git", "status", "--porcelain", "--untracked-files=normal").String()
+		if err != nil {
+			return fmt.Errorf("build-images: inspect source checkout: %w", err)
+		}
+		if strings.TrimSpace(status) != "" {
+			return fmt.Errorf("build-images: source checkout has uncommitted changes; commit or remove them before building images")
+		}
+		head, err := sparkwing.Exec(ctx, "git", "rev-parse", "HEAD").String()
+		if err != nil {
+			return fmt.Errorf("build-images: resolve source HEAD: %w", err)
+		}
+		p.revision, err = gitRevision(strings.TrimSpace(head))
+		if err != nil {
+			return fmt.Errorf("build-images: source HEAD: %w", err)
+		}
+	}
 	if p.args.Tag != "" {
 		p.tag = p.args.Tag
 	} else {
@@ -225,6 +243,13 @@ func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
 		"--build-arg", "SPARKWING_VERSION=" + p.tag,
 		"--build-arg", "SPARKWING_IMAGE_REFRESH=" + p.tag,
 		"--tag", imageRef,
+	}
+	if !p.args.RuntimeBase {
+		args = append(args,
+			"--label", "org.opencontainers.image.revision="+p.revision,
+			"--label", "org.opencontainers.image.version="+p.tag,
+			"--label", "org.opencontainers.image.source=https://github.com/sparkwing-dev/sparkwing",
+		)
 	}
 	if p.args.QATrust {
 		args = append(args, "--build-arg", "GO_TAGS=qatrust")
