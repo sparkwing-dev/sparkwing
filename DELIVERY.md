@@ -701,7 +701,25 @@ an absent artifact is missing evidence, not a successful export.
 
 Pre-release records each check as a sequential WorkStep. A failed check does
 not suppress later checks; the parent reports the first failure, while the run
-logs and step states retain every individual failure. The canonical timing
+logs and step states retain every individual failure. `--platform-cells` adds
+the `macos` and `windows` cells as dispatched jobs requiring `os=darwin` and
+`os=windows`; they run the `macos-verify` and `windows-verify` checks. A local
+run cannot place them and hosted CI does not pass the flag. Trigger the run on
+the team controller; each cell waits visibly for a team runner reporting its
+operating system:
+
+```bash
+sparkwing pipeline trigger pre-release --profile prod -- --platform-cells
+```
+
+Enroll each machine once as a shared team runner scoped to this repository,
+piping a dedicated administrator session to stdin, then keep its runner service
+running. The service reports `os=darwin` or `os=windows` itself:
+
+```bash
+sparkwing runners add --runner build-mac --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
+sparkwing runners add --runner build-windows --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
+``` The canonical timing
 artifact retains those step outcomes and durations but excludes their error text.
 
 Pinned actionlint v1.7.12 does not recognize GitHub's `concurrency.queue`.

@@ -54,6 +54,9 @@ func Validate(cfg Config) error {
 				return err
 			}
 		}
+		if err := validatePlacement(key, p, cfg.Defaults); err != nil {
+			return err
+		}
 	}
 	for i, s := range cfg.Sparks {
 		key := fmt.Sprintf("sparks[%d]", i)

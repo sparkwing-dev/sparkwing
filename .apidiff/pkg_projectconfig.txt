@@ -6,6 +6,7 @@ type Config struct {
 	Sparks    []Spark
 }
 func (c *Config) Registry() *pipelines.Config
+func (c *Config) RepositoryPlacement(pipeline, revision string) (*runspec.RepositoryPlacement, error)
 type Defaults struct {
 	Run      *RunRestrictions
 	Args     map[string]string
@@ -29,6 +30,9 @@ type Guards struct {
 	Unless []string
 }
 type Hook struct{}
+type JobOverride struct {
+	Placement *Placement
+}
 func Load(path string) (*Config, error)
 func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error)
 func Parse(raw []byte) (*Config, error)
@@ -46,8 +50,22 @@ type Pipeline struct {
 	Prefers     []string
 	SourceFiles []string
 	On          *Events
+
+	Placement *Placement
+
+	Jobs map[string]JobOverride
 }
 func PipelineSource(repoDir, name string) (string, error)
+type Placement struct {
+	Prefer []PlacementTier
+}
+type PlacementTier struct {
+	Target   string
+	Labels   []string
+	Hold     *string
+	Workflow *string
+	Runner   *string
+}
 type PullRequestEvent struct {
 	Actions  []string
 	Branches []string

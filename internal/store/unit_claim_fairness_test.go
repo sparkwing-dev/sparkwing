@@ -60,7 +60,7 @@ func TestClaimSeededDisjointLabelsAndFairShare(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				claimContext, err := persistClaimContextTx(t.Context(), tx, Team(team), run, capability.UnitNode, requirements, execution)
+				claimContext, err := persistClaimContextTx(t.Context(), tx, Team(team), run, "job", capability.UnitNode, requirements, execution)
 				if err != nil {
 					return err
 				}

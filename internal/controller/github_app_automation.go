@@ -138,7 +138,7 @@ func (s *Server) githubAppAutomationPreview(ctx context.Context, tenant *store.T
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return out, err
 	}
-	snapshot, err := s.githubApp.client.FileAtDefaultHead(ctx, in.InstallationID, repo.Owner, repo.Name, ".sparkwing/"+projectconfig.Filename)
+	snapshot, err := s.githubApp.client.FileAtDefaultHead(ctx, in.InstallationID, repo.ID, repo.Owner, repo.Name, ".sparkwing/"+projectconfig.Filename)
 	if err != nil {
 		out.Status = "unavailable"
 		out.Error = "GitHub could not read the repository configuration; retry discovery"

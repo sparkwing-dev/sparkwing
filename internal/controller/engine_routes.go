@@ -203,6 +203,7 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err != nil {
 			return err
 		}
+		placementSource := fetched
 		compared, credentialVerified, err := s.verifyIntakeSourceCredential(r.Context(), store.Team(a.Target.Team), body.Request)
 		unverifiedReason := ""
 		if err != nil {
@@ -216,6 +217,9 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if fetched.ID == 0 && compared.ID > 0 {
 			fetched = compared
 		}
+		if placementSource.ID == 0 {
+			placementSource = compared
+		}
 		ctx := context.WithValue(r.Context(), verifiedIntakeSourceKey{}, verifiedIntakeSource{location: body.Request.Source.Location, repository: body.Request.Git.Repository})
 		request, err := IntakeForStore(a, body)
 		if err != nil {
@@ -223,6 +227,9 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		}
 		request.Intent = &intent.Request
 		request.FetchedRepository = fetched
+		if request.RepositoryPlacement, err = s.requestPlacement(ctx, store.Team(a.Target.Team), body.Request, placementSource); err != nil {
+			return err
+		}
 		request.SourceCredentialVerified = credentialVerified
 		request.UnverifiedReason = unverifiedReason
 		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {

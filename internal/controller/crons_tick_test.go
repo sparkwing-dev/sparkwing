@@ -42,6 +42,10 @@ func newStoreForTick(t *testing.T) *store.Store {
 			body = `{"total_count":1,"repositories":[{"id":701,"full_name":"acme/widgets","owner":{"id":1,"login":"acme","type":"Organization"}}]}`
 		case "GET /repositories/701":
 			body = `{"id":701,"full_name":"acme/widgets","default_branch":"main"}`
+		case "GET /repos/acme/widgets":
+			body = `{"id":701,"default_branch":"main"}`
+		case "GET /repos/acme/widgets/git/ref/heads/main":
+			body = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}}`
 		case "GET /repos/acme/widgets/compare/0123456789abcdef0123456789abcdef01234567...refs/heads/main":
 			body = `{"status":"identical"}`
 		case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
