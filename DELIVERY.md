@@ -793,7 +793,9 @@ file. Other syntax and workflow checks remain active.
   class on touched packages. Local post-deploy scans pass `--full` to retain long race tests across
   every package except the deferred store.
   Affected race runs use the stable private test home and native Go test cache,
-  without `-count=1`. Full race runs keep the uncached shard path. The Go build
+  without `-count=1`. Each stable suite home is locked through setup, execution
+  and cleanup, so overlapping runs of the same step in one checkout wait for
+  each other. Full race runs keep the uncached shard path. The Go build
   cache already survives runs, and hosted jobs restore and save it through
   their existing cache steps. No successful policy or review check is skipped
   by a package cache hit. After
