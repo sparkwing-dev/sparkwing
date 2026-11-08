@@ -234,6 +234,9 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 			return err
 		}
 		if suspended {
+			if _, err := tx.execContext(ctx, `UPDATE github_actions_dispatches SET state='cancelled',reason='installation suspended' WHERE team=? AND installation_id=?`, team, installation); err != nil {
+				return err
+			}
 			if _, err := tx.execContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
 				tx.now(ctx).UnixNano(), team, installation); err != nil {

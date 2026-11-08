@@ -444,22 +444,22 @@ a verified recovery path.
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 29 is older than this binary (expects 34); back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+sparkwing: store schema version 29 is older than this binary (expects 36); back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
-sparkwing: store schema version 29 is older than this binary (expects 34); back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
+sparkwing: store schema version 29 is older than this binary (expects 36); back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
 
-sparkwing: store schema version 30 is older than this binary (expects 34); start the controller with this binary once to upgrade the v0.69.2 store in place, then run this again
+sparkwing: store schema version 30 is older than this binary (expects 36); start the controller with this binary once to upgrade the v0.69.2 store in place, then run this again
 
 sparkwing: store schema version 30 baseline digest "<recorded-digest>" is not the v0.69.2 baseline "d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.69.2 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
 sparkwing: store schema version 30 baseline digest "<missing>" is not the v0.69.2 baseline "d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.69.2 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
 
-sparkwing: store schema version 35 is newer than this binary (expects 34); start a binary matching the store, or restore a backup matching this binary: stop the controller, move <path> and any <path>-wal and <path>-shm files aside, and copy the newest <path>.schema-34-*.bak to <path>; runs recorded since that backup are lost
+sparkwing: store schema version 37 is newer than this binary (expects 36); start a binary matching the store, or restore a backup matching this binary: stop the controller, move <path> and any <path>-wal and <path>-shm files aside, and copy the newest <path>.schema-36-*.bak to <path>; runs recorded since that backup are lost
 
-sparkwing: store schema version 35 is newer than this binary (expects 34); start a binary matching the store, or restore a backup matching this binary into a separate database
+sparkwing: store schema version 37 is newer than this binary (expects 36); start a binary matching the store, or restore a backup matching this binary into a separate database
 
-sparkwing: store schema version 34 baseline digest "<recorded-digest>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+sparkwing: store schema version 36 baseline digest "<recorded-digest>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
-sparkwing: store schema version 34 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
+sparkwing: store schema version 36 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
 ```
 <!-- END GENERATED SCHEMA ERRORS -->

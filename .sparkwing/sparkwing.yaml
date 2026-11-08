@@ -88,6 +88,26 @@ pipelines:
   - name: release
     entrypoint: Release
 
+  - name: weekly-release
+    entrypoint: WeeklyRelease
+    on:
+      schedule:
+        - name: weekly-sdk-cli
+          cron: '0 9 * * 1'
+          tz: America/Denver
+          where: local
+          overlap: skip
+
+  - name: owned-sdk-main
+    entrypoint: OwnedSDK
+    on:
+      schedule:
+        - name: owned-sdk-main
+          cron: '0 8 * * *'
+          tz: America/Denver
+          where: local
+          overlap: skip
+
   - name: template-verify
     entrypoint: TemplateVerify
 

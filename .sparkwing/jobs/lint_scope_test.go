@@ -2,10 +2,11 @@ package jobs
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
@@ -144,7 +145,7 @@ func TestLintBaselineDescriptionCarriesTheResolvedCommit(t *testing.T) {
 
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	out, err := testgit.Command("git", append([]string{"-C", dir}, args...)...).Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}

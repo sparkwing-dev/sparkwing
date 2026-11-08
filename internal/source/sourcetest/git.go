@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 // Remote redirects git fetches to local fixtures and records argv, env and private file paths.
@@ -78,7 +79,7 @@ os.execv(` + encode(realGit) + `, [` + encode(realGit) + `] + args)
 // Environment gives source tools an isolated home and the fixture git executable.
 func Environment(t *testing.T) []string {
 	t.Helper()
-	return []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()}
+	return testgit.Env([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()})
 }
 
 // Git runs native fixture operations without the user's git configuration.

@@ -96,9 +96,9 @@ func (d *Daemon) admissionHTTP(next http.Handler) http.Handler {
 				d.mu.Unlock()
 			}
 			d.releaseAdmissionHTTP(w, r, subject, id)
-		case strings.HasPrefix(path, "/requests/") && strings.HasSuffix(path, "/process") && r.Method == http.MethodPost:
-			id := strings.TrimSuffix(strings.TrimPrefix(path, "/requests/"), "/process")
-			d.processAdmissionHTTP(w, r, subject, id, peer)
+		case strings.HasPrefix(path, "/requests/") && (strings.HasSuffix(path, "/process") || strings.HasSuffix(path, "/command")) && r.Method == http.MethodPost:
+			id, kind, _ := strings.Cut(strings.TrimPrefix(path, "/requests/"), "/")
+			d.processAdmissionHTTP(w, r, subject, id, peer, kind == "command")
 		case strings.HasPrefix(path, "/requests/"):
 			id := strings.TrimPrefix(path, "/requests/")
 			watch := strings.HasSuffix(id, "/watch")
@@ -656,7 +656,8 @@ func (d *Daemon) cancelAdmissionRunLocked(runID, reason string) error {
 	return nil
 }
 
-func (d *Daemon) processAdmissionHTTP(w http.ResponseWriter, r *http.Request, subject, id string, peer localhostwire.LocalPeerIdentity) {
+// safety: a command only joins measurement; the durable root alone drives orphan cleanup.
+func (d *Daemon) processAdmissionHTTP(w http.ResponseWriter, r *http.Request, subject, id string, peer localhostwire.LocalPeerIdentity, command bool) {
 	var request struct {
 		PID          int    `json:"pid"`
 		ProcessBirth string `json:"process_birth"`
@@ -681,6 +682,16 @@ func (d *Daemon) processAdmissionHTTP(w http.ResponseWriter, r *http.Request, su
 	}
 	if !ticket.Active || ticket.Result.State != "granted" {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Conflict, Message: "admission lease is no longer granted"})
+		return
+	}
+	if command {
+		c := ticket.participant
+		c.measuredCommands()
+		if c.commands == nil {
+			c.commands = map[int]string{}
+		}
+		c.commands[request.PID] = request.ProcessBirth
+		writeAdmissionJSON(w, ticket.Result)
 		return
 	}
 	ticket.MeasurementPID = request.PID

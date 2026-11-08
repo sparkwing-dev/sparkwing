@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 )
 
@@ -37,5 +39,37 @@ func TestGitHubRunnerWorkflowUsesCurrentGrammar(t *testing.T) {
 	}
 	if _, err := runnerflags.Parse(words[0], words[1:], io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFallbackWorkflowIsDispatchOnlyAndBindsReceiptName(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "sparkwing-fallback.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		RunName string `yaml:"run-name"`
+		On      map[string]struct {
+			Inputs map[string]struct {
+				Required bool `yaml:"required"`
+			} `yaml:"inputs"`
+		} `yaml:"on"`
+		Permissions map[string]string `yaml:"permissions"`
+		Jobs        map[string]struct {
+			RunsOn string `yaml:"runs-on"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	dispatch, ok := workflow.On["workflow_dispatch"]
+	if !ok || len(workflow.On) != 1 || !dispatch.Inputs["receipt"].Required || !dispatch.Inputs["runner"].Required {
+		t.Fatal("fallback workflow must require a receipt and image and start only on dispatch")
+	}
+	if workflow.RunName != "sparkwing:${{ inputs.receipt }}" || workflow.Jobs["sparkwing"].RunsOn != "${{ inputs.runner }}" {
+		t.Fatal("fallback workflow lost provider receipt/image binding")
+	}
+	if workflow.Permissions["id-token"] != "write" || workflow.Permissions["contents"] != "read" || len(workflow.Permissions) != 2 {
+		t.Fatal("fallback workflow changed its credential permissions")
 	}
 }

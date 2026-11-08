@@ -1,0 +1,6 @@
+# pkg/gitenv/testgit
+
+func Command(name string, args ...string) *exec.Cmd
+func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd
+func Env(environment []string) []string
+func Unbind() error

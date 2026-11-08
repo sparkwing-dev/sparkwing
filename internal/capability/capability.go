@@ -60,6 +60,12 @@ type LeaseRef struct {
 
 // PushScope confines an Actions exchange without manufacturing App branch trust.
 type PushScope struct {
+	Receipt     string `json:"receipt,omitempty"`
+	RunID       string `json:"run_id,omitempty"`
+	JobID       string `json:"job_id,omitempty"`
+	WorkflowSHA string `json:"workflow_sha,omitempty"`
+	RunnerImage string `json:"runner_image,omitempty"`
+
 	RepositoryKey      string `json:"repo_key"`
 	Repository         string `json:"repository,omitempty"`
 	Ref                string `json:"ref"`
