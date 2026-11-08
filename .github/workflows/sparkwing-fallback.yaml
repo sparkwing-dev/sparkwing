@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 env:
-  SPARKWING_RUNNER_VERSION: v0.70.0
+  SPARKWING_RUNNER_VERSION: v0.71.0
   # Sparkwing's ed25519 release signing key, the one https://sparkwing.dev/install.sh trusts.
   SPARKWING_RELEASE_KEY: whVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI=
 jobs:
@@ -20,6 +20,8 @@ jobs:
       - name: Install sparkwing-runner
         shell: bash
         working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           case "$RUNNER_OS" in Linux) os=linux ;; macOS) os=darwin ;; Windows) os=windows ;; *) echo "unsupported runner OS $RUNNER_OS" >&2; exit 1 ;; esac
@@ -28,7 +30,16 @@ jobs:
           if [ "$os" = windows ]; then ext=.exe; fi
           asset="sparkwing-runner-$os-$arch$ext"
           base="https://github.com/sparkwing-dev/sparkwing/releases/download/$SPARKWING_RUNNER_VERSION"
-          curl --fail-early --retry 3 --retry-delay 1 -fsSL -o "$asset" "$base/$asset" -o SHA256SUMS "$base/SHA256SUMS" -o SHA256SUMS.sig "$base/SHA256SUMS.sig"
+          download_asset() {
+            local name="$1" status=0 code id
+            code="$(curl --fail-early --retry 3 --retry-delay 1 -fsSL --connect-timeout 60 --speed-limit 1 --speed-time 60 -w '%{http_code}' -o "$name" "$base/$name")" || status=$?
+            [ "$status" = 0 ] && return 0
+            case "$code:$status" in 5??:*|*:28) ;; *) return "$status" ;; esac
+            id="$(gh api "repos/sparkwing-dev/sparkwing/releases/tags/$SPARKWING_RUNNER_VERSION" --jq ".assets[] | select(.name == \"$name\") | .id")"
+            [ -n "$id" ] || return 1
+            gh api -H 'Accept: application/octet-stream' "repos/sparkwing-dev/sparkwing/releases/assets/$id" >"$name"
+          }
+          for name in "$asset" SHA256SUMS SHA256SUMS.sig; do download_asset "$name"; done
           # macOS ships LibreSSL, which cannot verify ed25519; the hosted image also carries OpenSSL 3.
           verifier=""
           for candidate in openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
@@ -40,6 +51,9 @@ jobs:
           expected="$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' SHA256SUMS)"
           actual="$("$verifier" dgst -sha256 "$asset" | awk '{ print $NF }')"
           if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then echo "release checksum mismatch for $asset" >&2; exit 1; fi
+          printf 'Verified checksum: %s  %s\n' "$actual" "$asset"
+          printf 'Hosted platform: %s/%s (%s/%s)\n' "$RUNNER_OS" "$RUNNER_ARCH" "$os" "$arch"
+          "$verifier" version
           chmod +x "$asset"
           mv "$asset" "sparkwing-runner$ext"
           # The signature covers bytes, not the tag, so the binary must also name the pinned release.
@@ -52,4 +66,7 @@ jobs:
           ext=""
           if [ "$RUNNER_OS" = Windows ]; then ext=.exe; fi
           "./sparkwing-runner$ext" version -o json
-          "./sparkwing-runner$ext" warm --help
+          "./sparkwing-runner$ext" warm --help-all >warm-help-all.txt
+          cat warm-help-all.txt
+          grep -qF -- '--dispatch-receipt' warm-help-all.txt
+          echo "Verified warm --help-all exposes --dispatch-receipt"
