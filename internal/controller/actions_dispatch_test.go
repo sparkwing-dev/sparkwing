@@ -195,10 +195,12 @@ func TestActionsDispatchTeamClaimWinsDuringHTTP(t *testing.T) {
 	if err != nil || claim.NodeID != "job" {
 		t.Fatalf("team claim: %+v %v", claim, err)
 	}
+	assertDispatchHistory(t, f, "sending", receipt, "1 lost race")
 	release <- struct{}{}
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+	assertDispatchHistory(t, f, "1 dispatch", receipt, "accepted", "1 lost race")
 	claims := f.claims()
 	spec, err := f.e.Server.actionsReceiptProvision(t.Context(), "a", receipt, claims)
 	if err != nil {
@@ -211,6 +213,14 @@ func TestActionsDispatchTeamClaimWinsDuringHTTP(t *testing.T) {
 	if late, err := f.e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("late runner did not exit idle: %+v %v", late, err)
 	}
+	assertDispatchHistory(t, f, "1 lost race", "https://github.com/acme/repo/actions/runs/1000")
+	engineSQL(t, f.e.Store, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES('a','run','job',1,?,?,?,'runner','team','local',?)`, int64(claim.Award.Generation), claim.Award.Holder, claim.Award.CapabilityPrefix, f.now.UnixNano())
+	engineSQL(t, f.e.Store, `UPDATE nodes SET status='done',outcome='success',attempt=1,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,ready_at=NULL,queue_started_at=NULL,finished_at=? WHERE node_id='job'`, f.now.UnixNano())
+	engineSQL(t, f.e.Store, `UPDATE runs SET status='success',finished_at=? WHERE id='run'`, f.now.UnixNano())
+	if err := f.e.Server.processPendingActionsCancellations(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertDispatchHistory(t, f, "cancelled", "1 lost race", receipt, "https://github.com/acme/repo/actions/runs/1000")
 }
 
 func (f *dispatchFixture) claims() githuboidc.Claims {
@@ -249,6 +259,7 @@ func TestActionsReceiptBindsOneJobAndCancelsProvider(t *testing.T) {
 	if got := f.app.CancelledRuns(); len(got) != 1 || got[0] != "1000" {
 		t.Fatalf("provider cancellation: %v", got)
 	}
+	assertDispatchHistory(t, f, "1 dispatch", "cancelled", d.Receipt, "https://github.com/acme/repo/actions/runs/1000")
 }
 
 func TestActionsReceiptRejectsUnboundProviderIdentity(t *testing.T) {
@@ -545,6 +556,7 @@ func TestActionsReceiptWorkflowSurvivesReturnStartAndFinish(t *testing.T) {
 	if running, err := f.e.Store.AsOperator().ReadActionsDispatch(t.Context(), "a", d.Receipt); err != nil || running.State != "accepted" || len(f.app.CancelledRuns()) != 0 {
 		t.Fatalf("running workflow cancelled: %+v %v %v", running, f.app.CancelledRuns(), err)
 	}
+	assertDispatchHistory(t, f, "0 lost race", d.Receipt, "accepted", "https://github.com/acme/repo/actions/runs/1000")
 	engineSQL(t, f.e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=?,ready_at=NULL,queue_started_at=NULL,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE node_id='job'`, f.now.UnixNano())
 	if err := f.e.Server.processPendingActionsCancellations(t.Context()); err != nil {
 		t.Fatal(err)
@@ -552,6 +564,9 @@ func TestActionsReceiptWorkflowSurvivesReturnStartAndFinish(t *testing.T) {
 	if finished, err := f.e.Store.AsOperator().ReadActionsDispatch(t.Context(), "a", d.Receipt); err != nil || finished.Reason != "job finished" || len(f.app.CancelledRuns()) != 0 {
 		t.Fatalf("finished job cancelled its workflow: %+v %v %v", finished, f.app.CancelledRuns(), err)
 	}
+	assertDispatchHistory(t, f, "0 lost race", d.Receipt, "job finished", "https://github.com/acme/repo/actions/runs/1000")
+	engineSQL(t, f.e.Store, `UPDATE nodes SET status='pending',outcome='',finished_at=NULL,claimed_by='team-runner',capability_prefix='team',lease_expires_at=?,attempt=2 WHERE node_id='job'`, f.now.Add(time.Minute).UnixNano())
+	assertDispatchHistory(t, f, "0 lost race", d.Receipt)
 }
 
 func TestActionsReceiptCancelledWhenAnotherRunnerRunsTheJob(t *testing.T) {

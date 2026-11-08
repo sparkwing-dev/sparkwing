@@ -4,20 +4,12 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
-
-var inputsSchemaTestSequence atomic.Uint64
-
-func inputsSchemaTestName(prefix string) string {
-	return prefix + strconv.FormatUint(inputsSchemaTestSequence.Add(1), 10)
-}
 
 type allTypesInputs struct {
 	S    string            `flag:"s"`
@@ -309,7 +301,8 @@ func (secretValuesPipe) Plan(_ context.Context, _ *Plan, _ secretValuesCreds, _ 
 }
 
 func TestStandaloneSDKReturnsAuthorPlanningError(t *testing.T) {
-	name := inputsSchemaTestName("secret-values-fixture-")
+	isolateRegistry(t)
+	name := "secret-values-fixture"
 	Register[secretValuesCreds](name, func() Pipeline[secretValuesCreds] {
 		return secretValuesPipe{}
 	})
@@ -323,8 +316,9 @@ func TestStandaloneSDKReturnsAuthorPlanningError(t *testing.T) {
 }
 
 func TestRegister_SchemaCarriesSecretBit(t *testing.T) {
+	isolateRegistry(t)
 	captured := &secretPipe{}
-	name := inputsSchemaTestName("secret-bit-fixture-")
+	name := "secret-bit-fixture"
 	Register[secretInputs](name, func() Pipeline[secretInputs] { return captured })
 	reg, ok := lookup(name)
 	if !ok {
@@ -510,8 +504,9 @@ func (p *embeddedRegPipe) Plan(_ context.Context, plan *Plan, in embedOuter, rc 
 }
 
 func TestRegister_EmbeddedArgsAppearInSchema(t *testing.T) {
+	isolateRegistry(t)
 	captured := &embeddedRegPipe{}
-	name := inputsSchemaTestName("embedded-args-fixture-")
+	name := "embedded-args-fixture"
 	Register[embedOuter](name, func() Pipeline[embedOuter] { return captured })
 	reg, ok := lookup(name)
 	if !ok {

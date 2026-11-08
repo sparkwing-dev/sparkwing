@@ -108,11 +108,11 @@ func (c *dataClient) HasMany(ctx context.Context, input blob.HasManyRequest) (bl
 	if err := c.checkAuthority(input.Authority); err != nil {
 		return blob.Presence{}, err
 	}
+	if input.Budget.Deadline.IsZero() {
+		return blob.Presence{}, errors.New("presence requires an explicit deadline")
+	}
 	var result wire.DataPresence
-	body := struct {
-		Digests  []blob.Digest `json:"digests"`
-		Deadline *time.Time    `json:"deadline,omitempty"`
-	}{input.Digests, dataDeadline(input.Budget)}
+	body := wire.DataHasManyRequest{Digests: input.Digests, Deadline: input.Budget.Deadline}
 	if body.Digests == nil {
 		body.Digests = []blob.Digest{}
 	}

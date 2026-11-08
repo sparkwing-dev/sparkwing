@@ -96,28 +96,29 @@ func TestProcSamplerCPUChild(t *testing.T) {
 		t.Skip("subprocess entry point")
 	}
 	fmt.Println("ready")
-	var signal [1]byte
-	if _, err := io.ReadFull(os.Stdin, signal[:]); err != nil {
-		t.Fatal(err)
-	}
-	var before, after syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &before); err != nil {
-		t.Fatal(err)
-	}
-	var cpu int64
-	for cpu < int64(subtreeCPUWork) {
-		value := uint64(1)
-		for range 100_000 {
-			value = (value << 1) ^ (value*17 + 3)
+	for {
+		var signal [1]byte
+		if _, err := io.ReadFull(os.Stdin, signal[:]); err != nil {
+			return
 		}
-		runtime.KeepAlive(value)
-		if err := syscall.Getrusage(syscall.RUSAGE_SELF, &after); err != nil {
+		var before, after syscall.Rusage
+		if err := syscall.Getrusage(syscall.RUSAGE_SELF, &before); err != nil {
 			t.Fatal(err)
 		}
-		cpu = after.Utime.Nano() + after.Stime.Nano() - before.Utime.Nano() - before.Stime.Nano()
+		var cpu int64
+		for cpu < int64(subtreeCPUWork) {
+			value := uint64(1)
+			for range 100_000 {
+				value = (value << 1) ^ (value*17 + 3)
+			}
+			runtime.KeepAlive(value)
+			if err := syscall.Getrusage(syscall.RUSAGE_SELF, &after); err != nil {
+				t.Fatal(err)
+			}
+			cpu = after.Utime.Nano() + after.Stime.Nano() - before.Utime.Nano() - before.Stime.Nano()
+		}
+		fmt.Println(cpu)
 	}
-	fmt.Println(cpu)
-	_, _ = io.Copy(io.Discard, os.Stdin)
 }
 
 func TestProcSampler_IdleTreeIsZero(t *testing.T) {

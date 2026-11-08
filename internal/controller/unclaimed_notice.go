@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -67,6 +68,12 @@ func unclaimedNotice(view store.RunView) *engineid.Notice {
 func placementNotices(view store.RunView) []engineid.Notice {
 	var out []engineid.Notice
 	for _, wait := range view.PlacementWaits {
+		if len(wait.Dispatches) > 0 {
+			out = append(out, actionsHistoryNotice(view, wait))
+		}
+		if len(wait.Tiers) == 0 {
+			continue
+		}
 		parts := make([]string, len(wait.Tiers))
 		actions := false
 		for i, tier := range wait.Tiers {
@@ -75,15 +82,6 @@ func placementNotices(view store.RunView) []engineid.Notice {
 				state = append(state, tier.Unavailable)
 			} else if tier.OpensIn > 0 {
 				state = append(state, "opens in "+tier.OpensIn.Round(time.Second).String())
-			}
-			if d := tier.Dispatch; d != nil {
-				state = append(state, "dispatch "+d.State+", receipt "+d.Receipt)
-				if d.Reason != "" && tier.Unavailable == "" {
-					state = append(state, d.Reason)
-				}
-				if d.ProviderRunID != "" {
-					state = append(state, "https://github.com/"+d.Repository+"/actions/runs/"+d.ProviderRunID)
-				}
 			}
 			if len(tier.Live) > 0 {
 				state = append(state, strings.Join(tier.Live, ", ")+" live")
@@ -108,4 +106,43 @@ func placementNotices(view store.RunView) []engineid.Notice {
 		out = append(out, engineid.Notice{Kind: engineid.NoticePlacementHold, Reason: "job " + wait.JobID + " waits for placement: " + strings.Join(parts, "; then "), Hint: hint})
 	}
 	return out
+}
+
+func actionsHistoryNotice(view store.RunView, wait store.PlacementWait) engineid.Notice {
+	parts := make([]string, 0, len(wait.Dispatches))
+	lost := 0
+	for _, d := range wait.Dispatches {
+		part := fmt.Sprintf("%s: dispatch %s, receipt %s", d.Runner, d.State, d.Receipt)
+		if d.Reason != "" {
+			part += ", " + d.Reason
+		}
+		holder := fmt.Sprintf("github:%d:%d:%s:%s", d.RepositoryID, d.RepositoryOwnerID, d.ProviderRunID, d.ProviderAttempt)
+		winner := ""
+		for _, node := range view.Snapshot.Nodes {
+			if string(node.Ref.NodeID) == wait.JobID {
+				winner = node.ClaimedBy
+				for _, attempt := range view.Attempts {
+					if winner == "" && attempt.Identity.NodeID == wait.JobID && attempt.Identity.Attempt == int64(node.Attempt) && attempt.StartedAt.UnixNano() >= d.QueueStartedAt {
+						winner = attempt.Holder
+					}
+				}
+			}
+		}
+		won := slices.ContainsFunc(view.Attempts, func(attempt runstate.NodeAttempt) bool {
+			return attempt.Identity.NodeID == wait.JobID && attempt.Holder == holder && attempt.StartedAt.UnixNano() >= d.QueueStartedAt
+		})
+		if !won && winner != "" && winner != holder {
+			lost++
+			part += ", lost race to " + winner
+		}
+		if d.ProviderRunID != "" {
+			part += ", https://github.com/" + d.Repository + "/actions/runs/" + d.ProviderRunID
+		}
+		parts = append(parts, part)
+	}
+	return engineid.Notice{
+		Kind:   engineid.NoticePlacementHold,
+		Reason: fmt.Sprintf("job %s GitHub Actions history (%d dispatches, %d lost race): %s", wait.JobID, len(parts), lost, strings.Join(parts, "; ")),
+		Hint:   "Fallback startup and execution spend the repository account's Actions minutes, including workers that lose the race.",
+	}
 }

@@ -6,8 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 	sparkwing "github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -46,23 +49,18 @@ func TestTemplateVerifierCompilesAndPlansFreshTemplate(t *testing.T) {
 		t.Fatalf("build verifier CLI: %v\n%s", err, output)
 	}
 	ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
+	rendered, _, err := renderVerifyTemplates(ctx, root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for key, value := range readGoEnv(ctx) {
 		t.Setenv(key, value)
 	}
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	var manifest templates.Manifest
-	for _, candidate := range verifyTemplates {
-		if candidate.Manifest.Name == "lint-test-go" {
-			manifest = candidate.Manifest
-			break
-		}
-	}
-	if manifest.Name == "" {
-		t.Fatal("lint-test-go verification template is missing")
-	}
+	manifest := rendered["lint-test-go"].Manifest
 	manifest.Verify = templates.VerifyCompileOnly
-	outcome, err := verifyTemplate(ctx, manifest, verifyEnv{CLI: bin, Root: root})
+	outcome, err := verifyTemplate(ctx, manifest, verifyEnv{CLI: bin, Root: root, Templates: rendered})
 	if err != nil || outcome.Tier != templates.VerifyCompileOnly || outcome.Skipped {
 		t.Fatalf("fresh-template verification: %+v: %v", outcome, err)
 	}
@@ -313,5 +311,67 @@ func TestTemplateDryRunMissingEvidenceFails(t *testing.T) {
 		if err == nil || out.RanRunStep {
 			t.Fatalf("evidence %s: outcome=%+v, error=%v; want unverified", raw, out, err)
 		}
+	}
+}
+
+func TestTemplateVerifierRendersLocalTextAndVerificationManifest(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Dir}}", "github.com/sparkwing-dev/sparks-core/templates")
+	command.Env = append(os.Environ(), "GOWORK=off")
+	output, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := filepath.Join(t.TempDir(), "templates")
+	if err := os.CopyFS(local, os.DirFS(strings.TrimSpace(string(output)))); err != nil {
+		t.Fatal(err)
+	}
+	bodyPath := filepath.Join(local, "lint-test-go", "pipeline.go.tmpl")
+	body, err := os.ReadFile(bodyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const marker = "\n// local template edit\n"
+	if err := os.WriteFile(bodyPath, append(body, marker...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(local, "lint-test-go", "template.yaml")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest templates.Manifest
+	if err := yaml.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.VerifyTools = []string{"local-tool"}
+	raw, err = yaml.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
+	t.Setenv("SPARKWING_SPARKS_CORE_DIR", filepath.Dir(local))
+	registry, source, err := renderVerifyTemplates(ctx, root, t.TempDir(), discoverSparksCore(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source != local {
+		t.Fatalf("source = %q, want %q", source, local)
+	}
+	got := registry["lint-test-go"]
+	if !strings.HasSuffix(got.Body, marker) || !slices.Equal(got.Manifest.VerifyTools, manifest.VerifyTools) {
+		t.Fatalf("local source was not rendered: %+v", got)
+	}
+	if err := os.WriteFile(bodyPath, []byte("{{ broken local template"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := renderVerifyTemplates(ctx, root, t.TempDir(), discoverSparksCore(root)); err == nil {
+		t.Fatal("invalid local template fell back to the published template")
 	}
 }
