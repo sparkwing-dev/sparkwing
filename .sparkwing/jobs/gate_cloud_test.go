@@ -48,7 +48,7 @@ func TestCloudGatePreparesTheBaselineInEveryJobWorkspace(t *testing.T) {
 		t.Fatalf("missing gate jobs: %+v", doc.Jobs)
 	}
 	for _, job := range doc.Jobs {
-		if (job.ID == "gate" || job.ID == "race-touched") && (job.Cores == nil || *job.Cores != overlappedGoSuiteCPUs) {
+		if (job.ID == "gate" || job.ID == "race-touched" || job.ID == policyJobID) && (job.Cores == nil || *job.Cores != overlappedGoSuiteCPUs) {
 			t.Fatalf("%s lost its hosted four-core allocation: %+v", job.ID, job.Cores)
 		}
 		want := 2

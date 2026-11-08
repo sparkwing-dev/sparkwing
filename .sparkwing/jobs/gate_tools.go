@@ -29,10 +29,17 @@ func cloudGateTools(arch string) ([]gateToolArchive, error) {
 	if checksum == "" {
 		return nil, fmt.Errorf("cloud gate tools: unsupported Linux architecture %s", arch)
 	}
+	nativeArch := "x64"
+	nativeChecksum := "2b5f62986b14f2891fb78e5b554e60e38f25987217fed578f0303bbfda5e124a"
+	if arch == "arm64" {
+		nativeArch = "arm64"
+		nativeChecksum = "22b886e280579171aa77e2df699792932ccf66b1853aa73cf1cd851c959465ac"
+	}
 	lint := "golangci-lint-2.12.2-linux-" + arch
 	return []gateToolArchive{
 		{"golangci-lint", "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/" + lint + ".tar.gz", checksum, lint + "/golangci-lint", "golangci-lint"},
-		{"pnpm", "https://registry.npmjs.org/pnpm/-/pnpm-12.6.0.tgz", "05b7b921fbb31564505c967eabf825895a1cc18f50935c00be98815272cc9d56", "", "bin/pnpm.cjs"},
+		{"pnpm-data", "https://registry.npmjs.org/pnpm/-/pnpm-12.6.0.tgz", "05b7b921fbb31564505c967eabf825895a1cc18f50935c00be98815272cc9d56", "", "package.json"},
+		{"pnpm", "https://registry.npmjs.org/@pnpm/exe.linux-" + nativeArch + "/-/exe.linux-" + nativeArch + "-12.6.0.tgz", nativeChecksum, "package/pnpm", "pnpm"},
 	}, nil
 }
 
@@ -77,8 +84,8 @@ func prepareCloudGateTools(ctx context.Context) error {
 			return err
 		}
 	}
-	pnpm := filepath.Join(root, "pnpm", "bin")
-	if _, err := sparkwing.Exec(ctx, "ln", "-sf", "pnpm.cjs", filepath.Join(pnpm, "pnpm")).Run(); err != nil {
+	pnpm := filepath.Join(root, "pnpm")
+	if _, err := sparkwing.Exec(ctx, "ln", "-sfn", "../pnpm-data/dist", filepath.Join(pnpm, "dist")).Run(); err != nil {
 		return err
 	}
 	if err := os.Setenv("PATH", strings.Join([]string{filepath.Join(root, "golangci-lint"), pnpm, os.Getenv("PATH")}, string(os.PathListSeparator))); err != nil {

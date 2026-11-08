@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,7 +62,7 @@ func TestCloudGateToolInstallVerifiesDownloadsAndReusesInstalledTools(t *testing
 func TestCloudGateToolsCoverBothRunnerArchitectures(t *testing.T) {
 	for _, arch := range []string{"amd64", "arm64"} {
 		tools, err := cloudGateTools(arch)
-		if err != nil || len(tools) != 2 {
+		if err != nil || len(tools) != 3 {
 			t.Fatalf("%s tools=%+v error=%v", arch, tools, err)
 		}
 		for _, tool := range tools {
@@ -72,5 +73,27 @@ func TestCloudGateToolsCoverBothRunnerArchitectures(t *testing.T) {
 	}
 	if _, err := cloudGateTools("unsupported"); err == nil {
 		t.Fatal("unsupported architecture accepted")
+	}
+}
+
+func TestCloudPnpmEntrypointMatchesItsPinnedPackage(t *testing.T) {
+	data, err := os.ReadFile("testdata/pnpm-12.6.0-package.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Bin map[string]string `json:"bin"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	tools, err := cloudGateTools("amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools {
+		if tool.name == "pnpm" && tool.executable != manifest.Bin["pnpm"] {
+			t.Fatalf("pnpm executable %q differs from its published package entrypoint %q", tool.executable, manifest.Bin["pnpm"])
+		}
 	}
 }

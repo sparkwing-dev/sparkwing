@@ -39,7 +39,7 @@ the local review runs beside it. Cloud runs the policy, broad `gate`,
 `origin/main` commit captured by preconditions over HTTPS, without developer
 credentials. That commit bounds policy and lint findings even though the uploaded
 snapshot has no ancestry. The affected fast dependency closure, full critical
-set and touched-package fast race class match local gate mode. The two heavy jobs each
+set and touched-package fast race class match local gate mode. Policy and both heavy jobs each
 request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
 requires a successful Cloud receipt and an unchanged clean HEAD before and
 after the remote gate. The landing record's `gate_run` names the Cloud run.

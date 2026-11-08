@@ -75,7 +75,7 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 			return err
 		}
 		for _, job := range jobs {
-			if job.ID() == rc.Pipeline || job.ID() == "race-touched" {
+			if job.ID() == rc.Pipeline || job.ID() == "race-touched" || job.ID() == policyJobID {
 				job.Cores(overlappedGoSuiteCPUs)
 			}
 			job.BeforeRun(func(ctx context.Context) error {
