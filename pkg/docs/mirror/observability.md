@@ -68,6 +68,22 @@ the log level of an unrelated server fault, which still logs at error. Rollback
 cleanup failures caused by closed connections or canceled contexts log at debug.
 Other rollback cleanup failures log at warn.
 
+## Admission wait progress
+
+Live human output from `sparkwing run` and `sparkwing runs logs --follow` shows the
+machine's running holders and their charges, then your queue position. The next
+waiter reads `you are next`. Deeper waiters show `position N of M`.
+The line includes requested capacity and its source, free and held capacity,
+the reserve, external load, and expected clear time when measured durations
+support an estimate. These numbers come from the same queue snapshot as the
+dashboard capacity panel.
+
+After queue entry, progress checks at intervals of 30 seconds, 1 minute,
+2 minutes, then 5 minutes. It prints only when holders change, your position
+moves, or the blocking resource changes. Availability readings and ETA countdowns
+alone produce no output. If the queue snapshot is unavailable, the persisted
+wait reason appears once. JSON and filtered log reads retain their event records.
+
 ## Run statistics and sizing
 
 `sparkwing runs stats --pipeline check --since 7d` reads every matching root-run
