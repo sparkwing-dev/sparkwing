@@ -38,6 +38,7 @@ func dialSocket(ctx context.Context, path string) (net.Conn, error) {
 }
 
 func socketPresent(path string) bool {
+	// #nosec G703 -- Lstat inspects an entry inside a directory already checked private to this user.
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode()&os.ModeSocket != 0
 }
@@ -60,6 +61,7 @@ func removeStaleSocketDirs(keep string) {
 			continue
 		}
 		if staleSocketDir(dir) {
+			// #nosec G703 -- one validated user-owned entry under sticky /tmp; other users cannot swap it.
 			_ = os.RemoveAll(dir)
 		}
 	}
@@ -77,6 +79,7 @@ func staleSocketDir(dir string) bool {
 		if !socketPresent(path) {
 			return false
 		}
+		// #nosec G704 -- this probe dials only a Unix socket in this user's private directory.
 		if conn, err := net.DialTimeout("unix", path, time.Second); err == nil {
 			_ = conn.Close()
 			return false

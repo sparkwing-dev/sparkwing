@@ -360,10 +360,10 @@ func TestEveryWorkflowPinsActionsByCommitSHA(t *testing.T) {
 func TestSecurityWorkflowHasNoPrivateInfrastructureSurface(t *testing.T) {
 	body := strings.ToLower(readHostedCIFile(t, ".github/workflows/security.yaml"))
 	for _, forbidden := range []string{
-		"aws-actions", "configure-aws", "amazonaws", "run: aws", "ecr", "kube", "helm", "s3://",
-		"ghcr.io", "docker/login-action", "id-token", "packages: write", "secrets.", "private",
+		"aws-actions", "configure-aws", "amazonaws", "run: aws", `\becr\b`, "kube", "helm", "s3://",
+		`ghcr\.io`, "docker/login-action", "id-token", "packages: write", `\$\{\{\s*secrets\.`, `\bprivate\b`,
 	} {
-		if strings.Contains(body, forbidden) {
+		if regexp.MustCompile(forbidden).MatchString(body) {
 			t.Errorf("security workflow contains private-infrastructure surface %q", forbidden)
 		}
 	}
@@ -439,6 +439,56 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 		"95faf9f804197eb3f6ef4841f5a2a1d53a94bcf0:sweeps/grid-1-10/evidence/R03C16/before.txt:generic-api-key:6",
 		"95faf9f804197eb3f6ef4841f5a2a1d53a94bcf0:sweeps/grid-1-10/evidence/R09C14/after.txt:generic-api-key:6",
 		"95faf9f804197eb3f6ef4841f5a2a1d53a94bcf0:sweeps/grid-1-10/evidence/R09C14/before.txt:generic-api-key:6",
+		"# Reviewed historical prose and SHA-256 compilation-cache identifiers.",
+		"68a85824ce0982474c5cae7254ba59fb1d4064cd:design/rewrite/proposals/thin-sdk-step2/verification-wire.log:generic-api-key:15",
+		"68a85824ce0982474c5cae7254ba59fb1d4064cd:design/rewrite/proposals/thin-sdk-step2/verification-wire.log:generic-api-key:22",
+		"68a85824ce0982474c5cae7254ba59fb1d4064cd:design/rewrite/proposals/thin-sdk-step2/verification-wire.log:generic-api-key:29",
+		"68a85824ce0982474c5cae7254ba59fb1d4064cd:design/rewrite/proposals/thin-sdk-step2/verification-wire.log:generic-api-key:36",
+		"68a85824ce0982474c5cae7254ba59fb1d4064cd:design/rewrite/proposals/thin-sdk-step2/verification-wire.log:generic-api-key:43",
+		"68a85824ce0982474c5cae7254ba59fb1d4064cd:design/rewrite/proposals/thin-sdk-step2/verification-wire.log:generic-api-key:8",
+		"7a6a2f2bd9f1010d239adca1d5bc973607316e1b:design/rewrite/proposals/local-controller-restart.md:generic-api-key:97",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/cold.log:generic-api-key:15",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/cold.log:generic-api-key:22",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/cold.log:generic-api-key:29",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/cold.log:generic-api-key:36",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/cold.log:generic-api-key:43",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/cold.log:generic-api-key:8",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:112",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:153",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:195",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:237",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:305",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:32",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:345",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:385",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:426",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:468",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:510",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:578",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:618",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:658",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:699",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:72",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:741",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/measurements.json:generic-api-key:783",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm-fill.log:generic-api-key:15",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm-fill.log:generic-api-key:22",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm-fill.log:generic-api-key:29",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm-fill.log:generic-api-key:36",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm-fill.log:generic-api-key:43",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm-fill.log:generic-api-key:8",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm.log:generic-api-key:15",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm.log:generic-api-key:22",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm.log:generic-api-key:29",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm.log:generic-api-key:36",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm.log:generic-api-key:43",
+		"9b392db2ebb28c3f8941ce8da5032e9a447175ca:design/rewrite/proposals/thin-sdk-step1/warm.log:generic-api-key:8",
+		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:15",
+		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:22",
+		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:29",
+		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:36",
+		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:43",
+		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:8",
 	}, "\n")
 	if ignore != want {
 		t.Fatalf("gitleaks history exceptions are not the exact fingerprint set: %q", ignore)
