@@ -160,6 +160,7 @@ func TestTouchedLintJudgesOnlyThePackagesTheChangeHolds(t *testing.T) {
 	}
 	root := lintFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "internal", "negative_control.go"), ineffassignViolation("internal"))
+	writeGoFile(t, filepath.Join(root, "testdata", "tool", "go.mod"), "module fixture/tool\n\ngo 1.25\n")
 	gitAddAll(t, root)
 	host := newTestHost(t, sparkwingtest.Options{})
 	err := runGolangciLintTouched(host.Context(t.Context()))

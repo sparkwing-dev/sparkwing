@@ -87,6 +87,9 @@ func runGolangciLintTouched(ctx context.Context) error {
 		return err
 	}
 	for _, f := range files {
+		if isTestdataPath(f) {
+			continue
+		}
 		switch path.Base(f) {
 		case "go.mod", "go.sum", ".golangci.yml":
 			sparkwing.Info(ctx, "golangci-lint: %s changed, so every package is linted", f)

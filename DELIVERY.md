@@ -787,7 +787,8 @@ file. Other syntax and workflow checks remain active.
   dependency. Affected lint runs the full configured linter set with bounded
   workers and its existing checkout cache, without waiting on the global
   serial-runner lock. Full lint still waits for that lock. The real lint
-  integration fixture stays in the full test class. Its lint step lints only the packages holding changed Go
+  integration fixture stays in the full test class. Fixture-module dependency
+  changes do not widen product lint. Its lint step lints only the packages holding changed Go
   files (every package when `go.mod`, `go.sum` or `.golangci.yml` changed),
   since `--new-from-rev` drops findings outside the change anyway. With
   `--full`, race tests cover every package but `internal/store` and the
