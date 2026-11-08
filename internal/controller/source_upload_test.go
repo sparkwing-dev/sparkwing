@@ -158,7 +158,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := process.StartChild(t.Context(), "child", nil, "", "")
+	child, err := process.StartChild(t.Context(), "child", nil, "", "", false)
 	if err != nil {
 		t.Fatalf("uploaded-source child: %v", err)
 	}

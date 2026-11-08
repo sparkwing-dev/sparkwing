@@ -673,3 +673,23 @@ the development version `0.0.0`, which requires a verified `v0.0.0` engine. The
 Go local replacement path can use the candidate CLI, while TypeScript has no
 corresponding path. The twin's README names the stamped SDK and matching engine
 prerequisites. The Go example remains the executable candidate staging gate.
+
+## Detached child runs
+
+Go pipelines can start a child without holding the parent job open:
+
+```go
+sparkwing.Job(plan, "submit-scan", func(ctx context.Context) error {
+    run, err := sparkwing.StartChild(ctx, "scan", map[string]string{"target": "staging"})
+    if err == nil {
+        sparkwing.Info(ctx, "scan run: %s", run)
+    }
+    return err
+}).StartsChildren("scan")
+```
+
+`StartChild` returns the admitted run ID. The child keeps the parent's repository,
+revision and verified provenance, and continues when the parent completes or is
+cancelled. It uses its own pipeline's concurrency groups. Ordinary `RunAndAwait`
+children remain attached and are cancelled when their creating job can no longer
+await them. TypeScript does not expose detached child submission.

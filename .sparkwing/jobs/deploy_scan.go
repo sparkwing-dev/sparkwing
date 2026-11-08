@@ -26,7 +26,7 @@ func (DeployScan) ShortHelp() string {
 }
 
 func (DeployScan) Help() string {
-	return "Submitted by deploy after each environment smoke. Uses an independent per-environment concurrency group and the deploy-kikd-prod runner toolchain. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
+	return "Started as a detached child by deploy after each environment smoke, inheriting its verified repository and revision. Uses an independent per-environment concurrency group and the deploy-kikd-prod runner toolchain. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
 }
 
 type deployScanSecrets struct {
@@ -226,20 +226,15 @@ func (d *deployer) submitScan(ctx context.Context, env deployEnv, images deployI
 	if err != nil {
 		return "", err
 	}
-	const profile = "deploy-scans"
-	if err := d.addProfile(ctx, profile, d.cfg.Production.ControllerURL, d.cfg.Params.ScanToken); err != nil {
-		return "", err
-	}
 	var runID string
 	err = d.act(ctx, "submit detached "+env.Name+" deploy-scan at "+images.Commit, func() error {
-		out, err := d.sw(ctx, "", "pipeline", "trigger", "deploy-scan", "-C", d.repoDir,
-			"--profile", profile, "--runner", "label=deploy-kikd-prod", "--detach", "--ref", images.Commit, "-o", "json", "--", "--environment", env.Name, "--record", string(body))
+		var err error
+		runID, err = d.tools.startChild(ctx, "deploy-scan", map[string]string{"environment": env.Name, "record": string(body)})
 		if err != nil {
 			return err
 		}
-		runID = acceptedRunID(out)
 		if runID == "" {
-			return fmt.Errorf("deploy-scan submission returned no run_id: %q", out)
+			return errors.New("child start returned no scan run ID")
 		}
 		link := "https://console.sparkwing.dev/runs?run=" + url.QueryEscape(runID)
 		sparkwing.Summary(ctx, fmt.Sprintf("%s post-deploy scan: [%s](%s)\n\nDeploy `%s`, commit `%s`, controller `%s`, runner `%s`. Submitted without waiting; failures appear on the linked scan run and in Bitwing.",

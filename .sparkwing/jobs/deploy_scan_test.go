@@ -275,6 +275,11 @@ func TestDeployScanPipelineSeparatesConcurrencyAndPinsSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, job := range deploy.Jobs {
+		if (job.ID == "staging-gate" || job.ID == "production") && (len(job.Children) != 1 || job.Children[0].Pipeline != "deploy-scan") {
+			t.Fatalf("deploy job %s must declare scan children: %+v", job.ID, job.Children)
+		}
+	}
 	if len(deploy.Concurrency) != 1 || deploy.Concurrency[0].Group != "sparkwing-cloud-deploy" || len(deploy.Jobs) != 4 {
 		t.Fatalf("deploy must have its own slot and no scan jobs: %+v", deploy)
 	}
@@ -283,33 +288,20 @@ func TestDeployScanPipelineSeparatesConcurrencyAndPinsSource(t *testing.T) {
 func TestDeploySubmitsScanWithoutAwaitingAndLinksItsReceipt(t *testing.T) {
 	f := newFakeDeploy(t)
 	d := f.deployer(false)
-	host := newTestHost(t, sparkwingtest.Options{})
-	ctx := host.Context(t.Context())
-	if err := d.assumeRole(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.buildCLI(ctx); err != nil {
-		t.Fatal(err)
-	}
-	submitted := false
-	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
-		if len(c.Args) > 2 && c.Args[0] == "pipeline" && c.Args[2] == "deploy-scan" {
-			submitted = true
-			var rec deployScanRecord
-			if i := slices.Index(c.Args, "--record"); i < 0 {
-				t.Fatal("submission lost deployment identity")
-			} else if err := json.Unmarshal([]byte(c.Args[i+1]), &rec); err != nil {
-				t.Fatal(err)
-			}
-			if rec.DeployRun != d.runID || rec.Images.Commit != f.head || !rec.Images.sameDigests(f.candidate()) || !slices.Contains(c.Args, "--detach") || !slices.Contains(c.Args, "label=deploy-kikd-prod") || !slices.Contains(c.Args, f.head) {
-				t.Fatalf("unbound or attached submission: %+v, %v", rec, c.Args)
-			}
-			return `{"run_id":"run-detached-scan","status":"queued"}`, nil
+	host := newTestHost(t, sparkwingtest.Options{StartChild: func(_ context.Context, pipeline string, args map[string]string) (string, error) {
+		var rec deployScanRecord
+		if err := json.Unmarshal([]byte(args["record"]), &rec); err != nil {
+			t.Fatal(err)
 		}
-		if len(c.Args) > 0 && c.Args[0] == "runs" {
-			t.Fatal("deploy must not await scan completion")
+		if pipeline != "deploy-scan" || rec.DeployRun != d.runID || rec.Images.Commit != f.head || !rec.Images.sameDigests(f.candidate()) || args["environment"] != "staging" {
+			t.Fatalf("unbound submission: %s, %+v, %v", pipeline, rec, args)
 		}
-		return f.run(ctx, c)
+		return "run-detached-scan", nil
+	}})
+	d.tools.startChild = sparkwing.StartChild
+	d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
+		t.Fatalf("child submission must not use a token or CLI: %s", c)
+		return "", nil
 	}
 	var run string
 	plan := sparkwing.NewPlan()
@@ -317,9 +309,9 @@ func TestDeploySubmitsScanWithoutAwaitingAndLinksItsReceipt(t *testing.T) {
 		var err error
 		run, err = d.submitScan(ctx, d.cfg.Staging, f.candidate())
 		return err
-	})
+	}).StartsChildren("deploy-scan")
 	_, err := host.RunStep(t.Context(), plan, "submit", "run")
-	if err != nil || run != "run-detached-scan" || !submitted {
+	if err != nil || run != "run-detached-scan" {
 		t.Fatalf("detached submission = %q, %v", run, err)
 	}
 	if !slices.ContainsFunc(host.Records(), func(record sparkwing.LogRecord) bool {

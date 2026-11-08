@@ -592,6 +592,16 @@ func (f *fakeDeploy) config() deployConfig {
 
 func (f *fakeDeploy) deployer(dry bool) *deployer {
 	tools := deployTools{
+		startChild: func(_ context.Context, pipeline string, args map[string]string) (string, error) {
+			raw, err := json.Marshal(args)
+			if err != nil {
+				return "", err
+			}
+			f.mu.Lock()
+			f.calls = append(f.calls, "child start "+pipeline+" "+string(raw))
+			f.mu.Unlock()
+			return "run-" + pipeline + "-" + args["environment"], nil
+		},
 		run:      f.run,
 		registry: f.registry,
 		oidc: func(context.Context, string) (string, error) {

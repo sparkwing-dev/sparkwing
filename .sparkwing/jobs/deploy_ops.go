@@ -53,21 +53,23 @@ type deployRegistry interface {
 }
 
 type deployTools struct {
-	run      func(context.Context, deployCommand) (string, error)
-	registry deployRegistry
-	oidc     func(context.Context, string) (string, error)
-	wait     func(context.Context, time.Duration) error
-	now      func() time.Time
-	lookPath func(string) (string, error)
-	say      func(context.Context, string)
-	mask     func(context.Context, string) error
+	startChild func(context.Context, string, map[string]string) (string, error)
+	run        func(context.Context, deployCommand) (string, error)
+	registry   deployRegistry
+	oidc       func(context.Context, string) (string, error)
+	wait       func(context.Context, time.Duration) error
+	now        func() time.Time
+	lookPath   func(string) (string, error)
+	say        func(context.Context, string)
+	mask       func(context.Context, string) error
 }
 
 func realDeployTools() deployTools {
 	return deployTools{
-		run:      runDeployCommand,
-		registry: ecrRegistry{},
-		oidc:     sparkwing.OIDCToken,
+		startChild: sparkwing.StartChild,
+		run:        runDeployCommand,
+		registry:   ecrRegistry{},
+		oidc:       sparkwing.OIDCToken,
 		wait: func(ctx context.Context, d time.Duration) error {
 			t := time.NewTimer(d)
 			defer t.Stop()

@@ -707,3 +707,19 @@ func (h *host) jobArguments(p *sparkwing.Plan, id string) (map[string]string, er
 	}
 	return nil, &apierr.Error{Code: apierr.UnknownJob, Message: "job is not declared"}
 }
+
+func (h *host) StartChild(ctx context.Context, r sdkserve.ChildRequest) (string, error) {
+	if err := h.executionError(ctx); err != nil {
+		return "", err
+	}
+	if h.opts.StartChild == nil {
+		return "", errors.New("fake host has no child start handler")
+	}
+	if err := h.begin(ctx); err != nil {
+		return "", err
+	}
+	defer h.work.Done()
+	ctx, cancel := h.linkedContext(ctx)
+	defer cancel()
+	return h.opts.StartChild(ctx, r.Pipeline, r.Args)
+}

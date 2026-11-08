@@ -121,15 +121,23 @@ func (s *routeServices) Latest(ctx context.Context, pipeline, job string, age ti
 	return out.Output, err
 }
 
-func (s *routeServices) RunPipeline(ctx context.Context, request ChildRequest) (json.RawMessage, error) {
+func (s *routeServices) StartChild(ctx context.Context, request ChildRequest) (string, error) {
 	var started struct {
 		RunID string `json:"run_id"`
 	}
 	if err := s.call(ctx, "POST", "/node/v1/children", request, &started); err != nil {
-		return nil, err
+		return "", err
 	}
 	if started.RunID == "" {
-		return nil, fmt.Errorf("child start returned no run ID")
+		return "", fmt.Errorf("child start returned no run ID")
+	}
+	return started.RunID, nil
+}
+
+func (s *routeServices) RunPipeline(ctx context.Context, request ChildRequest) (json.RawMessage, error) {
+	runID, err := s.StartChild(ctx, request)
+	if err != nil {
+		return nil, err
 	}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -140,7 +148,7 @@ func (s *routeServices) RunPipeline(ctx context.Context, request ChildRequest) (
 			Output json.RawMessage `json:"output"`
 			Error  json.RawMessage `json:"error"`
 		}
-		path := "/node/v1/children/" + routeSegment(started.RunID) + "/await?job=" + url.QueryEscape(request.Job) + "&wait_ms=" + strconv.FormatInt(limits.ChildAwait.Milliseconds(), 10)
+		path := "/node/v1/children/" + routeSegment(runID) + "/await?job=" + url.QueryEscape(request.Job) + "&wait_ms=" + strconv.FormatInt(limits.ChildAwait.Milliseconds(), 10)
 		if err := s.call(ctx, "GET", path, nil, &state); err != nil {
 			return nil, err
 		}

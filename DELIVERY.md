@@ -506,16 +506,19 @@ a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before
 migration. Checking that automated backups are on belongs to external verification through
 stormwing, not the deploy. The deploy role has no RDS permission.
 
-After a successful staging gate or production smoke, the deploy submits a detached
-`deploy-scan` at the deployed commit and digests. The scan runs the full `example`
+After a successful staging gate or production smoke, the deploy starts a detached child
+`deploy-scan` at the deployed commit and digests using `sparkwing.StartChild`.
+The child inherits verified-default provenance from the deploy, so the existing
+runner trust policy and repository-scoped scan secrets apply; it is exempt from
+the parent-completion child sweep. No manual trigger token is needed. The scan runs the full `example`
 and records its result in the runner user's normal Bitwing ledger. Promotion does
 not wait for it, and its environment-specific concurrency group is separate from
 the deploy group. Bitwing must be installed on that user's PATH. The scan also
 requires the runner label and trust conditions documented below.
 
-The deploy reads `/kikd-prod/sparkwing/deploy/scan-submit-token` to submit the scan
-on the production controller. The `deploy-scan` pipeline there receives the scoped
-`DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` secrets. Each value
+The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
+Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
+repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
 is a token for its target fixture team with permission to start and observe the
 example and read its logs. Missing prerequisites report that the scan could not
 run, rather than clearing prior Bitwing findings.

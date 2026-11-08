@@ -80,7 +80,6 @@ func (c deployConfig) productionBudget() time.Duration {
 type deployParams struct {
 	GitopsKey      string
 	ReferenceKey   string
-	ScanToken      string
 	StagingToken   string
 	SmokeTokenBase string
 }
@@ -117,7 +116,6 @@ func defaultDeployConfig() deployConfig {
 			GitopsKey:      "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
 			ReferenceKey:   "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
 			StagingToken:   "/kikd-prod/sparkwing/deploy/staging-gate-token",
-			ScanToken:      "/kikd-prod/sparkwing/deploy/scan-submit-token",
 			SmokeTokenBase: "/kikd-prod/sparkwing/deploy/smoke-token-",
 		},
 		Staging: deployEnv{

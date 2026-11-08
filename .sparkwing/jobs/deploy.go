@@ -37,7 +37,7 @@ func (Deploy) Help() string {
 		"Take a manual snapshot before a risky migration. Each environment's deployed and previous digests are that job's output. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Every deploy job refuses a commit that is no longer the tip of origin/main, and " +
-		"production refuses a version below the one it runs, so retrying an old run cannot roll production back. After each successful environment smoke, deploy submits a revision-bound deploy-scan pipeline and links it in the job summary without awaiting it. Scans use their own concurrency group, leaving the deploy slot free when promotion finishes. Scan failures upsert a stable per-environment Bitwing finding; a clean scan resolves it. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. Bitwing resolves from the runner user's PATH and uses their existing ledger configuration; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
+		"production refuses a version below the one it runs, so retrying an old run cannot roll production back. After each successful environment smoke, deploy starts a detached deploy-scan child at the same revision and with the same verified lineage and links it in the job summary without awaiting it. Scans use their own concurrency group, leaving the deploy slot free when promotion finishes. Scan failures upsert a stable per-environment Bitwing finding; a clean scan resolves it. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. Bitwing resolves from the runner user's PATH and uses their existing ledger configuration; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
 }
 
 func (Deploy) Examples() []sparkwing.Example {
@@ -95,13 +95,13 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 		staging := sparkwing.Job(plan, "staging-deploy", &deployStagingJob{Job: base.named("staging-deploy"), Images: images}).
 			Needs(build).Requires(runnerLabels...).Timeout(cfg.stagingBudget())
 		gate = sparkwing.Job(plan, "staging-gate", &deployGateJob{Job: base.named("staging-gate"), Images: images}).
-			Needs(staging).Requires(runnerLabels...).Timeout(cfg.gateBudget())
+			Needs(staging).Requires(runnerLabels...).StartsChildren("deploy-scan").Timeout(cfg.gateBudget())
 		if in.StopAfter == "staging" {
 			return nil
 		}
 	}
 	prod := &deployProductionJob{Job: base.named("production"), Images: images, Gate: sparkwing.RefTo[stagingGateRecord](gate)}
-	sparkwing.Job(plan, "production", prod).Needs(build, gate).Requires(runnerLabels...).Timeout(cfg.productionBudget())
+	sparkwing.Job(plan, "production", prod).Needs(build, gate).Requires(runnerLabels...).StartsChildren("deploy-scan").Timeout(cfg.productionBudget())
 	return nil
 }
 

@@ -78,14 +78,16 @@ An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, 
 | `/kikd-prod/sparkwing/deploy/staging-gate-token` | staging team token, `runs.read,logs.read,runs.write` | staging fixture team `stg-qa` |
 | `/kikd-prod/sparkwing/deploy/smoke-token-qa-team` | production team token, `runs.read,logs.read,runs.write` | `qa-team` |
 | `/kikd-prod/sparkwing/deploy/smoke-token-qa-team-b` | production team token, `runs.read,logs.read,runs.write` | `qa-team-b` |
-| `/kikd-prod/sparkwing/deploy/scan-submit-token` | production submission token, `runs.read,logs.read,runs.write` | `deploy-scan` in the deployment team |
 
 The full `example` run also reads `EXAMPLE_PROBE_TOKEN` from its target fixture team's Sparkwing secrets, rather than SSM. It holds a separate token for that team with `runs.read,logs.read,runs.write`. Its lifecycle probes use it to start, cancel, retry and read `example-probe` runs from inside the Cloud job. Without it they skip.
 
 The production controller also scopes `DEPLOY_SCAN_STAGING_TOKEN` and
-`DEPLOY_SCAN_PRODUCTION_TOKEN` to the `deploy-scan` pipeline. They hold fixture-team
+`DEPLOY_SCAN_PRODUCTION_TOKEN` to the `deploy` pipeline: a same-revision child
+keeps its parent pipeline identity when selecting secrets. They hold fixture-team
 tokens for starting and observing the full example on staging and production.
-The detached scan records its result through the runner user's installed Bitwing
+The deploy starts the scan through the authenticated child-start route; it inherits
+the deploy's verified-default repository identity instead of a manually asserted
+identity. No scan-submit token is used. The detached scan records its result through the runner user's installed Bitwing
 and normal ledger. See [deployment instructions](../../../DELIVERY.md#deploying-sparkwing-cloud).
 
 These are long-lived secrets. They never sit on a runner's disk past the job (the job writes each to a 0600 file in its temporary directory and removes the directory) and are masked in logs, but whoever holds the role can read them. Each token should carry an expiry and a rotation date in the ink vault runbook.
