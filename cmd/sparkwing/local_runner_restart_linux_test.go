@@ -48,7 +48,7 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	t.Setenv("HOME", user)
 	t.Setenv("SPARKWING_HOME", home)
 	config := filepath.Join(user, "config.yaml")
-	// Other CI shards must not consume this private controller's admission budget.
+	// bug: other CI shards must not starve this private controller's child admission.
 	if err := os.WriteFile(config, []byte("admission:\n  budget: ignore-external\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
