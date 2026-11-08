@@ -312,8 +312,7 @@ func ensureSocketDir(dir string) error {
 }
 
 func checkSocketBase(base string) error {
-	// safety: the base is a system path such as /tmp, which is a symlink on
-	// macOS, so resolve it; the sticky bit on the target is what matters.
+	// #nosec G703 -- read-only inspection follows the macOS /tmp symlink to validate its sticky target.
 	info, err := os.Stat(base)
 	if err != nil {
 		return fmt.Errorf("wingd: inspect socket base directory %s: %w", base, err)
@@ -331,6 +330,7 @@ func checkSocketDir(dir string) error {
 	if err := checkSocketBase(filepath.Dir(dir)); err != nil {
 		return err
 	}
+	// #nosec G703 -- read-only inspection decides whether this directory is safe to use.
 	info, err := os.Lstat(dir)
 	if err != nil {
 		return fmt.Errorf("wingd: inspect socket directory %s: %w", dir, err)
