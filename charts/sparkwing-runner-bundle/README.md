@@ -183,7 +183,8 @@ to name this deployment's job namespace, a supported protected Cloud class, and
 a nonempty `karpenter.sh/nodepool` label. NodeClaims must lack the team-node
 label because the launcher uses shared pools. Operators and Karpenter establish those
 labels before the launcher reserves a fresh node. The launcher cannot add them
-to foreign nodes in the same write. Every existing node label is immutable.
+to foreign nodes in the same write. Existing node labels, owner references and
+finalizers are immutable.
 First reservation may add only the protected team-node, used-team and used-run
 labels. The dedicated taint and all foreign taints stay unchanged. The launcher
 may add or remove its reservation taint and add its quarantine taint, both with

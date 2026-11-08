@@ -223,6 +223,13 @@ func testCapacityPolicyCEL(t *testing.T, policy *admissionv1.ValidatingAdmission
 		},
 		"change foreign taint":      func(n *corev1.Node) { n.Spec.Taints[1].Effect = corev1.TaintEffectNoExecute },
 		"replace reservation taint": func(n *corev1.Node) { n.Spec.Taints[2].Value = "another-reservation" },
+		"add second reservation taint": func(n *corev1.Node) {
+			n.Spec.Taints = append(n.Spec.Taints, corev1.Taint{Key: "sparkwing.dev/cloud-reserved", Value: "another-reservation", Effect: corev1.TaintEffectNoSchedule})
+		},
+		"add owner reference": func(n *corev1.Node) {
+			n.OwnerReferences = append(n.OwnerReferences, metav1.OwnerReference{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "missing", UID: "nonexistent"})
+		},
+		"add finalizer": func(n *corev1.Node) { n.Finalizers = append(n.Finalizers, "example.com/held") },
 		"quarantine with eviction": func(n *corev1.Node) {
 			n.Spec.Taints = append(n.Spec.Taints, corev1.Taint{Key: "sparkwing.dev/quarantined", Effect: corev1.TaintEffectNoExecute})
 		},

@@ -51,12 +51,14 @@ spec:
       message: the launcher may only write capacity from its Sparkwing shared NodePools
     - expression: >-
         request.userInfo.username != variables.launcher || request.operation != 'UPDATE' ||
+        object.metadata.?ownerReferences.orValue([]) == oldObject.metadata.?ownerReferences.orValue([]) &&
+        object.metadata.?finalizers.orValue([]) == oldObject.metadata.?finalizers.orValue([]) &&
         variables.labels.all(k, k in variables.newLabels && variables.newLabels[k] == variables.labels[k]) &&
         variables.newLabels.all(k, k in variables.labels || k in [
           'node-restriction.kubernetes.io/sparkwing-team-node',
           'node-restriction.kubernetes.io/sparkwing-used-team',
           'node-restriction.kubernetes.io/sparkwing-used-run'])
-      message: the launcher may only add team and run binding labels and must preserve all existing labels
+      message: the launcher may only add team and run binding labels and must preserve existing labels, ownership and finalizers
     - expression: >-
         request.userInfo.username != variables.launcher || request.operation != 'UPDATE' ||
         variables.newTaints.exists(t, t.key == 'sparkwing.dev/dedicated' &&
