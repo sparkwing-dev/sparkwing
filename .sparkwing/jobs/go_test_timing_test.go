@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,7 +117,7 @@ func TestTestStepNamesTheFailingTestThroughJSON(t *testing.T) {
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "internal", "sound_test.go"),
 		"package internal\n\nimport \"testing\"\n\nfunc TestSound(t *testing.T) { t.Fatal(\"named failure\") }\n")
-	err := runTest(context.Background())
+	err := runTest(newTestContext(t))
 	if err == nil {
 		t.Fatal("test accepted a failing test")
 	}

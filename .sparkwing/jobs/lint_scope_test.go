@@ -52,7 +52,7 @@ func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 	for _, dir := range productDirs {
 		t.Run(dir, func(t *testing.T) {
 			root := lintFixtureRepo(t)
-			ctx := context.Background()
+			ctx := newTestContext(t)
 
 			if err := runGolangciLint(ctx); err != nil {
 				t.Fatalf("clean fixture must pass lint, or the red below proves nothing: %v", err)
@@ -111,7 +111,7 @@ func TestLintJudgesAllFilesWhenTheBaselineRefIsMissing(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "bad.go"), ineffassignViolation("internal"))
 	gitCommitAll(t, root, "uploaded snapshot with finding")
 	runTestGit(t, root, "update-ref", "-d", "refs/remotes/"+gateBaselineRef)
-	err := runGolangciLint(t.Context())
+	err := runGolangciLint(newTestContext(t))
 	if err == nil || !strings.Contains(err.Error(), "ineffectual assignment") {
 		t.Fatalf("lint did not judge snapshot finding: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestLintScopeLineNamesEveryModuleAndTheBaseline(t *testing.T) {
 func TestLintBaselineDescriptionCarriesTheResolvedCommit(t *testing.T) {
 	root := lintFixtureRepo(t)
 
-	_, got, err := resolveGateBase(context.Background())
+	_, got, err := resolveGateBase(newTestContext(t))
 	if err != nil {
 		t.Fatalf("the fixture's baseline must resolve: %v", err)
 	}
