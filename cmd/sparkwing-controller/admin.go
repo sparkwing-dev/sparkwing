@@ -13,15 +13,17 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 const adminUsage = `usage: sparkwing-controller admin freeze --operator ACCOUNT_ID --team SLUG --reason TEXT
        sparkwing-controller admin unfreeze --operator ACCOUNT_ID --team SLUG --reason TEXT [--hold ID]
-       sparkwing-controller admin session --operator ACCOUNT_ID --team SLUG --reason TEXT [--output json|plain]
+       sparkwing-controller admin session --operator ACCOUNT_ID --team SLUG --reason TEXT [--output pretty|json|plain]
        sparkwing-controller admin grant --operator ACCOUNT_ID --team SLUG --cents N --reason TEXT --key KEY [--reverses REF]
 
 Break-glass for the operator console. When console sign-in is down, run it in
@@ -32,8 +34,8 @@ store configuration under SPARKWING_HOME and never creates a store.
 
 session prints an independent account session for an existing team administrator
 on a licensed team or Cloud controller.
-Plain output is the default for piping to sparkwing runners add --session-stdin.
-Use --output json for a JSON object containing the session. Its initial expiry is 15 minutes.
+Output is pretty on a terminal and one JSON object when piped. Use --output plain
+when piping to sparkwing runners add --session-stdin. Its initial expiry is 15 minutes.
 Normal renewal applies, including during enrollment. After fetching the session
 CSRF proof, enrollment attempts logout on success or failure. If fetching the
 proof or logout fails, the session remains live until expiry or revocation. The session is printed only
@@ -74,8 +76,9 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	}
 	verb := args[0]
 	fs := flag.NewFlagSet("admin "+verb, flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprintln(stderr, adminUsage) }
-	output := fs.StringP("output", "o", "plain", "session only: plain (default) or json")
+	output := fs.StringP("output", "o", "", "session only: pretty|json|plain (pretty on a terminal, JSON when piped)")
 	operator := fs.String("operator", "", "your operator account ID (required)")
 	team := fs.String("team", "", "the team's slug (required)")
 	reason := fs.String("reason", "", "why (required, up to 500 characters; excluded from audit rows)")
@@ -89,9 +92,10 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if fs.Changed("output") && verb != "session" {
 		return errors.New("--output belongs to session")
 	}
-	if *output != "json" && *output != "plain" {
-		return errors.New("--output must be json or plain")
+	if fs.Changed("output") && *output != "pretty" && *output != "json" && *output != "plain" {
+		return errors.New("--output must be pretty, json or plain")
 	}
+	format := clisurface.OutputFormat(*output, color.IsInteractiveStdout())
 	if *operator == "" || strings.ContainsAny(*operator, "@\r\n\t ") {
 		return errors.New("admin " + verb + " needs --operator with your account ID")
 	}
@@ -198,7 +202,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		slog.New(controller.CredentialSafeLogHandler(slog.NewJSONHandler(stderr, nil))).Info("audit",
 			"command", "sparkwing-controller admin session", "principal_kind", "break-glass", "principal_id", *operator,
 			"target_team", string(t.Team()))
-		if *output == "json" {
+		if format == "json" {
 			return json.NewEncoder(stdout).Encode(struct {
 				Session string `json:"session"`
 			}{Session: raw})

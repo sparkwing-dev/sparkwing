@@ -26,6 +26,10 @@ unlock.
 
 ### Changed
 
+- **cli (Breaking):** `sparkwing-controller admin session` defaults to JSON when piped and pretty output on a terminal
+  Enrollment pipes must request `--output plain` to pass the raw session to `sparkwing runners add --session-stdin`.
+  Internal `__complete` output also follows the stdout terminal default. Generated shell callers already request plain output.
+
 - **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/_unreleased.md#bound-object-presence-requests).
 
 

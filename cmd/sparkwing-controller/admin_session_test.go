@@ -189,19 +189,48 @@ func TestAdminSessionRefusesLocalDeployment(t *testing.T) {
 	}
 }
 
-func TestAdminSessionDefaultsToPlainForEnrollmentPipe(t *testing.T) {
+func TestAdminSessionOutputModes(t *testing.T) {
 	st, _, _ := adminSessionFixture(t)
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','ops-admin','owner',1)`); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	var out bytes.Buffer
-	if err := runAdminFixture([]string{"session", "--team", "default", "--reason", "enroll build machines"}, &out, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
+	for _, flags := range [][]string{nil, {"-o", "json"}, {"--output=json"}, {"-o=plain"}, {"--output", "pretty"}} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			var out, audit bytes.Buffer
+			args := append([]string{"session", "--team", "default", "--reason", "enroll build machines"}, flags...)
+			if err := runAdminFixture(args, &out, &audit); err != nil {
+				t.Fatal(err)
+			}
+			raw := strings.TrimSpace(out.String())
+			if len(flags) == 0 || strings.Contains(strings.Join(flags, " "), "json") {
+				var result struct {
+					Session string `json:"session"`
+				}
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || bytes.Count(out.Bytes(), []byte("\n")) != 1 {
+					t.Fatal("session output must be one JSON object per line")
+				}
+				raw = result.Session
+			}
+			if raw == "" || strings.Contains(audit.String(), raw) {
+				t.Fatal("session missing or leaked to audit")
+			}
+			digest := sha256.Sum256([]byte(raw))
+			var count int
+			if err := teststore.SQL(t, st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sessions WHERE hash=?`, hex.EncodeToString(digest[:])).Scan(&count); err != nil || count != 1 {
+				t.Fatal("output does not contain a usable enrollment session")
+			}
+		})
 	}
-	digest := sha256.Sum256([]byte(strings.TrimSpace(out.String())))
-	var count int
-	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sessions WHERE hash=?`, hex.EncodeToString(digest[:])).Scan(&count); err != nil || count != 1 {
-		t.Fatal("default output cannot be used as an enrollment session")
+}
+
+func TestAdminSessionRejectsOutputBeforeOpeningState(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	for _, flags := range [][]string{{"-o"}, {"--output"}, {"-o="}, {"--output="}, {"-o", ""}, {"-o", "table"}, {"--output", "JSON"}} {
+		var out bytes.Buffer
+		err := runAdmin(append([]string{"session"}, flags...), &out, &bytes.Buffer{})
+		if err == nil || out.Len() != 0 || !strings.Contains(err.Error(), "output") && !strings.Contains(err.Error(), "argument") {
+			t.Fatalf("%v: want output refusal before required identity or state, got %v", flags, err)
+		}
 	}
 }
