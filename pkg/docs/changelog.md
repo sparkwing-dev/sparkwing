@@ -75,6 +75,7 @@ unlock.
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
 - **local runner:** Held jobs reconnect after controller restarts because cancelled admission polls return an unavailable response instead of an empty success.
+- **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller's configuration and index untouched
 
 - **controller:** Run listings load at most the requested page plus one lookahead row per batch, reducing database work for small pages while preserving filters and stable cursors.
 

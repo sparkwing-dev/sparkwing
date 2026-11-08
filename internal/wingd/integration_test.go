@@ -80,48 +80,47 @@ func TestElection_ExactlyOneWinner(t *testing.T) {
 		}(d)
 	}
 
-	var winners int
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for winners == 0 {
-		for _, d := range daemons {
+	ready := make(chan struct{}, n)
+	for _, d := range daemons {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			select {
 			case <-d.Ready():
-				winners++
-			default:
+				ready <- struct{}{}
+			case <-ctx.Done():
 			}
-		}
-		if winners == 0 {
-			select {
-			case <-deadline.C:
-				t.Fatal("no daemon won the election")
-			case <-poll.C:
-			}
-		}
+		}()
 	}
-	poll.Stop()
-
-	lost := 0
-	loseDeadline := time.NewTimer(3 * time.Second)
-	defer loseDeadline.Stop()
-	for lost < n-1 {
+	t.Cleanup(func() { cancel(); wg.Wait() })
+	wait, stop := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stop()
+	select {
+	case <-ready:
+	case <-wait.Done():
+		t.Fatal("no daemon won the election")
+	}
+	for lost := 0; lost < n-1; lost++ {
 		select {
 		case err := <-errs:
 			if !errors.Is(err, wingd.ErrNotElected) {
 				t.Fatalf("loser returned %v, want ErrNotElected", err)
 			}
-			lost++
-		case <-loseDeadline.C:
+		case <-wait.Done():
 			t.Fatalf("only %d of %d losers reported ErrNotElected", lost, n-1)
+		}
+	}
+	winners := 0
+	for _, d := range daemons {
+		select {
+		case <-d.Ready():
+			winners++
+		default:
 		}
 	}
 	if winners != 1 {
 		t.Fatalf("saw %d ready daemons, want exactly 1", winners)
 	}
-	cancel()
-	wg.Wait()
 }
 
 func TestPromotionRebroadcastsRemainingWaiterPosition(t *testing.T) {
@@ -133,28 +132,14 @@ func TestPromotionRebroadcastsRemainingWaiterPosition(t *testing.T) {
 
 	b := ensure(t, home, "")
 	positionsB, resultB := acquireAsync(t, b, semReq("b", "deploy", 1, 1, wingwire.PolicyQueue))
-	select {
-	case q := <-positionsB:
-		if q.Position != 1 {
-			t.Fatalf("b initial position = %d, want 1", q.Position)
-		}
-	case r := <-resultB:
-		t.Fatalf("b resolved before queueing: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("b never reported its initial queue position")
+	if q := waitQueued(t, positionsB, resultB); q.Position != 1 {
+		t.Fatalf("b initial position = %d, want 1", q.Position)
 	}
 
 	c := ensure(t, home, "")
 	positionsC, resultC := acquireAsync(t, c, semReq("c", "deploy", 1, 1, wingwire.PolicyQueue))
-	select {
-	case q := <-positionsC:
-		if q.Position != 2 {
-			t.Fatalf("c initial position = %d, want 2", q.Position)
-		}
-	case r := <-resultC:
-		t.Fatalf("c resolved before queueing: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("c never reported its initial queue position")
+	if q := waitQueued(t, positionsC, resultC); q.Position != 2 {
+		t.Fatalf("c initial position = %d, want 2", q.Position)
 	}
 
 	if err := holder.Release(); err != nil {
@@ -165,15 +150,8 @@ func TestPromotionRebroadcastsRemainingWaiterPosition(t *testing.T) {
 		t.Fatalf("b should have promoted, got %v", r.err)
 	}
 
-	select {
-	case q := <-positionsC:
-		if q.Position != 1 {
-			t.Fatalf("c refreshed position = %d, want 1", q.Position)
-		}
-	case r := <-resultC:
-		t.Fatalf("c resolved instead of remaining queued: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("c never received refreshed queue position after b promoted")
+	if q := waitQueued(t, positionsC, resultC); q.Position != 1 {
+		t.Fatalf("c refreshed position = %d, want 1", q.Position)
 	}
 }
 
@@ -204,25 +182,11 @@ func TestPositionRebroadcastKeepsIndependentQueuesSeparate(t *testing.T) {
 	waitC := ensure(t, home, "")
 	waitCPositions, waitCResult := acquireAsync(t, waitC, semOnly("wait-c", "deploy-c"))
 
-	select {
-	case q := <-waitBPositions:
-		if q.Position != 1 {
-			t.Fatalf("wait-b initial position = %d, want 1", q.Position)
-		}
-	case r := <-waitBResult:
-		t.Fatalf("wait-b resolved before queueing: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("wait-b never reported its initial queue position")
+	if q := waitQueued(t, waitBPositions, waitBResult); q.Position != 1 {
+		t.Fatalf("wait-b initial position = %d, want 1", q.Position)
 	}
-	select {
-	case q := <-waitCPositions:
-		if q.Position != 1 {
-			t.Fatalf("wait-c initial position = %d, want 1", q.Position)
-		}
-	case r := <-waitCResult:
-		t.Fatalf("wait-c resolved before queueing: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("wait-c never reported its initial queue position")
+	if q := waitQueued(t, waitCPositions, waitCResult); q.Position != 1 {
+		t.Fatalf("wait-c initial position = %d, want 1", q.Position)
 	}
 
 	if err := holderA.Release(); err != nil {
@@ -233,25 +197,11 @@ func TestPositionRebroadcastKeepsIndependentQueuesSeparate(t *testing.T) {
 		t.Fatalf("wait-a should have promoted, got %v", r.err)
 	}
 
-	select {
-	case q := <-waitBPositions:
-		if q.Position != 1 {
-			t.Fatalf("wait-b refreshed position = %d, want 1", q.Position)
-		}
-	case r := <-waitBResult:
-		t.Fatalf("wait-b resolved instead of remaining queued: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("wait-b never received refreshed queue position")
+	if q := waitQueued(t, waitBPositions, waitBResult); q.Position != 1 {
+		t.Fatalf("wait-b refreshed position = %d, want 1", q.Position)
 	}
-	select {
-	case q := <-waitCPositions:
-		if q.Position != 1 {
-			t.Fatalf("wait-c refreshed position = %d, want 1", q.Position)
-		}
-	case r := <-waitCResult:
-		t.Fatalf("wait-c resolved instead of remaining queued: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("wait-c never received refreshed queue position")
+	if q := waitQueued(t, waitCPositions, waitCResult); q.Position != 1 {
+		t.Fatalf("wait-c refreshed position = %d, want 1", q.Position)
 	}
 }
 
@@ -313,13 +263,7 @@ func TestOversizedMeasuredCPURequestQueuesFollower(t *testing.T) {
 		CostSource: wingwire.CostSourceMeasured,
 		Resources:  wingwire.HostResources{Cores: 1},
 	})
-	select {
-	case <-positions:
-	case r := <-result:
-		t.Fatalf("follower resolved without queueing: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("follower neither queued nor resolved")
-	}
+	waitQueued(t, positions, result)
 }
 
 func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
@@ -347,13 +291,7 @@ func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 		CostSource: wingwire.CostSourceMeasured,
 		Resources:  wingwire.HostResources{Cores: 1},
 	})
-	select {
-	case <-positions:
-	case r := <-result:
-		t.Fatalf("second run resolved without queueing: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("second run neither queued nor resolved")
-	}
+	waitQueued(t, positions, result)
 }
 
 func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
@@ -398,15 +336,8 @@ func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 			CostSource:   wingwire.CostSourceMeasured,
 			Resources:    wingwire.HostResources{Cores: 4, MemoryBytes: 4 << 30},
 		})
-		select {
-		case q := <-positions:
-			if q.Position != i+1 {
-				t.Fatalf("node %d position = %d, want FIFO position %d", i+1, q.Position, i+1)
-			}
-		case r := <-result:
-			t.Fatalf("node %d resolved before blocker release: lease=%v err=%v", i+1, r.lease, r.err)
-		case <-time.After(2 * time.Second):
-			t.Fatalf("node %d neither queued nor resolved", i+1)
+		if q := waitQueued(t, positions, result); q.Position != i+1 {
+			t.Fatalf("node %d position = %d, want FIFO position %d", i+1, q.Position, i+1)
 		}
 		results[i] = result
 	}
@@ -422,7 +353,7 @@ func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 		select {
 		case r := <-results[i]:
 			t.Fatalf("node %d also resolved while head holds resources: lease=%v err=%v", i+1, r.lease, r.err)
-		case <-time.After(100 * time.Millisecond):
+		default:
 		}
 	}
 
@@ -465,24 +396,15 @@ func TestServiceOrderPromotesEarlierParticipantAcrossOwners(t *testing.T) {
 		RunID: "newer-child", OwnerRunID: "owner-newer", OwnerLeaseToken: newerOwner.Token, SubLease: true,
 		Resources: wingwire.HostResources{Cores: 4},
 	})
-	select {
-	case <-newerPositions:
-	case <-time.After(2 * time.Second):
-		t.Fatal("newer child did not queue")
-	}
+	waitQueued(t, newerPositions, nil)
 
 	olderChildClient := ensure(t, home, "")
 	olderPositions, olderResult := acquireAsync(t, olderChildClient, wingwire.AdmissionRequest{
 		RunID: "older-child", OwnerRunID: "owner-older", OwnerLeaseToken: olderOwner.Token, SubLease: true,
 		Resources: wingwire.HostResources{Cores: 4},
 	})
-	select {
-	case q := <-olderPositions:
-		if q.Position != 2 {
-			t.Fatalf("older child position = %d, want 2 behind the earlier participant", q.Position)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("older child did not queue")
+	if q := waitQueued(t, olderPositions, nil); q.Position != 2 {
+		t.Fatalf("older child position = %d, want 2 behind the earlier participant", q.Position)
 	}
 
 	if err := blocker.Release(); err != nil {
@@ -495,7 +417,12 @@ func TestServiceOrderPromotesEarlierParticipantAcrossOwners(t *testing.T) {
 	select {
 	case r := <-olderResult:
 		t.Fatalf("later participant resolved first: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(100 * time.Millisecond):
+	default:
+	}
+
+	qs := queueOnce(t, home)
+	if _, queued := waiterPriority(qs, "older-child"); !queued {
+		t.Fatalf("later participant left the queue while earlier participant holds capacity: %+v", qs)
 	}
 
 	_ = olderOwner.Release()
@@ -561,22 +488,13 @@ func TestOwnerRunAdmissionAuthorityRejectsRankTheft(t *testing.T) {
 			baselinePositions, _ := acquireAsync(t, ensure(t, home, ""), wingwire.AdmissionRequest{
 				RunID: "baseline", Resources: wingwire.HostResources{Cores: 4},
 			})
-			select {
-			case <-baselinePositions:
-			case <-time.After(2 * time.Second):
-				t.Fatal("baseline did not queue")
-			}
+			waitQueued(t, baselinePositions, nil)
 			forgedPositions, _ := acquireAsync(t, ensure(t, home, ""), wingwire.AdmissionRequest{
 				RunID: "forged", OwnerRunID: claimedOwner, OwnerLeaseToken: proofToken, SubLease: true,
 				Resources: wingwire.HostResources{Cores: 4},
 			})
-			select {
-			case q := <-forgedPositions:
-				if q.Position != 2 {
-					t.Fatalf("forged position = %d, want 2 behind earlier fallback participant", q.Position)
-				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("forged request did not queue")
+			if q := waitQueued(t, forgedPositions, nil); q.Position != 2 {
+				t.Fatalf("forged position = %d, want 2 behind earlier fallback participant", q.Position)
 			}
 		})
 	}
@@ -609,13 +527,7 @@ func TestMeasuredCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
 		CostSource: wingwire.CostSourceMeasured,
 		Resources:  wingwire.HostResources{Cores: 1, MemoryBytes: 2 << 30},
 	})
-	select {
-	case <-positions:
-	case r := <-result:
-		t.Fatalf("next run resolved without queueing: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("next run neither queued nor resolved")
-	}
+	waitQueued(t, positions, result)
 }
 
 func TestPinnedRequestAboveCapacityFails(t *testing.T) {
@@ -724,7 +636,7 @@ func TestRepeatedInvalidRequestsSurfaceInQueueStateWindow(t *testing.T) {
 
 func TestExplicitRelease_Promotes(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home})
+	startDaemon(t, wingd.Config{Home: home, SampleInterval: time.Hour, CapacityInterval: time.Hour, StallInterval: time.Hour})
 
 	a := ensure(t, home, "")
 	holder := mustAcquire(t, a, semReq("a", "lock", 1, 1, wingwire.PolicyQueue))
@@ -732,7 +644,6 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	b := ensure(t, home, "")
 	positions, resultB := acquireAsync(t, b, semReq("b", "lock", 1, 1, wingwire.PolicyQueue))
 	waitForQueue(t, positions)
-	started := time.Now()
 
 	if err := holder.Release(); err != nil {
 		t.Fatalf("release: %v", err)
@@ -741,18 +652,33 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("b should have been promoted after release, got %v", r.err)
 	}
-	if elapsed := time.Since(started); elapsed >= 90*time.Millisecond {
-		t.Fatalf("release-to-promotion took %v, want less than 90ms", elapsed)
+	qs := queueOnce(t, home)
+	if len(qs.Holders) != 1 || qs.Holders[0].RunID != "b" || len(qs.Waiters) != 0 {
+		t.Fatalf("release did not commit promotion: %+v", qs)
 	}
 }
 
 func waitForQueue(t *testing.T, positions <-chan wingwire.Queued) {
 	t.Helper()
+	waitQueued(t, positions, nil)
+}
+
+func waitQueued(t *testing.T, positions <-chan wingwire.Queued, result <-chan acquireResult) wingwire.Queued {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
 	select {
-	case <-positions:
-	case <-time.After(2 * time.Second):
+	case queued, ok := <-positions:
+		if !ok {
+			t.Fatal("queue updates ended before the request queued")
+		}
+		return queued
+	case r := <-result:
+		t.Fatalf("request resolved before queueing: lease=%v err=%v", r.lease, r.err)
+	case <-ctx.Done():
 		t.Fatal("waiter never reported a queue position")
 	}
+	return wingwire.Queued{}
 }
 
 func resourceHeld(qs wingwire.QueueState, key string) float64 {

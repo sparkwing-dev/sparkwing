@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -60,11 +61,13 @@ func TestTerminateJobByNameEndsEveryMember(t *testing.T) {
 	if err := TerminateJobByName(job.Name); err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
 	select {
 	case <-waited:
-	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the job leader outlived TerminateJobByName")
 	}
 	n, err := job.ActiveProcesses()
@@ -87,11 +90,13 @@ func TestClosingTheJobEndsItsMembers(t *testing.T) {
 	if err := job.Close(); err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
 	select {
 	case <-waited:
-	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the job leader outlived the closed job handle")
 	}
 	if err := TerminateJobByName(job.Name); err != nil {

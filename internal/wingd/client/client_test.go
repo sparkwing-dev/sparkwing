@@ -64,9 +64,11 @@ func spawnInProcess(t *testing.T, home string) func(string, string) error {
 		case <-d.Ready():
 			t.Cleanup(func() {
 				cancel()
+				ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
 				select {
 				case <-exited:
-				case <-time.After(5 * time.Second):
+				case <-ctx.Done():
 					t.Error("spawned daemon did not stop after cancellation")
 				}
 			})
@@ -207,26 +209,26 @@ func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 	t.Cleanup(func() {
 		releaseStart()
 		cancel()
-		joinDeadline := time.NewTimer(time.Second)
+		ensureJoin, stopEnsureJoin := context.WithTimeout(context.Background(), time.Second)
+		defer stopEnsureJoin()
 		ensureJoined := false
 		select {
 		case <-ensureFinished:
 			ensureJoined = true
-		case <-joinDeadline.C:
+		case <-ensureJoin.Done():
 			t.Error("EnsureDaemon did not stop after cancellation")
 		}
-		joinDeadline.Stop()
 		if ensureJoined && result.cl != nil {
 			_ = result.cl.Close()
 		}
-		joinDeadline = time.NewTimer(time.Second)
-		defer joinDeadline.Stop()
+		daemonJoin, stopDaemonJoin := context.WithTimeout(context.Background(), time.Second)
+		defer stopDaemonJoin()
 		select {
 		case <-daemonFinished:
 			if daemonErr != nil && !errors.Is(daemonErr, context.Canceled) {
 				t.Errorf("spawned daemon: %v", daemonErr)
 			}
-		case <-joinDeadline.C:
+		case <-daemonJoin.Done():
 			t.Error("spawned daemon did not stop after cancellation")
 		}
 	})

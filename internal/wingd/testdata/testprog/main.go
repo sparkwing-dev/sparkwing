@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -79,6 +81,7 @@ func runDaemon(args []string) {
 	go func() {
 		<-d.Ready()
 		recordWin(*home)
+		fmt.Println("READY")
 	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -162,8 +165,10 @@ func runHold(args []string) {
 	} else {
 		req.Resources = wingwire.HostResources{Cores: *cores}
 	}
-	// hack: test driver program; queue position updates have no run log to write to.
-	lease, err := cl.Acquire(context.Background(), req, nil)
+	lease, err := cl.Acquire(context.Background(), req, func(q wingwire.Queued) {
+		fmt.Printf("QUEUED %d\n", q.Position)
+		_ = os.Stdout.Sync()
+	})
 	if err != nil {
 		fail("acquire: %v", err)
 	}
@@ -210,12 +215,36 @@ func daemonSpawner(home, version string) error {
 	if err != nil {
 		return err
 	}
-	cmd := procenv.ControlCommand(os.Environ(), self, "daemon",
-		"--home", home,
-	)
-	cmd.SysProcAttr = daemonDetachSysProcAttr()
-	if err := cmd.Start(); err != nil {
+	reader, writer, err := os.Pipe()
+	if err != nil {
 		return err
+	}
+	defer reader.Close()
+	cmd := procenv.ControlCommand(os.Environ(), self, "daemon", "--home", home)
+	cmd.SysProcAttr = daemonDetachSysProcAttr()
+	cmd.Stdout = writer
+	if err := cmd.Start(); err != nil {
+		_ = writer.Close()
+		return err
+	}
+	_ = writer.Close()
+	if err := reader.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return err
+	}
+	var ready [6]byte
+	n, err := io.ReadFull(reader, ready[:])
+	if n == 0 && errors.Is(err, io.EOF) {
+		return cmd.Wait()
+	}
+	if err != nil || string(ready[:]) != "READY\n" {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		if err != nil {
+			return fmt.Errorf("daemon readiness: %w", err)
+		}
+		return fmt.Errorf("invalid daemon readiness: %q", ready)
 	}
 	return cmd.Process.Release()
 }
