@@ -281,11 +281,8 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 					return runstate.Applied{}, err
 				}
 			}
-			if row.Request.Request.Mode != runspec.IntakePublish {
-				_, err = tx.execContext(ctx, `INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES (?,?,?,?) ON CONFLICT(team,pipeline) DO UPDATE SET run_id=excluded.run_id,finished_at=excluded.finished_at WHERE pipeline_success_pins.finished_at<excluded.finished_at`, team, row.Pipeline, row.ID, now.UnixNano())
-				if err != nil {
-					return runstate.Applied{}, err
-				}
+			if err := advanceLatestSuccessPinTx(ctx, tx, team, row, now); err != nil {
+				return runstate.Applied{}, err
 			}
 		}
 	}
