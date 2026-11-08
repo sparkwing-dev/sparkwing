@@ -102,7 +102,7 @@ func secret(t *testing.T, s *server, name, bearer string) reply {
 
 func TestHTTPServicesNeedNoProtocolVersionHeader(t *testing.T) {
 	s := start(t)
-	bearer := admit(t, s, routeNode{RunID: "run", NodeID: "build", Secrets: []string{"TOKEN"}, Resolver: &fakeResolver{entries: map[string]entry{"TOKEN": {value: "value"}}}, Masker: secrets.NewMasker()})
+	bearer := admit(t, s, routeNode{RunID: "run", NodeID: "build", Secrets: []string{"TOKEN"}, Resolver: &fakeResolver{entries: map[string]entry{"TOKEN": {value: "value", masked: true}}}, Masker: secrets.NewMasker()})
 	for _, version := range []string{"", "0", "2", "obsolete"} {
 		got := get(t, s, "/node/v1/secrets/TOKEN", bearer, version)
 		if got.status != http.StatusOK || got.body["value"] != "value" {
@@ -220,7 +220,7 @@ func TestSecretRegistersAMaskedValueBeforeAnswering(t *testing.T) {
 	if strings.Contains(masker.Mask("log s3cret-value"), "s3cret-value") {
 		t.Fatal("masked secret was answered before the masker held it")
 	}
-	got = secret(t, s, "REGION", bearer)
+	got = get(t, s, "/node/v1/secrets/REGION?variable=true", bearer, authwire.NodeProtocolVersion)
 	if got.status != http.StatusOK || got.body["value"] != "us-west-2" || got.body["masked"] != false {
 		t.Fatalf("REGION: status %d body %v", got.status, got.body)
 	}

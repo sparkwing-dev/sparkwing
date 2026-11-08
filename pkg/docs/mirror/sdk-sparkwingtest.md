@@ -2,7 +2,7 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # SDK API reference: `sparkwing/sparkwingtest`
 
-Package sparkwingtest supplies a fake protocol host without a controller or store.
+Package sparkwingtest supplies an in-process host for pipeline and helper-library tests.
 
 Import as `swsparkwingtest "github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
 

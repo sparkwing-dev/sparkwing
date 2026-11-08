@@ -141,14 +141,7 @@ func (sdkOperations) Plan(ctx context.Context, name string, args map[string]stri
 		return nil, nodeproto.PlanDoc{}, sdkError(code, err.Error())
 	}
 	p.registration = reg
-	doc := documentForHost(ctx, planDocument(p))
-	raw, err := json.Marshal(doc)
-	if err != nil {
-		return nil, doc, sdkError(apierr.PlanFailed, "plan cannot be encoded")
-	}
-	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: hostSecretMatcher(ctx)}); err != nil {
-		return nil, doc, err
-	}
+	doc := planDocument(p)
 	return p, doc, nil
 }
 
@@ -377,18 +370,7 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 			GroupJobs(expansion, ancestor, members...)
 		}
 		registerRecoveryArgs(expansion)
-		doc := documentForHost(ctx, planDocument(expansion))
-		raw, err := json.Marshal(doc)
-		if err != nil {
-			return nil, err
-		}
-		existing := planDocument(p)
-		if _, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{
-			Placement: nodeproto.PlacementLocal, Secrets: hostSecretMatcher(ctx),
-			Expansion: true, ExistingJobs: existing.Jobs, ExistingConcurrency: existing.Concurrency, SourceJob: n.id,
-		}); err != nil {
-			return nil, err
-		}
+		doc := planDocument(expansion)
 		var arguments []nodeproto.ArgumentDescription
 		for _, field := range expansion.declaredArguments() {
 			arguments = append(arguments, nodeproto.ArgumentDescription{
@@ -409,25 +391,13 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 		p.groups = append(p.groups, expansion.groups...)
 		p.jobArgs = append(p.jobArgs, expansion.jobArgs...)
 		if p.generated == nil {
-			p.generated = map[string][]nodeproto.JobSpec{}
+			p.generated = map[string]nodeproto.PlanDoc{}
 		}
-		p.generated[g.id] = doc.Jobs
+		p.generated[g.id] = doc
 		p.mu.Unlock()
-		return doc.Jobs, nil
+		return doc, nil
 	}
 	return nil, sdkError(apierr.UnknownClosure, "closure is not declared")
-}
-
-// safety: a host older than a declaration refuses the whole plan as an unknown field, so a core request
-// it never named is left out and the job keeps that host's default charge.
-func documentForHost(ctx context.Context, doc nodeproto.PlanDoc) nodeproto.PlanDoc {
-	if sdkserve.HostAccepts(ctx, nodeproto.FeatureJobCores) {
-		return doc
-	}
-	for i := range doc.Jobs {
-		doc.Jobs[i].Cores = nil
-	}
-	return doc
 }
 
 func sdkError(code apierr.Code, message string) *apierr.Error {

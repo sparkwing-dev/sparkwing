@@ -156,7 +156,6 @@ func (g *Git) ShortSHA() string
 func (g *Git) TagsAtHead(ctx context.Context) ([]string, error)
 func (g *Git) WorkDir() string
 func GithubOwnerRepo(slug string) (owner, repo string)
-func Glob(pattern string) ([]string, error)
 func GoModules() DirCache
 func GroupJobs(p *Plan, name string, nodes ...*JobNode) *JobGroup
 func GroupSteps(w *Work, name string, steps ...*WorkStep) *StepGroup
@@ -276,7 +275,6 @@ type Outcome string
 func (o Outcome) OK() bool
 func (o Outcome) Terminal() bool
 type ParallelFailurePolicy string
-func Path(parts ...string) string
 type Pipeline[T any] interface {
 	Plan(ctx context.Context, plan *Plan, in T, rc RunContext) error
 }
@@ -302,7 +300,6 @@ type PullRequest struct {
 	HeadSHA string
 }
 const Queue OnLimit = "queue"
-func ReadFile(path string) ([]byte, error)
 type Ref[T any] struct {
 	JobID string
 
@@ -431,7 +428,6 @@ func (s *WorkStep) SkipIf(fn SkipPredicate) *WorkStep
 type Workable interface {
 	Work(w *Work) (*WorkStep, error)
 }
-func WriteFile(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
 func (c *jobFn) Work(w *Work) (*WorkStep, error)

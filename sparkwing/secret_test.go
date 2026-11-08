@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 func TestSecret_NoResolverInstalled(t *testing.T) {
@@ -14,15 +16,6 @@ func TestSecret_NoResolverInstalled(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no resolver installed") {
 		t.Fatalf("err = %v, want one mentioning the missing resolver", err)
-	}
-}
-
-func TestSecret_BlankName(t *testing.T) {
-	ctx := withSecretResolver(context.Background(), secretResolverFunc(
-		func(ctx context.Context, name string) (string, bool, error) { return "x", true, nil },
-	))
-	if _, err := Secret(ctx, ""); err == nil {
-		t.Fatal("Secret(ctx, \"\") must error")
 	}
 }
 
@@ -66,18 +59,17 @@ func TestSecret_PropagatesResolverError(t *testing.T) {
 	}
 }
 
-func TestSecret_RejectsUnmaskedEntry(t *testing.T) {
-	ctx := withSecretResolver(context.Background(), secretResolverFunc(
-		func(ctx context.Context, name string) (string, bool, error) {
-			return "us-east-1", false, nil
-		},
-	))
-	_, err := Secret(ctx, "REGION")
-	if err == nil {
-		t.Fatal("expected error for masked=false entry")
+func TestSecretRelaysClassification(t *testing.T) {
+	var requested bool
+	ctx := withSecretResolver(t.Context(), secretResolverFunc(func(ctx context.Context, _ string) (string, bool, error) {
+		requested = sdkserve.SecretIsVariable(ctx)
+		return "value", !requested, nil
+	}))
+	if _, err := Variable(ctx, "REGION"); err != nil || !requested {
+		t.Fatalf("variable classification=%v error=%v", requested, err)
 	}
-	if !strings.Contains(err.Error(), "use sparkwing.Variable") {
-		t.Fatalf("err = %v, want hint to use Variable", err)
+	if _, err := Secret(ctx, "TOKEN"); err != nil || requested {
+		t.Fatalf("secret classification=%v error=%v", requested, err)
 	}
 }
 

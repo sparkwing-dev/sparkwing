@@ -11,7 +11,27 @@ type Emitter = (event: string, attrs: Record<string, unknown>) => void;
 interface CommandBinding {
   emit: Emitter;
   env: Readonly<Record<string, string>>;
+  hostExec?: HostExec;
 }
+export interface HostExecRequest {
+  onOutput?:(stream:string,data:Buffer)=>void;
+  step?: string;
+  argv: readonly string[];
+  dir: string;
+  env: string[];
+  capture: boolean;
+  stdin?: string;
+}
+// Logged commands return at most the last 64 KiB of each stream; the job log keeps the rest.
+export interface HostExecResult {
+  exitCode: number;
+  signaled: boolean;
+  startError?: string;
+  notFound: boolean;
+  stdout: Buffer;
+  stderr: Buffer;
+}
+export type HostExec = (request: HostExecRequest, signal: AbortSignal) => Promise<HostExecResult>;
 const bindings = new WeakMap<Context, CommandBinding>();
 
 export class ExecError extends Error implements ExecResult {
@@ -52,9 +72,11 @@ function boundedCommand(command: string): string {
   return `${bytes.subarray(0, cut).toString()}... [${bytes.length - cut} more bytes]`;
 }
 
-export function registerCommandContext(ctx: Context, emit: Emitter, env: Readonly<Record<string, string>> = {}): void {
-  bindings.set(ctx, { emit, env: { ...env } });
+export function registerCommandContext(ctx: Context, emit: Emitter, env: Readonly<Record<string, string>> = {}, hostExec?: HostExec): void {
+  bindings.set(ctx, { emit, env: { ...env }, ...(hostExec === undefined ? {} : { hostExec }) });
 }
+
+export function commandEnvironment(ctx:Context):Readonly<Record<string,string>>{return binding(ctx).env}
 
 function binding(ctx: Context): CommandBinding {
   return bindings.get(ctx) ?? { emit: (event, attrs) => ctx.log.info(event, attrs), env: {} };
@@ -76,7 +98,7 @@ function deriveContext(ctx: Context, signal: AbortSignal, env: Readonly<Record<s
           : ctx.bash.call(derived, script, { ...options, env: { ...env, ...options?.env } }),
     },
   });
-  if (registered) registerCommandContext(derived, binding(ctx).emit, env);
+  if (registered) registerCommandContext(derived, binding(ctx).emit, env, binding(ctx).hostExec);
   return derived;
 }
 
@@ -147,30 +169,13 @@ export interface CommandOptions extends ExecOptions {
   capture?: boolean;
 }
 
-const protocolEnv = new Set([
-  "SPARKWING_NODE_TOKEN",
-  "SPARKWING_AGENT_TOKEN",
-  "SPARKWING_CACHE_GRANT",
-  "SPARKWING_SOURCE_TOKEN",
-  "SPARKWING_API_TOKEN",
-  "SPARKWING_LEASE_TOKEN",
-  "SPARKWING_SECRETS_KEY",
-  "SPARKWING_SECRETS_PREVIOUS_KEY",
-  "SPARKWING_RELEASE_SIGNING_KEY",
-  "SPARKWING_NODE_URL",
-  "SPARKWING_PROTOCOL_HANDLES",
-  "SPARKWING_CONTROLLER_URL",
-]);
+function commandEnv(ctx:Context,options:ExecOptions):NodeJS.ProcessEnv{return {...process.env,...binding(ctx).env,...options.env};}
 
-function commandEnv(ctx: Context, options: ExecOptions): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = Object.create(null);
-  for (const layer of [process.env, binding(ctx).env, options.env ?? {}]) {
-    for (const [name, value] of Object.entries(layer)) {
-      const key = process.platform === "win32" ? name.toUpperCase() : name;
-      if (!protocolEnv.has(key) && !key.startsWith("SPARKWING_NODE_CLAIM_")) env[key] = value;
-    }
-  }
-  return env;
+const windowsPrivateEnv=new Set(["SPARKWING_NODE_TOKEN","SPARKWING_AGENT_TOKEN","SPARKWING_CACHE_GRANT","SPARKWING_SOURCE_TOKEN","SPARKWING_API_TOKEN","SPARKWING_LEASE_TOKEN","SPARKWING_SECRETS_KEY","SPARKWING_SECRETS_PREVIOUS_KEY","SPARKWING_RELEASE_SIGNING_KEY","SPARKWING_NODE_URL","SPARKWING_PROTOCOL_HANDLES","SPARKWING_CONTROLLER_URL"]);
+function windowsCommandEnv(ctx:Context,options:ExecOptions):NodeJS.ProcessEnv{
+ const env=commandEnv(ctx,options);
+ for(const name of Object.keys(env)){const key=name.toUpperCase();if(windowsPrivateEnv.has(key)||key.startsWith("SPARKWING_NODE_CLAIM_"))delete env[name]}
+ return env;
 }
 
 export function runInput(
@@ -193,9 +198,27 @@ export async function runCommand(ctx: Context, argv: readonly [string, ...string
   try {
     if (ctx.signal.aborted) throw new ExecError(result, "cancellation", ctx.signal.reason);
     const cwd = options.cwd !== undefined && isAbsolute(options.cwd) ? options.cwd : resolve(projectRoot(), options.cwd ?? "");
+    const hostExec = binding(ctx).hostExec;
+    // Output callbacks need the bytes as they arrive, so those commands stay in the SDK.
+    if (process.platform !== "win32") {
+      if(!hostExec)throw new Error("host command service unavailable");
+      const reply = await hostCommand(ctx, hostExec, argv, cwd, options);
+      result = { command, stdout: reply.stdout.toString("utf8"), stderr: reply.stderr.toString("utf8"), exitCode: reply.exitCode };
+      if (reply.startError !== undefined) {
+        result = { command, stdout: "", stderr: "", exitCode: exitNotStarted };
+        throw new ExecError(result, "", Object.assign(new Error(reply.startError), reply.notFound ? { code: "ENOENT" } : {}));
+      }
+      if (ctx.signal.aborted && (reply.signaled || reply.exitCode !== 0)) {
+        result = { ...result, exitCode: exitNotStarted };
+        throw new ExecError(result, "cancellation", ctx.signal.reason);
+      }
+      if (reply.signaled) throw new ExecError(result, "signal", new Error("process received a signal"));
+      if (result.exitCode !== 0) throw new ExecError(result);
+      return result;
+    }
     const child = spawn(argv[0], argv.slice(1), {
       cwd,
-      env: commandEnv(ctx, options),
+      env: windowsCommandEnv(ctx, options),
       detached: process.platform !== "win32",
       // safety: Only these three handles are inherited; protocol handles never enter a tool.
       stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -215,6 +238,23 @@ export async function runCommand(ctx: Context, argv: readonly [string, ...string
   }
 }
 
+function hostCommand(ctx: Context, hostExec: HostExec, argv: readonly string[], dir: string, options: CommandOptions): Promise<HostExecResult> {
+  const env: string[] = [];
+  for (const [name, value] of Object.entries(commandEnv(ctx, options))) if (value !== undefined) env.push(`${name}=${value}`);
+  return hostExec(
+    {
+      ...(ctx.stepId === undefined ? {} : { step: ctx.stepId }),
+      argv,
+      onOutput:(stream,data)=>(stream==="stdout"?options.stdout:options.stderr)?.(data),
+      dir,
+      env,
+      capture: options.capture === true || !!options.stdout || !!options.stderr,
+      ...(options.input === undefined ? {} : { stdin: options.input }),
+    },
+    ctx.signal,
+  );
+}
+
 interface Completion {
   stdout: string;
   stderr: string;
@@ -229,7 +269,7 @@ function collectCommand(ctx: Context, child: ChildProcess, options: CommandOptio
     let cancelled = false;
     const kill = () => {
       try {
-        terminate(child, commandEnv(ctx, {}));
+        terminate(child, windowsCommandEnv(ctx, {}));
       } catch (error) {
         cause ??= error;
       }

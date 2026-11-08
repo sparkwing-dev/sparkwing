@@ -2,6 +2,7 @@ package procenv
 
 import (
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -37,5 +38,17 @@ func TestHostCommandPreservesDirectoryEnvironment(t *testing.T) {
 	}
 	if string(output) != directory {
 		t.Fatalf("PWD=%q, want %q", output, directory)
+	}
+}
+
+func TestSDKCommandDropsOnlyEngineCredentials(t *testing.T) {
+	for _, row := range Registry {
+		if row.Class == Credential && row.Owner == "engine" && !strings.HasPrefix(row.Name, engineCredentialPrefix) {
+			t.Fatalf("engine credential %s escapes the SDKCommand prefix check", row.Name)
+		}
+	}
+	cmd := SDKCommand([]string{"PATH=/bin", "SPARKWING_NODE_TOKEN=minted", "SPARKWING_SECRETS_KEY=k", "GITHUB_TOKEN=user", "SPARKWING_HOME=/h"}, "true")
+	if got := strings.Join(cmd.Env, ","); got != "PATH=/bin,GITHUB_TOKEN=user,SPARKWING_HOME=/h" {
+		t.Fatalf("SDKCommand env = %s", got)
 	}
 }

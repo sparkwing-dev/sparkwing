@@ -1,0 +1,1 @@
+{"bytes":8388608,"errors":0,"host_cpu_ns":4337000,"log_message_bytes":62,"log_records":2,"samples_ns":[337690427],"sdk_cpu_ns":571506000,"spec":{"lang":"go","variant":"TC","size":"bulk","concurrency":1,"count":1,"bytes":8388608,"out":"<pi-home>/sdkstep3/diag/r-TC.json","dir":"<pi-home>/sdkstep3/diag"},"step_ns":5949331968,"wall_ns":337757001}

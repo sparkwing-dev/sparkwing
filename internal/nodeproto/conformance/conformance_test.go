@@ -157,7 +157,7 @@ func (p *fixtureProcess) checkEval(t *testing.T, reply nodeproto.Reply, step cor
 	if result.Error != nil {
 		t.Fatalf("expansion failed: %v", result.Error)
 	}
-	raw := append(append([]byte(`{"jobs":`), result.Value...), '}')
+	raw := result.Value
 	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{
 		Placement: nodeproto.PlacementLocal, Secrets: vectorSecrets{}, Expansion: true,
 		SourceJob: vector.SourceJob, ExistingJobs: p.plan.Jobs, ExistingConcurrency: p.plan.Concurrency,

@@ -1,0 +1,464 @@
+// Package git is the sparkwing SDK's repo-inspection helper layer:
+// commit SHA, branch, dirty-tree detection, deterministic fileset
+// hash, tag listing, and safe tag push.
+//
+// Every function takes an explicit `repoDir` parameter. Callers
+// operating on the run's working tree usually go through
+// sparkwing.RunContext.Git; release
+// pipelines that operate on sibling clones import this package
+// directly.
+//
+// All helpers are free functions with (T, error) returns; nothing
+// panics. Shell-outs are context-aware so cancellation and timeouts
+// propagate.
+//
+// Leaf package: must not import sparkwing/ proper.
+package git
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"golang.org/x/mod/semver"
+
+	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+)
+
+// ErrTagAlreadyExists is returned by PushTag when the tag already
+// exists on the remote. Go-module safety: never force-push a tag.
+// Callers wanting to move a tag must delete it on the remote first.
+var ErrTagAlreadyExists = errors.New("git: tag already exists on remote")
+
+// ShortCommit returns the HEAD commit SHA in repoDir truncated to 12
+// characters. Errors when repoDir is not a git working tree.
+func ShortCommit(ctx context.Context, repoDir string) (string, error) {
+	sha, err := CurrentSHA(ctx, repoDir)
+	if err != nil {
+		return "", err
+	}
+	if len(sha) > 12 {
+		return sha[:12], nil
+	}
+	return sha, nil
+}
+
+// CurrentSHA returns the full HEAD commit SHA in repoDir. Errors
+// loudly when not in a git repo.
+func CurrentSHA(ctx context.Context, repoDir string) (string, error) {
+	out, err := runGit(ctx, repoDir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// CurrentBranch returns the branch name HEAD points at in repoDir.
+// Detached HEAD returns ("", nil) -- a normal state during CI builds
+// that check out a specific SHA. Errors loudly when not in a git
+// repo.
+func CurrentBranch(ctx context.Context, repoDir string) (string, error) {
+	out, err := runGit(ctx, repoDir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		// hack: symbolic-ref --quiet exits 1 on detached HEAD with no output; rev-parse confirms we're in a repo.
+		if _, sErr := runGit(ctx, repoDir, "rev-parse", "--git-dir"); sErr != nil {
+			return "", sErr
+		}
+		return "", nil
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// DefaultBranch returns the repo's default branch name (typically
+// "main" or "master"). Reads it from origin's HEAD symbolic ref --
+// the same source `git remote show origin` uses. Returns ("", nil)
+// when no origin remote exists or origin's HEAD isn't published; the
+// caller treats that as "no default branch known" rather than an
+// error so guards stay safe-by-default.
+func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
+	out, err := runGit(ctx, repoDir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		if _, sErr := runGit(ctx, repoDir, "rev-parse", "--git-dir"); sErr != nil {
+			return "", sErr
+		}
+		return "", nil
+	}
+	name := strings.TrimSpace(out)
+	if rest, ok := strings.CutPrefix(name, "origin/"); ok {
+		return rest, nil
+	}
+	return name, nil
+}
+
+// RemoteOriginURL returns the URL of `origin` in repoDir, or "" with
+// nil error when no origin remote is configured. Errors only when
+// repoDir isn't a git tree.
+func RemoteOriginURL(ctx context.Context, repoDir string) (string, error) {
+	out, err := runGit(ctx, repoDir, "remote", "get-url", "origin")
+	if err != nil {
+		// safety: rev-parse distinguishes "no origin" from "not a git repo"; both cause runGit to fail.
+		if _, sErr := runGit(ctx, repoDir, "rev-parse", "--git-dir"); sErr != nil {
+			return "", sErr
+		}
+		return "", nil
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// IsDirty reports whether the working tree in repoDir has uncommitted
+// changes -- either unstaged or staged-but-not-committed. Errors
+// loudly when not in a git repo.
+func IsDirty(ctx context.Context, repoDir string) (bool, error) {
+	out, err := runGit(ctx, repoDir, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+// FilesetHash returns a deterministic 12-char hex hash derived from
+// the contents of every file that would land in a Docker build
+// context for repoDir. With git, hashes tracked + untracked-not-
+// ignored files; without, falls back to a filesystem walk with a
+// small skip list. .dockerignore is honored in both modes.
+//
+// Paths (including whitespace and non-ASCII names), file permissions, and contents
+// contribute to the hash. Unreadable inputs or ignore rules return an error;
+// tracked files absent from disk are omitted.
+// File contents are read from disk (not from the git blob) so
+// staged-but-not-committed changes are reflected in the hash --
+// content addressing keys off the tree the build will actually see.
+func FilesetHash(ctx context.Context, repoDir string) (string, error) {
+	repoDir = helperruntime.Path(ctx, repoDir)
+	files, err := listGitFiles(ctx, repoDir)
+	if err != nil {
+		return "", err
+	}
+	if files == nil {
+		files = listFilesystemFiles(repoDir)
+	}
+	ignore, err := loadDockerignore(repoDir)
+	if err != nil {
+		return "", fmt.Errorf("fileset hash ignore rules: %w", err)
+	}
+	if len(files) == 0 {
+		return "", nil
+	}
+
+	seen := map[string]bool{}
+	keep := files[:0]
+	for _, f := range files {
+		if f == "" || seen[f] {
+			continue
+		}
+		seen[f] = true
+		if matchesIgnore(f, ignore) {
+			continue
+		}
+		keep = append(keep, f)
+	}
+	sort.Strings(keep)
+
+	h := sha256.New()
+	base := repoDir
+	if base == "" {
+		base = "."
+	}
+	for _, f := range keep {
+		path := filepath.Join(base, f)
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("fileset hash %s: %w", f, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("fileset hash %s: %w", f, err)
+		}
+		fmt.Fprintf(h, "%d\x00%s\x00%d\x00%d\x00", len(f), f, info.Mode().Perm(), len(data))
+		h.Write(data)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))[:12], nil
+}
+
+func listGitFiles(ctx context.Context, repoDir string) ([]string, error) {
+	dir, err := filepath.Abs(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		_, err := os.Stat(filepath.Join(dir, ".git"))
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, nil
+		}
+		dir = parent
+	}
+	listed, err := runGit(ctx, repoDir, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	// safety: Git terminates each literal path with NUL; line splitting loses quoted or whitespace-bearing names.
+	files := strings.Split(listed, "\x00")
+	return files[:len(files)-1], nil
+}
+
+//nolint:errcheck,nilerr // This fallback skips unreadable entries, matching the existing fileset contract.
+func listFilesystemFiles(repoDir string) []string {
+	root := repoDir
+	if root == "" {
+		root = "."
+	}
+	skipDirs := map[string]bool{
+		".git": true, "node_modules": true, "vendor": true,
+		"dist": true, "build": true, ".sparkwing": true,
+	}
+	var files []string
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		if rel == "." {
+			return nil
+		}
+		if info.IsDir() {
+			if skipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		files = append(files, rel)
+		return nil
+	})
+	return files
+}
+
+func loadDockerignore(repoDir string) ([]string, error) {
+	path := ".dockerignore"
+	if repoDir != "" {
+		path = filepath.Join(repoDir, ".dockerignore")
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var patterns []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			patterns = append(patterns, line)
+		}
+	}
+	return patterns, nil
+}
+
+// safety: as in Docker, the last matching pattern wins and a leading ! re-includes, so a
+// re-included build input changes the hash.
+func matchesIgnore(path string, patterns []string) bool {
+	ignored := false
+	for _, p := range patterns {
+		p, include := strings.CutPrefix(p, "!")
+		if matchesIgnorePattern(path, p) {
+			ignored = !include
+		}
+	}
+	return ignored
+}
+
+func matchesIgnorePattern(path, p string) bool {
+	if strings.HasSuffix(p, "/") && (strings.HasPrefix(path, p) || strings.HasPrefix(path+"/", p)) {
+		return true
+	}
+	if matched, err := filepath.Match(p, filepath.Base(path)); err == nil && matched {
+		return true
+	}
+	return strings.HasPrefix(path, p+"/") || path == p
+}
+
+// ChangedFiles returns paths (repo-relative) modified between `since`
+// and HEAD in repoDir. `since` may be any git revision (commit SHA,
+// branch name, tag, "HEAD~5"). Empty `since` returns the working
+// tree's currently-modified set (`git diff --name-only HEAD`).
+func ChangedFiles(ctx context.Context, repoDir, since string) ([]string, error) {
+	args := []string{"diff", "--name-only"}
+	if since == "" {
+		args = append(args, "HEAD")
+	} else {
+		// safety: a revision that leads with a dash is read by git as an option, not a range.
+		args = append(args, "--end-of-options", since+"...HEAD")
+	}
+	out, err := runGit(ctx, repoDir, args...)
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(out), nil
+}
+
+// TagsAtHead returns every tag pointing at HEAD in repoDir. Order is
+// whatever git returns (lexical by default).
+func TagsAtHead(ctx context.Context, repoDir string) ([]string, error) {
+	out, err := runGit(ctx, repoDir, "tag", "--points-at", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(out), nil
+}
+
+// LatestTag returns the highest semver tag in repoDir matching the
+// given prefix, or "" if none. Ordering is by semver: v0.10.0 >
+// v0.2.0. Non-semver tags are skipped. Prefix is matched literally
+// and preserved in the returned tag; pass "" to consider every tag.
+func LatestTag(ctx context.Context, repoDir, prefix string) (string, error) {
+	out, err := runGit(ctx, repoDir, "tag", "--list")
+	if err != nil {
+		return "", err
+	}
+	tags := splitLines(out)
+
+	var best string
+	var bestSem string
+	for _, t := range tags {
+		if prefix != "" && !strings.HasPrefix(t, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(t, prefix)
+		sem := rest
+		if !strings.HasPrefix(sem, "v") {
+			sem = "v" + sem
+		}
+		if !semver.IsValid(sem) {
+			continue
+		}
+		if best == "" || semver.Compare(sem, bestSem) > 0 {
+			best = t
+			bestSem = sem
+		}
+	}
+	return best, nil
+}
+
+// TagExistsOnRemote checks whether `tag` exists on origin in repoDir.
+// Returns (true, nil) if present, (false, nil) if absent, (_, err)
+// on transport failure.
+func TagExistsOnRemote(ctx context.Context, repoDir, tag string) (bool, error) {
+	if tag == "" {
+		return false, errors.New("git: empty tag")
+	}
+	out, err := runGit(ctx, repoDir, "ls-remote", "--tags", "origin", "refs/tags/"+tag)
+	if err != nil {
+		return false, fmt.Errorf("git: ls-remote origin: %w", err)
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+// PushTag creates an annotated tag locally in repoDir and pushes it
+// to origin. Refuses with ErrTagAlreadyExists if the remote already
+// has that tag or a local tag points elsewhere. A local tag at HEAD can
+// be retried after a failed push. Tags are never force-pushed.
+func PushTag(ctx context.Context, repoDir, tag, message string) error {
+	if tag == "" {
+		return errors.New("git: empty tag")
+	}
+
+	exists, err := TagExistsOnRemote(ctx, repoDir, tag)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("%w: %s", ErrTagAlreadyExists, tag)
+	}
+
+	if message == "" {
+		message = tag
+	}
+	local, localErr := runGit(ctx, repoDir, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag+"^{commit}")
+	if localErr == nil {
+		head, err := CurrentSHA(ctx, repoDir)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(local) != head {
+			return fmt.Errorf("%w: local tag %s points outside HEAD", ErrTagAlreadyExists, tag)
+		}
+	} else if _, err := runGit(ctx, repoDir, "tag", "-a", tag, "-m", message); err != nil {
+		return fmt.Errorf("git: create tag %s: %w", tag, err)
+	}
+	if _, err := runGit(ctx, repoDir, "push", "origin", "refs/tags/"+tag); err != nil {
+		return fmt.Errorf("git: push tag %s: %w", tag, err)
+	}
+	return nil
+}
+
+func runGit(ctx context.Context, repoDir string, args ...string) (string, error) {
+	return runGitEnv(ctx, repoDir, promptlessEnv(), args...)
+}
+
+func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, error) {
+	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
+	sdkserve.RequireExecution(ctx, "git "+firstWord(args))
+	cmd := helperruntime.Command(ctx, "git", args...)
+	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=0")
+	if repoDir != "" {
+		cmd.Dir = helperruntime.Path(ctx, repoDir)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := runGitCommand(cmd); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
+	}
+	return stdout.String(), nil
+}
+
+func firstWord(args []string) string {
+	if len(args) == 0 {
+		return "git command"
+	}
+	return args[0]
+}
+
+func splitLines(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	out := lines[:0]
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}

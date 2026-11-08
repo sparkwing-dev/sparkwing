@@ -57,7 +57,7 @@ loop condition, or a context.WithTimeout or WithDeadline argument). time.Now()
 that only stamps a fixture value is allowed. A file that dot-imports time
 cannot be judged and fails for that reason.
 
-Four approved real HTTP/process bounds require an exact source marker,
+Approved real HTTP/process bounds require an exact source marker,
 file, function and duration; a stale or changed exception fails the run.
 
 -staged and -base narrow the report to the lines those diffs add, which is how

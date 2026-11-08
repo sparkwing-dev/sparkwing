@@ -42,7 +42,7 @@ func ReadPin(checkout string, sdk engineid.SDKKind) (engineid.Pin, error) {
 
 // VersionForPin selects the exact release or installed engine for an SDK replacement.
 func VersionForPin(pin engineid.Pin) (string, error) {
-	if pin.SDK == engineid.GoSDK && pin.Replacement != "" && pin.Version != "" {
+	if pin.Replacement != "" && pin.Version != "" {
 		return installedEngineVersion()
 	}
 	version := pin.Version
@@ -191,6 +191,7 @@ func readNpmPin(dir string) (engineid.Pin, error) {
 		}
 	}
 	if source := localNpmPath(spec); source != "" {
+		pin.Replacement = source
 		entry := lock.Packages["node_modules/"+typeScriptPackage]
 		resolved := entry.Resolved
 		if lock.LockfileVersion == 1 {

@@ -17988,6 +17988,46 @@ paths:
             liveness: process
         retry: never
       x-sparkwing-wire: undocumented
+  /node/v1/helpers:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /node/v1/helpers
+      x-sparkwing-policy:
+        method: POST
+        path: /node/v1/helpers
+        audience: nodehost
+        owner: nodehost
+        authentication: capability
+        access:
+          - credential: nodehost_process
+            grants:
+              - node.report
+            binding: ownNode
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
+            liveness: process
+          - credential: owner_process
+            grants:
+              - expansion.submit
+            binding: sourceReport
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: planOwner
+            liveness: process
+        retry: never
+      x-sparkwing-wire: undocumented
   /node/v1/jobs/{job}/output:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

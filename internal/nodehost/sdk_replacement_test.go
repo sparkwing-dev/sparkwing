@@ -19,7 +19,7 @@ func FuzzReplacementHelloPreservesProtocolAndLanguage(f *testing.F) {
 			pin.Replacement = "../sdk"
 		}
 		process := &executorProcess{answer: func(context.Context, nodeproto.Request) (any, error) {
-			return nodeproto.HelloResult{Protocol: protocol, SDK: nodeproto.SDKIdentity{Language: language, Version: version}, Features: []string{}}, nil
+			return nodeproto.HelloResult{Protocol: protocol, SDK: nodeproto.SDKIdentity{Language: language, Version: version}}, nil
 		}}
 		err := sdkHello(t.Context(), &executorSession{process: process}, engineid.Identity{Pin: pin, Version: "installed"}, nodeproto.RunnerIdentity{Name: "local", Type: "local"}, nil)
 		want := protocol == nodeproto.Version && language == "go" && version != "" && (replacement || strings.TrimPrefix(version, "v") == "1.0.0")

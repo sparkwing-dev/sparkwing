@@ -1,0 +1,2 @@
+bench go T bulk 1 wall_ms 8187
+PASS
