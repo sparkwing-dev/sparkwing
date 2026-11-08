@@ -111,6 +111,12 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	run := readMatchingRunTx(ctx, tx, request.CapabilityPrefix, string(unit.RunID), lock)
 	profile := run.profile
 	profile.Labels, profile.OS, profile.Arch = slices.Clone(request.Labels), request.OS, request.Arch
+	for _, node := range run.chain {
+		if push := node.principal.Capability.Binding.Push; push != nil && push.Receipt != "" {
+			profile.Labels = nil
+			profile.OS = actionsImageOS(push.RunnerImage)
+		}
+	}
 	if profile.Class == match.ClassCloud {
 		for _, size := range match.CloudSizes() {
 			profile.Labels = append(profile.Labels, size.Label)
@@ -125,6 +131,24 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if requestSeal.Request.Burst != nil {
 		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {
 			return profile, match.Demand{}, err
+		}
+	}
+	for _, node := range chain {
+		push := node.principal.Capability.Binding.Push
+		if push != nil && push.Receipt != "" {
+			q := claimSQL{dialect: tx.dialect}
+			raw, err := q.jsonParam(push)
+			if err != nil {
+				return profile, match.Demand{}, err
+			}
+			alias := `(SELECT ` + raw + ` AS push,` + q.param(team) + ` AS team,` + q.param(string(unit.RunID)) + ` AS run_id,` + q.param(string(unit.NodeID)) + ` AS node_id,` + q.param(string(unit.Kind)) + ` AS kind) w`
+			var ok bool
+			if err := tx.QueryRowContext(ctx, `SELECT `+actionsReceiptScopeSQL(&q, "w.push", "w")+` FROM `+alias, q.args...).Scan(&ok); err != nil {
+				return profile, match.Demand{}, err
+			}
+			if !ok {
+				return profile, match.Demand{}, bindingRefusal()
+			}
 		}
 	}
 	options := requestSeal.Request.Options

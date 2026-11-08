@@ -152,6 +152,12 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	}
 	profile = authenticatedClaimProfile(leaf, profile, f.HereRun != "")
 	profile.Labels, profile.OS, profile.Arch = slices.Clone(demand.Labels), demand.OS, demand.Arch
+	for _, push := range f.Pushes {
+		if push.Receipt != "" {
+			profile.Labels = nil
+			profile.OS = actionsImageOS(push.RunnerImage)
+		}
+	}
 	if f.Cloud == 1 {
 		for _, size := range match.CloudSizes() {
 			profile.Labels = append(profile.Labels, size.Label)
@@ -167,6 +173,12 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	}
 	if profile.Class == match.ClassCoordinator {
 		f.Labels = append(f.Labels, "local", "location=coordinator")
+	}
+	for _, push := range f.Pushes {
+		if push.Receipt != "" {
+			profile.Labels = nil
+			profile.OS = actionsImageOS(push.RunnerImage)
+		}
 	}
 	if f.Cloud == 1 {
 		for _, size := range match.CloudSizes() {
@@ -348,7 +360,7 @@ func (q *claimSQL) flag(name string) string { return q.number(q.fact(name)) }
 func (q *claimSQL) pushScopeMatches(provenance, push, repo string) string {
 	p := func(name string) string { return q.at(provenance, name) }
 	b := func(name string) string { return q.at(push, name) }
-	return `COALESCE((` + trustIn(p("trust"), runspec.GitHubEventTrust()) + ` AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `=` + q.provenRepository(provenance) + ` AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
+	return `COALESCE(((` + trustIn(p("trust"), runspec.GitHubEventTrust()) + ` OR COALESCE(` + b("receipt") + `,'')<>'')` + ` AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `=` + q.provenRepository(provenance) + ` AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
 }
 
 func writerPrincipalSQL(writer, kind string) string {
@@ -405,7 +417,7 @@ func (q *claimSQL) predicate() string {
 	accepted := `(` + n("filter") + `=0 OR (w.kind IN ('node','eval') AND w.repo_display='' AND COALESCE(` + w("git", "repository", "display") + `,'')='') OR EXISTS (SELECT 1 FROM ` + q.array(f("accept"), "pattern") + ` WHERE ` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `))`
 	trust := q.poolTrust("w.team", f("pools"), f("trust"), n("launcher"), q.at("w.request", "provenance"))
 	bind := `(` + f("bind_run") + `='' OR (w.run_id=` + f("bind_run") + ` AND (` + n("here") + `=0 OR (w.kind='trigger' AND EXISTS (SELECT 1 FROM triggers bt WHERE bt.team=w.team AND bt.id=w.run_id AND (bt.generation<>0 OR ` + n("claim_by") + `>clock.now))))))`
-	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE NOT (` + q.pushScopeMatches(q.at("w.request", "provenance"), "push.value", "w.repo_key") + `))`
+	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE NOT (` + q.pushScopeMatches(q.at("w.request", "provenance"), "push.value", "w.repo_key") + ` AND (COALESCE(` + q.at("push.value", "receipt") + `,'')='' OR ` + actionsReceiptScopeSQL(q, "push.value", "w") + `)))`
 	personal := `(` + n("personal") + `=0 OR (` + f("account") + `<>'' AND ` + f("account") + `=w.requester AND NOT EXISTS (SELECT 1 FROM ancestors a WHERE a.team=w.team AND a.child=w.run_id AND a.origin IN ('` + string(runspec.OriginApp) + `','` + string(runspec.OriginSchedule) + `'))))`
 	runnerKind := `COALESCE(` + w("options", "runner", "value", "kind") + `,'')`
 	runnerValue := `COALESCE(` + w("options", "runner", "value", "value") + `,'')`
@@ -911,11 +923,11 @@ func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
 	burst := q.at("w.request", "request", "burst")
 	burstPrefs := q.at("w.request", "request", "burst", "preferences")
 	steps := `steps AS MATERIALIZED (
- SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,` + q.index("p") + ` AS step,` + q.number(q.at("p.value", "Hold")) + ` AS hold,COALESCE(` + q.at("p.value", "Prefers") + `,'[]') AS selectors,'' AS target FROM work w CROSS JOIN ` + q.indexed(param, "p") + ` WHERE ` + burst + ` IS NULL AND w.repo=0 AND w.preferences='[]'
- UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,0,` + fmt.Sprint(firstPreferenceHold(policy)) + `,w.preferences,'' FROM work w WHERE ` + burst + ` IS NULL AND w.repo=0 AND w.preferences<>'[]'
- UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,1,0,'[]','' FROM work w WHERE ` + burst + ` IS NULL AND w.repo=0 AND w.preferences<>'[]'
- UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,` + q.index("p") + `,` + q.number(q.at("p.value", "hold")) + `,'[]',` + q.at("p.value", "target") + ` FROM work w CROSS JOIN ` + q.indexed(burstPrefs, "p") + ` WHERE ` + burst + ` IS NOT NULL
- UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,` + q.index("p") + `,` + q.number(q.at("p.value", "hold")) + `,COALESCE(` + q.at("p.value", "labels") + `,'[]'),'repo:'||` + q.at("p.value", "target") + ` FROM work w CROSS JOIN ` + q.indexed("w.repo_tiers", "p") + ` WHERE w.repo=1
+ SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,` + q.index("p") + ` AS step,` + q.number(q.at("p.value", "Hold")) + ` AS hold,COALESCE(` + q.at("p.value", "Prefers") + `,'[]') AS selectors,'' AS target,'' AS workflow,'' AS runner FROM work w CROSS JOIN ` + q.indexed(param, "p") + ` WHERE ` + burst + ` IS NULL AND w.repo=0 AND w.preferences='[]'
+ UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,0,` + fmt.Sprint(firstPreferenceHold(policy)) + `,w.preferences,'','','' FROM work w WHERE ` + burst + ` IS NULL AND w.repo=0 AND w.preferences<>'[]'
+ UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,1,0,'[]','','','' FROM work w WHERE ` + burst + ` IS NULL AND w.repo=0 AND w.preferences<>'[]'
+ UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,` + q.index("p") + `,` + q.number(q.at("p.value", "hold")) + `,'[]',` + q.at("p.value", "target") + `,'','' FROM work w CROSS JOIN ` + q.indexed(burstPrefs, "p") + ` WHERE ` + burst + ` IS NOT NULL
+ UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,` + q.index("p") + `,` + q.number(q.at("p.value", "hold")) + `,COALESCE(` + q.at("p.value", "labels") + `,'[]'),'repo:'||` + q.at("p.value", "target") + `,` + q.at("p.value", "workflow") + `,` + q.at("p.value", "runner") + ` FROM work w CROSS JOIN ` + q.indexed("w.repo_tiers", "p") + ` WHERE w.repo=1
  )`
 	labels := `CASE WHEN ` + q.number(q.at("e.facts", "cloud")) + `=1 THEN (SELECT ` + q.at("ps.value", "labels") + ` FROM ` + q.array(q.at("e.facts", "placement_sizes"), "ps") + ` WHERE ` + q.number(q.at("ps.value", "class")) + `=e.cpu_class) ELSE ` + q.at("e.facts", "labels") + ` END`
 	stepLabels := q.anyAlternative("s.selectors", func(alt string) string { return q.contains(labels, alt) })
@@ -977,5 +989,5 @@ func (q *claimSQL) repositoryTiers(alias string) string {
 func (q *claimSQL) repositoryTierMatch(step, facts string) string {
 	tier := q.at(facts, "tier")
 	team := `(` + tier + `='` + tierSelfHosted + `' AND ` + q.terms(step+".selectors", func(alt string) string { return q.contains(q.at(facts, "labels"), alt) }) + `)`
-	return `(` + step + `.target='repo:` + runspec.PlacementTeam + `' AND ` + team + `) OR (substr(` + step + `.target,1,10)='repo:name=' AND ` + q.at(facts, "name") + `=substr(` + step + `.target,11) AND ` + team + `) OR (` + step + `.target='repo:` + runspec.PlacementCloud + `' AND ` + q.number(q.at(facts, "cloud")) + `=1) OR (` + step + `.target='repo:` + runspec.PlacementGitHubActions + `' AND ` + tier + `='` + tierActions + `')`
+	return `(` + step + `.target='repo:` + runspec.PlacementTeam + `' AND ` + team + `) OR (substr(` + step + `.target,1,10)='repo:name=' AND ` + q.at(facts, "name") + `=substr(` + step + `.target,11) AND ` + team + `) OR (` + step + `.target='repo:` + runspec.PlacementCloud + `' AND ` + q.number(q.at(facts, "cloud")) + `=1) OR (` + step + `.target='repo:` + runspec.PlacementGitHubActions + `' AND ` + tier + `='` + tierActions + `' AND EXISTS (SELECT 1 FROM ` + q.array(q.at(facts, "pushes"), "ap") + ` WHERE ` + q.at("ap.value", "runner_environment") + `='github-hosted' AND ` + q.at("ap.value", "runner_image") + `=` + step + `.runner AND ` + q.at("ap.value", "receipt") + `<>'' AND ` + `EXISTS (SELECT 1 FROM github_actions_dispatches ad WHERE ad.receipt=` + q.at("ap.value", "receipt") + ` AND ad.workflow=` + step + `.workflow AND ad.runner=` + step + `.runner)))`
 }

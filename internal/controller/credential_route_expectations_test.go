@@ -7,6 +7,9 @@ type credentialRouteExpectation struct {
 
 func credentialRouteExpectations() []credentialRouteExpectation {
 	return []credentialRouteExpectation{
+		{"PUT", "/api/v1/team/github-app/actions-approval", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
+		{"DELETE", "/api/v1/team/github-app/actions-approval", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
+		{"POST", "/api/v1/operator/teams/{team}/actions-dispatches/{receipt}/retry", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential"}},
 		{"POST", "/api/v1/runs/{run}/local-host/nodes/{job}/debug-pause", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting"}},
 		{"GET", "/api/v1/team/github-app/deliveries/failed", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"POST", "/api/v1/team/github-app/deliveries/{delivery}/process-again", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
@@ -270,6 +273,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"POST", "/node/v1/oidc-token", "nodehost", "nodehost", "capability", []string{"nodehost_process|oidc.mint|ownNode|process", "owner_process|oidc.mint|runOfTrigger|process"}},
 		{"POST", "/node/v1/masks", "nodehost", "nodehost", "capability", []string{"nodehost_process|node.report|ownNode|process", "owner_process|expansion.submit|sourceReport|process", "owner_process|node.report|planOwner|process", "owner_process|node.report|runOfTrigger|process"}},
 		{"POST", "/node/v1/annotations", "nodehost", "nodehost", "capability", []string{"nodehost_process|node.report|ownNode|process", "owner_process|expansion.submit|sourceReport|process", "owner_process|node.report|planOwner|process", "owner_process|node.report|runOfTrigger|process"}},
+		{"POST", "/node/v1/helpers", "nodehost", "nodehost", "capability", []string{"nodehost_process|node.report|ownNode|process", "owner_process|expansion.submit|sourceReport|process", "owner_process|node.report|planOwner|process", "owner_process|node.report|runOfTrigger|process"}},
 		{"POST", "/node/v1/summary", "nodehost", "nodehost", "capability", []string{"nodehost_process|node.report|ownNode|process", "owner_process|expansion.submit|sourceReport|process", "owner_process|node.report|planOwner|process", "owner_process|node.report|runOfTrigger|process"}},
 		{"POST", "/node/v1/children", "nodehost", "nodehost", "capability", []string{"nodehost_process|children.start|bodyNamesRun|process", "owner_process|children.start|bodyNamesRun|process"}},
 		{"GET", "/node/v1/children/{run}/await", "nodehost", "nodehost", "capability", []string{"nodehost_process|children.start|childOfBoundNode|process", "owner_process|children.start|childOfBoundNode|process"}},

@@ -222,6 +222,8 @@ var schemaTables = []schemaTable{
 	{Name: "github_app_triggers", Owner: schemaTenant},
 	{Name: "github_runner_bindings", Owner: schemaTenant},
 	{Name: "github_actions_exchanges", Owner: schemaTenant},
+	{Name: "github_actions_approvals", Owner: schemaTenant},
+	{Name: "github_actions_dispatches", Owner: schemaTenant},
 	{Name: "identities", Owner: schemaOperator},
 	{Name: "email_owners", Owner: schemaOperator},
 	{Name: "identity_unlinks", Owner: schemaOperator},

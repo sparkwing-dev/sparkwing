@@ -10,29 +10,41 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-const buildTrustSchema34 = `CREATE TABLE team_build_trust (
+const buildTrustSchema35 = `CREATE TABLE team_build_trust (
     team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
     trust_local_builds BIGINT NOT NULL DEFAULT 0 CHECK(trust_local_builds IN (0,1))
 )`
 
-func addSchema34BuildTrust(t *testing.T, st *store.Store) {
+func addSchema35BuildTrust(t *testing.T, st *store.Store) {
 	t.Helper()
-	if _, err := st.DB().Exec(buildTrustSchema34); err != nil {
+	if _, err := st.DB().Exec(buildTrustSchema35); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestSchemaUpgradeRemovesBuildTrustAndPreservesConfiguredInstall(t *testing.T) {
+func TestSchemaUpgradeRemovesBuildTrustFromVersion35AndPreservesConfiguredInstall(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
 	cipher := drillCipher(t)
 	populateInstall(t, st, cipher)
+	for _, statement := range []string{
+		`INSERT INTO local_runner_instances(id,capability_prefix,machine,pid,process_birth,version,build_identity,state) SELECT 'kept-runner',prefix,'kept-machine',1,'kept-birth','kept-version','kept-build','active' FROM capabilities WHERE subject_id='runner-1'`,
+		`INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES(35,'default',35,'kept-owner','Organization',1,1)`,
+		`INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_at,repo_key,installation_id) VALUES('default',35,35,'kept-owner/repo',1,'github.com/kept-owner/repo',35)`,
+		`INSERT INTO github_actions_approvals(team,repository_id,workflow,runner,workflow_ref,approval_id) VALUES('default',35,'worker.yml','ubuntu-latest','refs/heads/worker','kept-approval')`,
+		`INSERT INTO github_actions_dispatches(receipt,team,run_id,node_id,queue_started_at,generation,approval_id,installation_id,repository_id,repository_owner_id,repository,workflow,workflow_ref,runner,policy_revision,state) VALUES('kept-receipt','default','drill-run-0','node-0',1,1,'kept-approval',35,35,35,'kept-owner/repo','worker.yml','refs/heads/worker','ubuntu-latest','kept-policy','accepted')`,
+		`INSERT INTO cron_schedules(id,repo_path,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,team,repo_key,github_installation_id,github_repository_id) VALUES('kept-schedule','/repo','nightly','0 * * * *','UTC','skip',0,1,1,1,'default','github.com/kept-owner/repo',35,35)`,
+	} {
+		if _, err := st.DB().Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
 	before := fingerprintInstall(t, st, cipher)
-	addSchema34BuildTrust(t, st)
+	addSchema35BuildTrust(t, st)
 	if _, err := st.DB().Exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('default',1)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=34,baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`); err != nil {
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=35,baseline_digest='4d4bc4dc64181ee22e7d1bc02925b4587dde2395469658c9b06b6c6ee59a81a2'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -43,6 +55,20 @@ func TestSchemaUpgradeRemovesBuildTrustAndPreservesConfiguredInstall(t *testing.
 	if before.String() != after.String() {
 		t.Fatal("configured install changed during schema upgrade")
 	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM local_runner_instances WHERE id='kept-runner' AND machine='kept-machine' AND build_identity='kept-build' AND state='active'`,
+		`SELECT COUNT(*) FROM teams WHERE name='default'`,
+		`SELECT COUNT(*) FROM github_app_installations WHERE installation_id=35 AND account_login='kept-owner'`,
+		`SELECT COUNT(*) FROM github_runner_bindings WHERE repository_id=35 AND installation_id=35`,
+		`SELECT COUNT(*) FROM github_actions_approvals WHERE approval_id='kept-approval' AND workflow_ref='refs/heads/worker'`,
+		`SELECT COUNT(*) FROM github_actions_dispatches WHERE receipt='kept-receipt' AND state='accepted' AND policy_revision='kept-policy'`,
+		`SELECT COUNT(*) FROM cron_schedules WHERE id='kept-schedule' AND cron='0 * * * *' AND github_installation_id=35`,
+	} {
+		var count int
+		if err := upgraded.DB().QueryRow(query).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("configured record after upgrade: count=%d, error=%v, query=%s", count, err, query)
+		}
+	}
 	fresh := storetest.New(t).Open(t)
 	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
 		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
@@ -52,10 +78,11 @@ func TestSchemaUpgradeRemovesBuildTrustAndPreservesConfiguredInstall(t *testing.
 func schema30Store(t *testing.T, target *storetest.Target) {
 	t.Helper()
 	st := target.Open(t)
+	dropActionsSchema(t, st)
 	for _, statement := range []string{
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
 		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('kept','TOKEN','sealed-configuration','fixture',1,1)`,
-		buildTrustSchema34,
+		buildTrustSchema35,
 		`DROP INDEX idx_runs_live_children`,
 		`DROP TABLE local_runner_instances`,
 		`DROP TABLE local_run_secrets`,
@@ -74,7 +101,8 @@ func schema30Store(t *testing.T, target *storetest.Target) {
 func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
-	addSchema34BuildTrust(t, st)
+	addSchema35BuildTrust(t, st)
+	dropActionsSchema(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +122,8 @@ func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
 func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
-	addSchema34BuildTrust(t, st)
+	addSchema35BuildTrust(t, st)
+	dropActionsSchema(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +146,8 @@ func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
-	addSchema34BuildTrust(t, st)
+	addSchema35BuildTrust(t, st)
+	dropActionsSchema(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -293,4 +323,41 @@ func shapeDiff(a, b string) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+func dropActionsSchema(t *testing.T, st *store.Store) {
+	t.Helper()
+	for _, table := range []string{"github_actions_dispatches", "github_actions_approvals"} {
+		if _, err := st.DB().Exec(`DROP TABLE ` + table); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSchemaUpgradeAddsActionsWithoutLosingConfiguration(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	addSchema35BuildTrust(t, st)
+	if _, err := st.DB().Exec(`INSERT INTO teams(name,created_at,updated_at) VALUES('kept',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES('kept','TOKEN','sealed-configuration','fixture',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	dropActionsSchema(t, st)
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=34,baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	var secret string
+	if err := upgraded.DB().QueryRow(`SELECT value FROM secrets WHERE team='kept' AND name='TOKEN'`).Scan(&secret); err != nil || secret != "sealed-configuration" {
+		t.Fatalf("configured secret changed: %v", err)
+	}
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("upgrade shape: %s", shapeDiff(a, b))
+	}
 }

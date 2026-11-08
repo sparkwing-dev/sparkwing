@@ -9,7 +9,7 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 35. Both dialects are translated from `schema.sql`.
+The baseline version is 36. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
@@ -25,8 +25,14 @@ while an instance drains. Existing credential retention removes an instance
 record when its ended claim capability is retired. Schema 34 adds
 `idx_runs_live_children`, a partial index on pending and running child runs that
 the parent-cancellation sweep reads instead of the whole run history. Schema 35
-drops the unused team build-trust table. A step adds a
-column at the end of its table so the upgraded schema matches a fresh one.
+adds `github_actions_approvals` and `github_actions_dispatches`. Approval rows
+bind a team repository, workflow ref and hosted image. A dispatch receipt binds
+one job queue start and placement generation to its workflow revision and provider
+run. Sending is persisted before HTTP. Expired sender leases become uncertain,
+never another send. An operator retry invalidates the earlier receipt and records
+an audit mutation before opening a new placement generation. Receipt credentials
+have only node-claim authority and keep the original workload's provenance.
+Schema 36 drops the unused team build-trust table. A step adds a column at the end of its table so the upgraded schema matches a fresh one.
 Other versions and digests are refused unchanged. Any reset must preserve secrets,
 teams and memberships, tokens, runner registrations, GitHub App installations,
 schedules and subscriptions. Billing records require separate review. There are

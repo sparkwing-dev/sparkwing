@@ -87,7 +87,7 @@ func testGoSDKClosureIdentifiers(t *testing.T) {
 			if !reflect.DeepEqual(doc, actual) {
 				t.Fatalf("fake and process closure declarations differ: fake=%+v process=%+v", doc, actual)
 			}
-			checks := map[string]string{job.Closures.SkipIf[0]: "false", job.Closures.Generate[0]: "[]"}
+			checks := map[string]string{job.Closures.SkipIf[0]: "false", job.Closures.Generate[0]: `{"jobs":[]}`}
 			if job.ID == "scope/step/release" {
 				checks[job.Closures.SkipIf[0]] = "true"
 			}

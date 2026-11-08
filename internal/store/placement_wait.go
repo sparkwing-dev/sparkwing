@@ -28,6 +28,7 @@ type PlacementWait struct {
 // capacity when the tier opens. Unavailable says why the tier cannot take the
 // job at all.
 type PlacementTierWait struct {
+	Dispatch    *ActionsDispatch
 	Tier        runspec.RepositoryTier
 	OpensIn     time.Duration
 	Live        []string
@@ -117,6 +118,9 @@ func readPlacementWaitsTx(ctx context.Context, tx *storeTx, team Team, run RunRo
 			candidates = append(candidates, placementCandidate{name: facts.Name, facts: facts, standing: standing, onDemand: true})
 		}
 		waits[i].Tiers = placementTierWaits(policy.ForJob(waits[i].JobID), candidates, ranking, waits[i].ReadyAt, now)
+		if err := actionsPlacementWaitTx(ctx, tx, team, run, &waits[i]); err != nil {
+			return nil, err
+		}
 	}
 	return waits, nil
 }
@@ -180,7 +184,9 @@ func repositoryTierMatches(tier runspec.RepositoryTier, f claimFacts) bool {
 	case runspec.PlacementCloud:
 		return f.Cloud == 1
 	case runspec.PlacementGitHubActions:
-		return f.Tier == tierActions
+		return f.Tier == tierActions && slices.ContainsFunc(f.Pushes, func(p capability.PushScope) bool {
+			return p.Receipt != "" && p.RunnerEnvironment == githubHostedRunner && p.RunnerImage == tier.Runner && strings.HasPrefix(p.WorkflowRef, p.Repository+"/"+tier.Workflow+"@")
+		})
 	}
 	if f.Tier != tierSelfHosted {
 		return false

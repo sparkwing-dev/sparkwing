@@ -198,8 +198,8 @@ Store incompatibility is an actionable refusal. It never silently opens another
 store.
 Before 1.0, schema changes may require a reset after configured data has been
 preserved. The binary refuses a mismatched store with a
-move-aside remedy for an older local store. Schemas 30 through 33 upgrade in
-place to schema 35. Earlier baselines are refused unchanged. A reset must preserve
+move-aside remedy for an older local store. Schemas 30 through 35 upgrade in
+place to schema 36. Earlier baselines are refused unchanged. A reset must preserve
 configured data, especially secrets and their keys. Billing records require
 separate review. See
 [Schema compatibility](backup-restore.md#schema-compatibility). Explicit standalone CI mode uses the same controller code in process.

@@ -144,7 +144,9 @@ replaces the store's authorization check for those segments.
 Ordinary foreground status observation and followed logs reconnect through interrupted
 or temporarily unavailable controller reads. Logs keep their last cursor, so
 reconnecting does not repeat output. Permission, protocol and integrity refusals
-remain errors. Observation reconnects do not resubmit the run or claim its work.
+remain errors. Once the host confirms a terminal outcome, a transport failure in
+log observation prints a warning with the retained-log command and preserves
+the run's exit status. Observation reconnects do not resubmit the run or claim its work.
 
 Cross-run log search uses the same persisted subjects and authorization. Run
 filters apply before the run limit. A page can contain no matches and still

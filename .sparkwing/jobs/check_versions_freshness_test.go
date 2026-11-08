@@ -19,7 +19,7 @@ func TestScaffoldFallbackProblem(t *testing.T) {
 		wantOK bool
 	}{
 		{"current", "v0.15.3", "v0.15.3", true},
-		{"ahead", "v0.15.4", "v0.15.3", true},
+		{"unpublished", "v0.15.4", "v0.15.3", false},
 		{"behind", "v0.8.1", "v0.15.3", false},
 		{"behind by patch", "v0.15.2", "v0.15.3", false},
 		{"invalid pin", "", "v0.15.3", false},
@@ -35,6 +35,27 @@ func TestScaffoldFallbackProblem(t *testing.T) {
 				t.Errorf("scaffoldFallbackProblem(%q, %q) reported no problem, want one", c.pinned, c.latest)
 			}
 		})
+	}
+}
+
+func TestScaffoldFallbackChecksPublicationWithoutTheLocalReleaseTag(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	gitRun(t, repo, "tag", "v0.1.0")
+	gitRun(t, repo, "tag", "v0.2.0")
+	gitRun(t, repo, "push", "origin", "v0.2.0")
+	gitRun(t, repo, "tag", "--delete", "v0.2.0")
+	ctx := newTestContext(t)
+	for _, version := range []string{"v0.2.0", "v0.3.0"} {
+		if err := bumpFallbackSDKVersionFile(repo, version); err != nil {
+			t.Fatal(err)
+		}
+		problem := checkScaffoldFallbackPin(ctx, repo)
+		if version == "v0.2.0" && problem != "" {
+			t.Fatalf("published release fixture refused: %s", problem)
+		}
+		if version == "v0.3.0" && !strings.Contains(problem, "ahead of latest release") {
+			t.Fatalf("unpublished pin problem = %q, want publication refusal", problem)
+		}
 	}
 }
 
@@ -302,7 +323,7 @@ func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
 	gitRun(t, repo, "push", "origin", "v0.1.0")
 	before := gitRun(t, repo, "rev-parse", "HEAD")
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(newTestContext(t), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +347,7 @@ func TestAutoBumpSparkwingPinIfStaleLeavesDetachedCheckoutUnchanged(t *testing.T
 	gitRun(t, repo, "checkout", "--detach", "HEAD")
 	before := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(newTestContext(t), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +360,7 @@ func TestAutoBumpSparkwingPinIfStaleLeavesDetachedCheckoutUnchanged(t *testing.T
 	if status := strings.TrimSpace(gitRun(t, repo, "status", "--porcelain")); status != "" {
 		t.Fatalf("detached auto bump changed the tree or index:\n%s", status)
 	}
-	if err := CheckVersionsFreshness(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "v0.99.0") {
+	if err := CheckVersionsFreshness(newTestContext(t), repo); err == nil || !strings.Contains(err.Error(), "v0.99.0") {
 		t.Fatalf("stale detached checkout freshness error = %v, want the available v0.99.0 release", err)
 	}
 }
@@ -479,7 +500,7 @@ func TestAutoBumpSparkwingPinIfStaleRegeneratesAPISnapshot(t *testing.T) {
 	gitRun(t, repo, "add", "doc.go")
 	gitRun(t, repo, "commit", "-m", "move past the tag")
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(newTestContext(t), repo)
 	if err != nil {
 		t.Fatalf("autoBumpSparkwingPinIfStale: %v", err)
 	}
