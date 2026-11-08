@@ -84,7 +84,7 @@ func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (snapshot RunSn
 	return readSnapshotTx(ctx, tx, t.team, runID)
 }
 
-// SQLite can surface its interrupt code instead of the context cancellation that caused it.
+// hack: SQLite can surface its interrupt code instead of the context cancellation that caused it.
 func snapshotReadError(ctx context.Context, err error) error {
 	var coded interface{ Code() int }
 	if cause := context.Cause(ctx); cause != nil && errors.As(err, &coded) && coded.Code() == 9 {
