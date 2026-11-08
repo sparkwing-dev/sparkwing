@@ -3,7 +3,10 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,9 +22,11 @@ import (
 // this test is about, and a real `go build` cannot be paused mid-link.
 const fakeGoScript = `#!/bin/sh
 if [ "$1" = env ]; then printf 'auto\ngo1.26.6\noff\n'; exit 0; fi
+exec 9> "$TEST_COMPILER_LIFETIME"
 sleep 600 &
 echo $! > "$TEST_GRANDCHILD_PID"
 echo $$ > "$TEST_GO_PID"
+printf 'ready\n' >&9
 wait
 `
 
@@ -59,12 +64,15 @@ func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
 	goPIDFile := filepath.Join(scratch, "go.pid")
 	grandchildPIDFile := filepath.Join(scratch, "grandchild.pid")
 
-	child := exec.Command(os.Args[0], "-test.run=^TestMaterializeStopsTheToolchainOnTermination$")
+	lifetime, keeper := compileLifetimePipe(t, filepath.Join(scratch, "compiler-lifetime"))
+	ready := bufio.NewReader(lifetime)
+	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestMaterializeStopsTheToolchainOnTermination$")
 	child.Env = append(scrubbed(os.Environ(),
 		"SPARKWING_FLEET", "SPARKWING_GITCACHE_URL"),
 		"SPARKWING_TEST_COMPILE_INTERRUPT_CHILD=1",
 		"SPARKWING_TEST_FLEET_COMPILE_DIR="+pipelineDir,
 		"TEST_GO_PID="+goPIDFile,
+		"TEST_COMPILER_LIFETIME="+lifetime.Name(),
 		"TEST_GRANDCHILD_PID="+grandchildPIDFile,
 		"SPARKWING_HOME="+filepath.Join(scratch, "home"),
 		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
@@ -74,7 +82,8 @@ func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
 		t.Fatal(err)
 	}
 	exited := make(chan error, 1)
-	go func() { exited <- child.Wait() }()
+	finished := make(chan struct{})
+	go func() { defer close(finished); exited <- child.Wait() }()
 	t.Cleanup(func() {
 		_ = child.Process.Kill()
 		for _, path := range []string{goPIDFile, grandchildPIDFile} {
@@ -82,22 +91,39 @@ func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
 				_ = syscall.Kill(pid, syscall.SIGKILL)
 			}
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			t.Error("CLI did not join after cleanup")
+		}
 	})
 
-	goPID := waitForPIDFile(t, goPIDFile)
-	grandchildPID := waitForPIDFile(t, grandchildPIDFile)
+	if line, err := ready.ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("compiler did not report readiness: %q, %v", line, err)
+	}
 
+	if err := keeper.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := child.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
 	select {
 	case <-exited:
-	case <-time.After(60 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the CLI did not exit after SIGTERM")
 	}
 
-	assertGone(t, "the toolchain process", goPID)
-	assertGone(t, "the toolchain's own child", grandchildPID)
+	if err := lifetime.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := io.ReadAll(ready); err != nil || len(data) != 0 {
+		t.Fatalf("the compiler or its child outlived the CLI: data=%q err=%v", data, err)
+	}
 }
 
 func scrubbed(env []string, keys ...string) []string {
@@ -117,17 +143,25 @@ func scrubbed(env []string, keys ...string) []string {
 	return out
 }
 
-func waitForPIDFile(t *testing.T, path string) int {
+func compileLifetimePipe(t *testing.T, path string) (*os.File, *os.File) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if pid, err := readPID(path); err == nil {
-			return pid
-		}
-		time.Sleep(20 * time.Millisecond)
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("%s never named a pid", path)
-	return 0
+	pipe, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pipe.Close() })
+	if err := pipe.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	keeper, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keeper.Close() })
+	return pipe, keeper
 }
 
 func readPID(path string) (int, error) {
@@ -136,16 +170,4 @@ func readPID(path string) (int, error) {
 		return 0, err
 	}
 	return strconv.Atoi(strings.TrimSpace(string(body)))
-}
-
-func assertGone(t *testing.T, what string, pid int) {
-	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if syscall.Kill(pid, 0) != nil {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Errorf("%s (pid %d) outlived the CLI it was compiling for", what, pid)
 }

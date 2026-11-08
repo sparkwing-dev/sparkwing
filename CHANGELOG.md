@@ -99,6 +99,8 @@ unlock.
 
 ### Fixed
 
+- Jobs cancelled while queued for machine capacity report cancelled instead of an internal failure, without starting an attempt.
+
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
 - **local runner:** Held jobs reconnect after controller restarts because cancelled admission polls return an unavailable response instead of an empty success.
