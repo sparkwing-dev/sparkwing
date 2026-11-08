@@ -139,7 +139,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 			}
 		}
 	}
-	snapshot, err := burstSourceSnapshot(ctx, captured, filepath.Dir(directory), files, route.SourceFiles, flags.allowSecretFiles)
+	snapshot, err := burstSourceSnapshot(ctx, captured, filepath.Dir(directory), files, route.SourceFiles, nil)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

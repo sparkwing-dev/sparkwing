@@ -28,16 +28,15 @@ func TestThisRepoSatisfiesItsOwnWholeTreeGates(t *testing.T) {
 
 	t.Chdir(root)
 
+	ctx, cancel := context.WithTimeout(newTestContext(t), wholeTreeGateBudget)
+	defer cancel()
 	start := time.Now()
+	defer func() { t.Logf("whole-tree gates took %s", time.Since(start)) }()
 	for _, g := range wholeTreeGates {
 		t.Run(g.name, func(t *testing.T) {
-			if err := g.check(newTestContext(t)); err != nil {
+			if err := g.check(ctx); err != nil {
 				t.Fatalf("%s fails against %s:\n%v", g.name, root, err)
 			}
 		})
-	}
-	if elapsed := time.Since(start); elapsed > wholeTreeGateBudget {
-		t.Errorf("the whole-tree gates took %s, over the %s budget for this table",
-			elapsed.Round(time.Millisecond), wholeTreeGateBudget)
 	}
 }

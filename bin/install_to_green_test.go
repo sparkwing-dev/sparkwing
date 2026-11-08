@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
@@ -147,7 +149,7 @@ func runInstallToGreen(t *testing.T, options installToGreenOptions) installToGre
 	argv := append([]string{filepath.Join(root, "bin", "install-to-green.sh"), "--binary", stub}, options.args...)
 	cmd := exec.Command("bash", argv...)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(testgit.Env(os.Environ()),
 		"INSTALL_TO_GREEN_TRACE="+trace,
 		"INSTALL_TO_GREEN_STUB_RUN="+options.stubRun,
 		"INSTALL_TO_GREEN_STUB_SCAFFOLD="+options.stubScaffold,
@@ -386,8 +388,8 @@ func operatorRepository(t *testing.T) string {
 			"-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "operator work",
 		},
 	} {
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = environWithoutGitBindings()
+		cmd := testgit.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = testgit.Env(os.Environ())
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git fixture: %v %s", err, out)
 		}
@@ -397,24 +399,13 @@ func operatorRepository(t *testing.T) string {
 
 func gitCommitCount(t *testing.T, repo string) string {
 	t.Helper()
-	cmd := exec.Command("git", "-C", repo, "rev-list", "--count", "HEAD")
-	cmd.Env = environWithoutGitBindings()
+	cmd := testgit.Command("git", "-C", repo, "rev-list", "--count", "HEAD")
+	cmd.Env = testgit.Env(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("count commits in %s: %v", repo, err)
 	}
 	return strings.TrimSpace(string(out))
-}
-
-func environWithoutGitBindings() []string {
-	var kept []string
-	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, "GIT_") {
-			continue
-		}
-		kept = append(kept, entry)
-	}
-	return kept
 }
 
 func gitBindingNames(t *testing.T) []string {
@@ -565,7 +556,7 @@ func TestInstallToGreenBuildUsesPublicScaffoldAndCandidateSDK(t *testing.T) {
 	root := installToGreenRoot(t)
 	cmd := exec.Command("bash", filepath.Join(root, "bin", "install-to-green.sh"), "--build", "--output", "json")
 	cmd.Dir = root
-	cmd.Env = append(environWithoutGitBindings(), "GOWORK=off", "XDG_CONFIG_HOME="+filepath.Join(t.TempDir(), "config"))
+	cmd.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "XDG_CONFIG_HOME="+filepath.Join(t.TempDir(), "config"))
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -613,21 +604,21 @@ func TestInstallToGreenBuildSelectsAStableSDKVersion(t *testing.T) {
 				{"init", "-q"},
 				{"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "fixture"},
 			} {
-				cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-				cmd.Env = environWithoutGitBindings()
+				cmd := testgit.Command("git", append([]string{"-C", root}, args...)...)
+				cmd.Env = testgit.Env(os.Environ())
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("git fixture: %v\n%s", err, out)
 				}
 			}
 			if tt.tag != "" {
-				cmd := exec.Command("git", "-C", root, "tag", tt.tag)
-				cmd.Env = environWithoutGitBindings()
+				cmd := testgit.Command("git", "-C", root, "tag", tt.tag)
+				cmd.Env = testgit.Env(os.Environ())
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("git tag: %v\n%s", err, out)
 				}
 			}
 			cmd := exec.Command("bash", filepath.Join(root, "bin", "install-to-green.sh"), "--build", "--keep")
-			cmd.Env = append(environWithoutGitBindings(), "GOWORK=off")
+			cmd.Env = append(testgit.Env(os.Environ()), "GOWORK=off")
 			out, err := cmd.CombinedOutput()
 			kept := regexp.MustCompile(`install-to-green: kept ([^\n]+)`).FindStringSubmatch(string(out))
 			if kept == nil {
@@ -709,7 +700,7 @@ func TestInstallToGreenTidiesSoACandidateDependencyResolves(t *testing.T) {
 	run := func(dir string, args ...string) (string, error) {
 		cmd := exec.Command(goBinary, args...)
 		cmd.Dir = dir
-		cmd.Env = append(environWithoutGitBindings(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+		cmd.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}

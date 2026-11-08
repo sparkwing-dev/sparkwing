@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 const homeProbeEnv = "SPARKWING_TESTLEAK_HOME_PROBE"
@@ -76,5 +78,26 @@ func TestGoTelemetryCannotRecreateTheSandboxHome(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(out)); got != os.DevNull {
 		t.Fatalf("Go telemetry directory = %q, want %q", got, os.DevNull)
+	}
+}
+
+func TestFreshSuiteScrubsAmbientGitBindings(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=^TestHelperRejectsAmbientGitBindings$")
+	command.Env = append(testgit.Env(os.Environ()), hostEnv+"=", "SPARKWING_TESTLEAK_GIT_PROBE=1",
+		"GIT_DIR="+t.TempDir(), "GIT_WORK_TREE="+t.TempDir(), "GIT_INDEX_FILE="+filepath.Join(t.TempDir(), "index"),
+		"GIT_COMMON_DIR="+t.TempDir(), "GIT_OBJECT_DIRECTORY="+t.TempDir(), "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.worktree", "GIT_CONFIG_VALUE_0="+t.TempDir())
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("fresh suite Git probe: %v: %s", err, output)
+	}
+}
+
+func TestHelperRejectsAmbientGitBindings(t *testing.T) {
+	if os.Getenv("SPARKWING_TESTLEAK_GIT_PROBE") != "1" {
+		return
+	}
+	for _, name := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"} {
+		if _, set := os.LookupEnv(name); set {
+			t.Errorf("fresh suite inherited %s", name)
+		}
 	}
 }

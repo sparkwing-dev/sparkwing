@@ -189,12 +189,14 @@ func TestPrepareCheckoutCancellationStopsCredentialRelease(t *testing.T) {
 		t.Fatal("source acquisition did not reach credential release")
 	}
 	cancel()
+	joined, stop := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stop()
 	select {
 	case err := <-done:
 		if !errors.Is(err, context.Canceled) || returned != nil {
 			t.Fatalf("source cancellation returned %v, %v", returned, err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-joined.Done():
 		t.Fatal("source acquisition did not join credential release")
 	}
 	remaining, err := os.ReadDir(workspace)

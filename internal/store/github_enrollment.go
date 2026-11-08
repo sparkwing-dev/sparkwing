@@ -115,7 +115,7 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 func consumeActionsExchangeTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	push := spec.Binding.Push
 	if push.Receipt != "" {
-		result, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET provider_run_id=?,provider_attempt=?,state='accepted' WHERE receipt=? AND provider_run_id='' AND state IN ('sending','accepted','uncertain') AND `+actionsConsentSQL, push.WorkflowRunID, push.WorkflowRunAttempt, push.Receipt)
+		result, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET provider_run_id=?,provider_attempt=?,state='accepted' WHERE team=? AND receipt=? AND provider_run_id='' AND state IN ('sending','accepted','uncertain') AND `+actionsConsentSQL, push.WorkflowRunID, push.WorkflowRunAttempt, spec.Team, push.Receipt)
 		if err != nil {
 			return err
 		}

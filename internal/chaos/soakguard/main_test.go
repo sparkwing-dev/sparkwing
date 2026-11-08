@@ -4,7 +4,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 const (
@@ -36,9 +39,11 @@ func TestSoakguardHelperProcess(t *testing.T) {
 			os.Exit(2)
 		}
 		procgroup.IgnoreTermination()
-		if err := os.WriteFile(os.Getenv(soakguardLeaderReady), []byte("ready"), 0o600); err != nil {
+		ready, err := net.Dial("unix", os.Getenv(soakguardLeaderReady))
+		if err != nil {
 			os.Exit(2)
 		}
+		_ = ready.Close()
 		release := make(chan os.Signal, 1)
 		signal.Notify(release, syscall.SIGUSR1)
 		<-release
@@ -77,12 +82,14 @@ func TestFailedCommandCleansNestedGroupsBeforeReturningStatus(t *testing.T) {
 	t.Setenv(soakguardHelper, "leader-fail")
 	go func() { done <- run(cmd, signals, started) }()
 	session := <-started
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
 	select {
 	case code := <-done:
 		if code != 7 {
 			t.Fatalf("exit code = %d, want 7", code)
 		}
-	case <-time.After(3 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("soakguard did not bound failed-command cleanup")
 	}
 	assertSessionHasNoLiveProcesses(t, session)
@@ -97,8 +104,13 @@ func TestSignalTerminatesEveryNestedProcessGroupBeforeExit(t *testing.T) {
 	done := make(chan int, 1)
 	cmd := []string{os.Args[0], "-test.run=^TestSoakguardHelperProcess$"}
 	t.Setenv(soakguardHelper, "leader")
-	ready := filepath.Join(t.TempDir(), "leader-ready")
-	t.Setenv(soakguardLeaderReady, ready)
+	readyPath := filepath.Join(testhome.TempDir(t), "leader-ready.sock")
+	ready, err := net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: readyPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ready.Close() })
+	t.Setenv(soakguardLeaderReady, readyPath)
 	go func() { done <- run(cmd, signals, started) }()
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { signals <- syscall.SIGTERM }) }
@@ -108,49 +120,36 @@ func TestSignalTerminatesEveryNestedProcessGroupBeforeExit(t *testing.T) {
 		if joined {
 			return
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+		defer cancel()
 		select {
 		case <-done:
-		case <-time.After(7 * time.Second):
+		case <-ctx.Done():
 			t.Error("soakguard did not stop during cleanup")
 		}
 	})
 	session := <-started
-	waitForSoakguardMarker(t, ready)
+	if err := ready.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := ready.AcceptUnix()
+	if err != nil {
+		t.Fatalf("soakguard leader readiness: %v", err)
+	}
+	_ = connection.Close()
 	stop()
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	defer cancel()
 	select {
 	case code := <-done:
 		joined = true
 		if code != 130 {
 			t.Fatalf("exit code = %d, want 130", code)
 		}
-	case <-time.After(7 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("soakguard did not bound signal cleanup")
 	}
 	assertSessionHasNoLiveProcesses(t, session)
-}
-
-func waitForSoakguardMarker(t *testing.T, path string) {
-	t.Helper()
-	deadlineAt := time.Now().Add(3 * time.Second)
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	deadline := time.NewTimer(time.Until(deadlineAt))
-	defer deadline.Stop()
-	for {
-		if !time.Now().Before(deadlineAt) {
-			t.Fatal("soakguard leader did not publish readiness")
-		}
-		if _, err := os.Stat(path); err == nil {
-			return
-		} else if !os.IsNotExist(err) {
-			t.Fatalf("read soakguard leader readiness: %v", err)
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatal("soakguard leader did not publish readiness")
-		}
-	}
 }
 
 func assertSessionHasNoLiveProcesses(t *testing.T, session int) {

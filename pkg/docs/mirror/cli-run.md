@@ -41,7 +41,6 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--publish PROFILE` | Copy this local run's results to the named controller profile. |
 | `--sw-route ROUTE` | Select local execution or direct Cloud execution for this invocation. Values: local, cloud. |
 | `--profile NAME` | Cloud connection profile; requires --sw-route cloud. |
-| `--allow-secret-file PATH` | Upload this repository-relative file even though its name or content looks like a secret; the secret-value scan still applies. Requires --sw-route cloud. Repeatable; comma-separated values are accepted. |
 | `--agent NAME` | Coding agent starting this run, such as claude-code:land-agent; none records no agent. Display-only. |
 | `--sw-cache-from PROFILE` | Read the authorized remote cache; an empty value disables the machine default. |
 | `--sw-pause-before JOB` | Pause before the selected job. Repeatable; comma-separated values are accepted. |

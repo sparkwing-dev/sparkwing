@@ -241,7 +241,7 @@ exit with its real outcome; one that another runner takes cancels the idle workf
 the run is gone or already finished count as done; a removed, suspended or
 refused installation is logged once for an operator and not retried. A lost response or sender
 restart never resends the generation. An operator can make an audited retry with
-`POST /api/v1/operator/teams/<team>/actions-dispatches/<receipt>/retry`, supplying
+`POST /api/v1/operator/teams/{team}/actions-dispatches/{receipt}/retry`, supplying
 `{"reason":"provider recovery checked"}`. This invalidates the old receipt before
 opening a new generation and refuses while a live award exists. A delayed old
 workflow can still spend GitHub startup minutes.
