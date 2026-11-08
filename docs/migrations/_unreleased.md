@@ -10,3 +10,22 @@ secrets, teams, credentials, runners, installations and schedules. Older binarie
 refuse the upgraded store. The real GitHub App permission update is a separate
 operator action. Existing Actions workers need a matching dispatch receipt to
 claim jobs whose repository placement explicitly lists GitHub Actions.
+
+## Windows local runners survive controller replacement
+
+Windows queued work now runs in a detached process under the same user, with
+independent stdio and Job Object breakaway. An enclosing Job Object must permit
+breakaway; startup reports an error when it forbids it. The controller records
+the runner's process birth and reuses a matching live runner after restart, or
+starts a successor when it exits. Held work keeps its existing drain behavior.
+`sparkwing daemon stop` drains the runner through the local API before stopping
+the controller. Windows controllers start on demand; `daemon install` remains
+a Linux/macOS command.
+
+## Declare upload allowances in repository config
+
+The `--allow-secret-file` flag is removed. For Cloud source uploads and
+working-tree triggers, list literal repository-relative paths under the
+`allow_secret_files` key in `.sparkwing/sparkwing.yaml`. These exceptions allow
+public credential-shaped fixtures through the file scan. Secret-value scanning
+still applies, and repository local restrictions remain binding.

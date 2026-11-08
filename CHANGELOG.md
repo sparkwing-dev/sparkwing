@@ -22,9 +22,16 @@ unlock.
 
 ### Changed
 
+- **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/_unreleased.md#declare-upload-allowances-in-repository-config).
+
+- **local controller:** Windows queued work runs in a detached same-user runner that survives controller replacement. A matching live runner is reused; a new build starts a successor while held work drains. The enclosing Job Object must permit breakaway. `daemon stop` drains through the local API. See [the migration guide](docs/migrations/_unreleased.md#windows-local-runners-survive-controller-replacement).
+
 - **controller (Breaking):** The schema baseline advances to version 35, adding durable GitHub Actions approvals and dispatch receipts, upgrading recognized schema 34 stores in place. Explicit repository Actions tiers require a receipt from the approved workflow on a GitHub-hosted image. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-35).
 
 ### Fixed
+
+- **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
+- **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
 
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
@@ -86,6 +93,7 @@ unlock.
 
 ### Fixed
 
+- **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
 - **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
