@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 const (
@@ -84,6 +85,13 @@ func captureSnapshot(ctx context.Context, env []string, start string, limits wor
 		return nil, fmt.Errorf("working-tree snapshot requires a Git checkout: %w", err)
 	}
 	repoRoot = strings.TrimSpace(repoRoot)
+	cfg, err := projectconfig.Load(filepath.Join(repoRoot, ".sparkwing", projectconfig.Filename))
+	if err != nil {
+		return nil, err
+	}
+	if cfg != nil {
+		allowedSecretFiles = append(allowedSecretFiles, cfg.AllowSecretFiles...)
+	}
 	baseSHA, err := gitOutput(ctx, repoRoot, env, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires an existing HEAD commit: %w", err)
@@ -631,7 +639,7 @@ func rejectSecretShapedFiles(ctx context.Context, env []string, gitDir, tree, ba
 	}
 	if len(unmatched) > 0 {
 		sort.Strings(unmatched)
-		return fmt.Errorf("--allow-secret-file names %s, which no file in the working-tree snapshot matches; "+
+		return fmt.Errorf(".sparkwing/sparkwing.yaml allow_secret_files names %s, which no file in the working-tree snapshot matches; "+
 			"the path is repository-relative", strings.Join(unmatched, ", "))
 	}
 	if len(offenders) == 0 {
@@ -665,7 +673,7 @@ func secretShapedFileError(ctx context.Context, env []string, gitDir, baseSHA st
 	}
 	return fmt.Errorf("working-tree snapshot refuses secret-shaped files:\n  %s%s\n"+
 		"untrack a tracked file with `git rm --cached PATH`, ignore an untracked one in .gitignore, "+
-		"or send one anyway with --allow-secret-file PATH",
+		"or list the file in .sparkwing/sparkwing.yaml allow_secret_files",
 		strings.Join(described, "\n  "), more)
 }
 

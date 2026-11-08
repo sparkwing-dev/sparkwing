@@ -31,7 +31,9 @@ const maxFrame = 8 << 20
 type conn struct {
 	measurementPID   int
 	measurementBirth string
-	ticketID         string
+	// safety: host-run commands by PID and birth live in memory; a restart loses their measurement, not capacity.
+	commands map[int]string
+	ticketID string
 
 	runID        string
 	journalRunID string
@@ -77,4 +79,16 @@ func (c *conn) samplePID() int {
 		return 0
 	}
 	return c.measurementPID
+}
+
+func (c *conn) measuredCommands() []int {
+	var live []int
+	for pid, birth := range c.commands {
+		if actual, err := admissionProcessBirth(pid); err != nil || actual != birth {
+			delete(c.commands, pid)
+			continue
+		}
+		live = append(live, pid)
+	}
+	return live
 }

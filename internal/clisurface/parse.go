@@ -234,9 +234,6 @@ func (i *Invocation) validate() error {
 	if !i.Help() && i.Command.Path == "sparkwing run" && i.Has("profile") && i.Value("sw-route") != "cloud" {
 		return i.invalid("--profile requires --sw-route cloud")
 	}
-	if !i.Help() && i.Command.Path == "sparkwing run" && i.Has("allow-secret-file") && i.Value("sw-route") != "cloud" {
-		return i.invalid("--allow-secret-file requires --sw-route cloud")
-	}
 	definitions := append(GlobalFlags(), i.Command.Flags...)
 	allowed := make(map[string]Flag, len(definitions))
 	for _, f := range definitions {
@@ -306,7 +303,7 @@ func (i *Invocation) validate() error {
 		if i.Has("runner") && i.Value("runner") != "here" {
 			return i.invalid("--resume requires --runner here or no --runner")
 		}
-		for _, name := range []string{"reason", "agent", "ref", "pipeline-ref", "working-tree", "allow-secret-file", "detach"} {
+		for _, name := range []string{"reason", "agent", "ref", "pipeline-ref", "working-tree", "detach"} {
 			if i.Has(name) {
 				return i.invalid("--resume cannot be combined with --%s", name)
 			}

@@ -4,6 +4,25 @@
 
 Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated from the Go structs the config parser enforces. `Required` reflects whether the field may be omitted. A `sparkwing.yaml` larger than 1 MiB is refused before it is parsed. See [storage backends](backends.md) for profiles and [spark libraries](sparks.md) for library configuration.
 
+## Top level
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `allow_secret_files` | `[]string` | no | AllowSecretFiles names repository-relative upload exceptions. Secret-value scanning still applies. |
+| `defaults` | `Defaults` | no |  |
+| `pipelines` | `[]Pipeline` | no |  |
+| `sparks` | `[]Spark` | no |  |
+
+## `defaults`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `run` | `RunRestrictions` | no |  |
+| `args` | `map[string]string` | no |  |
+| `guards` | `Guards` | no |  |
+| `requires` | `[]string` | no |  |
+| `prefers` | `[]string` | no |  |
+
 ## Pipeline entry (a `pipelines:` list item)
 
 | Field | Type | Required | Description |

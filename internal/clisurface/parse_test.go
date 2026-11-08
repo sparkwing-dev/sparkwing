@@ -224,7 +224,6 @@ func TestRunInvocationCloudRouting(t *testing.T) {
 		{"run", "gate", "--sw-route", "cloud", "--profile", "work", "--sw-detached", "--", "--full"},
 		{"--profile", "work", "run", "gate", "--sw-route", "cloud"},
 		{"run", "gate", "--sw-route", "local"},
-		{"run", "gate", "--sw-route", "cloud", "--allow-secret-file", "a.key,b.key", "--allow-secret-file", "c.key"},
 	} {
 		if _, err := Parse("sparkwing", args); err != nil {
 			t.Fatalf("%v: %v", args, err)
@@ -235,6 +234,8 @@ func TestRunInvocationCloudRouting(t *testing.T) {
 		{"run", "gate", "--profile", "work", "--sw-route", "local"},
 		{"run", "gate", "--sw-route", "other"},
 		{"run", "gate", "--allow-secret-file", "a.key"},
+		{"run", "gate", "--sw-route", "cloud", "--allow-secret-file", "a.key"},
+		{"pipeline", "trigger", "gate", "--profile", "work", "--working-tree", "--allow-secret-file", "a.key"},
 		{"run", "gate", "--sw-route", "local", "--allow-secret-file", "a.key"},
 	} {
 		if _, err := Parse("sparkwing", args); err == nil {
