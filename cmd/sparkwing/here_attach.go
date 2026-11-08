@@ -70,6 +70,7 @@ func observeHereRun(ctx context.Context, run string, observe hereObservation, si
 	go func() { followed <- observe.follow(ctx) }()
 	var result hereHostResult
 	var failures []error
+	var logFailure error
 	var cancelling chan error
 	done := ctx.Done()
 	requested := false
@@ -96,9 +97,7 @@ func observeHereRun(ctx context.Context, run string, observe hereObservation, si
 			}
 		case err := <-followed:
 			followed = nil
-			if err != nil {
-				failures = append(failures, err)
-			}
+			logFailure = err
 		case err := <-cancelling:
 			cancelling = nil
 			if err != nil {
@@ -121,8 +120,16 @@ func observeHereRun(ctx context.Context, run string, observe hereObservation, si
 			stop()
 		}
 	}
+	if !isTerminalRunStatus(result.completion.Outcome) || !retryableRunRead(logFailure) {
+		failures = append(failures, logFailure)
+	}
 	if err := errors.Join(append(failures, ctx.Err())...); err != nil {
 		return result.completion, incompleteHereHandoff(run, err)
+	}
+	if logFailure != nil {
+		if _, err := fmt.Fprintf(os.Stderr, "warning: run %s finished %s, but log observation was incomplete; read retained logs with sparkwing runs logs --run %s\n", run, result.completion.Outcome, run); err != nil {
+			return result.completion, incompleteHereHandoff(run, errors.Join(logFailure, err))
+		}
 	}
 	return result.completion, nil
 }
