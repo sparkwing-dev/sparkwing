@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 const buildTrustSchema35 = `CREATE TABLE team_build_trust (
@@ -22,10 +23,21 @@ func addSchema35BuildTrust(t *testing.T, st *store.Store) {
 	}
 }
 
-func TestSchemaUpgradeRemovesBuildTrustFromVersion35AndPreservesConfiguredInstall(t *testing.T) {
+func TestSchemaUpgradeRemovesBuildTrustFromVersion36AndPreservesConfiguredInstall(t *testing.T) {
 	target := storetest.New(t)
-	st := target.Open(t)
+	dialect, location := store.DialectSQLite, target.Path()
+	if location == "" {
+		dialect, location = store.DialectPostgres, target.DSN()
+	}
 	cipher := drillCipher(t)
+	st := store.OpenSchema36ForTest(t, dialect, location, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{Intake: storetest.IntakePolicy{}, SessionKeys: cipher}, nil
+	}))
+	if dialect == store.DialectSQLite {
+		teststore.RegisterSQLite(t, st, location)
+	} else {
+		teststore.RegisterPostgres(t, st, location)
+	}
 	populateInstall(t, st, cipher)
 	for _, statement := range []string{
 		`INSERT INTO local_runner_instances(id,capability_prefix,machine,pid,process_birth,version,build_identity,state) SELECT 'kept-runner',prefix,'kept-machine',1,'kept-birth','kept-version','kept-build','active' FROM capabilities WHERE subject_id='runner-1'`,
@@ -39,19 +51,27 @@ func TestSchemaUpgradeRemovesBuildTrustFromVersion35AndPreservesConfiguredInstal
 			t.Fatal(err)
 		}
 	}
-	before := fingerprintInstall(t, st, cipher)
-	addSchema35BuildTrust(t, st)
-	if _, err := st.DB().Exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('default',1)`); err != nil {
-		t.Fatal(err)
+	queries := []string{
+		`SELECT * FROM teams ORDER BY name`, `SELECT * FROM secrets ORDER BY name`,
+		`SELECT * FROM capabilities ORDER BY prefix`, `SELECT * FROM local_runner_instances ORDER BY id`,
+		`SELECT * FROM github_app_installations ORDER BY installation_id`, `SELECT * FROM github_runner_bindings ORDER BY repository_id`,
+		`SELECT * FROM github_actions_approvals ORDER BY approval_id`, `SELECT * FROM github_actions_dispatches ORDER BY receipt`,
+		`SELECT * FROM cron_schedules ORDER BY id`, `SELECT * FROM runs ORDER BY id`, `SELECT * FROM nodes ORDER BY node_id`,
 	}
-	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=35,baseline_digest='4d4bc4dc64181ee22e7d1bc02925b4587dde2395469658c9b06b6c6ee59a81a2'`); err != nil {
+	rowsBefore := snapshotRows(t, st, queries)
+	before := fingerprintInstall(t, st, cipher)
+	if _, err := st.DB().Exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('default',1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 	upgraded := target.Open(t)
+	if got := snapshotRows(t, upgraded, queries); got != rowsBefore {
+		t.Fatal("configured rows changed during schema 36 upgrade")
+	}
 	after := fingerprintInstall(t, upgraded, cipher)
+	before.Schema = store.ExpectedSchemaVersion()
 	if before.String() != after.String() {
 		t.Fatal("configured install changed during schema upgrade")
 	}
@@ -69,9 +89,18 @@ func TestSchemaUpgradeRemovesBuildTrustFromVersion35AndPreservesConfiguredInstal
 			t.Fatalf("configured record after upgrade: count=%d, error=%v, query=%s", count, err, query)
 		}
 	}
+	if _, err := upgraded.DB().Exec(`SELECT * FROM team_build_trust`); err == nil {
+		t.Fatal("schema 37 retained build trust")
+	}
 	fresh := storetest.New(t).Open(t)
 	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
 		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+	if err := upgraded.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshotRows(t, target.Open(t), queries); got != rowsBefore {
+		t.Fatal("reopen changed configured rows")
 	}
 }
 
@@ -197,6 +226,10 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 	}{
 		"unknown 30 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the v0.69.2 baseline`, "left the store unchanged", "open it once with Sparkwing v0.69.2"}},
 		"missing 30 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the v0.69.2 baseline`, "left the store unchanged"}},
+		"unknown 35 digest": {`UPDATE sparkwing_schema_version SET version=35,baseline_digest='other'`, []string{`"other" is not the schema 35 baseline`, "left the store unchanged"}},
+		"missing 35 digest": {`UPDATE sparkwing_schema_version SET version=35,baseline_digest=''`, []string{`"<missing>" is not the schema 35 baseline`, "left the store unchanged"}},
+		"unknown 36 digest": {`UPDATE sparkwing_schema_version SET version=36,baseline_digest='other'`, []string{`"other" is not the schema 36 baseline`, "left the store unchanged"}},
+		"missing 36 digest": {`UPDATE sparkwing_schema_version SET version=36,baseline_digest=''`, []string{`"<missing>" is not the schema 36 baseline`, "left the store unchanged"}},
 		"older than 30":     {`UPDATE sparkwing_schema_version SET version=29`, []string{"version 29 is older", "this build cannot upgrade it", "back up the store"}},
 		"newer than binary": {fmt.Sprintf(`UPDATE sparkwing_schema_version SET version=%d`, store.ExpectedSchemaVersion()+1), []string{fmt.Sprintf("version %d is newer", store.ExpectedSchemaVersion()+1), "start a binary matching the store"}},
 	} {
@@ -270,7 +303,9 @@ func mutate(t *testing.T, dialect store.Dialect, location, statement string) {
 func schemaShape(t *testing.T, st *store.Store) string {
 	t.Helper()
 	queries := []string{
+		`SELECT m.name || ' ' || f.id || ' ' || f.seq || ' ' || f."table" || ' ' || f."from" || ' ' || f."to" || ' ' || f.on_update || ' ' || f.on_delete FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type='table' ORDER BY m.name,f.id,f.seq`,
 		`SELECT m.name || '.' || p.cid || '.' || p.name || '.' || p.type || '.' || p."notnull" || '.' || COALESCE(p.dflt_value, '') FROM sqlite_master m JOIN pragma_table_xinfo(m.name) p WHERE m.type = 'table' ORDER BY m.name, p.cid`,
+		`SELECT m.name || '.' || p."table" || '.' || p."from" || '.' || p."to" || '.' || p.on_delete FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) p WHERE m.type='table' ORDER BY 1`,
 		`SELECT type || ' ' || name || ' ' || tbl_name FROM sqlite_master WHERE type <> 'table' AND name NOT LIKE 'sqlite_%' ORDER BY type, name`,
 		`SELECT name || ' ' || sql FROM sqlite_master WHERE type = 'view' ORDER BY name`,
 	}
@@ -360,4 +395,88 @@ func TestSchemaUpgradeAddsActionsWithoutLosingConfiguration(t *testing.T) {
 	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
 		t.Fatalf("upgrade shape: %s", shapeDiff(a, b))
 	}
+}
+
+func TestSchemaUpgrade36PreservesActionsRows(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	addSchema35BuildTrust(t, st)
+	dropActionsSchema(t, st)
+	store.InstallSchema35ActionsForTest(t, st)
+	for _, statement := range []string{
+		`INSERT INTO teams(name,created_at,updated_at) VALUES('kept',1,1)`,
+		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES('kept','TOKEN','sealed-configuration','fixture',1,1)`,
+		`INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES(41,'kept',7,'acme','Organization',1,1)`,
+		`INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_at,repo_key,installation_id) VALUES('kept',42,7,'acme/repo',1,'gh:42',41)`,
+		`INSERT INTO github_actions_approvals VALUES('kept',42,'.github/workflows/ci.yaml','ubuntu-latest','refs/heads/main','approval')`,
+		`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES('kept','run',1,'ci','pending',X'7b7d','hash',1,'gh:42','controller','execute','owner',1,'standard',7)`,
+		`INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES('kept','run','job','pending',1,X'7b7d',X'7b7d')`,
+		`INSERT INTO github_actions_dispatches VALUES('receipt','kept','run','job',1,2,'approval',41,42,7,'acme/repo','.github/workflows/ci.yaml','refs/heads/main','revision','ubuntu-latest','policy','accepted','kept reason',12,'provider-run','2',1)`,
+		`UPDATE sparkwing_schema_version SET version=35,baseline_digest='4d4bc4dc64181ee22e7d1bc02925b4587dde2395469658c9b06b6c6ee59a81a2'`,
+	} {
+		if st.Dialect() == store.DialectPostgres {
+			statement = strings.ReplaceAll(statement, "X'7b7d'", "decode('7b7d','hex')")
+		}
+		if _, err := st.DB().Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queries := []string{
+		`SELECT * FROM teams ORDER BY name`, `SELECT * FROM secrets ORDER BY name`,
+		`SELECT * FROM github_app_installations ORDER BY installation_id`, `SELECT * FROM github_runner_bindings ORDER BY repository_id`,
+		`SELECT * FROM github_actions_approvals ORDER BY approval_id`, `SELECT * FROM github_actions_dispatches ORDER BY receipt`,
+		`SELECT * FROM runs ORDER BY id`, `SELECT * FROM nodes ORDER BY node_id`,
+	}
+	before := snapshotRows(t, st, queries)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	if after := snapshotRows(t, upgraded, queries); before != after {
+		t.Fatalf("upgrade changed rows:\nbefore %s\nafter %s", before, after)
+	}
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("upgrade shape: %s", shapeDiff(a, b))
+	}
+	if err := upgraded.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := target.Open(t)
+	if after := snapshotRows(t, reopened, queries); before != after {
+		t.Fatal("reopen changed preserved rows")
+	}
+}
+
+func snapshotRows(t *testing.T, st *store.Store, queries []string) string {
+	t.Helper()
+	var out strings.Builder
+	for _, query := range queries {
+		rows, err := st.DB().Query(query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			values := make([]any, len(cols))
+			pointers := make([]any, len(cols))
+			for i := range values {
+				pointers[i] = &values[i]
+			}
+			if err := rows.Scan(pointers...); err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintln(&out, values)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return out.String()
 }

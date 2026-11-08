@@ -9,7 +9,7 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 36. Both dialects are translated from `schema.sql`.
+The baseline version is 37. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
@@ -31,8 +31,12 @@ one job queue start and placement generation to its workflow revision and provid
 run. Sending is persisted before HTTP. Expired sender leases become uncertain,
 never another send. An operator retry invalidates the earlier receipt and records
 an audit mutation before opening a new placement generation. Receipt credentials
-have only node-claim authority and keep the original workload's provenance.
-Schema 36 drops the unused team build-trust table. A step adds a column at the end of its table so the upgraded schema matches a fresh one.
+have only node-claim authority and keep the original workload's provenance. Schema 36
+adds direct team foreign keys to both Actions tables. SQLite copies all columns
+inside the upgrade transaction because it cannot add foreign keys. PostgreSQL
+adds the constraints in place. Schema 37 drops the unused team build-trust table. The schema 35 digest remains a recognized upgrade
+source. A step adds a
+column at the end of its table so the upgraded schema matches a fresh one.
 Other versions and digests are refused unchanged. Any reset must preserve secrets,
 teams and memberships, tokens, runner registrations, GitHub App installations,
 schedules and subscriptions. Billing records require separate review. There are

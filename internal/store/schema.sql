@@ -1929,7 +1929,7 @@ CREATE UNIQUE INDEX idx_local_runner_active ON local_runner_instances(machine) W
 CREATE INDEX idx_runs_live_children ON runs(team,id) WHERE parent_run_id <> '' AND status IN ('pending','running');
 
 CREATE TABLE github_actions_approvals (
-    team TEXT NOT NULL,
+    team TEXT NOT NULL REFERENCES teams(name),
     repository_id BIGINT NOT NULL,
     workflow TEXT NOT NULL,
     runner TEXT NOT NULL,
@@ -1941,7 +1941,7 @@ CREATE TABLE github_actions_approvals (
 
 CREATE TABLE github_actions_dispatches (
     receipt TEXT NOT NULL PRIMARY KEY,
-    team TEXT NOT NULL,
+    team TEXT NOT NULL REFERENCES teams(name),
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
     queue_started_at BIGINT NOT NULL,
