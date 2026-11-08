@@ -65,8 +65,9 @@ type AdmissionBurst struct {
 
 // DashboardConfig is read when the local controller starts, so a change takes effect on restart.
 type DashboardConfig struct {
-	Address  *string `yaml:"address,omitempty" json:"address,omitempty"`
-	ReadOnly *bool   `yaml:"read_only,omitempty" json:"read_only,omitempty"`
+	Address      *string  `yaml:"address,omitempty" json:"address,omitempty"`
+	ReadOnly     *bool    `yaml:"read_only,omitempty" json:"read_only,omitempty"`
+	AllowedHosts []string `yaml:"allowed_hosts,omitempty" json:"allowed_hosts,omitempty"`
 }
 
 // RunnerConfig supplies machine claim preferences; pools and billing facts come

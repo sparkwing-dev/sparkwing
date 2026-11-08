@@ -19,7 +19,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -33,7 +35,8 @@ func billingNativeServer(t *testing.T) (*serverFixture, string, string) {
 		t.Fatal(err)
 	}
 	fixture := &serverFixture{}
-	e, _ := engineRuntimeStore(t, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
+	cfg := deploymenttest.Parse(t, deployment.Inputs{Kind: "team", PaymentMode: "test"}, license.FeatureMultiTeam)
+	e, _ := engineRuntimeStore(t, fixture.option(cfg, func(s *Server) { s.WithSecretsCipher(cipher) }))
 	fixture.engine = e
 	s := fixture
 	engineSQL(t, s.store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('owner','owner@example.test',1,1,1)`)
@@ -62,7 +65,7 @@ func TestBillingModelProductionPages(t *testing.T) {
 		if body["team"] != "a" || body["amount_cents"] != float64(2000) || body["key"] == "" {
 			t.Fatalf("provider: %v", body)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_native","expires_at":` + strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10) + `}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_test_native","expires_at":` + strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10) + `}`))}, nil
 	})
 	h := s.Handler()
 	call := func(method, path, body string, status int) {
@@ -184,14 +187,14 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 			if in["setup_id"] != in["key"] || in["email"] != "owner@example.test" {
 				t.Fatalf("setup=%v", in)
 			}
-			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.stripe.com/setup"}`
+			body = `{"id":"cs_test_setup","customer":"cus_native","url":"https://checkout.stripe.com/setup"}`
 		case "/internal/portal":
 			if len(in) != 3 || in["customer"] != "cus_native" {
 				t.Fatalf("portal=%v", in)
 			}
 			body = `{"url":"https://billing.stripe.com/portal"}`
 		case "/internal/checkout":
-			body = `{"id":"cs_prepay","url":"https://checkout.stripe.com/prepay"}`
+			body = `{"id":"cs_test_prepay","url":"https://checkout.stripe.com/prepay"}`
 		case "/internal/refill":
 			if _, method := in["payment_method"]; in["amount_cents"] != float64(1000) || in["customer"] != "cus_native" || method || in["receipt_email"] != nil {
 				t.Fatalf("refill=%v", in)
@@ -266,7 +269,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	}
 	call("portal", "", 409)
 	for range 2 {
-		webhook("evt_setup_page", "checkout.session.completed", `{"id":"cs_setup","object":"checkout.session","mode":"setup","status":"complete","livemode":false,"customer":"cus_native","setup_intent":"seti_native","metadata":{"purpose":"card_setup",`+stamp+`}}`)
+		webhook("evt_setup_page", "checkout.session.completed", `{"id":"cs_test_setup","object":"checkout.session","mode":"setup","status":"complete","livemode":false,"customer":"cus_native","setup_intent":"seti_native","metadata":{"purpose":"card_setup",`+stamp+`}}`)
 		webhook("evt_setup", "setup_intent.succeeded", setupIntent)
 	}
 	spend, err := tenant.SpendStanding(t.Context())
@@ -278,7 +281,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 		call("checkout", `{"amount_cents":2000}`, 200)
 	}
 	for range 2 {
-		webhook("evt_prepay", "checkout.session.completed", `{"id":"cs_prepay","object":"checkout.session","mode":"payment","livemode":false,"payment_status":"paid","payment_intent":"pi_prepay","amount_total":2000,"currency":"usd"}`)
+		webhook("evt_prepay", "checkout.session.completed", `{"id":"cs_test_prepay","object":"checkout.session","mode":"payment","livemode":false,"payment_status":"paid","payment_intent":"pi_prepay","amount_total":2000,"currency":"usd"}`)
 	}
 	standing, err := tenant.BillingStanding(t.Context())
 	if err != nil || standing.Tier != "Established" {
@@ -334,7 +337,7 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 				if phase == "revoked" {
 					engineSQL(t, s.store, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='owner'`)
 				}
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"cs_retry","url":"https://checkout.stripe.com/page"}`))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"cs_test_retry","url":"https://checkout.stripe.com/page"}`))}, nil
 			})
 			h := s.Handler()
 			call := func(want int) {
