@@ -398,3 +398,10 @@ t.Cleanup(func() { _ = host.Close() })
 ctx := host.Context(t.Context())
 result, err := myLibraryHelper(ctx)
 ```
+
+## Upgrade the store in place to schema baseline 35
+
+Start the controller with the new binary once. Schemas 30 through 34 upgrade
+in place. Schema 35 drops the unused team build-trust table and preserves
+secrets, teams, tokens, runner enrollments and automation. The team build-trust
+API is removed. Execution trust still follows sealed provenance and host facts.

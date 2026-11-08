@@ -63,6 +63,13 @@ unlock.
 
 ### Changed
 
+- **controller (Breaking):** Remove the ineffective `trust_local_builds` setting and its team API.
+  The schema baseline advances to version 35. Existing configured data upgrades
+  in place, and execution trust continues to use sealed provenance and host facts.
+- **runs:** Select latest pipeline observations through one store owner. CLI
+  repository status and dashboard summaries use the same start-time, run-number
+  and run-ID order. Reference authorization and success-pin policy stay unchanged.
+
 - **examples:** The `example` pipeline's memoized-step, cancellation and logs-history probes now run on Sparkwing Cloud instead of skipping. A new `lifecycle-cli` job builds the CLI from the checkout and signs in to `--api-controller` with the optional `EXAMPLE_PROBE_TOKEN` secret, and the deploy pipeline's staging gate passes the staging controller. Without a CLI on the host, a controller or that secret, the probes still skip with the reason.
 
 - **storage:** The first 256 MiB of the prepared pipeline Sparkwing Cloud builds for a run no longer counts toward the team's per-run, monthly or object storage quotas, so free-tier teams can run Go pipelines whose binaries are 20 to 40 MB. Bytes past 256 MiB and further uploads from the run's planning credentials count as before. The prepared pipeline stays deduplicated by digest and retained-storage billing still counts it. The free tier's per-run limit rises from 10 MiB to 100 MiB; the paid tier and explicit operator quotas are unchanged. See [limits](docs/limits.md#uploads-and-storage-accounting).

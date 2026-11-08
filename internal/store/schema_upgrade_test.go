@@ -10,12 +10,52 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
+const buildTrustSchema34 = `CREATE TABLE team_build_trust (
+    team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
+    trust_local_builds BIGINT NOT NULL DEFAULT 0 CHECK(trust_local_builds IN (0,1))
+)`
+
+func addSchema34BuildTrust(t *testing.T, st *store.Store) {
+	t.Helper()
+	if _, err := st.DB().Exec(buildTrustSchema34); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSchemaUpgradeRemovesBuildTrustAndPreservesConfiguredInstall(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	cipher := drillCipher(t)
+	populateInstall(t, st, cipher)
+	before := fingerprintInstall(t, st, cipher)
+	addSchema34BuildTrust(t, st)
+	if _, err := st.DB().Exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('default',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=34,baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	after := fingerprintInstall(t, upgraded, cipher)
+	if before.String() != after.String() {
+		t.Fatal("configured install changed during schema upgrade")
+	}
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+}
+
 func schema30Store(t *testing.T, target *storetest.Target) {
 	t.Helper()
 	st := target.Open(t)
 	for _, statement := range []string{
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
 		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('kept','TOKEN','sealed-configuration','fixture',1,1)`,
+		buildTrustSchema34,
 		`DROP INDEX idx_runs_live_children`,
 		`DROP TABLE local_runner_instances`,
 		`DROP TABLE local_run_secrets`,
@@ -34,6 +74,7 @@ func schema30Store(t *testing.T, target *storetest.Target) {
 func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	addSchema34BuildTrust(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +94,7 @@ func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
 func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	addSchema34BuildTrust(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +117,7 @@ func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	addSchema34BuildTrust(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}

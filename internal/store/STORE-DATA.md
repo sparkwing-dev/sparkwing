@@ -9,7 +9,7 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 34. Both dialects are translated from `schema.sql`.
+The baseline version is 35. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
@@ -24,7 +24,8 @@ stopped instances receive no new awards. Held award authority remains live
 while an instance drains. Existing credential retention removes an instance
 record when its ended claim capability is retired. Schema 34 adds
 `idx_runs_live_children`, a partial index on pending and running child runs that
-the parent-cancellation sweep reads instead of the whole run history. A step adds a
+the parent-cancellation sweep reads instead of the whole run history. Schema 35
+drops the unused team build-trust table. A step adds a
 column at the end of its table so the upgraded schema matches a fresh one.
 Other versions and digests are refused unchanged. Any reset must preserve secrets,
 teams and memberships, tokens, runner registrations, GitHub App installations,
@@ -232,12 +233,6 @@ Their consumer cutovers and old cache RPC client removal remain open.
 `Operator.ConfigureDeployment` persists checked JSON in the final settings table. Negative
 values and sealed rows refuse updates. The policy survives reopening, and an
 unreadable slot source cannot open the controller's signup gate.
-
-Build trust uses `Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds`.
-Their raw Store methods are removed. Missing policy defaults to false, invalid
-flags return an error, and writes cannot change another tenant's opt-in.
-Policy survives reopening and cannot change persisted upload provenance.
-Execution still needs W7's binary check and W3's adapter.
 
 Financial writes use the same transaction as the state change that caused them.
 Unpriced work is refused by the claim transaction without changing the job,
@@ -1010,3 +1005,18 @@ and reservation and include only `unit_kind='node'`, excluding plan/eval
 preparation. Both upsize windows count execution starts, excluding granted awards
 that never start. Retries retain separate reservation facts. These fields belong to
 schema baseline 28, with no forward migration.
+
+## Latest-run selection
+
+`latestRunQuery` owns selection for pipeline observations, controller reference
+lookups, CLI repository status, and dashboard pipeline summaries. Observation
+ranking uses start time (creation time if unstarted), run number, then run ID.
+The caller supplies the authorized candidate set before ranking. Pipeline
+summaries include started runs and merge queued triggers separately.
+
+The same owner advances and reads success pins for declared blob references.
+Pins retain the newest non-publish success by finish time, retaining the existing
+pin on a tie. Their key remains team and pipeline. Retention protects that pin.
+Default reference lookups still require verified default-branch provenance,
+and own-pipeline lookups stay within the reader's sealed repository. Proven
+lookups still require the reader's sealed commit and trusted execution hosts.
