@@ -4,6 +4,7 @@ package sdkinstall
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -221,7 +222,21 @@ func selectionInputs(dir string, environment procenv.Env) ([]string, string) {
 	return append(args, "-m", "-json", engine.GoModule), inputs.String()
 }
 
-func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {
+func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (_ []string, result error) {
+	// bug: npm ci removes node_modules. Serialize helpers on the native lockfile and reuse
+	// completed installs so another job cannot remove packages beneath an SDK process.
+	lock, err := os.Open(filepath.Join(dir, "package-lock.json"))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { result = errors.Join(result, lock.Close()) }()
+	if err := lockTypeScriptInstall(lock); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	var manifest struct{ Main string }
 	body, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
@@ -233,17 +248,40 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 	if manifest.Main == "" {
 		return nil, errors.New("TypeScript package.json requires a main entry")
 	}
-	body, err = installTool(ctx, dir, environment, "npm", "ci", "--no-audit", "--no-fund")
-	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+	lockfile, err := os.ReadFile(filepath.Join(dir, "package-lock.json"))
+	if err != nil {
 		return nil, err
 	}
-	body, err = os.ReadFile(filepath.Join(dir, "node_modules", "@sparkwing", "sdk", "package.json"))
+	values := slices.Collect(environment.Values())
+	slices.Sort(values)
+	inputs, err := json.Marshal([]any{string(body), string(lockfile), values})
+	if err != nil {
+		return nil, err
+	}
+	fingerprint := fmt.Sprintf("%x", sha256.Sum256(inputs))
+	marker := filepath.Join(dir, "node_modules", ".sparkwing-install")
+	previous, markerErr := os.ReadFile(marker)
+	installedManifest := filepath.Join(dir, "node_modules", "@sparkwing", "sdk", "package.json")
+	_, installedErr := os.Stat(installedManifest)
+	if markerErr != nil || string(previous) != fingerprint || installedErr != nil {
+		if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		body, err = installTool(ctx, dir, environment, "npm", "ci", "--no-audit", "--no-fund")
+		if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+			return nil, err
+		}
+	}
+	body, err = os.ReadFile(installedManifest)
 	if err != nil {
 		return nil, err
 	}
 	var installed struct{ Version string }
 	if err := json.Unmarshal(body, &installed); err != nil || installed.Version != pin.Version {
 		return nil, &apierr.Error{Code: apierr.IntegrityFailure, Message: "installed TypeScript SDK differs from the native lockfile pin"}
+	}
+	if err := os.WriteFile(marker, []byte(fingerprint), 0o600); err != nil {
+		return nil, err
 	}
 	main := filepath.Join(dir, manifest.Main)
 	if _, err := os.Stat(main); err != nil {

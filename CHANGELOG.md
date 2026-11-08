@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **runner:** Concurrent TypeScript jobs keep their SDK packages available during startup
+  SDK preparation serializes npm installs and reuses completed installations for unchanged inputs.
+
 ## [v0.71.0] - 2026-11-08
 ### Changed
 
