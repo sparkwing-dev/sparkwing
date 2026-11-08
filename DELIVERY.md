@@ -800,7 +800,7 @@ file. Other syntax and workflow checks remain active.
   file outside every package runs the packages whose tests read it, from the
   `nonPackageReaders` table in `.sparkwing/jobs/affected_tests.go` (`.github/`
   and `bin/` run `.sparkwing/jobs`, `docs/` runs `internal/doccheck` and
-  `cmd/sparkwing`, and so on); `CHANGELOG.md` and generated `pkg/docs/` Markdown stay with the docs-mirror
+  `cmd/sparkwing`, and so on); `CHANGELOG.md` and generated `pkg/docs/` Markdown and schema mirrors stay with the docs-mirror
   and changelog steps. File readers select their own tests without charging
   importers whose code did not change. Changes under `pkg/wingwire/`, `internal/controllerwire/`,
   `internal/apispec/` or `api/` also run `.sparkwing/jobs`, including

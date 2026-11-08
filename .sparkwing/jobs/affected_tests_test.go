@@ -358,7 +358,7 @@ func TestAffectedGeneratedDocsStayWithTheDriftCheck(t *testing.T) {
 		{importPath: "m/docs", dir: "pkg/docs"},
 		{importPath: "m/consumer", dir: "consumer", imports: []string{"m/docs"}},
 	}
-	p := planAffectedTests(".", []string{"."}, []string{"CHANGELOG.md", "pkg/docs/changelog.md", "pkg/docs/mirror/cli.md"}, packages, nil)
+	p := planAffectedTests(".", []string{"."}, []string{"CHANGELOG.md", "pkg/docs/changelog.md", "pkg/docs/mirror/cli.md", "pkg/docs/mirror/schemas/node-protocol.schema.json"}, packages, nil)
 	if len(p.packages) != 0 {
 		t.Fatalf("generated docs selected %v; source readers and drift checks cover them", p.packages)
 	}

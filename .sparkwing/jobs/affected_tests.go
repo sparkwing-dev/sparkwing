@@ -283,7 +283,7 @@ func planAffectedTests(module string, modules, files []string, packages []module
 	changed := map[string]bool{}
 	readers := map[string]bool{}
 	for _, f := range files {
-		if f == "CHANGELOG.md" || strings.HasPrefix(f, "pkg/docs/") && strings.HasSuffix(f, ".md") {
+		if f == "CHANGELOG.md" || strings.HasPrefix(f, "pkg/docs/") && strings.HasSuffix(f, ".md") || strings.HasPrefix(f, "pkg/docs/mirror/") && strings.HasSuffix(f, ".json") {
 			continue
 		}
 		for _, pkg := range readerPackages(module, modules, f, byDir) {
