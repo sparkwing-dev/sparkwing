@@ -1,6 +1,7 @@
 package repos
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
@@ -154,6 +157,14 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 		t.Fatal(err)
 	}
 
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watcher.Close()
+	if err := watcher.Add(dir); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command(os.Args[0],
 		"-test.run", "^TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact$")
 	cmd.Env = append(os.Environ(), killSentinel+"="+path)
@@ -168,7 +179,7 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
-	waitForStagingFile(t, dir)
+	waitForStagingFile(t, watcher)
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("kill child: %v", err)
 	}
@@ -222,22 +233,25 @@ func isKilledChildRegistry(cfg *userconfig.ReposConfig) bool {
 	return true
 }
 
-func waitForStagingFile(t *testing.T, dir string) {
+func waitForStagingFile(t *testing.T, watcher *fsnotify.Watcher) {
 	t.Helper()
-	// perf: the child builds and marshals 100k entries under -race before its
-	// first staging file, close to 10s alone and more beside parallel packages.
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		matches, err := filepath.Glob(filepath.Join(dir, ".config-*.yaml"))
-		if err != nil {
-			t.Fatalf("match staging file: %v", err)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				t.Fatal("staging watcher closed")
+			}
+			if event.Has(fsnotify.Create) && strings.HasPrefix(filepath.Base(event.Name), ".config-") {
+				return
+			}
+		case err := <-watcher.Errors:
+			t.Fatalf("watch staging file: %v", err)
+		case <-ctx.Done():
+			t.Fatal("the child never exposed an in-progress staging file")
 		}
-		if len(matches) > 0 {
-			return
-		}
-		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("the child never exposed an in-progress staging file")
 }
 
 // Save replaces the repos section of the config.yaml at path with cfg,

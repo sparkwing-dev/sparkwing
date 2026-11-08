@@ -36,6 +36,15 @@ func (f *fakeSampler) Sample() (wingd.HostStat, error) {
 	return f.stat, nil
 }
 
+func (f *fakeSampler) SampleWithOwned(roots []wingd.OwnedRoot, _ float64) (wingd.HostStat, map[int]float64, bool, error) {
+	stat, err := f.Sample()
+	owned := make(map[int]float64, len(roots))
+	for _, root := range roots {
+		owned[root.PID] = 0
+	}
+	return stat, owned, true, err
+}
+
 func (f *fakeSampler) set(stat wingd.HostStat) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -94,11 +103,13 @@ func startDaemon(t *testing.T, cfg wingd.Config) *testDaemon {
 		td.done <- d.Run(ctx)
 	}()
 	t.Cleanup(func() { td.stopAndWait(t) })
+	ready, stop := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stop()
 	select {
 	case <-d.Ready():
 	case err := <-td.done:
 		t.Fatalf("daemon exited before ready: %v", err)
-	case <-time.After(3 * time.Second):
+	case <-ready.Done():
 		t.Fatal("daemon never became ready")
 	}
 	return td
@@ -107,21 +118,23 @@ func startDaemon(t *testing.T, cfg wingd.Config) *testDaemon {
 func (td *testDaemon) stopAndWait(t *testing.T) {
 	t.Helper()
 	td.stop()
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	select {
 	case <-td.finished:
-	case <-timer.C:
+	case <-ctx.Done():
 		t.Error("daemon did not stop during test cleanup")
 	}
 }
 
 func (td *testDaemon) waitExit(t *testing.T, within time.Duration) error {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), within)
+	defer cancel()
 	select {
 	case err := <-td.done:
 		return err
-	case <-time.After(within):
+	case <-ctx.Done():
 		t.Fatalf("daemon did not exit within %s", within)
 		return nil
 	}
@@ -199,10 +212,12 @@ func mustAcquire(t *testing.T, cl *client.Client, req wingwire.AdmissionRequest)
 
 func waitResult(t *testing.T, ch <-chan acquireResult, within time.Duration) acquireResult {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), within)
+	defer cancel()
 	select {
 	case r := <-ch:
 		return r
-	case <-time.After(within):
+	case <-ctx.Done():
 		t.Fatal("acquire did not resolve in time")
 		return acquireResult{}
 	}

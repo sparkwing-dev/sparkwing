@@ -32,11 +32,6 @@ var approvedExternalBoundaries = []externalBoundary{
 		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",
 	},
 	{
-		file: "internal/controller/direct_source_e2e_test.go", function: "startRunner",
-		duration: "10 * time.Second",
-		marker:   "// sleepcheck:external-boundary external runner gets ten seconds to exit before kill",
-	},
-	{
 		file: "internal/controller/direct_source_e2e_test.go", function: "awaitSuccess",
 		duration: "500 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary external runner status needs a paced HTTP poll",

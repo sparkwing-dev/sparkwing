@@ -39,6 +39,7 @@ type dashboardLogins struct {
 	now     func() time.Time
 	mu      sync.Mutex
 	origin  string
+	origins map[string]string
 	entries map[string]dashboardEntry
 	watch   map[string]*sessionWatch
 	// hack: tests interpose a revocation between a request's session lookup and serving it.
@@ -66,10 +67,25 @@ func newDashboardLogins(now func() time.Time) *dashboardLogins {
 	return &dashboardLogins{now: now, entries: map[string]dashboardEntry{}, watch: map[string]*sessionWatch{}}
 }
 
-func (l *dashboardLogins) serving(origin string) {
+func (l *dashboardLogins) serving(origin string, allowedHosts []string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.origin = normalizeDashboardOrigin(origin)
+	l.origins = make(map[string]string, len(allowedHosts))
+	for _, host := range allowedHosts {
+		host = strings.ToLower(host)
+		l.origins[host] = "https://" + host
+	}
+}
+
+func (l *dashboardLogins) allowedOrigins() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	origins := make([]string, 0, len(l.origins))
+	for _, origin := range l.origins {
+		origins = append(origins, origin)
+	}
+	return origins
 }
 
 func (l *dashboardLogins) servingOrigin() string {
@@ -97,7 +113,7 @@ func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "dashboard sign-in links need a verified local peer"})
 			return
 		}
-		login, failure := l.mint(peer)
+		login, failure := l.mint(peer, r.URL.Query().Get("host"))
 		if failure != nil {
 			writeLoginFailure(w, failure)
 			return
@@ -110,7 +126,7 @@ func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 	})
 }
 
-func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity) (DashboardLogin, *apierr.Error) {
+func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity, host string) (DashboardLogin, *apierr.Error) {
 	token, err := randomToken()
 	if err != nil {
 		return DashboardLogin{}, &apierr.Error{Code: apierr.Internal, Message: "dashboard sign-in token: " + err.Error()}
@@ -120,6 +136,13 @@ func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity) (DashboardL
 	if l.origin == "" {
 		return DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard status to see why"}
 	}
+	origin := l.origin
+	if host != "" {
+		origin = l.origins[strings.ToLower(host)]
+		if origin == "" {
+			return DashboardLogin{}, &apierr.Error{Code: apierr.BadRequest, Message: "dashboard host is not configured", Hint: "add its exact DNS name to dashboard.allowed_hosts in config.yaml, then run sparkwing daemon restart --force"}
+		}
+	}
 	now := l.now()
 	for digest, entry := range l.entries {
 		if !now.Before(entry.expires) {
@@ -127,10 +150,10 @@ func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity) (DashboardL
 		}
 	}
 	expires := now.Add(dashboardLoginLifetime)
-	l.entries[tokenDigest(token)] = dashboardEntry{code: true, origin: l.origin, peer: peer.Clone(), expires: expires}
+	l.entries[tokenDigest(token)] = dashboardEntry{code: true, origin: origin, peer: peer.Clone(), expires: expires}
 	// safety: the code rides in the fragment, which the browser never sends; the page exchanges it
 	// and drops it from history.
-	return DashboardLogin{URL: l.origin + "/#code=" + token, ExpiresAt: expires}, nil
+	return DashboardLogin{URL: origin + "/#code=" + token, ExpiresAt: expires}, nil
 }
 
 // safety: the code is spent even when it is refused, so a guess at another origin uses it up.
@@ -174,7 +197,13 @@ func normalizeDashboardOrigin(origin string) string {
 }
 
 // safety: the origin guard has already refused a foreign Host, so this is the origin the browser addressed.
-func requestOrigin(r *http.Request) string {
+func (l *dashboardLogins) requestOrigin(r *http.Request) string {
+	l.mu.Lock()
+	origin := l.origins[strings.ToLower(r.Host)]
+	l.mu.Unlock()
+	if origin != "" {
+		return origin
+	}
 	return normalizeDashboardOrigin("http://" + r.Host)
 }
 
@@ -202,7 +231,7 @@ func (l *dashboardLogins) lookup(r *http.Request, digest string) (dashboardSessi
 		hook(digest)
 	}
 	// safety: a session redeemed at one origin does not authorize another origin on the same host.
-	if !ok || entry.code || !l.now().Before(entry.expires) || entry.origin != requestOrigin(r) {
+	if !ok || entry.code || !l.now().Before(entry.expires) || entry.origin != l.requestOrigin(r) {
 		return dashboardSession{}, false
 	}
 	return dashboardSession{digest: digest, peer: entry.peer.Clone(), expires: entry.expires}, true
@@ -262,10 +291,9 @@ func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, n
 	next.ServeHTTP(w, request)
 }
 
-// safety: a cookie-authenticated write must name this dashboard's own origin; a missing, null or foreign Origin is
-// refused, because SameSite alone does not stop another page on the same host.
-func sameDashboardOrigin(r *http.Request) bool {
-	return normalizeDashboardOrigin(r.Header.Get("Origin")) == requestOrigin(r)
+// safety: sign-in and authenticated writes must name this session's origin, including the proxy's configured scheme.
+func (l *dashboardLogins) sameDashboardOrigin(r *http.Request) bool {
+	return normalizeDashboardOrigin(r.Header.Get("Origin")) == l.requestOrigin(r)
 }
 
 func unsafeDashboardMethod(method string) bool {
@@ -293,7 +321,7 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 			ended, release := l.watchSession(digest)
 			if current, ok := l.lookup(r, digest); ok {
 				defer release()
-				if unsafeDashboardMethod(r.Method) && !sameDashboardOrigin(r) {
+				if unsafeDashboardMethod(r.Method) && !l.sameDashboardOrigin(r) {
 					http.Error(w, "forbidden: a dashboard write must come from the dashboard's own origin", http.StatusForbidden)
 					return
 				}
@@ -328,7 +356,7 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "the dashboard page exchanges its sign-in code with POST"})
 		return
 	}
-	if !sameDashboardOrigin(r) {
+	if !l.sameDashboardOrigin(r) {
 		http.Error(w, "forbidden: exchange a sign-in code from the dashboard's own origin", http.StatusForbidden)
 		return
 	}
@@ -343,7 +371,7 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Internal, Message: "dashboard session token: " + err.Error()})
 		return
 	}
-	expires, ok := l.redeem(tokenDigest(exchange.Code), tokenDigest(session), requestOrigin(r))
+	expires, ok := l.redeem(tokenDigest(exchange.Code), tokenDigest(session), l.requestOrigin(r))
 	if !ok {
 		writeLoginFailure(w, refused)
 		return
@@ -361,7 +389,7 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "sign out with POST"})
 		return
 	}
-	if !sameDashboardOrigin(r) {
+	if !l.sameDashboardOrigin(r) {
 		http.Error(w, "forbidden: sign out from the dashboard's own origin", http.StatusForbidden)
 		return
 	}
