@@ -596,7 +596,7 @@ func fixtureChange(files, modules []string, byDir map[string]string, built map[s
 		if _, whole := wholeModuleTriggers[rel]; whole {
 			return f + " changed"
 		}
-		if strings.HasSuffix(rel, ".md") || strings.HasSuffix(rel, "_test.go") {
+		if strings.HasSuffix(rel, ".md") || strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(rel, "pkg/docs/mirror/") && strings.HasSuffix(rel, ".json") {
 			continue
 		}
 		if pkg := owningPackage(rel, byDir); built[pkg] {
