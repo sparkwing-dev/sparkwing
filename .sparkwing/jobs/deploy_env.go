@@ -183,6 +183,7 @@ type gitopsChange struct {
 
 // safety: this run's rollback record prevents reverting another deploy or crossing a schema upgrade.
 type envDeployment struct {
+	ScanRun         string         `json:"scan_run,omitempty"`
 	Environment     string         `json:"environment"`
 	Images          deployImages   `json:"images"`
 	Previous        valuesPins     `json:"previous"`
@@ -193,10 +194,11 @@ type envDeployment struct {
 }
 
 type stagingGateRecord struct {
+	ScanRun      string       `json:"scan_run"`
 	Images       deployImages `json:"images"`
 	RunID        string       `json:"run_id"`
 	GatedAt      string       `json:"gated_at"`
-	ExampleRun   string       `json:"example_run"`
+	SmokeRun     string       `json:"smoke_run"`
 	ReferenceRun string       `json:"reference_run"`
 }
 
