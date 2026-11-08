@@ -11,6 +11,7 @@ import (
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 	sparkwing "github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 func TestTemplateVerifyCLIPathUsesPlatformExecutableName(t *testing.T) {
@@ -44,7 +45,8 @@ func TestTemplateVerifierCompilesAndPlansFreshTemplate(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build verifier CLI: %v\n%s", err, output)
 	}
-	for key, value := range readGoEnv(t.Context()) {
+	ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
+	for key, value := range readGoEnv(ctx) {
 		t.Setenv(key, value)
 	}
 	t.Setenv("HOME", t.TempDir())
@@ -60,7 +62,7 @@ func TestTemplateVerifierCompilesAndPlansFreshTemplate(t *testing.T) {
 		t.Fatal("lint-test-go verification template is missing")
 	}
 	manifest.Verify = templates.VerifyCompileOnly
-	outcome, err := verifyTemplate(t.Context(), manifest, verifyEnv{CLI: bin, Root: root})
+	outcome, err := verifyTemplate(ctx, manifest, verifyEnv{CLI: bin, Root: root})
 	if err != nil || outcome.Tier != templates.VerifyCompileOnly || outcome.Skipped {
 		t.Fatalf("fresh-template verification: %+v: %v", outcome, err)
 	}
