@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -14,53 +15,56 @@ import (
 )
 
 func TestRetryStopsAfterItsAttemptBudget(t *testing.T) {
-	cause := errors.New("connection reset")
-	r := newRetry("queue state", 3)
-	for i := 0; i < 2; i++ {
-		if err := r.wait(context.Background(), cause); err != nil {
-			t.Fatalf("attempt %d ended the retry early: %v", i+1, err)
+	synctest.Test(t, func(t *testing.T) {
+		cause := errors.New("connection reset")
+		r := newRetry("queue state", 3)
+		for i := 0; i < 2; i++ {
+			if err := r.wait(context.Background(), cause); err != nil {
+				t.Fatalf("attempt %d ended the retry early: %v", i+1, err)
+			}
 		}
-	}
-	err := r.wait(context.Background(), cause)
-	if !errors.Is(err, cause) {
-		t.Fatalf("exhausted retry = %v, want it to carry the transport failure", err)
-	}
-	if !strings.Contains(err.Error(), "queue state") || !strings.Contains(err.Error(), "3 attempts") {
-		t.Fatalf("exhausted retry = %q, want it to name the exchange and the attempt count", err)
-	}
+		err := r.wait(context.Background(), cause)
+		if !errors.Is(err, cause) {
+			t.Fatalf("exhausted retry = %v, want it to carry the transport failure", err)
+		}
+		if !strings.Contains(err.Error(), "queue state") || !strings.Contains(err.Error(), "3 attempts") {
+			t.Fatalf("exhausted retry = %q, want it to name the exchange and the attempt count", err)
+		}
+	})
 }
 
 func TestRetryPacesItsAttempts(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	r := newRetry("acquire", 0)
-	start := time.Now()
-	for i := 0; i < 4; i++ {
-		if err := r.wait(context.Background(), errors.New("boom")); err != nil {
-			t.Fatalf("unbounded retry gave up: %v", err)
+	synctest.Test(t, func(t *testing.T) {
+		r := newRetry("acquire", 0)
+		start := time.Now()
+		for i := 0; i < 4; i++ {
+			if err := r.wait(context.Background(), errors.New("boom")); err != nil {
+				t.Fatalf("unbounded retry gave up: %v", err)
+			}
 		}
-	}
-	if elapsed := time.Since(start); elapsed < 150*time.Millisecond {
-		t.Fatalf("four retries took %s; an unpaced loop is what spun a core", elapsed)
-	}
-	r.reset()
-	if r.delay != retryBaseDelay || r.attempts != 0 {
-		t.Fatalf("reset left delay %s attempts %d, want the base pacing back", r.delay, r.attempts)
-	}
+		if elapsed := time.Since(start); elapsed < 150*time.Millisecond {
+			t.Fatalf("four retries took %s; an unpaced loop is what spun a core", elapsed)
+		}
+		r.reset()
+		if r.delay != retryBaseDelay || r.attempts != 0 {
+			t.Fatalf("reset left delay %s attempts %d, want the base pacing back", r.delay, r.attempts)
+		}
+	})
 }
 
 func TestRetryReturnsOnceTheCallerGivesUp(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	r := newRetry("acquire", 0)
-	start := time.Now()
-	if err := r.wait(ctx, errors.New("boom")); !errors.Is(err, context.Canceled) {
-		t.Fatalf("retry under a cancelled context = %v, want context.Canceled", err)
-	}
-	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
-		t.Fatalf("cancelled retry still waited %s", elapsed)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		r := newRetry("acquire", 0)
+		start := time.Now()
+		if err := r.wait(ctx, errors.New("boom")); !errors.Is(err, context.Canceled) {
+			t.Fatalf("retry under a cancelled context = %v, want context.Canceled", err)
+		}
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Fatalf("cancelled retry still waited %s", elapsed)
+		}
+	})
 }
 
 func failingDaemon(t *testing.T, home string) *atomic.Int64 {
@@ -82,7 +86,7 @@ func TestQueueStateGivesUpRatherThanRetryingForever(t *testing.T) {
 		t.Skip("slow: 3.6s of real work; the fast class runs under -short")
 	}
 	home := shortHome(t)
-	failingDaemon(t, home)
+	accepted := failingDaemon(t, home)
 
 	cl, err := EnsureDaemon(context.Background(), Options{
 		Home:        home,
@@ -95,10 +99,12 @@ func TestQueueStateGivesUpRatherThanRetryingForever(t *testing.T) {
 	}
 	defer cl.Close()
 
-	start := time.Now()
+	before := accepted.Load()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, qerr := cl.QueueState(context.Background())
+		_, qerr := cl.QueueState(ctx)
 		done <- qerr
 	}()
 	select {
@@ -109,10 +115,10 @@ func TestQueueStateGivesUpRatherThanRetryingForever(t *testing.T) {
 		if !strings.Contains(qerr.Error(), "attempts") {
 			t.Fatalf("queue state failure = %v, want it to report the exhausted attempts", qerr)
 		}
-		if elapsed := time.Since(start); elapsed < 2*time.Second {
-			t.Fatalf("queue state exhausted its attempts in %s; retries were not paced", elapsed)
+		if attempts := accepted.Load() - before; attempts != readOnlyRetryLimit {
+			t.Fatalf("queue state tried %d requests, want %d", attempts, readOnlyRetryLimit)
 		}
-	case <-time.After(30 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("queue state never gave up on a daemon that answers nothing")
 	}
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source "$(dirname "${BASH_SOURCE[0]}")/test-git-env.sh"
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"

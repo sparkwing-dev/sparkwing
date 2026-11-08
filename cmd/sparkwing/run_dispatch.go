@@ -19,7 +19,6 @@ type runFlags struct {
 	parseErr                error
 	ref                     string
 	route, profile          string
-	allowSecretFiles        []string
 	publish, cacheFrom      string
 	pauseBefore, pauseAfter []string
 	pauseOnFailure          *bool
@@ -90,7 +89,7 @@ func runFlagsFromInvocation(inv clisurface.Invocation) (runFlags, []string) {
 	}
 	return runFlags{
 		invocation: inv,
-		route:      inv.Value("sw-route"), profile: inv.Value("profile"), allowSecretFiles: inv.Flags["allow-secret-file"],
+		route:      inv.Value("sw-route"), profile: inv.Value("profile"),
 		publish: inv.Value("publish"), cacheFrom: inv.Value("sw-cache-from"),
 		pauseBefore: inv.Flags["sw-pause-before"], pauseAfter: inv.Flags["sw-pause-after"], pauseOnFailure: pause,
 		ref: inv.Value("sw-ref"), pipelineRef: inv.Value("sw-pipeline-ref"),

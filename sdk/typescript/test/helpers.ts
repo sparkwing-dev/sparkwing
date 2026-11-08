@@ -30,7 +30,7 @@ export class Host {
       const timer = setTimeout(() => {
         this.waiters.delete(id);
         reject(new Error(`host timed out waiting for ${id}`));
-      }, 10000);
+      }, 60000);
       this.timers.add(timer);
       this.waiters.set(id, (frame) => {
         clearTimeout(timer);

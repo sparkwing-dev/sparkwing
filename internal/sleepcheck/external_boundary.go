@@ -32,11 +32,6 @@ var approvedExternalBoundaries = []externalBoundary{
 		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",
 	},
 	{
-		file: "internal/controller/direct_source_e2e_test.go", function: "startRunner",
-		duration: "10 * time.Second",
-		marker:   "// sleepcheck:external-boundary external runner gets ten seconds to exit before kill",
-	},
-	{
 		file: "internal/controller/direct_source_e2e_test.go", function: "awaitSuccess",
 		duration: "500 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary external runner status needs a paced HTTP poll",
@@ -45,11 +40,6 @@ var approvedExternalBoundaries = []externalBoundary{
 		file: "cmd/sparkwing/local_runner_restart_linux_test.go", function: "pollLocalRunner",
 		duration: "20 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary real runner processes, services and socket state need a paced poll",
-	},
-	{
-		file: "cmd/sparkwing/local_runner_restart_linux_test.go", function: "outlastClaimRecovery",
-		duration: "6 * time.Second",
-		marker:   "// sleepcheck:external-boundary a real controller outage must outlast the five-second claim recovery window",
 	},
 }
 

@@ -23,39 +23,8 @@ sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate
 sparkwing run land --sw-allow-risk destructive,prod                         # land on main
 ```
 
-Our lands run on our own desktop hardware. Cloud is reserved for checks that
-prove Cloud itself. For an explicit Cloud-only check, use the `cloud` profile
-for team `korey-gam`:
-
-```bash
-sparkwing run land --sw-route local --sw-stop-at verify --sw-allow-risk destructive,prod -- --cloud-profile cloud
-sparkwing run land --sw-route local --sw-allow-risk destructive,prod -- --cloud-profile cloud
-```
-
-`--sw-route local` keeps land on the developer's machine. With `--cloud-profile`, its
-local policy job runs first, then a light `cloud-gate` job invokes
-`sparkwing run gate --sw-route cloud --profile cloud -o json -- --full --base SHA` while
-the local review runs beside it. Cloud runs the policy, broad `gate`,
-`race-touched` and `record-tree` jobs. Each Cloud job fetches the exact public
-`origin/main` commit captured by preconditions over HTTPS, without developer
-credentials. That commit bounds policy and lint findings even though the uploaded
-snapshot has no ancestry. Full mode runs every package. The two heavy jobs each
-request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
-requires a successful Cloud receipt and an unchanged clean HEAD before and
-after the remote gate. The landing record's `gate_run` names the Cloud run.
-The wrapper passes this repository's tracked secret-shaped fixtures, listed in
-`cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
-that kind fails the Cloud upload until it is added there.
-Preconditions, review, verification and push retain the original checkout and
-its git credentials. A merge after the gate still runs its existing build and
-affected-test recheck locally.
-
-This option needs a CLI with invocation routing on PATH and a configured Cloud
-profile. It makes no machine-wide routing change. Cloud observation can be
-interrupted without cancelling the remote run. Follow or cancel that run using
-`sparkwing runs logs` or `sparkwing runs cancel` with `--profile cloud --run ID`.
-Do not route the whole land pipeline to Cloud because the push and review use
-local credentials and records.
+Lands run on owned hardware. Policy, gate, review and push use that machine.
+The land queue invokes it with `--sw-route local`.
 
 The risk check covers the whole plan even when `--sw-stop-at verify` leaves
 the push out, so the stop-at form needs the risks too; the push step still
@@ -91,7 +60,8 @@ suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
 
-The `land` job's `verify` step requires the review record's tree to be HEAD's
+The `land` job reads the review JSON from the shared Git directory instead of
+resolving a review output blob. Its `verify` step requires the review record's tree to be HEAD's
 tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
@@ -506,8 +476,11 @@ before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
 `deploy-smoke` once in the production team that owns the source repository installation, using
 the existing `/kikd-prod/sparkwing/deploy/scan-submit-token` (one NodeClaim, no controller or launcher
-WARN or ERROR after both controller and launcher rollouts complete). Recovered
-startup probe failures before readiness remain visible in pod logs but do not
+WARN or ERROR after both controller and launcher rollouts complete).
+Smoke status follows poll every second. NodeClaim sampling interrupts its wait
+when all followers finish, then takes a final sample before checking the claims
+and logs.
+Recovered startup probe failures before readiness remain visible in pod logs but do not
 fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Each environment's deployed and previous digests are its job output. Credentials come
 from the run's OIDC token through the `sparkwing-deploy` role in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
@@ -551,6 +524,21 @@ entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push r
 through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
 through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
 retried old run cannot roll production back.
+
+The deployment pipeline pins a published SDK without a local replacement, so
+Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
+selects the planning host's installed executable instead and requires every job
+host to retain those exact bytes. A main-built Cloud runner and a released desktop
+runner therefore cannot share that replacement engine identity. Keep SDK source
+development outside the committed deployment module's engine pin.
+
+A local `pipeline plan` can pass while an older Cloud planning runner rejects the
+same source before any job starts. Deploy a wire-contract change to staging and
+production before later pipelines depend on it. If that ordering breaks,
+bootstrap with an exact image already proven by the staging smokes, compare its
+schema with production before changing the controller pin, and wait for its
+rollout before updating the launcher and planning runner. Then observe a new
+push-triggered deploy through both environments.
 
 #### Deploy cost estimate
 
@@ -823,7 +811,9 @@ file. Other syntax and workflow checks remain active.
   class on touched packages. Local post-deploy scans pass `--full` to retain long race tests across
   every package except the deferred store.
   Affected race runs use the stable private test home and native Go test cache,
-  without `-count=1`. Full race runs keep the uncached shard path. The Go build
+  without `-count=1`. Each stable suite home is locked through setup, execution
+  and cleanup, so overlapping runs of the same step in one checkout wait for
+  each other. Full race runs keep the uncached shard path. The Go build
   cache already survives runs, and hosted jobs restore and save it through
   their existing cache steps. No successful policy or review check is skipped
   by a package cache hit. After
@@ -1436,10 +1426,12 @@ file. Other syntax and workflow checks remain active.
   origin/main when nothing is staged, so a new offender fails from the first
   run while the tests written before the rule keep passing until they are
   edited. `GOWORK=off go run ./internal/sleepcheck .` judges every test file in
-  the tree, which is how to size the remaining purge. Korey approved two
-  external-boundary exceptions: the process-exit bound and paced status poll
-  in `internal/controller/direct_source_e2e_test.go`, which bound cleanup of an
-  external runner and avoid a busy HTTP loop.
+  the tree, which is how to size the remaining purge. The external-boundary
+  allowlist covers the paced runner status polls in
+  `internal/controller/direct_source_e2e_test.go` and
+  `cmd/sparkwing/local_runner_restart_linux_test.go`, and the OS pipe-drain
+  deadline in `internal/nodehost/host_exec_stdin_unix_test.go`. Runner cleanup
+  uses a context hang bound and needs no exception.
   Each `time.After` has a `// sleepcheck:external-boundary` reason immediately
   above its select receive arm. The checker allows only the listed path,
   function, duration, select arm and exact marker, and fails if an exception
@@ -1474,7 +1466,14 @@ file. Other syntax and workflow checks remain active.
   API fixtures on OS-assigned local ports and does not replace that product
   exercise or exercise Kubernetes.
 - **Template verification proofs:** `template-verify` scaffolds, builds, lints,
-  and explains all 37 registry templates, and runs the runnable ones. A local
+  and explains all registry templates, and runs the runnable ones. The build-cli
+  job renders template text and verification manifests through the discovered
+  local sparks-core templates module (SPARKWING_SPARKS_CORE_DIR, go.work, or a
+  sibling checkout), or the pipeline module's published templates pin when no
+  checkout is found. Its annotation names the selected source. The selected
+  registry generates the verification jobs, so local additions and removals need
+  no pipeline module replacement.
+  A local
   run reuses a recorded proof for any template whose proof inputs are
   byte-identical to a previous pass. The digest covers, in one hash per
   template: the template's registry files (every file under its directory in
@@ -1510,8 +1509,8 @@ file. Other syntax and workflow checks remain active.
   Any skipped execution is partial verification, including a body skipped as
   `no_dry_run_defined`. It reports no completed run step and records no proof.
   Missing or unreadable execution evidence fails verification.
-  Reuse never changes the plan: every template keeps its node, and the decision
-  is made inside it, so a digest miss cannot be lost in
+  Reuse never changes the generated fan-out: every selected template keeps its
+  node, and the decision is made inside it, so a digest miss cannot be lost in
   plan shaping. Third-party module resolution is outside the digest either way,
   which is the standing reason the boundary stays exhaustive: the release
   pipeline passes `--exhaustive`, and so should any manual run being used as a
