@@ -54,14 +54,14 @@ func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob
 }
 
 func (s *boundData) HasMany(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error) {
-	if !request.Budget.Deadline.IsZero() {
-		if !time.Now().Before(request.Budget.Deadline) {
-			return blob.Presence{}, blob.ErrBudget
-		}
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, request.Budget.Deadline)
-		defer cancel()
+	if request.Budget.Deadline.IsZero() {
+		return blob.Presence{}, invalidEngineBody("presence requires an explicit deadline")
 	}
+	if !time.Now().Before(request.Budget.Deadline) {
+		return blob.Presence{}, blob.ErrBudget
+	}
+	ctx, cancel := context.WithDeadline(ctx, request.Budget.Deadline)
+	defer cancel()
 	authority, err := s.live(ctx, request.Authority)
 	if err != nil {
 		return blob.Presence{}, err
@@ -101,6 +101,9 @@ func (s *boundData) HasMany(ctx context.Context, request blob.HasManyRequest) (b
 			return blob.Presence{}, dataProjectionError()
 		}
 		present.Present = append(present.Present, digest)
+	}
+	if err := ctx.Err(); err != nil {
+		return blob.Presence{}, dataBudgetError(err, request.Budget)
 	}
 	return present, nil
 }

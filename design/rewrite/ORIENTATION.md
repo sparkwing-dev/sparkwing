@@ -247,6 +247,14 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | Pod admission policy | `internal/runners/launcher/admission_policy.go` | `internal/runners/launcher/admission_policy_test.go`: `TestAdmissionPolicyOnAPIServer` (skips without `KUBEBUILDER_ASSETS`) |
 | NetworkPolicy (decision 71) | `charts/sparkwing-runner-bundle/templates/launcher-networkpolicy.yaml` | `charts/cloud_test.go`: `TestCloudExampleRendersCompleteInstall` |
 
+### Blob storage
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Cache-reader grants and known digests stay within their team even when the same digest exists in both teams | `blob_read_authority.go`: `blobReadSetTx` | `blob_cache_isolation_test.go`: `TestRemoteCacheKnownDigestCannotReadAnotherTeam` |
+| Manual and pull request memo writers cannot replace a verified default-branch memo | `blob_record_runtime.go`: `checkBlobWriteKey` | `blob_cache_isolation_test.go`: `TestMemoWritersCannotReplaceVerifiedDefaultScope` |
+| HTTP presence queries require an explicit deadline and discard results when cancellation crosses the final read | `internal/controller/data_read_binding.go`: `boundData.HasMany` | `internal/controller/data_binding_native_test.go`: `TestNativeDataReaderRoutesAndSelectorIsolation`, `TestNativeDataPresenceCancellationAfterFinalRead` |
+
 ### Memoization
 
 | Rule | Owner | Guard test |

@@ -48,10 +48,10 @@ type DataSignedTransfer struct {
 	Size      int64             `json:"size"`
 }
 
-// DataHasManyRequest queries authorized presence under an optional budget.
+// DataHasManyRequest queries authorized presence under an explicit deadline.
 type DataHasManyRequest struct {
 	Digests  []blob.Digest `json:"digests"`
-	Deadline *time.Time    `json:"deadline,omitempty"`
+	Deadline time.Time     `json:"deadline"`
 }
 
 // DataPresence contains only digests requested and authorized by this caller.

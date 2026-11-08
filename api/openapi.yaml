@@ -1147,10 +1147,8 @@ components:
       additionalProperties: true
       properties:
         deadline:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
+          format: date-time
+          type: string
         digests:
           anyOf:
             - items:
@@ -1159,6 +1157,7 @@ components:
             - type: "null"
       required:
         - digests
+        - deadline
       type: object
       x-sparkwing-go-type: controllerwire.DataHasManyRequest
     internal.controllerwire.DataMember:

@@ -1,5 +1,12 @@
 # Migrating to the next release
 
+## Bound object presence requests
+
+`POST /api/v1/data/has-many` requires a nonzero RFC3339 `deadline` alongside
+`digests`. Send the caller's query deadline; a missing deadline returns `400`.
+The signed blob client already requires an explicit presence budget. Requests
+that expire or are cancelled return an error without partial presence results.
+
 ## Parse command output with Capture
 
 Hosts on Linux and macOS now run SDK commands themselves. A command run with `Run`

@@ -316,11 +316,13 @@ The URL names one immutable object and expires after 60 seconds. Revocation
 stops new signing requests. Issued URLs remain valid until their expiry.
 S3 and filesystem backends use the same authorization boundary.
 
-`POST /api/v1/data/has-many` takes `{"digests":["<sha256>"]}` and returns
-`{"present":["<sha256>"]}`. Missing and unreadable digests are omitted.
-An empty array returns an empty array. Duplicate digests appear once. An
-optional `deadline` is an RFC 3339 timestamp that bounds this query. Presence
-checks transfer no object bytes and consume no download allowance.
+`POST /api/v1/data/has-many` takes `{"digests":["<sha256>"],"deadline":"<RFC3339 timestamp>"}`
+and returns `{"present":["<sha256>"]}`. Missing and unreadable digests are omitted.
+An empty array returns an empty array. Duplicate digests appear once. The
+required `deadline` bounds the query. Omitting it returns `400`. Expiry or
+cancellation returns an error without partial presence results, including
+when it happens during the final read. Presence checks transfer no object
+bytes and consume no download allowance.
 
 Both routes use the common error envelope. Missing or dead authority returns
 `401`. Live authority without the required grant or read edge returns `403`.
