@@ -50,7 +50,7 @@ func TestHostCommandMasksBeforeOutputCuts(t *testing.T) {
 						return nil
 					}
 					return logs.stream(t.Context(), gotStream, nodeproto.FrameLog{Level: "info"}, chunk, eof)
-				})
+				}, nil)
 				if err := endCommandSessions([]*commandSession{session}); err != nil {
 					t.Fatal(err)
 				}
