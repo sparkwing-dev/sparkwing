@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **runner:** Trim Go's regression assets from the image and reuse pinned tool layers across package refreshes
+
 ### Fixed
 
 - **local execution:** Command cancellation waits for cleanup of children in separate process groups before returning a result.

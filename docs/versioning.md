@@ -140,6 +140,14 @@ controller and runner images with the full Git HEAD revision, the resolved
 version and the canonical repository URL. Runtime-only bases carry no source
 binary and do not require a clean checkout.
 
+The runner image keeps its pinned Go, Node/npm and Docker CLI/plugin layers
+before the per-attempt Debian package refresh. Go's own regression corpus,
+API baselines and HTML docs stay out of the runtime image. The standard-library
+source, compiler tools and runtime dependencies remain available for pipeline
+builds and tests. The runner executable is the last layer. Cloud publication
+appends that executable to a pinned runtime base, so runtime changes take effect
+only after rebuilding the base and updating its deployment pin.
+
 Cloud controllers and every launcher refuse to run work from a development
 build. A controller with `--deployment=cloud` refuses to start unless it is
 given `--allow-development-build`. Every launcher, Cloud or self-hosted,
