@@ -23,6 +23,7 @@ unlock.
 ### Fixed
 
 - **controller:** Runner claims succeed when another run waits for the same plan concurrency slot
+- **local execution:** Command cancellation waits for cleanup of children in separate process groups before returning a result.
 
 - **Go SDK:** Windows commands honor their own `PATH` and `PATHEXT` and strip engine credentials from child environments. Pipeline tests no longer pull controller dependencies into the SDK module closure.
 ## [v0.71.0] - 2026-11-08
