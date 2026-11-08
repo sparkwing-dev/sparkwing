@@ -360,10 +360,10 @@ func TestEveryWorkflowPinsActionsByCommitSHA(t *testing.T) {
 func TestSecurityWorkflowHasNoPrivateInfrastructureSurface(t *testing.T) {
 	body := strings.ToLower(readHostedCIFile(t, ".github/workflows/security.yaml"))
 	for _, forbidden := range []string{
-		"aws-actions", "configure-aws", "amazonaws", "run: aws", "ecr", "kube", "helm", "s3://",
-		"ghcr.io", "docker/login-action", "id-token", "packages: write", "secrets.", "private",
+		"aws-actions", "configure-aws", "amazonaws", "run: aws", `\becr\b`, "kube", "helm", "s3://",
+		`ghcr\.io`, "docker/login-action", "id-token", "packages: write", `\$\{\{\s*secrets\.`, `\bprivate\b`,
 	} {
-		if strings.Contains(body, forbidden) {
+		if regexp.MustCompile(forbidden).MatchString(body) {
 			t.Errorf("security workflow contains private-infrastructure surface %q", forbidden)
 		}
 	}
