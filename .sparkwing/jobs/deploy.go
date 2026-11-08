@@ -200,7 +200,7 @@ func (j *deployStagingJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) 
 }
 
 func (d *deployer) deployTo(ctx context.Context, env deployEnv, images deployImages) (envDeployment, map[string]string, error) {
-	if err := d.requireMainTip(ctx, images.Commit); err != nil {
+	if err := d.requireMainAncestor(ctx, images.Commit); err != nil {
 		return envDeployment{}, nil, err
 	}
 	if err := d.assumeRole(ctx); err != nil {

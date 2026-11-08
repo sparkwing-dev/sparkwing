@@ -563,6 +563,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	}
 	f.registry = &fakeDeployRegistry{digests: map[string]string{}, revisions: map[string]string{
 		f.old.Controller.Repository + "@" + f.old.Controller.Digest: f.head,
+		f.old.Runner.Repository + "@" + f.old.Runner.Digest:         f.head,
 	}}
 	for _, ref := range []string{f.config().ControllerBase, f.config().RunnerBase} {
 		f.registry.digests[ref] = testDigest(ref)
@@ -1009,7 +1010,7 @@ func TestDeployRefusesMissingToolchain(t *testing.T) {
 	}
 }
 
-func TestDeployRefusesSupersededCommit(t *testing.T) {
+func TestDeployRefusesSupersededBuild(t *testing.T) {
 	f := newFakeDeploy(t)
 	images := f.candidate()
 	if err := os.WriteFile(filepath.Join(f.repo, "NEXT"), []byte("x"), 0o644); err != nil {
@@ -1019,10 +1020,9 @@ func TestDeployRefusesSupersededCommit(t *testing.T) {
 	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "next")
 	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
 	before := deployGitIn(t, f.bare, "rev-parse", "main")
-	for _, env := range []deployEnv{f.config().Staging, f.config().Production} {
-		if _, _, err := f.deployer(false).deployTo(t.Context(), env, images); err == nil || !strings.Contains(err.Error(), "only main's tip deploys") {
-			t.Fatalf("%s deploy of a superseded commit: %v", env.Name, err)
-		}
+	deployGitIn(t, f.repo, "checkout", "--quiet", "--detach", images.Commit)
+	if _, err := f.deployer(false).buildCandidate(t.Context(), images.Version); err == nil || !strings.Contains(err.Error(), "only main's tip deploys") {
+		t.Fatalf("build of a superseded commit: %v", err)
 	}
 	if deployGitIn(t, f.bare, "rev-parse", "main") != before {
 		t.Fatal("a superseded commit reached GitOps")
