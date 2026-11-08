@@ -24,6 +24,7 @@ func TestSDKZeroValueServiceRequestsConformToHostDecoder(t *testing.T) {
 		{"summary", nodeproto.SummaryRequest{}, &nodeproto.SummaryRequest{}},
 		{"oidc", map[string]string{"audience": ""}, &processOIDCRequest{}},
 		{"child", sdkserve.ChildRequest{}, &ChildRequest{}},
+		{"detached child", sdkserve.ChildRequest{Pipeline: "scan", Detached: true}, &ChildRequest{}},
 		{"cleanup", map[string]any{"argv": []string(nil), "description": ""}, &processCleanupRequest{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -37,6 +38,9 @@ func TestSDKZeroValueServiceRequestsConformToHostDecoder(t *testing.T) {
 			}
 			if err := decodeService(request, test.target); err != nil {
 				t.Fatalf("SDK encoded %s: %v", raw, err)
+			}
+			if test.name == "detached child" && !test.target.(*ChildRequest).Detached {
+				t.Fatal("host dropped detached child intent")
 			}
 			value := reflect.ValueOf(test.target).Elem()
 			for i := range value.NumField() {

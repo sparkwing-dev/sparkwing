@@ -58,7 +58,7 @@ func TestNativeChildIntakeInheritsCapturedEnvironment(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		id, err := process.StartChild(t.Context(), "deploy", nil, "", "")
+		id, err := process.StartChild(t.Context(), "deploy", nil, "", "", false)
 		if err != nil {
 			t.Fatal(err)
 		}

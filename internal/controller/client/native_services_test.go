@@ -106,7 +106,7 @@ func TestNativeChildPreservesOmittedRepositoryIntent(t *testing.T) {
 				return engineResponse(http.StatusCreated, string(response)), nil
 			})
 			process := &NativeProcessClient{transport: transport, run: "run", job: "job", request: runspec.Request{LocalSecretNames: []string{"TOKEN"}, Source: runspec.Source{Entrypoint: "Build"}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"password"}}, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/team/repo"}}}}
-			if _, err := process.StartChild(t.Context(), "deploy", nil, repo, ""); err != nil {
+			if _, err := process.StartChild(t.Context(), "deploy", nil, repo, "", false); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -145,7 +145,7 @@ func TestNativeChildrenUseTheirOwnJobAndStepSelections(t *testing.T) {
 				return engineResponse(http.StatusCreated, string(response)), err
 			})
 			process := &NativeProcessClient{transport: transport, run: "parent", job: "dynamic-child", request: runspec.Request{Options: options}}
-			if _, err := process.StartChild(t.Context(), "weather-report", nil, "", ""); err != nil {
+			if _, err := process.StartChild(t.Context(), "weather-report", nil, "", "", false); err != nil {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(process.request.Options, options) {
@@ -175,7 +175,7 @@ func FuzzNativeChildrenResolveTheirOwnLocalSecretNames(f *testing.F) {
 			return engineResponse(http.StatusCreated, string(response)), err
 		})
 		process := &NativeProcessClient{transport: transport, run: "parent", job: "build", request: runspec.Request{LocalSecretNames: strings.Fields(names), Git: runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey(repo)}}}}
-		if _, err := process.StartChild(t.Context(), "Deploy", nil, repo, branch); err != nil {
+		if _, err := process.StartChild(t.Context(), "Deploy", nil, repo, branch, false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -204,5 +204,25 @@ func TestProvenLatestRefusesAControllerThatIgnoredTheFilter(t *testing.T) {
 		if !marked && err == nil {
 			t.Fatal("an answer from a controller that ignored the proven filter was accepted")
 		}
+	}
+}
+
+func TestNativeDetachedChildRetainsParentSourceAndLineage(t *testing.T) {
+	parent := runspec.Request{Version: 1, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: strings.Repeat("a", 40)}, Source: runspec.Source{Ref: strings.Repeat("a", 40), Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/repo", PipelineDir: ".sparkwing"}}}
+	transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
+		var body controllerwire.CreateRunRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		got := body.Request
+		if !got.Lineage.Detached || got.Lineage.ParentRunID != "parent" || got.Lineage.ParentJobID != "deploy" || !reflect.DeepEqual(got.Git, parent.Git) || !reflect.DeepEqual(got.Source, parent.Source) {
+			t.Fatalf("child lost parent identity: %+v", got)
+		}
+		response, err := json.Marshal(controllerwire.CreateRunResponse{RunID: "scan", Number: 2})
+		return engineResponse(http.StatusCreated, string(response)), err
+	})
+	process := &NativeProcessClient{transport: transport, run: "parent", job: "deploy", request: parent}
+	if run, err := process.StartChild(t.Context(), "deploy-scan", map[string]string{"environment": "staging"}, "", "", true); err != nil || run != "scan" {
+		t.Fatalf("start = %q, %v", run, err)
 	}
 }

@@ -175,7 +175,7 @@ func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 	if explicit {
 		repoArgument = remote
 	}
-	id, err := process.StartChild(t.Context(), "deploy", nil, repoArgument, "deploy")
+	id, err := process.StartChild(t.Context(), "deploy", nil, repoArgument, "deploy", false)
 	if err != nil {
 		t.Fatal(err)
 	}

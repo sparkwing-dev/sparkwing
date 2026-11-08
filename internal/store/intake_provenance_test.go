@@ -26,3 +26,36 @@ func TestChildSealKeepsLineageWhenCompareIsUnavailable(t *testing.T) {
 		t.Fatalf("unavailable compare changed child identity: %+v", got)
 	}
 }
+
+func TestDetachedChildInheritsVerifiedDefaultRepositoryIdentity(t *testing.T) {
+	s := authorityStore(t)
+	proof, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
+	child := childRequest("deploy", git.Ref, git.SHA)
+	child.Lineage.Detached = true
+	tenant, id := childReference(t, s, proof, git, child)
+	row, err := tenant.ReadRun(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := row.Request.Provenance
+	selection, err := runSecretSelection(row.Request)
+	if err != nil || selection.scope != secretPipelineScope || selection.repo != "gh:1" || selection.pipeline != proof.Pipeline() {
+		t.Fatalf("child lost inherited pipeline-secret scope: %+v, %v", selection, err)
+	}
+	if got.Trust() != runspec.TrustVerifiedDefault || got.ProvenRepository() != "gh:1" || got.SharedSecretsOnly() || !row.Lineage.Detached {
+		t.Fatalf("detached child lost verified-default runner/secret eligibility: %+v, %+v", got, row.Lineage)
+	}
+}
+
+func TestDetachedChildDoesNotUpgradeAssertedParent(t *testing.T) {
+	tenant, request := childIntakeFixture(t)
+	request.Request.Lineage.Detached = true
+	result, err := tenant.AdmitRun(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.ReadRun(t.Context(), result.RunID)
+	if err != nil || row.Request.Provenance.Trust() != runspec.TrustAsserted || row.Request.Provenance.ProvenRepository() != "" {
+		t.Fatalf("detaching upgraded an asserted parent: %v, %v", row.Request.Provenance.Trust(), err)
+	}
+}

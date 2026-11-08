@@ -643,8 +643,10 @@ sparkwing run example -- --secret-name EXAMPLE_GATE_SECRET
 sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/sparkwing-ci-smoke
 ```
 
-`--fail-once` asks the probe to fail on its first attempt. The failed-only retry
+`--fail-once` asks the probe to fail on its source run. The failed-only retry
 must reuse its successful predecessors, read their outputs and finish green.
+The source job returns its run identity, so the probe recognizes a retry from
+that saved output and `SPARKWING_RUN_ID` without needing a CLI in its job host.
 `--secret-name` selects the declared optional secret `EXAMPLE_GATE_SECRET`.
 The secret job skips with a reason when no name or stored value is configured.
 OIDC skips only when the run has no issuer. Otherwise it mints a token and
@@ -675,3 +677,23 @@ the development version `0.0.0`, which requires a verified `v0.0.0` engine. The
 Go local replacement path can use the candidate CLI, while TypeScript has no
 corresponding path. The twin's README names the stamped SDK and matching engine
 prerequisites. The Go example remains the executable candidate staging gate.
+
+## Detached child runs
+
+Go pipelines can start a child without holding the parent job open:
+
+```go
+sparkwing.Job(plan, "submit-scan", func(ctx context.Context) error {
+    run, err := sparkwing.StartChild(ctx, "scan", map[string]string{"target": "staging"})
+    if err == nil {
+        sparkwing.Info(ctx, "scan run: %s", run)
+    }
+    return err
+}).StartsChildren("scan")
+```
+
+`StartChild` returns the admitted run ID. The child keeps the parent's repository,
+revision and verified provenance, and continues when the parent completes or is
+cancelled. It uses its own pipeline's concurrency groups. Ordinary `RunAndAwait`
+children remain attached and are cancelled when their creating job can no longer
+await them. TypeScript does not expose detached child submission.
