@@ -32,6 +32,8 @@ func (s *Server) githubAppWriter(r *http.Request, a capability.Authorized) (gitH
 
 func (s *Server) githubAppEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
+		{Method: "PUT", Pattern: "/api/v1/team/github-app/actions-approval", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleActionsApproval},
+		{Method: "DELETE", Pattern: "/api/v1/team/github-app/actions-approval", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleActionsApproval},
 		{Method: "GET", Pattern: "/api/v1/team/github-app/deliveries/failed", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleFailedGitHubDeliveries},
 		{Method: "POST", Pattern: "/api/v1/team/github-app/deliveries/{delivery}/process-again", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleProcessGitHubDeliveryAgain},
 		{Method: "DELETE", Pattern: "/api/v1/team/github-app/installations/{installation}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleGitHubAppUnbind},

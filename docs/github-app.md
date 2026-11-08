@@ -37,10 +37,19 @@ The examples use the hosted deployment's hosts: the dashboard at `console.sparkw
 - **Setup URL**: `https://console.sparkwing.dev/github/app/setup`, with **Redirect on update** checked.
 - **Callback URLs**: `https://console.sparkwing.dev/github/app/callback`, beside the sign-in callback.
 - **Request user authorization (OAuth) during installation**: unchecked. The connect flow asks for the user's authorization as its own step.
-- **Repository permissions**: Checks read and write, Contents read-only, Metadata read-only, Pull requests read-only.
+- **Repository permissions**: Actions read and write, Checks read and write, Contents read-only, Metadata read-only, Pull requests read-only.
 - **Organization permissions**: Members read-only.
 - **Account permissions**: Email addresses read-only (sign-in).
 - **Subscribe to events**: Check run, Check suite, Push, Pull request, Release, Create, Delete, Repository. GitHub sends `installation` and `installation_repositories` to every App without a checkbox.
+
+### Actions dispatch permission update
+
+On-demand fallback uses the existing App. Add `"actions": "write"` to its
+manifest's `default_permissions` object, retaining every existing permission.
+In GitHub App settings this is **Repository permissions -> Actions -> Read and
+write**. Installation owners must approve the update through their installation
+settings. This permission authorizes workflow dispatch and cancellation; it does
+not change source-token permissions. See [on-demand fallback](github-actions-runners.md#on-demand-fallback).
 
 ## Connecting a team
 

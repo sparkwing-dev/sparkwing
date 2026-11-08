@@ -522,6 +522,9 @@ of commands a step starts.
 `sw.Exec(ctx, program, args...)` runs argv directly. `sw.Bash(ctx, script)` runs a
 shell script for a step. Use Exec to run a command such as `go test ./...`.
 Both return a command builder with `Dir`, `Env` and `EnvMap`.
+Commands resolve executables using their `PATH` and working directory. On Windows,
+`PATHEXT` supplies executable extensions. Engine credentials and protocol settings
+are removed from child environments, including values supplied through `Env`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
 Handle returned errors to fail the step. `ExecError` carries exit status and
 captured output. Its message repeats at most 512 bytes of the command and counts
