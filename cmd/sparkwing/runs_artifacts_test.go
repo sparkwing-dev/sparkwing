@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -71,6 +72,9 @@ func TestRunArtifactsDownloadPreservesExistingFilesAndRemovesFailedBytes(t *test
 			if _, err := io.WriteString(out, "bytes"); err != nil {
 				return blob.ManifestEntry{}, err
 			}
+			if _, err := os.Lstat(dest); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("unverified download appeared at destination: %v", err)
+			}
 			if fail {
 				return blob.ManifestEntry{}, blob.ErrIntegrity
 			}
@@ -79,6 +83,14 @@ func TestRunArtifactsDownloadPreservesExistingFilesAndRemovesFailedBytes(t *test
 		inv := logInvocation(t, "artifacts", "--run", "run", "--job", "build", "--path", "dist/file", "--dest", dest, "-o", "json")
 		var out bytes.Buffer
 		err := observeRunArtifacts(t.Context(), inv, reader, &out)
+		entries, listErr := os.ReadDir(filepath.Dir(dest))
+		wantEntries := 1
+		if fail {
+			wantEntries = 0
+		}
+		if listErr != nil || len(entries) != wantEntries {
+			t.Fatalf("download left temporary files: %v, %v", entries, listErr)
+		}
 		if fail {
 			if err == nil || out.Len() != 0 {
 				t.Fatalf("failure = %v, %s", err, &out)
@@ -98,6 +110,67 @@ func TestRunArtifactsDownloadPreservesExistingFilesAndRemovesFailedBytes(t *test
 		if err != nil || string(body) != "bytes" {
 			t.Fatalf("saved bytes = %q, %v", body, err)
 		}
+	}
+}
+
+func TestRunArtifactsQuotesControlCharactersInTextListings(t *testing.T) {
+	path := "dist/\x1b[31mfile\a\nnext\tline"
+	record := artifactRecord{ManifestEntry: blob.ManifestEntry{Path: path}, JobID: "build"}
+	for _, mode := range []string{"pretty", "plain", "json"} {
+		var out bytes.Buffer
+		if err := writeArtifact(&out, record, mode); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(out.String(), "\n") != 1 || strings.ContainsAny(out.String(), "\x1b\a") {
+			t.Fatalf("unsafe %s listing: %q", mode, out.String())
+		}
+		if mode == "json" {
+			var decoded artifactRecord
+			if err := json.Unmarshal(out.Bytes(), &decoded); err != nil || decoded.Path != path {
+				t.Fatalf("JSON changed the path: %+v, %v", decoded, err)
+			}
+		} else if !strings.Contains(out.String(), strconv.Quote(path)) {
+			t.Fatalf("unquoted %s path: %q", mode, out.String())
+		}
+	}
+}
+
+func TestRunArtifactsDoesNotReplaceADestinationCreatedDuringDownload(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "artifact")
+	reader := artifactTestReader{download: func(out io.Writer) (blob.ManifestEntry, error) {
+		if _, err := io.WriteString(out, "download"); err != nil {
+			return blob.ManifestEntry{}, err
+		}
+		return blob.ManifestEntry{Path: "file"}, os.WriteFile(dest, []byte("existing"), 0o600)
+	}}
+	inv := logInvocation(t, "artifacts", "--run", "run", "--job", "build", "--path", "file", "--dest", dest)
+	if err := observeRunArtifacts(t.Context(), inv, reader, io.Discard); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("destination was not refused: %v", err)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil || string(body) != "existing" {
+		t.Fatalf("destination was replaced: %q, %v", body, err)
+	}
+}
+
+func TestRunArtifactsDoesNotPublishACancelledDownload(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	dest := filepath.Join(t.TempDir(), "artifact")
+	reader := artifactTestReader{download: func(out io.Writer) (blob.ManifestEntry, error) {
+		if _, err := io.WriteString(out, "download"); err != nil {
+			return blob.ManifestEntry{}, err
+		}
+		cancel()
+		return blob.ManifestEntry{Path: "file"}, nil
+	}}
+	inv := logInvocation(t, "artifacts", "--run", "run", "--job", "build", "--path", "file", "--dest", dest)
+	if err := observeRunArtifacts(ctx, inv, reader, io.Discard); err == nil {
+		t.Fatal("cancelled download succeeded")
+	}
+	entries, err := os.ReadDir(filepath.Dir(dest))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("cancelled download left files: %v, %v", entries, err)
 	}
 }
 

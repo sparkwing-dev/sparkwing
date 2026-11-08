@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -63,22 +67,29 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 	run = detail.ID
 	if path := inv.Value("path"); path != "" {
 		dest := inv.Value("dest")
-		file, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err := artifactDestinationAvailable(dest); err != nil {
+			return err
+		}
+		file, err := os.CreateTemp(filepath.Dir(dest), ".sparkwing-artifact-*")
 		if err != nil {
 			return err
 		}
-		complete := false
 		defer func() {
-			if !complete {
-				_ = file.Close()
-				err = errors.Join(err, os.Remove(dest))
+			_ = file.Close()
+			if removeErr := os.Remove(file.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				err = errors.Join(err, removeErr)
 			}
 		}()
 		entry, readErr := reader.DownloadArtifact(ctx, run, job, path, file)
-		if err := errors.Join(readErr, file.Close()); err != nil {
+		if err := errors.Join(readErr, file.Close(), ctx.Err()); err != nil {
 			return err
 		}
-		complete = true
+		if err := artifactDestinationAvailable(dest); err != nil {
+			return err
+		}
+		if err := os.Rename(file.Name(), dest); err != nil {
+			return err
+		}
 		return writeArtifact(out, artifactRecord{ManifestEntry: entry, RunID: run, JobID: job, SavedTo: dest}, inv.Output(color.IsInteractiveStdout()))
 	}
 	jobs := []string{job}
@@ -107,13 +118,31 @@ func writeArtifact(out io.Writer, record artifactRecord, format string) error {
 		return json.NewEncoder(out).Encode(record)
 	}
 	if format == "plain" && record.SavedTo == "" {
-		_, err := fmt.Fprintln(out, record.Path)
+		_, err := fmt.Fprintln(out, artifactDisplayText(record.Path))
 		return err
 	}
 	if record.SavedTo != "" {
-		_, err := fmt.Fprintln(out, record.SavedTo)
+		_, err := fmt.Fprintln(out, artifactDisplayText(record.SavedTo))
 		return err
 	}
-	_, err := fmt.Fprintf(out, "%s\t%s\t%d\t%s\n", record.JobID, record.Path, record.Size, record.Digest)
+	_, err := fmt.Fprintf(out, "%s\t%s\t%d\t%s\n", artifactDisplayText(record.JobID), artifactDisplayText(record.Path), record.Size, record.Digest)
 	return err
+}
+
+func artifactDestinationAvailable(dest string) error {
+	_, err := os.Lstat(dest)
+	if err == nil {
+		return &os.PathError{Op: "create", Path: dest, Err: os.ErrExist}
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func artifactDisplayText(value string) string {
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return strconv.Quote(value)
+	}
+	return value
 }

@@ -26,16 +26,21 @@ sparkwing runs artifacts --run 42 --job build --path dist/app.tar.gz --dest app.
 
 Add `--profile NAME` for a remote controller. JSON emits one object per file
 with `run_id`, `job_id`, `path`, `digest` (SHA-256), `size` (bytes), and `mode`.
-Plain output prints one manifest path per line. A download prints a receipt
+Plain output prints one manifest path per line. Text listings quote paths
+containing control characters. A download prints a receipt
 with `saved_to` in JSON, or its destination in plain output.
 
 Downloads select an exact path from the job's committed manifest, verify its
-size and digest, and refuse an existing destination. The destination's parent
-must exist. An unfinished job or an absent or expired manifest lists no files.
+size and digest, and refuse an existing destination. Downloads stay in a temporary
+file beside the destination until verification succeeds, then rename into place.
+The destination's parent must exist. An unfinished job or an absent or expired
+manifest lists no files.
 A missing or corrupt retained manifest fails listing. Missing or corrupt file
-bytes fail download. Each request checks current
-team membership with `runs.read`. Execution claims and cache-only credentials
+bytes fail download. Each request checks current team membership with
+`runs.read`. Execution claims and cache-only credentials
 cannot use this command. Local runs read their local controller's blob store.
+Artifact contents are not secret-masked and are readable by any team member
+with `runs.read`, as with GitHub Actions artifacts.
 
 Artifacts carry files. To read typed job values inside a pipeline, use `Ref[T]`.
 
