@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **Cloud execution:** Exact-source child runs can reuse their direct parent's verified source and installed pipeline. Inherited input mismatches fail before execution, and host logs separate source preparation stages.
 - **deployment:** Smoke observation wakes when all runs finish and takes a final NodeClaim sample before checking claims and logs. Deploy status follows poll every second.
 
 ## [v0.71.0] - 2026-11-08

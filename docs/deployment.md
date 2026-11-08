@@ -288,13 +288,27 @@ Sources for changed files:
    [sdk-reference.md](sdk-reference.md))
 2. An explicit `--all`-style input on your pipeline to deploy everything
 
-### Same-run preparation
+### Prepared source and pipeline
 
 Cloud planning publishes its source snapshot and installed pipeline through the
-controller's existing data store. Jobs of the same run verify and restore it;
-missing artifacts or different build inputs use fresh preparation. Corrupt
-artifacts fail before execution. Prepared records follow run retention and never
-provide cross-run or cross-team access.
+controller's existing data store. Jobs of the same run verify and restore it.
+An exact-source child with no prepared record can also restore its direct parent's
+artifact. The store requires the same team, sealed source revisions, checkout
+policy and provenance. The child still plans and runs its own jobs and assertions.
+Pipeline names and arguments select execution after installation.
+
+Restoration checks the content digest, engine, target, environment and toolchain.
+An inherited artifact with mismatched inputs fails before execution. Missing
+artifacts and changed inputs within the same run use fresh preparation. Corrupt
+artifacts always fail. Records follow the publishing run's retention. A grandchild
+prepares fresh when its direct parent has no published record.
+
+Host logs report `source preparation` stages for restore, checkout, engine
+selection, SDK installation (including dependency resolution and compilation),
+and publication. Each record carries elapsed milliseconds and success, with
+reuse reported for restore. These records contain no source locations,
+environment values or compiler diagnostics, so discovery failure does not hide
+the timing boundaries.
 
 Update the controller, launcher, runner image and generated admission policies
 together. The policies read the runner and Docker images from the ConfigMap
