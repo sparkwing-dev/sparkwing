@@ -306,6 +306,17 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 					t.Fatal(err)
 				}
 				doc := decodePipeline(t, plan)
+				if mode == "real" {
+					if len(plan.Concurrency) != 1 {
+						t.Fatalf("deploy must serialize the whole run: %+v", plan.Concurrency)
+					}
+					group := plan.Concurrency[0]
+					if group.Group != "sparkwing-cloud-deploy" || group.Capacity == nil || *group.Capacity != 1 || (group.OnLimit != nil && *group.OnLimit != "queue") || (group.Scope != nil && *group.Scope != "global") {
+						t.Fatalf("deploy must use one global Queue slot: %+v", group)
+					}
+				} else if len(plan.Concurrency) != 0 {
+					t.Fatalf("dry-run holds a deploy slot: %+v", plan.Concurrency)
+				}
 				if len(doc.Jobs) != shape.jobs {
 					t.Fatalf("got %d jobs, want %d", len(doc.Jobs), shape.jobs)
 				}
@@ -589,6 +600,9 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	deployGitIn(t, work, "add", "-A")
 	deployGitIn(t, work, "commit", "--quiet", "-m", "seed")
 	deployGitIn(t, root, "clone", "--quiet", "--bare", work, f.bare)
+	deployGitIn(t, f.repo, "commit", "--quiet", "--allow-empty", "-m", "candidate")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
 	return f
 }
 
@@ -1261,12 +1275,12 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"resolve the candidate commit", "assume arn:aws:iam::633280902600:role/sparkwing-deploy", "build linux/amd64", "build linux/arm64", "publish both images",
+		"resolve the candidate commit", "is still the tip of origin/main", "assume arn:aws:iam::633280902600:role/sparkwing-deploy", "build linux/amd64", "build linux/arm64", "publish both images",
 		"clone " + f.bare, "pin the staging controller", "render sparkwing-staging/rendered.yaml",
 		"commit \"deploy(staging): controller", "wait for Argo application sparkwing-staging", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-full-controller",
 		"pin the staging launcher", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-runner-bundle-launcher",
 		"build the candidate CLI", "add CLI profile staging", "trigger deploy-smoke", "trigger hello",
-		"is still the tip of origin/main", "is not older than the production version",
+		"belongs to origin/main", "advance the production source without lowering its version",
 		"pin the production controller", "wait for Argo application sparkwing to be", "pin the production launcher",
 		"add CLI profile production-smoke ", "trigger deploy-smoke", "follow production smoke runs", "check each smoke run used one NodeClaim",
 		"on a failed production deploy or smoke, would renew the role session and revert",
@@ -1301,6 +1315,7 @@ func TestDeployBuildsUntaggedMainWithoutARelease(t *testing.T) {
 	deployGitIn(t, f.repo, "tag", "v0.68.3")
 	deployGitIn(t, f.repo, "commit", "--quiet", "--allow-empty", "-m", "main change")
 	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
 	d := f.deployer(false)
 	images, err := d.buildCandidate(t.Context(), "")
 	if err != nil {
@@ -1500,6 +1515,7 @@ func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
 	origin := deployGitIn(t, f.repo, "remote", "get-url", "origin")
 	shallow := filepath.Join(t.TempDir(), "shallow")
 	deployGitIn(t, f.repo, "clone", "--quiet", "--depth", "1", "file://"+origin, shallow)
+	newest := advanceDeployMain(t, f)
 	f.repo = shallow
 	deployGitIn(t, f.repo, "fetch", "--quiet", "origin", f.head)
 	before, err := os.ReadFile(filepath.Join(f.repo, ".git", "FETCH_HEAD"))
@@ -1515,5 +1531,11 @@ func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
 	}
 	if string(after) != string(before) {
 		t.Fatalf("schema lookup overwrote candidate fetch proof: before %q, after %q", before, after)
+	}
+	if got := deployGitIn(t, f.repo, "rev-parse", "refs/remotes/origin/main"); got != newest {
+		t.Fatalf("promotion did not fetch main's newer tip: %s, want %s", got, newest)
+	}
+	if got := deployGitIn(t, f.repo, "rev-parse", "--is-shallow-repository"); got != "false" {
+		t.Fatal("promotion did not fetch the history needed to prove ancestry")
 	}
 }

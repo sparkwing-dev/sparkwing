@@ -42,6 +42,7 @@ unlock.
 
 ### Fixed
 
+- **deployment:** Skip superseded queued builds before credentials or Cloud smoke, and let staging-verified ancestors of main finish promotion while both production image revisions only advance
 - **runner:** Child awaits pace controller reads with jittered backoff and reuse the authorized host request while waiting
 - **Local onboarding:** the welcome card calls out the initial commit, and the quick start explains run inspection, managed schedules and the daemon-owned dashboard.
 - **cli:** Show one admission-wait progress stream with holder charges, held and free capacity, external load and expected clear time. Print updates only for material queue changes at increasing intervals.

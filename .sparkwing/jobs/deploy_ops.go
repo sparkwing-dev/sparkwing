@@ -639,7 +639,7 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 		return rec, nil
 	}
 	if env.Name == d.cfg.Production.Name {
-		if err := d.act(ctx, "check that "+images.Version+" is not older than the production version", func() error {
+		if err := d.act(ctx, "check that "+images.Commit+" and "+images.Version+" advance the production source without lowering its version", func() error {
 			return d.requireNotOlder(ctx, env, rec.Previous, images)
 		}); err != nil {
 			return rec, err
@@ -697,7 +697,8 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 }
 
 func (d *deployer) requireNotOlder(ctx context.Context, env deployEnv, previous valuesPins, images deployImages) error {
-	for _, pin := range []imagePin{previous.Controller, previous.Launcher} {
+	for _, phase := range deployPhases {
+		pin := phase.current(previous)
 		previous, err := deployVersionOrder(pin.Tag)
 		if err != nil {
 			return d.firstDeployError(env, pin, err.Error())
@@ -715,6 +716,9 @@ func (d *deployer) requireNotOlder(ctx context.Context, env deployEnv, previous 
 		}
 		if !fullCommitRE.MatchString(revision) {
 			return errors.New("production revision is missing or invalid; production was not changed")
+		}
+		if revision == images.Commit && pin.Digest != phase.want(images).Digest {
+			return fmt.Errorf("production revision %s already matches the candidate with different image digests; use a newer source commit; production was not changed", revision)
 		}
 		if _, err := d.sourceGit(ctx, "merge-base", "--is-ancestor", revision, images.Commit); err != nil {
 			return fmt.Errorf("production revision %s is not an ancestor of candidate %s; production was not changed: %w", revision, images.Commit, err)
