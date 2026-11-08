@@ -245,9 +245,13 @@ func planAffectedTests(module string, modules, files []string, packages []module
 		byDir[pkg.dir] = pkg.importPath
 	}
 	changed := map[string]bool{}
+	readers := map[string]bool{}
 	for _, f := range files {
+		if f == "CHANGELOG.md" || strings.HasPrefix(f, "pkg/docs/") && strings.HasSuffix(f, ".md") {
+			continue
+		}
 		for _, pkg := range readerPackages(module, modules, f, byDir) {
-			changed[pkg] = true
+			readers[pkg] = true
 		}
 		rel, ok := moduleRelative(module, modules, f)
 		if !ok {
@@ -279,6 +283,9 @@ func planAffectedTests(module string, modules, files []string, packages []module
 				}
 			}
 		}
+	}
+	for pkg := range readers {
+		affected[pkg] = true
 	}
 	for _, pkg := range packages {
 		if p.whole {

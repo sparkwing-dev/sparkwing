@@ -53,8 +53,10 @@ Zig supplies the C compiler and libc headers for race builds through
 coreutils. Go module downloads and
 Go build/test results use Sparkwing dependency caches. Fresh workers can reuse
 the policy job's compiled dependencies and later runs can reuse those caches.
-Race keeps a separate build cache because Sparkwing dependency caches save only
-on a miss, and the policy seed contains no race-instrumented objects.
+Gate tests and race tests each keep a separate build cache because Sparkwing
+dependency caches save only on a miss. The policy seed contains no test or race
+objects. Cloud jobs set CI and a four-core runtime budget at startup, so compiler
+steps use two workers instead of inheriting control-plane limits.
 Full scans still use `sparkwing run gate -- --full`.
 The wrapper passes this repository's tracked secret-shaped fixtures, listed in
 `cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
@@ -793,8 +795,9 @@ file. Other syntax and workflow checks remain active.
   file outside every package runs the packages whose tests read it, from the
   `nonPackageReaders` table in `.sparkwing/jobs/affected_tests.go` (`.github/`
   and `bin/` run `.sparkwing/jobs`, `docs/` runs `internal/doccheck` and
-  `cmd/sparkwing`, and so on); `CHANGELOG.md` is left to the docs-mirror and
-  changelog steps. Changes under `pkg/wingwire/`, `internal/controllerwire/`,
+  `cmd/sparkwing`, and so on); `CHANGELOG.md` and generated `pkg/docs/` Markdown stay with the docs-mirror
+  and changelog steps. File readers select their own tests without charging
+  importers whose code did not change. Changes under `pkg/wingwire/`, `internal/controllerwire/`,
   `internal/apispec/` or `api/` also run `.sparkwing/jobs`, including
   `TestRepositoryUnreleasedSectionDeclaresEveryWireCut`, because the release
   wire-cut check reads the protocol and API surfaces outside its package.

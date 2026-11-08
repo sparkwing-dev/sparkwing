@@ -337,3 +337,29 @@ func TestAffectedBuildLeavesNoCommandBinary(t *testing.T) {
 		t.Fatalf("build left a command binary: %v", err)
 	}
 }
+
+func TestAffectedFileReadersDoNotChargeTheirImporters(t *testing.T) {
+	packages := []modulePackage{
+		{importPath: "m/check", dir: "internal/doccheck"},
+		{importPath: "m/consumer", dir: "consumer", imports: []string{"m/check"}},
+	}
+	p := planAffectedTests(".", []string{"."}, []string{"DELIVERY.md"}, packages, nil)
+	if !slices.Equal(p.packages, []string{"m/check"}) {
+		t.Fatalf("reader selection=%v, want only the file reader", p.packages)
+	}
+	p = planAffectedTests(".", []string{"."}, []string{"internal/doccheck/check.go"}, packages, nil)
+	if !slices.Equal(p.packages, []string{"m/check", "m/consumer"}) {
+		t.Fatalf("code selection=%v, want its importer too", p.packages)
+	}
+}
+
+func TestAffectedGeneratedDocsStayWithTheDriftCheck(t *testing.T) {
+	packages := []modulePackage{
+		{importPath: "m/docs", dir: "pkg/docs"},
+		{importPath: "m/consumer", dir: "consumer", imports: []string{"m/docs"}},
+	}
+	p := planAffectedTests(".", []string{"."}, []string{"CHANGELOG.md", "pkg/docs/changelog.md", "pkg/docs/mirror/cli.md"}, packages, nil)
+	if len(p.packages) != 0 {
+		t.Fatalf("generated docs selected %v; source readers and drift checks cover them", p.packages)
+	}
+}

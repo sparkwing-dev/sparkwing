@@ -76,16 +76,18 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 		}
 		for _, job := range jobs {
 			if job.ID() == rc.Pipeline || job.ID() == "race-touched" || job.ID() == policyJobID {
-				job.Cores(overlappedGoSuiteCPUs)
+				job.Cores(overlappedGoSuiteCPUs).Env("CI", "true", sparkwing.Startup()).Env("GOMAXPROCS", "4", sparkwing.Startup())
 			}
 			job.BeforeRun(func(ctx context.Context) error {
 				return fetchGateBase(ctx, "https://github.com/sparkwing-dev/sparkwing.git", in.Base)
 			})
 			if job.ID() != recordTreeJob {
 				goCache := gateGoCachePath
-				// perf: policy's immutable seed contains no race objects, so race saves its own cache.
+				// perf: dependency caches save only on a miss, so each test workload saves its own compiled objects.
 				if job.ID() == "race-touched" {
 					goCache += "-race"
+				} else if job.ID() == rc.Pipeline {
+					goCache += "-gate"
 				}
 				job.Cache(sparkwing.Dir(gateToolsPath, sparkwing.KeyFromFile(".sparkwing/jobs/gate_tools.go")),
 					sparkwing.Dir(goCache, sparkwing.KeyFromFile(".sparkwing/jobs/gate_tools.go")), sparkwing.GoModules())

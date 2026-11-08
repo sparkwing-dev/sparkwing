@@ -48,6 +48,9 @@ func TestCloudGatePreparesTheBaselineInEveryJobWorkspace(t *testing.T) {
 		t.Fatalf("missing gate jobs: %+v", doc.Jobs)
 	}
 	for _, job := range doc.Jobs {
+		if job.ID != recordTreeJob && (job.Env["CI"].Value != "true" || !job.Env["CI"].Startup || job.Env["GOMAXPROCS"].Value != "4" || !job.Env["GOMAXPROCS"].Startup) {
+			t.Fatalf("%s lost its dedicated Cloud CPU startup budget", job.ID)
+		}
 		if (job.ID == "gate" || job.ID == "race-touched" || job.ID == policyJobID) && (job.Cores == nil || *job.Cores != overlappedGoSuiteCPUs) {
 			t.Fatalf("%s lost its hosted four-core allocation: %+v", job.ID, job.Cores)
 		}
