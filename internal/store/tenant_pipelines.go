@@ -59,18 +59,11 @@ func (t *Tenant) ListPipelines(ctx context.Context, limit int) ([]PipelineSummar
 // a pipeline in the merged top limit is in the top limit of the source that
 // gave it its newest time.
 func (t *Tenant) latestRunPerPipeline(ctx context.Context, limit int, byName map[string]*PipelineSummary) (err error) {
-	rows, err := t.s.query(ctx, `
-SELECT r.pipeline, r.id, r.status, r.started_at, r.finished_at
-  FROM runs r
-  JOIN (SELECT pipeline, MAX(started_at) AS latest
-          FROM runs
-         WHERE team = ?
-         GROUP BY pipeline
-         ORDER BY latest DESC, pipeline
-         LIMIT ?) m
-    ON r.pipeline = m.pipeline AND r.started_at = m.latest
- WHERE r.team = ?
- ORDER BY r.started_at DESC, r.id DESC`, string(t.team), limit, string(t.team))
+	query := latestRunQuery(`SELECT team,id FROM runs WHERE team=? AND started_at IS NOT NULL`, latestPipelineObservations)
+	rows, err := t.s.query(ctx, `WITH latest AS (`+query+` LIMIT ?)
+        SELECT r.pipeline,r.id,r.status,COALESCE(r.started_at,r.created_at),r.finished_at
+        FROM latest JOIN runs r ON r.team=latest.team AND r.id=latest.id WHERE r.team=?
+        ORDER BY COALESCE(r.started_at,r.created_at) DESC,r.pipeline`, string(t.team), string(t.team), limit, string(t.team))
 	if err != nil {
 		return err
 	}
@@ -81,9 +74,6 @@ SELECT r.pipeline, r.id, r.status, r.started_at, r.finished_at
 		var finished sql.NullInt64
 		if err := rows.Scan(&name, &id, &status, &started, &finished); err != nil {
 			return err
-		}
-		if _, seen := byName[name]; seen {
-			continue
 		}
 		at := time.Unix(0, started).UTC()
 		p := &PipelineSummary{Name: name, LastActivityAt: at, LastRunID: id, LastStatus: status, LastRunAt: &at}

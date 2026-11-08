@@ -476,8 +476,11 @@ before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
 `deploy-smoke` once in the production team that owns the source repository installation, using
 the existing `/kikd-prod/sparkwing/deploy/scan-submit-token` (one NodeClaim, no controller or launcher
-WARN or ERROR after both controller and launcher rollouts complete). Recovered
-startup probe failures before readiness remain visible in pod logs but do not
+WARN or ERROR after both controller and launcher rollouts complete).
+Smoke status follows poll every second. NodeClaim sampling interrupts its wait
+when all followers finish, then takes a final sample before checking the claims
+and logs.
+Recovered startup probe failures before readiness remain visible in pod logs but do not
 fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Each environment's deployed and previous digests are its job output. Credentials come
 from the run's OIDC token through the `sparkwing-deploy` role in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
@@ -522,15 +525,20 @@ through production after its staging gate passes. A terminal can preview with `-
 through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
 retried old run cannot roll production back.
 
-An SDK replacement makes the controller plan the checkout's SDK with its installed
-engine. A local `pipeline plan` can therefore pass while the Cloud controller
-rejects the same source before any job starts. Deploy a wire-contract change to
-staging and production before later pipelines depend on it. If that ordering
-breaks, bootstrap the production controller with an exact image already proven
-by the staging smokes, compare its schema with production before changing the
-pin, and wait for its rollout before updating the launcher. Then observe a new
-push-triggered deploy through both environments. Rebuilding the desktop CLI or
-retrying unchanged source does not upgrade the Cloud planning engine.
+The deployment pipeline pins a published SDK without a local replacement, so
+Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
+selects the planning host's installed executable instead and requires every job
+host to retain those exact bytes. A main-built Cloud runner and a released desktop
+runner therefore cannot share that replacement engine identity. Keep SDK source
+development outside the committed deployment module's engine pin.
+
+A local `pipeline plan` can pass while an older Cloud planning runner rejects the
+same source before any job starts. Deploy a wire-contract change to staging and
+production before later pipelines depend on it. If that ordering breaks,
+bootstrap with an exact image already proven by the staging smokes, compare its
+schema with production before changing the controller pin, and wait for its
+rollout before updating the launcher and planning runner. Then observe a new
+push-triggered deploy through both environments.
 
 #### Deploy cost estimate
 
@@ -718,6 +726,13 @@ file. Other syntax and workflow checks remain active.
   main runs `gate` and `race-touched` over the change since the push's previous
   commit (or the pull request base), and the full suite, `pre-release`, the
   store race lanes and Postgres conformance run nightly and on dispatch.
+  The full acceptance suite includes `TestFeatureE2E`, which exercises placement
+  deadlines, failed-only retries with outputs and artifacts, and child-run
+  cancellation against isolated local controller processes. Run just these with
+  `sparkwing run feature-e2e --sw-route local`. Its `--scenario` and `--repeat`
+  arguments select one scenario or repeat fresh environments. The
+  [acceptance runbook](tests/acceptance/README.md#feature-scenarios-against-a-local-controller)
+  names the real-time budgets, trust setting and runner-actor boundary.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` checks the active hook directory and compares
   each hook's presence, content, format version, and executability. Blocking
@@ -810,7 +825,9 @@ file. Other syntax and workflow checks remain active.
   class on touched packages. Local post-deploy scans pass `--full` to retain long race tests across
   every package except the deferred store.
   Affected race runs use the stable private test home and native Go test cache,
-  without `-count=1`. Full race runs keep the uncached shard path. The Go build
+  without `-count=1`. Each stable suite home is locked through setup, execution
+  and cleanup, so overlapping runs of the same step in one checkout wait for
+  each other. Full race runs keep the uncached shard path. The Go build
   cache already survives runs, and hosted jobs restore and save it through
   their existing cache steps. No successful policy or review check is skipped
   by a package cache hit. After
@@ -1463,7 +1480,14 @@ file. Other syntax and workflow checks remain active.
   API fixtures on OS-assigned local ports and does not replace that product
   exercise or exercise Kubernetes.
 - **Template verification proofs:** `template-verify` scaffolds, builds, lints,
-  and explains all 37 registry templates, and runs the runnable ones. A local
+  and explains all registry templates, and runs the runnable ones. The build-cli
+  job renders template text and verification manifests through the discovered
+  local sparks-core templates module (SPARKWING_SPARKS_CORE_DIR, go.work, or a
+  sibling checkout), or the pipeline module's published templates pin when no
+  checkout is found. Its annotation names the selected source. The selected
+  registry generates the verification jobs, so local additions and removals need
+  no pipeline module replacement.
+  A local
   run reuses a recorded proof for any template whose proof inputs are
   byte-identical to a previous pass. The digest covers, in one hash per
   template: the template's registry files (every file under its directory in
@@ -1499,8 +1523,8 @@ file. Other syntax and workflow checks remain active.
   Any skipped execution is partial verification, including a body skipped as
   `no_dry_run_defined`. It reports no completed run step and records no proof.
   Missing or unreadable execution evidence fails verification.
-  Reuse never changes the plan: every template keeps its node, and the decision
-  is made inside it, so a digest miss cannot be lost in
+  Reuse never changes the generated fan-out: every selected template keeps its
+  node, and the decision is made inside it, so a digest miss cannot be lost in
   plan shaping. Third-party module resolution is outside the digest either way,
   which is the standing reason the boundary stays exhaustive: the release
   pipeline passes `--exhaustive`, and so should any manual run being used as a

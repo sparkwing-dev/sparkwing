@@ -240,28 +240,15 @@ func (e httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) 
 
 func downloadFile(url, dst string, maxBytes int64) error {
 	client := &http.Client{Timeout: 60 * time.Second}
-	// #nosec G704 -- callers construct release asset URLs under the fixed GitHub release base
-	resp, err := client.Get(url)
+	body, err := releaseasset.Download(context.Background(), client, url, maxBytes)
 	if err != nil {
+		var status releaseasset.HTTPStatusError
+		if errors.As(err, &status) {
+			return httpStatusError{code: status.Code}
+		}
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return httpStatusError{code: resp.StatusCode}
-	}
-	f, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	written, err := io.Copy(f, io.LimitReader(resp.Body, maxBytes+1))
-	if err != nil {
-		return err
-	}
-	if written > maxBytes {
-		return fmt.Errorf("download exceeds %d-byte limit", maxBytes)
-	}
-	return nil
+	return os.WriteFile(dst, body, 0o600) // #nosec G703 -- safety: dst is a validated release filename beneath the updater's private MkdirTemp staging directory.
 }
 
 func sha256OfFile(path string) (string, error) {

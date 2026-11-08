@@ -7,8 +7,9 @@ const DefaultDashboardAddress = "127.0.0.1:4343"
 
 // DashboardSettings is the dashboard a shared local controller binds when it starts.
 type DashboardSettings struct {
-	Address  string
-	ReadOnly bool
+	Address      string
+	ReadOnly     bool
+	AllowedHosts []string
 }
 
 // ResolveDashboardSettings reads the dashboard section of the machine configuration.
@@ -18,6 +19,7 @@ func ResolveDashboardSettings() (DashboardSettings, error) {
 		return DashboardSettings{}, err
 	}
 	settings := DashboardSettings{Address: DefaultDashboardAddress}
+	settings.AllowedHosts = raw.AllowedHosts
 	if raw.Address != nil {
 		settings.Address = *raw.Address
 	}
