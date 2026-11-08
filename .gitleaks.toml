@@ -26,6 +26,12 @@ regexes = ['''abcd1234-ef567890''']
 id = "generic-api-key"
 
 [[rules.allowlists]]
+description = "Public Ed25519 release-verification key in the fallback workflow"
+condition = "AND"
+paths = ['''(^|/)\.github/workflows/sparkwing-fallback\.yaml$''']
+regexes = ['''^\QwhVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI=\E$''']
+
+[[rules.allowlists]]
 description = "SHA-256 of the empty artifact blob"
 condition = "AND"
 paths = ['''(^|/)internal/orchestrator/direct_artifact\.go$''']

@@ -367,6 +367,7 @@ func TestReviewResumesTheSameSessionAndClearsFixedFindings(t *testing.T) {
 	}
 
 	fx.git.head, fx.git.tree = "c2", "t2"
+	in.brief = "Lands and scans now run on our own hardware."
 	rec, _, err = runReview(context.Background(), fx.deps, p, in)
 	if err != nil {
 		t.Fatal(err)
@@ -375,7 +376,7 @@ func TestReviewResumesTheSameSessionAndClearsFixedFindings(t *testing.T) {
 		t.Fatalf("second pass did not resume sess-a: %+v", fx.def.calls)
 	}
 	second := fx.def.calls[1].prompt
-	if !strings.Contains(second, `"id": "F1"`) || !strings.Contains(second, "diff of everything at c2") {
+	if !strings.Contains(second, `"id": "F1"`) || !strings.Contains(second, "diff of everything at c2") || !strings.Contains(second, in.brief) {
 		t.Errorf("resume prompt lacks the open finding or the new diff:\n%s", second)
 	}
 	if rec.Result != resultPass || rec.Findings[0].Status != findingFixed || rec.Findings[0].Summary != "leaks team ids" || len(rec.Passes) != 2 || !rec.Passes[1].Resumed {

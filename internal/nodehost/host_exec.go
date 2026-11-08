@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -27,6 +28,9 @@ func (c *hostCommand) stop() { c.killOnce.Do(func() { close(c.kill) }) }
 
 // safety: a background child holding the pipes cannot keep the command open past this.
 const commandDrainGrace = 500 * time.Millisecond
+
+// perf: the daemon samples every few seconds, so a command that ends sooner skips the registration call.
+const commandMeasureDelay = time.Second
 
 // safety: the frame reader must keep draining log frames while the command runs, so this never blocks it.
 func (s *protocolSession) startExec(req nodeproto.ExecRequest) {
@@ -69,7 +73,15 @@ func (s *protocolSession) startExec(req nodeproto.ExecRequest) {
 				return s.cfg.output.stream(s.logCtx, key+stream, base, chunk, eof)
 			}
 		}
-		done, session := runHostCommand(req, s.cfg.output.masker, command.kill, s.done, sink)
+		var measure func(int, string)
+		if s.measureCommand != nil {
+			measure = func(pid int, birth string) {
+				if err := s.measureCommand(s.executionCtx, pid, birth); err != nil {
+					slog.Default().Debug("SDK command not measured", "err", err)
+				}
+			}
+		}
+		done, session := runHostCommand(req, s.cfg.output.masker, command.kill, s.done, sink, measure)
 		s.mu.Lock()
 		delete(s.execs, req.ID)
 		if session != nil {
@@ -112,7 +124,8 @@ func (s *protocolSession) writeHostLine(value any) error {
 var commandBuffers = sync.Pool{New: func() any { return new([64 << 10]byte) }}
 
 // safety: a normal exit returns the session alive; the end of the SDK session kills what it left running.
-func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error) (nodeproto.ExecDone, *commandSession) {
+// measure, when set, adds a command still running after commandMeasureDelay to the job's machine measurement.
+func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error, measure func(pid int, birth string)) (nodeproto.ExecDone, *commandSession) {
 	done := nodeproto.ExecDone{ID: req.ID, ExitCode: -1}
 	if info, err := os.Stat(req.Dir); err != nil {
 		done.StartError = fmt.Sprintf("dir %q: %v", req.Dir, err)
@@ -174,6 +187,10 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 	// safety: the child owns the write ends now; dropping ours lets the readers see EOF.
 	closeFiles(outW, errW)
 	session := trackHostCommand(cmd, req.Env)
+	stopMeasure := func() bool { return false }
+	if pid, birth, ok := session.leader(); ok && measure != nil {
+		stopMeasure = time.AfterFunc(commandMeasureDelay, func() { measure(pid, birth) }).Stop
+	}
 	exited := make(chan struct{})
 	go func() {
 		select {
@@ -241,6 +258,7 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 		}()
 	}
 	waitErr := cmd.Wait()
+	stopMeasure()
 	close(exited)
 	// safety: a background child holding the pipes ends the drain at the deadline.
 	deadline := time.Now().Add(commandDrainGrace)
@@ -319,7 +337,7 @@ func NewLocalCommands(masker *secrets.Masker) *LocalCommands {
 //
 //nolint:contextcheck // Cancellation travels through the joined command channels.
 func (c *LocalCommands) Execute(ctx context.Context, req nodeproto.ExecRequest, sink func(string, []byte, bool) error) nodeproto.ExecDone {
-	done, session := runHostCommand(req, c.masker, ctx.Done(), ctx.Done(), sink)
+	done, session := runHostCommand(req, c.masker, ctx.Done(), ctx.Done(), sink, nil)
 	if session != nil {
 		c.mu.Lock()
 		c.sessions = append(c.sessions, session)

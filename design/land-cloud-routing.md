@@ -16,7 +16,7 @@ There are no SDK, controller API, wire or store changes.
 ## Customer-visible decisions for maintainer approval
 
 - Add `--sw-route local|cloud` and permit `--profile NAME` and
-  `--allow-secret-file PATH` with the explicit Cloud route. Cloud supports non-interactive foreground observation and
+  repository `allow_secret_files` with the explicit Cloud route. Cloud supports non-interactive foreground observation and
   `--sw-detached`. Defaults remain local unless the machine opted into burst.
 - Explicit Cloud selects Cloud immediately and fails when connection or
   upload fails. It never falls back to desktop work. Existing machine burst
@@ -49,7 +49,7 @@ to run `gate --sw-route cloud --profile cloud -- --full --base SHA` and waits fo
 successful receipt. The parent records that Cloud run ID as `gate_run`.
 The remote graph includes policy, broad checks, race tests and the tree record.
 The wrapper names this repository's tracked secret-shaped fixtures with
-`--allow-secret-file`, because the upload refuses them otherwise.
+`.sparkwing/sparkwing.yaml` `allow_secret_files`, because the upload refuses them otherwise.
 The wrapper checks clean, unchanged HEAD before and after the gate and allows
 90 minutes, including remote preparation and observation. Normal local land
 keeps its affected check selection.

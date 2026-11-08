@@ -227,8 +227,12 @@ func TestReleaseCutRunsStateChecksAndTheFastBuildClass(t *testing.T) {
 		if s.ID == budgetStepID {
 			continue
 		}
-		if deps := s.Needs; len(deps) != 0 {
-			t.Errorf("step %q waits on %v; the class is budgeted at its parallel cost, not the sum of its members", s.ID, deps)
+		wantDeps := []string(nil)
+		if slices.Contains([]string{"go-directives", "sdk-pins", "changelog-links", "docs-sidebar"}, s.ID) {
+			wantDeps = []string{"version-freshness"}
+		}
+		if deps := s.Needs; !slices.Equal(deps, wantDeps) {
+			t.Errorf("step %q waits on %v; want only policy guards under the selected freshness root", s.ID, deps)
 		}
 	}
 }
