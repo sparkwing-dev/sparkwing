@@ -17,7 +17,16 @@ import (
 var allDocs embed.FS
 
 //go:embed changelog.md
-var changelogMD string
+var releasedChangelogMD string
+
+var changelogMD = func() string {
+	sources, _ := fs.Sub(allDocs, "mirror")
+	body, err := CollectChangelog(releasedChangelogMD, sources)
+	if err != nil {
+		panic(err)
+	}
+	return body
+}()
 
 // ChangelogSlug is the synthetic topic under which the repo-root
 // CHANGELOG.md is surfaced by [Read], [List], [Search], and [All].
@@ -65,7 +74,7 @@ func listEntries() []Entry {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		if !strings.HasSuffix(p, ".md") {
+		if !strings.HasSuffix(p, ".md") || strings.HasPrefix(p, "mirror/changes/") || strings.HasPrefix(p, "mirror/migrations/unreleased/") {
 			return nil
 		}
 		body, rerr := fs.ReadFile(allDocs, p)
@@ -117,6 +126,11 @@ func ReadRaw(slug string) (string, error) {
 	slug = strings.TrimSuffix(slug, ".md")
 	if slug == ChangelogSlug {
 		return changelogMD, nil
+	}
+	if slug == "migrations/_unreleased" {
+		sources, _ := fs.Sub(allDocs, "mirror/migrations")
+		body, err := CollectMigration(sources)
+		return string(body), err
 	}
 	p := path.Join("mirror", slug+".md")
 	body, err := fs.ReadFile(allDocs, p)

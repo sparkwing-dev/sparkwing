@@ -81,7 +81,7 @@ func checkMigrationGuide(ctx context.Context, repoDir, version string) error {
 	if err := requireVerifiableVersion(version); err != nil {
 		return err
 	}
-	body, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
+	body, err := readChangelog(repoDir)
 	if err != nil {
 		return fmt.Errorf("release-verify: read CHANGELOG.md: %w", err)
 	}
@@ -131,7 +131,7 @@ func checkChangelogSection(ctx context.Context, repoDir, version string) error {
 	if err := requireVerifiableVersion(version); err != nil {
 		return err
 	}
-	body, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
+	body, err := readChangelog(repoDir)
 	if err != nil {
 		return fmt.Errorf("release-verify: read CHANGELOG.md: %w", err)
 	}

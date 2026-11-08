@@ -492,7 +492,7 @@ func mergeChangelogHeadings(ctx context.Context, git gitRunner, dir string, targ
 }
 
 func changelogRepeatedHeadings(dir string) (string, error) {
-	body, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	body, err := readChangelog(dir)
 	if os.IsNotExist(err) {
 		return "", nil
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -34,7 +35,7 @@ func LintChangelog(body string, migrations fs.FS) []ChangelogIssue {
 }
 
 func CheckChangelogLint(ctx context.Context, repoRoot string) error {
-	body, err := os.ReadFile(filepath.Join(repoRoot, "CHANGELOG.md"))
+	body, err := readChangelog(repoRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -324,13 +325,12 @@ func migrationSectionBody(migrations fs.FS, path, anchor string) (body string, f
 	if anchor == "" || migrations == nil {
 		return "", false
 	}
-	f, err := migrations.Open(path)
+	data, err := readMigrationContent(migrations, path)
 	if err != nil {
 		return "", false
 	}
-	defer func() { _ = f.Close() }()
 	var b strings.Builder
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -578,7 +578,7 @@ func readMigrationHeadings(migrations fs.FS, path string) ([]string, bool) {
 	if migrations == nil {
 		return nil, false
 	}
-	body, err := fs.ReadFile(migrations, path)
+	body, err := readMigrationContent(migrations, path)
 	if err != nil {
 		return nil, false
 	}
@@ -646,3 +646,10 @@ func migrationsFS(repoRoot string) fs.FS {
 type emptyFS struct{}
 
 func (emptyFS) Open(string) (fs.File, error) { return nil, fs.ErrNotExist }
+
+func readMigrationContent(migrations fs.FS, path string) ([]byte, error) {
+	if path == "_unreleased.md" {
+		return docs.CollectMigration(migrations)
+	}
+	return fs.ReadFile(migrations, path)
+}
