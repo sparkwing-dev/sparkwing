@@ -1773,13 +1773,39 @@ SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-m
 SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main -- --repos-root "$HOME/code"
 ```
 
-Arm both declarations from the main checkout on a host with Git push access,
+`desktop-update` runs daily at 07:00 America/Denver. It hands activation to
+`sparkwing-desktop-update.service` because the scheduling run must finish before
+its controller can restart. The user unit clones origin/main, requires green
+push CI at that SHA, and builds the CLI, runner and dashboard in a private
+directory beside the installed binaries. It then waits up to 30 minutes for
+runs, queued triggers and held leases in both the default and scheduling state
+homes, plus active systemd land units, to finish. A failed inspection or timeout
+fails the unit and leaves the installed binaries unchanged. Once idle, it
+renames the staged binaries into `~/.local/bin` and restarts the controllers
+that were running. The standalone runner service keeps its running process.
+Its replacement binary takes effect at that service's next restart.
+
+The pipeline result confirms the handoff. Read the activation result with
+`journalctl --user -u sparkwing-desktop-update`. Use
+`systemctl --user status sparkwing-desktop-update` while it runs. Concurrent updater attempts
+refuse rather than replacing an active updater. Failed attempts retain their
+staging directory, printed in the journal, for inspection. The updater never
+cancels work or stops land units. Continuous activity defers the update to a
+later invocation. New work can still arrive while it waits.
+
+Preview the handoff without building, installing or restarting anything:
+
+```sh
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run desktop-update --sw-dry-run
+```
+
+Arm the declarations from the main checkout on a host with Git push access,
 GitHub CLI authentication for CI reads, Go, Bitwing, Xwing and Sparkwing on PATH:
 
 ```sh
 export SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery"
 export SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/secrets.key"
-sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-release/weekly-sdk-cli,owned-sdk-main/owned-sdk-main --unpinned
+sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-release/weekly-sdk-cli,owned-sdk-main/owned-sdk-main,desktop-update/desktop-main --unpinned
 sparkwing schedules list
 ```
 
@@ -1789,7 +1815,8 @@ same exports for manual runs. Keep HOME at the operator's home so Git signing an
 remain available. Sparkwing owns cadence and overlap handling through its
 schedule evaluator and managed timer. `--unpinned` compiles the main checkout
 on each fire so later pipeline fixes take effect. This installation command
-selects only these schedules and preserves other installed schedules.
+selects only these schedules and preserves other installed schedules. The desktop
+updater also needs a systemd user manager, `jq`, `flock`, `timeout`, pnpm and Go.
 
 ## Release failure policy
 
