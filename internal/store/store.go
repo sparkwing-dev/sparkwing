@@ -1363,7 +1363,7 @@ func (s *Store) createBaseline(ctx context.Context, path string) error {
 		if err := upgradeSchemaTx(ctx, tx, version, path); err != nil {
 			return err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil { //nolint:contextcheck // Commit uses the context captured by beginTx.
 			return err
 		}
 		if s.dialect == DialectSQLite && path != "" {
