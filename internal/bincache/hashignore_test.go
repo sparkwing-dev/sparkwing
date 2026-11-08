@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func newGitPipelineDir(t *testing.T) string {
@@ -12,7 +14,7 @@ func newGitPipelineDir(t *testing.T) string {
 		t.Skip("git not on PATH")
 	}
 	dir := newPipelineDir(t)
-	cmd := exec.Command("git", "init", "-q")
+	cmd := testgit.Command("git", "init", "-q")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("git init: %v: %s", err, out)
@@ -118,7 +120,7 @@ func TestHashSkipsWhollyIgnoredDirectoriesButHashesTrackedFilesInThem(t *testing
 	writeFile(t, filepath.Join(dir, "cache/lint/entry"), "cached")
 	writeFile(t, filepath.Join(dir, "vendored/tracked.go"), "package vendored\n")
 	writeFile(t, filepath.Join(dir, "vendored/scratch/out"), "ignored")
-	add := exec.Command("git", "add", "-f", "vendored/tracked.go")
+	add := testgit.Command("git", "add", "-f", "vendored/tracked.go")
 	add.Dir = dir
 	if out, err := add.CombinedOutput(); err != nil {
 		t.Fatalf("git add: %v: %s", err, out)
@@ -150,7 +152,7 @@ func TestHashableAgreesWithCheckIgnore(t *testing.T) {
 	for _, name := range []string{"logs/a.log", "logs/keep.txt", "x.tmp", "sub/x.tmp", "sub/local.json", "sub/ok.go", "build/out/bin", "tracked.tmp"} {
 		writeFile(t, filepath.Join(dir, name), name)
 	}
-	add := exec.Command("git", "add", "-f", "tracked.tmp")
+	add := testgit.Command("git", "add", "-f", "tracked.tmp")
 	add.Dir = dir
 	if out, err := add.CombinedOutput(); err != nil {
 		t.Fatalf("git add: %v: %s", err, out)
@@ -168,7 +170,7 @@ func TestHashableAgreesWithCheckIgnore(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range all {
-		check := exec.Command("git", "check-ignore", "-q", path)
+		check := testgit.Command("git", "check-ignore", "-q", path)
 		check.Dir = dir
 		ignored := check.Run() == nil
 		if ignored == kept[path] {

@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -18,8 +19,8 @@ import (
 
 func TestSDKGateIndexReachesCheckingTools(t *testing.T) {
 	if os.Getenv("W6_GATE_CONSUMER") == "1" {
-		command := exec.Command("git", "ls-files")
-		command.Env = os.Environ()
+		command := testgit.Command("git", "ls-files")
+		command.Env = testgit.Env(os.Environ())
 		if index := gitenv.GateIndex(); index != "" {
 			command.Env = append(command.Env, "GIT_INDEX_FILE="+index)
 		}
@@ -32,7 +33,7 @@ func TestSDKGateIndexReachesCheckingTools(t *testing.T) {
 	dir := t.TempDir()
 	git := func(index string, args ...string) string {
 		t.Helper()
-		command := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		command := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 		command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}
 		if index != "" {
 			command.Env = append(command.Env, "GIT_INDEX_FILE="+index)

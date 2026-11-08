@@ -3,12 +3,13 @@ package git
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestPromptlessGitPreservesStoredCredentials(t *testing.T) {
@@ -51,8 +52,8 @@ func TestPromptlessGitPreservesStoredCredentials(t *testing.T) {
 			if tc.helper != "" {
 				args = append(args, "-c", "credential.helper="+tc.helper)
 			}
-			cmd := exec.CommandContext(ctx, "git", append(args, "credential", "fill")...)
-			cmd.Env = env
+			cmd := testgit.CommandContext(ctx, "git", append(args, "credential", "fill")...)
+			cmd.Env = append(testgit.Env(env), "GIT_ASKPASS="+askpass)
 			cmd.Stdin = strings.NewReader("protocol=https\nhost=fixture.invalid\n\n")
 			out, err := cmd.Output()
 			if err != nil {

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -45,7 +47,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	directory := filepath.Join(root, ".sparkwing")
 	binary := filepath.Join(t.TempDir(), "pipeline")
 	build := exec.CommandContext(t.Context(), "go", "-C", directory, "build", "-o", binary, ".")
-	build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+	build.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build repository SDK: %v: %s", err, output)
 	}
@@ -75,7 +77,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	}
 	selected := engine.Resolved{Identity: engineid.Identity{Pin: pin, Version: "development"}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
 	masker := secrets.NewMasker()
-	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Captured: os.Environ(), Masker: masker}}}
+	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Captured: testgit.Env(os.Environ()), Masker: masker}}}
 	planner := nodehost.SDKPlanner{
 		Start: processes.StartPlanning, Masker: masker,
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
@@ -141,7 +143,7 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit, err := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "--verify", "HEAD^{commit}").Output()
+	commit, err := testgit.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "--verify", "HEAD^{commit}").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
