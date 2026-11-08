@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -10,6 +11,9 @@ import (
 )
 
 func TestDesktopUpdateWaitsForWorkAndRefusesUnverifiedIdle(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux systemd updater")
+	}
 	for _, mode := range []string{"idle", "drain", "run", "trigger", "lease", "land", "opaque-land", "status-error", "malformed", "missing-count", "units-error", "malformed-units", "show-error", "red", "build-error", "restart-error", "stopped"} {
 		t.Run(mode, func(t *testing.T) {
 			root, err := filepath.Abs(".")
@@ -109,6 +113,8 @@ show)
 esac
 `)
 			write(filepath.Join(bin, "sleep"), "#!/bin/sh\ntouch \"$HOME/drained\"\n")
+			write(filepath.Join(bin, "go"), "#!/bin/sh\nexit 1\n")
+			write(filepath.Join(bin, "pnpm"), "#!/bin/sh\nexit 1\n")
 			write(filepath.Join(dest, "sparkwing-runner"), "old runner\n")
 			before, err := os.ReadFile(filepath.Join(dest, "sparkwing"))
 			if err != nil {
