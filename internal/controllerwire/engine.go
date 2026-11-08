@@ -391,7 +391,7 @@ type RunDetail struct {
 	Retry *RetryDetail `json:"retry,omitempty"`
 }
 
-// RetryDetail names a retry's mode and the source jobs whose results it reuses.
+// RetryDetail names a retry's mode and jobs whose source results it has materialized.
 type RetryDetail struct {
 	Mode   string   `json:"mode"`
 	Reused []string `json:"reused"`

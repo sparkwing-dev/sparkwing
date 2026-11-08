@@ -66,7 +66,7 @@ func TestEngineRunDetailUsesCurrentInvocationLineage(t *testing.T) {
 	if err != nil || got.ID != "retry" || !reflect.DeepEqual(got.Inputs.Lineage, lineage) || request.RunID != "original" || request.Request.Lineage.RetryOf != "earlier" {
 		t.Fatalf("retry lineage: %+v", got)
 	}
-	if !reflect.DeepEqual(got.Retry, &controllerwire.RetryDetail{Mode: "failed", Reused: []string{"build", "test"}}) {
+	if !reflect.DeepEqual(got.Retry, &controllerwire.RetryDetail{Mode: "failed", Reused: []string{}}) {
 		t.Fatalf("retry reuse: %+v", got.Retry)
 	}
 }
