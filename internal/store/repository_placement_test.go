@@ -194,7 +194,7 @@ func TestPlacementNamedTierHoldsOtherTeamRunners(t *testing.T) {
 	wantJob(t, f, builder)
 }
 
-func TestPlacementActionsTierTakesALiveActionsRunnerLast(t *testing.T) {
+func TestPlacementActionsTierRefusesUnboundActionsRunner(t *testing.T) {
 	f := rankingFixture(t, true)
 	finishRankingTrigger(t, f)
 	f.Place(t, runspec.RepositoryPlacement{Prefer: tiers(team(5*time.Second), runspec.RepositoryTier{Target: runspec.PlacementGitHubActions, Workflow: ".github/workflows/fallback.yaml", Runner: "ubuntu-latest"})})
@@ -202,7 +202,7 @@ func TestPlacementActionsTierTakesALiveActionsRunnerLast(t *testing.T) {
 	f.At(time.Second)
 	wantNoJob(t, f, f.Actions)
 	f.At(5 * time.Second)
-	wantJob(t, f, f.Actions)
+	wantNoJob(t, f, f.Actions)
 }
 
 func TestPlacementNamedClaimFollowsTheSameHold(t *testing.T) {

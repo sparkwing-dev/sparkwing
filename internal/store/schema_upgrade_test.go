@@ -13,6 +13,7 @@ import (
 func schema30Store(t *testing.T, target *storetest.Target) {
 	t.Helper()
 	st := target.Open(t)
+	dropActionsSchema(t, st)
 	for _, statement := range []string{
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
 		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('kept','TOKEN','sealed-configuration','fixture',1,1)`,
@@ -34,6 +35,7 @@ func schema30Store(t *testing.T, target *storetest.Target) {
 func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	dropActionsSchema(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +55,7 @@ func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
 func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	dropActionsSchema(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +78,7 @@ func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	dropActionsSchema(t, st)
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -250,4 +254,40 @@ func shapeDiff(a, b string) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+func dropActionsSchema(t *testing.T, st *store.Store) {
+	t.Helper()
+	for _, table := range []string{"github_actions_dispatches", "github_actions_approvals"} {
+		if _, err := st.DB().Exec(`DROP TABLE ` + table); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSchemaUpgradeAddsActionsWithoutLosingConfiguration(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	if _, err := st.DB().Exec(`INSERT INTO teams(name,created_at,updated_at) VALUES('kept',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES('kept','TOKEN','sealed-configuration','fixture',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	dropActionsSchema(t, st)
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=34,baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	var secret string
+	if err := upgraded.DB().QueryRow(`SELECT value FROM secrets WHERE team='kept' AND name='TOKEN'`).Scan(&secret); err != nil || secret != "sealed-configuration" {
+		t.Fatalf("configured secret changed: %v", err)
+	}
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("upgrade shape: %s", shapeDiff(a, b))
+	}
 }

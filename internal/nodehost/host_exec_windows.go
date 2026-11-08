@@ -17,6 +17,8 @@ func bufferedBytes(*os.File) int { return 0 }
 
 func trackHostCommand(cmd *exec.Cmd, _ []string) *commandSession { return &commandSession{cmd: cmd} }
 
+func (c *commandSession) leader() (int, string, bool) { return 0, "", false }
+
 func (c *commandSession) kill() {
 	if err := c.cmd.Process.Kill(); err != nil {
 		slog.Default().Debug("kill SDK command", "err", err)

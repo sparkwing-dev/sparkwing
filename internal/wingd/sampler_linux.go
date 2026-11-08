@@ -18,12 +18,12 @@ import (
 const linuxClockTicks = 100.0
 
 func (p *procSampler) sample(pid int) (ProcUsage, bool) {
-	usages := p.sampleMany([]int{pid})
+	usages := p.sampleMany([]int{pid}, nil)
 	usage, ok := usages[pid]
 	return usage, ok
 }
 
-func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
+func (p *procSampler) sampleMany(pids []int, members map[int][]int) map[int]ProcUsage {
 	procs, ok := linuxProcesses()
 	if !ok {
 		p.unmeasuredMetrics(pids)
@@ -42,7 +42,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 			p.forget(pid)
 			continue
 		}
-		trees[pid] = collectSubtree(pid, children)
+		trees[pid] = collectSubtree(pid, children, members[pid]...)
 	}
 
 	usages := make(map[int]ProcUsage, len(trees))

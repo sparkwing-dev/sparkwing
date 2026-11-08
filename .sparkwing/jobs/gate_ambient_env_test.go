@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,7 +13,7 @@ func TestTheTestStepKeepsLiveServicesAwayFromTheSuitesItRuns(t *testing.T) {
 		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
 	}
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := newTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, "internal", "ambient_probe_test.go"), ambientServiceProbe)
 	gitAddAll(t, root)

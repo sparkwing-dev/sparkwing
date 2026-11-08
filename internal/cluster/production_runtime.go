@@ -31,8 +31,8 @@ import (
 func productionRuntime(version string) clusterRuntime {
 	return clusterRuntime{
 		Launcher: productionLauncher(version),
-		Runner: RunnerCLI{Actions: func(ctx context.Context, controller, team string) (capability.Issued, error) {
-			return client.ExchangeGitHubActions(ctx, client.EngineOptions{URL: controller}, team, os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"), os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"))
+		Runner: RunnerCLI{Actions: func(ctx context.Context, controller, team, receipt string) (capability.Issued, error) {
+			return client.ExchangeGitHubActions(ctx, client.EngineOptions{URL: controller}, team, os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"), os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"), receipt)
 		}, Factory: func(ctx context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
 			home, err := wingd.HomeDir("")
 			if err != nil {

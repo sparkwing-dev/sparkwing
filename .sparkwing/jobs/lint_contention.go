@@ -30,6 +30,13 @@ func lintCommand(base string) string {
 	return "golangci-lint run --allow-serial-runners --new-from-merge-base= --new-from-rev=" + base + " ./..."
 }
 
+// perf: affected lint has its own checkout cache and bounded workers, so it
+// can judge a small diff while a neighboring full scan owns the global lock.
+func affectedLintCommand(base string) string {
+	cores := goStepParallelism(currentHost())
+	return fmt.Sprintf("GOMAXPROCS=%d golangci-lint run --allow-parallel-runners -j %d --new-from-merge-base= --new-from-rev=%s ./...", cores, cores, base)
+}
+
 // perf: the subset that answers in about a second over the packages one push
 // touches. Every name is enabled in .golangci.yml, the whole set the release
 // cut runs; what the subset leaves out is the type-and-SSA family, which
@@ -80,6 +87,9 @@ func runGolangciLintTouched(ctx context.Context) error {
 		return err
 	}
 	for _, f := range files {
+		if isTestdataPath(f) {
+			continue
+		}
 		switch path.Base(f) {
 		case "go.mod", "go.sum", ".golangci.yml":
 			sparkwing.Info(ctx, "golangci-lint: %s changed, so every package is linted", f)
@@ -95,12 +105,11 @@ func runGolangciLintTouched(ctx context.Context) error {
 		targets[module] = defaultBuildPackages(module, pkgs, true)
 	}
 	sparkwing.Info(ctx, "golangci-lint: linting the packages that hold changed Go files (%s)", scope)
-	return runGolangciLintOver(ctx, targets)
+	return lintModules(ctx, gateLintDeadline, affectedLintCommand, targets)
 }
 
 // safety: nil targets lint every package; a module absent from targets is skipped.
 func lintModules(ctx context.Context, deadline time.Duration, command func(base string) string, targets map[string][]string) error {
-	const doing = "waiting for the box-wide lock if held, then linting"
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
@@ -127,6 +136,10 @@ func lintModules(ctx context.Context, deadline time.Duration, command func(base 
 		} else if empty, emptyErr := moduleHasNoPackages(lintCtx, dir); emptyErr == nil && empty {
 			sparkwing.Info(lintCtx, "golangci-lint: %s holds no packages to lint", dir)
 			continue
+		}
+		doing := "linting with bounded workers"
+		if strings.Contains(script, "--allow-serial-runners") {
+			doing = "waiting for the box-wide lock if held, then linting"
 		}
 		stepStart := time.Now()
 		sparkwing.Info(lintCtx, "golangci-lint: %s %s (deadline %s)", dir, doing, deadline)

@@ -63,7 +63,7 @@ An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, 
 
 | Scope | Resources | Verbs | Used for |
 | --- | --- | --- | --- |
-| `argocd` | `applications.argoproj.io` named `sparkwing`, `sparkwing-staging` | get | Synced/Healthy wait |
+| `argocd` | `applications.argoproj.io` named `sparkwing`, `sparkwing-staging` | get, patch | Hard refresh after each GitOps push, then Synced/Healthy wait |
 | `sparkwing`, `sparkwing-staging` | `deployments`, `replicasets` (apps) | get, list, watch | `kubectl rollout status`, image check |
 | `sparkwing`, `sparkwing-staging` | `pods`, `pods/log` | get, list | WARN and ERROR scan of controller and launcher logs |
 | cluster | `nodes` | get, list | which node carries a smoke run's `sparkwing.dev/used-run` |
@@ -78,7 +78,16 @@ An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, 
 | `/kikd-prod/sparkwing/deploy/staging-gate-token` | staging team token, `runs.read,logs.read,runs.write` | staging fixture team `stg-qa` |
 | `/kikd-prod/sparkwing/deploy/scan-submit-token` | production source-owning team token, `runs.read,logs.read,runs.write` | production smoke and scan submission |
 
-The `example` run the staging gate starts also reads `EXAMPLE_PROBE_TOKEN`, a Sparkwing secret stored on `stg-qa` rather than in SSM, holding a separate `stg-qa` token with `runs.read,logs.read,runs.write`. Its lifecycle probes use it to start, cancel, retry and read `example-probe` runs from inside the Cloud job. Without it they skip.
+The full `example` run also reads `EXAMPLE_PROBE_TOKEN` from its target fixture team's Sparkwing secrets, rather than SSM. It holds a separate token for that team with `runs.read,logs.read,runs.write`. Its lifecycle probes use it to start, cancel, retry and read `example-probe` runs from inside the Cloud job. Without it they skip.
+
+The production controller also scopes `DEPLOY_SCAN_STAGING_TOKEN` and
+`DEPLOY_SCAN_PRODUCTION_TOKEN` to the `deploy` pipeline: a same-revision child
+keeps its parent pipeline identity when selecting secrets. They hold fixture-team
+tokens for starting and observing the full example on staging and production.
+The deploy starts the scan through the authenticated child-start route; it inherits
+the deploy's verified-default repository identity instead of a manually asserted
+identity. No scan-submit token is used. The detached scan records its result through the runner user's installed Bitwing
+and normal ledger. See [deployment instructions](../../../DELIVERY.md#deploying-sparkwing-cloud).
 
 These are long-lived secrets. They never sit on a runner's disk past the job (the job writes each to a 0600 file in its temporary directory and removes the directory) and are masked in logs, but whoever holds the role can read them. Each token should carry an expiry and a rotation date in the ink vault runbook.
 
@@ -160,7 +169,7 @@ A GitHub deploy key reaches its whole repository, so a write key on kikd-gitops 
 
 A release that changes them updates kikd-infra before its deploy, staging first, then production: render the chart at the new tag (`helm template <release> charts/sparkwing-full --namespace <ns> -f <env dir>/helm-values.yaml`), copy its cluster-scoped documents into the environment's file, land that on kikd-infra main and wait for `sparkwing-cluster` to report Synced. Add permissions before the deploy and remove them after the old version is gone. `sparkwing-cluster` prunes, so deleting an object from the file deletes it from the cluster; a Namespace leaves the file only on purpose, because deleting it deletes everything in it.
 
-**Argo refresh.** The role no longer patches applications, so the pipeline waits for Argo's own poll (3 minutes by default), about four extra minutes per deploy across the two phases. A GitHub webhook from sparkwing-gitops to `https://argocd.rangz.dev/api/webhook`, with its secret in `argocd-secret` as `webhook.github.secret`, brings that back to seconds; it is configured in the Argo Helm values in kikd-infra and is not on the branch.
+**Argo refresh.** The deploy role may get and patch only the named `sparkwing` and `sparkwing-staging` Applications. After each GitOps push, the pipeline sets `argocd.argoproj.io/refresh=hard` and then waits for the exact revision to be Synced and Healthy. Patch refusal fails that phase with a permission remedy; the pipeline does not fall back to Argo's periodic poll.
 
 **Pipeline.** The pipeline writes only `sparkwing-dev/sparkwing-gitops`, with the `sparkwing-gitops-deploy-key` parameter, in the same directory names.
 

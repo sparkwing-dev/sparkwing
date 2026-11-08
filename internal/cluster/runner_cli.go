@@ -46,7 +46,7 @@ type RunnerFactory func(context.Context, RunnerOptions) (runners.RuntimeConfig, 
 type RunnerCLI struct {
 	ReadConfig func(string) (userconfig.Config, error)
 	Factory    RunnerFactory
-	Actions    func(context.Context, string, string) (capability.Issued, error)
+	Actions    func(context.Context, string, string, string) (capability.Issued, error)
 }
 
 // Run parses the final grammar before reading credentials or constructing a host.
@@ -57,6 +57,9 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	fs, err := commandFlags(command, args)
 	if err != nil {
 		return parsedHelp(err)
+	}
+	if fs.Changed("dispatch-receipt") && (!enabled(fs, "github-actions") || textFlag(fs, "dispatch-receipt") == "") {
+		return errors.New("--dispatch-receipt requires --github-actions and a nonempty controller receipt")
 	}
 	config, accepted, boxID, err := cli.config(command, fs)
 	if err != nil {
@@ -276,7 +279,7 @@ func (cli RunnerCLI) authorizeActions(ctx context.Context, fs *flag.FlagSet, opt
 	if cli.Actions == nil {
 		return errors.New("GitHub Actions exchange is unavailable: compose the controller capability exchange")
 	}
-	issued, err := cli.Actions(ctx, *options.Config.Controller, team)
+	issued, err := cli.Actions(ctx, *options.Config.Controller, team, textFlag(fs, "dispatch-receipt"))
 	if err != nil {
 		return err
 	}
@@ -292,6 +295,10 @@ func (cli RunnerCLI) authorizeActions(ctx context.Context, fs *flag.FlagSet, opt
 	}
 	options.Loop.ClaimUntil = *expires
 	options.Loop.VersionPinned, options.Loop.FailOnFailedWork = true, true
+	if push.Receipt != "" {
+		options.Loop.Kinds = []capability.UnitKind{capability.UnitNode}
+		options.Loop.MaxClaims = 1
+	}
 	options.actions = &githubActionsSource{repository: push.RepositoryKey, token: os.Getenv("GITHUB_TOKEN")}
 	if options.Config.Repos == nil {
 		options.Config.Repos = []string{"github.com/" + push.Repository}

@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -52,7 +51,7 @@ func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 	for _, dir := range productDirs {
 		t.Run(dir, func(t *testing.T) {
 			root := lintFixtureRepo(t)
-			ctx := context.Background()
+			ctx := newTestContext(t)
 
 			if err := runGolangciLint(ctx); err != nil {
 				t.Fatalf("clean fixture must pass lint, or the red below proves nothing: %v", err)
@@ -78,7 +77,7 @@ func TestLintStillCoversThePipelineModule(t *testing.T) {
 		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
 	}
 	root := lintFixtureRepo(t)
-	ctx := context.Background()
+	ctx := newTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "negative_control.go"),
 		ineffassignViolation("pipelines"))
@@ -94,7 +93,7 @@ func TestLintCoversEveryCommittedModule(t *testing.T) {
 		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
 	}
 	root := lintFixtureRepo(t)
-	ctx := context.Background()
+	ctx := newTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, "tools", "go.mod"), "module fixture/tools\n\ngo 1.25\n")
 	writeGoFile(t, filepath.Join(root, "tools", "bad.go"), ineffassignViolation("tools"))
@@ -106,12 +105,15 @@ func TestLintCoversEveryCommittedModule(t *testing.T) {
 }
 
 func TestLintJudgesAllFilesWhenTheBaselineRefIsMissing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: real lint integration runs in full scans")
+	}
 	root := lintFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, ".golangci.yml"), lintBaselineFixtureConfig)
 	writeGoFile(t, filepath.Join(root, "internal", "bad.go"), ineffassignViolation("internal"))
 	gitCommitAll(t, root, "uploaded snapshot with finding")
 	runTestGit(t, root, "update-ref", "-d", "refs/remotes/"+gateBaselineRef)
-	err := runGolangciLint(t.Context())
+	err := runGolangciLint(newTestContext(t))
 	if err == nil || !strings.Contains(err.Error(), "ineffectual assignment") {
 		t.Fatalf("lint did not judge snapshot finding: %v", err)
 	}
@@ -130,7 +132,7 @@ func TestLintScopeLineNamesEveryModuleAndTheBaseline(t *testing.T) {
 func TestLintBaselineDescriptionCarriesTheResolvedCommit(t *testing.T) {
 	root := lintFixtureRepo(t)
 
-	_, got, err := resolveGateBase(context.Background())
+	_, got, err := resolveGateBase(newTestContext(t))
 	if err != nil {
 		t.Fatalf("the fixture's baseline must resolve: %v", err)
 	}
@@ -157,6 +159,7 @@ func TestTouchedLintJudgesOnlyThePackagesTheChangeHolds(t *testing.T) {
 	}
 	root := lintFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "internal", "negative_control.go"), ineffassignViolation("internal"))
+	writeGoFile(t, filepath.Join(root, "testdata", "tool", "go.mod"), "module fixture/tool\n\ngo 1.25\n")
 	gitAddAll(t, root)
 	host := newTestHost(t, sparkwingtest.Options{})
 	err := runGolangciLintTouched(host.Context(t.Context()))

@@ -5,11 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 	sparkwing "github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 func TestTemplateVerifyCLIPathUsesPlatformExecutableName(t *testing.T) {
@@ -25,6 +27,44 @@ func TestTemplateVerifyCLIPathUsesPlatformExecutableName(t *testing.T) {
 		if got, want := templateVerifyCLIPath(dir, tc.goos), filepath.Join(dir, tc.name); got != want {
 			t.Errorf("%s executable = %q, want %q", tc.goos, got, want)
 		}
+	}
+}
+
+func TestTemplateVerifierCompilesAndPlansFreshTemplate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the CLI and a fresh template")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := templateVerifyCLIPath(t.TempDir(), runtime.GOOS)
+	build := exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-o", bin, "./cmd/sparkwing")
+	build.Dir = root
+	build.Env = append(os.Environ(), "GOWORK=off")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build verifier CLI: %v\n%s", err, output)
+	}
+	ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
+	for key, value := range readGoEnv(ctx) {
+		t.Setenv(key, value)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	var manifest templates.Manifest
+	for _, candidate := range verifyTemplates {
+		if candidate.Manifest.Name == "lint-test-go" {
+			manifest = candidate.Manifest
+			break
+		}
+	}
+	if manifest.Name == "" {
+		t.Fatal("lint-test-go verification template is missing")
+	}
+	manifest.Verify = templates.VerifyCompileOnly
+	outcome, err := verifyTemplate(ctx, manifest, verifyEnv{CLI: bin, Root: root})
+	if err != nil || outcome.Tier != templates.VerifyCompileOnly || outcome.Skipped {
+		t.Fatalf("fresh-template verification: %+v: %v", outcome, err)
 	}
 }
 
@@ -198,7 +238,7 @@ func TestNodeFixture_PassesNpm(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"ci"}, {"test"}, {"run", "lint"}} {
-		result, err := sparkwing.Bash(t.Context(), "npm "+strings.Join(args, " ")).Dir(dir).Capture()
+		result, err := sparkwing.Bash(newTestContext(t), "npm "+strings.Join(args, " ")).Dir(dir).Capture()
 		if err != nil {
 			t.Fatalf("npm %v: %v\n%s\n%s", args, err, result.Stdout, result.Stderr)
 		}

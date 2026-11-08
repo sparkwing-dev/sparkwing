@@ -25,7 +25,7 @@ func TestReleaseGatesFetchThePreviousTagInTheJobCheckout(t *testing.T) {
 			before := gitRun(t, checkout, "rev-parse", "HEAD")
 			results := make(chan error, len(gates))
 			for _, gate := range gates {
-				go func() { results <- gate(t.Context(), checkout, "v0.2.0") }()
+				go func() { results <- gate(newTestContext(t), checkout, "v0.2.0") }()
 			}
 			for range gates {
 				if err := <-results; err != nil {

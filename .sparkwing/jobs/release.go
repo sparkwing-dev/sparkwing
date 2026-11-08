@@ -131,15 +131,16 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 	})
 	budget.step(w, "test", runShortTest)
 	// safety: these checks only read, so a dry run reports what the cut would refuse.
-	budget.step(w, "version-freshness", func(ctx context.Context) error {
+	// perf: a shared policy root keeps every release guard selected when desktop cuts reuse CI evidence.
+	freshness := budget.step(w, "version-freshness", func(ctx context.Context) error {
 		return checkPublishedVersionsFreshness(ctx, sparkwing.WorkDir())
 	}).SafeWithoutDryRun()
-	budget.step(w, "go-directives", checkGoDirectives).SafeWithoutDryRun()
+	budget.step(w, "go-directives", checkGoDirectives).Needs(freshness).SafeWithoutDryRun()
 	budget.step(w, "sdk-pins", func(context.Context) error {
 		return checkReleasePins(sparkwing.WorkDir())
-	}).SafeWithoutDryRun()
-	budget.step(w, "changelog-links", checkChangelogLinks).SafeWithoutDryRun()
-	budget.step(w, "docs-sidebar", checkDocsSidebar).SafeWithoutDryRun()
+	}).Needs(freshness).SafeWithoutDryRun()
+	budget.step(w, "changelog-links", checkChangelogLinks).Needs(freshness).SafeWithoutDryRun()
+	budget.step(w, "docs-sidebar", checkDocsSidebar).Needs(freshness).SafeWithoutDryRun()
 	budget.verdict(w)
 	return nil, nil
 }
@@ -335,6 +336,10 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 		return fmt.Errorf("release: %w", err)
 	}
 	staged := []string{"CHANGELOG.md", embeddedChangelogRel}
+	if err := prepareReleasePins(ctx, j.RepoDir, version); err != nil {
+		return err
+	}
+	staged = append(staged, sparkwingPinArtifacts[2:]...)
 	switch {
 	case roll.needed && roll.guideOnDisk:
 		body = roll.changelogBody
@@ -369,7 +374,7 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add"}, staged...)...); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
 	}
-	sparkwing.Info(ctx, "staged release notes for %s; commit waits for the schema and wire gates", version)
+	sparkwing.Info(ctx, "staged release notes and SDK pins for %s; commit waits for the schema and wire gates", version)
 	return nil
 }
 
@@ -388,14 +393,14 @@ func (j *commitChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 		commit, err := runGitIn(ctx, j.RepoDir, "rev-parse", "--verify", "HEAD^{commit}")
 		return strings.TrimSpace(commit), err
 	}).DryRun(func(ctx context.Context) error {
-		sparkwing.Info(ctx, "dry-run: would commit prepared release notes for %s after all gates pass", j.Version.Get(ctx))
+		sparkwing.Info(ctx, "dry-run: would commit prepared release notes and SDK pins for %s after all gates pass", j.Version.Get(ctx))
 		return nil
 	}), nil
 }
 
 func (j *commitChangelogJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	pending, err := runGitIn(ctx, j.RepoDir, "diff", "--cached", "--name-only")
+	pending, err := runGitIn(ctx, j.RepoDir, append([]string{"diff", "--cached", "--name-only", "--"}, releasePreparedPaths(version)...)...)
 	if err != nil {
 		return fmt.Errorf("release: read the staged set: %w", err)
 	}
@@ -404,11 +409,31 @@ func (j *commitChangelogJob) run(ctx context.Context) error {
 		return nil
 	}
 	rolled := slices.Contains(strings.Fields(pending), migrationsDirRel+"/"+version+".md")
-	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", releaseCommitSubject(version, rolled)); err != nil {
+	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"commit", "--no-verify", "-m", releaseCommitSubject(version, rolled), "--"}, strings.Fields(pending)...)...); err != nil {
 		return fmt.Errorf("release: git commit CHANGELOG.md: %w", err)
 	}
 	sparkwing.Info(ctx, "committed CHANGELOG.md rewrite for %s", version)
 	return nil
+}
+
+func releasePreparedPaths(version string) []string {
+	paths := slices.Clone(sparkwingPinArtifacts)
+	for _, name := range []string{version + ".md", unreleasedGuideName, migrationIndexName} {
+		paths = append(paths, migrationFileRels(name)...)
+	}
+	return paths
+}
+
+func prepareReleasePins(ctx context.Context, repoDir, version string) error {
+	if err := bumpFallbackSDKVersionFile(repoDir, version); err != nil {
+		return err
+	}
+	for _, module := range []string{".sparkwing", kubernetesE2EPipelineModuleRel} {
+		if err := bumpPipelineModulePin(ctx, repoDir, module, version); err != nil {
+			return err
+		}
+	}
+	return regenerateScaffoldAPISnapshot(ctx, repoDir)
 }
 
 func releaseCommitSubject(version string, rolled bool) string {
@@ -454,6 +479,7 @@ func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
 	case rewriteApply:
 		sparkwing.Info(ctx, "dry-run: would rename [Unreleased] -> [%s] (%d entries) and stage", version, action.unreleasedEntries)
 	}
+	sparkwing.Info(ctx, "dry-run: would align scaffold, API snapshot and pipeline module pins to %s", version)
 	roll, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
@@ -681,7 +707,7 @@ func tagExistsOnRemote(ctx context.Context, repoDir, tag string) (bool, error) {
 }
 
 func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
-	res, err := sparkwing.Exec(ctx, "git", args...).Dir(dir).Run()
+	res, err := sparkwing.Exec(ctx, "git", args...).Dir(dir).Capture()
 	if err != nil {
 		msg := strings.TrimSpace(res.Stderr)
 		if msg == "" {
