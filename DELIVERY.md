@@ -19,11 +19,11 @@ landing goes through Sparkwing itself. From a clean work branch:
 
 ```bash
 sparkwing run land --sw-dry-run                           # preview; nothing is pushed
-sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate and review, stop before the push
-sparkwing run land --sw-allow-risk destructive,prod                         # land on main
+sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod -- --cloud-profile cloud
+sparkwing run land --sw-allow-risk destructive,prod -- --cloud-profile cloud
 ```
 
-To keep the heavy checks off the developer's machine, use the `cloud` profile
+Heavy landing checks run on Sparkwing Cloud. Use the `cloud` profile
 for team `korey-gam`:
 
 ```bash
@@ -33,15 +33,24 @@ sparkwing run land --sw-route local --sw-allow-risk destructive,prod -- --cloud-
 
 `--sw-route local` keeps land on the developer's machine. With `--cloud-profile`, its
 local policy job runs first, then a light `cloud-gate` job invokes
-`sparkwing run gate --sw-route cloud --profile cloud -o json -- --full --base SHA` while
+`sparkwing run gate --sw-route cloud --profile cloud -o json -- --base SHA` while
 the local review runs beside it. Cloud runs the policy, broad `gate`,
 `race-touched` and `record-tree` jobs. Each Cloud job fetches the exact public
 `origin/main` commit captured by preconditions over HTTPS, without developer
 credentials. That commit bounds policy and lint findings even though the uploaded
-snapshot has no ancestry. Full mode runs every package. The two heavy jobs each
+snapshot has no ancestry. The affected fast dependency closure, full critical
+set and touched-package fast race class match local gate mode. The two heavy jobs each
 request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
 requires a successful Cloud receipt and an unchanged clean HEAD before and
 after the remote gate. The landing record's `gate_run` names the Cloud run.
+Each Cloud policy, gate and race job restores a Sparkwing tool cache keyed by
+`.sparkwing/jobs/gate_tools.go` and the host platform. Before checks start, it
+installs checksum-pinned golangci-lint 2.12.2 and pnpm 12.6.0 on a cache miss,
+adds their private paths to PATH, and verifies the runner's Go, Node and npm.
+The image supplies Git, Bash, curl, tar and coreutils. Go module downloads and
+Go build/test results use Sparkwing dependency caches. Fresh workers can reuse
+the policy job's compiled dependencies and later runs can reuse those caches.
+Full scans still use `sparkwing run gate -- --full`.
 The wrapper passes this repository's tracked secret-shaped fixtures, listed in
 `cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
 that kind fails the Cloud upload until it is added there.

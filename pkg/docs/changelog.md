@@ -54,6 +54,8 @@ unlock.
 
 ### Changed
 
+- Cloud landing checks restore cached Go builds and checksum-pinned lint and pnpm tools before running the affected gate.
+
 - Landing gates run fast tests across affected package dependencies, keep full critical checks and touched-package race checks, and leave PostgreSQL and long integration suites to full and release runs. Lint starts alongside tests, and affected race results can reuse Go's test cache.
 
 - **examples:** The `example` pipeline's memoized-step, cancellation and logs-history probes now run on Sparkwing Cloud instead of skipping. A new `lifecycle-cli` job builds the CLI from the checkout and signs in to `--api-controller` with the optional `EXAMPLE_PROBE_TOKEN` secret, and the deploy pipeline's staging gate passes the staging controller. Without a CLI on the host, a controller or that secret, the probes still skip with the reason.

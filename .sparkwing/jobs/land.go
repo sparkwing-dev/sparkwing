@@ -20,7 +20,7 @@ type Land struct{ sparkwing.Base }
 // LandArgs selects the gate's controller and supplies the local review inputs.
 type LandArgs struct {
 	ReviewArgs
-	CloudProfile string `flag:"cloud-profile" desc:"Run the full gate, including race tests, on this Cloud profile; keep review and push local."`
+	CloudProfile string `flag:"cloud-profile" desc:"Run the affected gate, including race tests, on this Cloud profile; keep review and push local."`
 }
 
 func (Land) ShortHelp() string {
@@ -28,7 +28,7 @@ func (Land) ShortHelp() string {
 }
 
 func (Land) Help() string {
-	return "Pass --cloud-profile NAME to run the full gate, including race tests, on Cloud while policy, review and push stay local. " +
+	return "Pass --cloud-profile NAME to run the affected gate, including race tests, on Cloud while policy, review and push stay local. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks), so a policy finding fails the land within seconds, " +
 		"and once it passes runs the rest of the gate (the same jobs as `sparkwing run gate`) and the review " +

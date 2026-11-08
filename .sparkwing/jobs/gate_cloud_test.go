@@ -51,7 +51,13 @@ func TestCloudGatePreparesTheBaselineInEveryJobWorkspace(t *testing.T) {
 		if (job.ID == "gate" || job.ID == "race-touched") && (job.Cores == nil || *job.Cores != overlappedGoSuiteCPUs) {
 			t.Fatalf("%s lost its hosted four-core allocation: %+v", job.ID, job.Cores)
 		}
-		if len(job.Closures.BeforeRun) != 1 {
+		want := 2
+		if job.ID == recordTreeJob {
+			want = 1
+		} else if len(job.Caches) != 3 {
+			t.Fatalf("%s has no tool, Go build and module caches: %+v", job.ID, job.Caches)
+		}
+		if len(job.Closures.BeforeRun) != want {
 			t.Fatalf("%s has no baseline preparation: %+v", job.ID, job.Closures)
 		}
 	}

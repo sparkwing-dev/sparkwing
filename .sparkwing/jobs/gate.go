@@ -81,6 +81,11 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 			job.BeforeRun(func(ctx context.Context) error {
 				return fetchGateBase(ctx, "https://github.com/sparkwing-dev/sparkwing.git", in.Base)
 			})
+			if job.ID() != recordTreeJob {
+				job.Cache(sparkwing.Dir(gateToolsPath, sparkwing.KeyFromFile(".sparkwing/jobs/gate_tools.go")),
+					sparkwing.Dir(gateGoCachePath, sparkwing.KeyFromFile("go.sum")), sparkwing.GoModules())
+				job.BeforeRun(prepareCloudGateTools)
+			}
 		}
 	}
 	return nil

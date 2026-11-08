@@ -407,7 +407,7 @@ func TestLandCloudGateWaitsForSuccessAndChecksTheCheckout(t *testing.T) {
 			bin := t.TempDir()
 			script := `#!/bin/sh
 case "$*" in
-  'run gate --sw-route cloud --profile cloud -o json --allow-secret-file .gitleaks.toml,testdata/sdk-compat/go/v1/compat-cache-key.txt -- --full --base aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') ;;
+  'run gate --sw-route cloud --profile cloud -o json --allow-secret-file .gitleaks.toml,testdata/sdk-compat/go/v1/compat-cache-key.txt -- --base aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') ;;
   *) echo "unexpected invocation: $*" >&2; exit 2 ;;
 esac
 if [ "$LAND_CLOUD_TEST_MODE" = fail ]; then exit 1; fi

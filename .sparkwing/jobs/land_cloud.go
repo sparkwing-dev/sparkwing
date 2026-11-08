@@ -44,8 +44,8 @@ func (j *landCloudGate) run(ctx context.Context) (string, error) {
 	if allowed != "" {
 		args = append(args, "--allow-secret-file", strings.Join(strings.Fields(allowed), ","))
 	}
-	// safety: full mode covers every package; the public base keeps policy and lint scoped to this change.
-	result, err := sparkwing.Exec(ctx, "sparkwing", append(args, "--", "--full", "--base", head.Base)...).Dir(j.RepoDir).Run()
+	// safety: the exact public base gives the snapshot the same affected scope as local land.
+	result, err := sparkwing.Exec(ctx, "sparkwing", append(args, "--", "--base", head.Base)...).Dir(j.RepoDir).Run()
 	if err != nil {
 		return "", fmt.Errorf("land: Cloud gate failed; inspect the run with --profile %s: %w", j.Profile, err)
 	}

@@ -507,10 +507,7 @@ func goChange(files []string, byDir map[string]string) string {
 			continue
 		case strings.HasSuffix(f, ".go"):
 			return f + " changed"
-		case path.Base(f) == "go.mod" || path.Base(f) == "go.sum" || path.Base(f) == ".golangci.yml":
-			return f + " changed"
-		}
-		if _, ok := wholeModuleTriggers[f]; ok {
+		case path.Base(f) == "go.mod" || path.Base(f) == "go.sum" || path.Base(f) == ".golangci.yml" || f == "internal/store/schema.sql":
 			return f + " changed"
 		}
 		if pkg := owningPackage(f, byDir); pkg != "" {
