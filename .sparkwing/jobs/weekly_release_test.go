@@ -46,6 +46,11 @@ func TestWeeklyReleaseUsesFreshMainAndTheExistingCut(t *testing.T) {
 			writeDeliveryTool(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' \"$RELEASE_TEST_CI\"\n")
 			writeDeliveryTool(t, filepath.Join(bin, "sparkwing"), `#!/bin/sh
 set -eu
+[ "$SPARKWING_SECRETS_KEY_FILE" = "$SPARKWING_HOME/secrets.key" ]
+if [ "$1" = daemon ]; then
+  printf '%s\n' "$*" > "$RELEASE_TEST_CALL.stop"
+  exit
+fi
 printf '%s\n' "$@" > "$RELEASE_TEST_CALL"
 printf '%s\n' "$SPARKWING_HOME" >> "$RELEASE_TEST_CALL"
 git -C "$4" rev-parse HEAD >> "$RELEASE_TEST_CALL"
@@ -76,6 +81,10 @@ git -C "$4" rev-parse HEAD >> "$RELEASE_TEST_CALL"
 				}
 				if strings.Contains(text, "--sw-allow-risk") != (mode == "release") {
 					t.Fatalf("risk propagation: %s", text)
+				}
+				stop, err := os.ReadFile(call + ".stop")
+				if err != nil || strings.TrimSpace(string(stop)) != "daemon stop" {
+					t.Fatalf("private controller cleanup = %q, %v", stop, err)
 				}
 			}
 			if after := gitRun(t, repo, "status", "--porcelain"); after != before {

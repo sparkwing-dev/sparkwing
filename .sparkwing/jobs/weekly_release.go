@@ -100,8 +100,17 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 		args = append(args, "--bump", j.Args.Bump)
 	}
 	sparkwing.Info(ctx, "release source main@%s (%d unreleased entries)", head, entries)
+	state := filepath.Join(dir, "state")
+	defer func() {
+		_, stopErr := sparkwing.Exec(context.WithoutCancel(ctx), "sparkwing", "daemon", "stop").
+			Env("SPARKWING_HOME", state).Env("SPARKWING_SECRETS_KEY_FILE", filepath.Join(state, "secrets.key")).Run()
+		if stopErr != nil {
+			err = errors.Join(err, fmt.Errorf("stop private release controller: %w", stopErr))
+		}
+	}()
 	_, err = sparkwing.Exec(ctx, "sparkwing", args...).Dir(checkout).
-		Env("SPARKWING_HOME", filepath.Join(dir, "state")).Env("GOWORK", "off").Run()
+		Env("SPARKWING_HOME", state).Env("SPARKWING_SECRETS_KEY_FILE", filepath.Join(state, "secrets.key")).
+		Env("GOWORK", "off").Run()
 	return err
 }
 
