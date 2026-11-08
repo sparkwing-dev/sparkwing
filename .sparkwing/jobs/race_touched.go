@@ -44,10 +44,32 @@ func runRaceTouched(ctx context.Context, mode gateMode, suitesDone <-chan struct
 			return err
 		}
 	}
+	if mode == gateAffected {
+		return runAffectedRaceModules(ctx, targets)
+	}
 	return withGoTestScratch(func(testRoot string) error {
 		return withProductTestHome(func(home string) error {
 			return raceModules(ctx, targets, testRoot, home, suitesDone)
 		})
+	})
+}
+
+// perf: the fast class avoids slow integration bodies and can reuse Go's
+// race-test cache. Full checks retain the uncached, sharded integration path.
+func runAffectedRaceModules(ctx context.Context, targets map[string][]string) error {
+	return withStableProductTestHome("gate-race", func(home string) error {
+		var failures []string
+		for _, module := range mapKeys(targets) {
+			cmd := raceGoCommand(currentHost(), "-race -short -timeout "+raceTouchedPackageTimeout.String()+" "+quoteAll(targets[module]))
+			script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
+			if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+				failures = append(failures, describeModuleFailure(module, err))
+			}
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("go test -race -short failed:\n  - %s", strings.Join(failures, "\n  - "))
+		}
+		return nil
 	})
 }
 

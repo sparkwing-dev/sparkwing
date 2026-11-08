@@ -200,7 +200,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		// safety: ready work and live holders can predate this owner; neither needs a second release event.
 		for _, row := range snapshot.Nodes {
-			if active[string(row.Ref.NodeID)] != nil || row.Status == runstate.StatusDone {
+			if active[string(row.Ref.NodeID)] != nil || row.Status == runstate.StatusDone || row.CancelRequestedAt != nil {
 				continue
 			}
 			if h.Local == nil || !h.Local(row) {
@@ -387,7 +387,13 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 
 	result, err := followReconciliation(ctx, h.Store, request, h.WaitNode)
 	if err != nil {
-		return err
+		// safety: cancellation can commit while reconciliation is in flight.
+		snapshot, readErr := h.Store.ReadSnapshot(ctx, run.RunID)
+		row, ok := ownerNode(snapshot, string(request.Ref.NodeID))
+		if readErr == nil && ok && row.CancelRequestedAt != nil {
+			return nil
+		}
+		return errors.Join(err, readErr)
 	}
 	if result.Kind != runstate.Execute {
 		return nil

@@ -448,6 +448,8 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	go s.runTeamDeletions(ctx, teamDeletionInterval)
 	go s.runBilling(ctx, billingInterval)
 	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
+	actionsDone := make(chan struct{})
+	go func() { defer close(actionsDone); s.runActionsDispatcher(ctx) }()
 	inboxDone := make(chan struct{})
 	go func() {
 		defer close(inboxDone)
@@ -456,6 +458,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	defer func() {
 		stopWorkers()
 		<-inboxDone
+		<-actionsDone
 	}()
 
 	errCh := make(chan error, len(servers))

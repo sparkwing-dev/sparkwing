@@ -90,12 +90,11 @@ func TestDaemon_AcceptLoopClosesAForeignConnection(t *testing.T) {
 	readPeerUID = func(net.Conn) (int, bool, error) { return foreign, true, nil }
 	defer func() { readPeerUID = restore }()
 
-	var mu sync.Mutex
-	var logs strings.Builder
+	refused := make(chan struct{})
 	sock := startLoggingDaemon(t, func(format string, args ...any) {
-		mu.Lock()
-		defer mu.Unlock()
-		fmt.Fprintf(&logs, format+"\n", args...)
+		if strings.Contains(fmt.Sprintf(format, args...), fmt.Sprintf("refused a connection from uid %d", foreign)) {
+			close(refused)
+		}
 	})
 
 	c, err := net.Dial("unix", sock)
@@ -110,18 +109,12 @@ func TestDaemon_AcceptLoopClosesAForeignConnection(t *testing.T) {
 		t.Fatalf("daemon answered a connection reported as uid %d (read %d bytes, err %v)", foreign, n, rerr)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		mu.Lock()
-		got := logs.String()
-		mu.Unlock()
-		if strings.Contains(got, fmt.Sprintf("refused a connection from uid %d", foreign)) {
-			return
-		}
-		if !time.Now().Before(deadline) {
-			t.Fatalf("daemon log does not record the refusal:\n%s", got)
-		}
-		time.Sleep(20 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	select {
+	case <-refused:
+	case <-ctx.Done():
+		t.Fatal("daemon did not record the refusal")
 	}
 }
 
@@ -193,20 +186,24 @@ func startLoggingDaemon(t *testing.T, logf func(format string, args ...any)) str
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() { errc <- d.Run(ctx) }()
+	ready, stop := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stop()
 	select {
 	case <-d.Ready():
 	case err := <-errc:
 		cancel()
 		t.Fatalf("daemon exited before serving: %v", err)
-	case <-time.After(3 * time.Second):
+	case <-ready.Done():
 		cancel()
 		t.Fatal("daemon never became ready")
 	}
 	t.Cleanup(func() {
 		cancel()
+		ctx, stop := context.WithTimeout(context.Background(), 3*time.Second)
+		defer stop()
 		select {
 		case <-errc:
-		case <-time.After(3 * time.Second):
+		case <-ctx.Done():
 			t.Error("daemon did not stop after cancel")
 		}
 	})

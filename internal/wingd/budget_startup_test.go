@@ -1,6 +1,7 @@
 package wingd_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,14 +13,19 @@ import (
 )
 
 type logCapture struct {
-	mu    sync.Mutex
-	lines []string
+	mu      sync.Mutex
+	lines   []string
+	changed chan struct{}
 }
 
 func (l *logCapture) logf(format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.lines = append(l.lines, strings.TrimSpace(fmt.Sprintf(format, args...)))
+	if l.changed != nil {
+		close(l.changed)
+	}
+	l.changed = make(chan struct{})
 }
 
 func (l *logCapture) contains(sub string) bool {
@@ -77,17 +83,21 @@ func TestDaemonStartup_LogsIgnoreExternal(t *testing.T) {
 
 func waitForLog(t *testing.T, log *logCapture, sub string) {
 	t.Helper()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	deadline := time.NewTimer(2 * time.Second)
-	defer deadline.Stop()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
 	for {
+		log.mu.Lock()
+		if log.changed == nil {
+			log.changed = make(chan struct{})
+		}
+		changed := log.changed
+		log.mu.Unlock()
 		if log.contains(sub) {
 			return
 		}
 		select {
-		case <-poll.C:
-		case <-deadline.C:
+		case <-changed:
+		case <-ctx.Done():
 			t.Fatalf("expected a log line containing %q, got:\n%s", sub, log.joined())
 		}
 	}

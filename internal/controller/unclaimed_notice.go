@@ -76,6 +76,15 @@ func placementNotices(view store.RunView) []engineid.Notice {
 			} else if tier.OpensIn > 0 {
 				state = append(state, "opens in "+tier.OpensIn.Round(time.Second).String())
 			}
+			if d := tier.Dispatch; d != nil {
+				state = append(state, "dispatch "+d.State+", receipt "+d.Receipt)
+				if d.Reason != "" && tier.Unavailable == "" {
+					state = append(state, d.Reason)
+				}
+				if d.ProviderRunID != "" {
+					state = append(state, "https://github.com/"+d.Repository+"/actions/runs/"+d.ProviderRunID)
+				}
+			}
 			if len(tier.Live) > 0 {
 				state = append(state, strings.Join(tier.Live, ", ")+" live")
 			}

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -37,7 +39,7 @@ func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	captured := os.Environ()
+	captured := testgit.Env(os.Environ())
 	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", captured, snapshots, runFlags{})
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +73,7 @@ func TestNativeLocalPreparationResolvesTrackingSparksBeforeInstallation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = prepareNativeLocalRun(t.Context(), home, dir, "ci", os.Environ(), snapshots, runFlags{})
+	_, err = prepareNativeLocalRun(t.Context(), home, dir, "ci", testgit.Env(os.Environ()), snapshots, runFlags{})
 	if err == nil || !strings.Contains(err.Error(), "--sw-no-update") || !strings.Contains(err.Error(), "example.com/dependency@latest") {
 		t.Fatalf("tracking resolution did not precede source installation: %v", err)
 	}
@@ -104,7 +106,7 @@ func main() {
 	}
 	binary := filepath.Join(t.TempDir(), "pipeline")
 	build := exec.CommandContext(t.Context(), "go", "-C", dir, "build", "-mod=mod", "-o", binary, ".")
-	build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+	build.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build local probe: %v: %s", err, output)
 	}
@@ -113,7 +115,7 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	git := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
+	git := testgit.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
 	sha, err := git.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -141,11 +143,11 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seal, err := snapshots.Capture(t.Context(), os.Environ())
+	seal, err := snapshots.Capture(t.Context(), testgit.Env(os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}}}
+	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Local: true, Captured: testgit.Env(os.Environ()), Masker: masker}}}
 	planner := nodehost.SDKPlanner{
 		Start: processes.StartPlanning, Masker: masker,
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
@@ -191,7 +193,7 @@ func TestNativeLocalPreparationInspectsBeforeParsingRequiredEnum(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "config.yaml"))
 	repo := t.TempDir()
 	for _, args := range [][]string{{"init", "--quiet"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "--allow-empty", "--no-verify", "-m", "fixture"}} {
-		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+		if out, err := testgit.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git: %v: %s", err, out)
 		}
 	}
@@ -216,7 +218,7 @@ func main() { sw.Register("Required", func() sw.Pipeline[args] { return pipeline
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := prepareNativeLocalRun(t.Context(), home, dir, "required", os.Environ(), snapshots, runFlags{})
+	prepared, err := prepareNativeLocalRun(t.Context(), home, dir, "required", testgit.Env(os.Environ()), snapshots, runFlags{})
 	if err != nil {
 		t.Fatalf("discovery required invocation arguments before parsing them: %v", err)
 	}

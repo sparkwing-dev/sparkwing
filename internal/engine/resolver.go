@@ -102,7 +102,11 @@ func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, targe
 		if !validDigest(identity.ManifestDigest) {
 			return Resolved{}, integrity(errors.New("accepted local engine digest is invalid"))
 		}
-		path := filepath.Join(r.config.LocalBuildDirectory, identity.ManifestDigest)
+		name := identity.ManifestDigest
+		if target.GOOS == "windows" {
+			name += ".exe"
+		}
+		path := filepath.Join(r.config.LocalBuildDirectory, name)
 		resolved, err = replacementEngineAt(ctx, identity.Pin, target, path, true)
 		if err != nil {
 			return Resolved{}, integrity(fmt.Errorf("read accepted retained local engine: %w", err))

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -63,7 +64,7 @@ func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
 	if !strings.Contains(diagnostic.String(), "git commit --allow-empty") {
 		t.Fatalf("rendered refusal lost its repair command: %s", diagnostic.String())
 	}
-	if out, err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", "HEAD").CombinedOutput(); err == nil {
+	if out, err := testgit.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", "HEAD").CombinedOutput(); err == nil {
 		t.Fatalf("planning or refusal created a commit: %s", out)
 	}
 	runSnapshotGit(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "--no-verify", "-qm", "Initial commit")

@@ -287,13 +287,17 @@ func init() {
 }
 
 func runStorePostgresIfTouched(ctx context.Context, mode gateMode) error {
+	if mode == gateAffected {
+		sparkwing.Info(ctx, "store-postgres: deferred to full, nightly and release checks")
+		return nil
+	}
 	files, scope, err := gateScope(ctx, mode, "internal/store file(s)", storeFiles)
 	if err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "store-postgres: %s", scope)
 	if len(files) == 0 {
-		sparkwing.Info(ctx, "store-postgres: internal/store unchanged; pre-push runs the suite against postgres regardless")
+		sparkwing.Info(ctx, "store-postgres: internal/store unchanged; full and release checks run the suite against postgres")
 		return nil
 	}
 	return (&StorePostgres{}).run(ctx)

@@ -4,11 +4,12 @@ import (
 	"context"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestScaffoldFallbackProblem(t *testing.T) {
@@ -121,7 +122,7 @@ func TestBumpFallbackSDKVersionFile(t *testing.T) {
 func TestCommitSparkwingPinBump(t *testing.T) {
 	mustGit := func(t *testing.T, dir string, args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -370,7 +371,7 @@ func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *tes
 
 	mustGit := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -418,7 +419,7 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 	dir := t.TempDir()
 	mustGit := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -524,7 +525,7 @@ func TestAutoBumpSparkwingPinIfStaleRegeneratesAPISnapshot(t *testing.T) {
 
 func captureGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -581,7 +582,7 @@ printf '# pkg/other\n' > "$out/pkg_other.txt"
 
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

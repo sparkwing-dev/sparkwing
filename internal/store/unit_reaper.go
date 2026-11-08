@@ -63,9 +63,9 @@ const unawaitedChildrenQuery = `SELECT c.team,c.id,c.parent_run_id,c.parent_node
 	 SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.parent_run_id AND n.node_id=c.parent_node_id AND n.status='done'))
 	 ORDER BY c.team,c.id LIMIT ?`
 
-func (s *Store) unawaitedChildrenQuery() string {
+func (o *Operator) unawaitedChildrenQuery() string {
 	detached := `COALESCE(json_extract(c.lineage_json, '$.detached'),0)=0`
-	if s.dialect == DialectPostgres {
+	if o.s.dialect == DialectPostgres {
 		detached = `COALESCE((convert_from(c.lineage_json,'UTF8')::jsonb->>'detached')::boolean,false)=false`
 	}
 	return fmt.Sprintf(unawaitedChildrenQuery, detached)
@@ -75,7 +75,7 @@ func (s *Store) unawaitedChildrenQuery() string {
 // parent leaves it unconsumable; retries are user-requested and kept. A sweep, not the parent's transition,
 // keeps the run lock order and reaches grandchildren on later passes.
 func (o *Operator) cancelUnawaitedChildren(ctx context.Context, limit int) ([]ReapedUnit, error) {
-	rows, err := o.s.query(ctx, o.s.unawaitedChildrenQuery(), limit)
+	rows, err := o.s.query(ctx, o.unawaitedChildrenQuery(), limit)
 	if err != nil {
 		return nil, err
 	}
