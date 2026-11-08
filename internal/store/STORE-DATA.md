@@ -463,8 +463,10 @@ and through the transaction that owns receipt changes.
 `ReadableBlobs` returns each readable digest once in request order, including
 large requests. It checks the budget after its final read and returns an empty
 presence result with `blob.ErrBudget` when the deadline has passed. The HTTP
-signer requires an explicit deadline and rechecks cancellation after its final
-metadata read before returning any presence result.
+route requires an explicit deadline after authentication. Its signer bounds
+work by the earlier of that deadline and the server's 30-second write timeout,
+then rechecks cancellation after its final metadata read before returning
+any presence result.
 
 `MarkBlobTombstones` and `CollectBlobTombstones` run in the controller's
 maintenance pass. Record expiry and reachability GC replace `ExpiredOutputRuns`,

@@ -253,7 +253,7 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | --- | --- | --- |
 | Cache-reader grants and known digests stay within their team even when the same digest exists in both teams | `blob_read_authority.go`: `blobReadSetTx` | `blob_cache_isolation_test.go`: `TestRemoteCacheKnownDigestCannotReadAnotherTeam` |
 | Manual and pull request memo writers cannot replace a verified default-branch memo | `blob_record_runtime.go`: `checkBlobWriteKey` | `blob_cache_isolation_test.go`: `TestMemoWritersCannotReplaceVerifiedDefaultScope` |
-| HTTP presence queries require an explicit deadline and discard results when cancellation crosses the final read | `internal/controller/data_read_binding.go`: `boundData.HasMany` | `internal/controller/data_binding_native_test.go`: `TestNativeDataReaderRoutesAndSelectorIsolation`, `TestNativeDataPresenceCancellationAfterFinalRead` |
+| HTTP presence queries authenticate before requiring a deadline, bound work by the earlier caller deadline or 30-second response window, and discard cancelled results | `internal/controller/data_read_binding.go`: `boundData.HasMany` | `internal/controller/data_binding_native_test.go`: `TestNativeDataReaderRoutesAndSelectorIsolation`, `TestNativeDataPresenceCancellationAfterFinalRead`; `tests/acceptance/data_presence_deadline_test.go`: `TestDataReadHTTPPresenceDeadlineFitsResponseWindow`, `TestDataReadHTTPPresenceRequiresDeadlineAfterAuthentication` |
 
 ### Memoization
 

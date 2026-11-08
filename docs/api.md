@@ -319,7 +319,8 @@ S3 and filesystem backends use the same authorization boundary.
 `POST /api/v1/data/has-many` takes `{"digests":["<sha256>"],"deadline":"<RFC3339 timestamp>"}`
 and returns `{"present":["<sha256>"]}`. Missing and unreadable digests are omitted.
 An empty array returns an empty array. Duplicate digests appear once. The
-required `deadline` bounds the query. Omitting it returns `400`. Expiry or
+required `deadline` bounds the query to the earlier of that timestamp and the
+server's 30-second response window. Omitting it returns `400` after authentication. Expiry or
 cancellation returns an error without partial presence results, including
 when it happens during the final read. Presence checks transfer no object
 bytes and consume no download allowance.

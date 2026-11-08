@@ -235,7 +235,7 @@ func TestDataClientRefusesMalformedResponsesAndRedirects(t *testing.T) {
 		s, _ := testDataClient(t, func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})
-		if _, err := s.HasMany(t.Context(), blob.HasManyRequest{}); err == nil {
+		if _, err := s.HasMany(t.Context(), blob.HasManyRequest{Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}); err == nil {
 			t.Fatalf("accepted malformed response %s", body)
 		}
 	}
@@ -253,7 +253,7 @@ func TestDataClientRejectsUnrequestedPresence(t *testing.T) {
 	s, _ := testDataClient(t, func(*http.Request) (*http.Response, error) {
 		return dataResponse(t, wire.DataPresence{Present: []blob.Digest{"unrequested"}}), nil
 	})
-	if _, err := s.HasMany(t.Context(), blob.HasManyRequest{Digests: []blob.Digest{"requested"}}); err == nil {
+	if _, err := s.HasMany(t.Context(), blob.HasManyRequest{Digests: []blob.Digest{"requested"}, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}); err == nil {
 		t.Fatal("accepted an unrelated existence disclosure")
 	}
 }
@@ -274,5 +274,16 @@ func TestDataClientValidatesBaseAndBearerProvider(t *testing.T) {
 	}
 	if _, err := s.Download(t.Context(), blob.GetRequest{}); !errors.Is(err, failure) {
 		t.Fatalf("provider error lost: %v", err)
+	}
+}
+
+func TestDataClientPresenceRequiresDeadline(t *testing.T) {
+	calls := 0
+	s, _ := testDataClient(t, func(*http.Request) (*http.Response, error) {
+		calls++
+		return dataResponse(t, wire.DataPresence{Present: []blob.Digest{}}), nil
+	})
+	if _, err := s.HasMany(t.Context(), blob.HasManyRequest{}); err == nil || calls != 0 {
+		t.Fatalf("missing presence deadline reached transport: calls=%d, err=%v", calls, err)
 	}
 }

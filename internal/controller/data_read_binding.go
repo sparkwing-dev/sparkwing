@@ -54,10 +54,12 @@ func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob
 }
 
 func (s *boundData) HasMany(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error) {
-	if request.Budget.Deadline.IsZero() {
-		return blob.Presence{}, invalidEngineBody("presence requires an explicit deadline")
+	now := time.Now()
+	responseDeadline := now.Add(controllerWriteTimeout)
+	if request.Budget.Deadline.IsZero() || request.Budget.Deadline.After(responseDeadline) {
+		request.Budget.Deadline = responseDeadline
 	}
-	if !time.Now().Before(request.Budget.Deadline) {
+	if !now.Before(request.Budget.Deadline) {
 		return blob.Presence{}, blob.ErrBudget
 	}
 	ctx, cancel := context.WithDeadline(ctx, request.Budget.Deadline)
