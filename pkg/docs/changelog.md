@@ -32,6 +32,8 @@ unlock.
 
 ### Fixed
 
+- **scheduling:** Run status and the run page keep GitHub Actions dispatch receipts, provider links and lost-race counts after award, cancellation and completion.
+
 - **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller’s configuration and index untouched.
 - **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
 - **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
