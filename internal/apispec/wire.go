@@ -35,6 +35,7 @@ func query(name, kind string) schema {
 
 func wireOperations() map[string]wireOperation {
 	result := map[string]wireOperation{
+		"GET /api/v1/pipelines/{name}/latest":                  operation("Read the latest authorized pipeline run", nil, wire.LatestRun{}, query("status", "string"), query("max_age", "string"), query("from_any_run", "boolean"), query("from_proven_run", "boolean"), query("run", "string"), query("job", "string")),
 		"GET /api/v1/operator/warm-capacity":                   operation("Read warm capacity policies and start metrics", nil, wire.WarmCapacity{}),
 		"PUT /api/v1/operator/warm-capacity":                   operation("Set one hardware class warm capacity policy", wire.WarmCapacitySettings{}, wire.WarmCapacity{}),
 		"GET /api/v1/overflow":                                 operation("Read the account overflow allowance", nil, wire.OverflowControl{}),
@@ -190,6 +191,10 @@ func addReadParameters(operations map[string]wireOperation) {
 		}
 		operations[key] = op
 	}
+	latest := operations["GET /api/v1/pipelines/{name}/latest"]
+	latest.parameters = append(latest.parameters, schema{"in": "query", "name": "repo", "style": "form", "explode": true, "description": "Exact repository display names that further restrict authorized candidates.", "schema": schema{"type": "array", "items": schema{"type": "string"}}})
+	operations["GET /api/v1/pipelines/{name}/latest"] = latest
+
 	for _, key := range []string{"GET /api/v1/runs/{run}/logs", "GET /api/v1/runs/{run}/jobs/{job}/logs", "GET /api/v1/runs/{run}/logs/search"} {
 		op := operations[key]
 		for _, name := range []string{"job", "cursor", "lines", "grep", "since"} {

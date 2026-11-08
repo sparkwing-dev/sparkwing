@@ -159,7 +159,22 @@ func TestPruneDoesNotRaceWriterOrExposePartialEntry(t *testing.T) {
 	started := make(chan string, 1)
 	release := make(chan struct{})
 	done := make(chan error, 1)
+	finished := make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(release)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			t.Error("cache writer did not stop after release")
+		}
+	})
 	go func() {
+		defer close(finished)
 		_, err := entry.Materialize(context.Background(), func(path string) error {
 			if err := os.WriteFile(path, []byte("complete"), 0o755); err != nil {
 				return err
@@ -171,6 +186,8 @@ func TestPruneDoesNotRaceWriterOrExposePartialEntry(t *testing.T) {
 		done <- err
 	}()
 
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
 	select {
 	case staging := <-started:
 		if staging == entry.binaryPath() {
@@ -178,7 +195,7 @@ func TestPruneDoesNotRaceWriterOrExposePartialEntry(t *testing.T) {
 		}
 	case err := <-done:
 		t.Fatalf("Materialize returned before writer entered: %v", err)
-	case <-time.After(time.Second):
+	case <-ctx.Done():
 		t.Fatal("Materialize did not enter writer")
 	}
 
@@ -194,6 +211,7 @@ func TestPruneDoesNotRaceWriterOrExposePartialEntry(t *testing.T) {
 	}
 
 	close(release)
+	released = true
 	if err := <-done; err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}

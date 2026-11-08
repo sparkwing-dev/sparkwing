@@ -62,7 +62,7 @@ func checkRegistrationExample(t *testing.T, path, goBlock, yamlBlock string) {
 	if err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
-	isolateProtocolDiscoveryRegistry(t)
+	isolateRegistry(t)
 	var invoked string
 	for _, key := range keys {
 		Register(key[1], func() Pipeline[NoInputs] { return registrationExamplePipeline{invoked: &invoked} })

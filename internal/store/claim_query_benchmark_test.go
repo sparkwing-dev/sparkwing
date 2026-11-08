@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -262,7 +262,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		b.ReportMetric(float64(examined.Load()), "replayed_pending_predicate_evals/op")
 		b.ReportMetric(float64(examinedContexts.Load()), "replayed_context_predicate_evals/op")
 	}
-	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	slices.Sort(samples)
 	b.ReportMetric(float64(samples[(len(samples)*95+99)/100-1].Nanoseconds()), "p95-ns/op")
 	b.ReportMetric(50000, "ready_jobs")
 	b.ReportMetric(200, "teams")

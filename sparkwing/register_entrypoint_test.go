@@ -16,6 +16,7 @@ func (entrypointPipe) Plan(_ context.Context, plan *Plan, _ entrypointArgs, _ Ru
 }
 
 func TestRegisterEntrypointIsAvailableToTheHost(t *testing.T) {
+	isolateRegistry(t)
 	RegisterEntrypoint[entrypointArgs]("EntrypointTestPipe", func() Pipeline[entrypointArgs] { return entrypointPipe{} })
 	reg, exists := lookup("EntrypointTestPipe")
 	if !exists {

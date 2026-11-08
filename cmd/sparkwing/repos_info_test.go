@@ -15,14 +15,32 @@ import (
 
 type repoInfoReader struct {
 	controllerwire.RunReader
-	list func(controllerwire.RunQuery) (controllerwire.RunPage, error)
+	list      func(controllerwire.RunQuery) (controllerwire.RunPage, error)
+	latestErr error
 }
 
 func (r repoInfoReader) ListRuns(_ context.Context, q controllerwire.RunQuery) (controllerwire.RunPage, error) {
 	return r.list(q)
 }
 
-func TestRepoInfoReadsLatestPipelineStatesAcrossControllerPages(t *testing.T) {
+func (r repoInfoReader) LatestPipeline(_ context.Context, name string, repositories []string) (controllerwire.LatestRun, error) {
+	if r.latestErr != nil {
+		return controllerwire.LatestRun{}, r.latestErr
+	}
+	if !reflect.DeepEqual(repositories, []string{"acme/app"}) {
+		return controllerwire.LatestRun{}, errors.New("wrong repository selection")
+	}
+	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	status := map[string]string{"deploy": "failed", "pending": "pending", "test": "skipped"}[name]
+	result := controllerwire.LatestRun{}
+	result.Status = status
+	if name != "pending" {
+		result.StartedAt = at
+	}
+	return result, nil
+}
+
+func TestRepoInfoUsesControllerLatestSelectionAfterDiscoveringPipelinePages(t *testing.T) {
 	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	run := func(number int64, repo, pipeline, status string) controllerwire.RunDetail {
 		return controllerwire.RunDetail{
@@ -47,7 +65,7 @@ func TestRepoInfoReadsLatestPipelineStatesAcrossControllerPages(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(cursors, []string{"", "page-two"}) || len(got) != 3 {
 		t.Fatalf("states = %+v, cursors = %v, err = %v", got, cursors, err)
 	}
-	if got[0].Name != "deploy" || got[0].LastStatus != "success" || got[0].LastRun != "2026-10-14 12:00" || got[1].Name != "pending" || got[1].LastRun != "" || got[1].LastStatus != "pending" || got[2].Name != "test" || got[2].LastStatus != "skipped" {
+	if got[0].Name != "deploy" || got[0].LastStatus != "failed" || got[0].LastRun != "2026-10-14 12:00" || got[1].Name != "pending" || got[1].LastRun != "" || got[1].LastStatus != "pending" || got[2].Name != "test" || got[2].LastStatus != "skipped" {
 		t.Fatalf("pipeline history = %+v", got)
 	}
 }
@@ -59,6 +77,16 @@ func TestRepoInfoHistoryFailureIsLoud(t *testing.T) {
 	}}
 	if got, err := pipelineStates(t.Context(), repos.Repo{Name: "app"}, reader); got != nil || !errors.Is(err, want) {
 		t.Fatalf("history failure became absence: %+v %v", got, err)
+	}
+}
+
+func TestRepoInfoLatestFailureIsLoud(t *testing.T) {
+	want := errors.New("latest selection failed")
+	reader := repoInfoReader{latestErr: want, list: func(controllerwire.RunQuery) (controllerwire.RunPage, error) {
+		return controllerwire.RunPage{Runs: []controllerwire.RunDetail{{ID: "seen", Number: 1, Status: "success", Inputs: runspec.Display{Pipeline: "deploy", Git: runspec.Git{Repository: runspec.Repository{Display: "acme/app"}}}}}}, nil
+	}}
+	if got, err := pipelineStates(t.Context(), repos.Repo{Name: "app"}, reader); got != nil || !errors.Is(err, want) {
+		t.Fatalf("latest failure became absence: %+v, %v", got, err)
 	}
 }
 
