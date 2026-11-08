@@ -899,7 +899,7 @@ An isolated `profiles add` also supplies `SPARKWING_CONFIG` to the write guard.
 secret-file checks, materializes its immutable private checkout, resolves the
 pipeline alias and entrypoint from the captured configuration, and describes
 that checkout with the selected engine. It leaves the user's HEAD and index
-untouched. `--allow-secret-file` applies to this capture. After validating
+untouched. The repository `allow_secret_files` list applies to this capture. After validating
 arguments, the production client commits the bundle through shared source
 storage and seals its digest into the trigger request. A source pinned to a
 different revision keeps that pipeline revision while the execution snapshot

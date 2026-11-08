@@ -24,6 +24,7 @@
     "claim-jobs",
     "local-admission",
     "github-actions",
+    "dispatch-receipt",
     "team",
     "idle-exit",
     "label",

@@ -124,6 +124,9 @@ func (t *Tenant) withdrawGitHubAppAutomationTx(ctx context.Context, tx *storeTx,
 			return struct{}{}, err
 		}
 		_, err := tx.execContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, t.team, installation, repository)
+		if err == nil {
+			err = invalidateActionsRepositoryTx(ctx, tx, t.team, repository)
+		}
 		return struct{}{}, err
 	})
 	return err
