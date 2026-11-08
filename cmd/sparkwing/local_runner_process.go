@@ -46,7 +46,7 @@ func superviseLocalRunnerProcess(ctx context.Context, host crontimer.Host) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	executable, build, err := pinLocalRunnerExecutable(host.SparkwingHome, host.Binary)
+	executable, build, err := pinLocalRunnerExecutable(host.SparkwingHome, host.Binary, "")
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func localRunnerNotFound(err error) bool {
 	return errors.As(err, &failure) && failure.Code == apierr.NotFound
 }
 
-func pinLocalRunnerExecutable(home, executable string) (_, _ string, result error) {
+func pinLocalRunnerExecutable(home, executable, acceptedBuild string) (_, _ string, result error) {
 	dir := filepath.Join(home, "runners", "builds")
 	if err := fssecure.EnsureDir(dir); err != nil {
 		return "", "", err
@@ -155,6 +155,39 @@ func pinLocalRunnerExecutable(home, executable string) (_, _ string, result erro
 		return "", "", err
 	}
 	defer func() { result = errors.Join(result, source.Close()) }()
+	build := acceptedBuild
+	if build == "" {
+		digest := sha256.New()
+		if _, err := io.Copy(digest, source); err != nil {
+			return "", "", err
+		}
+		build = hex.EncodeToString(digest.Sum(nil))
+		if _, err := source.Seek(0, io.SeekStart); err != nil {
+			return "", "", err
+		}
+	}
+	decoded, err := hex.DecodeString(build)
+	if err != nil || len(decoded) != sha256.Size {
+		return "", "", errors.New("invalid accepted local runner executable digest")
+	}
+	name := build
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(dir, name)
+	if existing, err := os.Open(path); err == nil {
+		digest := sha256.New()
+		equal, compareErr := sameExecutableBytes(io.TeeReader(source, digest), existing)
+		if err := errors.Join(compareErr, existing.Close()); err != nil {
+			return "", "", err
+		}
+		if !equal || hex.EncodeToString(digest.Sum(nil)) != build {
+			return "", "", errors.New("pinned local runner executable digest differs")
+		}
+		return path, build, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", "", err
+	}
 	file, err := os.CreateTemp(dir, ".runner-*")
 	if err != nil {
 		return "", "", err
@@ -169,39 +202,20 @@ func pinLocalRunnerExecutable(home, executable string) (_, _ string, result erro
 	if err := errors.Join(copyErr, file.Chmod(0o700), file.Close()); err != nil {
 		return "", "", err
 	}
-	build := hex.EncodeToString(digest.Sum(nil))
-	name := build
-	if runtime.GOOS == "windows" {
-		name += ".exe"
+	if hex.EncodeToString(digest.Sum(nil)) != build {
+		return "", "", errors.New("local runner executable changed during preparation")
 	}
-	path := filepath.Join(dir, name)
-	if existing, err := os.Open(path); err == nil {
-		staged, err := os.Open(file.Name())
-		if err != nil {
-			return "", "", errors.Join(err, existing.Close())
-		}
-		equal, compareErr := sameExecutableBytes(staged, existing)
-		if err := errors.Join(compareErr, staged.Close(), existing.Close()); err != nil {
-			return "", "", err
-		}
-		if !equal {
-			return "", "", errors.New("pinned local runner executable digest differs")
-		}
-	} else if errors.Is(err, os.ErrNotExist) {
-		if err := os.Rename(file.Name(), path); err != nil {
-			return "", "", err
-		}
-	} else {
+	if err := os.Rename(file.Name(), path); err != nil {
 		return "", "", err
 	}
 	return path, build, nil
 }
 
-// perf: the staged bytes already supplied the digest; comparing them avoids hashing a large executable twice.
-func sameExecutableBytes(staged, existing io.Reader) (bool, error) {
+// perf: comparing source and retained bytes lets the caller verify both with one digest and no staging write.
+func sameExecutableBytes(source, existing io.Reader) (bool, error) {
 	var a, b [32 * 1024]byte
 	for {
-		na, ea := io.ReadFull(staged, a[:])
+		na, ea := io.ReadFull(source, a[:])
 		nb, eb := io.ReadFull(existing, b[:])
 		for _, err := range []error{ea, eb} {
 			if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {

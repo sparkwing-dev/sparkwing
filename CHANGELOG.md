@@ -38,7 +38,7 @@ unlock.
 
 - **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
 - **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
-- **local execution:** Avoid rehashing unchanged engine digests across installed and retained paths, and compare pinned runner bytes without a second SHA-256 pass.
+- **local execution:** Avoid rehashing unchanged engine digests across installed and retained paths. Reuse retained runner images without staging another executable, while checking every source and retained byte against the accepted engine digest.
 
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
