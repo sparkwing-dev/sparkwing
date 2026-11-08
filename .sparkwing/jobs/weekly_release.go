@@ -105,7 +105,7 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 			return err
 		}
 		if run.ID == "" {
-			return errors.New("Bitwing returned no release workflow run id")
+			return errors.New("bitwing returned no release workflow run id")
 		}
 		workflow = run.ID
 		if err := releaseWorkflowHandoff(ctx, workflow, "Cut starting from main@"+head+" for "+version+"."); err != nil {
