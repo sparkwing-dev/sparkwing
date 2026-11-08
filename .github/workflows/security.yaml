@@ -27,7 +27,15 @@ jobs:
       security-events: write
     env:
       GOWORK: "off"
+      SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+      SPARKWING_SECRETS_KEY_FILE: ${{ runner.temp }}/sparkwing-home/secrets.key
     steps:
+      - name: Prepare isolated controller key
+        run: |
+          umask 077
+          mkdir -p "$SPARKWING_HOME"
+          openssl rand 32 > "$SPARKWING_SECRETS_KEY_FILE"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -54,8 +62,6 @@ jobs:
         run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
 
       - name: Run the security-scan pipeline
-        env:
-          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
         run: '"$RUNNER_TEMP/sparkwing" run security-scan -- --report-dir="$RUNNER_TEMP/security"'
 
       # Fork tokens cannot write code-scanning alerts; scanners still run.
