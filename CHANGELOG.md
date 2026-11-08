@@ -88,6 +88,7 @@ unlock.
 
 ### Fixed
 
+- **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
 - **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
