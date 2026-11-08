@@ -105,16 +105,16 @@ func TestGeneratedCodeExecutesAndReplays(t *testing.T) {
 	}
 }
 
-func TestGeneratedSettingsAreRefused(t *testing.T) {
+func TestGeneratedSettingsReachHostValidation(t *testing.T) {
 	p := NewPlan()
 	n := Job(p, "source", func(context.Context) error { return nil })
 	g := n.Generate(func(_ context.Context, p *Plan) error { p.Priority(0); return nil })
-	result, err := (sdkOperations{}).Eval(context.Background(), p, nodeproto.Request{Job: n.ID(), Closure: g.ID()})
-	if err != nil || result.Error == nil {
-		t.Fatalf("generation settings must fail: %+v %v", result, err)
+	result, err := (sdkOperations{}).Eval(t.Context(), p, nodeproto.Request{Job: n.ID(), Closure: g.ID()})
+	if err != nil || result.Error != nil {
+		t.Fatalf("generation=%+v error=%v", result, err)
 	}
-	if len(p.nodes) != 1 {
-		t.Fatal("refused expansion changed executable topology")
+	if _, err := nodeproto.ValidatePlan(result.Value, nodeproto.ValidationContext{Expansion: true, Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()}); err == nil {
+		t.Fatal("host accepted generated settings")
 	}
 }
 

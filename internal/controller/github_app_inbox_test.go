@@ -142,13 +142,13 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 		t.Fatal(err)
 	}
 	outcome, err = restarted.processNextGitHubDelivery(t.Context())
-	if err != nil || outcome == nil || outcome.status != http.StatusAccepted || outcome.failureReason() == "" || !strings.Contains(outcome.body.String(), `"dispatched"`) {
-		t.Fatalf("manual run with unavailable automation = %+v, %v", outcome, err)
+	if err != nil || outcome == nil || outcome.status != http.StatusAccepted || outcome.failureReason() == "" || !strings.Contains(outcome.body.String(), `"refused"`) || !strings.Contains(outcome.body.String(), "read default-branch placement") {
+		t.Fatalf("manual run with unavailable placement = %+v, %v", outcome, err)
 	}
 	previewUnavailable = false
 	processAgain("partial-discovery")
 	outcome, err = restarted.processNextGitHubDelivery(t.Context())
-	if err != nil || outcome == nil || outcome.failureReason() != "" || !strings.Contains(outcome.body.String(), `"duplicate"`) {
+	if err != nil || outcome == nil || outcome.failureReason() != "" || !strings.Contains(outcome.body.String(), `"dispatched"`) {
 		t.Fatalf("automation recovery = %+v, %v", outcome, err)
 	}
 	rows, err = tenant.ListRuns(t.Context(), store.RunFilter{Limit: 100})
@@ -190,10 +190,10 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 	s.WithFloodPolicy(FloodPolicy{})
 	configRef = "0123456789abcdef0123456789abcdef01234567"
 	for _, test := range []struct {
-		id, sha, config string
+		id, sha, config, status string
 	}{
-		{"invalid-discovery", strings.Repeat("c", 40), "pipelines: ["},
-		{"unsupported-discovery", strings.Repeat("d", 40), "pipelines:\n  - name: build\n    entrypoint: Build\n    on:\n      push:\n        paths: ['src/*']\n"},
+		{"invalid-discovery", strings.Repeat("c", 40), "pipelines: [", "refused"},
+		{"unsupported-discovery", strings.Repeat("d", 40), "pipelines:\n  - name: build\n    entrypoint: Build\n    on:\n      push:\n        paths: ['src/*']\n", "dispatched"},
 	} {
 		t.Run(test.id, func(t *testing.T) {
 			projectConfig = test.config
@@ -207,8 +207,15 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 				t.Fatalf("partial permanent discovery failure = %+v, %v", outcome, err)
 			}
 			var response githubAppWebhookResp
-			if err := json.Unmarshal(outcome.body.Bytes(), &response); err != nil || len(response.Runs) != 1 || response.Runs[0].Status != "dispatched" || response.Runs[0].RunID == "" {
-				t.Fatalf("manual subscription did not dispatch: %s, %v", outcome.body.String(), err)
+			if err := json.Unmarshal(outcome.body.Bytes(), &response); err != nil || len(response.Runs) != 1 || response.Runs[0].Status != test.status {
+				t.Fatalf("manual subscription placement result: %s, %v", outcome.body.String(), err)
+			}
+			if run := response.Runs[0]; test.status == "refused" {
+				if run.RunID != "" || !strings.Contains(run.Reason, "default-branch .sparkwing/sparkwing.yaml") {
+					t.Fatalf("unreadable placement started a run: %+v", run)
+				}
+			} else if run.RunID == "" {
+				t.Fatal("readable placement did not start a run")
 			}
 			var state, reason string
 			var retained []byte

@@ -1,0 +1,1 @@
+{"bytes":8388608,"errors":0,"host_cpu_ns":759457000,"log_message_bytes":62,"log_records":2,"samples_ns":[1973156011],"sdk_cpu_ns":2935826000,"spec":{"lang":"go","variant":"P2","size":"bulk","concurrency":1,"count":1,"bytes":8388608,"out":"<pi-home>/sdkstep3/diag/r-P2.json","dir":"<pi-home>/sdkstep3/diag"},"step_ns":8928289099,"wall_ns":1973286750}

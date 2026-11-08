@@ -98,6 +98,7 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 	}}
 	config.Log = logs.write
 	config.output, config.Masks = logs, service.Masks
+	service.HelperStream = logs.stream
 	config.Environments.Masks = service.Masks
 	config.Environments.Base.Masker = service.Masks.masker
 	config.RunCleanups = func(ctx context.Context, scope CleanupScope) error {

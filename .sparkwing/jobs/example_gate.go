@@ -61,7 +61,7 @@ func exampleNeedsCLI(in ExampleInputs, rc sparkwing.RunContext) sparkwing.SkipPr
 }
 
 func exampleCLIDir(rc sparkwing.RunContext) string {
-	return sparkwing.Path(filepath.Join(".sparkwing/cache/example-cli", rc.RunID))
+	return filepath.Join(sparkwing.WorkDir(), filepath.Join(".sparkwing/cache/example-cli", rc.RunID))
 }
 
 // safety: resolved at job time because lifecycle-cli writes its wrapper after planning.
@@ -212,11 +212,11 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	}))
 	cachePath := filepath.Join(".sparkwing/cache/example-deps", rc.RunID)
 	cache := sparkwing.Dir(cachePath, sparkwing.KeyFromFile(".sparkwing/go.sum"))
-	reset := sparkwing.Job(plan, "dependency-cache-reset", func(context.Context) error { return os.RemoveAll(sparkwing.Path(cachePath)) }).Inline()
+	reset := sparkwing.Job(plan, "dependency-cache-reset", func(context.Context) error { return os.RemoveAll(filepath.Join(sparkwing.WorkDir(), cachePath)) }).Inline()
 	seed := sparkwing.Job(plan, "dependency-cache-seed", func(context.Context) error {
 		return exampleWriteFile(filepath.Join(cachePath, "proof"), rc.RunID)
 	}).Needs(reset).Cache(cache)
-	clearCache := sparkwing.Job(plan, "dependency-cache-clear", func(context.Context) error { return os.RemoveAll(sparkwing.Path(cachePath)) }).Needs(seed).Inline()
+	clearCache := sparkwing.Job(plan, "dependency-cache-clear", func(context.Context) error { return os.RemoveAll(filepath.Join(sparkwing.WorkDir(), cachePath)) }).Needs(seed).Inline()
 	all = append(all, sparkwing.Job(plan, "dependency-cache-assert", func(context.Context) error {
 		return exampleFileEquals(filepath.Join(cachePath, "proof"), rc.RunID)
 	}).Needs(clearCache).Cache(cache))
@@ -309,14 +309,14 @@ func (j *exampleOutputJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) 
 }
 
 func exampleWriteFile(path, value string) error {
-	if err := os.MkdirAll(filepath.Dir(sparkwing.Path(path)), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(sparkwing.WorkDir(), path)), 0o700); err != nil {
 		return err
 	}
-	return sparkwing.WriteFile(path, []byte(value))
+	return os.WriteFile(path, []byte(value), 0o644)
 }
 
 func exampleFileEquals(path, want string) error {
-	data, err := sparkwing.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package procenv
 import (
 	"context"
 	"os/exec"
+	"strings"
 )
 
 // Command constructs a process with a policy-owned environment. The zero Env
@@ -19,6 +20,39 @@ func CommandContext(ctx context.Context, environment Env, name string, args ...s
 	cmd.Env = append([]string{}, environment.values...)
 	return cmd
 }
+
+// SDKCommand constructs a command an SDK asked its host to run. environment is the one
+// the SDK process, started with Build's result, would have given the command, so a
+// pipeline's own changes still apply; engine-minted credentials never reach it.
+func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	cmd.Env = sdkCommandEnvironment(environment)
+	return cmd
+}
+
+// SDKCommandContext applies SDK child environment policy with context cancellation.
+func SDKCommandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = sdkCommandEnvironment(environment)
+	return cmd
+}
+
+func sdkCommandEnvironment(environment []string) []string {
+	filtered := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		key, _, _ := strings.Cut(entry, "=")
+		// perf: every engine credential row shares this prefix, so other names skip the registry scan.
+		if strings.HasPrefix(envKey(key), engineCredentialPrefix) {
+			if row, ok := Lookup(key); ok && (row.Class == Credential || row.Class == Protocol) && row.Owner == "engine" {
+				continue
+			}
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
+}
+
+const engineCredentialPrefix = "SPARKWING_"
 
 // ControlCommand constructs trusted host tooling with an explicit captured environment.
 // Repository-controlled processes use Command with Build's result.

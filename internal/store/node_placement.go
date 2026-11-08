@@ -52,7 +52,7 @@ func (p ClaimPlacement) preferencesFor(nodePrefers []string) []PlacementPreferen
 
 func claimLiveness(ctx context.Context, request runspec.Request) time.Duration {
 	policy, _ := claimPlacementFromContext(ctx)
-	if policy.Liveness <= 0 && (request.Burst != nil || runAnywhere(request)) {
+	if policy.Liveness <= 0 && (request.Burst != nil || runAnywhere(request) || request.Placement != nil) {
 		return time.Minute
 	}
 	return policy.Liveness

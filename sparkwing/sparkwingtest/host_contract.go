@@ -1,4 +1,5 @@
-// Package sparkwingtest supplies a fake protocol host without a controller or store.
+// Package sparkwingtest supplies an in-process host for pipeline and helper-library tests.
+// Host contexts execute commands and helpers locally without starting a controller or opening a store.
 package sparkwingtest
 
 import (
@@ -41,4 +42,5 @@ type Host interface {
 
 // New snapshots option values so later caller edits cannot change an existing fixture.
 // Service callbacks remain callable dependencies owned by the test.
+// Close joins command sessions and helper resource cleanup.
 func New(opts Options) Host { return newHost(opts) }

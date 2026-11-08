@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -50,6 +51,7 @@ type server struct {
 	active     map[string]*activeRequest
 	mu         sync.Mutex
 	workers    sync.WaitGroup
+	execs      hostExecs
 }
 
 type activeRequest struct {
@@ -68,7 +70,7 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s := &server{cfg: cfg, out: out, ids: map[string]bool{}, steps: map[[2]string]context.CancelFunc{}, active: map[string]*activeRequest{}, stop: cancel, closeInput: func() {}}
+	s := &server{cfg: cfg, out: out, ids: map[string]bool{}, steps: map[[2]string]context.CancelFunc{}, active: map[string]*activeRequest{}, stop: cancel, closeInput: func() {}, execs: hostExecs{calls: map[string]*execCall{}, closed: make(chan struct{})}}
 	if closer, ok := in.(io.Closer); ok {
 		s.closeInput = func() { _ = closer.Close() }
 	}
@@ -77,7 +79,22 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	reader := nodeproto.NewReader(in)
 	var readErr error
 	for {
-		req, err := reader.NextRequest()
+		line, err := reader.ReadLine()
+		var req nodeproto.Request
+		if err == nil {
+			host, ok, hostErr := nodeproto.ParseHostLine(line)
+			if ok {
+				if hostErr == nil {
+					hostErr = s.deliverExec(host)
+				}
+				if hostErr != nil {
+					s.shutdown(cancel)
+					return hostErr
+				}
+				continue
+			}
+			req, err = nodeproto.ParseRequest(line)
+		}
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -86,13 +103,11 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 			break
 		}
 		if req.ID == "" {
-			cancel()
-			s.workers.Wait()
+			s.shutdown(cancel)
 			return fmt.Errorf("unanswerable request: %w", err)
 		}
 		if s.ids[req.ID] {
-			cancel()
-			s.workers.Wait()
+			s.shutdown(cancel)
 			return protocolError("duplicate request ID")
 		}
 		s.ids[req.ID] = true
@@ -129,12 +144,18 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	if ctx.Err() != nil {
 		readErr = ctx.Err()
 	}
-	cancel()
-	s.workers.Wait()
+	s.shutdown(cancel)
 	if s.writeErr != nil {
 		return s.writeErr
 	}
 	return readErr
+}
+
+// safety: commands waiting on the host are released before joining the requests that run them.
+func (s *server) shutdown(cancel context.CancelFunc) {
+	cancel()
+	s.endExecs()
+	s.workers.Wait()
 }
 
 func (s *server) start(ctx context.Context, req nodeproto.Request) {
@@ -234,7 +255,7 @@ func (s *server) negotiate(req nodeproto.Request) {
 		return
 	}
 	s.hello = &req
-	s.reply(req.ID, nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: s.cfg.SDKVersion}, Features: []string{}}, nil)
+	s.reply(req.ID, nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: s.cfg.SDKVersion}}, nil)
 }
 
 func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeproto.RunContext) (result any, err error) {
@@ -250,7 +271,10 @@ func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeprot
 	if req.Op == nodeproto.OpPlan || req.Op == nodeproto.OpDescribe {
 		services.binding = nil
 	}
-	ctx = s.cfg.Operations.Context(WithHostFeatures(ctx, s.hello.Features), rc, *s.hello.Runner, services)
+	if services.binding != nil && runtime.GOOS != "windows" {
+		ctx = WithHostExec(ctx, s.hostExec)
+	}
+	ctx = s.cfg.Operations.Context(ctx, rc, *s.hello.Runner, services)
 	switch req.Op {
 	case nodeproto.OpDescribe:
 		result, err = s.cfg.Operations.Describe(ctx)

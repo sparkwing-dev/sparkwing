@@ -35,11 +35,13 @@ func (r EvalResult) ValidateValue(kind string) error {
 			return bad()
 		}
 	case "generate":
-		var jobs []json.RawMessage
-		if null || json.Unmarshal(raw, &jobs) != nil {
+		var document struct {
+			Jobs []json.RawMessage `json:"jobs"`
+		}
+		if null || json.Unmarshal(raw, &document) != nil || document.Jobs == nil {
 			return bad()
 		}
-		for _, job := range jobs {
+		for _, job := range document.Jobs {
 			if !isObject(job) {
 				return bad()
 			}

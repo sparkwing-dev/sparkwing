@@ -208,7 +208,7 @@ func (request SDKInstallRequest) PipelineDirectory() (string, error) {
 }
 
 func (r Resolved) verifyInstalledEngine() error {
-	if r.Identity.Pin.SDK == engineid.GoSDK && r.Identity.Pin.Replacement != "" {
+	if r.Identity.Pin.Replacement != "" {
 		var current Resolved
 		var err error
 		if r.retainedExecutable != "" {

@@ -2,8 +2,6 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # SDK API reference: `sparkwing/git`
 
-Package git is the sparkwing SDK's repo-inspection helper layer: commit SHA, branch, dirty-tree detection, deterministic fileset hash, tag listing, and safe tag push.
-
 Import as `swgit "github.com/sparkwing-dev/sparkwing/sparkwing/git"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
 
 ## Functions

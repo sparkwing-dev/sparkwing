@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -25,6 +26,14 @@ import (
 
 func bootstrapDotSparkwing(cwd, sparkwingDir string) error {
 	moduleName := scaffoldModuleName(filepath.Base(cwd))
+	if body, err := os.ReadFile(filepath.Join(sparkwingDir, "go.mod")); err == nil {
+		moduleName = modfile.ModulePath(body)
+		if moduleName == "" {
+			return errors.New("existing pipeline go.mod needs a module directive")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	_, err := writeSkeleton(sparkwingDir, moduleName, false)
 	if err != nil {
 		return err

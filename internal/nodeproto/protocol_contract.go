@@ -16,7 +16,7 @@ import (
 // Version is checked once in hello; documents and HTTP headers carry no protocol version.
 const Version = 2
 
-// Op keeps the complete launch operation vocabulary separate from optional hello features.
+// Op keeps the complete launch operation vocabulary separate from requests.
 type Op string
 
 // OpHello through OpCancel name the supported protocol operations.
@@ -49,16 +49,7 @@ type Request struct {
 	Input    json.RawMessage   `json:"input,omitempty"`
 	// Target identifies the active request cancelled by OpCancel, including eval without job/step.
 	Target string `json:"target,omitempty"`
-	// Features names the optional plan declarations this host accepts. Hello only; an SDK leaves a
-	// declaration the host does not name out of the plan, so an older host still accepts it.
-	Features []string `json:"features,omitempty"`
 }
-
-// FeatureJobCores is the hello feature for a job's declared core request.
-const FeatureJobCores = "job_cores"
-
-// HostFeatures lists the optional plan declarations this host accepts.
-func HostFeatures() []string { return []string{FeatureJobCores} }
 
 // EngineIdentity permits actionable mismatch diagnostics without stamping every request.
 type EngineIdentity struct {
@@ -85,11 +76,10 @@ type ProcessRoutes struct {
 	Bearer string `json:"bearer"`
 }
 
-// HelloResult advertises optional operations so additive protocol changes need no major bump.
+// HelloResult identifies the current SDK protocol.
 type HelloResult struct {
 	Protocol int         `json:"protocol"`
 	SDK      SDKIdentity `json:"sdk"`
-	Features []string    `json:"features"`
 }
 
 // SDKIdentity lets a mismatch name the package that must be rebuilt or upgraded.
@@ -152,10 +142,12 @@ type FrameLog struct {
 	Attrs      json.RawMessage `json:"attrs,omitempty"`
 }
 
-// Frame represents either a reply or log record on the isolated frame pipe, never stdout.
+// Frame represents one reply, log record or host exec request on the isolated frame pipe, never stdout.
 type Frame struct {
-	Reply *Reply
-	Log   *FrameLog
+	Reply      *Reply
+	Log        *FrameLog
+	Exec       *ExecRequest
+	ExecCancel *ExecCancel
 }
 
 // ParseRequest ignores additive fields, checks operation fields and decodes failure.error with apierr.DecodeInner.
@@ -188,9 +180,16 @@ func ParseRequest(line []byte) (Request, error) {
 
 // ParseFrame rejects ambiguous frames and uses apierr.DecodeInner for reply errors; unknown log events remain readable.
 func ParseFrame(line []byte) (Frame, error) {
+	if frame, ok := parseExecFast(line); ok {
+		return frame, nil
+	}
 	obj, err := protocolObject(line)
 	if err != nil {
 		return Frame{}, err
+	}
+	_, exec := obj["exec"]
+	if _, cancel := obj["exec_cancel"]; exec || cancel {
+		return parseExecFrame(obj, line)
 	}
 	if _, reply := obj["reply"]; reply {
 		if _, log := obj["ts"]; log {
@@ -247,10 +246,10 @@ func ParseFrame(line []byte) (Frame, error) {
 // OperationFields names the request fields an operation must carry and may carry, by JSON name.
 type OperationFields struct{ Required, Allowed []string }
 
-var requestFieldNames = []string{"protocol", "engine", "runner", "binding", "features", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"}
+var requestFieldNames = []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"}
 
 var requestFieldRules = map[Op]OperationFields{
-	OpHello:    {[]string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding", "features"}},
+	OpHello:    {[]string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding"}},
 	OpDescribe: {},
 	OpPlan:     {[]string{"pipeline", "args", "run"}, []string{"pipeline", "args", "run"}},
 	OpRunStep:  {[]string{"job", "step", "attempt", "settled"}, []string{"args", "job", "step", "attempt", "settled", "failure"}},
@@ -270,7 +269,7 @@ func RequestFields(op Op) OperationFields {
 
 func (r Request) fields() map[string]bool {
 	return map[string]bool{
-		"protocol": r.Protocol != 0, "engine": r.Engine != nil, "runner": r.Runner != nil, "binding": r.Binding != nil, "features": r.Features != nil,
+		"protocol": r.Protocol != 0, "engine": r.Engine != nil, "runner": r.Runner != nil, "binding": r.Binding != nil,
 		"pipeline": r.Pipeline != "", "args": r.Args != nil, "run": r.Run != nil, "job": r.Job != "", "step": r.Step != "",
 		"attempt": r.Attempt != 0, "settled": r.Settled != nil, "failure": r.Failure != nil, "closure": r.Closure != "",
 		"input": len(r.Input) != 0, "target": r.Target != "",
@@ -373,7 +372,7 @@ func (r Reply) Decode(result any) error {
 	}
 	switch v := result.(type) {
 	case *HelloResult:
-		if v.Protocol != Version || v.SDK.Language == "" || v.SDK.Version == "" || v.Features == nil {
+		if v.Protocol != Version || v.SDK.Language == "" || v.SDK.Version == "" {
 			return fmt.Errorf("%w: invalid hello result", ErrMalformed)
 		}
 	case *RunResult:

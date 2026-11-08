@@ -424,7 +424,7 @@ func TestProtocolSessionChild(t *testing.T) {
 			if mode == "planner" && request.Binding != nil {
 				os.Exit(8)
 			}
-			reply(request, nodeproto.HelloResult{Protocol: version, SDK: nodeproto.SDKIdentity{Language: "go", Version: sdkVersion}, Features: []string{}})
+			reply(request, nodeproto.HelloResult{Protocol: version, SDK: nodeproto.SDKIdentity{Language: "go", Version: sdkVersion}})
 			if mode == "blocked" {
 				reader, writer, err := os.Pipe()
 				if err != nil {
@@ -524,7 +524,7 @@ func TestProtocolSessionChild(t *testing.T) {
 				if request.Job != "" || string(request.Input) != `{"count":2}` {
 					os.Exit(6)
 				}
-				raw, _ := json.Marshal([]nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}}})
+				raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 				reply(request, nodeproto.EvalResult{Value: raw, DeclarationsKnown: true})
 			default:
 				os.Exit(7)

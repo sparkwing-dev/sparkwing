@@ -77,7 +77,7 @@ func NewResolver(config Config) (*Resolver, error) {
 
 // Resolve obtains the exact pin's permitted executable, including on a warm cache.
 func (r *Resolver) Resolve(ctx context.Context, pin engineid.Pin, target releaseasset.Target) (Resolved, error) {
-	if pin.SDK == engineid.GoSDK && pin.Replacement != "" {
+	if pin.Replacement != "" {
 		return installedEngine(ctx, pin, target)
 	}
 	version, err := VersionForPin(pin)
@@ -91,7 +91,7 @@ func (r *Resolver) Resolve(ctx context.Context, pin engineid.Pin, target release
 // A configured local build directory can retain the exact accepted Go replacement
 // engine after the installed CLI changes; new resolutions still use the installed CLI.
 func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, error) {
-	if identity.Pin.SDK == engineid.GoSDK && identity.Pin.Replacement != "" {
+	if identity.Pin.Replacement != "" {
 		resolved, err := installedEngine(ctx, identity.Pin, target)
 		if err != nil || resolved.Identity == identity {
 			return resolved, err

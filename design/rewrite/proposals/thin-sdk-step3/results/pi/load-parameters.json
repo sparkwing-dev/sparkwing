@@ -1,0 +1,7 @@
+{
+ "cpu_workers": 3,
+ "io_workers": 1,
+ "io_ring_bytes": 67108864,
+ "io_fsync": "every ring",
+ "stabilize_s": 30
+}

@@ -21,7 +21,7 @@ echo x >> `+counter+`
 while read -r line <&3; do
  id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
  case "$line" in
- *'"op":"hello"'*) payload='"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}' ;;
+ *'"op":"hello"'*) payload='"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"}}}' ;;
  *'"op":"describe"'*) payload='"ok":true,"result":{"pipelines":`+pipelines+`}}' ;;
  *) exit 9 ;;
  esac
