@@ -160,12 +160,6 @@
     "HelloResult": {
       "additionalProperties": true,
       "properties": {
-        "features": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "protocol": {
           "type": "integer"
         },
@@ -175,8 +169,7 @@
       },
       "required": [
         "protocol",
-        "sdk",
-        "features"
+        "sdk"
       ],
       "type": "object"
     },
@@ -306,12 +299,6 @@
         },
         "failure": {
           "$ref": "#/$defs/JobFailure"
-        },
-        "features": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
         },
         "id": {
           "type": "string"

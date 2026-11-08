@@ -1,0 +1,42 @@
+quiet-r0-go-small-c1-D ok 4.59 s load 0.69775390625
+quiet-r0-go-small-c1-T ok 4.81 s load 0.80224609375
+quiet-r0-go-small-c1-TC ok 4.87 s load 0.8984375
+quiet-r0-go-small-c1-P1 ok 5.93 s load 0.90673828125
+quiet-r0-go-small-c1-P2 ok 6.01 s load 0.91455078125
+quiet-r0-go-bulk-c1-D ok 0.2 s load 0.921875
+quiet-r0-go-bulk-c1-T ok 100.36 s load 0.921875
+quiet-r0-go-bulk-c1-TC ok 37.99 s load 1.9365234375
+quiet-r0-go-bulk-c1-P1 ok 2.39 s load 1.8623046875
+quiet-r0-go-bulk-c1-P2 ok 25.84 s load 1.8623046875
+quiet-r1-go-small-c1-D ok 4.55 s load 1.83740234375
+quiet-r1-go-small-c1-P2 ok 5.89 s load 1.83740234375
+quiet-r1-go-small-c1-P1 ok 5.92 s load 1.7822265625
+quiet-r1-go-small-c1-TC ok 5.04 s load 1.7998046875
+quiet-r1-go-small-c1-T ok 4.79 s load 1.89599609375
+quiet-r1-go-bulk-c1-D ok 0.21 s load 1.98486328125
+quiet-r1-go-bulk-c1-P2 ok 35.99 s load 1.98486328125
+quiet-r1-go-bulk-c1-P1 ok 2.35 s load 1.919921875
+quiet-r1-go-bulk-c1-TC ok 65.57 s load 1.919921875
+quiet-r1-go-bulk-c1-T ok 75.91 s load 1.97509765625
+quiet-r2-go-small-c1-TC ok 4.85 s load 1.88134765625
+quiet-r2-go-small-c1-P1 ok 6.04 s load 1.88671875
+quiet-r2-go-small-c1-P2 ok 5.92 s load 1.8154296875
+quiet-r2-go-small-c1-D ok 4.57 s load 1.91064453125
+quiet-r2-go-small-c1-T ok 4.77 s load 1.83740234375
+quiet-r2-go-bulk-c1-TC ok 51.45 s load 1.77001953125
+quiet-r2-go-bulk-c1-P1 ok 2.9 s load 1.9013671875
+quiet-r2-go-bulk-c1-P2 ok 33.45 s load 1.8291015625
+quiet-r2-go-bulk-c1-D ok 0.2 s load 1.98583984375
+quiet-r2-go-bulk-c1-T ok 69.28 s load 1.98583984375
+| Condition | Lang | Size | C | Variant | Rounds | p50 ms | p95 ms | cmds/s | MiB/s | Added p50 vs base | Ratio vs base | Ratio vs D | Host CPU s | SDK CPU s |
+| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| quiet | go | bulk | 1 | D | 3 | 41.195 | 41.195 | 24.2 | 193.8 |  |  |  | 0.001 | 0.037 |
+| quiet | go | bulk | 1 | T (vs D) | 3 | 39974.568 | 39974.568 | 0.0 | 0.2 | 39933.373 | 0.1% | 0.1% | 5.773 | 76.366 |
+| quiet | go | bulk | 1 | TC (vs D) | 3 | 25136.075 | 25136.075 | 0.0 | 0.3 | 25095.576 | 0.2% | 0.2% | 0.003 | 50.253 |
+| quiet | go | bulk | 1 | P1 (vs T) | 3 | 1110.666 | 1110.666 | 0.9 | 7.2 | -38884.458 | 3666.8% | 3.8% | 2.726 | 0.006 |
+| quiet | go | bulk | 1 | P2 (vs TC) | 3 | 7720.776 | 7720.776 | 0.1 | 1.0 | -18136.153 | 283.9% | 0.5% | 0.331 | 15.127 |
+| quiet | go | small | 1 | D | 3 | 4.298 | 4.857 | 232.2 |  |  |  |  | 0.009 | 1.928 |
+| quiet | go | small | 1 | T (vs D) | 3 | 4.454 | 5.140 | 221.3 |  | 0.163 | 95.1% | 95.1% | 1.389 | 2.705 |
+| quiet | go | small | 1 | TC (vs D) | 3 | 4.511 | 5.180 | 218.7 |  | 0.218 | 94.3% | 94.3% | 0.958 | 2.581 |
+| quiet | go | small | 1 | P1 (vs T) | 3 | 5.440 | 6.294 | 178.3 |  | 0.968 | 80.8% | 76.7% | 3.436 | 0.847 |
+| quiet | go | small | 1 | P2 (vs TC) | 3 | 5.424 | 6.214 | 178.8 |  | 0.911 | 81.6% | 77.0% | 3.299 | 0.864 |

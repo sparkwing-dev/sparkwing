@@ -2,7 +2,6 @@ package sparkwing
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -92,12 +91,6 @@ func Backoff(d time.Duration) RetryOption {
 // Cache declares files restored through the host-authorized depcache scope.
 func (n *JobNode) Cache(caches ...DirCache) *JobNode {
 	for _, c := range caches {
-		if c.spec.Path == "" && c.spec.Resolver == "" {
-			panic("sparkwing: Cache: path or resolver required")
-		}
-		if len(c.spec.KeyFiles) == 0 {
-			panic("sparkwing: Cache: key files required")
-		}
 		n.dirCaches = append(n.dirCaches, c)
 	}
 	return n
@@ -305,12 +298,7 @@ func (a *Approval) OnFailure(id string, body any) *JobNode {
 
 // FailurePolicy chooses fail_fast or collect_all without changing dependency requirements.
 func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work {
-	switch policy {
-	case FailFast, CollectAll:
-		w.failures = policy
-	default:
-		panic("sparkwing: unknown failure policy")
-	}
+	w.failures = policy
 	return w
 }
 
@@ -361,14 +349,8 @@ func Mask(ctx context.Context, value string) error {
 
 // Variable distinguishes a declared unmasked value from a secret.
 func Variable(ctx context.Context, name string) (string, error) {
-	v, masked, err := resolveValue(ctx, "Variable", name)
-	if err != nil {
-		return "", err
-	}
-	if masked {
-		return "", fmt.Errorf("sparkwing: Variable(%q) is a secret", name)
-	}
-	return v, nil
+	v, _, err := resolveValue(ctx, "Variable", name)
+	return v, err
 }
 
 // MustVariable makes a missing required plain value fail the job.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
@@ -22,6 +23,9 @@ import (
 )
 
 type host struct {
+	commands             *nodehost.LocalCommands
+	helperCleanups       nodehost.ProcessCleanups
+	commandSequence      uint64
 	argumentDeclarations []nodeproto.ArgumentDescription
 	opts                 Options
 	ctx                  context.Context
@@ -75,8 +79,10 @@ func (h *host) context(ctx context.Context, job string) context.Context {
 	ctx, _ = h.linkedContext(ctx)
 	rc := h.runContext(h.opts.Run.Pipeline)
 	r := h.opts.Runner
-	ctx = sdkserve.WithHostFeatures(ctx, nodeproto.HostFeatures())
-	return sdkserve.DefaultOperations.Context(ctx, rc, nodeproto.RunnerIdentity{Name: r.Name, Type: r.Type, Labels: r.Labels}, boundServices{host: h, ctx: ctx, job: job})
+	ctx = sdkserve.DefaultOperations.Context(ctx, rc, nodeproto.RunnerIdentity{Name: r.Name, Type: r.Type, Labels: r.Labels}, boundServices{host: h, ctx: ctx, job: job})
+	return sdkserve.WithHostExec(ctx, func(ctx context.Context, request nodeproto.ExecRequest) (sdkserve.HostExecResult, error) {
+		return h.execute(ctx, job, request)
+	})
 }
 
 type boundServices struct {
@@ -355,6 +361,8 @@ func (h *host) Close() error {
 	h.cancel()
 	h.mu.Unlock()
 	h.work.Wait()
+	cleanupErr := h.helperCleanups.CloseHelpers(context.Background())
+	commandErr := h.commands.Close()
 	h.mu.Lock()
 	for job, presenter := range h.presenters {
 		for _, frame := range presenter.Flush() {
@@ -362,7 +370,7 @@ func (h *host) Close() error {
 		}
 	}
 	h.mu.Unlock()
-	return nil
+	return errors.Join(cleanupErr, commandErr)
 }
 
 func (h *host) begin(ctx context.Context) error {
@@ -402,6 +410,9 @@ func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
 	v, ok := h.opts.Secrets[name]
 	if !ok {
 		return "", false, fmt.Errorf("secret %q: %w", name, sparkwing.ErrSecretMissing)
+	}
+	if v.Masked == sdkserve.SecretIsVariable(ctx) {
+		return "", false, fmt.Errorf("value classification differs from the requested secret or variable")
 	}
 	if v.Masked {
 		if err := h.registerIssued(ctx, v.Value); err != nil {
@@ -678,6 +689,7 @@ func newHost(opts Options) Host {
 		}
 	}
 	h.masker.Merge(h.replayMasks)
+	h.commands = nodehost.NewLocalCommands(h.masker)
 	return h
 }
 

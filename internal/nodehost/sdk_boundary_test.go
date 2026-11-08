@@ -39,7 +39,7 @@ func TestLifecycleCleanupCommandsHaveIndependentBudgets(t *testing.T) {
 					input, _, deps, base := evaluationFixture(t)
 					base.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 						if request.Op == nodeproto.OpEval {
-							return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+							return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 						}
 						return nil, nil
 					}

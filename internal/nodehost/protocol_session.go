@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -174,6 +175,10 @@ type protocolSession struct {
 	closeOnce                 sync.Once
 	closeErr                  error
 	reapErr                   error
+	execs                     map[string]*hostCommand
+	commandSessions           []*commandSession
+	execSeq                   uint64
+	commands                  sync.WaitGroup
 }
 
 var errProtocolSessionClosed = errors.New("SDK protocol session closed")
@@ -440,6 +445,18 @@ func (s *protocolSession) readProtocolFrames(file *os.File) {
 			s.emitProtocolLog(s.attributeProtocolLog(*frame.Log))
 			continue
 		}
+		if frame.Exec != nil {
+			if runtime.GOOS == "windows" {
+				s.failProtocol(protocolSessionError(apierr.ProtocolError, "SDK sent a command to a host that does not run commands"))
+				return
+			}
+			s.startExec(*frame.Exec)
+			continue
+		}
+		if frame.ExecCancel != nil {
+			s.cancelExec(frame.ExecCancel.ID)
+			continue
+		}
 		if frame.Reply == nil {
 			s.failProtocol(protocolSessionError(apierr.ProtocolError, "empty SDK frame"))
 			return
@@ -612,6 +629,20 @@ func (s *protocolSession) Close() error {
 		_ = s.requests.Close()
 		<-s.joined
 		s.writes.Wait()
+		// safety: the failure above kills every host command; joining them keeps
+		// their log writes ahead of the final flush, and a sink that stops accepting
+		// them is released by cancelling the log context after the grace.
+		commandsDone := make(chan struct{})
+		go func() { s.commands.Wait(); close(commandsDone) }()
+		if !s.awaitProtocol(commandsDone) {
+			s.stopLogs()
+			<-commandsDone
+		}
+		s.mu.Lock()
+		sessions := s.commandSessions
+		s.commandSessions = nil
+		s.mu.Unlock()
+		sessionsErr := endCommandSessions(sessions)
 		drained := make(chan struct{})
 		go func() { s.streams.Wait(); close(drained) }()
 		if !s.awaitProtocol(drained) {
@@ -627,7 +658,7 @@ func (s *protocolSession) Close() error {
 		if s.cfg.output != nil {
 			err = errors.Join(err, s.cfg.output.finish(s.executionCtx))
 		}
-		s.closeErr = errors.Join(revokeErr, err, s.reapErr)
+		s.closeErr = errors.Join(revokeErr, err, s.reapErr, sessionsErr)
 	})
 	return s.closeErr
 }

@@ -405,7 +405,7 @@ func (p *burstSDKProcess) Request(ctx context.Context, request nodeproto.Request
 	var err error
 	switch request.Op {
 	case nodeproto.OpHello:
-		result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: p.identity.Pin.Version}, Features: []string{}}
+		result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: p.identity.Pin.Version}}
 	case nodeproto.OpPlan:
 		p.run = *request.Run
 		var plan nodeproto.PlanDoc

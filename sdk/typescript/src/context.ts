@@ -1,7 +1,8 @@
 import type { Annotation, Args, Context, Failure, PipelineDef, RunContext } from "../index.d.ts";
-import { createCommand, registerCommandContext } from "./command.ts";
+import { createCommand, registerCommandContext, type HostExec } from "./command.ts";
 import { SDKError, failure } from "./errors.ts";
 import { LogWriter, type LineSink } from "./log.ts";
+import { registerHelpers } from "./helpers/host.ts";
 import type { HostServices } from "./routes.ts";
 
 export interface ContextOptions {
@@ -16,6 +17,7 @@ export interface ContextOptions {
   services?: HostServices;
   outputs: ReadonlyMap<string, unknown>;
   bodyEnv?: Record<string, string>;
+  hostExec?: HostExec;
 }
 export function makeContext(options: ContextOptions): Context {
   const { run, signal, jobId } = options;
@@ -27,11 +29,10 @@ export function makeContext(options: ContextOptions): Context {
   };
   const read = async (name: string, variable: boolean): Promise<string | undefined> => {
     const declaration = options.definition.secrets?.find((s) => s.name === name && Boolean(s.variable) === variable);
-    if (!declaration) throw failure("forbidden", "value was not declared by this pipeline", { reason: "secret_undeclared" });
     try {
-      return await services().secret(name, signal);
+      return await services().secret(name, signal, variable);
     } catch (error) {
-      if (declaration.optional && error instanceof SDKError && error.code === "not_found") return undefined;
+      if (declaration?.optional && error instanceof SDKError && error.code === "not_found") return undefined;
       throw error;
     }
   };
@@ -50,11 +51,9 @@ export function makeContext(options: ContextOptions): Context {
     output: (job) => services().output(typeof job === "string" ? job : job.id, signal),
     stepOutput: (step) => options.outputs.get(typeof step === "string" ? step : step.id) as never,
     annotate: async (annotation) => {
-      checkAnnotation(annotation);
       await services().annotate(annotation, signal, options.stepId);
     },
     summary: async (markdown) => {
-      if (typeof markdown !== "string") throw failure("bad_request", "summary markdown must be a string");
       await services().summary(markdown, signal, options.stepId);
     },
     mask: (value) => services().mask(value, signal),
@@ -65,13 +64,7 @@ export function makeContext(options: ContextOptions): Context {
     exec: (argv, opts) => createCommand(ctx, argv, opts),
     bash: (script, opts) => createCommand(ctx, ["bash", "-c", script], opts),
   };
-  registerCommandContext(ctx, (event, attrs) => log.event(event, attrs), options.bodyEnv);
+  registerHelpers(ctx, options.services);
+  registerCommandContext(ctx, (event, attrs) => log.event(event, attrs), options.bodyEnv, options.hostExec);
   return ctx;
-}
-function checkAnnotation(annotation: Annotation): void {
-  if (typeof annotation.message !== "string") throw failure("bad_request", "annotation message must be a string");
-  if (annotation.level !== undefined && typeof annotation.level !== "string") throw failure("bad_request", "annotation level must be a string");
-  for (const value of [annotation.line, annotation.endLine, annotation.column])
-    if (value !== undefined && !Number.isSafeInteger(value))
-      throw failure("bad_request", "annotation location must be an integer");
 }

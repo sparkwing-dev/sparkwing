@@ -16,7 +16,7 @@ func TestEvalValueKinds(t *testing.T) {
 		{"before_run", []string{`null`}, []string{`false`, `""`, `[]`, `{}`}},
 		{"after_run", []string{`null`}, []string{`false`, `""`, `[]`, `{}`}},
 		{"verify", []string{`null`}, []string{`false`, `""`, `[]`, `{}`}},
-		{"generate", []string{`[]`, `[{"id":"child","steps":[{"id":"run"}]}]`}, []string{`null`, `true`, `{}`, `[null]`, `[1]`}},
+		{"generate", []string{`{"jobs":[]}`, `{"jobs":[{"id":"child","steps":[{"id":"run"}]}]}`}, []string{`null`, `true`, `{}`, `[null]`, `[1]`}},
 		{"unknown", nil, []string{`null`}},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {

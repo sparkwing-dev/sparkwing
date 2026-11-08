@@ -1,0 +1,482 @@
+quiet-r0-go-small-c1-D ok 4.54 s load 1.3935546875
+quiet-r0-go-small-c1-T ok 5.66 s load 1.4423828125
+quiet-r0-go-small-c1-TC ok 5.76 s load 1.40673828125
+quiet-r0-go-small-c1-P1 ok 6.76 s load 1.3740234375
+quiet-r0-go-small-c1-P2 ok 6.03 s load 1.396484375
+quiet-r0-go-small-c8-D ok 1.74 s load 1.52490234375
+quiet-r0-go-small-c8-T ok 3.5 s load 1.52490234375
+quiet-r0-go-small-c8-TC ok 4.05 s load 1.87939453125
+quiet-r0-go-small-c8-P1 ok 4.01 s load 1.84423828125
+quiet-r0-go-small-c8-P2 ok 3.77 s load 1.90966796875
+quiet-r0-go-bulk-c1-D ok 0.42 s load 1.90966796875
+quiet-r0-go-bulk-c1-T ok 44.86 s load 1.90966796875
+quiet-r0-go-bulk-c1-TC ok 17.89 s load 1.98046875
+quiet-r0-go-bulk-c1-P1 ok 5.25 s load 1.92431640625
+quiet-r0-go-bulk-c1-P2 ok 26.94 s load 1.85009765625
+quiet-r0-go-bulk-c8-D ok 0.77 s load 1.90234375
+quiet-r0-go-bulk-c8-T ok 84.66 s load 1.830078125
+quiet-r0-go-bulk-c8-TC ok 38.08 s load 1.81689453125
+quiet-r0-go-bulk-c8-P1 ok 20.42 s load 1.88134765625
+quiet-r0-go-bulk-c8-P2 ok 36.91 s load 1.63037109375
+quiet-r0-typescript-small-c1-D ok 17.25 s load 1.69189453125
+quiet-r0-typescript-small-c1-T ok 18.8 s load 1.8466796875
+quiet-r0-typescript-small-c1-TC ok 18.05 s load 1.9970703125
+quiet-r0-typescript-small-c1-P1 ok 8.84 s load 1.93603515625
+quiet-r0-typescript-small-c1-P2 ok 8.6 s load 1.859375
+quiet-r0-typescript-small-c8-D ok 15.19 s load 1.8818359375
+quiet-r0-typescript-small-c8-T ok 17.49 s load 1.84033203125
+quiet-r0-typescript-small-c8-TC ok 17.46 s load 1.74365234375
+quiet-r0-typescript-small-c8-P1 ok 4.72 s load 1.806640625
+quiet-r0-typescript-small-c8-P2 ok 5.62 s load 1.74169921875
+quiet-r0-typescript-bulk-c1-D ok 2.3 s load 1.98974609375
+quiet-r0-typescript-bulk-c1-T ok 13.56 s load 1.99072265625
+quiet-r0-typescript-bulk-c1-TC ok 2.9 s load 1.912109375
+quiet-r0-typescript-bulk-c1-P1 ok 7.26 s load 1.8388671875
+quiet-r0-typescript-bulk-c1-P2 ok 3.87 s load 1.771484375
+quiet-r0-typescript-bulk-c8-D ok 3.25 s load 1.70947265625
+quiet-r0-typescript-bulk-c8-T ok 53.17 s load 1.81298828125
+quiet-r0-typescript-bulk-c8-TC ok 4.33 s load 1.8671875
+quiet-r0-typescript-bulk-c8-P1 ok 22.27 s load 1.8671875
+quiet-r0-typescript-bulk-c8-P2 ok 8.48 s load 1.5703125
+quiet-r1-go-small-c1-D ok 4.72 s load 1.55615234375
+quiet-r1-go-small-c1-P2 ok 6.1 s load 1.51123046875
+quiet-r1-go-small-c1-P1 ok 5.8 s load 1.630859375
+quiet-r1-go-small-c1-TC ok 5.01 s load 1.580078125
+quiet-r1-go-small-c1-T ok 5.33 s load 1.533203125
+quiet-r1-go-small-c8-D ok 2.33 s load 1.57080078125
+quiet-r1-go-small-c8-P2 ok 2.56 s load 1.57080078125
+quiet-r1-go-small-c8-P1 ok 3.58 s load 1.52490234375
+quiet-r1-go-small-c8-TC ok 4.3 s load 1.88330078125
+quiet-r1-go-small-c8-T ok 3.74 s load 1.9716796875
+quiet-r1-go-bulk-c1-D ok 0.42 s load 1.9716796875
+quiet-r1-go-bulk-c1-P2 ok 41.73 s load 1.9716796875
+quiet-r1-go-bulk-c1-P1 ok 5.11 s load 1.9853515625
+quiet-r1-go-bulk-c1-TC ok 30.21 s load 1.90625
+quiet-r1-go-bulk-c1-T ok 38.4 s load 1.9443359375
+quiet-r1-go-bulk-c8-D ok 0.77 s load 1.9228515625
+quiet-r1-go-bulk-c8-P2 ok 50.14 s load 1.9228515625
+quiet-r1-go-bulk-c8-P1 ok 27.96 s load 1.99072265625
+quiet-r1-go-bulk-c8-TC ok 6.68 s load 0.84423828125
+quiet-r1-go-bulk-c8-T ok 75.69 s load 1.93505859375
+quiet-r1-typescript-small-c1-D ok 17.89 s load 1.97900390625
+quiet-r1-typescript-small-c1-P2 ok 8.56 s load 1.78125
+quiet-r1-typescript-small-c1-P1 ok 8.47 s load 1.798828125
+quiet-r1-typescript-small-c1-TC ok 17.89 s load 1.859375
+quiet-r1-typescript-small-c1-T ok 18.4 s load 1.61474609375
+quiet-r1-typescript-small-c8-D ok 16.19 s load 1.55224609375
+quiet-r1-typescript-small-c8-P2 ok 5.52 s load 1.46875
+quiet-r1-typescript-small-c8-P1 ok 4.23 s load 1.86181640625
+quiet-r1-typescript-small-c8-TC ok 16.8 s load 1.9560546875
+quiet-r1-typescript-small-c8-T ok 17.58 s load 1.74365234375
+quiet-r1-typescript-bulk-c1-D ok 2.43 s load 1.91796875
+quiet-r1-typescript-bulk-c1-P2 ok 3.57 s load 1.84423828125
+quiet-r1-typescript-bulk-c1-P1 ok 6.99 s load 1.7763671875
+quiet-r1-typescript-bulk-c1-TC ok 2.49 s load 1.7138671875
+quiet-r1-typescript-bulk-c1-T ok 14.16 s load 1.73681640625
+quiet-r1-typescript-bulk-c8-D ok 2.7 s load 1.623046875
+quiet-r1-typescript-bulk-c8-P2 ok 8.06 s load 1.7333984375
+quiet-r1-typescript-bulk-c8-P1 ok 21.84 s load 1.6201171875
+quiet-r1-typescript-bulk-c8-TC ok 4.18 s load 1.44287109375
+quiet-r1-typescript-bulk-c8-T ok 61.53 s load 1.4072265625
+quiet-r2-go-small-c1-TC ok 4.87 s load 1.95947265625
+quiet-r2-go-small-c1-P1 ok 5.96 s load 1.962890625
+quiet-r2-go-small-c1-P2 ok 5.77 s load 1.8857421875
+quiet-r2-go-small-c1-D ok 4.8 s load 1.89501953125
+quiet-r2-go-small-c1-T ok 5.24 s load 1.8232421875
+quiet-r2-go-small-c8-TC ok 1.96 s load 1.9111328125
+quiet-r2-go-small-c8-P1 ok 2.29 s load 1.9111328125
+quiet-r2-go-small-c8-P2 ok 1.88 s load 1.8671875
+quiet-r2-go-small-c8-D ok 1.56 s load 1.8671875
+quiet-r2-go-small-c8-T ok 2.05 s load 1.88134765625
+quiet-r2-go-bulk-c1-TC ok 15.98 s load 1.88134765625
+quiet-r2-go-bulk-c1-P1 ok 4.97 s load 1.908203125
+quiet-r2-go-bulk-c1-P2 ok 26.2 s load 1.83544921875
+quiet-r2-go-bulk-c1-D ok 0.27 s load 1.89208984375
+quiet-r2-go-bulk-c1-T ok 45.79 s load 1.89208984375
+quiet-r2-go-bulk-c8-TC ok 23.56 s load 1.9052734375
+quiet-r2-go-bulk-c8-P1 ok 20.12 s load 1.859375
+quiet-r2-go-bulk-c8-P2 ok 41.48 s load 1.61474609375
+quiet-r2-go-bulk-c8-D ok 0.6 s load 1.83984375
+quiet-r2-go-bulk-c8-T ok 82.83 s load 1.83984375
+quiet-r2-typescript-small-c1-TC ok 17.65 s load 1.9453125
+quiet-r2-typescript-small-c1-P1 ok 8.76 s load 1.73486328125
+quiet-r2-typescript-small-c1-P2 ok 8.5 s load 1.6953125
+quiet-r2-typescript-small-c1-D ok 17.26 s load 1.587890625
+quiet-r2-typescript-small-c1-T ok 17.81 s load 1.45703125
+quiet-r2-typescript-small-c8-TC ok 17.33 s load 1.3447265625
+quiet-r2-typescript-small-c8-P1 ok 4.93 s load 1.341796875
+quiet-r2-typescript-small-c8-P2 ok 3.74 s load 1.71484375
+quiet-r2-typescript-small-c8-D ok 15.78 s load 1.89306640625
+quiet-r2-typescript-small-c8-T ok 17.31 s load 1.9912109375
+quiet-r2-typescript-bulk-c1-TC ok 2.52 s load 1.92578125
+quiet-r2-typescript-bulk-c1-P1 ok 7.28 s load 1.998046875
+quiet-r2-typescript-bulk-c1-P2 ok 3.4 s load 1.91796875
+quiet-r2-typescript-bulk-c1-D ok 2.26 s load 1.84423828125
+quiet-r2-typescript-bulk-c1-T ok 12.61 s load 1.84423828125
+quiet-r2-typescript-bulk-c8-TC ok 3.26 s load 1.65625
+quiet-r2-typescript-bulk-c8-P1 ok 21.8 s load 1.9912109375
+quiet-r2-typescript-bulk-c8-P2 ok 8.06 s load 1.9130859375
+quiet-r2-typescript-bulk-c8-D ok 2.82 s load 1.98681640625
+quiet-r2-typescript-bulk-c8-T ok 66.9 s load 1.98681640625
+quiet-r3-go-small-c1-TC ok 4.88 s load 1.8486328125
+quiet-r3-go-small-c1-T ok 4.94 s load 1.86083984375
+quiet-r3-go-small-c1-D ok 4.52 s load 1.79150390625
+quiet-r3-go-small-c1-P2 ok 5.8 s load 1.72802734375
+quiet-r3-go-small-c1-P1 ok 5.79 s load 1.66943359375
+quiet-r3-go-small-c8-TC ok 1.95 s load 1.61572265625
+quiet-r3-go-small-c8-T ok 2.05 s load 1.61572265625
+quiet-r3-go-small-c8-D ok 1.5 s load 1.88330078125
+quiet-r3-go-small-c8-P2 ok 2.94 s load 1.88330078125
+quiet-r3-go-small-c8-P1 ok 1.97 s load 1.9287109375
+quiet-r3-go-bulk-c1-TC ok 24.8 s load 1.9287109375
+quiet-r3-go-bulk-c1-T ok 41.18 s load 1.9541015625
+quiet-r3-go-bulk-c1-D ok 0.2 s load 1.93310546875
+quiet-r3-go-bulk-c1-P2 ok 19.22 s load 1.93310546875
+quiet-r3-go-bulk-c1-P1 ok 5.08 s load 1.953125
+quiet-r3-go-bulk-c8-TC ok 27.5 s load 1.947265625
+quiet-r3-go-bulk-c8-T ok 76.25 s load 1.96923828125
+quiet-r3-go-bulk-c8-D ok 0.4 s load 1.92919921875
+quiet-r3-go-bulk-c8-P2 ok 40.99 s load 1.92919921875
+quiet-r3-go-bulk-c8-P1 ok 19.09 s load 1.828125
+quiet-r3-typescript-small-c1-TC ok 17.83 s load 1.5927734375
+quiet-r3-typescript-small-c1-T ok 18.07 s load 1.49169921875
+quiet-r3-typescript-small-c1-D ok 17.58 s load 1.5244140625
+quiet-r3-typescript-small-c1-P2 ok 8.49 s load 1.56201171875
+quiet-r3-typescript-small-c1-P1 ok 8.53 s load 1.5166015625
+quiet-r3-typescript-small-c8-TC ok 16.62 s load 1.59765625
+quiet-r3-typescript-small-c8-T ok 16.92 s load 1.60009765625
+quiet-r3-typescript-small-c8-D ok 16.27 s load 1.4287109375
+quiet-r3-typescript-small-c8-P2 ok 4.14 s load 1.3330078125
+quiet-r3-typescript-small-c8-P1 ok 4.28 s load 1.30615234375
+quiet-r3-typescript-bulk-c1-TC ok 2.5 s load 1.91552734375
+quiet-r3-typescript-bulk-c1-T ok 13.31 s load 1.91552734375
+quiet-r3-typescript-bulk-c1-D ok 2.28 s load 1.92138671875
+quiet-r3-typescript-bulk-c1-P2 ok 3.31 s load 1.92138671875
+quiet-r3-typescript-bulk-c1-P1 ok 6.21 s load 1.84716796875
+quiet-r3-typescript-bulk-c8-TC ok 3.44 s load 1.779296875
+quiet-r3-typescript-bulk-c8-T ok 51.85 s load 1.79736328125
+quiet-r3-typescript-bulk-c8-D ok 2.76 s load 1.89501953125
+quiet-r3-typescript-bulk-c8-P2 ok 8.11 s load 1.90380859375
+quiet-r3-typescript-bulk-c8-P1 ok 21.21 s load 1.9248046875
+quiet-r4-go-small-c1-P2 ok 5.97 s load 1.90234375
+quiet-r4-go-small-c1-D ok 4.74 s load 1.91064453125
+quiet-r4-go-small-c1-T ok 4.77 s load 1.8935546875
+quiet-r4-go-small-c1-TC ok 5.03 s load 1.89697265625
+quiet-r4-go-small-c1-P1 ok 5.82 s load 1.9736328125
+quiet-r4-go-small-c8-P2 ok 3.58 s load 1.8955078125
+quiet-r4-go-small-c8-D ok 2.48 s load 1.89892578125
+quiet-r4-go-small-c8-T ok 2.04 s load 1.9384765625
+quiet-r4-go-small-c8-TC ok 2.41 s load 1.9384765625
+quiet-r4-go-small-c8-P1 ok 2.2 s load 1.86328125
+quiet-r4-go-bulk-c1-P2 ok 15.1 s load 1.86328125
+quiet-r4-go-bulk-c1-D ok 0.24 s load 1.89404296875
+quiet-r4-go-bulk-c1-T ok 32.91 s load 1.89404296875
+quiet-r4-go-bulk-c1-TC ok 23.56 s load 1.9345703125
+quiet-r4-go-bulk-c1-P1 ok 6.19 s load 1.9541015625
+quiet-r4-go-bulk-c8-P2 ok 37.27 s load 1.80712890625
+quiet-r4-go-bulk-c8-D ok 0.71 s load 1.92822265625
+quiet-r4-go-bulk-c8-T ok 92.7 s load 1.92822265625
+quiet-r4-go-bulk-c8-TC ok 27.59 s load 1.9580078125
+quiet-r4-go-bulk-c8-P1 ok 20.91 s load 1.75048828125
+quiet-r4-typescript-small-c1-P2 ok 8.21 s load 1.94970703125
+quiet-r4-typescript-small-c1-D ok 16.91 s load 1.87353515625
+quiet-r4-typescript-small-c1-T ok 18.13 s load 1.87451171875
+quiet-r4-typescript-small-c1-TC ok 17.92 s load 1.822265625
+quiet-r4-typescript-small-c1-P1 ok 8.61 s load 1.87841796875
+quiet-r4-typescript-small-c8-P2 ok 5.64 s load 1.74267578125
+quiet-r4-typescript-small-c8-D ok 15.66 s load 1.87109375
+quiet-r4-typescript-small-c8-T ok 17.76 s load 1.677734375
+quiet-r4-typescript-small-c8-TC ok 16.92 s load 1.73681640625
+quiet-r4-typescript-small-c8-P1 ok 4.31 s load 1.67529296875
+quiet-r4-typescript-bulk-c1-P2 ok 3.51 s load 1.9814453125
+quiet-r4-typescript-bulk-c1-D ok 1.45 s load 1.9814453125
+quiet-r4-typescript-bulk-c1-T ok 13.51 s load 1.9833984375
+quiet-r4-typescript-bulk-c1-TC ok 2.54 s load 1.986328125
+quiet-r4-typescript-bulk-c1-P1 ok 6.76 s load 1.90185546875
+quiet-r4-typescript-bulk-c8-P2 ok 8.53 s load 1.82958984375
+quiet-r4-typescript-bulk-c8-D ok 3.17 s load 1.9228515625
+quiet-r4-typescript-bulk-c8-T ok 52.09 s load 1.84814453125
+quiet-r4-typescript-bulk-c8-TC ok 3.42 s load 1.89990234375
+quiet-r4-typescript-bulk-c8-P1 ok 22.5 s load 1.88525390625
+loaded-r0-go-small-c1-D ok 10.67 s load 3.337890625
+loaded-r0-go-small-c1-T ok 14.06 s load 3.673828125
+loaded-r0-go-small-c1-TC ok 13.37 s load 4.712890625
+loaded-r0-go-small-c1-P1 ok 15.58 s load 5.0849609375
+loaded-r0-go-small-c1-P2 ok 16.03 s load 5.38671875
+loaded-r0-go-small-c8-D ok 5.0 s load 5.81884765625
+loaded-r0-go-small-c8-T ok 6.79 s load 6.39404296875
+loaded-r0-go-small-c8-TC ok 6.64 s load 8.0380859375
+loaded-r0-go-small-c8-P1 ok 6.61 s load 8.275390625
+loaded-r0-go-small-c8-P2 ok 6.88 s load 8.73388671875
+loaded-r0-go-bulk-c1-D ok 0.81 s load 9.61767578125
+loaded-r0-go-bulk-c1-T ok 17.91 s load 9.61767578125
+loaded-r0-go-bulk-c1-TC ok 1.49 s load 8.787109375
+loaded-r0-go-bulk-c1-P1 ok 7.58 s load 8.787109375
+loaded-r0-go-bulk-c1-P2 ok 3.81 s load 8.646484375
+loaded-r0-go-bulk-c8-D ok 1.35 s load 8.646484375
+loaded-r0-go-bulk-c8-T ok 81.76 s load 9.3955078125
+loaded-r0-go-bulk-c8-TC ok 4.84 s load 8.1943359375
+loaded-r0-go-bulk-c8-P1 ok 37.63 s load 8.73974609375
+loaded-r0-go-bulk-c8-P2 ok 15.07 s load 8.42138671875
+loaded-r0-typescript-small-c1-D ok 31.85 s load 8.3896484375
+loaded-r0-typescript-small-c1-T ok 36.22 s load 7.79248046875
+loaded-r0-typescript-small-c1-TC ok 36.72 s load 6.69921875
+loaded-r0-typescript-small-c1-P1 ok 19.79 s load 6.509765625
+loaded-r0-typescript-small-c1-P2 ok 19.85 s load 6.34619140625
+loaded-r0-typescript-small-c8-D ok 31.58 s load 6.85302734375
+loaded-r0-typescript-small-c8-T ok 35.36 s load 6.43310546875
+loaded-r0-typescript-small-c8-TC ok 34.71 s load 6.0615234375
+loaded-r0-typescript-small-c8-P1 ok 10.86 s load 6.63623046875
+loaded-r0-typescript-small-c8-P2 ok 10.35 s load 6.69873046875
+loaded-r0-typescript-bulk-c1-D ok 4.28 s load 6.98583984375
+loaded-r0-typescript-bulk-c1-T ok 19.39 s load 6.82666015625
+loaded-r0-typescript-bulk-c1-TC ok 4.46 s load 6.7470703125
+loaded-r0-typescript-bulk-c1-P1 ok 10.84 s load 6.767578125
+loaded-r0-typescript-bulk-c1-P2 ok 5.5 s load 6.79052734375
+loaded-r0-typescript-bulk-c8-D ok 5.67 s load 6.9677734375
+loaded-r0-typescript-bulk-c8-T ok 75.48 s load 6.9794921875
+loaded-r0-typescript-bulk-c8-TC ok 7.28 s load 7.42041015625
+loaded-r0-typescript-bulk-c8-P1 ok 32.61 s load 7.306640625
+loaded-r0-typescript-bulk-c8-P2 ok 13.38 s load 7.24853515625
+loaded-r1-go-small-c1-D ok 10.56 s load 7.10693359375
+loaded-r1-go-small-c1-P2 ok 15.27 s load 7.17724609375
+loaded-r1-go-small-c1-P1 ok 16.04 s load 7.12548828125
+loaded-r1-go-small-c1-TC ok 13.41 s load 6.7216796875
+loaded-r1-go-small-c1-T ok 13.8 s load 7.12109375
+loaded-r1-go-small-c8-D ok 4.94 s load 7.02197265625
+loaded-r1-go-small-c8-P2 ok 9.72 s load 7.1005859375
+loaded-r1-go-small-c8-P1 ok 6.83 s load 7.95361328125
+loaded-r1-go-small-c8-TC ok 6.49 s load 8.35498046875
+loaded-r1-go-small-c8-T ok 6.87 s load 8.80712890625
+loaded-r1-go-bulk-c1-D ok 0.83 s load 9.30322265625
+loaded-r1-go-bulk-c1-P2 ok 3.73 s load 9.03857421875
+loaded-r1-go-bulk-c1-P1 ok 10.16 s load 9.03857421875
+loaded-r1-go-bulk-c1-TC ok 1.58 s load 8.8046875
+loaded-r1-go-bulk-c1-T ok 18.67 s load 8.90087890625
+loaded-r1-go-bulk-c8-D ok 1.47 s load 8.46044921875
+loaded-r1-go-bulk-c8-P2 ok 14.82 s load 8.26318359375
+loaded-r1-go-bulk-c8-P1 ok 32.21 s load 8.0380859375
+loaded-r1-go-bulk-c8-TC ok 4.72 s load 7.54052734375
+loaded-r1-go-bulk-c8-T ok 86.33 s load 7.4169921875
+loaded-r1-typescript-small-c1-D ok 32.6 s load 8.3154296875
+loaded-r1-typescript-small-c1-P2 ok 19.63 s load 7.7373046875
+loaded-r1-typescript-small-c1-P1 ok 19.75 s load 7.2373046875
+loaded-r1-typescript-small-c1-TC ok 36.33 s load 7.35009765625
+loaded-r1-typescript-small-c1-T ok 36.83 s load 6.94970703125
+loaded-r1-typescript-small-c8-D ok 32.58 s load 6.927734375
+loaded-r1-typescript-small-c8-P2 ok 10.89 s load 6.63037109375
+loaded-r1-typescript-small-c8-P1 ok 10.59 s load 7.4755859375
+loaded-r1-typescript-small-c8-TC ok 34.34 s load 8.0498046875
+loaded-r1-typescript-small-c8-T ok 35.29 s load 7.267578125
+loaded-r1-typescript-bulk-c1-D ok 3.59 s load 6.94482421875
+loaded-r1-typescript-bulk-c1-P2 ok 5.98 s load 6.94482421875
+loaded-r1-typescript-bulk-c1-P1 ok 10.97 s load 7.02978515625
+loaded-r1-typescript-bulk-c1-TC ok 4.32 s load 6.8623046875
+loaded-r1-typescript-bulk-c1-T ok 19.61 s load 6.79296875
+loaded-r1-typescript-bulk-c8-D ok 6.36 s load 7.2197265625
+loaded-r1-typescript-bulk-c8-P2 ok 16.36 s load 7.72119140625
+loaded-r1-typescript-bulk-c8-P1 ok 31.89 s load 8.63916015625
+loaded-r1-typescript-bulk-c8-TC ok 7.52 s load 8.05908203125
+loaded-r1-typescript-bulk-c8-T ok 75.74 s load 7.81591796875
+loaded-r2-go-small-c1-TC ok 13.04 s load 7.20751953125
+loaded-r2-go-small-c1-P1 ok 15.59 s load 7.2783203125
+loaded-r2-go-small-c1-P2 ok 15.27 s load 7.13037109375
+loaded-r2-go-small-c1-D ok 10.4 s load 7.37841796875
+loaded-r2-go-small-c1-T ok 13.75 s load 7.24609375
+loaded-r2-go-small-c8-TC ok 6.44 s load 6.982421875
+loaded-r2-go-small-c8-P1 ok 7.08 s load 7.86474609375
+loaded-r2-go-small-c8-P2 ok 6.83 s load 8.75439453125
+loaded-r2-go-small-c8-D ok 4.96 s load 8.8544921875
+loaded-r2-go-small-c8-T ok 6.85 s load 9.2666015625
+loaded-r2-go-bulk-c1-TC ok 1.6 s load 9.3603515625
+loaded-r2-go-bulk-c1-P1 ok 7.82 s load 9.3603515625
+loaded-r2-go-bulk-c1-P2 ok 3.98 s load 9.2509765625
+loaded-r2-go-bulk-c1-D ok 0.68 s load 9.150390625
+loaded-r2-go-bulk-c1-T ok 17.83 s load 9.150390625
+loaded-r2-go-bulk-c8-TC ok 4.43 s load 8.5166015625
+loaded-r2-go-bulk-c8-P1 ok 29.15 s load 8.7958984375
+loaded-r2-go-bulk-c8-P2 ok 14.31 s load 8.1005859375
+loaded-r2-go-bulk-c8-D ok 1.49 s load 8.298828125
+loaded-r2-go-bulk-c8-T ok 79.64 s load 8.298828125
+loaded-r2-typescript-small-c1-TC ok 34.82 s load 8.203125
+loaded-r2-typescript-small-c1-P1 ok 19.74 s load 7.70703125
+loaded-r2-typescript-small-c1-P2 ok 19.96 s load 7.54931640625
+loaded-r2-typescript-small-c1-D ok 31.18 s load 7.49169921875
+loaded-r2-typescript-small-c1-T ok 36.89 s load 7.51708984375
+loaded-r2-typescript-small-c8-TC ok 35.38 s load 6.95654296875
+loaded-r2-typescript-small-c8-P1 ok 10.52 s load 6.60888671875
+loaded-r2-typescript-small-c8-P2 ok 10.61 s load 7.29736328125
+loaded-r2-typescript-small-c8-D ok 32.51 s load 7.57861328125
+loaded-r2-typescript-small-c8-T ok 35.81 s load 6.767578125
+loaded-r2-typescript-bulk-c1-TC ok 4.64 s load 6.26318359375
+loaded-r2-typescript-bulk-c1-P1 ok 11.72 s load 6.642578125
+loaded-r2-typescript-bulk-c1-P2 ok 5.6 s load 7.3994140625
+loaded-r2-typescript-bulk-c1-D ok 4.29 s load 7.44775390625
+loaded-r2-typescript-bulk-c1-T ok 19.0 s load 7.33154296875
+loaded-r2-typescript-bulk-c8-TC ok 7.37 s load 6.8740234375
+loaded-r2-typescript-bulk-c8-P1 ok 31.33 s load 6.6591796875
+loaded-r2-typescript-bulk-c8-P2 ok 13.53 s load 6.54541015625
+loaded-r2-typescript-bulk-c8-D ok 5.62 s load 6.935546875
+loaded-r2-typescript-bulk-c8-T ok 76.35 s load 7.26123046875
+loaded-r3-go-small-c1-TC ok 13.19 s load 7.47705078125
+loaded-r3-go-small-c1-T ok 13.89 s load 7.63134765625
+loaded-r3-go-small-c1-D ok 10.66 s load 7.90576171875
+loaded-r3-go-small-c1-P2 ok 15.67 s load 7.68603515625
+loaded-r3-go-small-c1-P1 ok 15.42 s load 7.44775390625
+loaded-r3-go-small-c8-TC ok 6.58 s load 7.341796875
+loaded-r3-go-small-c8-T ok 6.88 s load 7.65087890625
+loaded-r3-go-small-c8-D ok 5.05 s load 7.99951171875
+loaded-r3-go-small-c8-P2 ok 6.75 s load 7.75927734375
+loaded-r3-go-small-c8-P1 ok 6.57 s load 8.20947265625
+loaded-r3-go-bulk-c1-TC ok 1.31 s load 8.59326171875
+loaded-r3-go-bulk-c1-T ok 17.22 s load 8.59326171875
+loaded-r3-go-bulk-c1-D ok 0.82 s load 8.2890625
+loaded-r3-go-bulk-c1-P2 ok 3.84 s load 8.2890625
+loaded-r3-go-bulk-c1-P1 ok 7.52 s load 8.265625
+loaded-r3-go-bulk-c8-TC ok 3.78 s load 8.083984375
+loaded-r3-go-bulk-c8-T ok 87.91 s load 7.8369140625
+loaded-r3-go-bulk-c8-D ok 1.31 s load 8.31591796875
+loaded-r3-go-bulk-c8-P2 ok 14.26 s load 8.31591796875
+loaded-r3-go-bulk-c8-P1 ok 29.02 s load 8.16552734375
+loaded-r3-typescript-small-c1-TC ok 35.79 s load 8.03564453125
+loaded-r3-typescript-small-c1-T ok 36.94 s load 6.99169921875
+loaded-r3-typescript-small-c1-D ok 32.65 s load 6.89306640625
+loaded-r3-typescript-small-c1-P2 ok 19.62 s load 6.56103515625
+loaded-r3-typescript-small-c1-P1 ok 19.97 s load 7.0078125
+loaded-r3-typescript-small-c8-TC ok 34.0 s load 6.9267578125
+loaded-r3-typescript-small-c8-T ok 35.19 s load 6.61962890625
+loaded-r3-typescript-small-c8-D ok 31.45 s load 6.46826171875
+loaded-r3-typescript-small-c8-P2 ok 10.26 s load 6.2783203125
+loaded-r3-typescript-small-c8-P1 ok 10.65 s load 6.9375
+loaded-r3-typescript-bulk-c1-TC ok 4.48 s load 7.65576171875
+loaded-r3-typescript-bulk-c1-T ok 24.21 s load 7.44287109375
+loaded-r3-typescript-bulk-c1-D ok 4.1 s load 7.31689453125
+loaded-r3-typescript-bulk-c1-P2 ok 5.69 s load 7.4521484375
+loaded-r3-typescript-bulk-c1-P1 ok 10.72 s load 7.576171875
+loaded-r3-typescript-bulk-c8-TC ok 7.56 s load 7.56103515625
+loaded-r3-typescript-bulk-c8-T ok 78.74 s load 7.64111328125
+loaded-r3-typescript-bulk-c8-D ok 5.99 s load 7.80517578125
+loaded-r3-typescript-bulk-c8-P2 ok 13.32 s load 7.740234375
+loaded-r3-typescript-bulk-c8-P1 ok 30.59 s load 8.12353515625
+loaded-r4-go-small-c1-P2 ok 15.49 s load 7.2529296875
+loaded-r4-go-small-c1-D ok 10.34 s load 7.17822265625
+loaded-r4-go-small-c1-T ok 13.79 s load 7.1572265625
+loaded-r4-go-small-c1-TC ok 13.27 s load 7.197265625
+loaded-r4-go-small-c1-P1 ok 15.51 s load 6.85107421875
+loaded-r4-go-small-c8-P2 ok 6.52 s load 6.86572265625
+loaded-r4-go-small-c8-D ok 4.91 s load 7.27734375
+loaded-r4-go-small-c8-T ok 6.8 s load 7.73583984375
+loaded-r4-go-small-c8-TC ok 6.41 s load 8.63818359375
+loaded-r4-go-small-c8-P1 ok 6.73 s load 9.10693359375
+loaded-r4-go-bulk-c1-P2 ok 3.77 s load 9.5791015625
+loaded-r4-go-bulk-c1-D ok 0.81 s load 9.21240234375
+loaded-r4-go-bulk-c1-T ok 19.21 s load 9.21240234375
+loaded-r4-go-bulk-c1-TC ok 1.56 s load 8.94091796875
+loaded-r4-go-bulk-c1-P1 ok 9.12 s load 8.94091796875
+loaded-r4-go-bulk-c8-P2 ok 14.28 s load 8.6552734375
+loaded-r4-go-bulk-c8-D ok 1.41 s load 8.44873046875
+loaded-r4-go-bulk-c8-T ok 87.39 s load 8.44873046875
+loaded-r4-go-bulk-c8-TC ok 4.38 s load 8.8359375
+loaded-r4-go-bulk-c8-P1 ok 28.48 s load 8.92919921875
+loaded-r4-typescript-small-c1-P2 ok 20.38 s load 8.275390625
+loaded-r4-typescript-small-c1-D ok 32.23 s load 7.70849609375
+loaded-r4-typescript-small-c1-T ok 38.2 s load 6.81103515625
+loaded-r4-typescript-small-c1-TC ok 35.03 s load 6.318359375
+loaded-r4-typescript-small-c1-P1 ok 19.83 s load 6.25927734375
+loaded-r4-typescript-small-c8-P2 ok 10.59 s load 6.2041015625
+loaded-r4-typescript-small-c8-D ok 32.09 s load 7.3232421875
+loaded-r4-typescript-small-c8-T ok 36.47 s load 6.69189453125
+loaded-r4-typescript-small-c8-TC ok 33.53 s load 6.63525390625
+loaded-r4-typescript-small-c8-P1 ok 10.81 s load 6.55419921875
+loaded-r4-typescript-bulk-c1-P2 ok 5.96 s load 7.2578125
+loaded-r4-typescript-bulk-c1-D ok 4.3 s load 7.07666015625
+loaded-r4-typescript-bulk-c1-T ok 19.32 s load 6.990234375
+loaded-r4-typescript-bulk-c1-TC ok 4.61 s load 6.91357421875
+loaded-r4-typescript-bulk-c1-P1 ok 10.58 s load 6.9208984375
+loaded-r4-typescript-bulk-c8-P2 ok 13.68 s load 6.92626953125
+loaded-r4-typescript-bulk-c8-D ok 5.77 s load 7.6806640625
+loaded-r4-typescript-bulk-c8-T ok 80.42 s load 7.70654296875
+loaded-r4-typescript-bulk-c8-TC ok 7.33 s load 7.470703125
+loaded-r4-typescript-bulk-c8-P1 ok 31.55 s load 7.478515625
+| Condition | Lang | Size | C | Variant | Rounds | p50 ms | p95 ms | cmds/s | MiB/s | Added p50 vs base | Ratio vs base | Ratio vs D | Host CPU s | SDK CPU s |
+| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| loaded | go | bulk | 1 | D | 5 | 236.921 | 236.921 | 4.2 | 33.7 |  |  |  | 0.002 | 0.098 |
+| loaded | go | bulk | 1 | T (vs D) | 5 | 8539.539 | 8539.539 | 0.1 | 0.9 | 8301.358 | 2.8% | 2.8% | 15.661 | 1.518 |
+| loaded | go | bulk | 1 | TC (vs D) | 5 | 530.599 | 530.599 | 1.9 | 15.1 | 307.420 | 43.7% | 43.7% | 0.005 | 0.371 |
+| loaded | go | bulk | 1 | P1 (vs T) | 5 | 3781.367 | 3781.367 | 0.3 | 2.1 | -4849.747 | 221.4% | 4.7% | 7.055 | 0.017 |
+| loaded | go | bulk | 1 | P2 (vs TC) | 5 | 1679.919 | 1679.919 | 0.6 | 4.8 | 1134.319 | 32.5% | 14.5% | 0.839 | 1.274 |
+| loaded | go | bulk | 8 | D | 5 | 810.523 | 836.762 | 9.5 | 75.7 |  |  |  | 0.009 | 0.439 |
+| loaded | go | bulk | 8 | T (vs D) | 5 | 75417.485 | 75419.439 | 0.1 | 0.8 | 74595.625 | 1.1% | 1.1% | 68.241 | 10.907 |
+| loaded | go | bulk | 8 | TC (vs D) | 5 | 3125.122 | 3398.069 | 2.4 | 18.8 | 2314.598 | 26.2% | 26.2% | 0.024 | 4.013 |
+| loaded | go | bulk | 8 | P1 (vs T) | 5 | 25114.411 | 25129.891 | 0.3 | 2.5 | -47470.592 | 279.4% | 3.0% | 26.522 | 0.092 |
+| loaded | go | bulk | 8 | P2 (vs TC) | 5 | 11899.472 | 12260.522 | 0.7 | 5.2 | 8701.703 | 27.4% | 6.8% | 3.869 | 9.462 |
+| loaded | go | small | 1 | D | 5 | 9.147 | 16.285 | 102.7 |  |  |  |  | 0.009 | 3.542 |
+| loaded | go | small | 1 | T (vs D) | 5 | 12.432 | 20.523 | 76.7 |  | 3.220 | 74.8% | 74.8% | 2.759 | 5.276 |
+| loaded | go | small | 1 | TC (vs D) | 5 | 11.541 | 19.987 | 80.4 |  | 2.386 | 79.2% | 79.2% | 1.785 | 5.116 |
+| loaded | go | small | 1 | P1 (vs T) | 5 | 13.398 | 23.649 | 67.6 |  | 1.087 | 88.6% | 66.1% | 6.260 | 1.895 |
+| loaded | go | small | 1 | P2 (vs TC) | 5 | 13.475 | 23.496 | 68.5 |  | 1.864 | 84.0% | 67.7% | 6.078 | 1.948 |
+| loaded | go | small | 8 | D | 5 | 31.395 | 58.866 | 234.0 |  |  |  |  | 0.023 | 3.888 |
+| loaded | go | small | 8 | T (vs D) | 5 | 44.509 | 88.666 | 164.5 |  | 12.993 | 70.0% | 70.0% | 2.678 | 5.508 |
+| loaded | go | small | 8 | TC (vs D) | 5 | 42.432 | 81.511 | 174.1 |  | 11.208 | 73.7% | 73.7% | 1.855 | 5.199 |
+| loaded | go | small | 8 | P1 (vs T) | 5 | 45.634 | 76.307 | 168.6 |  | 1.348 | 102.5% | 71.2% | 6.106 | 1.369 |
+| loaded | go | small | 8 | P2 (vs TC) | 5 | 46.113 | 76.487 | 167.7 |  | 3.038 | 96.0% | 71.5% | 6.026 | 1.362 |
+| loaded | typescript | bulk | 1 | D | 5 | 385.238 | 385.238 | 2.6 | 20.7 |  |  |  | 0.001 | 0.188 |
+| loaded | typescript | bulk | 1 | T (vs D) | 5 | 8011.217 | 8011.217 | 0.1 | 1.0 | 7615.004 | 4.9% | 4.9% | 14.451 | 0.819 |
+| loaded | typescript | bulk | 1 | TC (vs D) | 5 | 614.729 | 614.729 | 1.6 | 13.0 | 229.491 | 62.7% | 62.7% | 0.005 | 0.409 |
+| loaded | typescript | bulk | 1 | P1 (vs T) | 5 | 3678.129 | 3678.129 | 0.3 | 2.2 | -4360.301 | 218.7% | 10.5% | 7.102 | 0.014 |
+| loaded | typescript | bulk | 1 | P2 (vs TC) | 5 | 1272.083 | 1272.083 | 0.8 | 6.3 | 678.911 | 47.1% | 30.3% | 0.706 | 1.063 |
+| loaded | typescript | bulk | 8 | D | 5 | 1816.409 | 1855.948 | 3.9 | 31.3 |  |  |  | 0.001 | 1.289 |
+| loaded | typescript | bulk | 8 | T (vs D) | 5 | 63925.053 | 64925.119 | 0.1 | 1.0 | 62199.132 | 3.1% | 3.1% | 63.288 | 5.740 |
+| loaded | typescript | bulk | 8 | TC (vs D) | 5 | 2889.532 | 3146.189 | 2.4 | 18.9 | 920.794 | 61.8% | 61.8% | 0.020 | 2.574 |
+| loaded | typescript | bulk | 8 | P1 (vs T) | 5 | 24198.864 | 24226.385 | 0.3 | 2.6 | -39726.189 | 267.8% | 8.4% | 26.757 | 0.205 |
+| loaded | typescript | bulk | 8 | P2 (vs TC) | 5 | 8337.079 | 8599.935 | 0.9 | 7.4 | 5556.604 | 38.4% | 22.5% | 3.187 | 7.317 |
+| loaded | typescript | small | 1 | D | 5 | 26.854 | 43.484 | 35.6 |  |  |  |  | 0.031 | 12.921 |
+| loaded | typescript | small | 1 | T (vs D) | 5 | 30.723 | 49.642 | 31.0 |  | 4.081 | 87.3% | 87.3% | 2.573 | 15.577 |
+| loaded | typescript | small | 1 | TC (vs D) | 5 | 30.150 | 50.595 | 31.5 |  | 2.518 | 90.1% | 90.1% | 1.530 | 15.027 |
+| loaded | typescript | small | 1 | P1 (vs T) | 5 | 14.641 | 25.271 | 62.7 |  | -16.005 | 202.3% | 177.8% | 6.889 | 3.574 |
+| loaded | typescript | small | 1 | P2 (vs TC) | 5 | 14.612 | 25.899 | 62.4 |  | -15.389 | 199.4% | 172.7% | 6.807 | 3.598 |
+| loaded | typescript | small | 8 | D | 5 | 213.003 | 398.792 | 36.0 |  |  |  |  | 0.033 | 12.622 |
+| loaded | typescript | small | 8 | T (vs D) | 5 | 236.079 | 447.711 | 32.6 |  | 24.358 | 88.6% | 88.6% | 2.541 | 15.006 |
+| loaded | typescript | small | 8 | TC (vs D) | 5 | 229.838 | 438.761 | 33.4 |  | 17.237 | 91.9% | 91.9% | 1.440 | 14.188 |
+| loaded | typescript | small | 8 | P1 (vs T) | 5 | 52.629 | 80.028 | 148.0 |  | -183.450 | 458.5% | 406.3% | 5.992 | 3.241 |
+| loaded | typescript | small | 8 | P2 (vs TC) | 5 | 52.074 | 79.057 | 150.4 |  | -178.160 | 452.2% | 417.3% | 5.846 | 3.240 |
+| quiet | go | bulk | 1 | D | 5 | 41.698 | 41.698 | 24.0 | 191.6 |  |  |  | 0.001 | 0.039 |
+| quiet | go | bulk | 1 | T (vs D) | 5 | 21228.574 | 21228.574 | 0.0 | 0.4 | 21186.888 | 0.2% | 0.2% | 13.129 | 32.819 |
+| quiet | go | bulk | 1 | TC (vs D) | 5 | 8125.490 | 8125.490 | 0.1 | 1.0 | 8083.804 | 0.6% | 0.6% | 0.004 | 16.185 |
+| quiet | go | bulk | 1 | P1 (vs T) | 5 | 2459.052 | 2459.052 | 0.4 | 3.3 | -18904.357 | 909.9% | 1.8% | 5.843 | 0.012 |
+| quiet | go | bulk | 1 | P2 (vs TC) | 5 | 6092.950 | 6092.950 | 0.2 | 1.3 | -2032.540 | 133.4% | 0.8% | 0.537 | 11.405 |
+| quiet | go | bulk | 8 | D | 5 | 367.637 | 393.260 | 20.2 | 161.7 |  |  |  | 0.001 | 0.386 |
+| quiet | go | bulk | 8 | T (vs D) | 5 | 58643.086 | 58704.678 | 0.1 | 1.1 | 58298.785 | 0.7% | 0.7% | 59.913 | 42.452 |
+| quiet | go | bulk | 8 | TC (vs D) | 5 | 15753.160 | 15948.280 | 0.5 | 4.0 | 15472.071 | 2.5% | 2.5% | 0.022 | 31.518 |
+| quiet | go | bulk | 8 | P1 (vs T) | 5 | 17699.739 | 17733.449 | 0.5 | 3.6 | -41141.862 | 335.5% | 2.1% | 22.965 | 0.079 |
+| quiet | go | bulk | 8 | P2 (vs TC) | 5 | 24232.097 | 25989.081 | 0.3 | 2.5 | 8244.708 | 59.6% | 1.6% | 2.972 | 45.495 |
+| quiet | go | small | 1 | D | 5 | 4.260 | 4.814 | 234.0 |  |  |  |  | 0.008 | 1.918 |
+| quiet | go | small | 1 | T (vs D) | 5 | 4.445 | 8.187 | 201.4 |  | 0.172 | 91.2% | 91.2% | 1.511 | 3.102 |
+| quiet | go | small | 1 | TC (vs D) | 5 | 4.521 | 5.914 | 211.4 |  | 0.255 | 90.4% | 90.4% | 0.964 | 2.679 |
+| quiet | go | small | 1 | P1 (vs T) | 5 | 5.351 | 6.233 | 181.9 |  | 0.906 | 87.3% | 77.7% | 3.073 | 0.854 |
+| quiet | go | small | 1 | P2 (vs TC) | 5 | 5.345 | 6.206 | 181.6 |  | 0.830 | 83.9% | 77.4% | 2.979 | 0.880 |
+| quiet | go | small | 8 | D | 5 | 9.048 | 23.562 | 779.3 |  |  |  |  | 0.012 | 1.632 |
+| quiet | go | small | 8 | T (vs D) | 5 | 12.920 | 29.104 | 564.2 |  | 4.625 | 69.3% | 69.3% | 1.146 | 2.279 |
+| quiet | go | small | 8 | TC (vs D) | 5 | 12.234 | 25.967 | 593.0 |  | 3.887 | 73.4% | 73.4% | 0.806 | 2.221 |
+| quiet | go | small | 8 | P1 (vs T) | 5 | 12.755 | 24.611 | 575.3 |  | 0.120 | 103.8% | 72.3% | 2.592 | 0.569 |
+| quiet | go | small | 8 | P2 (vs TC) | 5 | 16.919 | 38.435 | 392.3 |  | 0.845 | 103.3% | 68.0% | 3.720 | 0.938 |
+| quiet | typescript | bulk | 1 | D | 5 | 169.000 | 169.000 | 5.9 | 47.2 |  |  |  | 0.002 | 0.148 |
+| quiet | typescript | bulk | 1 | T (vs D) | 5 | 5434.090 | 5434.090 | 0.2 | 1.5 | 5337.402 | 3.1% | 3.1% | 14.451 | 0.786 |
+| quiet | typescript | bulk | 1 | TC (vs D) | 5 | 239.587 | 239.587 | 4.2 | 33.3 | 144.637 | 53.9% | 53.9% | 0.022 | 0.259 |
+| quiet | typescript | bulk | 1 | P1 (vs T) | 5 | 2424.155 | 2424.155 | 0.4 | 3.3 | -3009.935 | 224.1% | 6.4% | 5.769 | 0.013 |
+| quiet | typescript | bulk | 1 | P2 (vs TC) | 5 | 728.566 | 728.566 | 1.4 | 11.0 | 494.665 | 37.6% | 21.0% | 0.672 | 0.936 |
+| quiet | typescript | bulk | 8 | D | 5 | 554.208 | 693.616 | 11.5 | 91.9 |  |  |  | 0.002 | 0.675 |
+| quiet | typescript | bulk | 8 | T (vs D) | 5 | 44936.070 | 45246.705 | 0.2 | 1.4 | 43927.915 | 1.6% | 1.6% | 62.512 | 5.610 |
+| quiet | typescript | bulk | 8 | TC (vs D) | 5 | 970.909 | 1365.862 | 5.5 | 44.1 | 341.829 | 57.1% | 57.1% | 0.039 | 1.625 |
+| quiet | typescript | bulk | 8 | P1 (vs T) | 5 | 17434.699 | 17476.256 | 0.5 | 3.7 | -27367.424 | 266.6% | 4.2% | 23.041 | 0.198 |
+| quiet | typescript | bulk | 8 | P2 (vs TC) | 5 | 5047.884 | 5284.289 | 1.5 | 12.1 | 4058.791 | 27.6% | 13.5% | 3.198 | 6.490 |
+| quiet | typescript | small | 1 | D | 5 | 14.741 | 15.676 | 67.8 |  |  |  |  | 0.005 | 7.788 |
+| quiet | typescript | small | 1 | T (vs D) | 5 | 15.422 | 16.629 | 64.4 |  | 0.974 | 95.6% | 95.6% | 1.659 | 8.993 |
+| quiet | typescript | small | 1 | TC (vs D) | 5 | 15.148 | 16.309 | 65.0 |  | 0.244 | 97.0% | 97.0% | 0.903 | 8.589 |
+| quiet | typescript | small | 1 | P1 (vs T) | 5 | 6.172 | 6.863 | 158.4 |  | -9.251 | 245.4% | 235.2% | 4.264 | 2.059 |
+| quiet | typescript | small | 1 | P2 (vs TC) | 5 | 6.169 | 6.885 | 159.3 |  | -8.978 | 242.3% | 237.8% | 4.188 | 2.051 |
+| quiet | typescript | small | 8 | D | 5 | 105.077 | 186.461 | 75.4 |  |  |  |  | 0.005 | 7.519 |
+| quiet | typescript | small | 8 | T (vs D) | 5 | 117.076 | 208.690 | 67.2 |  | 11.244 | 89.0% | 89.0% | 1.672 | 8.768 |
+| quiet | typescript | small | 8 | TC (vs D) | 5 | 112.588 | 199.446 | 70.4 |  | 6.986 | 93.7% | 93.7% | 0.895 | 8.262 |
+| quiet | typescript | small | 8 | P1 (vs T) | 5 | 15.533 | 25.006 | 489.1 |  | -99.696 | 697.3% | 653.7% | 2.672 | 1.881 |
+| quiet | typescript | small | 8 | P2 (vs TC) | 5 | 23.726 | 43.388 | 311.1 |  | -88.930 | 441.8% | 416.5% | 4.254 | 2.711 |

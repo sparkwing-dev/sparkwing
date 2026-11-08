@@ -37,8 +37,8 @@ test("shared concurrency and source vectors preserve omission and explicit defau
   const job = p.job("job", () => null);
   job.concurrency(new ConcurrencyGroup("gate"), 3);
   assert.deepEqual(p.toDoc().jobs[0]!.concurrency, [{ group: "gate", cost: 3 }]);
-  assert.throws(() => new ConcurrencyGroup("gate", { capacity: 0 }), /positive/);
-  assert.throws(() => job.concurrency(new ConcurrencyGroup("gate"), 0), /positive/);
+  job.concurrency(new ConcurrencyGroup("gate", { capacity: 0 }), 0);
+  assert.deepEqual(p.toDoc().jobs[0]!.concurrency, [{ group: "gate", capacity: 0, cost: 0 }]);
 });
 
 test("shared inner error vectors reject duplicate, null and nested error envelopes", () => {

@@ -136,11 +136,11 @@ func main() {
 			if err != nil || result.Error != nil {
 				panic(result.Error)
 			}
-			var members []nodeproto.JobSpec
-			if err := json.Unmarshal(result.Value, &members); err != nil {
+			var document nodeproto.PlanDoc
+			if err := json.Unmarshal(result.Value, &document); err != nil {
 				panic(err)
 			}
-			jobs[name] = members
+			jobs[name] = document.Jobs
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(jobs); err != nil {
 			panic(err)

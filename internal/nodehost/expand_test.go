@@ -37,7 +37,7 @@ func evaluateExpansionBytes(t *testing.T, groups map[string]string) (json.RawMes
 		}
 		raw, ok := groups[request.Closure]
 		if !ok {
-			raw = "[]"
+			raw = `{"jobs":[]}`
 		}
 		return nodeproto.EvalResult{Value: json.RawMessage(raw)}, nil
 	}
@@ -66,7 +66,7 @@ func TestOwnerExpansionValidatesOriginalBytesBeforeWrites(t *testing.T) {
 		"cycle":     strings.Replace(valid, `["build"]`, `["build","child"]`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			body, failure := evaluateExpansionBytes(t, map[string]string{"first": "[" + raw + "]"})
+			body, failure := evaluateExpansionBytes(t, map[string]string{"first": `{"jobs":[` + raw + `]}`})
 			if len(body) != 0 || failure == nil || failure.Code != apierr.PlanInvalid {
 				t.Fatalf("body=%s failure=%+v", body, failure)
 			}
@@ -88,7 +88,7 @@ func TestOwnerExpansionValidatesSourceBatchesTogether(t *testing.T) {
 			case "implicit_source":
 				one = strings.Replace(one, `"deps":["build","two"],`, ``, 1)
 			}
-			body, failure := evaluateExpansionBytes(t, map[string]string{"first": "[" + one + "]", "last": "[" + two + "]"})
+			body, failure := evaluateExpansionBytes(t, map[string]string{"first": `{"jobs":[` + one + `]}`, "last": `{"jobs":[` + two + `]}`})
 			if mode == "cycle" {
 				if len(body) != 0 || failure == nil || failure.Code != apierr.PlanInvalid {
 					t.Fatalf("cyclic body=%s failure=%+v", body, failure)
@@ -110,7 +110,7 @@ func TestOwnerExpansionFanOutBoundary(t *testing.T) {
 			for i := range jobs {
 				jobs[i] = nodeproto.JobSpec{ID: fmt.Sprintf("child-%d", i), Needs: []string{"build"}, Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 			}
-			raw, err := json.Marshal(jobs)
+			raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,7 +172,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			jobs = append(jobs, nodeproto.JobSpec{ID: "extra", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 		}
 		process := &executorProcess{answer: func(context.Context, nodeproto.Request) (any, error) {
-			raw, err := json.Marshal(jobs)
+			raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 			return nodeproto.EvalResult{Value: raw}, err
 		}}
 		code := sdkCode{Store: state, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}

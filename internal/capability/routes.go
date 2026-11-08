@@ -270,6 +270,7 @@ var routes = []RoutePolicy{
 	nodeRoute("POST", "/node/v1/oidc-token", OIDCMint, BindOwnNode, RetryNever),
 	nodeRoute("POST", "/node/v1/masks", NodeReport, BindOwnNode, RetryExactBody),
 	nodeRoute("POST", "/node/v1/annotations", NodeReport, BindOwnNode, RetryNever),
+	nodeRoute("POST", "/node/v1/helpers", NodeReport, BindOwnNode, RetryNever),
 	nodeRoute("POST", "/node/v1/summary", NodeReport, BindOwnNode, RetryExactBody),
 	nodeRoute("POST", "/node/v1/children", ChildrenStart, BindBodyNamesRun, RetryNever),
 	nodeRoute("GET", "/node/v1/children/{run}/await", ChildrenStart, BindChildOfBoundNode, RetrySafe),

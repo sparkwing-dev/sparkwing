@@ -61,7 +61,7 @@ func newExpansionSDK(plan nodeproto.PlanDoc, mode string) *scriptedSDK {
 		var result any
 		switch in.Op {
 		case nodeproto.OpHello:
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.0.0"}, Features: []string{}}
+			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.0.0"}}
 		case nodeproto.OpPlan:
 			result = p.plan
 		case nodeproto.OpEval:
@@ -81,7 +81,7 @@ func newExpansionSDK(plan nodeproto.PlanDoc, mode string) *scriptedSDK {
 			if mode != "empty" {
 				jobs = append(jobs, nodeproto.JobSpec{ID: in.Closure, Groups: []string{in.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 			}
-			raw, _ := json.Marshal(jobs)
+			raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 			result = nodeproto.EvalResult{Value: raw}
 		default:
 			return nodeproto.Reply{}, fmt.Errorf("owner invoked %s", in.Op)

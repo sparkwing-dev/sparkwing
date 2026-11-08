@@ -72,7 +72,7 @@ func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
 				if r.Closure != "empty" {
 					jobs = append(jobs, nodeproto.JobSpec{ID: r.Closure, Groups: []string{r.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 				}
-				raw, _ := json.Marshal(jobs)
+				raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 				return nodeproto.EvalResult{Value: raw}, nil
 			}
 			h, err := newOwnerEvaluator(deps)
@@ -108,7 +108,7 @@ func TestOwnerEvaluationEmptyExpansionIsExplicit(t *testing.T) {
 	in, _, deps, p := evaluationFixture(t)
 	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
 		if r.Op == nodeproto.OpEval {
-			return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+			return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 		}
 		return nil, nil
 	}
@@ -152,7 +152,7 @@ func TestOwnerEvaluationRefusesFreshIdentifierAfterIssuance(t *testing.T) {
 		if request.Closure == "first" {
 			jobs = append(jobs, nodeproto.JobSpec{ID: generatedID, Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "run"}}})
 		}
-		raw, _ := json.Marshal(jobs)
+		raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 		return nodeproto.EvalResult{Value: raw}, nil
 	}
 	host, err := newOwnerEvaluator(deps)
@@ -183,12 +183,12 @@ func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 					return nodeproto.EvalResult{Error: cause}, nil
 				}
 				if mode == "validator" {
-					return nodeproto.EvalResult{Value: json.RawMessage(`[{"id":"child","groups":["first"],"steps":[]}]`)}, nil
+					return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[{"id":"child","groups":["first"],"steps":[]}]}`)}, nil
 				}
 				if mode == "shape" {
-					return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
+					return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
 				}
-				return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+				return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 			}
 			switch mode {
 			case "drift":
@@ -280,7 +280,7 @@ func TestOwnerEvaluationCannotAttributeJobsToAnotherGenerator(t *testing.T) {
 	in, _, deps, p := evaluationFixture(t)
 	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
 		if r.Op == nodeproto.OpEval {
-			return nodeproto.EvalResult{Value: json.RawMessage(`[{"id":"child","groups":["last"]}]`)}, nil
+			return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[{"id":"child","groups":["last"]}]}`)}, nil
 		}
 		return nil, nil
 	}
@@ -297,9 +297,9 @@ func TestOwnerEvaluationRejectsUnknownFieldsInCombinedBody(t *testing.T) {
 		if r.Op != nodeproto.OpEval {
 			return nil, nil
 		}
-		raw := json.RawMessage(`[]`)
+		raw := json.RawMessage(`{"jobs":[]}`)
 		if r.Closure == "first" {
-			raw = json.RawMessage(`[{"id":"child","groups":["first"],"steps":[{"id":"body"}],"unrecognized":true}]`)
+			raw = json.RawMessage(`{"jobs":[{"id":"child","groups":["first"],"steps":[{"id":"body"}],"unrecognized":true}]}`)
 		}
 		return nodeproto.EvalResult{Value: raw}, nil
 	}
@@ -373,13 +373,13 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 			if r.Job != "" || string(r.Input) != `{"root":true}` {
 				t.Fatalf("replay = %+v", r)
 			}
-			jobs, _ := json.Marshal([]nodeproto.JobSpec{source})
+			jobs, _ := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}})
 			return nodeproto.EvalResult{Value: jobs}, nil
 		}
 		if r.Job != "" || string(r.Input) != `{"count":2}` {
 			t.Fatalf("expansion = %+v", r)
 		}
-		return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+		return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 	}
 	h, _ := newOwnerEvaluator(deps)
 	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
@@ -393,7 +393,7 @@ func TestOwnerEvaluationUnclaimedMemoSourceKeepsGenerationZero(t *testing.T) {
 	in.Generation, st.row.Generation, st.row.Outcome = 0, 0, runstate.NodeMemoized
 	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
 		if r.Op == nodeproto.OpEval {
-			return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+			return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 		}
 		return nil, nil
 	}

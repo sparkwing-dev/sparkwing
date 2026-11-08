@@ -129,6 +129,10 @@ func (s *ProcessServices) secret(request *http.Request, auth capability.Authoriz
 		}
 		return nil, serviceUnavailable()
 	}
+	variable := request.URL.Query().Get("variable") == "true"
+	if masked == variable {
+		return nil, executorError(apierr.BadRequest, "value classification differs from the requested secret or variable")
+	}
 	if masked {
 		if err := s.Masks.registerIssued(value); err != nil {
 			return nil, err

@@ -10,7 +10,7 @@ test("protocol v2 negotiates once and rejects the removed operation", async () =
     const accepted = await host.send(hello);
     assert.equal(accepted.result.protocol, 2);
     assert.equal(accepted.result.sdk.language, "typescript");
-    assert.ok(Array.isArray(accepted.result.features));
+    assert.equal("features" in accepted.result,false);
     const repeat = await host.send({ ...hello, id: "repeat" });
     assert.equal(repeat.error.code, "protocol_error");
     const old = await host.send({ id: "old", op: "run_node" });

@@ -111,7 +111,7 @@ func (p *executorProcess) Request(ctx context.Context, r nodeproto.Request) (nod
 	if value == nil {
 		switch r.Op {
 		case nodeproto.OpHello:
-			value = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.0.0"}, Features: []string{}}
+			value = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.0.0"}}
 		case nodeproto.OpPlan:
 			value = p.plan
 		case nodeproto.OpRunStep:
@@ -712,7 +712,7 @@ func TestNodeExecutorGeneratorReplayChecksCompleteAcceptedMembership(t *testing.
 						if omit {
 							jobs = jobs[:1]
 						}
-						raw, _ := json.Marshal(jobs)
+						raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 						return nodeproto.EvalResult{Value: raw}, nil
 					}
 					return nil, nil
@@ -811,7 +811,7 @@ func recordedReplayFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDep
 			default:
 				t.Fatal("evaluated an unrelated generator")
 			}
-			raw, _ := json.Marshal([]nodeproto.JobSpec{generated})
+			raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{generated}})
 			return nodeproto.EvalResult{Value: raw}, nil
 		}
 		return process, err

@@ -1,0 +1,2 @@
+bench go TC bulk 1 wall_ms 337
+PASS
