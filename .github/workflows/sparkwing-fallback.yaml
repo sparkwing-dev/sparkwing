@@ -1,0 +1,65 @@
+name: Sparkwing fallback
+run-name: sparkwing:${{ inputs.receipt }}
+on:
+  workflow_dispatch:
+    inputs:
+      receipt:
+        description: Controller dispatch receipt
+        required: true
+        type: string
+      runner:
+        description: Team-approved GitHub-hosted image
+        required: true
+        type: string
+permissions:
+  id-token: write
+  contents: read
+env:
+  # Publish this release before approving the protected fallback ref; v0.70.0
+  # does not contain --dispatch-receipt.
+  SPARKWING_RUNNER_VERSION: v0.71.0
+  # Sparkwing's ed25519 release signing key, the one https://sparkwing.dev/install.sh trusts.
+  SPARKWING_RELEASE_KEY: whVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI=
+jobs:
+  sparkwing:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Install sparkwing-runner
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in Linux) os=linux ;; macOS) os=darwin ;; Windows) os=windows ;; *) echo "unsupported runner OS $RUNNER_OS" >&2; exit 1 ;; esac
+          case "$RUNNER_ARCH" in X64) arch=amd64 ;; ARM64) arch=arm64 ;; *) echo "unsupported runner architecture $RUNNER_ARCH" >&2; exit 1 ;; esac
+          ext=""
+          if [ "$os" = windows ]; then ext=.exe; fi
+          asset="sparkwing-runner-$os-$arch$ext"
+          base="https://github.com/sparkwing-dev/sparkwing/releases/download/$SPARKWING_RUNNER_VERSION"
+          curl -fsSL -o "$asset" "$base/$asset" -o SHA256SUMS "$base/SHA256SUMS" -o SHA256SUMS.sig "$base/SHA256SUMS.sig"
+          # macOS ships LibreSSL, which cannot verify ed25519; the hosted image also carries OpenSSL 3.
+          verifier=""
+          for candidate in openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
+            if "$candidate" version 2>/dev/null | grep -q '^OpenSSL [3-9]'; then verifier="$candidate"; break; fi
+          done
+          if [ -z "$verifier" ]; then echo "OpenSSL 3 is required to verify the release signature" >&2; exit 1; fi
+          printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' "$SPARKWING_RELEASE_KEY" >release.pem
+          "$verifier" pkeyutl -verify -pubin -inkey release.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig
+          expected="$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' SHA256SUMS)"
+          actual="$("$verifier" dgst -sha256 "$asset" | awk '{ print $NF }')"
+          if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then echo "release checksum mismatch for $asset" >&2; exit 1; fi
+          chmod +x "$asset"
+          mv "$asset" "sparkwing-runner$ext"
+          # The signature covers bytes, not the tag, so the binary must also name the pinned release.
+          "./sparkwing-runner$ext" version -o json | grep -qF "\"version\":\"$SPARKWING_RUNNER_VERSION\""
+      - name: Claim the dispatched Sparkwing job
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DISPATCH_RECEIPT: ${{ inputs.receipt }}
+          CONTROLLER: ${{ vars.SPARKWING_CONTROLLER }}
+          TEAM: ${{ vars.SPARKWING_TEAM }}
+        run: |
+          if (!$env:CONTROLLER -or !$env:TEAM) { throw 'Set repository variables SPARKWING_CONTROLLER and SPARKWING_TEAM' }
+          $extension = if ($env:RUNNER_OS -eq 'Windows') { '.exe' } else { '' }
+          & (Join-Path $env:RUNNER_TEMP "sparkwing-runner$extension") warm --github-actions --dispatch-receipt $env:DISPATCH_RECEIPT --controller $env:CONTROLLER --team $env:TEAM --idle-exit 2m
+          exit $LASTEXITCODE

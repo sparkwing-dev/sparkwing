@@ -191,8 +191,9 @@ func (q *claimSQL) readyClaimContextSQL() string {
 	return `(EXISTS (SELECT 1 FROM nodes ready_context WHERE ready_context.team=cc.team AND ready_context.claim_requirements=cc.requirements AND ready_context.claim_context=cc.id AND cc.unit_kind='node' AND ready_context.status='pending' AND ready_context.ready_at IS NOT NULL AND ready_context.ready_at<=clock.now AND ready_context.claimed_by IS NULL AND ready_context.capability_prefix='' AND ready_context.cancel_requested_at IS NULL) OR EXISTS (SELECT 1 FROM triggers ready_context WHERE ready_context.team=cc.team AND ready_context.claim_requirements=cc.requirements AND ready_context.claim_context=cc.id AND ready_context.unit_kind=cc.unit_kind AND ready_context.status='pending' AND ready_context.claimed_by IS NULL AND ready_context.capability_prefix='' AND ready_context.cancel_requested_at IS NULL AND ready_context.available_at<=clock.now))`
 }
 
-func (template *claimSQL) routesSQL() (string, []any, error) {
-	q := claimSQL{dialect: template.dialect, route: true, team: template.team, ordinal: template.ordinal, overflow: template.overflow}
+func (q *claimSQL) routesSQL() (string, []any, error) {
+	template := q
+	q = &claimSQL{dialect: template.dialect, route: true, team: template.team, ordinal: template.ordinal, overflow: template.overflow}
 	clock := q.param(template.now)
 	overflow, err := q.overflowFactsSQL()
 	if err != nil {

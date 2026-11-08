@@ -10,7 +10,7 @@ func sampleHost() (HostStat, error) {
 
 func (p *procSampler) sample(int) (ProcUsage, bool) { return ProcUsage{}, false }
 
-func (p *procSampler) sampleMany([]int) map[int]ProcUsage { return nil }
+func (p *procSampler) sampleMany([]int, map[int][]int) map[int]ProcUsage { return nil }
 
 func (s *ownedProcSampler) sampleOwned([]OwnedRoot, float64) (map[int]float64, bool) {
 	return nil, false

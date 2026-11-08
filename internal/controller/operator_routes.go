@@ -22,6 +22,7 @@ func (s *Server) WithAuthorization(authorization routepolicy.Authorization) *Ser
 
 func (s *Server) operatorEndpoints() []controllerwire.Endpoint {
 	endpoints := []controllerwire.Endpoint{
+		{Method: "POST", Pattern: "/api/v1/operator/teams/{team}/actions-dispatches/{receipt}/retry", Handle: s.handleRetryActionsDispatch},
 		{Method: "GET", Pattern: "/api/v1/operator/warm-capacity", Handle: s.handleWarmCapacity},
 		{Method: "PUT", Pattern: "/api/v1/operator/warm-capacity", Handle: s.handleSetWarmCapacity},
 		{Method: "GET", Pattern: "/api/v1/operator/health", Handle: s.handleOperatorHealth},

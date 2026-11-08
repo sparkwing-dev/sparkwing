@@ -110,6 +110,9 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 	if view.HostIneligible, err = readHostIneligibleTx(ctx, tx, team, view.Snapshot); err != nil {
 		return RunView{}, err
 	}
+	if err := fillAdmissionWaitsTx(ctx, tx, team, &view.Snapshot); err != nil {
+		return RunView{}, err
+	}
 	return view, nil
 }
 

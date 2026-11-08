@@ -46,7 +46,10 @@ func (t *Tenant) PutAuthorizedGitHubTrigger(ctx context.Context, a capability.Au
 func (t *Tenant) DeleteAuthorizedGitHubTrigger(ctx context.Context, a capability.Authorized, repository int64, pipeline string) error {
 	return t.teamMutationTx(ctx, a, "DeleteAuthorizedGitHubTrigger", string(t.team), func(tx *storeTx, _ capability.Principal) error {
 		result, err := tx.execContext(ctx, `DELETE FROM github_app_triggers WHERE team=? AND repository_id=? AND pipeline=?`, t.team, repository, pipeline)
-		return credentialRowChanged(result, err)
+		if err := credentialRowChanged(result, err); err != nil {
+			return err
+		}
+		return invalidateActionsRepositoryTx(ctx, tx, t.team, repository)
 	})
 }
 
@@ -71,7 +74,10 @@ func (t *Tenant) DeleteAuthorizedGitHubAutomation(ctx context.Context, a capabil
 			return err
 		}
 		_, err := tx.execContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND repository_id=?`, t.team, repository)
-		return err
+		if err != nil {
+			return err
+		}
+		return invalidateActionsRepositoryTx(ctx, tx, t.team, repository)
 	})
 }
 

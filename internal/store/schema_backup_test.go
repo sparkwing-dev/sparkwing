@@ -19,6 +19,7 @@ func TestSQLiteUpgradeKeepsABackupTheOlderBinaryCanOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropActionsSchema(t, st)
 	for _, statement := range []string{
 		`DROP TABLE local_runner_instances`,
 		`DROP INDEX idx_runs_live_children`,
@@ -113,6 +114,7 @@ func TestSQLiteUpgradePrunesBackupsOnlyAfterSuccess(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			dropActionsSchema(t, st)
 			if !fail {
 				if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 					t.Fatal(err)

@@ -140,6 +140,9 @@ func (d *Daemon) captureAdmissionDeliveriesLocked(deliveries []delivery) {
 			if ticket.Result.State == "cancelled" || ticket.Result.State == "evicted" {
 				continue
 			}
+			if prior := ticket.Result.Queued; prior != nil && *prior != *msg {
+				d.recordJournal("queued", dl.c, map[string]any{"position": msg.Position, "key": msg.Key, "blocking_reason": msg.BlockingReason})
+			}
 			ticket.Result.State = "queued"
 			ticket.Result.Queued = msg
 		case *wingwire.Evicted:
