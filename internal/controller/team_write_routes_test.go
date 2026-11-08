@@ -17,7 +17,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -67,10 +69,6 @@ func (f *teamWriteFake) DeleteAuthorizedInvitation(_ context.Context, a capabili
 	return f.record(a, id)
 }
 
-func (f *teamWriteFake) SetAuthorizedBuildTrust(_ context.Context, a capability.Authorized, trust bool) error {
-	return f.record(a, fmt.Sprint(trust))
-}
-
 func (f *teamWriteFake) DeleteAuthorizedRun(_ context.Context, a capability.Authorized, _ func(context.Context) error) error {
 	return f.record(a, a.Target.RunID)
 }
@@ -114,7 +112,6 @@ func TestTeamWriteHTTPAuthorityProperty(t *testing.T) {
 		{"DELETE", "/api/v1/team", `{"confirm_slug":"default"}`, 202},
 		{"POST", "/api/v1/team/invitations", `{"email":"friend@example.com","role":"reader"}`, 201},
 		{"DELETE", "/api/v1/team/invitations/invite", "", 204},
-		{"PUT", "/api/v1/team/build-trust", `{"trust_local_builds":true}`, 200},
 		{"DELETE", "/api/v1/runs/run", "", 204},
 		{"DELETE", "/api/v1/team/github-app/installations/17", "", 204},
 		{"DELETE", "/api/v1/team/github-app/triggers?repository_id=23&pipeline=ci", "", 204},
@@ -212,7 +209,7 @@ type billingPageTransport func(*http.Request) (*http.Response, error)
 func (f billingPageTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
-	f := newDeploymentScheduleHTTPFixture(t, deploymenttest.Metered(t))
+	f := newDeploymentScheduleHTTPFixture(t, deploymenttest.Parse(t, deployment.Inputs{PaymentMode: "test"}, license.FeatureMetering))
 	f.s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = append(f.facts.snapshot.Authorities[0].Principal.Capability.Grants, capability.TeamAdmin)
 	writer := &billingWriterFake{team: store.DefaultTeam}
@@ -234,7 +231,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 		if mode == 3 {
 			return nil, errors.New("private-provider-password")
 		}
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_test_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
 	})}}
 	for _, tc := range []struct {
 		path, body string
@@ -254,6 +251,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 					want = 409
 				case 2:
 					writer.page.URL = "https://checkout.stripe.com/replay"
+					writer.page.ProviderID = "cs_test_17"
 				case 3:
 					want = 503
 				case 4:

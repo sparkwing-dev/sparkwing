@@ -62,6 +62,10 @@ than falling back to an ephemeral `/data`.
 
 ## Credentials and bootstrap
 
+The controller Pod and ServiceAccount disable Kubernetes token automount because
+the controller uses no Kubernetes API permissions. The launcher uses a separate
+ServiceAccount with the token and RBAC needed to manage Jobs and node reservations.
+
 The credential epoch uses a dedicated retained 1Mi PVC, mounted at
 `/var/lib/sparkwing/credential-epoch`. The chart passes this writable path as
 `--credential-epoch-dir`, so credentials can stay in a read-only Secret

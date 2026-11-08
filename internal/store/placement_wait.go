@@ -12,14 +12,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// PlacementWait explains where one ready job with a repository tier list
-// stands. The store computes it from committed state and its own clock, so the
-// CLI and the console render the same answer.
+// PlacementWait explains a job's pending tiers and retained Actions dispatches.
+// The store computes it from committed state and its own clock, so the CLI and
+// the console render the same answer. Tiers is empty once the job stops waiting.
 type PlacementWait struct {
-	JobID    string
-	Revision string
-	ReadyAt  time.Time
-	Tiers    []PlacementTierWait
+	JobID      string
+	Revision   string
+	ReadyAt    time.Time
+	Tiers      []PlacementTierWait
+	Dispatches []ActionsDispatch
 }
 
 // PlacementTierWait is one tier's standing. OpensIn is zero once the tier can
@@ -28,7 +29,6 @@ type PlacementWait struct {
 // capacity when the tier opens. Unavailable says why the tier cannot take the
 // job at all.
 type PlacementTierWait struct {
-	Dispatch    *ActionsDispatch
 	Tier        runspec.RepositoryTier
 	OpensIn     time.Duration
 	Live        []string
@@ -45,6 +45,30 @@ type placementCandidate struct {
 }
 
 func readPlacementWaitsTx(ctx context.Context, tx *storeTx, team Team, run RunRow) ([]PlacementWait, error) {
+	waits, err := readPendingPlacementWaitsTx(ctx, tx, team, run)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.queryContext(ctx, `SELECT `+actionsDispatchColumns+` FROM github_actions_dispatches WHERE team=? AND run_id=? ORDER BY node_id,queue_started_at,generation,receipt`, team, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		d, err := scanActionsDispatch(rows)
+		if err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		i := slices.IndexFunc(waits, func(wait PlacementWait) bool { return wait.JobID == d.JobID })
+		if i < 0 {
+			i = len(waits)
+			waits = append(waits, PlacementWait{JobID: d.JobID})
+		}
+		waits[i].Dispatches = append(waits[i].Dispatches, d)
+	}
+	return waits, errors.Join(rows.Err(), rows.Close())
+}
+
+func readPendingPlacementWaitsTx(ctx context.Context, tx *storeTx, team Team, run RunRow) ([]PlacementWait, error) {
 	policy := run.Request.Request.Placement
 	if policy == nil || run.FinishedAt != nil || run.CancelRequestedAt != nil || run.Dispatch != string(runspec.DispatchController) {
 		return nil, nil
