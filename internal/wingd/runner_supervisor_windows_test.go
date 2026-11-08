@@ -23,8 +23,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-const runnerProbeRole = "SPARKWING_TEST_DETACHED_RUNNER_ROLE"
-const runnerProbeAddress = "SPARKWING_TEST_DETACHED_RUNNER_ADDRESS"
+const (
+	runnerProbeRole    = "SPARKWING_TEST_DETACHED_RUNNER_ROLE"
+	runnerProbeAddress = "SPARKWING_TEST_DETACHED_RUNNER_ADDRESS"
+)
 
 func init() {
 	if os.Getenv(runnerProbeRole) != "runner" {
