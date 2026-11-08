@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strings"
 	"testing"
 )
 
@@ -123,7 +124,48 @@ func TestRunDaemonCleanupCancelsAndJoinsWorker(t *testing.T) {
 		t.Error("runDaemon worker must defer close(finished) as its first statement")
 	}
 	if !cleanupOwnsJoin {
-		t.Error("runDaemon cleanup must cancel and select between finished and its owned timer")
+		t.Error("runDaemon cleanup must cancel and select between finished and its owned timeout")
+	}
+}
+
+func TestCleanupCancelsAndJoinsRejectsBrokenOwnership(t *testing.T) {
+	const cleanup = `package client
+func cleanup() {
+	cancel()
+	ctx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+	}
+}`
+	for _, tt := range []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{"missing cancellation", "cancel()", "other()"},
+		{"unbounded context", "WithTimeout(context.Background(), time.Second)", "WithCancel(context.Background())"},
+		{"cancelled parent", "context.Background()", "ctx"},
+		{"wrong duration", "time.Second", "time.Minute"},
+		{"missing timeout release", "defer stop()", "defer other()"},
+		{"missing join", "<-finished", "<-other"},
+		{"wrong timeout", "<-ctx.Done()", "<-other.Done()"},
+		{"nonblocking join", "case <-ctx.Done():", "default:"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "cleanup.go", strings.Replace(cleanup, tt.old, tt.new, 1), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fn, ok := file.Decls[0].(*ast.FuncDecl)
+			if !ok {
+				t.Fatal("fixture does not declare a function")
+			}
+			if cleanupCancelsAndJoins(fn.Body) {
+				t.Fatal("accepted broken cleanup ownership")
+			}
+		})
 	}
 }
 
@@ -139,9 +181,9 @@ func isStopReleaseRoundsLoop(loop *ast.RangeStmt) bool {
 func cleanupCancelsAndJoins(body *ast.BlockStmt) bool {
 	return len(body.List) == 4 &&
 		isDirectCall(body.List[0], "cancel") &&
-		isCleanupTimer(body.List[1]) &&
-		isDeferStop(body.List[2], "timer") &&
-		selectWaitsForFinishedOrTimer(body.List[3])
+		isCleanupTimeout(body.List[1]) &&
+		isDeferCall(body.List[2], "stop") &&
+		selectWaitsForFinishedOrTimeout(body.List[3])
 }
 
 func isDirectCall(stmt ast.Stmt, name string) bool {
@@ -153,36 +195,39 @@ func isDirectCall(stmt ast.Stmt, name string) bool {
 	return ok && len(call.Args) == 0 && isIdent(call.Fun, name)
 }
 
-func isCleanupTimer(stmt ast.Stmt) bool {
+func isCleanupTimeout(stmt ast.Stmt) bool {
 	assign, ok := stmt.(*ast.AssignStmt)
-	if !ok || assign.Tok != token.DEFINE || len(assign.Lhs) != 1 || !isIdent(assign.Lhs[0], "timer") || len(assign.Rhs) != 1 {
+	if !ok || assign.Tok != token.DEFINE || len(assign.Lhs) != 2 ||
+		!isIdent(assign.Lhs[0], "ctx") || !isIdent(assign.Lhs[1], "stop") || len(assign.Rhs) != 1 {
 		return false
 	}
 	call, ok := assign.Rhs[0].(*ast.CallExpr)
-	if !ok || len(call.Args) != 1 {
+	if !ok || len(call.Args) != 2 {
 		return false
 	}
 	constructor, ok := call.Fun.(*ast.SelectorExpr)
-	duration, durationOK := call.Args[0].(*ast.SelectorExpr)
-	return ok && constructor.Sel.Name == "NewTimer" && isIdent(constructor.X, "time") &&
+	parent, parentOK := call.Args[0].(*ast.CallExpr)
+	if !ok || constructor.Sel.Name != "WithTimeout" || !isIdent(constructor.X, "context") ||
+		!parentOK || len(parent.Args) != 0 {
+		return false
+	}
+	background, backgroundOK := parent.Fun.(*ast.SelectorExpr)
+	duration, durationOK := call.Args[1].(*ast.SelectorExpr)
+	return backgroundOK && background.Sel.Name == "Background" && isIdent(background.X, "context") &&
 		durationOK && duration.Sel.Name == "Second" && isIdent(duration.X, "time")
 }
 
-func isDeferStop(stmt ast.Stmt, receiver string) bool {
+func isDeferCall(stmt ast.Stmt, name string) bool {
 	deferStmt, ok := stmt.(*ast.DeferStmt)
-	if !ok || len(deferStmt.Call.Args) != 0 {
-		return false
-	}
-	stop, ok := deferStmt.Call.Fun.(*ast.SelectorExpr)
-	return ok && stop.Sel.Name == "Stop" && isIdent(stop.X, receiver)
+	return ok && len(deferStmt.Call.Args) == 0 && isIdent(deferStmt.Call.Fun, name)
 }
 
-func selectWaitsForFinishedOrTimer(stmt ast.Stmt) bool {
+func selectWaitsForFinishedOrTimeout(stmt ast.Stmt) bool {
 	selectStmt, ok := stmt.(*ast.SelectStmt)
 	if !ok || len(selectStmt.Body.List) != 2 {
 		return false
 	}
-	finished, timer := false, false
+	finished, timeout := false, false
 	for _, rawClause := range selectStmt.Body.List {
 		clause, ok := rawClause.(*ast.CommClause)
 		if !ok || clause.Comm == nil {
@@ -197,11 +242,13 @@ func selectWaitsForFinishedOrTimer(stmt ast.Stmt) bool {
 			return false
 		}
 		finished = finished || isIdent(receive.X, "finished")
-		if channel, ok := receive.X.(*ast.SelectorExpr); ok {
-			timer = timer || channel.Sel.Name == "C" && isIdent(channel.X, "timer")
+		if call, ok := receive.X.(*ast.CallExpr); ok && len(call.Args) == 0 {
+			if done, ok := call.Fun.(*ast.SelectorExpr); ok {
+				timeout = timeout || done.Sel.Name == "Done" && isIdent(done.X, "ctx")
+			}
 		}
 	}
-	return finished && timer
+	return finished && timeout
 }
 
 func isDeferClose(stmt ast.Stmt, channel string) bool {
