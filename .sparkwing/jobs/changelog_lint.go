@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 type ChangelogIssue struct {
@@ -338,7 +339,7 @@ func migrationSectionBody(migrations fs.FS, path, anchor string) (body string, f
 			if found {
 				break
 			}
-			found = slugifyHeading(strings.TrimSpace(strings.TrimPrefix(line, "## "))) == anchor
+			found = docs.MigrationAnchor(strings.TrimSpace(strings.TrimPrefix(line, "## "))) == anchor
 			continue
 		}
 		if found {
@@ -489,7 +490,7 @@ func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
 		if prev, ok := firstSeen[key]; ok {
 			fix := "move its bullets under the first heading and delete the repeat"
 			if s.version == "Unreleased" {
-				fix = "run `bash bin/check-changelog.sh --fix` to merge every repeated heading in [Unreleased] and re-sync the mirror, then commit CHANGELOG.md and pkg/docs/changelog.md"
+				fix = "move unreleased entries to docs/changes/<slug>.md and run bash bin/sync-docs.sh"
 			}
 			issues = append(issues, ChangelogIssue{
 				Line:     h.line,
@@ -562,7 +563,7 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 		}}
 	}
 	for _, h := range headings {
-		if slugifyHeading(h) == anchor {
+		if docs.MigrationAnchor(h) == anchor {
 			return nil
 		}
 	}
@@ -597,31 +598,13 @@ func markdownHeadings(body string) []string {
 	return headings
 }
 
-func slugifyHeading(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-' || r == '_':
-			b.WriteRune(r)
-		case r == ' ' || r == '\t':
-			b.WriteRune('-')
-		default:
-		}
-	}
-	return b.String()
-}
-
 func formatAnchorList(headings []string) string {
 	if len(headings) == 0 {
 		return "(file has no H2 headings yet)"
 	}
 	anchors := make([]string, 0, len(headings))
 	for _, h := range headings {
-		anchors = append(anchors, "#"+slugifyHeading(h))
+		anchors = append(anchors, "#"+docs.MigrationAnchor(h))
 	}
 	return strings.Join(anchors, ", ")
 }

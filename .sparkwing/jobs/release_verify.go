@@ -3,8 +3,6 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"

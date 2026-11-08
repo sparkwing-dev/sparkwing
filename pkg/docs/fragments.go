@@ -31,6 +31,7 @@ func CollectChangelog(body string, sources fs.FS) (string, error) {
 	entries := make(map[string][]string)
 	for _, fragment := range fragments {
 		category := ""
+		bullets := 0
 		for line := range strings.Lines(fragment) {
 			if strings.HasPrefix(line, "### ") {
 				category = strings.TrimSpace(strings.TrimPrefix(line, "### "))
@@ -40,8 +41,14 @@ func CollectChangelog(body string, sources fs.FS) (string, error) {
 			} else if strings.HasPrefix(line, "#") || (category == "" && strings.TrimSpace(line) != "") {
 				return "", fmt.Errorf("changelog fragment must start with a ### category")
 			} else if category != "" {
+				if strings.HasPrefix(line, "- ") {
+					bullets++
+				}
 				entries[category] = append(entries[category], line)
 			}
+		}
+		if bullets == 0 {
+			return "", fmt.Errorf("changelog fragment has no bullet entries")
 		}
 	}
 	var collected strings.Builder
@@ -79,7 +86,21 @@ func CollectMigration(sources fs.FS) ([]byte, error) {
 		if !strings.HasPrefix(strings.TrimSpace(fragment), "## ") {
 			return nil, fmt.Errorf("migration fragment must start with an H2")
 		}
+		if strings.TrimSpace(strings.SplitN(strings.TrimSpace(fragment), "\n", 2)[0]) == strings.TrimSpace(fragment) {
+			return nil, fmt.Errorf("migration fragment has no prose")
+		}
 		text += "\n\n" + strings.TrimSpace(fragment)
+	}
+	seen := make(map[string]bool)
+	for line := range strings.Lines(text) {
+		if !strings.HasPrefix(line, "## ") {
+			continue
+		}
+		heading := MigrationAnchor(strings.TrimSpace(line[3:]))
+		if seen[heading] {
+			return nil, fmt.Errorf("duplicate migration heading %q", heading)
+		}
+		seen[heading] = true
 	}
 	return []byte(text + "\n"), nil
 }
@@ -108,4 +129,23 @@ func fragmentBodies(sources fs.FS, dir string) ([]string, error) {
 		bodies = append(bodies, string(body)+"\n")
 	}
 	return bodies, nil
+}
+
+// MigrationAnchor returns the fragment identifier used by migration links.
+func MigrationAnchor(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		case r == ' ' || r == '\t':
+			b.WriteRune('-')
+		default:
+		}
+	}
+	return b.String()
 }

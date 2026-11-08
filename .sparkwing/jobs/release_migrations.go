@@ -2,13 +2,14 @@ package jobs
 
 import (
 	"fmt"
-	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing/fstest"
 	"unicode"
+
+	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 const (
