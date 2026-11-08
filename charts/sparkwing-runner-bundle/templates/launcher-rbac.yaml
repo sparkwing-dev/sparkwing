@@ -15,6 +15,7 @@ kind: ServiceAccount
 metadata:
   name: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . | quote }}
   namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: false
 ---
 apiVersion: v1
 kind: ServiceAccount
