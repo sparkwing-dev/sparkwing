@@ -617,7 +617,8 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 			}
 			previous, err := d.sourceGit(ctx, "show", revision+":internal/store/store.go")
 			if err != nil {
-				if _, err := d.sourceGit(ctx, "fetch", "--no-tags", "origin", revision); err != nil {
+				// safety: the smoke uses FETCH_HEAD as origin proof, so schema lookup must preserve it.
+				if _, err := d.sourceGit(ctx, "fetch", "--no-tags", "--no-write-fetch-head", "origin", revision); err != nil {
 					return err
 				}
 				previous, err = d.sourceGit(ctx, "show", revision+":internal/store/store.go")
