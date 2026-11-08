@@ -80,7 +80,7 @@ func indexFixtureUnit(t *testing.T, s *Store, team Team, unit UnitRef) {
 		if err != nil {
 			return err
 		}
-		claimContext, err := persistClaimContextTx(t.Context(), tx, team, string(unit.RunID), unit.Kind, requirements, execution)
+		claimContext, err := persistClaimContextTx(t.Context(), tx, team, string(unit.RunID), string(unit.NodeID), unit.Kind, requirements, execution)
 		if err != nil {
 			return err
 		}

@@ -37,11 +37,11 @@ func TestWindowsVerifyReservesFourCores(t *testing.T) {
 
 func TestWindowsVerifyKeepsRaceFailuresAndRunsLaterChecksInOrder(t *testing.T) {
 	var ran []string
-	check := func(id string, cause error) windowsVerifyCheck {
-		return windowsVerifyCheck{id: id, run: func(context.Context) error { ran = append(ran, id); return cause }}
+	check := func(id string, cause error) platformCheck {
+		return platformCheck{id: id, run: func(context.Context) error { ran = append(ran, id); return cause }}
 	}
 	host, plan, doc := prepareWork(t, testJob(func(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
-		addWindowsVerifyChecks(work, []windowsVerifyCheck{
+		addPlatformChecks(work, []platformCheck{
 			check("runtime-race", errors.New("C compiler failed")),
 			check("source-installer", errors.New("source installer failed")),
 			check("release-installer", nil),
@@ -113,7 +113,7 @@ func TestWindowsVerifyIsolatesSubcommandsAndPreservesFailures(t *testing.T) {
 		fmt.Fprintf(&probe, `[ "${%s+x}" != x ] || exit 33; `, name)
 	}
 	probe.WriteString(`printf '%s' "$SPARKWING_HOME"; exit 17`)
-	err := runWindowsVerifyIsolated(t.Context(), probe.String())
+	err := runPlatformIsolated(t.Context(), probe.String())
 	if err == nil {
 		t.Fatal("subcommand failure was masked")
 	}

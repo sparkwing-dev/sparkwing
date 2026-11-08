@@ -178,6 +178,17 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err := routeIntakeTx(ctx, tx, team, &input, provenance); err != nil {
 			return AdmissionResult{}, err
 		}
+		var parentPlacement *runspec.RepositoryPlacement
+		if input.Lineage.ParentRunID != "" {
+			parent, err := readRunTx(ctx, tx, team, input.Lineage.ParentRunID)
+			if err != nil {
+				return AdmissionResult{}, err
+			}
+			parentPlacement = parent.Request.Request.Placement
+		}
+		if err := sealRepositoryPlacement(&input, request.RepositoryPlacement, parentPlacement, input.Lineage.ParentJobID, owner); err != nil {
+			return AdmissionResult{}, err
+		}
 		if request.Request.Dispatch == "" {
 			input.Dispatch = SelectDispatch(input)
 		}
@@ -502,7 +513,7 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	if input.Pipeline == "" || input.Mode != runspec.IntakeExecute && input.Mode != runspec.IntakePublish || input.Dispatch != "" && input.Dispatch != runspec.DispatchHost && input.Dispatch != runspec.DispatchController {
 		return input, authorityError(apierr.BadRequest, "invalid intake mode, dispatch or pipeline")
 	}
-	input.Team, input.OriginMachine = string(team), ""
+	input.Team, input.OriginMachine, input.Placement = string(team), "", nil
 	if policy.Options == nil {
 		return input, authorityError(apierr.Unavailable, "intake settings resolution is unavailable")
 	}

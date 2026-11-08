@@ -75,9 +75,9 @@ func TestGitHubAppDefaultPushArmsAndWithdrawsControllerSchedules(t *testing.T) {
 	if len(minted) == 0 {
 		t.Fatal("schedule config read minted no installation token")
 	}
-	if last := minted[len(minted)-1]; len(last.Repositories) != 1 || last.Repositories[0] != "widgets" ||
+	if last := minted[len(minted)-1]; len(last.Repositories) != 0 || len(last.RepositoryIDs) != 1 || last.RepositoryIDs[0] != 701 ||
 		len(last.Permissions) != 1 || last.Permissions["contents"] != "read" {
-		t.Fatalf("schedule config token = %+v, want repository-scoped contents:read", last)
+		t.Fatalf("schedule config token = %+v, want repository 701 by ID with contents:read", last)
 	}
 	if rows := appCronRows(t, f, bob.team); len(rows) != 0 {
 		t.Fatalf("another team sees schedules = %+v", rows)
