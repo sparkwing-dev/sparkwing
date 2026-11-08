@@ -78,6 +78,7 @@ func (unavailableServices) Emit(nodeproto.FrameLog) {}
 
 // ChildRequest carries the author's requested child without granting repository access.
 type ChildRequest struct {
+	Detached bool              `json:"detached,omitempty"`
 	Pipeline string            `json:"pipeline"`
 	Job      string            `json:"job"`
 	Args     map[string]string `json:"args"`

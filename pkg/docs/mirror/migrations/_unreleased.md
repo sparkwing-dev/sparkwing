@@ -28,8 +28,9 @@ Use `errors.As` to read `*sparkwing.ExecError`, then inspect `ExitCode` and
 
 A binary that upgrades a local SQLite store first copies it beside the store as
 `state.db.schema-<N>-<YYYYMMDDTHHMMSSZ>.bak`, where N is the schema version it
-upgrades from. Delete old copies yourself when you no longer need to return to
-an older binary; they hold the same encrypted secrets as the store. A failed
+upgrades from. After a successful upgrade, it keeps the two newest schema backups
+by modification time and removes older ones. Copy a backup elsewhere if you need
+to retain it longer. Backups hold the same encrypted secrets as the store. A failed
 copy refuses the upgrade and leaves the store unchanged. PostgreSQL stores still
 need an operator snapshot before upgrading. See
 [Schema compatibility](../backup-restore.md#schema-compatibility).
