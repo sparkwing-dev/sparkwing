@@ -105,6 +105,7 @@ provisions only the job namespace, RBAC and admission policies for an externally
 managed launcher, which still needs `jobImage` and `dockerImage` and must run as
 `system:serviceaccount:<release namespace>:<launcher.serviceAccountName>`, the
 only launcher identity the policies admit.
+An externally managed launcher's Pod must set `automountServiceAccountToken: true` to mount its API token.
 Set `runner.enabled=false` when all work goes through Cloud Jobs.
 The launcher reads NodePools with `get` and `list` to distinguish a missing
 shared hardware class from scaling or exhaustion. Configure one shared pool per
@@ -174,6 +175,23 @@ and RoleBinding from the release namespace.
 `launcher.nodeClassName` pins the hardened EC2NodeClass name (`sparkwing-jobs`
 by default). Pools must reference that name with group `karpenter.k8s.aws` and
 kind `EC2NodeClass`. The launcher never writes NodePools or NodeClasses.
+
+The chart also binds `sparkwing-cloud-capacity-<job namespace>` with Deny and
+`failurePolicy: Fail`. For the launcher identity, node updates (including patches)
+and NodeClaim deletes require the stored object's `sparkwing.dev/launcher-namespace`
+to name this deployment's job namespace, a supported protected Cloud class, and
+a nonempty `karpenter.sh/nodepool` label. NodeClaims must lack the team-node
+label because the launcher uses shared pools. Operators and Karpenter establish those
+labels before the launcher reserves a fresh node. The launcher cannot add them
+to foreign nodes in the same write. Existing node labels, owner references and
+finalizers are immutable.
+First reservation may add only the protected team-node, used-team and used-run
+labels. The dedicated taint and all foreign taints stay unchanged. The launcher
+may add or remove its reservation taint and add its quarantine taint, both with
+`NoSchedule`. Annotations and the cordon remain writable for cleanup, quarantine
+and retirement. Other Kubernetes identities retain their existing access.
+Only the launcher Pod opts into API token mounting. Its ServiceAccount disables
+automount for other Pods that use it without an explicit choice.
 
 Upgrading from an install whose Jobs ran in another namespace: let Jobs and node
 reservations recorded under the old namespace drain first, or delete those Jobs
