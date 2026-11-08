@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-36).
+
 - **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/_unreleased.md#declare-upload-allowances-in-repository-config).
 
 - **local controller:** Windows queued work runs in a detached same-user runner that survives controller replacement. A matching live runner is reused; a new build starts a successor while held work drains. The enclosing Job Object must permit breakaway. `daemon stop` drains through the local API. See [the migration guide](docs/migrations/_unreleased.md#windows-local-runners-survive-controller-replacement).

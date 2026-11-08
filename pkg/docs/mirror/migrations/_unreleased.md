@@ -1,6 +1,16 @@
 # Migrating to the next release
 
-No breaking changes so far.
+## Upgrade the store in place to schema baseline 36
+
+Schema 36 adds direct team foreign keys to GitHub Actions approvals and dispatch
+receipts. The existing parent foreign keys already enforce team membership
+through their parent rows. This upgrade preserves the store's direct team-key
+invariant. Recognized schema 35 stores upgrade automatically on open. SQLite
+backs up the old store and rebuilds only these two tables in the upgrade
+transaction. PostgreSQL adds constraints in place. Configured secrets, teams,
+credentials, runners, installations, schedules and existing Actions rows survive.
+Older binaries refuse the upgraded store. Keep the automatic SQLite backup or
+a PostgreSQL backup if you need to return to an older binary.
 
 ## Upgrade the store in place to schema baseline 35
 

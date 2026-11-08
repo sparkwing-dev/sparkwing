@@ -141,9 +141,9 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 			if err != nil {
 				return profile, match.Demand{}, err
 			}
-			alias := `(SELECT ` + raw + ` AS push,` + q.param(team) + ` AS team,` + q.param(string(unit.RunID)) + ` AS run_id,` + q.param(string(unit.NodeID)) + ` AS node_id,` + q.param(string(unit.Kind)) + ` AS kind) w`
+			query := `SELECT ` + q.actionsReceiptScopeSQL("w.push", "w") + ` FROM (SELECT ` + raw + ` AS push,` + q.param(team) + ` AS team,` + q.param(string(unit.RunID)) + ` AS run_id,` + q.param(string(unit.NodeID)) + ` AS node_id,` + q.param(string(unit.Kind)) + ` AS kind) w`
 			var ok bool
-			if err := tx.QueryRowContext(ctx, `SELECT `+actionsReceiptScopeSQL(&q, "w.push", "w")+` FROM `+alias, q.args...).Scan(&ok); err != nil {
+			if err := tx.QueryRowContext(ctx, query, q.args...).Scan(&ok); err != nil {
 				return profile, match.Demand{}, err
 			}
 			if !ok {
