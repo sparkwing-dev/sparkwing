@@ -22,6 +22,7 @@ unlock.
 
 ### Security
 
+- **Helm:** Confine launcher node updates and NodeClaim deletes to its Sparkwing capacity, allow only binding-label additions and reservation/quarantine taint changes, and disable API token automount on its ServiceAccount
 - **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
 
 ### Changed
@@ -42,6 +43,9 @@ unlock.
 ### Fixed
 
 - **Local onboarding:** the welcome card calls out the initial commit, and the quick start explains run inspection, managed schedules and the daemon-owned dashboard.
+- **cli:** Show one admission-wait progress stream with holder charges, held and free capacity, external load and expected clear time. Print updates only for material queue changes at increasing intervals.
+- **template verification:** Accept unused failure recovery after a successful deploy. Skipped dry-run bodies and steps still prevent reusable proof.
+
 - **schedules:** Timer-started Linux controllers leave the timer's cgroup when the systemd user manager is available
 - **scheduling:** Run status and the run page keep GitHub Actions dispatch receipts, provider links and lost-race counts after award, cancellation and completion.
 - **billing:** Refuse checkout and card setup sessions whose Stripe mode differs from the controller's payment mode
