@@ -606,6 +606,38 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 			return rec, err
 		}
 	}
+	if env.Name == d.cfg.Production.Name {
+		if err := d.act(ctx, "compare production and candidate controller schema versions before changing images", func() error {
+			revision, err := d.tools.registry.revision(ctx, d.ecrPass, rec.Previous.Controller.Repository+"@"+rec.Previous.Controller.Digest)
+			if err != nil {
+				return err
+			}
+			if !fullCommitRE.MatchString(revision) {
+				return errors.New("previous controller has no valid source revision; production was not changed")
+			}
+			previous, err := d.sourceGit(ctx, "show", revision+":internal/store/store.go")
+			if err != nil {
+				if _, err := d.sourceGit(ctx, "fetch", "--no-tags", "origin", revision); err != nil {
+					return err
+				}
+				previous, err = d.sourceGit(ctx, "show", revision+":internal/store/store.go")
+				if err != nil {
+					return err
+				}
+			}
+			if rec.PreviousSchema, err = readDeploySchemaVersion(previous); err != nil {
+				return err
+			}
+			candidate, err := d.sourceGit(ctx, "show", images.Commit+":internal/store/store.go")
+			if err != nil {
+				return err
+			}
+			rec.CandidateSchema, err = readDeploySchemaVersion(candidate)
+			return err
+		}); err != nil {
+			return rec, err
+		}
+	}
 	for _, phase := range deployPhases {
 		want := phase.want(images)
 		if !d.dry && phase.current(rec.Previous).Digest == want.Digest {
@@ -965,7 +997,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 
 // safety: nodes outlive a run only briefly, so NodeClaims are sampled while
 // the smoke runs rather than counted afterwards.
-func (d *deployer) productionSmoke(ctx context.Context, images deployImages, since string) error {
+func (d *deployer) productionSmoke(ctx context.Context, since string) error {
 	if err := d.buildCLI(ctx); err != nil {
 		return err
 	}
@@ -975,7 +1007,7 @@ func (d *deployer) productionSmoke(ctx context.Context, images deployImages, sin
 		if err := d.addProfile(ctx, team, env.ControllerURL, d.cfg.Params.SmokeTokenBase+team); err != nil {
 			return err
 		}
-		if err := d.triggerRun(ctx, team, "deploy-smoke", d.repoDir, images.Commit, &runs[i]); err != nil {
+		if err := d.uploadSmoke(ctx, team, &runs[i]); err != nil {
 			return err
 		}
 	}
@@ -1156,5 +1188,50 @@ func (r ecrRegistry) publish(ctx context.Context, password string, in PublishIma
 	for _, ref := range refs {
 		sparkwing.Info(ctx, "published %s (linux/amd64, linux/arm64)", ref)
 	}
+	return err
+}
+
+// safety: uploaded source gives the QA teams real Cloud jobs without borrowing another team's GitHub installation.
+func (d *deployer) uploadSmoke(ctx context.Context, team string, runID *string) error {
+	return d.act(ctx, "trigger deploy-smoke with uploaded source on "+team+" Cloud", func() error {
+		args := []string{"run", "deploy-smoke", "-C", d.repoDir, "--sw-route", "cloud", "--profile", team, "--sw-detached", "-o", "json"}
+		allowed, err := d.sourceGit(ctx, append([]string{"ls-files", "--"}, cloudGateSecretShapedFixtures...)...)
+		if err != nil {
+			return err
+		}
+		if allowed != "" {
+			args = append(args, "--allow-secret-file", strings.Join(strings.Fields(allowed), ","))
+		}
+		out, err := d.sw(ctx, "", args...)
+		if err != nil {
+			return err
+		}
+		*runID = acceptedRunID(out)
+		if *runID == "" {
+			return fmt.Errorf("uploaded smoke printed no run_id: %q", out)
+		}
+		d.tools.say(ctx, "deploy-smoke on "+team+" is "+*runID)
+		return nil
+	})
+}
+
+func (d *deployer) recordUnsafeRollback(ctx context.Context, rec envDeployment, cause error) error {
+	feedback, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	detail := fmt.Sprintf("deploy %s, candidate %s: schema %d -> %d; automatic rollback suppressed; candidate images retained; roll forward to repair: %v", d.runID, rec.Images.Commit, rec.PreviousSchema, rec.CandidateSchema, cause)
+	d.tools.say(feedback, detail)
+	body, err := json.Marshal([]map[string]string{{"fingerprint": "production-schema-upgrade", "severity": "critical", "title": "Production deploy failed after a schema upgrade; roll forward required", "detail": detail}})
+	if err != nil {
+		return err
+	}
+	file := filepath.Join(d.tmp, "rollback-findings.json")
+	if err := os.WriteFile(file, body, 0o600); err != nil {
+		return err
+	}
+	path, err := d.tools.lookPath("bitwing")
+	if err != nil {
+		return err
+	}
+	_, err = d.tools.run(feedback, deployCommand{Name: path, Args: []string{"finding", "record", "--source", "sparkwing-production-rollback", "--file", file}})
 	return err
 }

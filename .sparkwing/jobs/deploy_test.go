@@ -531,6 +531,9 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	if err := os.WriteFile(filepath.Join(f.repo, deployStoreSchema), []byte(schema), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(f.repo, "internal/store/store.go"), []byte("package store\nconst expectedSchemaVersion = 34\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	deployGitIn(t, f.repo, "init", "--quiet", "-b", "main")
 	deployGitIn(t, f.repo, "add", "-A")
 	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "source")
@@ -575,6 +578,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 
 func (f *fakeDeploy) candidate() deployImages {
 	c := f.old
+	c.Commit = f.head
 	c.Version = "v0.68.3-1-g" + f.head[:12]
 	c.Controller = imagePin{c.Controller.Repository, c.Version, testDigest("new-ctl")}
 	c.Runner = imagePin{c.Runner.Repository, c.Version, testDigest("new-run")}
@@ -706,6 +710,8 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 			}
 		}
 		return "", nil
+	case name == "bitwing":
+		return "", nil
 	case name == "go":
 		return "", nil
 	case name == "kubectl":
@@ -717,6 +723,11 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 				return "", fmt.Errorf("profile added without a token file or isolated home")
 			}
 			return "", nil
+		case strings.HasPrefix(joined, "run deploy-smoke"):
+			if arg("--sw-route") != "cloud" || !slices.Contains(c.Args, "--sw-detached") || slices.Contains(c.Args, "--ref") {
+				return "", errors.New("smoke must upload source to Cloud")
+			}
+			return fmt.Sprintf(`{"run_id":"run-deploy-smoke-%s"}`+"\n", arg("--profile")), nil
 		case strings.HasPrefix(joined, "pipeline trigger"):
 			return fmt.Sprintf(`{"run_id":"run-%s-%s"}`+"\n", c.Args[2], arg("--profile")), nil
 		case strings.HasPrefix(joined, "runs status"):
@@ -788,6 +799,9 @@ func (f *fakeDeploy) triggered(pipeline string) []string {
 	var runs []string
 	for _, call := range f.calls {
 		fields := strings.Fields(call)
+		if len(fields) > 2 && fields[1] == "run" && fields[2] == pipeline {
+			runs = append(runs, "run-"+pipeline+"-"+fields[slices.Index(fields, "--profile")+1])
+		}
 		if len(fields) > 3 && fields[1] == "pipeline" && fields[2] == "trigger" && fields[3] == pipeline {
 			runs = append(runs, "run-"+pipeline+"-"+fields[slices.Index(fields, "--profile")+1])
 		}
@@ -1287,5 +1301,61 @@ func TestDeployBuildsReleaseTagUnchanged(t *testing.T) {
 	}
 	if images.Version != "v0.69.2" || images.Controller.Tag != "v0.69.2" || images.Runner.Tag != "v0.69.2" || f.registry.published[0].Version != "v0.69.2" {
 		t.Fatalf("release version changed: %+v, publications=%+v", images, f.registry.published)
+	}
+}
+
+func TestDeploySchemaUpgradeNeverRollsBackOnSmokeFailure(t *testing.T) {
+	f := newFakeDeploy(t)
+	if err := os.WriteFile(filepath.Join(f.repo, "internal/store/store.go"), []byte("package store\nconst expectedSchemaVersion = 35\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deployGitIn(t, f.repo, "add", "internal/store/store.go")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "upgrade schema")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+	f.failRuns["run-deploy-smoke-qa-team"] = true
+	_, err := f.deployer(false).promote(t.Context(), f.candidate())
+	if err == nil || !strings.Contains(err.Error(), "roll forward") {
+		t.Fatalf("promote = %v", err)
+	}
+	got := f.pinsOnMain("sparkwing")
+	if got.Controller != f.candidate().Controller || got.Launcher != f.candidate().Runner {
+		t.Fatalf("unsafe rollback: %+v", got)
+	}
+	if !strings.Contains(strings.Join(f.calls, "\n"), "finding record --source sparkwing-production-rollback") {
+		t.Fatal("missing Bitwing finding")
+	}
+}
+
+func TestDeployMissingSchemaEvidenceLeavesProductionUntouched(t *testing.T) {
+	f := newFakeDeploy(t)
+	f.registry.revisions[f.old.Controller.Repository+"@"+f.old.Controller.Digest] = ""
+	_, err := f.deployer(false).promote(t.Context(), f.candidate())
+	if err == nil || !strings.Contains(err.Error(), "production was not changed") {
+		t.Fatalf("promote = %v", err)
+	}
+	if got := f.pinsOnMain("sparkwing"); got.Controller != f.old.Controller || got.Launcher != f.old.Runner {
+		t.Fatalf("production changed: %+v", got)
+	}
+}
+
+func TestDeploySchemaUpgradeKeepsCandidateAfterCancellation(t *testing.T) {
+	f := newFakeDeploy(t)
+	if err := os.WriteFile(filepath.Join(f.repo, "internal/store/store.go"), []byte("package store\nconst expectedSchemaVersion = 35\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deployGitIn(t, f.repo, "add", "internal/store/store.go")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "upgrade schema")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	f.onSmoke = func(string) error { cancel(); return context.Canceled }
+	_, err := f.deployer(false).promote(ctx, f.candidate())
+	if err == nil || !strings.Contains(err.Error(), "roll forward") {
+		t.Fatalf("promote = %v", err)
+	}
+	if got := f.pinsOnMain("sparkwing"); got.Controller != f.candidate().Controller || got.Launcher != f.candidate().Runner {
+		t.Fatalf("unsafe rollback: %+v", got)
 	}
 }

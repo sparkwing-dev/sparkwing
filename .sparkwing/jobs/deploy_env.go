@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -183,11 +184,13 @@ type gitopsChange struct {
 // safety: a failed promote rolls back from this run's own record: it reverts
 // Changes newest first and names Previous as what production returns to.
 type envDeployment struct {
-	Environment string         `json:"environment"`
-	Images      deployImages   `json:"images"`
-	Previous    valuesPins     `json:"previous"`
-	Changes     []gitopsChange `json:"changes"`
-	WindowStart string         `json:"window_start"`
+	Environment     string         `json:"environment"`
+	Images          deployImages   `json:"images"`
+	Previous        valuesPins     `json:"previous"`
+	Changes         []gitopsChange `json:"changes"`
+	WindowStart     string         `json:"window_start"`
+	PreviousSchema  int            `json:"previous_schema"`
+	CandidateSchema int            `json:"candidate_schema"`
 }
 
 type stagingGateRecord struct {
@@ -520,4 +523,18 @@ func spliceControllerDeployment(previous, next, namespace, deployment string) (s
 		return "", fmt.Errorf("the current render has no %s", want)
 	}
 	return strings.Join(parts, "---"), nil
+}
+
+var deploySchemaVersion = regexp.MustCompile(`(?m)^const expectedSchemaVersion = ([0-9]+)$`)
+
+func readDeploySchemaVersion(source string) (int, error) {
+	match := deploySchemaVersion.FindStringSubmatch(source)
+	if len(match) != 2 {
+		return 0, errors.New("cannot establish controller schema version; production was not changed")
+	}
+	version, err := strconv.Atoi(match[1])
+	if err != nil || version <= 0 {
+		return 0, errors.New("invalid controller schema version; production was not changed")
+	}
+	return version, nil
 }
