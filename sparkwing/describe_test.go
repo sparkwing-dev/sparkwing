@@ -27,6 +27,7 @@ func (pp *populatePipe) Plan(_ context.Context, plan *Plan, in describeInputs, r
 }
 
 func TestRegistration_InvokeParsesTypes(t *testing.T) {
+	isolateRegistry(t)
 	captured := &populatePipe{}
 	Register[describeInputs]("populate-fixture", func() Pipeline[describeInputs] {
 		return captured
@@ -67,6 +68,7 @@ func TestRegistration_InvokeParsesTypes(t *testing.T) {
 }
 
 func TestRegistration_InvokeBadInt(t *testing.T) {
+	isolateRegistry(t)
 	Register[describeInputs]("populate-bad-int", func() Pipeline[describeInputs] {
 		return &populatePipe{}
 	})

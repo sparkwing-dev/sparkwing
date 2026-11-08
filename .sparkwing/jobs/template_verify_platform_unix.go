@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-func lockTemplateVerifyFile(f *os.File) error {
+func lockExclusiveFile(f *os.File) error {
 	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
 }
 

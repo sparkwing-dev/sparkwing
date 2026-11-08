@@ -54,12 +54,16 @@ func (f *scheduleRepositoryFixture) DeleteSchedulesForRepo(_ context.Context, re
 
 type scheduleLifecycleFixture struct {
 	wingd.LocalLifecycle
-	calls  *[]string
-	before func()
+	calls   *[]string
+	before  func()
+	started *wingd.LocalStartOptions
 }
 
-func (f scheduleLifecycleFixture) EnsureStarted(_ context.Context, _ wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+func (f scheduleLifecycleFixture) EnsureStarted(_ context.Context, options wingd.LocalStartOptions) (wingd.LocalStatus, error) {
 	*f.calls = append(*f.calls, "start")
+	if f.started != nil {
+		*f.started = options
+	}
 	if f.before != nil {
 		f.before()
 	}
@@ -275,6 +279,8 @@ func TestLocalSchedulePinResolvesAllSelectorsAndDeduplicates(t *testing.T) {
 func TestScheduleTickHonorsCapturedHomeAndDryRun(t *testing.T) {
 	for _, mode := range []string{"same", "different", "relative"} {
 		f := newScheduleCommandFixture(t)
+		var started wingd.LocalStartOptions
+		f.services.lifecycle = scheduleLifecycleFixture{calls: &f.calls, started: &started}
 		home := f.services.options.Home
 		if mode == "different" {
 			home = filepath.Join(t.TempDir(), "different")
@@ -284,7 +290,7 @@ func TestScheduleTickHonorsCapturedHomeAndDryRun(t *testing.T) {
 		var out bytes.Buffer
 		err := runScheduleTickCommandArgs(t.Context(), []string{"--home", home, "--dry-run", "-o", "json"}, &out, f.command.local)
 		if mode == "same" {
-			if err != nil || !reflect.DeepEqual(f.calls, []string{"start", "tick"}) || !strings.Contains(out.String(), "2026-10-15T03:00:00Z") {
+			if err != nil || !started.ScheduleTick || !reflect.DeepEqual(f.calls, []string{"start", "tick"}) || !strings.Contains(out.String(), "2026-10-15T03:00:00Z") {
 				t.Fatalf("tick: %v %v %s", err, f.calls, out.String())
 			}
 		} else if err == nil || len(f.calls) != 0 || out.Len() != 0 {

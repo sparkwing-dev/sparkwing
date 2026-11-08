@@ -385,6 +385,7 @@ type RecordLookup struct {
 // All returned members have passed existence and edge checks before their digests enter ReadSet.
 type RecordLookupResult struct {
 	Found           bool
+	PreparedParent  bool
 	VerifiedDefault bool
 	Record          Record
 	Members         []Member
