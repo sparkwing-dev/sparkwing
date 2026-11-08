@@ -1,8 +1,9 @@
 package routepolicy_test
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
 
 func TestMain(m *testing.M) { testleak.Main(m) }
