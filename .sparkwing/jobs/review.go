@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -253,27 +254,59 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	if docsModel != p.Reviewers[defaultReviewer].Model {
 		rec.Notes = append(rec.Notes, "every changed file is documentation, so the default reviewer ran on "+docsModel)
 	}
-	for _, profile := range order {
+	type profileResult struct {
+		record  reviewRecord
+		resumed bool
+		err     error
+	}
+	results := make([]profileResult, len(order))
+	prompts := make([]reviewPrompt, len(order))
+	for i, profile := range order {
 		scoped := diff
 		if profile != defaultReviewer {
 			if scoped, err = scopedDiff(ctx, d, base, head, profiles[profile]); err != nil {
 				return err
 			}
 		}
-		model := p.Reviewers[profile].Model
-		if profile == defaultReviewer {
-			model = docsModel
-		}
-		resumed, err := runProfile(ctx, d, p, rec, profile, model, reviewPrompt{
+		prompts[i] = reviewPrompt{
 			policy: p, profile: profile, objective: objective, standards: standards,
 			base: base, head: head, diff: scoped, files: profiles[profile],
-		})
-		if err != nil {
-			return err
 		}
-		pass.Profiles = append(pass.Profiles, profile)
-		pass.Resumed = pass.Resumed || resumed
+		results[i].record = reviewRecord{
+			Findings:  slices.Clone(rec.Findings),
+			Reviewers: slices.Clone(rec.Reviewers),
+		}
 	}
+	var wg sync.WaitGroup
+	for i, profile := range order {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			model := p.Reviewers[profile].Model
+			if profile == defaultReviewer {
+				model = docsModel
+			}
+			result := &results[i]
+			result.resumed, result.err = runProfile(ctx, d, p, &result.record, profile, model, prompts[i])
+		}()
+	}
+	wg.Wait()
+	var errs []error
+	for _, result := range results {
+		errs = append(errs, result.err)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	for i, profile := range order {
+		result := &results[i]
+		rec.Findings = mergeFindings(rec.Findings, findingsBy(result.record.Findings, profile), profile, prefixFor(profile))
+		rec.setSession(result.record.session(profile))
+		rec.Notes = append(rec.Notes, result.record.Notes...)
+		pass.Profiles = append(pass.Profiles, profile)
+		pass.Resumed = pass.Resumed || result.resumed
+	}
+
 	rec.Passes = append(rec.Passes, pass)
 	return nil
 }

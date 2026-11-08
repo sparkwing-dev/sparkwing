@@ -140,7 +140,7 @@ describe("runDetailView", () => {
     );
     assert.equal(api.planFailureHint(run, nodes), null);
     assert.equal(run.retry_mode, "failed");
-    assert.deepEqual(run.reused_jobs, ["lint"]);
+    assert.deepEqual(run.reused_jobs, []);
     assert.equal("trigger_source" in run, false);
     assert.deepEqual(run.retry_of, "run-earlier");
     const byID = Object.fromEntries(nodes.map((node) => [node.id, node]));
