@@ -1,9 +1,10 @@
 # pkg/projectconfig
 
 type Config struct {
-	Defaults  *Defaults
-	Pipelines []Pipeline
-	Sparks    []Spark
+	AllowSecretFiles []string
+	Defaults         *Defaults
+	Pipelines        []Pipeline
+	Sparks           []Spark
 }
 func (c *Config) Registry() *pipelines.Config
 func (c *Config) RepositoryPlacement(pipeline, revision string) (*runspec.RepositoryPlacement, error)

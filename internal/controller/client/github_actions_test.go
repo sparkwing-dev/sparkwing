@@ -51,7 +51,7 @@ func TestExchangeGitHubActionsRequiresHTTPSExceptLoopback(t *testing.T) {
 				}
 				return engineResponse(http.StatusOK, `{"token":"runner-token","team":"acme","expires_at":2000000000,"binding":{"kind":"push"}}`), nil
 			})}}
-			issued, err := ExchangeGitHubActions(t.Context(), options, "acme", tc.requestURL, "request-token")
+			issued, err := ExchangeGitHubActions(t.Context(), options, "acme", tc.requestURL, "request-token", "")
 			if tc.refused {
 				if err == nil || !strings.Contains(err.Error(), "must use HTTPS unless loopback") || calls != 0 {
 					t.Fatalf("insecure exchange = %+v, %v, calls = %d", issued, err, calls)

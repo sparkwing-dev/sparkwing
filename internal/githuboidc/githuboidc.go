@@ -58,6 +58,8 @@ type Claims struct {
 	// EventName is the event that started the workflow, such as push or
 	// pull_request.
 	EventName   string
+	WorkflowSHA string
+	CheckRunID  string
 	WorkflowRef string
 	RunID       string
 	RunAttempt  string
@@ -97,6 +99,8 @@ type tokenClaims struct {
 	SHA               string        `json:"sha"`
 	EventName         string        `json:"event_name"`
 	WorkflowRef       string        `json:"workflow_ref"`
+	WorkflowSHA       string        `json:"workflow_sha"`
+	CheckRunID        string        `json:"check_run_id"`
 	RunID             string        `json:"run_id"`
 	RunAttempt        string        `json:"run_attempt"`
 	RunnerEnvironment string        `json:"runner_environment"`
@@ -145,7 +149,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {
 	return Claims{
 		Repository: cl.Repository, RepositoryID: repoID, RepositoryOwnerID: ownerID,
 		Ref: cl.Ref, SHA: cl.SHA, EventName: cl.EventName,
-		WorkflowRef: cl.WorkflowRef, RunID: cl.RunID, RunAttempt: cl.RunAttempt, RunnerEnvironment: cl.RunnerEnvironment, Subject: cl.Sub,
+		WorkflowRef: cl.WorkflowRef, WorkflowSHA: cl.WorkflowSHA, CheckRunID: cl.CheckRunID, RunID: cl.RunID, RunAttempt: cl.RunAttempt, RunnerEnvironment: cl.RunnerEnvironment, Subject: cl.Sub,
 		ExpiresAt: time.Unix(cl.Exp, 0),
 	}, nil
 }

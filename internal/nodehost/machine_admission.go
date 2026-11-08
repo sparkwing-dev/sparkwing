@@ -72,6 +72,10 @@ func (l machineLease) TrackProcess(ctx context.Context, pid int) error {
 	return l.lease.TrackProcess(ctx, pid)
 }
 
+func (l machineLease) TrackCommand(ctx context.Context, pid int, birth string) error {
+	return l.lease.TrackCommand(ctx, pid, birth)
+}
+
 func (l machineLease) Watch(evicted func(wingwire.Evicted), stopped func(wingwire.Cancel)) error {
 	return l.lease.WatchControl(evicted, stopped)
 }

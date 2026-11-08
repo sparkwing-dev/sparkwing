@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
@@ -191,6 +192,17 @@ func protocolProbeReply(t *testing.T, process *acceptance.GoSDKProcess, id strin
 		line, err := process.NextFrame()
 		if err != nil {
 			t.Fatal(err)
+		}
+		frame, err := nodeproto.ParseFrame(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if frame.Exec != nil {
+			done := nodehost.ExecuteCommand(t.Context(), *frame.Exec, func(stream string, data []byte, _ bool) error {
+				return process.Send(nodeproto.ExecOutput{ID: frame.Exec.ID, Stream: stream, Data: data})
+			})
+			sendProtocolProbe(t, process, done)
+			continue
 		}
 		var reply nodeproto.Reply
 		if err := json.Unmarshal(line, &reply); err != nil {

@@ -85,7 +85,7 @@ func TestActionsExchangeUsesCallerContextAndServerPushBinding(t *testing.T) {
 	boundary := errors.New("runtime boundary")
 	push := capability.PushScope{RepositoryKey: "github.com/acme/project", Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "actions-run", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}
 	cli := RunnerCLI{
-		Actions: func(got context.Context, controller, team string) (capability.Issued, error) {
+		Actions: func(got context.Context, controller, team, receipt string) (capability.Issued, error) {
 			if got.Value(contextKey{}) != "caller" || controller != "https://controller.example" || team != "acme" {
 				t.Error("Actions exchange lost caller context or selection")
 			}
@@ -165,7 +165,7 @@ func runnerCredentials(t *testing.T) string {
 func TestActionsCancellationAndInvalidScopePreventRuntime(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	cli := RunnerCLI{Actions: func(ctx context.Context, _, _ string) (capability.Issued, error) {
+	cli := RunnerCLI{Actions: func(ctx context.Context, _, _, _ string) (capability.Issued, error) {
 		return capability.Issued{}, context.Cause(ctx)
 	}, Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
 		t.Error("invalid exchange reached runtime")
@@ -175,7 +175,7 @@ func TestActionsCancellationAndInvalidScopePreventRuntime(t *testing.T) {
 	if err := cli.Run(ctx, "warm", args, "v1.2.3"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
 	}
-	cli.Actions = func(context.Context, string, string) (capability.Issued, error) {
+	cli.Actions = func(context.Context, string, string, string) (capability.Issued, error) {
 		return capability.Issued{Raw: "private"}, nil
 	}
 	if err := cli.Run(t.Context(), "warm", args, "v1.2.3"); err == nil {
@@ -219,5 +219,12 @@ func TestWarmRejectsInertFlags(t *testing.T) {
 				t.Fatalf("expected unknown flag, got %v", err)
 			}
 		})
+	}
+}
+
+func TestRunnerRefusesReceiptWithoutActionsBeforeOpeningCredentials(t *testing.T) {
+	err := (RunnerCLI{}).Run(t.Context(), "warm", []string{"--dispatch-receipt=receipt"}, "v0.69.2")
+	if err == nil || !strings.Contains(err.Error(), "--dispatch-receipt requires --github-actions") {
+		t.Fatalf("invalid receipt invocation: %v", err)
 	}
 }
