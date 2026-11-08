@@ -431,14 +431,14 @@ usage independently of admission charges.
 election races, home binding, concurrent reuse and refusal paths through the
 lifecycle interface with process-boundary fakes.
 The process/store
-scenarios remain open: dashboard install/update, Windows
+scenarios remain open: daemon install/update, Windows
 transport identity and local orphan recovery. These require the real controller
 and platform fixtures.
 
 <!-- design:end -->
 
 The local dashboard binds loopback only; `dashboard.address` refuses any other
-host. Every data request requires the bearer session minted through `api.sock`.
+host. Every data request requires the bearer token of a session held in controller memory, exchanged from a link minted through `api.sock`; a restart revokes every session.
 `dashboard.read_only` rejects authenticated browser requests other than GET,
 HEAD and OPTIONS before controller dispatch; sign-in and sign-out remain
 available. It blocks writes but still allows reading decrypted secrets, so a

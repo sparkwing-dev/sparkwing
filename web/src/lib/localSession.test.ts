@@ -2,11 +2,18 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
 import { cancelRun } from "./api";
-import { localSession, logOutLocal, sessionFromFragment } from "./localSession";
+import {
+  codeFromFragment,
+  ensureLocalSignIn,
+  localSession,
+  localSignedIn,
+  localSignInFailure,
+  logOutLocal,
+} from "./localSession";
 
 type FakeWindow = {
   __SPARKWING_REQUIRE_LOGIN__?: string;
-  sessionStorage: Storage;
+  localStorage: Storage;
   location: { hash: string; pathname: string; search: string };
   history: { replaceState: (data: unknown, unused: string, url?: string) => void };
 };
@@ -32,7 +39,7 @@ function page(hash: string, mode = "false"): { w: FakeWindow; replaced: string[]
   const replaced: string[] = [];
   const w: FakeWindow = {
     __SPARKWING_REQUIRE_LOGIN__: mode,
-    sessionStorage: memoryStorage(),
+    localStorage: memoryStorage(),
     location: { hash, pathname: "/runs", search: "?x=1" },
     history: {
       replaceState: (_data, _unused, url) => {
@@ -50,48 +57,116 @@ afterEach(() => {
   runtime.fetch = previousFetch;
 });
 
-describe("sessionFromFragment", () => {
-  it("reads the session from the fragment only", () => {
-    assert.equal(sessionFromFragment("#s=abc%2Fdef"), "abc/def");
-    assert.equal(sessionFromFragment("#x=1&s=zz"), "zz");
-    assert.equal(sessionFromFragment(""), null);
-    assert.equal(sessionFromFragment("#sx=1"), null);
+describe("codeFromFragment", () => {
+  it("reads the sign-in code from the fragment only", () => {
+    assert.equal(codeFromFragment("#code=abc%2Fdef"), "abc/def");
+    assert.equal(codeFromFragment("#x=1&code=zz"), "zz");
+    assert.equal(codeFromFragment(""), null);
+    assert.equal(codeFromFragment("#codex=1"), null);
   });
 });
 
-describe("local session adoption", () => {
-  it("moves the fragment into sessionStorage, clears it and sends it as a bearer", async () => {
-    const { w, replaced } = page("#s=session-one");
-    let headers = new Headers();
-    runtime.fetch = async (_input, init) => {
-      headers = new Headers(init?.headers);
+describe("local sign-in", () => {
+  it("drops the code from history, exchanges it and sends the token as a bearer", async () => {
+    const { w, replaced } = page("#code=one-time");
+    const calls: { url: string; body?: string; auth: string | null; cookie: string | null }[] = [];
+    runtime.fetch = async (input, init) => {
+      const headers = new Headers(init?.headers);
+      calls.push({ url: String(input), body: init?.body as string | undefined, auth: headers.get("Authorization"), cookie: headers.get("Cookie") });
+      if (String(input) === "/login") {
+        assert.deepEqual(replaced, ["/runs?x=1"], "the code left history before the exchange");
+        return Response.json({ token: "session-one" });
+      }
       return new Response(null, { status: 204 });
     };
     await cancelRun("run-one");
-    assert.deepEqual(replaced, ["/runs?x=1"]);
     assert.equal(w.location.hash, "");
-    assert.equal(w.sessionStorage.getItem("sparkwing.localSession"), "session-one");
-    assert.equal(headers.get("Authorization"), "Bearer session-one");
-    assert.equal(headers.get("Cookie"), null);
+    assert.equal(calls[0].url, "/login");
+    assert.equal(calls[0].body, JSON.stringify({ code: "one-time" }));
+    assert.equal(w.localStorage.getItem("sparkwing.localSession"), "session-one");
+    assert.equal(calls[1].auth, "Bearer session-one");
+    assert.equal(calls[1].cookie, null);
+    assert.equal(localSignedIn(), true);
   });
 
-  it("ignores a fragment outside the local dashboard", () => {
-    const { w, replaced } = page("#s=planted", "true");
+  it("keeps no token and says why when the exchange is refused", async () => {
+    const { w } = page("#code=spent");
+    runtime.fetch = async () =>
+      Response.json({ error: { code: "unauthenticated", message: "this sign-in link is invalid, expired or already used" } }, { status: 401 });
+    await (ensureLocalSignIn() ?? Promise.resolve());
+    assert.equal(w.localStorage.getItem("sparkwing.localSession"), null);
     assert.equal(localSession(), null);
-    assert.deepEqual(replaced, []);
-    assert.equal(w.sessionStorage.getItem("sparkwing.localSession"), null);
+    assert.equal(localSignInFailure(), "this sign-in link is invalid, expired or already used");
+    page("#code=unanswered");
+    runtime.fetch = async () => {
+      throw new TypeError("network down");
+    };
+    await (ensureLocalSignIn() ?? Promise.resolve());
+    assert.equal(localSignInFailure(), "the controller did not answer");
   });
 
-  it("logs out with the bearer and forgets the session", async () => {
-    const { w } = page("#s=session-two");
+  it("revokes the session a new sign-in replaces", async () => {
+    const { w } = page("#code=fresh");
+    w.localStorage.setItem("sparkwing.localSession", "session-old");
+    const calls: { url: string; auth: string | null }[] = [];
+    runtime.fetch = async (input, init) => {
+      calls.push({ url: String(input), auth: new Headers(init?.headers).get("Authorization") });
+      return String(input) === "/login" ? Response.json({ token: "session-new" }) : new Response(null, { status: 503 });
+    };
+    await (ensureLocalSignIn() ?? Promise.resolve());
+    assert.deepEqual(calls, [
+      { url: "/login", auth: null },
+      { url: "/logout", auth: "Bearer session-old" },
+    ]);
+    assert.equal(w.localStorage.getItem("sparkwing.localSession"), "session-new");
+    assert.equal(localSignInFailure(), null);
+  });
+
+  it("allows authenticated requests while replacement logout is hung", async () => {
+    const { w } = page("#code=fresh");
+    w.localStorage.setItem("sparkwing.localSession", "old");
+    runtime.fetch = async (input, init) => {
+      if (String(input) === "/login") {
+        assert.ok(init?.signal);
+        return Response.json({ token: "new" });
+      }
+      if (String(input) === "/logout") {
+        assert.ok(init?.signal);
+        return new Promise<Response>(() => {});
+      }
+      assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer new");
+      return new Response(null, { status: 204 });
+    };
+    await cancelRun("run-one");
+    assert.equal(localSession(), "new");
+  });
+
+  it("ignores a fragment outside the local dashboard", async () => {
+    const { replaced } = page("#code=planted", "true");
+    let calls = 0;
+    runtime.fetch = async () => {
+      calls++;
+      return new Response(null, { status: 204 });
+    };
+    await (ensureLocalSignIn() ?? Promise.resolve());
+    assert.equal(calls, 0);
+    assert.deepEqual(replaced, []);
+    assert.equal(localSession(), null);
+  });
+
+  it("forgets the token only after the controller revokes it", async () => {
+    const { w } = page("");
+    w.localStorage.setItem("sparkwing.localSession", "session-two");
     const calls: { url: string; method?: string; auth: string | null }[] = [];
     runtime.fetch = async (input, init) => {
       calls.push({ url: String(input), method: init?.method, auth: new Headers(init?.headers).get("Authorization") });
-      return new Response(null, { status: 204 });
+      return new Response(null, { status: 503 });
     };
+    await assert.rejects(logOutLocal(), /still active/);
+    assert.equal(w.localStorage.getItem("sparkwing.localSession"), "session-two");
+    runtime.fetch = async () => new Response(null, { status: 204 });
     await logOutLocal();
     assert.deepEqual(calls, [{ url: "/logout", method: "POST", auth: "Bearer session-two" }]);
-    assert.equal(w.sessionStorage.getItem("sparkwing.localSession"), null);
     assert.equal(localSession(), null);
   });
 });

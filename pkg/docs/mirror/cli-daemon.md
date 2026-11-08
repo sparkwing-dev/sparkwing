@@ -11,8 +11,10 @@ Inspect and manage the local controller
 ### Subcommands
 
 - `events` -- Read retained local controller events
+- `install` -- Install the local controller as a login service
 - `restart` -- Restart an answering local controller
 - `status` -- Report local controller status
+- `uninstall` -- Remove the controller login service
 - `stop` -- Stop the local controller
 
 ### Flags
@@ -46,6 +48,21 @@ JSON emits event records followed by a page record with truncated. Plain and pre
 | `--incarnation N` | Show only events from this numbered controller start, the N in the #N.seq column; zero shows every start. Must be at least 0. |
 | `--limit N` | Maximum number of records to print, at least one. Raise it to include older records. |
 | `--explain` | Print the complete admission timeline for the --run run and all its descendant runs, without pagination. |
+
+## `sparkwing daemon install`
+
+Install the local controller as a login service
+
+Install the local controller as a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows, where `sparkwing dashboard open` starts the controller on demand.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing daemon restart`
 
@@ -81,6 +98,21 @@ Report local controller status
 Stop the local controller
 
 Stops the local controller, its dashboard and its local runner. The runner stops claiming work first: an idle runner exits within seconds, and a runner holding jobs finishes them and exits once a controller accepts their results. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+
+## `sparkwing daemon uninstall`
+
+Remove the controller login service
+
+Remove the controller login service; Windows starts the controller on demand.
 
 ### Flags
 

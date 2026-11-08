@@ -52,22 +52,20 @@ func Registry() []Command {
 			{Name: "limit", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "explain", Requires: []string{"run"}, Conflicts: []string{"since", "kind", "incarnation", "limit"}},
 		}},
+		{Path: "sparkwing daemon install", Platforms: []string{"linux", "darwin"}, Rules: []string{"Install the local controller as a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows, where `sparkwing dashboard open` starts the controller on demand."}, Flags: []Flag{}},
 		{Path: "sparkwing daemon restart", Rules: []string{"The local runner and the jobs it holds keep running through the restart; the replacement controller starts a new runner only when the version changes."}, Flags: []Flag{
 			{Name: "force"},
 		}},
 		{Path: "sparkwing daemon status", Flags: []Flag{}},
+		{Path: "sparkwing daemon uninstall", Platforms: []string{"linux", "darwin"}, Rules: []string{"Remove the controller login service; Windows starts the controller on demand."}, Flags: []Flag{}},
 		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller, its dashboard and its local runner. The runner stops claiming work first: an idle runner exits within seconds, and a runner holding jobs finishes them and exits once a controller accepts their results. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard", Flags: []Flag{}},
-		{Path: "sparkwing dashboard install", Platforms: []string{"linux", "darwin"}, Rules: []string{"Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows, where `sparkwing dashboard open` starts the controller on demand."}, Flags: []Flag{
-			{Name: "force"},
-		}},
 		{Path: "sparkwing dashboard logs", Flags: []Flag{
 			{Name: "tail", Argument: "N"},
 			{Name: "follow", Short: "f"},
 		}},
-		{Path: "sparkwing dashboard open", Rules: []string{"Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none."}, Flags: []Flag{}},
+		{Path: "sparkwing dashboard open", Rules: []string{"Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket and carries a one-time code in its fragment that works once, expires after 60 seconds and only at the dashboard address it names. The page exchanges it for a session token kept in localStorage and sent as an Authorization bearer header; it lasts at most 30 days, and Log out or any controller restart revokes it. No cookie is set or accepted; every write also needs the dashboard's own Origin. The local socket needs no session."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard status", Flags: []Flag{}},
-		{Path: "sparkwing dashboard uninstall", Platforms: []string{"linux", "darwin"}, Rules: []string{"Remove the managed login service; Windows starts the controller on demand."}, Flags: []Flag{}},
 		{Path: "sparkwing debug", Flags: []Flag{}},
 		{Path: "sparkwing debug attach", Flags: []Flag{
 			{Name: "run", Argument: "ID", Required: true},

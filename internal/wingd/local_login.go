@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -22,8 +24,7 @@ const DashboardLoginPath = "/api/v1/local/dashboard/login"
 
 const (
 	dashboardLoginLifetime   = 60 * time.Second
-	dashboardSessionIdle     = 12 * time.Hour
-	dashboardSessionLifetime = 24 * time.Hour
+	dashboardSessionLifetime = 30 * 24 * time.Hour
 )
 
 // DashboardLogin is the one-time sign-in link api.sock returns.
@@ -32,40 +33,43 @@ type DashboardLogin struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-type pendingLogin struct {
+// safety: codes and sessions live only in this controller run, so every restart revokes every sign-in; a process
+// that held the dashboard port while the controller was down cannot replay a token it collected.
+type dashboardLogins struct {
+	now     func() time.Time
+	mu      sync.Mutex
+	origin  string
+	entries map[string]dashboardEntry
+	watch   map[string]*sessionWatch
+	// hack: tests interpose a revocation between a request's session lookup and serving it.
+	afterLookup func(digest string)
+}
+
+// safety: entries are keyed by the SHA-256 digest of their token, so the map never holds a usable credential.
+type dashboardEntry struct {
+	code    bool
+	origin  string
 	peer    localhostwire.LocalPeerIdentity
 	expires time.Time
 }
 
-type dashboardSession struct {
-	peer              localhostwire.LocalPeerIdentity
-	lastSeen, expires time.Time
-	ended             chan struct{}
-}
-
-func (s dashboardSession) live(now time.Time) bool {
-	return now.Before(s.lastSeen.Add(dashboardSessionIdle)) && now.Before(s.expires)
-}
-
-type dashboardLogins struct {
-	now      func() time.Time
-	mu       sync.Mutex
-	origin   string
-	pending  map[[sha256.Size]byte]pendingLogin
-	sessions map[[sha256.Size]byte]dashboardSession
+// safety: Log out closes ended to stop every request the session is still serving, including open streams.
+type sessionWatch struct {
+	ended chan struct{}
+	refs  int
 }
 
 func newDashboardLogins(now func() time.Time) *dashboardLogins {
 	if now == nil {
 		now = time.Now
 	}
-	return &dashboardLogins{now: now, pending: map[[sha256.Size]byte]pendingLogin{}, sessions: map[[sha256.Size]byte]dashboardSession{}}
+	return &dashboardLogins{now: now, entries: map[string]dashboardEntry{}, watch: map[string]*sessionWatch{}}
 }
 
 func (l *dashboardLogins) serving(origin string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.origin = origin
+	l.origin = normalizeDashboardOrigin(origin)
 }
 
 func (l *dashboardLogins) servingOrigin() string {
@@ -117,100 +121,163 @@ func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity) (DashboardL
 		return DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard status to see why"}
 	}
 	now := l.now()
-	for key, login := range l.pending {
-		if !now.Before(login.expires) {
-			delete(l.pending, key)
+	for digest, entry := range l.entries {
+		if !now.Before(entry.expires) {
+			delete(l.entries, digest)
 		}
 	}
 	expires := now.Add(dashboardLoginLifetime)
-	l.pending[sha256.Sum256([]byte(token))] = pendingLogin{peer: peer.Clone(), expires: expires}
-	return DashboardLogin{URL: l.origin + "/login?" + url.Values{"token": {token}}.Encode(), ExpiresAt: expires}, nil
+	l.entries[tokenDigest(token)] = dashboardEntry{code: true, origin: l.origin, peer: peer.Clone(), expires: expires}
+	// safety: the code rides in the fragment, which the browser never sends; the page exchanges it
+	// and drops it from history.
+	return DashboardLogin{URL: l.origin + "/#code=" + token, ExpiresAt: expires}, nil
 }
 
-func (l *dashboardLogins) redeem(token string) (string, bool) {
-	session, err := randomToken()
-	if err != nil {
-		return "", false
-	}
-	key := sha256.Sum256([]byte(token))
+// safety: the code is spent even when it is refused, so a guess at another origin uses it up.
+func (l *dashboardLogins) redeem(code, session, origin string) (time.Time, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	login, ok := l.pending[key]
-	delete(l.pending, key)
+	entry, ok := l.entries[code]
+	delete(l.entries, code)
 	now := l.now()
-	if !ok || !now.Before(login.expires) {
-		return "", false
+	if !ok || !entry.code || entry.origin != origin || !now.Before(entry.expires) {
+		return time.Time{}, false
 	}
-	for key, current := range l.sessions {
-		if !current.live(now) {
-			l.endLocked(key)
+	expires := now.Add(dashboardSessionLifetime)
+	l.entries[session] = dashboardEntry{origin: origin, peer: entry.peer, expires: expires}
+	return expires, true
+}
+
+func (l *dashboardLogins) revoke(digest string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	entry, ok := l.entries[digest]
+	if !ok || entry.code {
+		return false
+	}
+	delete(l.entries, digest)
+	return l.now().Before(entry.expires)
+}
+
+func tokenDigest(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func normalizeDashboardOrigin(origin string) string {
+	parsed, err := url.Parse(origin)
+	if err == nil && parsed.Scheme == "http" && parsed.Port() == "80" {
+		parsed.Host = strings.TrimSuffix(parsed.Host, ":80")
+		return parsed.String()
+	}
+	return origin
+}
+
+// safety: the origin guard has already refused a foreign Host, so this is the origin the browser addressed.
+func requestOrigin(r *http.Request) string {
+	return normalizeDashboardOrigin("http://" + r.Host)
+}
+
+// safety: only the Authorization header authenticates. A browser attaches it from script on this origin alone,
+// unlike a cookie, which every port on the host receives.
+func sessionToken(r *http.Request) (string, bool) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return token, ok && token != "" && !strings.ContainsAny(token, " \t")
+}
+
+type dashboardSession struct {
+	digest  string
+	peer    localhostwire.LocalPeerIdentity
+	expires time.Time
+}
+
+// safety: the caller watches the digest before this lookup, and Log out revokes before it ends watches, so a
+// request validated just before a revocation is still ended by it.
+func (l *dashboardLogins) lookup(r *http.Request, digest string) (dashboardSession, bool) {
+	l.mu.Lock()
+	entry, ok := l.entries[digest]
+	hook := l.afterLookup
+	l.mu.Unlock()
+	if hook != nil {
+		hook(digest)
+	}
+	// safety: a session redeemed at one origin does not authorize another origin on the same host.
+	if !ok || entry.code || !l.now().Before(entry.expires) || entry.origin != requestOrigin(r) {
+		return dashboardSession{}, false
+	}
+	return dashboardSession{digest: digest, peer: entry.peer.Clone(), expires: entry.expires}, true
+}
+
+func (l *dashboardLogins) watchSession(digest string) (<-chan struct{}, func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	current, ok := l.watch[digest]
+	if !ok {
+		current = &sessionWatch{ended: make(chan struct{})}
+		l.watch[digest] = current
+	}
+	current.refs++
+	return current.ended, func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		current.refs--
+		// safety: an unknown or finished digest leaves no entry behind, so forged cookies cannot grow the map.
+		if current.refs == 0 && l.watch[digest] == current {
+			delete(l.watch, digest)
 		}
 	}
-	l.sessions[sha256.Sum256([]byte(session))] = dashboardSession{peer: login.peer, lastSeen: now, expires: now.Add(dashboardSessionLifetime), ended: make(chan struct{})}
-	return session, true
 }
 
-func sessionKey(r *http.Request) ([sha256.Size]byte, bool) {
-	session, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || session == "" {
-		return [sha256.Size]byte{}, false
-	}
-	return sha256.Sum256([]byte(session)), true
-}
-
-func (l *dashboardLogins) endLocked(key [sha256.Size]byte) {
-	if current, ok := l.sessions[key]; ok {
-		close(current.ended)
-		delete(l.sessions, key)
-	}
-}
-
-func (l *dashboardLogins) session(r *http.Request) (dashboardSession, time.Duration, bool) {
-	key, ok := sessionKey(r)
-	if !ok {
-		return dashboardSession{}, 0, false
-	}
+func (l *dashboardLogins) end(digest string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	current, ok := l.sessions[key]
-	now := l.now()
-	if !ok || !current.live(now) {
-		l.endLocked(key)
-		return dashboardSession{}, 0, false
+	if current, ok := l.watch[digest]; ok {
+		close(current.ended)
+		delete(l.watch, digest)
 	}
-	current.lastSeen = now
-	l.sessions[key] = current
-	current.peer = current.peer.Clone()
-	return current, current.expires.Sub(now), true
 }
 
-func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, next http.Handler, current dashboardSession, remaining time.Duration) {
-	ctx, cancel := context.WithTimeout(localhostwire.WithLocalPeer(r.Context(), current.peer), remaining)
+func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, next http.Handler, current dashboardSession, ended <-chan struct{}) {
+	ctx, cancel := context.WithTimeout(localhostwire.WithLocalPeer(r.Context(), current.peer), current.expires.Sub(l.now()))
 	defer cancel()
 	go func() {
 		select {
-		case <-current.ended:
+		case <-ended:
 			cancel()
 		case <-ctx.Done():
 		}
 	}()
 	request := r.Clone(ctx)
-	// safety: the dashboard bearer proves this peer session, not a controller capability.
+	// safety: the dashboard session proves this peer, not a controller capability, so no credential travels on.
 	request.Header.Del("Authorization")
-	// safety: cookies from another listener must not replace the verified dashboard peer.
 	cookies := request.Cookies()
 	request.Header.Del("Cookie")
 	for _, cookie := range cookies {
-		if cookie.Name != "sw_session" && cookie.Name != "__Host-sw_session" {
+		switch cookie.Name {
+		case "sw_session", "__Host-sw_session":
+		default:
 			request.AddCookie(cookie)
 		}
 	}
 	next.ServeHTTP(w, request)
 }
 
-// safety: a browser acts as the api.sock peer that minted its link only while it sends that session as a
-// bearer. Cookies reach every port on a loopback host, so they cannot authenticate it. The static shell carries no
-// run data and loads signed out, because a navigation cannot send the header.
+// safety: a cookie-authenticated write must name this dashboard's own origin; a missing, null or foreign Origin is
+// refused, because SameSite alone does not stop another page on the same host.
+func sameDashboardOrigin(r *http.Request) bool {
+	return normalizeDashboardOrigin(r.Header.Get("Origin")) == requestOrigin(r)
+}
+
+func unsafeDashboardMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	return true
+}
+
+// safety: a browser acts as the api.sock peer that minted its link only while it sends that session's
+// bearer. The static shell carries no run data and loads signed out; it exchanges the sign-in code.
 func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -221,9 +288,19 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 			l.logout(w, r)
 			return
 		}
-		if current, remaining, ok := l.session(r); ok {
-			l.serveSession(w, r, next, current, remaining)
-			return
+		if token, ok := sessionToken(r); ok {
+			digest := tokenDigest(token)
+			ended, release := l.watchSession(digest)
+			if current, ok := l.lookup(r, digest); ok {
+				defer release()
+				if unsafeDashboardMethod(r.Method) && !sameDashboardOrigin(r) {
+					http.Error(w, "forbidden: a dashboard write must come from the dashboard's own origin", http.StatusForbidden)
+					return
+				}
+				l.serveSession(w, r, next, current, ended)
+				return
+			}
+			release()
 		}
 		if shell != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) && !strings.HasPrefix(r.URL.Path, "/api/") {
 			shell.ServeHTTP(w, r)
@@ -234,20 +311,47 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 	})
 }
 
+type dashboardExchange struct {
+	Code string `json:"code"`
+}
+
+type dashboardSessionGrant struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "open the sign-in link in a browser"})
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "the dashboard page exchanges its sign-in code with POST"})
 		return
 	}
-	session, ok := l.redeem(r.URL.Query().Get("token"))
+	if !sameDashboardOrigin(r) {
+		http.Error(w, "forbidden: exchange a sign-in code from the dashboard's own origin", http.StatusForbidden)
+		return
+	}
+	var exchange dashboardExchange
+	refused := &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired, already used or for another address", Hint: "run sparkwing dashboard open for a new link"}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&exchange) != nil || exchange.Code == "" {
+		writeLoginFailure(w, refused)
+		return
+	}
+	session, err := randomToken()
+	if err != nil {
+		writeLoginFailure(w, &apierr.Error{Code: apierr.Internal, Message: "dashboard session token: " + err.Error()})
+		return
+	}
+	expires, ok := l.redeem(tokenDigest(exchange.Code), tokenDigest(session), requestOrigin(r))
 	if !ok {
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired or already used", Hint: "run sparkwing dashboard open for a new link"})
+		writeLoginFailure(w, refused)
 		return
 	}
-	http.Redirect(w, r, "/#s="+session, http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(dashboardSessionGrant{Token: session, ExpiresAt: expires}); err != nil {
+		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http aborts the incomplete response.
+	}
 }
 
 func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
@@ -257,12 +361,21 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "sign out with POST"})
 		return
 	}
-	key, ok := sessionKey(r)
-	l.mu.Lock()
-	current, found := l.sessions[key]
-	live := ok && found && current.live(l.now())
-	l.endLocked(key)
-	l.mu.Unlock()
+	if !sameDashboardOrigin(r) {
+		http.Error(w, "forbidden: sign out from the dashboard's own origin", http.StatusForbidden)
+		return
+	}
+	if _, err := io.Copy(io.Discard, http.MaxBytesReader(w, r.Body, 4096)); err != nil {
+		http.Error(w, "invalid sign-out body", http.StatusBadRequest)
+		return
+	}
+	token, ok := sessionToken(r)
+	live := false
+	if ok {
+		digest := tokenDigest(token)
+		live = l.revoke(digest)
+		l.end(digest)
+	}
 	if !live {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this browser is not signed in"})
 		return

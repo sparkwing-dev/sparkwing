@@ -85,7 +85,7 @@ func TestLoadRegistry_CollectsPathsAndHiddenVerbs(t *testing.T) {
 	wantValid := []string{
 		"sparkwing pipeline list",
 		"sparkwing pipeline hooks",
-		"sparkwing dashboard install",
+		"sparkwing daemon install",
 		"sparkwing __tick",
 	}
 	for _, p := range wantValid {

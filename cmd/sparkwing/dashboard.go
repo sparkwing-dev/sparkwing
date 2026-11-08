@@ -85,13 +85,6 @@ func validateDashboardInvocation(inv clisurface.Invocation, goos string) error {
 	case "sparkwing dashboard logs":
 		_, err := dashboardLogLimit(inv)
 		return err
-	case "sparkwing dashboard install", "sparkwing dashboard uninstall":
-		if goos != "linux" && goos != "darwin" {
-			return &apierr.Error{Code: apierr.BadRequest, Message: "dashboard login services are supported on Linux and macOS", Hint: "sparkwing dashboard open starts the controller on demand"}
-		}
-		if inv.Bool("force") {
-			return dashboardUnavailable("managed-unit replacement policy for --force")
-		}
 	}
 	return nil
 }
@@ -107,19 +100,6 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 	switch action {
 	case "status":
 		status, err = services.lifecycle.Status(ctx)
-	case "install", "uninstall":
-		if services.units == nil {
-			return result, dashboardUnavailable("local controller managed units")
-		}
-		if action == "install" {
-			options := services.options
-			status, err = services.lifecycle.InstallController(ctx, options)
-		} else {
-			err = services.units.UninstallController(ctx)
-		}
-		if err == nil && action == "uninstall" {
-			status, err = services.lifecycle.Status(ctx)
-		}
 	default:
 		return result, fmt.Errorf("unsupported dashboard action %q", action)
 	}

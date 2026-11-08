@@ -7,7 +7,7 @@ import {
   type ConnectionStatus,
 } from "@/lib/api";
 import { connectionMessage } from "@/lib/connectionMessage";
-import { localDashboard } from "@/lib/localSession";
+import { localDashboard, localSignInFailure } from "@/lib/localSession";
 
 export default function ConnectionBanner() {
   const [status, setStatus] = useState<ConnectionStatus>(getConnectionStatus);
@@ -16,7 +16,7 @@ export default function ConnectionBanner() {
 
   if (status === "ok") return null;
 
-  const { text, hint, signIn } = connectionMessage(status, localDashboard());
+  const { text, hint, signIn } = connectionMessage(status, localDashboard(), localSignInFailure());
 
   return (
     <div className="bg-red-900/80 border-b border-red-700 px-4 py-2 text-sm text-red-100 flex items-center gap-2">
