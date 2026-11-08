@@ -47,7 +47,12 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	home := filepath.Join(user, "state $cash%quotes")
 	t.Setenv("HOME", user)
 	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv("SPARKWING_CONFIG", filepath.Join(user, "missing.yaml"))
+	config := filepath.Join(user, "config.yaml")
+	// Other CI shards must not consume this private controller's admission budget.
+	if err := os.WriteFile(config, []byte("admission:\n  budget: ignore-external\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", config)
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(user, "secrets.key"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
 	cli := buildSubmitCLI(t)
