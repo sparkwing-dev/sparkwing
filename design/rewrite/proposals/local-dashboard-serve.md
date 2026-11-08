@@ -37,7 +37,9 @@ The signed-out static shell remains visible to anyone who can reach the proxy.
 API data requires a session. `dashboard.read_only` applies equally to loopback
 and proxy sessions because the machine's socket peer mints both.
 
-Use Serve, never Funnel. Sparkwing does not probe Tailscale or enforce its
+Use Serve, never Funnel. The dashboard must be the only app at its HTTPS name
+and port, because anything else served there shares the browser origin and can
+read the stored session. Sparkwing does not probe Tailscale or enforce its
 network configuration. Review shared backend-port exposure using the
 [Serve guide](https://tailscale.com/docs/features/tailscale-serve). Setup is in
 [machine configuration](../../../docs/machine-config.md#tailscale-serve).
