@@ -46,6 +46,16 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
+      - name: Prepare isolated controller key
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          SPARKWING_SECRETS_KEY_FILE: ${{ runner.temp }}/sparkwing-home/secrets.key
+        run: |
+          umask 077
+          mkdir -p "$SPARKWING_HOME"
+          openssl rand 32 > "$SPARKWING_SECRETS_KEY_FILE"
+          printf 'SPARKWING_HOME=%s\nSPARKWING_SECRETS_KEY_FILE=%s\n' "$SPARKWING_HOME" "$SPARKWING_SECRETS_KEY_FILE" >> "$GITHUB_ENV"
+
       - name: Checkout immutable release verifier
         if: inputs.release_tag != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -206,7 +216,6 @@ jobs:
       - name: Run canonical gate
         if: matrix.gate == 'gate'
         env:
-          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
           SOURCE_REF: ${{ inputs.source_ref }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -227,8 +236,6 @@ jobs:
 
       - name: Run canonical touched-package race
         if: matrix.gate == 'race-touched'
-        env:
-          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
         run: |
           race_args=()
           if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
@@ -239,7 +246,6 @@ jobs:
       - name: Run canonical pre-release
         if: matrix.gate == 'pre-release'
         env:
-          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
           SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
           SOURCE_REF: ${{ inputs.source_ref }}
           RELEASE_TAG: ${{ inputs.release_tag }}
@@ -265,7 +271,6 @@ jobs:
       - name: Run canonical store race part
         if: startsWith(matrix.gate, 'race-store-')
         env:
-          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
           LANE: ${{ matrix.gate }}
         run: |
           set -euo pipefail
@@ -289,8 +294,6 @@ jobs:
         if: ${{ always() }}
         continue-on-error: true
         timeout-minutes: 1
-        env:
-          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
         run: |
           exporter="bin/export-hosted-run-timings.sh"
           if [ -f "$RUNNER_TEMP/export-hosted-run-timings.sh" ]; then
@@ -312,8 +315,6 @@ jobs:
         if: ${{ failure() }}
         continue-on-error: true
         timeout-minutes: 2
-        env:
-          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
         run: |
           reporter="bin/report-hosted-run-failure.sh"
           if [ -f "$RUNNER_TEMP/report-hosted-run-failure.sh" ]; then

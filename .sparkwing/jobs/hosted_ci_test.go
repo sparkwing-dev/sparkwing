@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -505,5 +506,70 @@ func TestCanonicalStoreRacePartsCoverEveryPartOnce(t *testing.T) {
 	}
 	if len(seen) != count || count < 2 {
 		t.Fatalf("parts %v do not cover 1..%d", parts, count)
+	}
+}
+
+func TestHostedControllersUsePrivateHeadlessKeys(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hosted controller jobs use Linux file permissions")
+	}
+	for _, item := range []struct{ file, job string }{
+		{"canonical-gates.yaml", "gate"}, {"security.yaml", "scan"},
+	} {
+		t.Run(item.file, func(t *testing.T) {
+			var doc yaml.Node
+			if err := yaml.Unmarshal([]byte(readHostedCIFile(t, ".github/workflows/"+item.file)), &doc); err != nil {
+				t.Fatal(err)
+			}
+			job := mappingValue(mappingValue(&doc, "jobs"), item.job)
+			var setup *yaml.Node
+			for _, step := range mappingValue(job, "steps").Content {
+				if name := mappingValue(step, "name"); name != nil && name.Value == "Prepare isolated controller key" {
+					setup = step
+				}
+			}
+			if setup == nil {
+				t.Fatal("missing controller key setup")
+			}
+			env := mappingValue(setup, "env")
+			temp := t.TempDir()
+			values := map[string]string{}
+			for _, key := range []string{"SPARKWING_HOME", "SPARKWING_SECRETS_KEY_FILE"} {
+				node := mappingValue(env, key)
+				if node == nil {
+					t.Fatalf("missing setup %s", key)
+				}
+				values[key] = strings.ReplaceAll(node.Value, "${{ runner.temp }}", temp)
+			}
+			if filepath.Dir(values["SPARKWING_SECRETS_KEY_FILE"]) != values["SPARKWING_HOME"] {
+				t.Fatal("key is outside private home")
+			}
+			envFile := filepath.Join(temp, "github-env")
+			cmd := exec.Command("bash", "-eu", "-c", mappingValue(setup, "run").Value)
+			cmd.Env = append(os.Environ(), "GITHUB_ENV="+envFile, "SPARKWING_HOME="+values["SPARKWING_HOME"], "SPARKWING_SECRETS_KEY_FILE="+values["SPARKWING_SECRETS_KEY_FILE"])
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("setup: %v: %s", err, out)
+			}
+			exports, err := os.ReadFile(envFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range values {
+				if !strings.Contains(string(exports), key+"="+value+"\n") {
+					t.Fatalf("later steps do not inherit %s", key)
+				}
+			}
+			key, err := os.ReadFile(values["SPARKWING_SECRETS_KEY_FILE"])
+			if err != nil || len(key) != 32 {
+				t.Fatalf("private key length=%d: %v", len(key), err)
+			}
+			info, err := os.Stat(values["SPARKWING_SECRETS_KEY_FILE"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o600 {
+				t.Fatalf("key mode=%o", info.Mode().Perm())
+			}
+		})
 	}
 }
