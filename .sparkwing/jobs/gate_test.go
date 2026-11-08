@@ -65,12 +65,21 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 		t.Fatalf("single-tenant bounded command = %q", got)
 	}
 	t.Setenv("CI", "1")
-	if got := currentHost(); !got.singleTenant || got.cpus != runtime.NumCPU() {
-		t.Fatalf("currentHost under CI = %#v, want the machine's CPUs and single tenancy", got)
+	if got := currentHost(); !got.singleTenant || got.cpus != min(runtime.NumCPU(), runtime.GOMAXPROCS(0)) {
+		t.Fatalf("currentHost under CI = %#v, want the runtime CPU budget and single tenancy", got)
 	}
 	t.Setenv("CI", "")
 	if currentHost().singleTenant {
 		t.Fatal("currentHost reported single tenancy with CI unset")
+	}
+}
+
+func TestGateHonorsTheRuntimeCPULimit(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	t.Setenv("CI", "true")
+	if got := boundedGoCommand(currentHost(), "test", "./..."); got != "GOMAXPROCS=1 go test -p 1 ./..." {
+		t.Fatalf("bounded command = %q, want the runtime limit retained under CI", got)
 	}
 }
 

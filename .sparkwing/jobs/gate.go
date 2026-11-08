@@ -132,7 +132,7 @@ type hostShape struct {
 // safety: CI names the hosted runner, which carries one job and is thrown away
 // after it, so no neighbor loses cores to a gate that takes the whole box.
 func currentHost() hostShape {
-	return hostShape{cpus: runtime.NumCPU(), singleTenant: os.Getenv("CI") != ""}
+	return hostShape{cpus: min(runtime.NumCPU(), runtime.GOMAXPROCS(0)), singleTenant: os.Getenv("CI") != ""}
 }
 
 // perf: half the machine, so one gate cannot saturate a box another is
