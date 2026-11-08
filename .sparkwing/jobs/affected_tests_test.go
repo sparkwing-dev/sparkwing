@@ -383,3 +383,14 @@ func TestAffectedClosureCrossesLocalModuleReplacements(t *testing.T) {
 	}
 	t.Fatal("pipeline module omitted")
 }
+
+func TestAffectedProtocolSchemasRunTheirReaderWithoutTheCLI(t *testing.T) {
+	packages := []modulePackage{
+		{importPath: "m/doccheck", dir: "internal/doccheck"},
+		{importPath: "m/cli", dir: "cmd/sparkwing"},
+	}
+	p := planAffectedTests(".", []string{"."}, []string{"docs/schemas/node-protocol.schema.json"}, packages, nil)
+	if !slices.Equal(p.packages, []string{"m/doccheck"}) {
+		t.Fatalf("schema readers = %v, want doccheck", p.packages)
+	}
+}

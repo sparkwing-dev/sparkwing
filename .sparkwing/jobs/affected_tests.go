@@ -65,6 +65,9 @@ func readerPackages(module string, modules []string, file string, byDir map[stri
 			continue
 		}
 		for _, dir := range r.dirs {
+			if dir == "cmd/sparkwing" && strings.HasPrefix(file, "docs/schemas/") {
+				continue
+			}
 			if owningModule(dir, modules) != module {
 				continue
 			}
