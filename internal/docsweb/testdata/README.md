@@ -12,18 +12,18 @@ The `requires` field selects applicable cases:
 - `wrapped`: list-item continuation. Sparkwing, Xwing, Pulsewing and Stormwing.
 - `full`: ordered and star lists, deeper headings, tables and comment regions.
   Sparkwing. Bitwing has these features but adoption is tracked separately.
-- `reduced`: literal numeric markers, pipes and comments. All six smaller renderers.
+- `reduced`: literal numeric markers, pipes and comments. All five smaller renderers.
 - `reduced-wrapped`: a pipe line continuing a list item. Xwing, Pulsewing and Stormwing.
 - `authority-rejection`: normalized offsite authority rejection. Sparkwing,
   Xwing, Pulsewing and Stormwing.
 
-Workwing, Dowing and Sidewing do not implement list continuation or normalized
+Dowing and Sidewing do not implement list continuation or normalized
 authority rejection. Those cases stay outside their supported profile. This
 corpus preserves renderer behavior, including Sparkwing's lone-pipe table.
 Renderer-specific page-link resolution stays in each repo's own tests.
 
 Consumers are Sparkwing (`internal/docsweb`) and Xwing, Pulsewing, Stormwing,
-Workwing, Dowing and Sidewing (`internal/docs`). Flockwing is excluded.
+Dowing and Sidewing (`internal/docs`). Archived Workwing and Flockwing are excluded.
 Overwing's Notion and performance renderers have different contracts.
 
 After copying, check each consumer against the Sparkwing source:
