@@ -525,15 +525,20 @@ through production after its staging gate passes. A terminal can preview with `-
 through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
 retried old run cannot roll production back.
 
-An SDK replacement makes the controller plan the checkout's SDK with its installed
-engine. A local `pipeline plan` can therefore pass while the Cloud controller
-rejects the same source before any job starts. Deploy a wire-contract change to
-staging and production before later pipelines depend on it. If that ordering
-breaks, bootstrap the production controller with an exact image already proven
-by the staging smokes, compare its schema with production before changing the
-pin, and wait for its rollout before updating the launcher. Then observe a new
-push-triggered deploy through both environments. Rebuilding the desktop CLI or
-retrying unchanged source does not upgrade the Cloud planning engine.
+The deployment pipeline pins a published SDK without a local replacement, so
+Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
+selects the planning host's installed executable instead and requires every job
+host to retain those exact bytes. A main-built Cloud runner and a released desktop
+runner therefore cannot share that replacement engine identity. Keep SDK source
+development outside the committed deployment module's engine pin.
+
+A local `pipeline plan` can pass while an older Cloud planning runner rejects the
+same source before any job starts. Deploy a wire-contract change to staging and
+production before later pipelines depend on it. If that ordering breaks,
+bootstrap with an exact image already proven by the staging smokes, compare its
+schema with production before changing the controller pin, and wait for its
+rollout before updating the launcher and planning runner. Then observe a new
+push-triggered deploy through both environments.
 
 #### Deploy cost estimate
 
