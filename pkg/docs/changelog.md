@@ -65,6 +65,8 @@ unlock.
 
 ### Fixed
 
+- **deploy:** production smoke checks controller and launcher logs after both rollouts complete, so recovered startup probe failures do not trigger rollback; warnings and errors after readiness still fail the gate.
+
 - **deploy:** Preserve the candidate commit's origin proof when fetching the previous controller schema from a shallow checkout, so production smoke can submit that candidate.
 
 - **deploy:** Keep candidate production images after a schema upgrade if rollout or smoke fails, report the required roll forward in Bitwing, and run production smoke in the team that owns the source repository installation.

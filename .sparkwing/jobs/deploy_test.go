@@ -1112,6 +1112,52 @@ func TestDeploySmokeLogCheckRenewsAnExpiredSession(t *testing.T) {
 	}
 }
 
+func TestDeployProductionLogsExcludeStartupButRejectSettledWarnings(t *testing.T) {
+	for _, recurring := range []bool{false, true} {
+		t.Run(fmt.Sprintf("recurring=%t", recurring), func(t *testing.T) {
+			f := newFakeDeploy(t)
+			d := f.deployer(false)
+			d.tools.now = func() time.Time {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				f.clock = f.clock.Add(time.Nanosecond)
+				return f.clock
+			}
+			run := d.tools.run
+			var settled time.Time
+			d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+				joined := strings.Join(c.Args, " ")
+				if filepath.Base(c.Name) == "kubectl" && strings.Contains(joined, " logs ") {
+					for _, arg := range c.Args {
+						if strings.HasPrefix(arg, "--since-time=") {
+							since, err := time.Parse(time.RFC3339, strings.TrimPrefix(arg, "--since-time="))
+							if err != nil {
+								return "", err
+							}
+							if recurring || !since.After(settled) {
+								return "level=WARN msg=database-DNS-lookup-failed\n", nil
+							}
+							return "level=INFO msg=healthy\n", nil
+						}
+					}
+				}
+				out, err := run(ctx, c)
+				if filepath.Base(c.Name) == "kubectl" && strings.Contains(joined, "rollout status") {
+					f.mu.Lock()
+					f.clock = f.clock.Add(time.Minute)
+					settled = f.clock
+					f.mu.Unlock()
+				}
+				return out, err
+			}
+			_, err := d.promote(t.Context(), f.candidate())
+			if (err != nil) != recurring {
+				t.Fatalf("promote recurring=%t: %v", recurring, err)
+			}
+		})
+	}
+}
+
 func TestDeployRollsBackFailedProductionSmoke(t *testing.T) {
 	for name, breakIt := range map[string]func(*fakeDeploy){
 		"failed run":   func(f *fakeDeploy) { f.failRuns["run-deploy-smoke-production-smoke"] = true },
