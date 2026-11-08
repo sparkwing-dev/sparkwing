@@ -32,8 +32,6 @@ jobs:
         gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["gate", "race-touched", "pre-release", "race-store-1-of-3", "race-store-2-of-3", "race-store-3-of-3"]') || fromJSON('["gate", "race-touched"]')) }}
     env:
       GOWORK: "off"
-      SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-      SPARKWING_SECRETS_KEY_FILE: ${{ runner.temp }}/sparkwing-home/secrets.key
     services:
       postgres:
         image: ${{ matrix.gate == 'pre-release' && 'postgres:17' || '' }}
@@ -49,10 +47,14 @@ jobs:
           --health-retries 20
     steps:
       - name: Prepare isolated controller key
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          SPARKWING_SECRETS_KEY_FILE: ${{ runner.temp }}/sparkwing-home/secrets.key
         run: |
           umask 077
           mkdir -p "$SPARKWING_HOME"
           openssl rand 32 > "$SPARKWING_SECRETS_KEY_FILE"
+          printf 'SPARKWING_HOME=%s\nSPARKWING_SECRETS_KEY_FILE=%s\n' "$SPARKWING_HOME" "$SPARKWING_SECRETS_KEY_FILE" >> "$GITHUB_ENV"
 
       - name: Checkout immutable release verifier
         if: inputs.release_tag != ''

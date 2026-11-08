@@ -491,32 +491,42 @@ func TestHostedControllersUsePrivateHeadlessKeys(t *testing.T) {
 				t.Fatal(err)
 			}
 			job := mappingValue(mappingValue(&doc, "jobs"), item.job)
-			env := mappingValue(job, "env")
+			var setup *yaml.Node
+			for _, step := range mappingValue(job, "steps").Content {
+				if name := mappingValue(step, "name"); name != nil && name.Value == "Prepare isolated controller key" {
+					setup = step
+				}
+			}
+			if setup == nil {
+				t.Fatal("missing controller key setup")
+			}
+			env := mappingValue(setup, "env")
 			temp := t.TempDir()
 			values := map[string]string{}
 			for _, key := range []string{"SPARKWING_HOME", "SPARKWING_SECRETS_KEY_FILE"} {
 				node := mappingValue(env, key)
 				if node == nil {
-					t.Fatalf("missing job-level %s", key)
+					t.Fatalf("missing setup %s", key)
 				}
 				values[key] = strings.ReplaceAll(node.Value, "${{ runner.temp }}", temp)
 			}
 			if filepath.Dir(values["SPARKWING_SECRETS_KEY_FILE"]) != values["SPARKWING_HOME"] {
 				t.Fatal("key is outside private home")
 			}
-			var setup string
-			for _, step := range mappingValue(job, "steps").Content {
-				if name := mappingValue(step, "name"); name != nil && name.Value == "Prepare isolated controller key" {
-					setup = mappingValue(step, "run").Value
-				}
-			}
-			if setup == "" {
-				t.Fatal("missing controller key setup")
-			}
-			cmd := exec.Command("bash", "-eu", "-c", setup)
-			cmd.Env = append(os.Environ(), "SPARKWING_HOME="+values["SPARKWING_HOME"], "SPARKWING_SECRETS_KEY_FILE="+values["SPARKWING_SECRETS_KEY_FILE"])
+			envFile := filepath.Join(temp, "github-env")
+			cmd := exec.Command("bash", "-eu", "-c", mappingValue(setup, "run").Value)
+			cmd.Env = append(os.Environ(), "GITHUB_ENV="+envFile, "SPARKWING_HOME="+values["SPARKWING_HOME"], "SPARKWING_SECRETS_KEY_FILE="+values["SPARKWING_SECRETS_KEY_FILE"])
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("setup: %v: %s", err, out)
+			}
+			exports, err := os.ReadFile(envFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range values {
+				if !strings.Contains(string(exports), key+"="+value+"\n") {
+					t.Fatalf("later steps do not inherit %s", key)
+				}
 			}
 			key, err := os.ReadFile(values["SPARKWING_SECRETS_KEY_FILE"])
 			if err != nil || len(key) != 32 {

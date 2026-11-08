@@ -27,14 +27,16 @@ jobs:
       security-events: write
     env:
       GOWORK: "off"
-      SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-      SPARKWING_SECRETS_KEY_FILE: ${{ runner.temp }}/sparkwing-home/secrets.key
     steps:
       - name: Prepare isolated controller key
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          SPARKWING_SECRETS_KEY_FILE: ${{ runner.temp }}/sparkwing-home/secrets.key
         run: |
           umask 077
           mkdir -p "$SPARKWING_HOME"
           openssl rand 32 > "$SPARKWING_SECRETS_KEY_FILE"
+          printf 'SPARKWING_HOME=%s\nSPARKWING_SECRETS_KEY_FILE=%s\n' "$SPARKWING_HOME" "$SPARKWING_SECRETS_KEY_FILE" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
