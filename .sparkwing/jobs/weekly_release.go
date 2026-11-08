@@ -55,7 +55,9 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 	}
 	defer func() {
 		if err == nil {
-			_ = os.RemoveAll(dir)
+			if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
+				sparkwing.Warn(ctx, "remove release checkout %s: %v", dir, cleanupErr)
+			}
 		} else {
 			sparkwing.Info(ctx, "release checkout retained at %s", dir)
 		}

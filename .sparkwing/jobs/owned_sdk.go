@@ -170,7 +170,7 @@ func updateOwnedSDK(ctx context.Context, repo, name, version, sha string, dry bo
 		return err
 	}
 	if !filepath.IsAbs(attached.Path) {
-		return errors.New("Xwing returned no absolute worktree path")
+		return errors.New("xwing returned no absolute worktree path")
 	}
 	sparkwing.Info(ctx, "%s update environment: %s", name, attached.Path)
 	mod := filepath.Join(attached.Path, ".sparkwing")
