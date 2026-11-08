@@ -504,9 +504,14 @@ requires the runner label and trust conditions documented below.
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
 Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
 repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
-is a token for its target fixture team with permission to start and observe the
-example and read its logs. Missing prerequisites report that the scan could not
-run, rather than clearing prior Bitwing findings.
+needs `runs.write`, `runs.read` and `logs.read` in the target deployment's team that owns
+the GitHub App installation covering `sparkwing-dev/sparkwing`. Production uses the existing
+source-owning team's `/kikd-prod/sparkwing/deploy/scan-submit-token`, also used by its smoke.
+A QA fixture token with no installation cannot submit this repository-backed scan. Keep the
+source installation bound to its existing team. The optional `--smoke-profile` and
+`--smoke-checkout` example probe also needs access to `sparkwing-dev/sparkwing-ci-smoke`;
+the detached scan does not enable that probe. Missing prerequisites report that the scan
+could not run, rather than clearing prior Bitwing findings.
 
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed
@@ -668,6 +673,13 @@ null. Pipeline compilation, hosted setup, cache temperature and exact admission
 wait are not established by this artifact. A missing handle produces an explicit
 unavailable record. Export/upload failures warn without changing the check verdict;
 an absent artifact is missing evidence, not a successful export.
+
+Failed canonical hosted jobs retain the full paged `runs logs` output in a
+`canonical-run-log-<lane>-<workflow-run>-<attempt>` artifact for 14 days. The
+console prints its last 500 lines. A failed log read retains partial output
+and its error in the artifact. Missing handles and failed uploads warn without
+changing the gate verdict. The artifact contains run output, not the runner's
+Sparkwing home, database or controller key.
 
 Pre-release records each check as a sequential WorkStep. A failed check does
 not suppress later checks; the parent reports the first failure, while the run
