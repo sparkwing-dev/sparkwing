@@ -39,8 +39,22 @@ func TestBindingRemovesThisUsersStaleSocketDirs(t *testing.T) {
 	}
 	other := mkdir("sparkwing-0-eeeeeeeeeeee")
 	fresh := mkdir(socketDirPrefix() + "999999999999-0123456789abcdef")
+	target := mkdir("symlink-target")
+	dead, err := net.Listen("unix", filepath.Join(target, "d.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead.(*net.UnixListener).SetUnlinkOnClose(false)
+	_ = dead.Close()
+	link := filepath.Join(base, socketDirPrefix()+"888888888888-0123456789abcdef")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkSocketDir(link); err == nil {
+		t.Fatal("symlink accepted as a private socket directory")
+	}
 	old := time.Now().Add(-2 * staleSocketAge)
-	for _, dir := range []string{stale, legacy, live, data} {
+	for _, dir := range []string{stale, legacy, live, data, target} {
 		if err := os.Chtimes(dir, old, old); err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +66,7 @@ func TestBindingRemovesThisUsersStaleSocketDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	for dir, want := range map[string]bool{stale: false, legacy: false, live: true, data: true, other: true, fresh: true, filepath.Dir(current): true} {
+	for dir, want := range map[string]bool{stale: false, legacy: false, live: true, data: true, other: true, fresh: true, link: true, target: true, filepath.Dir(current): true} {
 		if _, err := os.Stat(dir); (err == nil) != want {
 			t.Errorf("%s present=%v, want %v", filepath.Base(dir), err == nil, want)
 		}
