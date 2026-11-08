@@ -15,9 +15,9 @@ permissions:
   id-token: write
   contents: read
 env:
-  # The runner release to install. Bump it when the controller upgrades; v0.70.0
-  # is the first release with --dispatch-receipt.
-  SPARKWING_RUNNER_VERSION: v0.70.0
+  # Publish this release before approving the protected fallback ref; v0.70.0
+  # does not contain --dispatch-receipt.
+  SPARKWING_RUNNER_VERSION: v0.71.0
   # Sparkwing's ed25519 release signing key, the one https://sparkwing.dev/install.sh trusts.
   SPARKWING_RELEASE_KEY: whVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI=
 jobs:

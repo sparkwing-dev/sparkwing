@@ -210,6 +210,10 @@ runs the runner; bump the pin when the controller upgrades.
 The workflow needs `run-name: sparkwing:${{ inputs.receipt }}`, inputs named
 `receipt` and `runner`, `id-token: write` and `contents: read`. It invokes
 `sparkwing-runner warm --github-actions --dispatch-receipt <receipt>`.
+
+The template targets v0.71.0. Publish that release before creating or approving
+the protected fallback ref. Published v0.70.0 runners lack `--dispatch-receipt`;
+installing v0.70.0 cannot execute this workflow.
 It has only `workflow_dispatch`, so pushes do not start fallback workers.
 
 The App's repository permission must include **Actions: Read and write**.
