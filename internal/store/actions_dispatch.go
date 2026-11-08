@@ -42,7 +42,7 @@ func (t *Tenant) PutActionsApproval(ctx context.Context, a capability.Authorized
 	if dir != ".github/workflows/" || path.Clean(approval.Workflow) != approval.Workflow || !strings.HasSuffix(file, ".yaml") && !strings.HasSuffix(file, ".yml") || strings.ContainsAny(approval.Runner, "/\\ \t\r\n") {
 		return ErrInvalidInput
 	}
-	if approval.RepositoryID <= 0 || !remove && (!strings.HasPrefix(approval.Ref, "refs/heads/") && !strings.HasPrefix(approval.Ref, "refs/tags/") || strings.ContainsAny(approval.Ref, " \t\r\n")) {
+	if approval.RepositoryID <= 0 || !remove && (!strings.HasPrefix(approval.Ref, "refs/heads/") || strings.ContainsAny(approval.Ref, " \t\r\n")) {
 		return ErrInvalidInput
 	}
 	return t.teamMutationTx(ctx, a, "PutActionsApproval", string(t.team), func(tx *storeTx, _ capability.Principal) error {
@@ -145,7 +145,7 @@ func (op *Operator) NextActionsDispatch(ctx context.Context) (*ActionsDispatch, 
 			if err != nil {
 				return err
 			}
-			if !run.Request.Request.Placement.Active() {
+			if !run.Request.Request.Placement.Active() || actionsForkWork(run) {
 				continue
 			}
 			waits, err := readPlacementWaitsTx(ctx, tx, k.team, run)
@@ -228,10 +228,16 @@ func (op *Operator) FinishActionsDispatch(ctx context.Context, receipt, state, r
 }
 
 // PendingActionsCancellations invalidates receipts before asking the provider to cancel known runs.
+// A job that finished without a cancellation request leaves its workflow to exit on its own,
+// so GitHub reports that run's real outcome instead of a cancellation.
 func (op *Operator) PendingActionsCancellations(ctx context.Context) ([]ActionsDispatch, error) {
 	var out []ActionsDispatch
 	err := op.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='cancelled',reason='job ended or consent withdrawn' WHERE state<>'cancelled' AND (NOT (`+actionsConsentSQL+`) OR NOT EXISTS (SELECT 1 FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at AND n.status IN ('pending','running') AND n.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.status IN ('pending','running')))`)
+		_, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='cancelled',reason='job finished',cancel_sent=1 WHERE state<>'cancelled' AND EXISTS (SELECT 1 FROM nodes n WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at AND n.status='done' AND n.outcome<>'cancelled' AND n.cancel_requested_at IS NULL)`)
+		if err != nil {
+			return err
+		}
+		_, err = tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='cancelled',reason='job ended or consent withdrawn' WHERE state<>'cancelled' AND (NOT (`+actionsConsentSQL+`) OR NOT EXISTS (SELECT 1 FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at AND n.status IN ('pending','running') AND n.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.status IN ('pending','running')))`)
 		if err != nil {
 			return err
 		}
@@ -315,6 +321,12 @@ func (op *Operator) RetryActionsDispatch(ctx context.Context, a capability.Autho
 	})
 }
 
+// perf: the exchange refuses fork work, so dispatching it would only spend the repository's GitHub minutes.
+func actionsForkWork(run RunRow) bool {
+	pr := run.Request.Request.PullRequest
+	return pr.Set && pr.Value.Fork
+}
+
 func actionsImageOS(image string) string {
 	for prefix, system := range map[string]string{"ubuntu-": "linux", "macos-": "darwin", "windows-": "windows"} {
 		if strings.HasPrefix(image, prefix) {
@@ -377,6 +389,10 @@ func actionsPlacementWaitTx(ctx context.Context, tx *storeTx, team Team, run Run
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
+		}
+		if actionsForkWork(run) {
+			tier.Unavailable = "fork pull requests cannot use the GitHub Actions fallback"
+			continue
 		}
 		var approved int
 		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_actions_approvals a JOIN github_runner_bindings b ON b.team=a.team AND b.repository_id=a.repository_id WHERE a.team=? AND b.repo_key=? AND a.workflow=? AND a.runner=?`, team, run.Request.Request.Git.Repository.Key, tier.Tier.Workflow, tier.Tier.Runner).Scan(&approved)

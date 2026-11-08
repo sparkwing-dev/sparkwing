@@ -96,9 +96,11 @@ type issuedToken struct {
 
 // GitHub is the fake.
 type GitHub struct {
-	ActionsRun       githubapp.WorkflowRun
-	ActionsLabels    []string
-	ActionsStatus    int
+	ActionsRun    githubapp.WorkflowRun
+	ActionsLabels []string
+	ActionsStatus int
+	// CancelStatus answers a run's cancellation with this status instead of 202.
+	CancelStatus     map[string]int
 	LostDispatch     bool
 	DispatchStarted  chan<- string
 	DispatchContinue <-chan struct{}

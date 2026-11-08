@@ -85,10 +85,15 @@ func (c *Client) ActionsJobLabels(ctx context.Context, token, repository, run, a
 }
 
 // CancelActionsRun cancels a known provider run without changing its Sparkwing award.
+// A run GitHub no longer has (404) or that already finished (409) needs no cancellation.
 func (c *Client) CancelActionsRun(ctx context.Context, token, repository, run string) error {
 	if n, err := strconv.ParseInt(run, 10, 64); err != nil || n <= 0 {
 		return errors.New("githubapp: invalid run ID")
 	}
 	_, err := c.repoWrite(ctx, http.MethodPost, token, strings.Split(repository, "/")[0], strings.Split(repository, "/")[1], "/actions/runs/"+run+"/cancel", "cancel Actions run", nil)
+	var answer *apiError
+	if errors.As(err, &answer) && (answer.status == http.StatusNotFound || answer.status == http.StatusConflict) {
+		return nil
+	}
 	return err
 }

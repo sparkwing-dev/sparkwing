@@ -307,6 +307,14 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
   job. The fallback workflow runs on its approved ref and preserves the workload's
   original source and trust. Sender leases fence concurrent replicas and a lost
   outcome remains uncertain until an audited operator retry.
+- The approved ref is a dedicated branch, never the default branch or a tag,
+  because GitHub signs the fallback job's OIDC token with the dispatched ref and
+  pull-request code would inherit any cloud role that trusts it. Approval,
+  dispatch and registration each refuse the live default branch (security
+  review H1, pending Korey's ratification).
+- A job that finished without a cancellation request leaves its workflow to exit
+  on its own; cancellation goes to GitHub only for cancelled jobs and withdrawn
+  consent, one receipt at a time.
 - `pipeline lint` prints the preview in table and plain output; JSON output
   keeps findings only.
 

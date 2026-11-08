@@ -40,7 +40,7 @@ func newDispatchFixture(t *testing.T) *dispatchFixture {
 	f.e, f.tenant = engineRuntimeStore(t, teststore.WithClock(func() time.Time { return f.now }))
 	f.app = githubapptest.New(t)
 	f.app.AddInstallation(githubapptest.Installation{ID: 7, Account: githubapp.Account{ID: 7, Login: "acme", Type: "Organization"}, Repos: []githubapptest.Repo{{ID: 1, FullName: "acme/repo", Owner: githubapp.Account{ID: 7}, DefaultBranch: "main"}}})
-	f.app.SetCommit("acme/repo", "refs/heads/main", fallbackSHA)
+	f.app.SetCommit("acme/repo", "refs/heads/sparkwing-fallback", fallbackSHA)
 	f.app.SetFile("acme/repo", fallbackSHA, fallbackWorkflow, []byte("name: fallback\non: workflow_dispatch\n"))
 	f.app.ActionsRun = githubapp.WorkflowRun{ID: 1000, Attempt: 1, Event: "workflow_dispatch", Path: fallbackWorkflow, SHA: fallbackSHA, Repository: githubapp.Repository{ID: 1, Owner: githubapp.Account{ID: 7}}}
 	f.app.ActionsLabels = []string{"ubuntu-latest"}
@@ -48,7 +48,7 @@ func newDispatchFixture(t *testing.T) *dispatchFixture {
 	engineSQL(t, f.e.Store, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES(7,'a',7,'acme','Organization',1,1)`)
 	engineSQL(t, f.e.Store, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_at,repo_key,installation_id) VALUES('a',1,7,'acme/repo',1,'gh:1',7)`)
 	engineSQL(t, f.e.Store, `INSERT INTO github_app_automation(team,repository_id,repository,installation_id,enabled_by,enabled_at,repo_key) VALUES('a',1,'acme/repo',7,'owner',1,'gh:1')`)
-	engineSQL(t, f.e.Store, `INSERT INTO github_actions_approvals(team,repository_id,workflow,runner,workflow_ref,approval_id) VALUES('a',1,?,'ubuntu-latest','refs/heads/main','approval')`, fallbackWorkflow)
+	engineSQL(t, f.e.Store, `INSERT INTO github_actions_approvals(team,repository_id,workflow,runner,workflow_ref,approval_id) VALUES('a',1,?,'ubuntu-latest','refs/heads/sparkwing-fallback','approval')`, fallbackWorkflow)
 	run, err := f.tenant.ReadRun(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestActionsDispatchTeamClaimWinsDuringHTTP(t *testing.T) {
 }
 
 func (f *dispatchFixture) claims() githuboidc.Claims {
-	return githuboidc.Claims{Repository: "acme/repo", RepositoryID: 1, RepositoryOwnerID: 7, Ref: "refs/heads/main", SHA: fallbackSHA, WorkflowSHA: fallbackSHA, WorkflowRef: "acme/repo/" + fallbackWorkflow + "@refs/heads/main", EventName: "workflow_dispatch", RunID: "1000", RunAttempt: "1", RunnerEnvironment: "github-hosted", CheckRunID: "9000", ExpiresAt: f.now.Add(5 * time.Minute)}
+	return githuboidc.Claims{Repository: "acme/repo", RepositoryID: 1, RepositoryOwnerID: 7, Ref: "refs/heads/sparkwing-fallback", SHA: fallbackSHA, WorkflowSHA: fallbackSHA, WorkflowRef: "acme/repo/" + fallbackWorkflow + "@refs/heads/sparkwing-fallback", EventName: "workflow_dispatch", RunID: "1000", RunAttempt: "1", RunnerEnvironment: "github-hosted", CheckRunID: "9000", ExpiresAt: f.now.Add(5 * time.Minute)}
 }
 
 func TestActionsReceiptBindsOneJobAndCancelsProvider(t *testing.T) {
@@ -291,7 +291,7 @@ func dispatchAdmin(t *testing.T, f *dispatchFixture) capability.Authorized {
 func TestActionsApprovalIsAuditedIdempotentAndFencesOldReceipts(t *testing.T) {
 	f := newDispatchFixture(t)
 	admin := dispatchAdmin(t, f)
-	input := store.ActionsApproval{RepositoryID: 1, Workflow: fallbackWorkflow, Ref: "refs/heads/main", Runner: "ubuntu-latest"}
+	input := store.ActionsApproval{RepositoryID: 1, Workflow: fallbackWorkflow, Ref: "refs/heads/sparkwing-fallback", Runner: "ubuntu-latest"}
 	d := f.dispatch(t)
 	if err := f.tenant.PutActionsApproval(t.Context(), admin, input, false); err != nil {
 		t.Fatal(err)
@@ -448,7 +448,7 @@ func TestActionsReceiptKeepsTagAndPullRequestSourceThroughOIDC(t *testing.T) {
 			keys := httptest.NewServer(http.HandlerFunc(signer.ServeKeys))
 			defer keys.Close()
 			f.e.Server.WithGitHubRunners(githuboidc.Config{Audience: "https://controller.test", Issuer: githuboidc.Issuer, JWKSURL: keys.URL, HTTP: keys.Client()})
-			token, err := signer.Sign(map[string]any{"iss": githuboidc.Issuer, "aud": "https://controller.test", "exp": f.now.Add(5 * time.Minute).Unix(), "iat": f.now.Unix(), "repository": "acme/repo", "repository_id": "1", "repository_owner_id": "7", "ref": "refs/heads/main", "sha": fallbackSHA, "workflow_ref": "acme/repo/" + fallbackWorkflow + "@refs/heads/main", "workflow_sha": fallbackSHA, "check_run_id": "9000", "run_id": "1000", "run_attempt": "1", "runner_environment": "github-hosted", "event_name": "workflow_dispatch"})
+			token, err := signer.Sign(map[string]any{"iss": githuboidc.Issuer, "aud": "https://controller.test", "exp": f.now.Add(5 * time.Minute).Unix(), "iat": f.now.Unix(), "repository": "acme/repo", "repository_id": "1", "repository_owner_id": "7", "ref": "refs/heads/sparkwing-fallback", "sha": fallbackSHA, "workflow_ref": "acme/repo/" + fallbackWorkflow + "@refs/heads/sparkwing-fallback", "workflow_sha": fallbackSHA, "check_run_id": "9000", "run_id": "1000", "run_attempt": "1", "runner_environment": "github-hosted", "event_name": "workflow_dispatch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -492,4 +492,123 @@ func TestActionsDispatchNewQueueStartAllowsOneNewSend(t *testing.T) {
 	if sent, err := f.e.Server.processActionsDispatch(t.Context()); err != nil || sent {
 		t.Fatalf("new generation resent: %v %v", sent, err)
 	}
+}
+
+func TestActionsCancellationsHandleEachReceiptAlone(t *testing.T) {
+	f := newDispatchFixture(t)
+	rows := []struct {
+		receipt      string
+		installation int64
+		run          string
+	}{{"gone", 8, "2000"}, {"busy", 7, "1001"}, {"finished", 7, "1002"}, {"live", 7, "1003"}}
+	for i, row := range rows {
+		engineSQL(t, f.e.Store, `INSERT INTO github_actions_dispatches(receipt,team,run_id,node_id,queue_started_at,generation,approval_id,installation_id,repository_id,repository_owner_id,repository,workflow,workflow_ref,runner,policy_revision,state,provider_run_id) VALUES(?,'a','run','job',1,?,'approval',?,1,7,'acme/repo',?,'refs/heads/sparkwing-fallback','ubuntu-latest','','cancelled',?)`, row.receipt, i+1, row.installation, fallbackWorkflow, row.run)
+	}
+	f.app.CancelStatus = map[string]int{"1001": http.StatusInternalServerError, "1002": http.StatusConflict}
+	if err := f.e.Server.processPendingActionsCancellations(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.app.CancelledRuns(); !slices.Equal(got, []string{"1003"}) {
+		t.Fatalf("provider cancellations: %v", got)
+	}
+	for receipt, want := range map[string]int{"gone": 1, "busy": 0, "finished": 1, "live": 1} {
+		var sent int
+		if err := teststore.SQL(t, f.e.Store).QueryRow(`SELECT cancel_sent FROM github_actions_dispatches WHERE receipt=?`, receipt).Scan(&sent); err != nil || sent != want {
+			t.Fatalf("%s cancel_sent=%d want %d: %v", receipt, sent, want, err)
+		}
+	}
+}
+
+func TestActionsFinishedJobLeavesProviderRunAlone(t *testing.T) {
+	f := newDispatchFixture(t)
+	d := f.dispatch(t)
+	spec, err := f.e.Server.actionsReceiptProvision(t.Context(), "a", d.Receipt, f.claims())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.e.Store.AsOperator().ProvisionCapability(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, f.e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE node_id='job'`, f.now.UnixNano())
+	if err := f.e.Server.processPendingActionsCancellations(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := f.e.Store.AsOperator().ReadActionsDispatch(t.Context(), "a", d.Receipt)
+	if err != nil || finished.Reason != "job finished" || len(f.app.CancelledRuns()) != 0 {
+		t.Fatalf("finished job cancelled its workflow: %+v %v %v", finished, f.app.CancelledRuns(), err)
+	}
+}
+
+func TestActionsExchangeReadsWithoutActionsWrite(t *testing.T) {
+	f := newDispatchFixture(t)
+	d := f.dispatch(t)
+	if _, err := f.e.Server.actionsReceiptProvision(t.Context(), "a", d.Receipt, f.claims()); err != nil {
+		t.Fatal(err)
+	}
+	minted := f.app.Minted()
+	if got := minted[len(minted)-1].Permissions; got["actions"] != "read" {
+		t.Fatalf("exchange token permissions: %v", got)
+	}
+}
+
+func TestActionsDispatchSkipsForkPullRequests(t *testing.T) {
+	f := newDispatchFixture(t)
+	workload, err := f.tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workload.Request.Request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42, BaseRepo: "gh:1", HeadRepo: "gh:2", BaseRef: "main", HeadRef: "feature", BaseSHA: fallbackSHA, HeadSHA: workload.Request.Request.Git.SHA, Fork: true}}
+	body, err := json.Marshal(workload.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, f.e.Store, `UPDATE runs SET request_json=?`, body)
+	if sent, err := f.e.Server.processActionsDispatch(t.Context()); err != nil || sent || len(f.app.ActionsCalls()) != 0 {
+		t.Fatalf("fork pull request dispatched: %v %v", sent, err)
+	}
+	view, err := f.tenant.ReadRunView(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.PlacementWaits) != 1 || !strings.Contains(view.PlacementWaits[0].Tiers[1].Unavailable, "fork") {
+		t.Fatalf("fork refusal not visible: %+v", view.PlacementWaits)
+	}
+}
+
+func TestActionsFallbackRefMustBeDedicatedBranch(t *testing.T) {
+	approve := func(t *testing.T, f *dispatchFixture, ref string) error {
+		t.Helper()
+		body, err := json.Marshal(store.ActionsApproval{RepositoryID: 1, Workflow: fallbackWorkflow, Ref: ref, Runner: "ubuntu-latest"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPut, "/api/v1/team/github-app/actions-approval", strings.NewReader(string(body)))
+		r.Header.Set("Content-Type", "application/json")
+		return f.e.Server.handleActionsApproval(httptest.NewRecorder(), r, dispatchAdmin(t, f))
+	}
+	t.Run("approval", func(t *testing.T) {
+		for ref, ok := range map[string]bool{"refs/heads/main": false, "refs/tags/v1.0.0": false, "refs/heads/sparkwing-fallback": true} {
+			f := newDispatchFixture(t)
+			if err := approve(t, f, ref); (err == nil) != ok {
+				t.Fatalf("approve %s: %v", ref, err)
+			}
+		}
+	})
+	t.Run("dispatch", func(t *testing.T) {
+		f := newDispatchFixture(t)
+		engineSQL(t, f.e.Store, `UPDATE github_actions_approvals SET workflow_ref='refs/heads/main'`)
+		f.app.SetCommit("acme/repo", "refs/heads/main", fallbackSHA)
+		d := f.dispatch(t)
+		if d.State != "refused" || !strings.Contains(d.Reason, "dedicated") || len(f.app.ActionsCalls()) != 0 {
+			t.Fatalf("default-branch fallback dispatched: %+v", d)
+		}
+	})
+	t.Run("exchange", func(t *testing.T) {
+		f := newDispatchFixture(t)
+		d := f.dispatch(t)
+		f.app.AddInstallation(githubapptest.Installation{ID: 7, Account: githubapp.Account{ID: 7, Login: "acme", Type: "Organization"}, Repos: []githubapptest.Repo{{ID: 1, FullName: "acme/repo", Owner: githubapp.Account{ID: 7}, DefaultBranch: "sparkwing-fallback"}}})
+		if _, err := f.e.Server.actionsReceiptProvision(t.Context(), "a", d.Receipt, f.claims()); err == nil {
+			t.Fatal("exchange accepted a fallback ref that became the default branch")
+		}
+	})
 }

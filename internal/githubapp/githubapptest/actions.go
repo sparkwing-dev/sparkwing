@@ -9,7 +9,8 @@ import (
 
 func (g *GitHub) actionsAllowed(w http.ResponseWriter, r *http.Request) bool {
 	token := g.installationToken(r)
-	if token == nil || !token.repos[strings.ToLower(r.PathValue("owner")+"/"+r.PathValue("repo"))] || token.permissions["actions"] != "write" {
+	readable := r.Method == http.MethodGet && token != nil && token.permissions["actions"] == "read"
+	if token == nil || !token.repos[strings.ToLower(r.PathValue("owner")+"/"+r.PathValue("repo"))] || token.permissions["actions"] != "write" && !readable {
 		w.WriteHeader(http.StatusForbidden)
 		return false
 	}
@@ -93,7 +94,11 @@ func (g *GitHub) handleActionsCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.mu.Lock()
-	g.cancelledRuns = append(g.cancelledRuns, r.PathValue("run"))
+	status := g.CancelStatus[r.PathValue("run")]
+	if status == 0 {
+		status = http.StatusAccepted
+		g.cancelledRuns = append(g.cancelledRuns, r.PathValue("run"))
+	}
 	g.mu.Unlock()
-	w.WriteHeader(http.StatusAccepted)
+	w.WriteHeader(status)
 }

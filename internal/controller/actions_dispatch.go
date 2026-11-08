@@ -19,29 +19,43 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func (s *Server) actionsToken(ctx context.Context, d store.ActionsDispatch) (githubapp.Token, error) {
+func (s *Server) actionsToken(ctx context.Context, d store.ActionsDispatch, actions string) (githubapp.Token, githubapp.Repository, error) {
 	if s.githubApp == nil {
-		return githubapp.Token{}, s.githubAppUnavailable()
+		return githubapp.Token{}, githubapp.Repository{}, s.githubAppUnavailable()
 	}
 	inst, err := s.githubApp.client.Installation(ctx, d.InstallationID)
 	if err != nil {
-		return githubapp.Token{}, err
+		return githubapp.Token{}, githubapp.Repository{}, err
 	}
 	if inst.ID != d.InstallationID || inst.AppID != s.githubApp.client.AppID() || inst.Account.ID != d.RepositoryOwnerID || inst.SuspendedAt != nil {
-		return githubapp.Token{}, actionsExchangeRefusal()
+		return githubapp.Token{}, githubapp.Repository{}, actionsExchangeRefusal()
 	}
-	token, err := s.githubApp.client.InstallationTokenByIDs(ctx, d.InstallationID, []int64{d.RepositoryID}, map[string]string{"actions": "write", "contents": "read"})
+	permissions := map[string]string{"contents": "read"}
+	if actions != "" {
+		permissions["actions"] = actions
+	}
+	token, err := s.githubApp.client.InstallationTokenByIDs(ctx, d.InstallationID, []int64{d.RepositoryID}, permissions)
 	if err != nil {
-		return githubapp.Token{}, err
+		return githubapp.Token{}, githubapp.Repository{}, err
 	}
 	repo, err := s.githubApp.client.RepositoryByID(ctx, token.Token, d.RepositoryID)
 	if err != nil {
-		return githubapp.Token{}, err
+		return githubapp.Token{}, githubapp.Repository{}, err
 	}
 	if repo.ID != d.RepositoryID || repo.Owner.ID != d.RepositoryOwnerID || repo.FullName != d.Repository {
-		return githubapp.Token{}, actionsExchangeRefusal()
+		return githubapp.Token{}, githubapp.Repository{}, actionsExchangeRefusal()
 	}
-	return token, nil
+	return token, repo, nil
+}
+
+// safety: GitHub signs a workflow_dispatch OIDC token with the dispatched ref, so a fallback on
+// the default branch or a tag would lend pull-request and branch code an identity that cloud
+// roles commonly trust. Only a dedicated branch is dispatched.
+func actionsFallbackRefProblem(ref string, repo githubapp.Repository) string {
+	if !strings.HasPrefix(ref, "refs/heads/") || repo.DefaultBranch == "" || ref == "refs/heads/"+repo.DefaultBranch {
+		return "approve a dedicated protected branch such as refs/heads/sparkwing-fallback as the fallback ref; the default branch and tags lend their OIDC identity to fallback jobs"
+	}
+	return ""
 }
 
 func (s *Server) actionsRepair(ctx context.Context, d store.ActionsDispatch, err error) string {
@@ -56,9 +70,12 @@ func (s *Server) processActionsDispatch(ctx context.Context) (bool, error) {
 	if err != nil || d == nil {
 		return false, err
 	}
-	token, err := s.actionsToken(ctx, *d)
+	token, repository, err := s.actionsToken(ctx, *d, "write")
 	if err != nil {
 		return true, s.operator.FinishActionsDispatch(ctx, d.Receipt, "refused", s.actionsRepair(ctx, *d, err))
+	}
+	if problem := actionsFallbackRefProblem(d.WorkflowRef, repository); problem != "" {
+		return true, s.operator.FinishActionsDispatch(ctx, d.Receipt, "refused", problem)
 	}
 	repo, ok := store.ParseGitHubRepo(d.Repository)
 	if !ok {
@@ -96,24 +113,44 @@ func (s *Server) processActionsDispatch(ctx context.Context) (bool, error) {
 	return true, s.operator.FinishActionsDispatch(ctx, d.Receipt, state, reason)
 }
 
+// safety: each receipt fails alone, so one team's broken installation never holds back another team's cancellations.
 func (s *Server) processPendingActionsCancellations(ctx context.Context) error {
 	pending, err := s.operator.PendingActionsCancellations(ctx)
 	if err != nil {
 		return err
 	}
 	for _, d := range pending {
-		token, err := s.actionsToken(ctx, d)
-		if err != nil {
-			return err
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		if err := s.githubApp.client.CancelActionsRun(ctx, token.Token, d.Repository, d.ProviderRunID); err != nil {
-			return err
+		err := s.cancelActionsRun(ctx, d)
+		if err != nil && !actionsCancellationRefused(err) {
+			s.logger.Warn("GitHub Actions cancellation will retry", "team", d.Team, "repository", d.Repository, "provider_run", d.ProviderRunID, "err", err)
+			continue
+		}
+		if err != nil {
+			s.logger.Warn("GitHub refused Actions cancellation; cancel the run in GitHub if it is still going", "team", d.Team, "repository", d.Repository, "provider_run", d.ProviderRunID, "err", err)
 		}
 		if err := s.operator.FinishActionsCancellation(ctx, d.Receipt); err != nil {
-			return err
+			s.logger.Warn("GitHub Actions cancellation not recorded", "team", d.Team, "receipt", d.Receipt, "err", err)
 		}
 	}
 	return nil
+}
+
+func (s *Server) cancelActionsRun(ctx context.Context, d store.ActionsDispatch) error {
+	token, _, err := s.actionsToken(ctx, d, "write")
+	if err != nil {
+		return err
+	}
+	return s.githubApp.client.CancelActionsRun(ctx, token.Token, d.Repository, d.ProviderRunID)
+}
+
+// safety: only answers a retry cannot change end retries: the App was removed, suspended
+// or moved, or GitHub refused its credential or permission.
+func actionsCancellationRefused(err error) bool {
+	var refusal *apierr.Error
+	return errors.Is(err, githubapp.ErrNotInstalled) || errors.Is(err, githubapp.ErrRejected) || errors.Is(err, githubapp.ErrPermissionMissing) || errors.As(err, &refusal)
 }
 
 func (s *Server) runActionsDispatcher(ctx context.Context) {
@@ -155,8 +192,8 @@ func (s *Server) actionsReceiptProvision(ctx context.Context, team store.Team, r
 	if d.RepositoryID != claims.RepositoryID || d.RepositoryOwnerID != claims.RepositoryOwnerID || d.Repository != claims.Repository || claims.WorkflowRef != d.Repository+"/"+d.Workflow+"@"+d.WorkflowRef || claims.WorkflowSHA != d.WorkflowSHA || claims.SHA != d.WorkflowSHA || claims.Ref != d.WorkflowRef || !slices.Contains([]string{"sending", "accepted", "uncertain"}, d.State) {
 		return capability.ProvisionSpec{}, actionsExchangeRefusal()
 	}
-	token, err := s.actionsToken(ctx, d)
-	if err != nil {
+	token, repository, err := s.actionsToken(ctx, d, "read")
+	if err != nil || actionsFallbackRefProblem(d.WorkflowRef, repository) != "" {
 		return capability.ProvisionSpec{}, actionsExchangeRefusal()
 	}
 	run, err := s.githubApp.client.ActionsRun(ctx, token.Token, d.Repository, claims.RunID)
@@ -194,6 +231,19 @@ func (s *Server) handleActionsApproval(w http.ResponseWriter, r *http.Request, a
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
+	}
+	if r.Method != http.MethodDelete {
+		binding, err := tenant.GitHubRunnerBinding(r.Context(), input.RepositoryID)
+		if err != nil {
+			return engineLookupError(err)
+		}
+		_, repository, err := s.actionsToken(r.Context(), store.ActionsDispatch{InstallationID: binding.InstallationID, RepositoryID: binding.RepositoryID, RepositoryOwnerID: binding.RepositoryOwnerID, Repository: binding.Repository}, "")
+		if err != nil {
+			return err
+		}
+		if problem := actionsFallbackRefProblem(input.Ref, repository); problem != "" {
+			return &apierr.Error{Code: apierr.BadRequest, Message: problem}
+		}
 	}
 	if err := tenant.PutActionsApproval(r.Context(), a, input, r.Method == http.MethodDelete); err != nil {
 		return engineLookupError(err)

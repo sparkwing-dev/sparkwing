@@ -180,7 +180,7 @@ authenticated `PUT /api/v1/team/github-app/actions-approval` request:
 {
   "repository_id": 123456,
   "workflow": ".github/workflows/sparkwing-fallback.yaml",
-  "ref": "refs/heads/main",
+  "ref": "refs/heads/sparkwing-fallback",
   "runner": "macos-latest"
 }
 ```
@@ -188,11 +188,21 @@ authenticated `PUT /api/v1/team/github-app/actions-approval` request:
 Repeat for each approved image. `DELETE` on the same endpoint withdraws an
 approval using the repository ID, workflow and runner fields. Replacing or
 withdrawing approval invalidates its earlier receipts. The repository's default
-branch must contain the workflow. The approved branch or tag supplies the
-workflow revision, while the original event supplies the workload revision.
+branch must contain the workflow. The approved branch supplies the workflow
+revision, while the original event supplies the workload revision.
+
+The approved ref must be a dedicated branch such as
+`refs/heads/sparkwing-fallback`. GitHub signs the fallback job's OIDC token
+with the dispatched ref, and that job runs pull-request and branch code, so
+approval, dispatch and registration refuse the default branch and tags. Protect
+the dedicated branch so only maintainers can change it, and never let a cloud
+role, such as an AWS IAM trust policy or a GCP workload identity provider,
+trust its ref.
 Use the dispatch-only [fallback workflow](https://github.com/sparkwing-dev/sparkwing/blob/main/.github/workflows/sparkwing-fallback.yaml)
 as the template. Set repository variables `SPARKWING_CONTROLLER` and
-`SPARKWING_TEAM`, and use a runner release that supports `--dispatch-receipt`.
+`SPARKWING_TEAM`. The template pins `SPARKWING_RUNNER_VERSION` to a release
+that supports `--dispatch-receipt` and checks the release signature before it
+runs the runner; bump the pin when the controller upgrades.
 The workflow needs `run-name: sparkwing:${{ inputs.receipt }}`, inputs named
 `receipt` and `runner`, `id-token: write` and `contents: read`. It invokes
 `sparkwing-runner warm --github-actions --dispatch-receipt <receipt>`.
@@ -201,8 +211,9 @@ It has only `workflow_dispatch`, so pushes do not start fallback workers.
 The App's repository permission must include **Actions: Read and write**.
 Each installation owner approves the permission update in GitHub. Until approved,
 the waiting-job notice names the installation approval link. Source-fetch tokens
-keep Contents read only. The dispatch token stays in the controller and is
-restricted to the numeric repository ID.
+keep Contents read only. Only dispatch and cancellation tokens carry Actions
+write; registration reads run and job metadata with Actions read. These tokens
+stay in the controller and are restricted to the numeric repository ID.
 
 A receipt is a correlation value, not a bearer credential. Registration verifies
 GitHub OIDC, workflow ref and SHA, numeric repository and owner, provider run and
@@ -210,11 +221,15 @@ attempt, and the OIDC job's provider-reported image label. Only a GitHub-hosted
 runner can claim an explicit Actions tier. The resulting credential claims only
 the receipt's original job, with its original source and trust. A default-branch
 workflow cannot upgrade pull-request code to default-branch trust. Fork pull
-requests remain refused. Each workflow attempt exchanges once.
+requests are never dispatched, so they spend no GitHub minutes, and registration
+refuses them. Each workflow attempt exchanges once.
 
 Run status and the run page show dispatch acceptance, refusal or uncertainty,
 the receipt and a provider link once registration identifies the run. Cancellation
-invalidates the receipt and cancels a known provider run. A lost response or sender
+invalidates the receipt and cancels a known provider run. A job that finishes on
+its own leaves its workflow to exit with its real outcome. GitHub answers that
+the run is gone or already finished count as done; a removed, suspended or
+refused installation is logged once for an operator and not retried. A lost response or sender
 restart never resends the generation. An operator can make an audited retry with
 `POST /api/v1/operator/teams/<team>/actions-dispatches/<receipt>/retry`, supplying
 `{"reason":"provider recovery checked"}`. This invalidates the old receipt before
