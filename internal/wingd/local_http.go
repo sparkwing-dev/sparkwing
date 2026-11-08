@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
@@ -15,9 +16,9 @@ func ServeAPI(ctx context.Context, listener net.Listener, s localhostwire.LocalH
 	if listener == nil {
 		return errors.New("wingd: controller HTTP requires a listener")
 	}
-	return ServeLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
+	return serveLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
 		return context.WithValue(localhostwire.WithLocalPeer(ctx, connection.(authenticatedAPIConn).PeerIdentity()), socketPeerContextKey{}, true)
-	}, nil)
+	}, nil, 0)
 }
 
 type localAPIListener struct{ net.Listener }
@@ -88,6 +89,10 @@ func (c *localHTTPConn) PeerIdentity() localhostwire.LocalPeerIdentity {
 
 // ServeLocalHTTP cancels and joins handlers and connections before returning.
 func ServeLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context, observe func(int)) error {
+	return serveLocalHTTP(ctx, listener, handler, connectionContext, observe, 15*time.Second)
+}
+
+func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context, observe func(int), readTimeout time.Duration) error {
 	if listener == nil || handler == nil {
 		return errors.New("wingd: controller HTTP requires a listener and shared handler")
 	}
@@ -96,8 +101,10 @@ func ServeLocalHTTP(ctx context.Context, listener net.Listener, handler http.Han
 	var connections, handlers sync.WaitGroup
 	var hijacked sync.Map
 	server := &http.Server{
-		BaseContext: func(net.Listener) context.Context { return ctx },
-		ConnContext: connectionContext,
+		ReadTimeout:       readTimeout,
+		ReadHeaderTimeout: readTimeout,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+		ConnContext:       connectionContext,
 		ConnState: func(connection net.Conn, state http.ConnState) {
 			switch state {
 			case http.StateNew:

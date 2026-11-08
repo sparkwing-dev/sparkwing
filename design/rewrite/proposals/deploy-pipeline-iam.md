@@ -76,8 +76,7 @@ An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, 
 | `/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key` | ed25519 private key of a write deploy key | `sparkwing-dev/sparkwing-gitops` only |
 | `/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key` | ed25519 private key of a read-only deploy key | `sparkwing-dev/sparkwing-ci-smoke` only |
 | `/kikd-prod/sparkwing/deploy/staging-gate-token` | staging team token, `runs.read,logs.read,runs.write` | staging fixture team `stg-qa` |
-| `/kikd-prod/sparkwing/deploy/smoke-token-qa-team` | production team token, `runs.read,logs.read,runs.write` | `qa-team` |
-| `/kikd-prod/sparkwing/deploy/smoke-token-qa-team-b` | production team token, `runs.read,logs.read,runs.write` | `qa-team-b` |
+| `/kikd-prod/sparkwing/deploy/scan-submit-token` | production source-owning team token, `runs.read,logs.read,runs.write` | production smoke and scan submission |
 
 The `example` run the staging gate starts also reads `EXAMPLE_PROBE_TOKEN`, a Sparkwing secret stored on `stg-qa` rather than in SSM, holding a separate `stg-qa` token with `runs.read,logs.read,runs.write`. Its lifecycle probes use it to start, cancel, retry and read `example-probe` runs from inside the Cloud job. Without it they skip.
 
@@ -116,7 +115,7 @@ Later deploys then compare image versions and run unattended.
 
 1. Done 2026-11-04: the role, policy, access entry, RBAC and AppProject are applied, with `sparkwing_deploy_team` defaulting to `spark-sharks`. Confirm the production team slug that covers `sparkwing-dev/sparkwing`; a different slug is a one-line Terraform change.
 2. Allow deploy keys in the `sparkwing-dev` organisation (it refuses them today), then create the write key on `sparkwing-gitops` and the read-only key on `sparkwing-ci-smoke` and store their private halves; mint the three team tokens and store them.
-3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` team and the production `qa-team` and `qa-team-b` installations must also cover `sparkwing-dev/sparkwing`, because the gate and the smoke trigger `example` and `deploy-smoke` at the candidate commit, and staging's must cover `sparkwing-ci-smoke`.
+3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` installation must also cover `sparkwing-dev/sparkwing` and `sparkwing-ci-smoke`, because its gate triggers repository-backed runs. Production smoke uses `/kikd-prod/sparkwing/deploy/scan-submit-token`, the existing token for the production team that owns the source installation, to trigger the two-job `deploy-smoke` at the candidate commit. It does not use `qa-team` or `qa-team-b`, which have no production source installation. Each installation belongs to one team; do not reconnect the main team's installation to a QA team.
 4. Run `sparkwing run deploy -- --dry-run --stop-after staging` from a checkout and read the printed actions.
 5. The `deploy` entry declares `on: push` for `main` with `args: {stop-after: staging}`. Watch the push deploy and gate staging. Remove the `args` line after that pass so the next push promotes to production.
 
@@ -166,3 +165,10 @@ A release that changes them updates kikd-infra before its deploy, staging first,
 **Pipeline.** The pipeline writes only `sparkwing-dev/sparkwing-gitops`, with the `sparkwing-gitops-deploy-key` parameter, in the same directory names.
 
 **The move (done 2026-11-04).** `sparkwing-dev/sparkwing-gitops` main is kikd-gitops `456e104` filtered to `sparkwing/` and `sparkwing-staging/` with history kept, trees identical. Argo reads it through ExternalSecret `argocd/sparkwing-gitops-repo` (the same token as kikd-gitops), and both applications moved to it with no change to any live object. The two directories were then deleted from kikd-gitops. The organisation has deploy keys disabled, so the write deploy key and its parameter wait for Korey.
+
+
+### Production rollback floor
+
+Before changing production images, deploy reads the previous controller image's revision label and compares its source schema version with the candidate's. Missing revision or schema evidence stops deployment before either image changes. If the candidate raises the schema version, a later rollout or smoke failure leaves the candidate image pins in place and fails with a roll-forward remedy. It records a stable `sparkwing-production-rollback` Bitwing finding, including deploy, commit and schema versions; a feedback failure remains visible in the deploy error. Cancellation does not permit an incompatible rollback. With equal schema versions, the existing detached rollback still reverts this run's GitOps commits. No database downgrade or restore runs automatically.
+
+Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.

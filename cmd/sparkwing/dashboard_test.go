@@ -71,8 +71,6 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 		calls, units []string
 	}{
 		{[]string{"status"}, []string{"status"}, nil},
-		{[]string{"install"}, []string{"install"}, nil},
-		{[]string{"uninstall"}, []string{"status"}, []string{"uninstall"}},
 	} {
 		t.Run(tc.args[0], func(t *testing.T) {
 			lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Installed: true, PID: 123, Version: "v1.2.3", Activity: wingd.LocalActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}}}
@@ -92,9 +90,6 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 			}
 			if got.State != "running" || got.Version != "v1.2.3" || got.PID != 123 || !got.Installed || got.Activity != (dashboardActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}) {
 				t.Fatalf("lost controller status: %+v", got)
-			}
-			if tc.args[0] == "install" && (lifecycle.options.Home != services.options.Home || lifecycle.options.Executable != services.options.Executable || lifecycle.options.Version != services.options.Version) {
-				t.Fatalf("login options: %+v", lifecycle.options)
 			}
 		})
 	}
@@ -156,9 +151,8 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 		{"linux", []string{"logs", "--tail", "-1"}},
 		{"linux", []string{"open", "--addr", "0.0.0.0:4343"}},
 		{"linux", []string{"open", "--allow-remote"}},
-		{"linux", []string{"install", "--force"}},
-		{"windows", []string{"install"}},
-		{"windows", []string{"uninstall"}},
+		{"linux", []string{"install"}},
+		{"linux", []string{"uninstall"}},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			var output bytes.Buffer
@@ -169,18 +163,12 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 			if err == nil || output.Len() != 0 {
 				t.Fatalf("error=%v output=%s", err, &output)
 			}
-			if tc.goos == "windows" {
-				var failure *apierr.Error
-				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "sparkwing dashboard open") {
-					t.Fatalf("missing dashboard open guidance: %v", err)
-				}
-			}
 		})
 	}
 }
 
 func TestDashboardHelpDoesNotResolveRuntime(t *testing.T) {
-	for _, args := range [][]string{nil, {"status", "--help"}, {"install", "--help"}, {"open", "--help"}} {
+	for _, args := range [][]string{nil, {"status", "--help"}, {"logs", "--help"}, {"open", "--help"}} {
 		var output bytes.Buffer
 		err := runDashboardCommandArgs(t.Context(), args, &output, "windows", func(context.Context) (dashboardServices, error) {
 			t.Fatal("help resolved services")
@@ -194,7 +182,7 @@ func TestDashboardHelpDoesNotResolveRuntime(t *testing.T) {
 
 func TestDashboardPreservesFailuresWithoutSuccessReceipt(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.Unavailable, Message: "admission drain failed"}
-	for _, action := range []string{"status", "install", "uninstall"} {
+	for _, action := range []string{"status"} {
 		t.Run(action, func(t *testing.T) {
 			lifecycle := &dashboardLifecycleFake{err: failure}
 			units := &dashboardUnitsFake{err: failure}

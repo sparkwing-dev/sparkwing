@@ -37,7 +37,7 @@ func RunnerAdmissionUnavailable(version string, err error) error {
 	const shared = "sparkwing-runner %s shares this machine's admission (runner.local_admission: true), but "
 	switch {
 	case errors.Is(err, wingdclient.ErrNoDaemon):
-		return fmt.Errorf(shared+"no local controller is running. Start it with `sparkwing dashboard open`, keep it running with `sparkwing dashboard install`, or set runner.local_admission: false and restart the runner: %w", version, err)
+		return fmt.Errorf(shared+"no local controller is running. Start it with `sparkwing dashboard open`, keep it running with `sparkwing daemon install`, or set runner.local_admission: false and restart the runner: %w", version, err)
 	case wingdclient.IncompatibleDaemon(err):
 		return fmt.Errorf(shared+"the local controller runs a sparkwing build this runner cannot speak to. Install the same sparkwing and sparkwing-runner build (restarting the runner service updates it to the latest release), or set runner.local_admission: false and restart the runner: %w", version, err)
 	}

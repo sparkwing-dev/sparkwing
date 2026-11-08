@@ -136,9 +136,10 @@ a diagnostic with the skipped count, and journal read failures remain errors.
 It conflicts with list filters and limits. Cursor, offset and zero-limit paths
 are deleted. Journal producer lifecycle remains W8-owned.
 
-Managed controller units call foreground `wingd run --stay --home <absolute-home>`.
-Managed timers call `__tick --home <absolute-home>`. Public dashboard start stays a
-lifecycle client. ManagedUnit retains Home and update re-renders both kinds before
+Managed controller units call foreground `wingd run --home <absolute-home>`.
+Managed timers call `__tick --home <absolute-home>`. `sparkwing dashboard open`
+starts the controller on demand, and `sparkwing daemon install` installs its
+login service. ManagedUnit retains Home and update re-renders both kinds before
 restarting installed services. These hidden home arguments replace environment
 plumbing and do not restore a public --home flag or removed command alias.
 

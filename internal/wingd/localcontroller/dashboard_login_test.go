@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,12 +22,22 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 		services.HTTP = controller.New(b.Store, nil).WithEngineController(b.Controller).HTTP()
 		return services, nil
 	}}
-	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{Admission: wingd.Config{Home: home}, Dashboard: wingd.DashboardSettings{Address: "127.0.0.1:0"}, Open: factory.Open})
+	// safety: a fixed port lets the restart below serve the same origin the session was redeemed at.
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{Admission: wingd.Config{Home: home}, Dashboard: wingd.DashboardSettings{Address: address}, Open: factory.Open})
 	if err != nil {
 		t.Fatal(err)
 	}
 	lifecycle := wingd.NewLocalLifecycle(runtime, nil)
-	if _, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{Home: home, Version: "v0.71.0"}); err != nil {
+	start := wingd.LocalStartOptions{Home: home, Version: "v0.71.0"}
+	if _, err := lifecycle.EnsureStarted(t.Context(), start); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -38,7 +49,7 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	origin, _, _ := strings.Cut(login.URL, "/login?")
+	origin, code, _ := strings.Cut(login.URL, "/#code=")
 	local, err := lifecycle.Status(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +74,9 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 		if session != "" {
 			r.Header.Set("Authorization", "Bearer "+session)
 		}
+		if method != http.MethodGet {
+			r.Header.Set("Origin", origin)
+		}
 		for _, cookie := range cookies {
 			r.AddCookie(cookie)
 		}
@@ -77,20 +91,35 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 		}
 		return body
 	}
-	resp, err := browser.Get(login.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	session, found := strings.CutPrefix(resp.Header.Get("Location"), "/#s=")
-	if resp.StatusCode != http.StatusSeeOther || !found || session == "" {
-		t.Fatalf("dashboard login: HTTP %d, Location %q", resp.StatusCode, resp.Header.Get("Location"))
-	}
 	link, err := url.Parse(login.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
+	signIn := func(code string) string {
+		t.Helper()
+		exchange, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/login", strings.NewReader(`{"code":"`+code+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		exchange.Header.Set("Origin", origin)
+		exchange.Header.Set("Content-Type", "application/json")
+		resp, err := browser.Do(exchange)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var grant struct {
+			Token string `json:"token"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&grant)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || err != nil || grant.Token == "" || len(resp.Header.Values("Set-Cookie")) != 0 {
+			t.Fatalf("dashboard sign-in exchange: HTTP %d, Set-Cookie %q (%v)", resp.StatusCode, resp.Header.Values("Set-Cookie"), err)
+		}
+		return grant.Token
+	}
+	session := signIn(code)
 	base := link.Scheme + "://" + link.Host
+	request(http.MethodGet, base+"/api/v1/runs", "", http.StatusUnauthorized, &http.Cookie{Name: "sw_dashboard", Value: session})
 	request(http.MethodGet, base+"/api/v1/runs", "", http.StatusUnauthorized)
 	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusOK)
 	var identity struct {
@@ -107,5 +136,20 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 		request(http.MethodGet, base+"/api/v1/runs", session, http.StatusOK, &http.Cookie{Name: name, Value: "swses_stale_other_port"})
 	}
 	request(http.MethodPost, base+"/logout", session, http.StatusNoContent)
+	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusUnauthorized)
+
+	again, err := wingclient.MintDashboardLogin(t.Context(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, code, _ = strings.Cut(again.URL, "/#code=")
+	session = signIn(code)
+	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusOK)
+	if err := lifecycle.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lifecycle.EnsureStarted(t.Context(), start); err != nil {
+		t.Fatal(err)
+	}
 	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusUnauthorized)
 }

@@ -10,11 +10,9 @@ Manage the local dashboard
 
 ### Subcommands
 
-- `install` -- Install a dashboard service that starts at login
 - `logs` -- Read a bounded dashboard log tail
 - `open` -- Print a one-time sign-in link for the local dashboard
 - `status` -- Report whether the controller runs and where the dashboard serves
-- `uninstall` -- Remove the dashboard login service
 
 ### Flags
 
@@ -24,22 +22,6 @@ Manage the local dashboard
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-
-## `sparkwing dashboard install`
-
-Install a dashboard service that starts at login
-
-Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows, where `sparkwing dashboard open` starts the controller on demand.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--force` | Replace an existing object. |
 
 ## `sparkwing dashboard logs`
 
@@ -60,7 +42,7 @@ Read a bounded dashboard log tail
 
 Print a one-time sign-in link for the local dashboard
 
-Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none.
+Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket and carries a one-time code in its fragment that works once, expires after 60 seconds and only at the dashboard address it names. The page exchanges it for a session token kept in localStorage and sent as an Authorization bearer header; it lasts at most 30 days, and Log out or any controller restart revokes it. No cookie is set or accepted; every write also needs the dashboard's own Origin. The local socket needs no session.
 
 ### Flags
 
@@ -74,21 +56,6 @@ Print a one-time sign-in link for the local dashboard, starting the local contro
 ## `sparkwing dashboard status`
 
 Report whether the controller runs and where the dashboard serves
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-
-## `sparkwing dashboard uninstall`
-
-Remove the dashboard login service
-
-Remove the managed login service; Windows starts the controller on demand.
 
 ### Flags
 
