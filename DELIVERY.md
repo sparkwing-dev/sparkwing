@@ -1679,28 +1679,39 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   they need no migration guide. Keep the embedded changelog mirror byte-identical.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
-- **Release:** merging is not a release; a release is a tag push. The local
-  `release` pipeline checks the chosen version against origin tags, checks the
-  clean tree, and verifies published module freshness, Go directive policy,
-  coherent SDK pins and changelog links in the build/lint/short-test class, with
-  a forty-minute wall budget including 30 minutes of lint-lock allowance. It then
-  renames `[Unreleased]`, rolls the migration guide, validates the resulting
-  section and guide, and checks schema/wire change coverage before committing.
-  All refusals precede push-tag. Freshness checks published versions, not the
-  position of local replacements against origin/main, so a cut may use an older
-  commit. Preview with
-  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`, then
-  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk
-  destructive,prod`; the isolated home keeps prerelease state out of the
-  operational runs store, which the release runner refuses to touch. From the
-  tag push on, `.github/workflows/release.yaml` owns the release, and it checks
-  nothing: it resolves the tag to a commit, builds the binaries and images,
-  signs and publishes them, and creates the GitHub release. `git tag vX.Y.Z &&
-  git push origin vX.Y.Z` from any commit therefore publishes a release. The
-  notes come from that tag's changelog section, and fall back to the annotated
-  tag message and then to a pointer at CHANGELOG.md when the tagged source has
-  no section. State-dependent source checks belong in the local cut, before
-  the tag exists. Handle refusals and failed builds through the
+- **Release:** merging is not a release; a release is a tag push. Select an
+  exact source with `sparkwing run release -- --commit SHA` (default `HEAD`).
+  The source must be an ancestor of freshly fetched `origin/main`, and its
+  latest push run of `ci.yaml` must have completed successfully at that exact
+  SHA. The release owns a detached worktree and compiles `release-cut` from
+  the selected source, using a private `SPARKWING_HOME`. The source must
+  contain the `release-cut` entrypoint. The invoking checkout stays untouched,
+  including uncommitted work. Lands continue on main throughout the cut.
+  Exact-source CI replaces the broad build, lint and short-suite steps under
+  the pre-launch desktop-load waiver. Incremental push CI is not full-suite
+  evidence. Published module freshness, Go directive policy, coherent SDK
+  pins, changelog links and docs sidebar checks still run. The cut prepares
+  notes, migrations and SDK pins, then checks schema/wire coverage before
+  committing those paths with `--no-verify`.
+  The annotated tag points to that prepared release commit, whose source
+  parent remains the selected SHA. A separate detached worktree merges that
+  commit into freshly fetched main. It removes only unchanged selected entries
+  from main's `[Unreleased]` section, keeps newer or edited notes there, and
+  copies the release section unchanged. The merge preserves main's newer code.
+  Publication atomically pushes the merge to main and the tag to origin. If
+  main moves during the push, only the metadata merge and push are retried,
+  with the same release commit and tag. A conflict or repeated contention
+  stops publication for manual recovery; it does not require freezing main.
+  Failed cuts retain their worktrees at the paths printed in the logs.
+  Preview with
+  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run -- --commit SHA`,
+  then use `--sw-allow-risk destructive,prod` for publication. Within one controller, manual and weekly
+  releases share a release concurrency group. Release owners serialize cuts
+  across isolated homes; lands use their own path.
+  From the tag push on, `.github/workflows/release.yaml` resolves the tag,
+  builds, signs and publishes artifacts, and creates the GitHub release.
+  Notes come from the tag's changelog section, with the annotated tag message
+  and a pointer to CHANGELOG.md as fallbacks. Handle failures through the
   [release failure policy](#release-failure-policy).
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
@@ -1715,22 +1726,15 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
 
 ## Weekly SDK and CLI delivery
 
-`weekly-release` runs Monday at 09:00 America/Denver. It clones origin/main,
-skips when `[Unreleased]` has no entries, and requires the latest push run of
-`ci.yaml` at the selected commit to have completed successfully. It then runs
-the existing `release` pipeline in that private checkout with its own
-`SPARKWING_HOME`. The exact-source green CI receipt supplies verification evidence. Under the
-pre-launch desktop-load waiver, the scheduled cut starts at `version-freshness`
-and keeps the release-specific guards; it skips the broader release build,
-lint and short-suite steps. Incremental push CI is not full-suite evidence. Its default minor bump stays on v0.x. Release cuts are
-pre-approved. The scheduled entrypoint supplies the cut's
-`--sw-allow-risk destructive,prod` authorization.
+`weekly-release` runs Monday at 09:00 America/Denver. It selects freshly
+fetched `origin/main` by default, or `--commit SHA`, and uses the same detached
+worktree cut and exact-source CI check as `release`. It skips when the selected
+source has no `[Unreleased]` entries. Its default minor bump stays on v0.x.
+Release cuts are pre-approved. The scheduled entrypoint supplies the cut's
+`--sw-allow-risk destructive,prod` authorization. Main keeps accepting lands
+while the cut runs. Publication merges the prepared metadata into fresh main
+and atomically pushes that merge with the tag on the separate release commit.
 
-The cut retains its changelog, migration-guide, schema, wire and release-cut
-checks. It prepares the scaffold fallback, API snapshot and both pipeline module pins
-for the chosen version using their local SDK replacements. It commits only the
-prepared notes and pin paths with `--no-verify` after the gates pass, then
-atomically pushes main and the tag.
 That tag makes the Go SDK module available and starts the existing
 `.github/workflows/release.yaml` publication steps for signed CLI binaries,
 images and the TypeScript package. Before cutting, the weekly pipeline starts
@@ -1740,7 +1744,7 @@ idempotency key. It records the cut's immutable tag and commit in a blocked
 to confirm hosted publication, publish matching sparkwing-product docs, verify
 production through kikd-infra, and reconcile downstream pins. The checklist
 stays open until every required step has evidence. A failed cut retains the
-private checkout at the path printed in its job log.
+detached worktree at the path printed in its job log.
 
 Run the same path sooner, or preview the cut:
 

@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **releases:** `sparkwing run release -- --commit SHA` cuts a green source in a detached worktree while main keeps accepting lands. Publication tags the prepared release commit and merges its metadata into fresh main, preserving newer code and unreleased notes.
+
 - **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-36).
 
 - **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/_unreleased.md#declare-upload-allowances-in-repository-config).

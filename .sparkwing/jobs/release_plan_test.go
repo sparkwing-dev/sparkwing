@@ -34,7 +34,7 @@ func releasePlan(t *testing.T) pipelineDocument {
 	t.Chdir(dir)
 
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Release{}).Plan(context.Background(), plan, ReleaseArgs{Version: "v0.99.0"}, sparkwing.RunContext{})
+		return (&ReleaseCut{}).Plan(context.Background(), plan, ReleaseArgs{Version: "v0.99.0", Commit: "selected"}, sparkwing.RunContext{})
 	})
 	return plan
 }

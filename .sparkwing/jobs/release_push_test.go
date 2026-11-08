@@ -12,75 +12,131 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
-func TestReleasePushFromDetachedHEADIsAtomic(t *testing.T) {
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
+func releaseGitIdentity(t *testing.T) {
+	t.Helper()
+	for key, value := range map[string]string{
+		"GIT_CONFIG_COUNT": "4",
+		"GIT_CONFIG_KEY_0": "user.name", "GIT_CONFIG_VALUE_0": "Test",
+		"GIT_CONFIG_KEY_1": "user.email", "GIT_CONFIG_VALUE_1": "test@example.invalid",
+		"GIT_CONFIG_KEY_2": "commit.gpgsign", "GIT_CONFIG_VALUE_2": "false",
+		"GIT_CONFIG_KEY_3": "core.hooksPath", "GIT_CONFIG_VALUE_3": "/dev/null",
+	} {
+		t.Setenv(key, value)
 	}
-	for _, failure := range []string{"", "tag", "push", "missing commit"} {
-		t.Run("failure="+failure, func(t *testing.T) {
+}
+
+func TestReleasePushKeepsTheChosenSourceWhileMainMoves(t *testing.T) {
+	for _, mode := range []string{"main already advanced", "main moves during push", "push refused", "missing commit", "missing source"} {
+		t.Run(mode, func(t *testing.T) {
+			releaseGitIdentity(t)
 			repo := atomicReleaseRepo(t, fixtureChangelog)
-			snapshot := filepath.Join(t.TempDir(), "snapshot")
-			gitRun(t, repo, "worktree", "add", "--detach", snapshot, "HEAD")
-			gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-				"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "release commit")
-			commit := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
-			t.Setenv("RELEASE_TEST_COMMIT", commit)
-			t.Setenv("RELEASE_TEST_REAL_GIT", realGit)
-			t.Chdir(snapshot)
-			logPath := filepath.Join(repo, "git-calls")
-			t.Setenv("RELEASE_TEST_GIT_LOG", logPath)
-			t.Setenv("RELEASE_TEST_FAILURE", failure)
-			bin := filepath.Join(repo, "bin")
-			writeGoFile(t, filepath.Join(bin, "git"), `#!/bin/sh
-printf '%s\n' "$*" >> "$RELEASE_TEST_GIT_LOG"
-case "$*" in
-  'ls-remote --tags origin refs/tags/v0.99.0') exit 0 ;;
-  'rev-parse --abbrev-ref HEAD') exec "$RELEASE_TEST_REAL_GIT" "$@" ;;
-  "tag -a v0.99.0 $RELEASE_TEST_COMMIT -m Release v0.99.0")
-    test "$RELEASE_TEST_FAILURE" != tag ;;
-  "push --atomic origin $RELEASE_TEST_COMMIT:refs/heads/main refs/tags/v0.99.0")
-    test "$RELEASE_TEST_FAILURE" != push ;;
-  *) echo "unexpected git call: $*" >&2; exit 1 ;;
-esac
-`)
-			if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+			writeFile(t, filepath.Join(repo, ".gitattributes"), "CHANGELOG.md merge=union\npkg/docs/changelog.md merge=union\n")
+			gitRun(t, repo, "add", "--", ".gitattributes")
+			gitRun(t, repo, "commit", "--no-verify", "-m", "merge policy")
+			source := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+			origin := t.TempDir()
+			gitRun(t, origin, "init", "--bare", "-b", "main")
+			gitRun(t, repo, "remote", "add", "origin", origin)
+			gitRun(t, repo, "push", "origin", "main")
+			detached := filepath.Join(t.TempDir(), "release")
+			gitRun(t, repo, "worktree", "add", "--detach", detached, source)
+			body, err := rewriteUnreleasedToVersion(fixtureChangelog, "v0.99.0", "2026-01-01")
+			if err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			if err := writeChangelogPair(detached, body); err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, detached, "add", "--", "CHANGELOG.md", embeddedChangelogRel)
+			gitRun(t, detached, "commit", "--no-verify", "-m", "release notes")
+			commit := strings.TrimSpace(gitRun(t, detached, "rev-parse", "HEAD"))
+
+			newer := strings.Replace(fixtureChangelog, "## [Unreleased]", "## [Unreleased]\n\n### Added\n\n- **later:** Keep this for the next release.", 1)
+			if err := writeChangelogPair(repo, newer); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(repo, "later.go"), "package sdk\nconst Later = true\n")
+			gitRun(t, repo, "add", "--", "CHANGELOG.md", embeddedChangelogRel, "later.go")
+			gitRun(t, repo, "commit", "--no-verify", "-m", "a later land")
+			advanced := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+			if mode != "main moves during push" {
+				gitRun(t, repo, "push", "origin", "main")
+			} else {
+				gitRun(t, repo, "push", "origin", "HEAD:refs/heads/race-candidate")
+			}
+			before := strings.TrimSpace(gitRun(t, origin, "rev-parse", "main"))
+
+			if mode == "main moves during push" || mode == "push refused" {
+				realGit, err := exec.LookPath("git")
+				if err != nil {
+					t.Fatal(err)
+				}
+				bin := t.TempDir()
+				t.Setenv("RELEASE_TEST_REAL_GIT", realGit)
+				t.Setenv("RELEASE_TEST_ORIGIN", origin)
+				t.Setenv("RELEASE_TEST_ADVANCED", advanced)
+				t.Setenv("RELEASE_TEST_ONCE", filepath.Join(bin, "once"))
+				t.Setenv("RELEASE_TEST_MODE", mode)
+				writeDeliveryTool(t, filepath.Join(bin, "git"), `#!/bin/sh
+set -eu
+if [ "$1" = push ] && [ "$RELEASE_TEST_MODE" = "push refused" ]; then exit 1; fi
+if [ "$1" = push ] && [ "$2" = --atomic ] && [ ! -f "$RELEASE_TEST_ONCE" ]; then
+ touch "$RELEASE_TEST_ONCE"
+ "$RELEASE_TEST_REAL_GIT" --git-dir="$RELEASE_TEST_ORIGIN" update-ref refs/heads/main "$RELEASE_TEST_ADVANCED"
+fi
+exec "$RELEASE_TEST_REAL_GIT" "$@"
+`)
+				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			}
 			output := commit
-			if failure == "missing commit" {
+			if mode == "missing commit" {
 				output = ""
 			}
+			selected := source
+			if mode == "missing source" {
+				selected = ""
+			}
 			ctx := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{
-				"version": json.RawMessage(`"v0.99.0"`),
-				"commit":  json.RawMessage(`"` + output + `"`),
+				"version": json.RawMessage(`"v0.99.0"`), "commit": json.RawMessage(`"` + output + `"`),
 			}}).Context(t.Context())
-			job := pushTagJob{
-				RepoDir: snapshot,
-				Version: sparkwing.Ref[string]{JobID: "version"},
-				Commit:  sparkwing.Ref[string]{JobID: "commit"},
+			writeFile(t, filepath.Join(repo, "local-draft"), "keep my work")
+			caller := gitRun(t, repo, "status", "--porcelain")
+			job := pushTagJob{RepoDir: detached, Source: selected, Version: sparkwing.Ref[string]{JobID: "version"}, Commit: sparkwing.Ref[string]{JobID: "commit"}}
+			err = job.run(ctx)
+			refused := mode == "push refused" || mode == "missing commit" || mode == "missing source"
+			if (err != nil) != refused {
+				t.Fatalf("publication = %v, want refusal %v", err, refused)
 			}
-			err := job.run(ctx)
-			if (err != nil) != (failure != "") {
-				t.Fatalf("push failure %q: %v", failure, err)
+			if gitRun(t, repo, "status", "--porcelain") != caller || strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD")) != advanced {
+				t.Fatal("publication changed caller checkout")
 			}
-			calls, readErr := os.ReadFile(logPath)
-			if readErr != nil {
-				t.Fatal(readErr)
+			if refused {
+				if strings.TrimSpace(gitRun(t, origin, "rev-parse", "main")) != before || strings.TrimSpace(gitRun(t, origin, "tag", "--list")) != "" {
+					t.Fatal("failed atomic publication changed main or tags")
+				}
+				return
 			}
-			wantPushes := 1
-			if failure == "tag" || failure == "missing commit" {
-				wantPushes = 0
+			if got := strings.TrimSpace(gitRun(t, origin, "rev-parse", "v0.99.0^{commit}")); got != commit {
+				t.Fatalf("tag = %s, want detached release %s", got, commit)
 			}
-			if failure == "missing commit" && strings.Contains(string(calls), "tag -a") {
-				t.Fatalf("missing release commit fell back to HEAD:\n%s", calls)
+			gitRun(t, origin, "merge-base", "--is-ancestor", commit, "main")
+			gitRun(t, origin, "merge-base", "--is-ancestor", advanced, "main")
+			if got := gitRun(t, origin, "show", "main:later.go"); !strings.Contains(got, "Later") {
+				t.Fatal("lost later source")
 			}
-			if pushes := strings.Count(string(calls), "push "); pushes != wantPushes {
-				t.Fatalf("got %d pushes, want %d after %q failure:\n%s", pushes, wantPushes, failure, calls)
+			notes := gitRun(t, origin, "show", "main:CHANGELOG.md")
+			_, _, pending, err := changelogSectionBounds(notes, "Unreleased")
+			if err != nil {
+				t.Fatal(err)
 			}
-			if strings.Contains(string(calls), "rev-parse --abbrev-ref HEAD") {
-				t.Fatalf("push still depends on the detached HEAD:\n%s", calls)
+			if len(pending.entries) != 1 || !strings.Contains(pending.entries[0].body, "later") {
+				t.Fatalf("pending notes = %v", pending.entries)
+			}
+			if mirror := gitRun(t, origin, "show", "main:"+embeddedChangelogRel); mirror != notes {
+				t.Fatal("changelog mirror drifted")
+			}
+			if got := gitRun(t, origin, "show", "v0.99.0:CHANGELOG.md"); strings.Contains(got, "later") {
+				t.Fatal("newer note leaked into tag")
 			}
 		})
 	}
@@ -88,6 +144,6 @@ esac
 
 func TestReleasePushRunsOnTheDispatcherHost(t *testing.T) {
 	if !mustNode(t, releasePlan(t), "push-tag").Inline {
-		t.Fatal("push-tag would run in a detached job snapshot instead of the release checkout")
+		t.Fatal("push-tag must run in the release worktree")
 	}
 }
