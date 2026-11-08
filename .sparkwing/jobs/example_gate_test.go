@@ -37,7 +37,8 @@ func TestExampleProbeCleanupRemainsUntilTerminalObservation(t *testing.T) {
 			}
 			released := false
 			run := exampleProbeRun{id: "probe", release: func() { released = true }}
-			_, err := run.await(t.Context(), ExampleInputs{CLI: cli})
+			ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
+			_, err := run.await(ctx, ExampleInputs{CLI: cli})
 			if (err != nil) != (tc.exit == 1) || released != tc.want {
 				t.Fatalf("released=%t, error=%v", released, err)
 			}
