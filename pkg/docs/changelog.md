@@ -42,6 +42,8 @@ unlock.
 
 ### Fixed
 
+- **Release downloads:** Installer, updater, engine and runner downloads fall back to GitHub’s asset API after a release-route server error or timeout, preserving signature and checksum verification.
+- **template verification:** Render local sparks-core template text and verification manifests when a checkout is discovered, and report the selected source.
 - **cli:** Reject step ranges that select no steps in a job instead of reporting success with every step skipped
 - **build-images:** Source-built controller and runner images record the clean full Git HEAD, version and source URL in OCI labels so deployment can verify their revision.
 
