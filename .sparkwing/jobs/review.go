@@ -528,6 +528,12 @@ func (r reviewPrompt) rereview() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "The author changed the branch; it now runs from %s to %s. Re-check your findings below against the new diff under the same policy. ", short(r.base), short(r.head))
 	b.WriteString("Mark a finding fixed only when the diff resolves it; keep it open otherwise, and keep every id. Raise new findings for new problems. Do not edit files.\n\n")
+	b.WriteString("## Current objective\n\nThis objective replaces earlier objectives. Reassess objective findings against it; the review policy still applies.\n\n")
+	if r.objective.text == "" {
+		b.WriteString("No objective was supplied, so the objective-not-met rule cannot fire.\n\n")
+	} else {
+		fmt.Fprintf(&b, "Source: %s %s\n\n%s\n\n", r.objective.Source, r.objective.Ref, r.objective.text)
+	}
 	b.WriteString("## Your findings\n\n" + findingsJSON(r.prior) + "\n\n")
 	b.WriteString(r.diffSection())
 	b.WriteString(r.answerFormat())

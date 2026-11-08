@@ -1932,3 +1932,45 @@ CREATE UNIQUE INDEX idx_local_runner_active ON local_runner_instances(machine) W
 
 -- The parent-cancellation sweep reads only live child runs, not retained history.
 CREATE INDEX idx_runs_live_children ON runs(team,id) WHERE parent_run_id <> '' AND status IN ('pending','running');
+
+CREATE TABLE github_actions_approvals (
+    team TEXT NOT NULL,
+    repository_id BIGINT NOT NULL,
+    workflow TEXT NOT NULL,
+    runner TEXT NOT NULL,
+    workflow_ref TEXT NOT NULL,
+    approval_id TEXT NOT NULL UNIQUE,
+    PRIMARY KEY(team,repository_id,workflow,runner),
+    FOREIGN KEY(team,repository_id) REFERENCES github_runner_bindings(team,repository_id) ON DELETE CASCADE
+);
+
+CREATE TABLE github_actions_dispatches (
+    receipt TEXT NOT NULL PRIMARY KEY,
+    team TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    queue_started_at BIGINT NOT NULL,
+    generation BIGINT NOT NULL,
+    approval_id TEXT NOT NULL,
+    installation_id BIGINT NOT NULL,
+    repository_id BIGINT NOT NULL,
+    repository_owner_id BIGINT NOT NULL,
+    repository TEXT NOT NULL,
+    workflow TEXT NOT NULL,
+    workflow_ref TEXT NOT NULL,
+    workflow_sha TEXT NOT NULL DEFAULT '',
+    runner TEXT NOT NULL,
+    policy_revision TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('requested','sending','accepted','refused','uncertain','cancelled')),
+    reason TEXT NOT NULL DEFAULT '',
+    send_until BIGINT NOT NULL DEFAULT 0,
+    provider_run_id TEXT NOT NULL DEFAULT '',
+    provider_attempt TEXT NOT NULL DEFAULT '',
+    cancel_sent BIGINT NOT NULL DEFAULT 0,
+    UNIQUE(team,run_id,node_id,queue_started_at,generation),
+    FOREIGN KEY(team,run_id,node_id) REFERENCES nodes(team,run_id,node_id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_actions_dispatch_sender ON github_actions_dispatches(state,send_until) WHERE state IN ('requested','sending');
+CREATE INDEX idx_actions_dispatch_live ON github_actions_dispatches(state) WHERE state<>'cancelled';
+CREATE INDEX idx_actions_dispatch_cancellation ON github_actions_dispatches(state,cancel_sent) WHERE provider_run_id<>'';

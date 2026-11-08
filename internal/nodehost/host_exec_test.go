@@ -85,6 +85,9 @@ func (hostExecJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		"dir": func(ctx context.Context) (hostExecObservation, error) {
 			return observe(sparkwing.Exec(ctx, "pwd").Dir(filepath.Join(dir, "sub")).Capture()), nil
 		},
+		"measured": func(ctx context.Context) (hostExecObservation, error) {
+			return observe(sparkwing.Bash(ctx, `cat "$F"`).Env("F", filepath.Join(dir, "measured.fifo")).Run()), nil
+		},
 		"background": func(ctx context.Context) (hostExecObservation, error) {
 			return observe(sparkwing.Bash(ctx, `sleep 60 & echo $! > "$P"`).Env("P", filepath.Join(dir, "background.pid")).Run()), nil
 		},
@@ -216,6 +219,15 @@ func startHostExecHarness(t testing.TB, lang, dir string, extraEnv ...string) *h
 
 func startHostExecHarnessWithSink(t testing.TB, lang, job, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
 	t.Helper()
+	return startTrackedHostExecHarness(t, nil, lang, job, dir, sink, extraEnv...)
+}
+
+func startTrackedHostExecHarness(t testing.TB, tracker admissionProcessTracker, lang, job, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
+	t.Helper()
+	ctx := context.Background()
+	if tracker != nil {
+		ctx = context.WithValue(ctx, admissionProcessObserverKey{}, tracker)
+	}
 	var err error
 	masker := secrets.NewMasker()
 	if err := masker.Register(hostExecSecret); err != nil {
@@ -238,7 +250,7 @@ func startHostExecHarnessWithSink(t testing.TB, lang, job, dir string, sink func
 			return nil
 		},
 	}
-	h.session, err = startProtocolSession(context.Background(), cfg)
+	h.session, err = startProtocolSession(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,6 +414,50 @@ func pidAlive(t *testing.T, path string) (int, bool) {
 		t.Fatal(err)
 	}
 	return pid, syscall.Kill(pid, 0) == nil
+}
+
+type commandMeasurementTracker struct {
+	tracked chan [2]string
+}
+
+func (commandMeasurementTracker) TrackProcess(context.Context, int) error { return nil }
+
+func (c commandMeasurementTracker) TrackCommand(_ context.Context, pid int, birth string) error {
+	c.tracked <- [2]string{strconv.Itoa(pid), birth}
+	return nil
+}
+
+// A command that outlives the registration delay joins the job's machine measurement under its own session leader.
+func TestHostExecRegistersLongCommandsForMeasurement(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "measured.fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tracker := commandMeasurementTracker{tracked: make(chan [2]string, 1)}
+	h := startTrackedHostExecHarness(t, tracker, "go", "job", dir, nil)
+	release := make(chan error, 1)
+	go func() {
+		tracked := <-tracker.tracked
+		pid, err := strconv.Atoi(tracked[0])
+		if err == nil {
+			var birth string
+			birth, err = procgroup.ProcessBirth(pid)
+			if err == nil && (birth != tracked[1] || pid == h.session.cmd.Process.Pid) {
+				err = errors.New("tracked " + tracked[0] + " " + tracked[1] + ", live birth " + birth)
+			}
+		}
+		if file, openErr := os.OpenFile(fifo, os.O_WRONLY, 0); openErr == nil {
+			_ = file.Close()
+		}
+		release <- err
+	}()
+	if measured := h.step(t, "measured"); measured.Error != "" {
+		t.Fatalf("measured = %#v", measured)
+	}
+	if err := <-release; err != nil {
+		t.Fatal(err)
+	}
 }
 
 // A daemon a command starts with & outlives the command, as it did when the SDK ran

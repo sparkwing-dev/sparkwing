@@ -55,6 +55,7 @@ func LookupCommand(name string, env []string, dir string) (string, error) {
 		}
 		for _, extension := range extensions {
 			file := candidate + extension
+			// #nosec G703 -- executable lookup must stat paths selected by the requesting process PATH.
 			if info, err := os.Stat(file); err == nil && !info.IsDir() && (windows || info.Mode()&0o111 != 0) {
 				return file, nil
 			}

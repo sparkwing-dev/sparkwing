@@ -68,6 +68,8 @@ type procBatchSampler interface {
 type OwnedRoot struct {
 	PID       int
 	HeldSince time.Time
+	// Members are processes outside PID's tree whose own trees count toward the job's measured usage.
+	Members []int
 }
 
 // OwnedCPUSampler reports the CPU each held run's process tree ran, keyed by
@@ -128,7 +130,7 @@ func newProcSampler() *procSampler {
 
 func (p *procSampler) CPUUsage(pid int) (ProcUsage, bool) { return p.sample(pid) }
 
-func (p *procSampler) CPUUsages(pids []int) map[int]ProcUsage { return p.sampleMany(pids) }
+func (p *procSampler) CPUUsages(pids []int) map[int]ProcUsage { return p.sampleMany(pids, nil) }
 
 type processIdentity struct {
 	pid        int
@@ -551,10 +553,10 @@ func darwinCPUFromSnapshot(
 	return host, true, byRoot, true
 }
 
-func collectSubtree(root int, children map[int][]int) []int {
+func collectSubtree(root int, children map[int][]int, extra ...int) []int {
 	var out []int
 	seen := map[int]bool{}
-	stack := []int{root}
+	stack := append([]int{root}, extra...)
 	for len(stack) > 0 {
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]

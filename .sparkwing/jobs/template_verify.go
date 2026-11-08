@@ -332,7 +332,7 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	if err := gitInitFixture(ctx, scratch); err != nil {
 		return out, fmt.Errorf("%s: source fixture: %w", m.Name, err)
 	}
-	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint").Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint", "--pipeline", m.Name).Run(); err != nil {
 		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
 	}
 	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "plan", "--pipeline", m.Name).Dir(scratch).Run(); err != nil {

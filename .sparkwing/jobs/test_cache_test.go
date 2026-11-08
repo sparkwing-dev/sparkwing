@@ -21,7 +21,7 @@ func TestOrdinaryTestStepsReusePassingResults(t *testing.T) {
 			root := gateFixtureRepo(t)
 			temporaryRoot := t.TempDir()
 			t.Setenv("TMPDIR", temporaryRoot)
-			t.Setenv("SPARKWING_TEST_EXPECTED_TMPDIR", temporaryRoot)
+			t.Setenv("FIXTURE_EXPECTED_TMPDIR", temporaryRoot)
 			t.Setenv("GOTMPDIR", "")
 			source := filepath.Join(root, "internal", "cache_test.go")
 			writeGoFile(t, source, `package internal
@@ -30,7 +30,7 @@ import (
  "testing"
 )
 func TestTemporaryFiles(t *testing.T) {
- if os.Getenv("TMPDIR") != os.Getenv("SPARKWING_TEST_EXPECTED_TMPDIR") { t.Fatal("caller temporary directory changed") }
+ if os.Getenv("TMPDIR") != os.Getenv("FIXTURE_EXPECTED_TMPDIR") { t.Fatal("caller temporary directory changed") }
  if os.Getenv("SPARKWING_HOME") == "" { t.Fatal("the step pinned no sparkwing home") }
  t.TempDir()
 }
@@ -54,7 +54,7 @@ func TestTemporaryFiles(t *testing.T) {
 import "testing"
 func TestTemporaryFiles(t *testing.T) { t.Fatal("changed test must run") }
 `)
-			if err := run(context.Background()); err == nil {
+			if err := run(newTestContext(t)); err == nil {
 				t.Fatal("cached pass hid a changed failing test")
 			}
 		})
