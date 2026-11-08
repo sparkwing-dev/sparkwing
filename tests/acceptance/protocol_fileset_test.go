@@ -3,13 +3,13 @@ package acceptance_test
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
@@ -44,7 +44,7 @@ func testGoSDKFilesetPathNames(t *testing.T) {
 					t.Cleanup(func() { _ = host.Close() })
 					ctx := host.Context(t.Context())
 					dir := t.TempDir()
-					command := exec.CommandContext(t.Context(), "git", "init", "--quiet", dir)
+					command := testgit.CommandContext(t.Context(), "git", "init", "--quiet", dir)
 					if output, err := command.CombinedOutput(); err != nil {
 						t.Fatalf("initialize fixture: %v: %s", err, output)
 					}
@@ -53,7 +53,7 @@ func testGoSDKFilesetPathNames(t *testing.T) {
 						t.Fatal(err)
 					}
 					if tracked {
-						command = exec.CommandContext(t.Context(), "git", "-C", dir, "add", "--", test.path)
+						command = testgit.CommandContext(t.Context(), "git", "-C", dir, "add", "--", test.path)
 						if output, err := command.CombinedOutput(); err != nil {
 							t.Fatalf("stage fixture: %v: %s", err, output)
 						}
@@ -88,7 +88,7 @@ func testGoSDKFilesetIgnoreReadFailure(t *testing.T) {
 			t.Cleanup(func() { _ = host.Close() })
 			ctx := host.Context(t.Context())
 			dir := t.TempDir()
-			command := exec.CommandContext(t.Context(), "git", "init", "--quiet", dir)
+			command := testgit.CommandContext(t.Context(), "git", "init", "--quiet", dir)
 			if output, err := command.CombinedOutput(); err != nil {
 				t.Fatalf("initialize fixture: %v: %s", err, output)
 			}

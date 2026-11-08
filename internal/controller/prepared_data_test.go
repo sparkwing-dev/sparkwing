@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -42,8 +43,12 @@ func testPreparedDataHTTPPublish(t *testing.T, cloud bool) {
 		t.Fatal(err)
 	}
 	run.Request.Request.Git.Ref = "main"
+	run.Request.Request.Git.SHA = strings.Repeat("a", 40)
+	run.Request.Request.Git.Repository = runspec.Repository{Key: "git:8.8.8.8/team/repo", Display: "8.8.8.8/team/repo"}
+	run.Request.Request.Source.Ref = run.Request.Request.Git.SHA
+	run.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://8.8.8.8/team/repo", PipelineDir: ".sparkwing"}
 	sealed := sealWith(t, run.Request, assertedProvenance(t, "ci", "main", run.Request.Request.Git.SHA))
-	engineSQL(t, e.Store, "UPDATE runs SET git_branch='main',request_json=? WHERE team='a' AND id='run'", sealed)
+	engineSQL(t, e.Store, "UPDATE runs SET git_branch='main',request_json=?,repo_key=?,repo_display=? WHERE team='a' AND id='run'", sealed, run.Request.Request.Git.Repository.Key, run.Request.Request.Git.Repository.Display)
 	var ownerRaw string
 	if cloud {
 		engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
@@ -81,7 +86,7 @@ func testPreparedDataHTTPPublish(t *testing.T, cloud bool) {
 		return
 	}
 	engineClaimHTTP(t, h, ownerRaw, "POST", "/api/v1/data/records", fmt.Sprintf(`{"kind":"prepared","pipeline":"ci","name":"pipeline","key":"run","digest":%q}`, digest), 200)
-	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job","children":[{"pipeline":"deploy"}]}`), []byte(`{}`))
 	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}})
 	if err != nil {
 		t.Fatal(err)
@@ -135,4 +140,110 @@ func testPreparedDataHTTPPublish(t *testing.T, cloud bool) {
 		t.Fatalf("eval lookup=%s: %v", w.Body.String(), err)
 	}
 	engineClaimHTTP(t, h, evalRaw, "POST", "/api/v1/data/download", fmt.Sprintf(`{"digest":%q}`, digest), 200)
+	testPreparedChildHTTP(t, e, tenant, nodeRaw, ownerRaw, digest)
+}
+
+func testPreparedChildHTTP(t *testing.T, e *engineFixture, tenant *store.Tenant, parentRaw, planRaw, digest string) {
+	t.Helper()
+	h := e.Server.Handler()
+	engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, []byte(`{"admission_key":"capability:root","admission_subject":{"kind":"account","id":"fixture"}}`))
+	engineAdmitBearer(t, e.Store, parentRaw)
+	engineClaimHTTP(t, h, parentRaw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	parent, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var submission controllerwire.CreateRunRequest
+	if err := json.Unmarshal([]byte(childIntakeBody(t, "deploy", parent.Request.Request.Git)), &submission); err != nil {
+		t.Fatal(err)
+	}
+	submission.Request.Source = parent.Request.Request.Source
+	submission.Request.Source.Entrypoint = "ChildEntry"
+	body, err := json.Marshal(submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := engineClaimHTTP(t, h, parentRaw, "POST", "/api/v1/runs/run/children", string(body), 201)
+	var created controllerwire.CreateRunResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	child, err := tenant.ReadRun(t.Context(), created.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(planRaw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: plan.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(child.ID)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := e.Store.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerRaw := issued.Raw
+	path := "/api/v1/data/records?kind=prepared&pipeline=deploy&name=pipeline&key=" + child.ID
+	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'stamp','pending',1,?,?)`, child.ID, []byte(`{"id":"stamp"}`), []byte(`{}`))
+	nodeClaim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(child.ID), NodeID: "stamp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodePrincipal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256(nodeClaim.Bearer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeRaw := nativeClaimPresentation(t, e, capability.Authorized{Principal: nodePrincipal, Binding: nodePrincipal.Capability.Binding, Target: capability.Target{Team: "a", RunID: child.ID, NodeID: "stamp"}})
+	w = engineClaimHTTP(t, h, nodeRaw, "GET", path, "", http.StatusOK)
+	var nodeHit controllerwire.DataRecordLookupResult
+	if err := json.Unmarshal(w.Body.Bytes(), &nodeHit); err != nil || !nodeHit.PreparedParent || !nodeHit.Found {
+		t.Fatalf("child job did not inherit preparation: %s %v", w.Body.String(), err)
+	}
+	engineClaimHTTP(t, h, nodeRaw, "POST", "/api/v1/data/download", fmt.Sprintf(`{"digest":%q}`, digest), http.StatusOK)
+	for _, mutation := range []string{"none", "revision", "pipeline revision", "repository", "checkout", "unrelated", "provenance"} {
+		t.Run("child/"+mutation, func(t *testing.T) {
+			request := child.Request
+			switch mutation {
+			case "revision":
+				request.Request.Git.SHA = strings.Repeat("b", 40)
+			case "pipeline revision":
+				request.Request.Source.Ref = strings.Repeat("b", 40)
+			case "repository":
+				request.Request.Source.Location.RemoteURL = "https://github.com/elsewhere/repo"
+			case "checkout":
+				request.Request.Options.Checkout.Set = true
+				request.Request.Options.Checkout.Value.Policy.Tags = new(true)
+			case "unrelated":
+				request.Request.Lineage.ParentRunID = ""
+			case "provenance":
+				request.Provenance = assertedProvenance(t, "deploy", "other", request.Request.Git.SHA)
+			}
+			body, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id=?`, body, child.ID)
+			if mutation == "provenance" {
+				engineClaimHTTP(t, h, ownerRaw, "GET", path, "", http.StatusForbidden)
+				engineClaimHTTP(t, h, ownerRaw, "POST", "/api/v1/data/download", fmt.Sprintf(`{"digest":%q}`, digest), http.StatusForbidden)
+				return
+			}
+			w := engineClaimHTTP(t, h, ownerRaw, "GET", path, "", 200)
+			var hit controllerwire.DataRecordLookupResult
+			if err := json.Unmarshal(w.Body.Bytes(), &hit); err != nil {
+				t.Fatal(err)
+			}
+			want := mutation == "none"
+			if hit.Found != want || hit.PreparedParent != want || want && (hit.Record == nil || string(hit.Record.Digest) != digest || hit.Record.Key != child.ID || hit.Record.Pipeline != "deploy") {
+				t.Fatalf("child lookup=%s; parent source=%+v, child source=%+v; parent checkout=%+v child checkout=%+v", w.Body.String(), parent.Request.Request.Source, request.Request.Source, parent.Request.Request.Options.Checkout.Value, request.Request.Options.Checkout.Value)
+			}
+			status := http.StatusForbidden
+			if want {
+				status = http.StatusOK
+			}
+			engineClaimHTTP(t, h, ownerRaw, "POST", "/api/v1/data/download", fmt.Sprintf(`{"digest":%q}`, digest), status)
+		})
+	}
 }

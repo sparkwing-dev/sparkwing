@@ -2,10 +2,10 @@ package controller
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -77,25 +77,24 @@ func TestLiveLogs_IdleRingIsReleased(t *testing.T) {
 }
 
 func TestLiveLogs_WaitWakesOnTheNextAppend(t *testing.T) {
-	l := newLiveLogs()
-	l.appendAt("run-1", "build", "attempt", 0, liveLine(1))
-	chunk, _ := l.wait(t.Context(), "run-1", "build", 0)
+	synctest.Test(t, func(t *testing.T) {
+		l := newLiveLogs()
+		l.appendAt("run-1", "build", "attempt", 0, liveLine(1))
+		chunk, _ := l.wait(t.Context(), "run-1", "build", 0)
 
-	done := make(chan liveChunk, 1)
-	go func() {
-		next, _ := l.wait(context.Background(), "run-1", "build", chunk.Next)
-		done <- next
-	}()
+		done := make(chan liveChunk, 1)
+		go func() {
+			next, _ := l.wait(t.Context(), "run-1", "build", chunk.Next)
+			done <- next
+		}()
 
-	l.appendAt("run-1", "build", "attempt", chunk.Next, liveLine(2))
-	select {
-	case got := <-done:
+		synctest.Wait()
+		l.appendAt("run-1", "build", "attempt", chunk.Next, liveLine(2))
+		got := <-done
 		if !bytes.Contains(got.Data, []byte("line 0002")) {
 			t.Fatalf("waiter woke with %q, want the newly appended line", got.Data)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("waiter never woke")
-	}
+	})
 }
 
 func TestLiveLogs_NodeCapReleasesTheLeastRecentlyWrittenRing(t *testing.T) {
@@ -129,28 +128,29 @@ func TestLiveLogs_NodeCapReleasesTheLeastRecentlyWrittenRing(t *testing.T) {
 }
 
 func TestLiveLogs_WaitReturnsNotFoundOnceTheRingIsReleased(t *testing.T) {
-	now := time.Now()
-	l := newLiveLogs()
-	l.now = func() time.Time { return now }
-	l.appendAt("run-1", "build", "attempt", 0, liveLine(1))
-	chunk, _ := l.wait(t.Context(), "run-1", "build", 0)
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		l := newLiveLogs()
+		l.now = func() time.Time { return now }
+		l.appendAt("run-1", "build", "attempt", 0, liveLine(1))
+		chunk, _ := l.wait(t.Context(), "run-1", "build", 0)
 
-	done := make(chan bool, 1)
-	go func() {
-		_, ok := l.wait(context.Background(), "run-1", "build", chunk.Next)
-		done <- ok
-	}()
+		done := make(chan bool, 1)
+		go func() {
+			_, ok := l.wait(t.Context(), "run-1", "build", chunk.Next)
+			done <- ok
+		}()
 
-	now = now.Add(l.idle + liveLogSweepInterval + time.Second)
-	l.appendAt("run-1", "other", "attempt", 0, liveLine(1))
+		synctest.Wait()
+		now = now.Add(l.idle + liveLogSweepInterval + time.Second)
+		l.appendAt("run-1", "other", "attempt", 0, liveLine(1))
 
-	select {
-	case ok := <-done:
-		_ = ok
-	case <-time.After(5 * time.Second):
-		t.Fatal("the waiter never woke after its ring was released")
-	}
-	if _, ok := l.wait(t.Context(), "run-1", "build", 0); ok {
-		t.Fatal("the released ring is still readable")
-	}
+		ok := <-done
+		if ok {
+			t.Fatal("waiter found a released ring")
+		}
+		if _, ok := l.wait(t.Context(), "run-1", "build", 0); ok {
+			t.Fatal("the released ring is still readable")
+		}
+	})
 }

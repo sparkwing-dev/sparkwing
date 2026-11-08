@@ -243,7 +243,7 @@ func acquireTemplateVerifyLock(root string) error {
 			templateVerifyLockErr = err
 			return
 		}
-		if err := lockTemplateVerifyFile(f); err != nil {
+		if err := lockExclusiveFile(f); err != nil {
 			_ = f.Close()
 			templateVerifyLockErr = err
 			return

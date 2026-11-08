@@ -90,17 +90,19 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 // Fragments correlate team keys with the final authenticated work/claimant pair.
 // They cannot execute SQL or accept database handles.
 var reviewedClaimSQLFragments = map[string]string{
-	"(*claimSQL).readyClaimContextSQL": "readiness existence checks correlate both indexed sources with the enclosing tenant-keyed context; this fragment cannot execute SQL",
-	"(*claimSQL).poolSatisfies":        "access rules correlate on the team column of the run the caller's tenant-keyed statement selects; this fragment cannot execute SQL",
-	"(*claimSQL).poolTrust":            "the correlated secret lookup uses the authenticated work team supplied by placement or the tenant-bound explanation query; this fragment cannot execute SQL",
-	"(*claimSQL).requirementsMatchSQL": "terms and alternatives bind the caller's scoped team and canonical requirement identity; this fragment cannot execute SQL",
-	"(*claimSQL).routesSQL":            "context routes join on both authenticated requirement team and requirement identity before selecting a tenant-keyed ready head",
-	"(*claimSQL).evaluationArrivalSQL": "the eval source correlates its run creation fallback on the same team and run identity",
-	"(*claimSQL).requirementRoutes":    "shared authenticated label routes restrict indexed selection before the final eligibility predicate",
-	"(*claimSQL).sourceScope":          "the globally unique run ID supplies the team index key; the shared predicate still authorizes its claimant",
-	"(*claimSQL).predicate":            "eligibility correlates every tenant row with the work team's authenticated claimant facts",
-	"(*claimSQL).source":               "the final predicate restricts the union of ready work to authorized teams",
-	"(*claimSQL).query":                "the generated query joins tenant-keyed source rows and applies authenticated scope before selection",
+	"(*claimSQL).actionsReceiptScopeSQL": "the pure SQL builder correlates team, run, node and queue generation with the authenticated work row and checks same-team consent; TestGoSQLRuleAgreement/Actions_tenant_correlations exercises complete bound queries",
+	"(*claimSQL).repositoryTierMatch":    "the receipt lookup equates ad.team with the authenticated claimant facts team and matches the receipt, workflow and runner; TestGoSQLRuleAgreement/Actions_tenant_correlations exercises the complete bound queries",
+	"(*claimSQL).readyClaimContextSQL":   "readiness existence checks correlate both indexed sources with the enclosing tenant-keyed context; this fragment cannot execute SQL",
+	"(*claimSQL).poolSatisfies":          "access rules correlate on the team column of the run the caller's tenant-keyed statement selects; this fragment cannot execute SQL",
+	"(*claimSQL).poolTrust":              "the correlated secret lookup uses the authenticated work team supplied by placement or the tenant-bound explanation query; this fragment cannot execute SQL",
+	"(*claimSQL).requirementsMatchSQL":   "terms and alternatives bind the caller's scoped team and canonical requirement identity; this fragment cannot execute SQL",
+	"(*claimSQL).routesSQL":              "context routes join on both authenticated requirement team and requirement identity before selecting a tenant-keyed ready head",
+	"(*claimSQL).evaluationArrivalSQL":   "the eval source correlates its run creation fallback on the same team and run identity",
+	"(*claimSQL).requirementRoutes":      "shared authenticated label routes restrict indexed selection before the final eligibility predicate",
+	"(*claimSQL).sourceScope":            "the globally unique run ID supplies the team index key; the shared predicate still authorizes its claimant",
+	"(*claimSQL).predicate":              "eligibility correlates every tenant row with the work team's authenticated claimant facts",
+	"(*claimSQL).source":                 "the final predicate restricts the union of ready work to authorized teams",
+	"(*claimSQL).query":                  "the generated query joins tenant-keyed source rows and applies authenticated scope before selection",
 }
 
 func TestClaimSQLFragmentsCannotExecuteOrCarryDatabaseHandles(t *testing.T) {
@@ -138,6 +140,7 @@ func TestClaimSQLFragmentsCannotExecuteOrCarryDatabaseHandles(t *testing.T) {
 					}
 				}
 			case *ast.FuncDecl:
+
 				if v.Recv != nil && len(v.Recv.List) == 1 {
 					star, ok := v.Recv.List[0].Type.(*ast.StarExpr)
 					if ok {
