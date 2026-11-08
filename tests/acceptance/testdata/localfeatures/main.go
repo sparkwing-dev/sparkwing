@@ -17,8 +17,10 @@ func hold(ctx context.Context, name string) error {
 	return err
 }
 
-type result struct{ Value string }
-type childJob struct{ sw.Produces[result] }
+type (
+	result   struct{ Value string }
+	childJob struct{ sw.Produces[result] }
+)
 
 func (childJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 	return sw.Step(w, "hold", func(ctx context.Context) (result, error) {
