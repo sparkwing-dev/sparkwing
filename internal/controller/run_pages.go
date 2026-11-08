@@ -63,7 +63,7 @@ func (s *Server) readRunPage(ctx context.Context, tenant *store.Tenant, a capabi
 	page := controllerwire.RunPage{Runs: []controllerwire.RunDetail{}}
 	engine := s.engineController
 	for through := cursor.Through; through > query.AfterNumber; {
-		views, err := tenant.ListRunViews(ctx, query.AfterNumber, through, 100)
+		views, err := tenant.ListRunViews(ctx, query.AfterNumber, through, min(100, query.Limit-len(page.Runs)+1))
 		if err != nil {
 			return controllerwire.RunPage{}, err
 		}
