@@ -7,7 +7,7 @@ restore and authentication checks. The runbook change adds no product code.
 ## Revisions and isolation
 
 - Old controller: tag `v0.69.2`, commit
-  `ecf8ec2862e8e1d95ebd4fcb66b1fd332771a84b`, schema 30.
+  `70795d1429120a78a41a51ba15684df10daac227`, schema 30.
 - Target controller: commit `1ce4624e418ae3da2c25d2cbf8d5af4e00b787ab`, schema 34.
 - Both binaries were compiled from their source with `GOWORK=off go build -p 2`
   against `./cmd/sparkwing-controller` and started as real loopback HTTP servers.
