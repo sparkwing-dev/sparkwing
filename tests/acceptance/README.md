@@ -37,15 +37,16 @@ scenarios cross real ten-second recovery intervals.
 
 | Scenario | Outcomes asserted |
 | --- | --- |
-| `placement` | Fallback waits for the original three-second hold, including after an unstarted award is returned. The deadline opens within one extra second. Another runner joins during a hold and completes the sole attempt. |
+| `placement` | Sealed repository placement tiers hold the fallback for the original three seconds, including after an unstarted award is returned. Another runner joins mid-hold and gets its tier after one second from the original queue time. Each deadline opens within one extra second. |
 | `retry_failed` | Four successful jobs retain output JSON and downloadable artifacts through three retries. Only the failed job gets an attempt. A second account cancels a running retry, its holder sees cancellation on heartbeat, and the run settles cancelled. |
 | `child_cancellation` | A running child is cancelled within the ten-second recovery interval plus two seconds when its parent is cancelled, fails, or its creating job ends while the parent remains live. A manual child retry survives another recovery sweep and succeeds. |
 
-Placement and child scenarios use personal runners. The retry scenario seeds a
-pending run with GitHub source provenance, then uses repository-scoped shared
-runners on an isolated `high_trust` team. Those runners can publish reusable
-shared records. Source authentication is fixture input because GitHub verification
-is outside this scenario. Plan acceptance, execution, uploads, retries and
+The child scenario uses personal runners. Placement and retry seed pending
+runs with GitHub source provenance and use repository-scoped shared runners
+on an isolated `high_trust` team. Placement also seeds the default-branch tier
+lists. Those runners can publish reusable shared records. Source authentication
+and policy fetching are fixture inputs because GitHub verification is outside
+these scenarios. Plan acceptance, execution, uploads, retries and
 cancellation all use the external controller. Personal runners keep private
 result scopes even on a high-trust team, so their results fall back to execution.
 No setting on a real team changes. Placement advertises two free runner slots

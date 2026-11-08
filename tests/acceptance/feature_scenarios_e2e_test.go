@@ -21,7 +21,7 @@ import (
 
 func testFeaturePlacement(f *featureController) {
 	f.poll(f.fast, "lane=fast")
-	run := f.plan(runspec.Request{}, []nodeproto.JobSpec{{ID: "job", Prefers: []string{"lane=fast"}}})
+	run := f.plan(runspec.Request{}, []nodeproto.JobSpec{{ID: "job"}})
 	if f.claim(f.slow, run, "job", "lane=slow") != nil {
 		f.t.Fatal("fallback bypassed a live preferred runner's hold")
 	}
@@ -55,7 +55,7 @@ func testFeaturePlacement(f *featureController) {
 	f.t.Logf("run=%s fallback opened after %s; unstarted return preserved ready=%s", run, elapsed, ready.Format(time.RFC3339Nano))
 
 	f.poll(f.fast, "lane=fast", "mid-hold")
-	run = f.plan(runspec.Request{}, []nodeproto.JobSpec{{ID: "job", Prefers: []string{"lane=fast,lane=late"}, Requires: []string{"mid-hold"}}})
+	run = f.plan(runspec.Request{}, []nodeproto.JobSpec{{ID: "job", Requires: []string{"mid-hold"}}})
 	f.delay(500 * time.Millisecond)
 	joined := f.mustClaim(f.slow, run, "job", "lane=late", "mid-hold")
 	joinedRow, err := f.host(joined).ReadNode(f.ctx, runspec.NodeRef{RunID: runspec.RunID(run), NodeID: "job"})
@@ -63,7 +63,7 @@ func testFeaturePlacement(f *featureController) {
 		f.t.Fatalf("joining runner queue time: %v", err)
 	}
 	joinedAt := time.Now()
-	if elapsed := joinedAt.Sub(*joinedRow.QueueStartedAt); elapsed < 500*time.Millisecond || elapsed >= 3*time.Second {
+	if elapsed := joinedAt.Sub(*joinedRow.QueueStartedAt); elapsed < time.Second || elapsed >= 2*time.Second {
 		f.t.Fatalf("runner joined outside hold: %s", elapsed)
 	}
 	f.finish(joined, "success")

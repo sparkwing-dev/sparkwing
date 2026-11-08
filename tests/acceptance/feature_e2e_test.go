@@ -34,7 +34,7 @@ type featureController struct {
 	t                               *testing.T
 	ctx                             context.Context
 	url, member, second, fast, slow string
-	seededRun                       string
+	seededRuns                      []string
 	profileReady                    bool
 	cli                             string
 	env                             []string
@@ -80,15 +80,16 @@ func TestFeatureE2E(t *testing.T) {
 		{"placement", testFeaturePlacement}, {"retry_failed", testFeatureRetry}, {"child_cancellation", testFeatureChildren},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			f := newFeatureController(t, bin, scenario.name == "retry_failed")
+			f := newFeatureController(t, bin, scenario.name)
 			f.cli = cli
 			scenario.run(f)
 		})
 	}
 }
 
-func newFeatureController(t *testing.T, bin string, reusable bool) *featureController {
+func newFeatureController(t *testing.T, bin, scenario string) *featureController {
 	t.Helper()
+	reusable := scenario != "child_cancellation"
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	t.Cleanup(cancel)
 	home := t.TempDir()
@@ -145,7 +146,18 @@ func newFeatureController(t *testing.T, bin string, reusable bool) *featureContr
 		*dest = issued.Raw
 	}
 	if reusable {
-		f.seededRun = seedFeatureSource(t, s)
+		if scenario == "placement" {
+			for i, hold := range []time.Duration{3 * time.Second, time.Second} {
+				last := "lane=slow"
+				if i == 1 {
+					last = "lane=late"
+				}
+				placement := &runspec.RepositoryPlacement{Revision: strings.Repeat("a", 40), Prefer: []runspec.RepositoryTier{{Target: runspec.PlacementTeam, Labels: []string{"lane=fast"}, Hold: hold}, {Target: runspec.PlacementTeam, Labels: []string{last}}}}
+				f.seededRuns = append(f.seededRuns, seedFeatureSource(t, s, fmt.Sprintf("placement-%d", i+1), int64(i+1), placement))
+			}
+		} else {
+			f.seededRuns = []string{seedFeatureSource(t, s, "feature-source", 1, nil)}
+		}
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
@@ -248,9 +260,10 @@ func (f *featureController) plan(request runspec.Request, jobs []nodeproto.JobSp
 		request.Source.Ref = request.Git.SHA
 		request.Source.Location = runspec.SourceLocation{RemoteURL: "https://git.example.test/feature.git", PipelineDir: ".sparkwing"}
 	}
-	created := controllerwire.CreateRunResponse{RunID: f.seededRun}
-	if f.seededRun != "" {
-		f.seededRun = ""
+	var created controllerwire.CreateRunResponse
+	if len(f.seededRuns) > 0 {
+		created.RunID = f.seededRuns[0]
+		f.seededRuns = f.seededRuns[1:]
 	} else {
 		var err error
 		created, err = f.control.CreateRun(f.ctx, controllerwire.CreateRunRequest{Request: request, IdempotencyKey: fmt.Sprintf("run-%d", time.Now().UnixNano())})
