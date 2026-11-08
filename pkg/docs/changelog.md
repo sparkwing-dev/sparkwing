@@ -54,7 +54,7 @@ unlock.
 
 ### Changed
 
-- Cloud landing checks restore cached Go builds and checksum-pinned lint and pnpm tools before running the affected gate.
+- Cloud landing checks restore cached Go builds and checksum-pinned tools before running the affected gate against the public merge base, so unmerged main changes stay outside the branch diff.
 
 - Landing gates compile, vet and run fast tests across affected package dependencies, keep full critical checks and touched-package race checks, and leave PostgreSQL and long integration suites to full and release runs. Lint starts alongside tests, and affected race results can reuse Go's test cache.
 

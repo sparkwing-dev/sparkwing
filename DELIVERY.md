@@ -36,9 +36,9 @@ local policy job runs first, then a light `cloud-gate` job invokes
 `sparkwing run gate --sw-route cloud --profile cloud -o json -- --base SHA` while
 the local review runs beside it. Cloud runs the policy, broad `gate`,
 `race-touched` and `record-tree` jobs. Each Cloud job fetches the exact public
-`origin/main` commit captured by preconditions over HTTPS, without developer
-credentials. That commit bounds policy and lint findings even though the uploaded
-snapshot has no ancestry. The affected fast dependency closure, full critical
+merge base of HEAD and the `origin/main` commit captured by preconditions, over
+HTTPS without developer credentials. That commit bounds policy and lint findings even though the uploaded
+snapshot has no ancestry. Main-only changes stay out of the branch diff. The affected fast dependency closure, full critical
 set and touched-package fast race class match local gate mode. Policy and both heavy jobs each
 request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
 requires a successful Cloud receipt and an unchanged clean HEAD before and

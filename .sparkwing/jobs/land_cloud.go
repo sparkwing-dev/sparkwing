@@ -36,6 +36,10 @@ func (j *landCloudGate) run(ctx context.Context) (string, error) {
 	if err := requireLandHead(ctx, git, j.RepoDir, head); err != nil {
 		return "", err
 	}
+	base, err := cloudGateBaseline(ctx, git, head)
+	if err != nil {
+		return "", err
+	}
 	args := []string{"run", "gate", "--sw-route", "cloud", "--profile", j.Profile, "-o", "json"}
 	allowed, err := git(ctx, append([]string{"ls-files", "--"}, cloudGateSecretShapedFixtures...)...)
 	if err != nil {
@@ -45,7 +49,7 @@ func (j *landCloudGate) run(ctx context.Context) (string, error) {
 		args = append(args, "--allow-secret-file", strings.Join(strings.Fields(allowed), ","))
 	}
 	// safety: the exact public base gives the snapshot the same affected scope as local land.
-	result, err := sparkwing.Exec(ctx, "sparkwing", append(args, "--", "--base", head.Base)...).Dir(j.RepoDir).Run()
+	result, err := sparkwing.Exec(ctx, "sparkwing", append(args, "--", "--base", base)...).Dir(j.RepoDir).Run()
 	if err != nil {
 		return "", fmt.Errorf("land: Cloud gate failed; inspect the run with --profile %s: %w", j.Profile, err)
 	}
@@ -53,6 +57,17 @@ func (j *landCloudGate) run(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return cloudGateReceipt(result.Stdout)
+}
+
+func cloudGateBaseline(ctx context.Context, git gitRunner, head landHead) (string, error) {
+	base, err := git(ctx, "merge-base", head.Commit, head.Base)
+	if err != nil {
+		return "", fmt.Errorf("land: resolve Cloud comparison base: %w", err)
+	}
+	if err := validateGateBase(base); err != nil {
+		return "", err
+	}
+	return base, nil
 }
 
 func requireLandHead(ctx context.Context, git gitRunner, dir string, head landHead) error {

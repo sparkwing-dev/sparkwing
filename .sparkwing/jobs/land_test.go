@@ -399,7 +399,7 @@ func TestLandCloudGateWaitsForSuccessAndChecksTheCheckout(t *testing.T) {
 			gitRun(t, repo, "add", ".")
 			gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
 				"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "fixtures")
-			head := landHead{Commit: strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD")), Base: strings.Repeat("a", 40)}
+			head := landHead{Commit: strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD")), Base: strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))}
 			raw, err := json.Marshal(head)
 			if err != nil {
 				t.Fatal(err)
@@ -414,7 +414,7 @@ if [ "$LAND_CLOUD_TEST_MODE" = fail ]; then exit 1; fi
 if [ "$LAND_CLOUD_TEST_MODE" = dirty ]; then printf '\nchanged\n' >> "$LAND_CLOUD_TEST_REPO/CHANGELOG.md"; fi
 printf '{"run_id":"cloud-run","number":7,"outcome":"success"}\n'
 `
-			if err := os.WriteFile(filepath.Join(bin, "sparkwing"), []byte(script), 0o700); err != nil {
+			if err := os.WriteFile(filepath.Join(bin, "sparkwing"), []byte(strings.ReplaceAll(script, strings.Repeat("a", 40), head.Base)), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -431,5 +431,29 @@ printf '{"run_id":"cloud-run","number":7,"outcome":"success"}\n'
 				t.Fatalf("accepted %s Cloud gate", mode)
 			}
 		})
+	}
+}
+
+func TestCloudGateUsesThePublicMergeBaseWhenMainHasMoved(t *testing.T) {
+	repo := atomicReleaseRepo(t, fixtureChangelog)
+	base := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+	gitRun(t, repo, "checkout", "-b", "feature")
+	writeGoFile(t, filepath.Join(repo, "FEATURE.md"), "feature\n")
+	gitRun(t, repo, "add", "FEATURE.md")
+	gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "feature")
+	feature := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+	gitRun(t, repo, "checkout", "-b", "advanced-main", base)
+	writeGoFile(t, filepath.Join(repo, "MAIN.md"), "main\n")
+	gitRun(t, repo, "add", "MAIN.md")
+	gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "main")
+	main := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+	gitRun(t, repo, "checkout", "feature")
+	got, err := cloudGateBaseline(t.Context(), gitIn(repo), landHead{Commit: feature, Base: main})
+	if err != nil || got != base {
+		t.Fatalf("comparison base=%s error=%v, want public merge base %s", got, err, base)
+	}
+	files, err := changedBetween(t.Context(), repo, got, feature)
+	if err != nil || !slices.Equal(files, []string{"FEATURE.md"}) {
+		t.Fatalf("Cloud delta=%v error=%v, want only the feature", files, err)
 	}
 }
