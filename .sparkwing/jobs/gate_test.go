@@ -33,7 +33,7 @@ func gateFixtureRepo(t *testing.T) string {
 
 func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Gate{}).Plan(context.Background(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 
 	nodes := plan.Jobs
@@ -65,8 +65,8 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 		t.Fatalf("single-tenant bounded command = %q", got)
 	}
 	t.Setenv("CI", "1")
-	if got := currentHost(); !got.singleTenant || got.cpus != runtime.NumCPU() {
-		t.Fatalf("currentHost under CI = %#v, want the machine's CPUs and single tenancy", got)
+	if got := currentHost(); !got.singleTenant || got.cpus != min(runtime.NumCPU(), runtime.GOMAXPROCS(0)) {
+		t.Fatalf("currentHost under CI = %#v, want the runtime CPU budget and single tenancy", got)
 	}
 	t.Setenv("CI", "")
 	if currentHost().singleTenant {
@@ -74,9 +74,18 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	}
 }
 
+func TestGateHonorsTheRuntimeCPULimit(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	t.Setenv("CI", "true")
+	if got := boundedGoCommand(currentHost(), "test", "./..."); got != "GOMAXPROCS=1 go test -p 1 ./..." {
+		t.Fatalf("bounded command = %q, want the runtime limit retained under CI", got)
+	}
+}
+
 func TestGateDeadlineAllowsTheHostedPostgresTail(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Gate{}).Plan(t.Context(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 	// safety: the hosted full-suite chain took 35m32s before Postgres could start.
 	const beforePostgres = 35*time.Minute + 32*time.Second
@@ -89,7 +98,7 @@ func TestGateDeadlineAllowsTheHostedPostgresTail(t *testing.T) {
 
 func TestGateKeepsRaceInAnIndependentRequiredJob(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Gate{}).Plan(t.Context(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 	if len(plan.Jobs) != 4 {
 		t.Fatalf("gate jobs = %d, want policy, broad checks, race and the tree record", len(plan.Jobs))
@@ -110,10 +119,13 @@ func TestGateKeepsRaceInAnIndependentRequiredJob(t *testing.T) {
 		t.Errorf("race job timeout = %s, want %s", got, raceTouchedStepTimeout)
 	}
 	w := inspectWork(t, &Gate{})
+	if got := findStep(w, "lint").Needs; len(got) != 0 {
+		t.Errorf("lint dependencies = %v, want independent lint", got)
+	}
 	if findStep(w, "race-touched") != nil {
 		t.Fatal("broad checks still run race in their own process")
 	}
-	for _, id := range []string{"lint", "store-postgres"} {
+	for _, id := range []string{"store-postgres"} {
 		if got := findStep(w, id).Needs; !slices.Equal(got, []string{"test"}) {
 			t.Errorf("%s dependencies = %v, want [test]", id, got)
 		}
@@ -201,7 +213,7 @@ func TestTestStepRefusesAFailingProductTest(t *testing.T) {
 
 func TestGoStepsStillCoverThePipelineModule(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := newTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "negative_control.go"),
 		"package pipelines\n\nfunc Broken( {\n")
@@ -216,7 +228,7 @@ func TestGoStepsCoverEveryCommittedModule(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := newTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, "tools", "go.mod"), "module fixture/tools\n\ngo 1.25\n")
 	writeGoFile(t, filepath.Join(root, "tools", "broken.go"), "package tools\n\nfunc Broken( {\n")
@@ -330,9 +342,9 @@ func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 	}
 }
 
-func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
+func TestBuildAndTestKeepTheirCompilerDependencies(t *testing.T) {
 	w := inspectWork(t, &Gate{})
-	chain := []string{"vet", "build", "test", "lint"}
+	chain := []string{"vet", "build", "test"}
 	for i := 1; i < len(chain); i++ {
 		if findStep(w, chain[i]) == nil {
 			t.Errorf("the gate must run step %q", chain[i])
@@ -518,7 +530,7 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 			t.Chdir(root)
 
 			writeGoFile(t, filepath.Join(web, "package.json"), fmt.Sprintf(`{"scripts":{"%s":"node -e \"process.exit(1)\""}}`, tc.script))
-			err := tc.run(context.Background())
+			err := tc.run(newTestContext(t))
 			if err == nil || !strings.Contains(err.Error(), tc.failure) {
 				t.Fatalf("%s failure = %v, want named verdict", tc.name, err)
 			}
@@ -686,7 +698,7 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 			writeGoFile(t, filepath.Join(root, "internal", "bad.go"), tc.body)
 			gitAddAll(t, root)
 
-			if err := tc.check(context.Background()); err == nil {
+			if err := tc.check(newTestContext(t)); err == nil {
 				t.Fatal("the sweep passed a staged change that introduces the pattern")
 			}
 		})
@@ -695,7 +707,7 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 
 func TestRegexSweepsReadTheRangeWhenNothingIsStaged(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := newTestContext(t)
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 
@@ -732,7 +744,7 @@ func TestRegexSweepsIgnoreHistoryBeforeTheBaseline(t *testing.T) {
 
 func TestRegexSweepAllReadsPastTheStagedChange(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := newTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, "FEEDBACK.md"), "a dash "+emDash+" here\n")
 	gitCommitAll(t, root, "history the commit does not touch")
@@ -874,7 +886,7 @@ func TestFullModeScopeJudgesEveryTrackedFileWhateverTheBaseline(t *testing.T) {
 
 func TestGateBaseRefusesAnUnreadableRepository(t *testing.T) {
 	t.Chdir(t.TempDir())
-	if _, _, err := resolveGateBase(t.Context()); err == nil {
+	if _, _, err := resolveGateBase(newTestContext(t)); err == nil {
 		t.Fatal("a missing repository produced a successful gate baseline")
 	}
 }
@@ -1111,7 +1123,7 @@ func TestScopedStepsRefuseToLetAFilenameRunACommand(t *testing.T) {
 
 	// safety: the step is expected to refuse the file, which is unformatted;
 	// what must not happen is the shell running the name.
-	if err := runGofmtOnTheChange(context.Background()); err == nil {
+	if err := runGofmtOnTheChange(newTestContext(t)); err == nil {
 		t.Error("gofmt passed an unformatted file, so the hostile name never reached it")
 	}
 
