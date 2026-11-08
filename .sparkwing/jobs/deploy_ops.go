@@ -47,6 +47,7 @@ func (c deployCommand) String() string {
 }
 
 type deployRegistry interface {
+	retain(ctx context.Context, password string, pin imagePin) error
 	digest(ctx context.Context, password, ref string) (string, error)
 	revision(ctx context.Context, password, ref string) (string, error)
 	publish(ctx context.Context, password string, in PublishImagesArgs) error
@@ -595,6 +596,16 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 		}
 		rec.Previous, err = readValuesPins(string(body))
 		return err
+	}); err != nil {
+		return rec, err
+	}
+	if err := d.act(ctx, "retain candidate and rollback image manifests outside ECR rolling pruning", func() error {
+		for _, pin := range []imagePin{images.Controller, images.Runner, rec.Previous.Controller, rec.Previous.Launcher, rec.Previous.Job} {
+			if err := d.tools.registry.retain(ctx, d.ecrPass, pin); err != nil {
+				return fmt.Errorf("retain %s: %w", pin.ref(), err)
+			}
+		}
+		return nil
 	}); err != nil {
 		return rec, err
 	}

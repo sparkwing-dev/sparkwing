@@ -380,6 +380,15 @@ type fakeDeployRegistry struct {
 	digests   map[string]string
 	revisions map[string]string
 	published []PublishImagesArgs
+	retained  []imagePin
+	retainErr error
+}
+
+func (r *fakeDeployRegistry) retain(_ context.Context, _ string, pin imagePin) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.retained = append(r.retained, pin)
+	return r.retainErr
 }
 
 func (r *fakeDeployRegistry) digest(_ context.Context, _, ref string) (string, error) {
