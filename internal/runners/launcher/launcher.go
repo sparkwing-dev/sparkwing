@@ -155,6 +155,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 			startupRateLimit := false
 			if err == nil && !time.Now().Before(cooldown) {
 				var launched bool
+				cooldown = time.Now().Add(poll)
 				launched, err = l.claim(ctx)
 				failure, ok := err.(*apierr.Error) //nolint:errorlint // Joined faults must remain WARN.
 				startupRateLimit = firstClaim && !launched && ok && failure.Code == apierr.RateLimited
@@ -172,7 +173,19 @@ func (l *Launcher) Run(ctx context.Context) error {
 				cooldown = later(cooldown, time.Now().Add(retryWait(err, 0)))
 			}
 		}
-		timer := time.NewTimer(poll)
+		wait := poll
+		if blocking(synced) == nil {
+			for _, award := range l.waitingAwards() {
+				// perf: container exit should release a held successor before the next claim poll.
+				if !award.teardownDeadline.IsZero() && time.Now().Before(award.teardownDeadline) {
+					wait = min(wait, time.Second)
+				}
+			}
+		}
+		if remaining := time.Until(cooldown); remaining > 0 {
+			wait = min(wait, remaining)
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

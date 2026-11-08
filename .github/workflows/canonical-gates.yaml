@@ -319,7 +319,17 @@ jobs:
           if [ -f "$RUNNER_TEMP/report-hosted-run-failure.sh" ]; then
             reporter="$RUNNER_TEMP/report-hosted-run-failure.sh"
           fi
-          bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing"
+          bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing" "$RUNNER_TEMP/canonical-run.log"
+
+      - name: Retain failed canonical run log
+        if: ${{ failure() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: canonical-run-log-${{ matrix.gate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/canonical-run.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload dashboard browser failure artifacts
         if: ${{ failure() && matrix.gate == 'gate' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}
