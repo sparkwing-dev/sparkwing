@@ -210,6 +210,8 @@ type cancelledError struct {
 	Reason string
 }
 
+func (e *cancelledError) Unwrap() error { return context.Canceled }
+
 func (e *cancelledError) Error() string {
 	if e.Reason == "" {
 		return "wingd: run cancelled while queued"

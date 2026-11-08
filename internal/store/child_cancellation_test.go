@@ -65,7 +65,7 @@ func TestUnawaitedChildSweepReadsOnlyLiveChildren(t *testing.T) {
 	if tenant.s.dialect != DialectSQLite {
 		t.Skip("plan text is SQLite's")
 	}
-	rows, err := tenant.s.query(t.Context(), "EXPLAIN QUERY PLAN "+tenant.s.unawaitedChildrenQuery(), 100)
+	rows, err := tenant.s.query(t.Context(), "EXPLAIN QUERY PLAN "+tenant.s.AsOperator().unawaitedChildrenQuery(), 100)
 	if err != nil {
 		t.Fatal(err)
 	}

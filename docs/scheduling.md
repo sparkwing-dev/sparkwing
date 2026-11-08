@@ -171,8 +171,12 @@ with the reason, and the rest of the delivery proceeds. `sparkwing pipeline lint
 every declared job. `sparkwing runs status` and the run page show each held
 job's tiers, the runners live in each, and when the next tier opens. A job
 with no available tier waits under the existing queue policy. On-demand
-GitHub Actions dispatch is not available yet; a `github-actions` tier takes
-only an already running Actions runner.
+A `github-actions` tier dispatches one approved workflow per job queue generation
+once earlier holds permit it. Its credential is bound to that job, workflow and
+GitHub-hosted image. Missing App permission shows an installation approval link.
+An uncertain send stays visible and is never resent automatically. See
+[on-demand fallback](github-actions-runners.md#on-demand-fallback) for approval,
+workflow setup and audited operator retries.
 
 ## How runners advertise labels
 

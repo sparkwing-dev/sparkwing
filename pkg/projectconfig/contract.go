@@ -3,9 +3,11 @@ package projectconfig
 // Config excludes connection credentials because a checkout cannot choose where
 // a user's secrets are sent. Nil optional fields mean unset; explicit null fails.
 type Config struct {
-	Defaults  *Defaults  `yaml:"defaults,omitempty" json:"defaults,omitempty"`
-	Pipelines []Pipeline `yaml:"pipelines,omitempty" json:"pipelines,omitempty"`
-	Sparks    []Spark    `yaml:"sparks,omitempty" json:"sparks,omitempty"`
+	// AllowSecretFiles names repository-relative upload exceptions. Secret-value scanning still applies.
+	AllowSecretFiles []string   `yaml:"allow_secret_files,omitempty" json:"allow_secret_files,omitempty"`
+	Defaults         *Defaults  `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+	Pipelines        []Pipeline `yaml:"pipelines,omitempty" json:"pipelines,omitempty"`
+	Sparks           []Spark    `yaml:"sparks,omitempty" json:"sparks,omitempty"`
 }
 
 // Defaults applies even when a pipeline has no entry in the project file.

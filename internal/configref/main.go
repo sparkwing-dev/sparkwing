@@ -31,7 +31,7 @@ func main() {
 	}
 	root := os.Args[1]
 	pf := mustParse(filepath.Join(root, "pkg", "pipelines", "pipelines.go"))
-	cf := mustParse(filepath.Join(root, "pkg", "projectconfig", "projectconfig.go"))
+	cf := mustParse(filepath.Join(root, "pkg", "projectconfig", "contract.go"))
 
 	var b strings.Builder
 	b.WriteString("<!-- GENERATED from the sparkwing.yaml schema structs (pkg/pipelines, pkg/projectconfig) by internal/configref. Do not edit by hand; regenerate with `bash bin/gen-config-docs.sh`. -->\n")
