@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Security
+
+- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
+
 ## [v0.71.0] - 2026-11-08
 ### Changed
 

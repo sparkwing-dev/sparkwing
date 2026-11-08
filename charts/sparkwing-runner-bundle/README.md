@@ -88,7 +88,10 @@ requires a `ReadWriteMany` volume. An existing claim can be selected through
 The runner has its own ServiceAccount. Its token is not mounted by default
 because the runner claims work through the controller and needs no Kubernetes
 API access. The chart creates no runner Role or RoleBinding. The launcher owns
-Kubernetes Jobs under its separate permissions. Set `runner.alsoClaimTriggers`
+Kubernetes Jobs under its separate permissions. The runner ServiceAccount also
+disables token automount for Pods that omit the setting. An explicit
+`runner.automountServiceAccountToken=true` still enables it on the runner Pod.
+Set `runner.alsoClaimTriggers`
 to `false` for a pool that should claim only jobs.
 
 Set `launcher.enabled=true` to run a Cloud launcher Deployment. Supply its
