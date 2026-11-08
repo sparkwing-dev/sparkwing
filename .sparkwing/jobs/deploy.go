@@ -345,7 +345,7 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 	if len(rec.Changes) == 0 {
 		return rec, err
 	}
-	// safety: a newer candidate may already have migrated the store; require roll forward even if startup failed before proving migration.
+	// safety: a newer candidate may already have migrated the store; uncertain migration progress requires roll forward.
 	if rec.CandidateSchema > rec.PreviousSchema || rec.PreviousSchema <= 0 || rec.CandidateSchema <= 0 {
 		feedbackErr := d.recordUnsafeRollback(ctx, rec, err)
 		if feedbackErr != nil {

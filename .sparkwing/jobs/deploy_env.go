@@ -181,7 +181,7 @@ type gitopsChange struct {
 	Commit string `json:"commit"`
 }
 
-// safety: rollback uses this run's own changes and schema evidence, so failure cannot revert another deploy or cross a schema upgrade.
+// safety: this run's rollback record prevents reverting another deploy or crossing a schema upgrade.
 type envDeployment struct {
 	Environment     string         `json:"environment"`
 	Images          deployImages   `json:"images"`
