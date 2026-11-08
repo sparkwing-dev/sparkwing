@@ -112,7 +112,7 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 			return err
 		}
 	}
-	// perf: exact-source green CI already ran the broad checks; the desktop keeps the release-specific guards.
+	// perf: reuse exact-source CI evidence to avoid a broad desktop suite; retain the release-specific guards.
 	args := []string{"run", "release", "-C", checkout, "--sw-route", "local", "--sw-start-at", "version-freshness"}
 	if dry {
 		args = append(args, "--sw-dry-run")
