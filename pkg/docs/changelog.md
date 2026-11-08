@@ -39,6 +39,10 @@ unlock.
 
 ### Fixed
 
+- **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller’s configuration and index untouched.
+- **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
+- **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
+
 - **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
 - **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
 
@@ -102,8 +106,6 @@ unlock.
 
 ### Fixed
 
-- **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
-- **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
 - **local runner:** Held jobs reconnect after controller restarts because cancelled admission polls return an unavailable response instead of an empty success.

@@ -9,11 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -256,7 +259,7 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 		t.Fatalf("same-build successor did not reuse identity: first=%+v successor=%+v", first, reused)
 	}
 	stopController()
-	if err := outlastClaimRecovery(ctx); err != nil {
+	if err := awaitLocalRunnerClaimDrain(ctx, home, first.ID); err != nil {
 		t.Fatal(err)
 	}
 	recovered := start(cli)
@@ -413,13 +416,55 @@ func pollLocalRunner(ctx context.Context, condition func() bool) error {
 	return nil
 }
 
-func outlastClaimRecovery(ctx context.Context) error {
+func awaitLocalRunnerClaimDrain(ctx context.Context, home, id string) error {
+	socket, err := wingd.APISocketPath(home)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(socket); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		return err
+	}
+	drained := make(chan struct{})
+	var once sync.Once
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/runners/claim" {
+			response := []byte(`{"error":{"code":"unavailable","message":"controller offline"}}`)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Length", strconv.Itoa(len(response)))
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if _, err := w.Write(response); err != nil {
+				return
+			}
+			if err := http.NewResponseController(w).Flush(); err != nil {
+				return
+			}
+			if r.Method == http.MethodPost && r.URL.Path == "/api/v1/local/runners/"+id+"/drain" {
+				once.Do(func() { close(drained) })
+			}
+			return
+		}
+		// safety: claim calls must fail as transport errors to exercise outage recovery;
+		// lifecycle calls keep retrying until the successor controller answers them.
+		connection, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = connection.Close()
+		}
+	})}
+	served := make(chan struct{})
+	var serveErr error
+	go func() { defer close(served); serveErr = server.Serve(listener) }()
+	defer func() { _ = server.Close(); <-served }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	// sleepcheck:external-boundary a real controller outage must outlast the five-second claim recovery window
-	case <-time.After(6 * time.Second):
-		return nil
+	case <-served:
+		return serveErr
+	case <-drained:
+		return server.Shutdown(ctx)
 	}
 }
 

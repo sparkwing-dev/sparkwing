@@ -2,10 +2,11 @@ package nodehost
 
 import (
 	"errors"
-	"os/exec"
 	"path"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 
@@ -14,7 +15,7 @@ import (
 
 func TestMalformedPatternsFailWithoutTrackedFiles(t *testing.T) {
 	repository := t.TempDir()
-	command := exec.CommandContext(t.Context(), "git", "init", "--quiet", repository)
+	command := testgit.CommandContext(t.Context(), "git", "init", "--quiet", repository)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("initialize repository: %v: %s", err, output)
 	}

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -186,7 +188,7 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 		t.Skip("git not available; the release pipeline carries the same check")
 	}
 	root := repoRootForTest(t)
-	cmd := exec.Command("git", "tag", "--list", firstHostingRelease)
+	cmd := testgit.Command("git", "tag", "--list", firstHostingRelease)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -196,7 +198,7 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 		return
 	}
 	const marker = "internal/wingd/supervise/supervise.go"
-	probe := exec.Command("git", "cat-file", "-e", firstHostingRelease+":"+marker)
+	probe := testgit.Command("git", "cat-file", "-e", firstHostingRelease+":"+marker)
 	probe.Dir = root
 	if err := probe.Run(); err != nil {
 		t.Fatalf("firstHostingRelease names %s, a released tag that does not contain %s -- that build cannot host a "+
