@@ -457,7 +457,7 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 	for _, want := range []string{
 		".env (name, untracked)", "deploy/service.conf (content, tracked)",
 		"notes/backup.txt (content, untracked)",
-		"git rm --cached", ".gitignore", "--allow-secret-file",
+		"git rm --cached", ".gitignore", "allow_secret_files",
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("refusal = %q, want it to mention %q", message, want)
@@ -479,8 +479,8 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 		t.Fatalf("naming an absent path = %v, want it reported", err)
 	}
 
-	snapshot, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo,
-		[]string{"./.env", "deploy/service.conf", "notes/backup.txt"})
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "allow_secret_files: [.env, deploy/service.conf, notes/backup.txt]\n", 0o644)
+	snapshot, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err != nil {
 		t.Fatalf("captureWorktreeSnapshot with both paths named: %v", err)
 	}

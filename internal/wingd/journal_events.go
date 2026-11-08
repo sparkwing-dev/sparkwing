@@ -8,6 +8,18 @@ import (
 )
 
 func (d *Daemon) recordJournal(kind string, c *conn, data map[string]any) {
+	if c != nil && (kind == "queued" || kind == "grant") {
+		if kind == "queued" {
+			data["wait_ms"] = max(int64(0), d.now().Sub(c.startAt).Milliseconds())
+		}
+		if observer, ok := d.cfg.Runs.(interface {
+			RecordAdmissionEvent(string, string, map[string]any) error
+		}); ok {
+			if err := observer.RecordAdmissionEvent(c.runID, kind, data); err != nil {
+				d.cfg.logf("run admission event: %v", err)
+			}
+		}
+	}
 	if d.journal == nil {
 		return
 	}

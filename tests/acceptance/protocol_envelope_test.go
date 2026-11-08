@@ -66,8 +66,8 @@ func testGoSDKEnvelopeTranscripts(t *testing.T) {
 						t.Fatalf("closure result = %+v; want %s", result, want)
 					}
 					if closure.kind == "generate" {
-						var jobs []nodeproto.JobSpec
-						if err := json.Unmarshal(result.Value, &jobs); err != nil || len(jobs) != 1 || jobs[0].ID != "generated" || !reflect.DeepEqual(jobs[0].Needs, []string{"envelope"}) {
+						var document nodeproto.PlanDoc
+						if err := json.Unmarshal(result.Value, &document); err != nil || len(document.Jobs) != 1 || document.Jobs[0].ID != "generated" || !reflect.DeepEqual(document.Jobs[0].Needs, []string{"envelope"}) {
 							t.Fatalf("generation result = %s, %v", result.Value, err)
 						}
 					}
@@ -138,13 +138,13 @@ func testProtocolReplyCorrelation(t *testing.T) {
 
 func testProtocolEvalValueTypes(t *testing.T) {
 	for kind, valid := range map[string][]string{
-		"skip_if": {"true", "false"}, "memo_key": {"true", "false", `"key"`, "null", "[]", "{}", "1"},
+		"skip_if": {"true", "false"}, "memo_key": {"true", "false", `"key"`, "null", "[]", "{}", "1", `{"jobs":[]}`},
 		"before_run": {"null"}, "after_run": {"null"}, "verify": {"null"},
-		"generate": {"[]"},
+		"generate": {`{"jobs":[]}`},
 	} {
 		t.Run(kind, func(t *testing.T) {
 			recordLeaf(t)
-			for _, value := range []string{"true", "false", `"key"`, `""`, "null", "[]", "{}", "1"} {
+			for _, value := range []string{"true", "false", `"key"`, `""`, "null", "[]", "{}", "1", `{"jobs":[]}`} {
 				var result nodeproto.EvalResult
 				if err := (nodeproto.Reply{ID: "eval", OK: true, Result: json.RawMessage(`{"value":` + value + `}`)}).Decode(&result); err != nil {
 					t.Fatal(err)

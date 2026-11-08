@@ -260,7 +260,6 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "detach"},
 			{Name: "working-tree"},
-			{Name: "allow-secret-file", Argument: "PATH", Repeatable: true, CommaList: true},
 			{Name: "trusted"},
 			{Name: "runner", Argument: "RUNNER"},
 			{Name: "reason", Argument: "TEXT"},
@@ -395,7 +394,6 @@ func Registry() []Command {
 			{Name: "publish", Argument: "PROFILE"},
 			{Name: "sw-route", Argument: "ROUTE", Values: []string{"local", "cloud"}, Meaning: "Select local execution or direct Cloud execution for this invocation."},
 			{Name: "profile", Argument: "NAME", Requires: []string{"sw-route"}, Meaning: "Cloud connection profile; requires --sw-route cloud."},
-			{Name: "allow-secret-file", Argument: "PATH", Repeatable: true, CommaList: true, Requires: []string{"sw-route"}, Meaning: "Upload this repository-relative file even though its name or content looks like a secret; the secret-value scan still applies. Requires --sw-route cloud."},
 			{Name: "agent", Argument: "NAME"},
 			{Name: "sw-cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
 			{Name: "sw-pause-before", Argument: "JOB", Repeatable: true, CommaList: true},
@@ -880,7 +878,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner version", Flags: []Flag{
 			{Name: "offline"},
 		}},
-		{Path: "sparkwing-runner warm", Rules: []string{"Claim triggers and jobs with controller-awarded leases. GitHub Actions exchange scopes work to the authorized push."}, Flags: []Flag{
+		{Path: "sparkwing-runner warm", Rules: []string{"Claim triggers and jobs with controller-awarded leases. GitHub Actions exchange scopes ordinary workers to their authorized push. --dispatch-receipt binds an on-demand worker to one job and its original workload trust."}, Flags: []Flag{
 			{Name: "controller", Argument: "VALUE"},
 			{Name: "poll", Argument: "DURATION"},
 			{Name: "max-concurrent", Argument: "N"},
@@ -890,6 +888,7 @@ func Registry() []Command {
 			{Name: "claim-jobs"},
 			{Name: "local-admission"},
 			{Name: "github-actions"},
+			{Name: "dispatch-receipt", Argument: "VALUE", Meaning: "Controller receipt for an on-demand GitHub Actions job"},
 			{Name: "team", Argument: "VALUE"},
 			{Name: "idle-exit", Argument: "DURATION"},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
