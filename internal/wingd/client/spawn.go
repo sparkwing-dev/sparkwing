@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -22,7 +23,7 @@ func defaultSpawn(home, version string) error {
 	if err != nil {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
-	return spawnDetached(self, home, version)
+	return spawnDetached(self, home, version, false)
 }
 
 const hostStartGrace = 2 * time.Second
@@ -33,7 +34,7 @@ var errNoDaemonHost = errors.New("wingd/client: no admission daemon is running a
 
 var errDaemonHostFailed = errors.New("wingd/client: the daemon host binary exited without serving")
 
-func spawnDetached(bin, home, version string) error {
+func spawnDetached(bin, home, version string, scheduleTick bool) error {
 	if _, err := wingd.EnsureSocketPath(home); err != nil {
 		return err
 	}
@@ -47,7 +48,9 @@ func spawnDetached(bin, home, version string) error {
 
 	logF, logExisted := openDaemonLog(home)
 
-	cmd := procenv.ControlCommand(os.Environ(), bin, args...)
+	scope := scheduleTick && runtime.GOOS == "linux" && os.Getenv("INVOCATION_ID") != ""
+	name, commandArgs := daemonCommandLine(bin, args, scope)
+	cmd := procenv.ControlCommand(os.Environ(), name, commandArgs...)
 	cmd.Stdin = nil
 	cmd.Stdout = logF
 	cmd.Stderr = logF
@@ -57,16 +60,29 @@ func spawnDetached(bin, home, version string) error {
 		// safety: a log this spawn created and never wrote to would imply a
 		// daemon ran here; leave the directory as it was found instead.
 		discardUnusedDaemonLog(logF, home, logExisted)
+		if scope {
+			return spawnDetached(bin, home, version, false)
+		}
 		return fmt.Errorf("start daemon: %w", err)
 	}
 	if logF != nil {
 		_ = logF.Close()
 	}
 	if err := watchHostStart(cmd, bin, home); err != nil {
+		if scope {
+			return spawnDetached(bin, home, version, false)
+		}
 		return err
 	}
 	_ = cmd.Process.Release()
 	return nil
+}
+
+func daemonCommandLine(bin string, args []string, scope bool) (string, []string) {
+	if scope {
+		return "systemd-run", append([]string{"--user", "--scope", "--quiet", "--", bin}, args...)
+	}
+	return bin, args
 }
 
 func watchHostStart(cmd *exec.Cmd, bin, home string) error {

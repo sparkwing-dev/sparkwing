@@ -184,7 +184,7 @@ func TestWalkHashable_DoesNotFollowSymlinks(t *testing.T) {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	files, _, err := walkHashable(root, allFiles, nil)
+	files, _, err := walkHashable(root, allFiles, nil, nil)
 	if err != nil {
 		t.Fatalf("walkHashable: %v", err)
 	}
