@@ -23,12 +23,6 @@ unlock.
 ### Changed
 
 - **runner:** Trim Go's regression assets from the image and reuse pinned tool layers across package refreshes
-### Security
-
-- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
-
-### Changed
-
 - **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/_unreleased.md#bound-object-presence-requests).
 
 
@@ -41,6 +35,10 @@ unlock.
 - **runs:** Select latest pipeline observations through one store owner. CLI
   repository status and dashboard summaries use the same start-time, run-number
   and run-ID order. Reference authorization and success-pin policy stay unchanged.
+
+### Security
+
+- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
 
 ### Fixed
 
@@ -55,6 +53,7 @@ unlock.
 - **local execution:** Command cancellation waits for cleanup of children in separate process groups before returning a result.
 
 - **Go SDK:** Windows commands honor their own `PATH` and `PATHEXT` and strip engine credentials from child environments. Pipeline tests no longer pull controller dependencies into the SDK module closure.
+
 ## [v0.71.0] - 2026-11-08
 ### Changed
 
