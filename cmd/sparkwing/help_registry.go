@@ -101,6 +101,7 @@ func surfaceCommand(path string) Command {
 }
 
 var commandFlagDescriptions = map[string]string{
+	"sparkwing dashboard open --host":                          "Exact DNS name from dashboard.allowed_hosts for an HTTPS sign-in link through Tailscale Serve.",
 	"sparkwing __complete --kind":                              "Which completion candidates to print for the given command words.",
 	"sparkwing billing request-tier --message":                 "What you need, sent to the operators with the team's standing and payment history.",
 	"sparkwing billing request-tier --tier":                    "Standing tier to request.",
