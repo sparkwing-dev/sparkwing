@@ -417,7 +417,7 @@ func TestConsoleFailedRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, err := control.ReadRun(t.Context(), created.RunID)
-	if err != nil || before.Retry == nil || !reflect.DeepEqual(before.Retry.Reused, []string{"job"}) {
+	if err != nil || before.Retry == nil || len(before.Retry.Reused) != 0 {
 		t.Fatalf("retry receipt: %+v, %v", before.Retry, err)
 	}
 	if _, err := s.store.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
@@ -426,6 +426,9 @@ func TestConsoleFailedRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 	after, err := control.ReadRun(t.Context(), created.RunID)
 	if err != nil || after.Status != "success" || len(after.Attempts) != 0 || len(after.Jobs) != 1 {
 		t.Fatalf("retry reran reused work: %+v, %v", after, err)
+	}
+	if after.Retry == nil || !reflect.DeepEqual(after.Retry.Reused, []string{"job"}) {
+		t.Fatalf("retry lost completed reuse: %+v", after.Retry)
 	}
 }
 
@@ -537,6 +540,9 @@ func TestFailedRetryReusesOnlyReleasedJobsAndStaysClaimable(t *testing.T) {
 	after, err := control.ReadRun(t.Context(), created.RunID)
 	if err != nil || after.Status != "success" || !reflect.DeepEqual(ran, []string{"build", "package", "test"}) {
 		t.Fatalf("retry: status=%s ran=%v err=%v", after.Status, ran, err)
+	}
+	if after.Retry == nil || !reflect.DeepEqual(after.Retry.Reused, []string{"check"}) {
+		t.Fatalf("retry reports executed jobs as reused: %+v", after.Retry)
 	}
 	for _, attempt := range after.Attempts {
 		if attempt.JobID == "check" {
