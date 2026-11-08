@@ -76,8 +76,9 @@ test -f "$store_home/state.db"
 mkdir -p /srv/backups/sparkwing
 mkdir "$backup"
 cp -a "$store_home" "$backup/home"
-sqlite3 "$backup/home/state.db" 'PRAGMA integrity_check;'
-sqlite3 "$backup/home/state.db" \
+backup_home="$backup/home"
+sqlite3 "$backup_home/state.db" 'PRAGMA integrity_check;'
+sqlite3 "$backup_home/state.db" \
   'SELECT version, baseline_digest FROM sparkwing_schema_version;'
 ```
 
