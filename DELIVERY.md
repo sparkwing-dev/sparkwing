@@ -1739,12 +1739,15 @@ Arm both declarations from the main checkout on a host with Git push access,
 GitHub CLI authentication for CI reads, Go, Xwing and Sparkwing on PATH:
 
 ```sh
-SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-sdk-cli,owned-sdk-main --unpinned
-SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing schedules list
+export SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery"
+export SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/secrets.key"
+sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-sdk-cli,owned-sdk-main --unpinned
+sparkwing schedules list
 ```
 
 The dedicated state directory keeps release work out of the operational runs
-store. Keep HOME at the operator's home so Git signing and GitHub authentication
+store. The private key-file provider also works on headless hosts. Use those
+same exports for manual runs. Keep HOME at the operator's home so Git signing and GitHub authentication
 remain available. Sparkwing owns cadence and overlap handling through its
 schedule evaluator and managed timer. `--unpinned` compiles the main checkout
 on each fire so later pipeline fixes take effect. This installation command
