@@ -115,11 +115,11 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 	if err != nil {
 		t.Fatalf("fake expansion = %v", err)
 	}
-	var jobs []nodeproto.JobSpec
-	if err := json.Unmarshal(fake, &jobs); err != nil {
+	var document nodeproto.PlanDoc
+	if err := json.Unmarshal(fake, &document); err != nil {
 		t.Fatal(err)
 	}
-	assertRecoveryChain(t, jobs, true)
+	assertRecoveryChain(t, document.Jobs, true)
 	for _, tc := range []struct {
 		name, output string
 		args         map[string]string
@@ -141,11 +141,11 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 			if result.Error != nil || !reflect.DeepEqual(result.Value, fake) {
 				t.Errorf("process expansion = %+v, want %s", result, fake)
 			}
-			var generated []nodeproto.JobSpec
+			var generated nodeproto.PlanDoc
 			if err := json.Unmarshal(result.Value, &generated); err != nil {
 				t.Fatal(err)
 			}
-			args, err := nodeproto.PrepareJobArguments(generated[2].Arguments, tc.args)
+			args, err := nodeproto.PrepareJobArguments(generated.Jobs[2].Arguments, tc.args)
 			if err != nil {
 				t.Fatal(err)
 			}
