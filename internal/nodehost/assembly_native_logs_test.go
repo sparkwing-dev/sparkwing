@@ -210,7 +210,16 @@ func TestLogLifecycleDetachesFlush(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "team", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Generation: 1, Attempt: 1}}
-				up := &stalledLogUploader{done: make(chan struct{})}
+				up := &stalledLogUploader{done: make(chan struct{}), wait: func(ctx context.Context) error {
+					timer := time.NewTimer(3 * time.Second)
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}}
 				sink, err := logseg.NewSink(t.Context(), up, logseg.Options{Subject: subject})
 				if err != nil {
 					t.Fatal(err)
@@ -251,19 +260,15 @@ func TestLogLifecycleDetachesFlush(t *testing.T) {
 	}
 }
 
-type stalledLogUploader struct{ done chan struct{} }
+type stalledLogUploader struct {
+	done chan struct{}
+	wait func(context.Context) error
+}
 
 func (*stalledLogUploader) PutSegment(context.Context, logseg.Segment, []byte) error { return nil }
 func (u *stalledLogUploader) PutManifest(ctx context.Context, _ logseg.Manifest) error {
 	defer close(u.done)
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return u.wait(ctx)
 }
 
 func TestNativeLogsUseCommittedAttemptWithoutMetadataReads(t *testing.T) {
@@ -320,7 +325,16 @@ func (s *unavailableLogMetadata) ReadNode(context.Context, runspec.NodeRef) (run
 
 func TestLogUploadsDoNotHoldOtherJobs(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		up := &stalledLogUploader{done: make(chan struct{})}
+		up := &stalledLogUploader{done: make(chan struct{}), wait: func(ctx context.Context) error {
+			timer := time.NewTimer(3 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}}
 		logs := &localLogs{run: "run", masker: secrets.NewMasker(), upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
 			if subject.Attempt.NodeID == "slow" {
 				return up, nil
@@ -417,7 +431,16 @@ func TestNativeServiceCloseJoinsLogsAfterTerminalCommit(t *testing.T) {
 			committed = true
 			return nil
 		}}
-		up := &stalledLogUploader{done: make(chan struct{})}
+		up := &stalledLogUploader{done: make(chan struct{}), wait: func(ctx context.Context) error {
+			timer := time.NewTimer(3 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}}
 		cfg.Logs = func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) { return up, nil }
 		listener := &processListener{closed: make(chan struct{})}
 		services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
@@ -540,7 +563,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 				}
 				gate := make(chan struct{})
 				registered := blob.LogSubject{Kind: blob.LogJobAttempt, Team: principal.Capability.Team, RunID: input.Accepted.RunID, Attempt: &runspec.AttemptIdentity{Team: principal.Capability.Team, RunID: input.Accepted.RunID, NodeID: "job", Generation: int64(input.Generation), Attempt: int64(started.Attempt)}}
-				uploader := &fencedLogUploader{tenant: f.Tenant, commit: store.SegmentCommit{Subject: registered, Actor: actor, RetentionClass: "r30"}, gate: gate}
+				uploader := &fencedLogUploader{tenant: f.Tenant, commit: store.SegmentCommit{Subject: registered, Actor: actor, RetentionClass: "r30"}, gate: gate, wait: func() { time.Sleep(3 * time.Second) }}
 				logs := &localLogs{run: input.Accepted.RunID, masker: secrets.NewMasker(), upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
 					return uploader, nil
 				}}
@@ -621,6 +644,7 @@ type fencedLogUploader struct {
 	tenant  *store.Tenant
 	commit  store.SegmentCommit
 	gate    <-chan struct{}
+	wait    func()
 	refused bool
 }
 
@@ -630,7 +654,7 @@ func (u *fencedLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	time.Sleep(3 * time.Second)
+	u.wait()
 	key, err := blob.LogObjectKey(u.commit.Subject, u.commit.RetentionClass, int64(segment.N))
 	if err != nil {
 		return err
@@ -695,7 +719,7 @@ func TestRetrySealsPreviousAttemptBeforeFenceAdvances(t *testing.T) {
 		gate := make(chan struct{})
 		close(gate)
 		first := blob.LogSubject{Kind: blob.LogJobAttempt, Team: principal.Capability.Team, RunID: input.Accepted.RunID, Attempt: &runspec.AttemptIdentity{Team: principal.Capability.Team, RunID: input.Accepted.RunID, NodeID: "job", Generation: int64(input.Generation), Attempt: int64(started.Attempt)}}
-		uploader := &fencedLogUploader{tenant: f.Tenant, commit: store.SegmentCommit{Subject: first, Actor: actor, RetentionClass: "r30"}, gate: gate}
+		uploader := &fencedLogUploader{tenant: f.Tenant, commit: store.SegmentCommit{Subject: first, Actor: actor, RetentionClass: "r30"}, gate: gate, wait: func() { time.Sleep(3 * time.Second) }}
 		logs := &localLogs{run: input.Accepted.RunID, masker: secrets.NewMasker(), upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
 			return uploader, nil
 		}}
