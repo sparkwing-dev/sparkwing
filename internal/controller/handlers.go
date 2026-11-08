@@ -178,9 +178,9 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	}
 	var run *store.Run
 	if reference.FromProvenRun {
-		run, err = tenant.GetLatestProvenRunAtCommit(r.Context(), name, reference.JobID, authorized.Principal.Capability.Binding.RunID, statuses, maxAge)
+		run, err = tenant.GetLatestProvenRunAtCommit(r.Context(), name, reference.JobID, authorized.Principal.Capability.Binding.RunID, statuses, maxAge, q["repo"]...)
 	} else {
-		run, err = tenant.GetLatestRun(r.Context(), name, statuses, maxAge, reference.FromAnyRun, authorized.Principal.Capability.Binding.RunID)
+		run, err = tenant.GetLatestRun(r.Context(), name, statuses, maxAge, reference.FromAnyRun, authorized.Principal.Capability.Binding.RunID, q["repo"]...)
 	}
 	if err != nil {
 		return engineLookupError(err)

@@ -475,12 +475,12 @@ type fileState struct {
 	modTime int64
 }
 
-func hashable(dir string, keep fileFilter, hashAllFiles bool) ([]string, int, error) {
+func hashable(dir string, keep fileFilter, hashAllFiles bool, directories map[string]string) ([]string, int, error) {
 	var prune, ignored map[string]bool
 	if !hashAllFiles {
 		prune, ignored = ignoredUnder(dir)
 	}
-	files, pruned, err := walkHashable(dir, keep, prune)
+	files, pruned, err := walkHashable(dir, keep, prune, directories)
 	if err != nil || len(ignored) == 0 {
 		return files, pruned, err
 	}
@@ -511,13 +511,20 @@ func snapshotHashable(files []string) (map[string]fileState, error) {
 }
 
 func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
-	before, err := listedSnapshot(dir, keep, hashAllFiles)
+	files, ignored, err := hashable(dir, keep, hashAllFiles, nil)
 	if err != nil {
 		return hashStats{}, err
 	}
-	files, ignored, err := hashable(dir, keep, hashAllFiles)
+	before, err := snapshotHashable(files)
 	if err != nil {
 		return hashStats{}, err
+	}
+	// safety: Windows exposes no change time, so retain the extra enumeration there.
+	if runtime.GOOS == "windows" {
+		files, ignored, err = hashable(dir, keep, hashAllFiles, nil)
+		if err != nil {
+			return hashStats{}, err
+		}
 	}
 	var digest bytes.Buffer
 	stats, err := hashFilesInto(&digest, dir, files)
@@ -525,23 +532,47 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 	if err != nil {
 		return stats, err
 	}
-	after, err := listedSnapshot(dir, keep, hashAllFiles)
-	if err != nil {
-		return stats, err
+	for range stableKeyAttempts {
+		directories := make(map[string]string)
+		files, _, err := hashable(dir, keep, hashAllFiles, directories)
+		if err != nil {
+			return stats, err
+		}
+		after, err := snapshotHashable(files)
+		if err != nil {
+			return stats, err
+		}
+		if !maps.Equal(before, after) {
+			return stats, ErrUnstableInputs
+		}
+		unchanged, err := unchangedDirectories(directories)
+		if err != nil {
+			return stats, err
+		}
+		if runtime.GOOS == "windows" || unchanged {
+			_, err = h.Write(digest.Bytes())
+			return stats, err
+		}
 	}
-	if !maps.Equal(before, after) {
-		return stats, ErrUnstableInputs
-	}
-	_, err = h.Write(digest.Bytes())
-	return stats, err
+	return stats, ErrUnstableInputs
 }
 
-func listedSnapshot(dir string, keep fileFilter, hashAllFiles bool) (map[string]fileState, error) {
-	files, _, err := hashable(dir, keep, hashAllFiles)
-	if err != nil {
-		return nil, err
+// safety: a file created after its parent's enumeration must trigger another listing, including when
+// an author restores the directory's modification time. Excluded churn may settle without changing the key.
+func unchangedDirectories(before map[string]string) (bool, error) {
+	for path, identity := range before {
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if identity == "" || directoryIdentity(info) != identity {
+			return false, nil
+		}
 	}
-	return snapshotHashable(files)
+	return true, nil
 }
 
 // perf: hashing a few thousand files one at a time took most of a replace target's key; files hash in
@@ -618,7 +649,7 @@ func hashFile(path, rel string, memo *digestMemo) ([]byte, int64, error) {
 }
 
 // perf: wholly ignored directories in prune are never walked; each counts as one excluded path.
-func walkHashable(dir string, keep fileFilter, prune map[string]bool) ([]string, int, error) {
+func walkHashable(dir string, keep fileFilter, prune map[string]bool, directories map[string]string) ([]string, int, error) {
 	var files []string
 	pruned := 0
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -636,6 +667,16 @@ func walkHashable(dir string, keep fileFilter, prune map[string]bool) ([]string,
 			if prune[path] {
 				pruned++
 				return filepath.SkipDir
+			}
+			if directories != nil && runtime.GOOS != "windows" {
+				info, err := d.Info()
+				if err != nil {
+					if errors.Is(err, fs.ErrNotExist) {
+						return ErrUnstableInputs
+					}
+					return err
+				}
+				directories[path] = directoryIdentity(info)
 			}
 			return nil
 		}

@@ -150,7 +150,7 @@ func (op *Operator) NextActionsDispatch(ctx context.Context) (*ActionsDispatch, 
 			if !run.Request.Request.Placement.Active() || actionsForkWork(run) {
 				continue
 			}
-			waits, err := readPlacementWaitsTx(ctx, tx, k.team, run)
+			waits, err := readPendingPlacementWaitsTx(ctx, tx, k.team, run)
 			if err != nil {
 				return err
 			}
@@ -418,7 +418,6 @@ func actionsPlacementWaitTx(ctx context.Context, tx *storeTx, team Team, run Run
 		d, err := scanActionsDispatch(tx.QueryRowContext(ctx, `SELECT `+actionsDispatchColumns+` FROM github_actions_dispatches WHERE team=? AND run_id=? AND node_id=? AND queue_started_at=? ORDER BY generation DESC LIMIT 1`, team, run.ID, wait.JobID, wait.ReadyAt.UnixNano()))
 		if err == nil {
 			tier.Unavailable = ""
-			tier.Dispatch = &d
 			if d.State == "refused" || d.State == "cancelled" {
 				tier.Unavailable = d.Reason
 			}

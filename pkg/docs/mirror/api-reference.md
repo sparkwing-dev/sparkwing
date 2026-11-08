@@ -108,7 +108,6 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/credits/history` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/credits/settings` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/team/billing` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
-| `GET` | `/api/v1/team/build-trust` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/team/git-credentials` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `PUT` | `/api/v1/team/github-app/actions-approval` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/team/github-app/actions-approval` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
@@ -157,7 +156,6 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/team/invitations` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/team/invitations` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/team/invitations/{invitation}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
-| `PUT` | `/api/v1/team/build-trust` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/team/git-credentials` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/team/git-credentials/{host}/confirm` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/team/git-credentials/{host}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |

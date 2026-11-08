@@ -191,6 +191,11 @@ deprecation procedure, and the pre-1.0 caveat. User-visible changes
 land in [CHANGELOG.md](./CHANGELOG.md); CI enforces that covered
 surfaces ship with matching entries.
 
+## Dependencies
+
+- `github.com/fsnotify/fsnotify` lets registry tests observe staging-file creation because filesystem events avoid timing-based polling.
+- `k8s.io/utils` supplies fake clocks for chaos tests because advancing time makes settling and process-guard assertions deterministic.
+
 ## Development candidates
 
 `.xwing-env.yaml` declares an optional Xwing install hook for this repository.

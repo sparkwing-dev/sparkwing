@@ -7,7 +7,6 @@ import (
 	"debug/buildinfo"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -177,23 +176,13 @@ func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]b
 	if !allowedURL(request.URL, release) {
 		return nil, fmt.Errorf("refused unofficial download origin")
 	}
-	response, err := client.Do(request)
+	body, err := releaseasset.Download(ctx, &client, address, 0)
+	var status releaseasset.HTTPStatusError
+	if errors.As(err, &status) && (status.Code == http.StatusNotFound || status.Code == http.StatusForbidden) {
+		return nil, fmt.Errorf("official download returned HTTP %d: %w", status.Code, errNotPublished)
+	}
 	if err != nil {
 		return nil, err
-	}
-	body, readErr := io.ReadAll(response.Body)
-	closeErr := response.Body.Close()
-	if readErr != nil {
-		return nil, readErr
-	}
-	if closeErr != nil {
-		return nil, closeErr
-	}
-	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("official download returned HTTP %d: %w", response.StatusCode, errNotPublished)
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("official download returned HTTP %d", response.StatusCode)
 	}
 	return body, nil
 }

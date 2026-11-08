@@ -50,20 +50,19 @@ func queueOnce(t *testing.T, home string) wingwire.QueueState {
 	return qs
 }
 
-func waitForCapacity(t *testing.T, home string, want float64) {
+func waitForCapacity(t *testing.T, home string, log *logCapture, want float64) {
 	t.Helper()
-	ticker := time.NewTicker(15 * time.Millisecond)
-	defer ticker.Stop()
-	timeout := time.NewTimer(5 * time.Second)
-	defer timeout.Stop()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	for {
+		changed := log.updates()
 		got := coresCapacity(queueOnce(t, home))
 		if got == want {
 			return
 		}
 		select {
-		case <-ticker.C:
-		case <-timeout.C:
+		case <-changed:
+		case <-ctx.Done():
 			t.Fatalf("cores capacity never reached %v (last %v)", want, got)
 		}
 	}
@@ -72,8 +71,10 @@ func waitForCapacity(t *testing.T, home string, want float64) {
 func TestCapacity_CgroupGrowFlipIsPickedUp(t *testing.T) {
 	root, cpuMax := cgroupFixture(t, "400000 100000")
 	home := shortHome(t)
+	log := &logCapture{}
 	startDaemon(t, wingd.Config{
 		Home:             home,
+		Logf:             log.logf,
 		Sampler:          newFakeSampler(8, 8<<30),
 		ContainerRoot:    root,
 		HeadroomFraction: -1,
@@ -81,10 +82,10 @@ func TestCapacity_CgroupGrowFlipIsPickedUp(t *testing.T) {
 		CapacityInterval: 15 * time.Millisecond,
 	})
 
-	waitForCapacity(t, home, 4)
+	waitForCapacity(t, home, log, 4)
 
 	writeFixture(t, cpuMax, "800000 100000")
-	waitForCapacity(t, home, 8)
+	waitForCapacity(t, home, log, 8)
 
 	qs := queueOnce(t, home)
 	if qs.CapacityChange == nil {
@@ -98,15 +99,17 @@ func TestCapacity_CgroupGrowFlipIsPickedUp(t *testing.T) {
 func TestCapacity_ShrinkNeverEvictsHolder(t *testing.T) {
 	root, cpuMax := cgroupFixture(t, "800000 100000")
 	home := shortHome(t)
+	log := &logCapture{}
 	startDaemon(t, wingd.Config{
 		Home:             home,
+		Logf:             log.logf,
 		Sampler:          newFakeSampler(8, 8<<30),
 		ContainerRoot:    root,
 		HeadroomFraction: -1,
 		SampleInterval:   15 * time.Millisecond,
 		CapacityInterval: 15 * time.Millisecond,
 	})
-	waitForCapacity(t, home, 8)
+	waitForCapacity(t, home, log, 8)
 
 	holder := ensure(t, home, "")
 	if _, err := holder.Acquire(context.Background(), coreReq("big-holder", 6), nil); err != nil {
@@ -114,7 +117,7 @@ func TestCapacity_ShrinkNeverEvictsHolder(t *testing.T) {
 	}
 
 	writeFixture(t, cpuMax, "200000 100000")
-	waitForCapacity(t, home, 6)
+	waitForCapacity(t, home, log, 6)
 
 	qs := queueOnce(t, home)
 	found := false

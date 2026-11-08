@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -31,12 +33,16 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 		return nil, err
 	}
 	if options.Prepared != nil {
+		started := time.Now()
 		restored, err := options.Prepared.restore(ctx, spec, options)
+		slog.InfoContext(ctx, "source preparation", "stage", "restore", "duration_ms", time.Since(started).Milliseconds(), "reused", restored != nil, "success", err == nil)
 		if restored != nil || err != nil {
 			return restored, err
 		}
 	}
+	started := time.Now()
 	entry, err = PrepareCheckout(ctx, spec, options)
+	slog.InfoContext(ctx, "source preparation", "stage", "checkout", "duration_ms", time.Since(started).Milliseconds(), "success", err == nil)
 	if err != nil {
 		return nil, errors.Join(err, context.Cause(ctx))
 	}
@@ -59,7 +65,9 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 			options.SDK = engineid.TypeScriptSDK
 		}
 	}
+	started = time.Now()
 	entry.Engine, err = resolveEngine(ctx, spec, options, entry.Directory)
+	slog.InfoContext(ctx, "source preparation", "stage", "engine", "duration_ms", time.Since(started).Milliseconds(), "success", err == nil)
 	if err != nil {
 		return entry, err
 	}
@@ -80,10 +88,12 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	if err != nil {
 		return entry, err
 	}
+	started = time.Now()
 	command, err := install(gotoolchain.WithSession(ctx, environment, nil), entry.Engine, engine.SDKInstallRequest{
 		Directory: entry.pipelineCheckout, PipelineDir: relative, SDK: options.SDK, Environment: environment, Masker: options.Base.Masker,
 		NoBincache: spec.NoBincache, HashAllFiles: spec.HashAllFiles,
 	})
+	slog.InfoContext(ctx, "source preparation", "stage", "sdk_install", "duration_ms", time.Since(started).Milliseconds(), "success", err == nil)
 	if err != nil {
 		return entry, fmt.Errorf("install source entry: %w", err)
 	}
@@ -101,8 +111,11 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	}
 	entry.Command = append([]string{}, command.Command...)
 	if options.Prepared != nil && options.Prepared.Publish {
-		if err := options.Prepared.publish(ctx, spec, options, entry); err != nil {
-			return entry, fmt.Errorf("publish prepared pipeline: %w", err)
+		started = time.Now()
+		publishErr := options.Prepared.publish(ctx, spec, options, entry)
+		slog.InfoContext(ctx, "source preparation", "stage", "publish", "duration_ms", time.Since(started).Milliseconds(), "success", publishErr == nil)
+		if publishErr != nil {
+			return entry, fmt.Errorf("publish prepared pipeline: %w", publishErr)
 		}
 	}
 	return entry, nil

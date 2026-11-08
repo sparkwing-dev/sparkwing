@@ -232,8 +232,10 @@ workflow cannot upgrade pull-request code to default-branch trust. Fork pull
 requests are never dispatched, so they spend no GitHub minutes, and registration
 refuses them. Each workflow attempt exchanges once.
 
-Run status and the run page show dispatch acceptance, refusal or uncertainty,
-the receipt and a provider link once registration identifies the run. Cancellation
+Run status and the run page retain every dispatch receipt after award, cancellation
+and completion, with its requested, accepted, refused, uncertain or cancelled state
+and a provider link once registration identifies the run. Each job shows its
+dispatch count and how many fallbacks lost the race to another worker. Cancellation
 invalidates the receipt and cancels a known provider run. A receipt stays live
 while its queue generation still waits, including after a returned award, and
 while its own workflow holds the job. A job that workflow finishes leaves it to

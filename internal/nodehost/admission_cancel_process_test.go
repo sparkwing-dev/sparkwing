@@ -159,12 +159,12 @@ func TestQueuedMachineCancellationReportsCancelledWithoutStarting(t *testing.T) 
 	input.Attempt, state.row.Attempt = 0, 0
 	admission := MachineAdmission(home, "test")
 	queued := false
-	admission.Queued = func(_ context.Context, _ runspec.NodeRef, _ wingwire.Queued) {
+	admission.Queued = func(ctx context.Context, _ runspec.NodeRef, _ wingwire.Queued) {
 		if queued {
 			return
 		}
 		queued = true
-		found, err := client.CancelLease(t.Context(), input.Accepted.RunID)
+		found, err := client.CancelLease(ctx, input.Accepted.RunID)
 		if err != nil || !found {
 			t.Errorf("cancel queued run: found=%t error=%v", found, err)
 		}

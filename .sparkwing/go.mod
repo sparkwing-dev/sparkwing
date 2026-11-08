@@ -57,11 +57,3 @@ require (
 	modernc.org/sqlite v1.50.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 )
-
-// The pipelines tree is consumed as the same module path the SDK
-// itself ships, so the require above is a placeholder; this replace
-// pins it to the parent checkout (the sparkwing repo root). The
-// pattern follows the standard "consumer .sparkwing/ uses a local
-// replace during development" convention; here the parent IS the
-// SDK rather than a sibling.
-replace github.com/sparkwing-dev/sparkwing => ..

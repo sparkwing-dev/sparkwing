@@ -69,13 +69,12 @@ func TestTeamMutationsRequireCurrentAuthorityProperty(t *testing.T) {
 		_, deletion := tenant.DeleteAuthorizedTeam(t.Context(), a)
 		_, invite := tenant.CreateAuthorizedInvitation(t.Context(), a, "guest@example.test", RoleReader, "key")
 		withdraw := tenant.DeleteAuthorizedInvitation(t.Context(), a, "missing")
-		trust := tenant.SetAuthorizedBuildTrust(t.Context(), a, true)
 		a.Target.RunID = "missing"
 		if caseID%7 != 4 {
 			a.Access.Grants = []capability.Grant{capability.RunsControl}
 		}
 		prune := tenant.DeleteAuthorizedRun(t.Context(), a, nil)
-		return rename != nil && deletion != nil && invite != nil && withdraw != nil && trust != nil && prune != nil && reflect.DeepEqual(before, purgeRows(t, s, "a", true))
+		return rename != nil && deletion != nil && invite != nil && withdraw != nil && prune != nil && reflect.DeepEqual(before, purgeRows(t, s, "a", true))
 	}
 	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 36})); err != nil {
 		t.Fatal(err)
@@ -96,12 +95,6 @@ func TestTeamMutationsCommitStoreTimeAndInvitationReplay(t *testing.T) {
 	var updated int64
 	if err := s.db.QueryRow(`SELECT updated_at FROM teams WHERE name='a'`).Scan(&updated); err != nil || updated != now.UnixNano() {
 		t.Fatalf("updated=%d: %v", updated, err)
-	}
-	if err := tenant.SetAuthorizedBuildTrust(t.Context(), a, true); err != nil {
-		t.Fatal(err)
-	}
-	if trust, err := tenant.TrustLocalBuilds(t.Context()); err != nil || !trust {
-		t.Fatalf("trust=%v: %v", trust, err)
 	}
 	first, err := tenant.CreateAuthorizedInvitation(t.Context(), a, "  GUEST@example.test ", RoleEditor, "stable")
 	if err != nil {

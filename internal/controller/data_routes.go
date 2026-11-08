@@ -26,11 +26,6 @@ type DataDownloadResponse struct {
 	Expires time.Time         `json:"expires"`
 }
 
-type dataPresenceRequest struct {
-	Digests  []blob.Digest `json:"digests"`
-	Deadline time.Time     `json:"deadline,omitzero"`
-}
-
 type dataPresenceResponse struct {
 	Present []blob.Digest `json:"present"`
 }
@@ -80,9 +75,12 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request, a ca
 }
 
 func (s *Server) handleDataPresence(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var request dataPresenceRequest
+	var request controllerwire.DataHasManyRequest
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
+	}
+	if request.Deadline.IsZero() {
+		return invalidEngineBody("presence requires an explicit deadline")
 	}
 	if request.Digests == nil {
 		return invalidEngineBody("digests must be an array")

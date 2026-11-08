@@ -99,7 +99,7 @@ func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity strin
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	if member.PersonalTeam != team {
+	if member.PersonalTeam != "" && member.PersonalTeam != team {
 		return nil, store.PlanAcceptance{}, fmt.Errorf("planner team: %s", member.PersonalTeam)
 	}
 	raw, _, _, err := s.AsOperator().CreateAccountSession(ctx, member.Account, team, time.Hour)
@@ -116,16 +116,7 @@ func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity strin
 		}
 		provisionAuthority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
 	}
-	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{
-		Kind: capability.ProvisionMachine, Authority: &provisionAuthority, Team: string(team), Metered: metered,
-		RegistrationID: "runner:" + identity + ":host", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"},
-		Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"},
-		Grants: []capability.Grant{capability.TriggersClaim},
-	})
-	if err != nil {
-		return nil, store.PlanAcceptance{}, err
-	}
-	parent := issued.Capability
+	var parent capability.Capability
 	tenant, err := s.ForTeam(ctx, team)
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
@@ -136,13 +127,49 @@ func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity strin
 	if configure != nil {
 		configure(&input, &plan)
 	}
+	if input.Request.Dispatch != runspec.DispatchController {
+		issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{
+			Kind: capability.ProvisionMachine, Authority: &provisionAuthority, Team: string(team), Metered: metered,
+			RegistrationID: "runner:" + identity + ":host", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"},
+			Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"},
+			Grants: []capability.Grant{capability.TriggersClaim},
+		})
+		if err != nil {
+			return nil, store.PlanAcceptance{}, err
+		}
+		parent = issued.Capability
+	}
 	admitted, err := tenant.AdmitRun(ctx, input)
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: parent.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
+	kind := capability.UnitTrigger
+	if input.Request.Dispatch == runspec.DispatchController {
+		kind = capability.UnitPlan
+		if _, err := tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "controller-fixture", CreatedBy: "fixture"}); err != nil {
+			return nil, store.PlanAcceptance{}, err
+		}
+		operator, err := acceptanceBootstrap(ctx, s)
+		if err != nil {
+			return nil, store.PlanAcceptance{}, err
+		}
+		operatorRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
+		launcher, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionService, Authority: &operatorRef, RegistrationID: "service:planner:" + admitted.RunID, Subject: capability.Subject{Kind: capability.SubjectService, ID: "planner:" + admitted.RunID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, Metered: true})
+		if err != nil {
+			return nil, store.PlanAcceptance{}, err
+		}
+		parent = launcher.Capability
+	}
+	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: parent.Prefix, Target: &store.UnitRef{Kind: kind, RunID: runspec.RunID(admitted.RunID)}})
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
+	}
+	if kind == capability.UnitPlan {
+		exchanged, err := s.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+		if err != nil {
+			return nil, store.PlanAcceptance{}, err
+		}
+		claim.Award.CapabilityPrefix = exchanged.Capability.Prefix
 	}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
