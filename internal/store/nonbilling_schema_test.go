@@ -34,7 +34,6 @@ func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 	exec(`INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a','key',1,1)`)
 	exec(`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('a','secret','sealed','account',1,1)`)
 	exec(`INSERT INTO storage_quotas(team,storage_allowance_bytes,updated_at) VALUES ('a',1,1)`)
-	exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('a',0)`)
 	exec(`INSERT INTO egress_usage(team,period,bytes,updated_at) VALUES ('a','day',1,1)`)
 	for _, tc := range []struct{ name, query string }{
 		{"null installation identity", `UPDATE github_app_installations SET installation_id=NULL WHERE installation_id=2`},
@@ -51,7 +50,6 @@ func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 		{"null concurrency key", `UPDATE concurrency_entries SET key=NULL WHERE team='a'`},
 		{"empty concurrency key", `UPDATE concurrency_entries SET key='' WHERE team='a'`},
 		{"negative concurrency capacity", `UPDATE concurrency_entries SET capacity=-1 WHERE team='a'`},
-		{"invalid build trust flag", `UPDATE team_build_trust SET trust_local_builds=2 WHERE team='a'`},
 		{"negative egress", `UPDATE egress_usage SET bytes=-1 WHERE team='a'`},
 		{"invalid secret flag", `UPDATE secrets SET masked=2 WHERE team='a'`},
 		{"invalid identity flag", `UPDATE identities SET linked=2 WHERE subject='1'`},

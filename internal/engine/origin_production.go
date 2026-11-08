@@ -21,6 +21,8 @@ func releaseAssetURL(u *url.URL) bool {
 	switch u.Host {
 	case "github.com":
 		return strings.HasPrefix(u.Path, "/sparkwing-dev/sparkwing/releases/download/")
+	case "api.github.com":
+		return strings.HasPrefix(u.Path, "/repos/sparkwing-dev/sparkwing/releases/tags/") || strings.HasPrefix(u.Path, "/repos/sparkwing-dev/sparkwing/releases/assets/")
 	case "release-assets.githubusercontent.com", "objects.githubusercontent.com":
 		return true
 	default:

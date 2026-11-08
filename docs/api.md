@@ -46,7 +46,7 @@ Embedded controllers supply `WithScheduleWriter` and `WithRunControlWriter`;
 these adapters recheck authority and commit state, events and replay together.
 Missing transaction adapters return `policy_missing`.
 
-Team invitation, build-trust, billing and storage reads use the same capability
+Team invitation, billing and storage reads use the same capability
 boundary, as do GitHub App installation, repository, trigger and extra-repository
 reads. Billing availability is checked after authentication.
 The API's `/metrics` route requires deployment `operator.limits` or a verified
@@ -387,3 +387,8 @@ checks and returns `masked:true`. Values remain in the intake controller's
 memory and are removed on terminal completion, team deletion and owner lease
 expiry. Reads recheck the sealed burst preference set. Values remain unavailable
 until the here host restores them. Retry requires a fresh requester submission.
+
+Latest pipeline observations use start time, creation time for unstarted runs,
+run number and run ID, in descending order. Repeated `repo` query parameters on
+`GET /api/v1/pipelines/{name}/latest` restrict exact repository display names.
+These filters only narrow the caller's existing authorized candidate set.

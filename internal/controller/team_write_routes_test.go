@@ -67,10 +67,6 @@ func (f *teamWriteFake) DeleteAuthorizedInvitation(_ context.Context, a capabili
 	return f.record(a, id)
 }
 
-func (f *teamWriteFake) SetAuthorizedBuildTrust(_ context.Context, a capability.Authorized, trust bool) error {
-	return f.record(a, fmt.Sprint(trust))
-}
-
 func (f *teamWriteFake) DeleteAuthorizedRun(_ context.Context, a capability.Authorized, _ func(context.Context) error) error {
 	return f.record(a, a.Target.RunID)
 }
@@ -114,7 +110,6 @@ func TestTeamWriteHTTPAuthorityProperty(t *testing.T) {
 		{"DELETE", "/api/v1/team", `{"confirm_slug":"default"}`, 202},
 		{"POST", "/api/v1/team/invitations", `{"email":"friend@example.com","role":"reader"}`, 201},
 		{"DELETE", "/api/v1/team/invitations/invite", "", 204},
-		{"PUT", "/api/v1/team/build-trust", `{"trust_local_builds":true}`, 200},
 		{"DELETE", "/api/v1/runs/run", "", 204},
 		{"DELETE", "/api/v1/team/github-app/installations/17", "", 204},
 		{"DELETE", "/api/v1/team/github-app/triggers?repository_id=23&pipeline=ci", "", 204},

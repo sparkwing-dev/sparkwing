@@ -86,6 +86,7 @@ type DataRecord struct {
 // DataRecordLookupResult carries a found record and its persisted members.
 type DataRecordLookupResult struct {
 	Found           bool         `json:"found"`
+	PreparedParent  bool         `json:"prepared_parent,omitempty"`
 	VerifiedDefault bool         `json:"verified_default,omitempty"`
 	Record          *DataRecord  `json:"record,omitempty"`
 	Members         []DataMember `json:"members"`

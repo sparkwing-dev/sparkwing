@@ -54,6 +54,26 @@ func TestDataClientAcceptsServerSelectedVerifiedDefaultRef(t *testing.T) {
 	}
 }
 
+func TestDataClientPreservesOnlyPreparedParentAttestation(t *testing.T) {
+	for _, kind := range []blob.Kind{blob.KindPrepared, blob.KindMemo} {
+		key := blob.PreparedRecordKey("team", "child", "gh:42", "child-pipeline")
+		key.Kind = kind
+		_, records := testDataClient(t, func(*http.Request) (*http.Response, error) {
+			return dataResponse(t, wire.DataRecordLookupResult{Found: true, PreparedParent: true, Record: &wire.DataRecord{
+				Kind: kind, Repo: key.Scope.Repo, Ref: key.Scope.Ref.CapabilityScope(), Pipeline: key.Scope.Pipeline, Key: key.Scope.Key, Name: key.Name, Digest: "digest",
+			}}), nil
+		})
+		result, err := records.LookupRecord(t.Context(), blob.RecordLookup{Key: key})
+		if kind == blob.KindPrepared {
+			if err != nil || !result.Found || !result.PreparedParent {
+				t.Fatalf("parent attestation lost: %+v %v", result, err)
+			}
+		} else if err == nil {
+			t.Fatal("parent attestation accepted for another record kind")
+		}
+	}
+}
+
 func FuzzDataClientRequiresDefaultAttestation(f *testing.F) {
 	f.Add("main", true, true)
 	f.Add("main", false, true)

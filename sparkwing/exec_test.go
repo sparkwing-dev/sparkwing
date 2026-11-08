@@ -58,6 +58,9 @@ func TestExecError_TerminatedRendersSignalNotStartFailure(t *testing.T) {
 }
 
 func TestCommandRelaysArgumentsEnvironmentAndCapture(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows owns command execution")
+	}
 	var got nodeproto.ExecRequest
 	ctx := sdkserve.WithHostExec(t.Context(), func(_ context.Context, req nodeproto.ExecRequest) (sdkserve.HostExecResult, error) {
 		got = req
