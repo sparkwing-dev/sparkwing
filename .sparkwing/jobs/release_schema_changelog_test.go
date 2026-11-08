@@ -158,11 +158,11 @@ func TestSchemaGateComparesTheNeutralBaseline(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "add neutral schema")
 	gitRun(t, repo, "tag", "v0.1.0")
 	gitRun(t, repo, "push", "origin", "main", "--tags")
-	if err := checkSchemaBreak(t.Context(), repo, "v0.1.1"); err != nil {
+	if err := checkSchemaBreak(newTestContext(t), repo, "v0.1.1"); err != nil {
 		t.Fatalf("unchanged neutral baseline refused: %v", err)
 	}
 	writeFile(t, filepath.Join(repo, baseline), "CREATE TABLE runs (run_id TEXT);\n")
-	if err := checkSchemaBreak(t.Context(), repo, "v0.1.1"); err == nil ||
+	if err := checkSchemaBreak(newTestContext(t), repo, "v0.1.1"); err == nil ||
 		!strings.Contains(err.Error(), "schema SQL changed without bumping the schema version") ||
 		!strings.Contains(err.Error(), baseline) {
 		t.Fatalf("edited neutral baseline = %v, want the schema drift refusal", err)
@@ -191,12 +191,12 @@ func TestSchemaGateCountsAStoreThePreviousTagLacksAsAChange(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "the store moves")
 	gitRun(t, repo, "push", "origin", "main", "--tags")
 
-	err := checkSchemaBreak(t.Context(), repo, "v0.2.0")
+	err := checkSchemaBreak(newTestContext(t), repo, "v0.2.0")
 	if err == nil || !strings.Contains(err.Error(), "undescribed runs-store schema change") {
 		t.Fatalf("unmarked new store = %v, want the schema refusal", err)
 	}
 	writeFile(t, filepath.Join(repo, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n### Changed\n\n- **store (Breaking):** A new schema baseline.\n")
-	if err := checkSchemaBreak(t.Context(), repo, "v0.2.0"); err != nil {
+	if err := checkSchemaBreak(newTestContext(t), repo, "v0.2.0"); err != nil {
 		t.Fatalf("marked new store refused: %v", err)
 	}
 }

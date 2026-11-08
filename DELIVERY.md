@@ -221,6 +221,8 @@ only at the next cut, whose `version-freshness` step refuses with "scaffold
 fallback pin ... is behind latest release"; the fix then is this same command
 and a land before the cut, which is how v0.69.0 found v0.68.7's missing pin.
 
+The scaffold fallback also refuses pins ahead of the latest released tag.
+
 The local release pipeline ends at the tag push because the new module must
 exist before the pins can resolve it. Pre-release leaves the tag's own commit
 unchanged because a release cannot depend on itself before publication.
@@ -1615,6 +1617,10 @@ file. Other syntax and workflow checks remain active.
   the release pins, with a local replace to the checkout. The harness bundles
   the committed SDK source from HEAD and rewrites that replace inside the
   uploaded repository so runner compilation needs no caller checkout.
+
+The hosted canonical gate installs `sdk/typescript` dependencies with
+`npm ci --ignore-scripts` before Go tests, because the native protocol and
+conformance tests compile the TypeScript SDK. Local runs need the same install.
 
 ## Decisions before landing
 
