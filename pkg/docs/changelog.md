@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **cli:** Standalone runs close unused API connections before controller shutdown, preventing an intermittent exit failure after a successful pipeline on Windows
+
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 - **Windows CLI:** Native shell drive-directory metadata no longer blocks environment capture, so commands launched through `cmd.exe` can submit pipelines
 - **Windows controller:** Reused named-pipe HTTP connections keep requests alive, so local runners can claim work and reconnect after daemon restart
