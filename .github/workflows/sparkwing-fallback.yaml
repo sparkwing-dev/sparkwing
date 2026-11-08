@@ -1,28 +1,21 @@
-name: Sparkwing fallback
-run-name: sparkwing:${{ inputs.receipt }}
+name: Sparkwing install OS verification
+run-name: Hosted signed runner install verification
 on:
   workflow_dispatch:
-    inputs:
-      receipt:
-        description: Controller dispatch receipt
-        required: true
-        type: string
-      runner:
-        description: Team-approved GitHub-hosted image
-        required: true
-        type: string
 permissions:
-  id-token: write
   contents: read
 env:
-  # Publish this release before approving the protected fallback ref; v0.70.0
-  # does not contain --dispatch-receipt.
-  SPARKWING_RUNNER_VERSION: v0.71.0
+  SPARKWING_RUNNER_VERSION: v0.70.0
   # Sparkwing's ed25519 release signing key, the one https://sparkwing.dev/install.sh trusts.
   SPARKWING_RELEASE_KEY: whVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI=
 jobs:
-  sparkwing:
-    runs-on: ${{ inputs.runner }}
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
     steps:
       - name: Install sparkwing-runner
         shell: bash
@@ -51,15 +44,12 @@ jobs:
           mv "$asset" "sparkwing-runner$ext"
           # The signature covers bytes, not the tag, so the binary must also name the pinned release.
           "./sparkwing-runner$ext" version -o json | grep -qF "\"version\":\"$SPARKWING_RUNNER_VERSION\""
-      - name: Claim the dispatched Sparkwing job
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          DISPATCH_RECEIPT: ${{ inputs.receipt }}
-          CONTROLLER: ${{ vars.SPARKWING_CONTROLLER }}
-          TEAM: ${{ vars.SPARKWING_TEAM }}
+      - name: Record installed runner
+        shell: bash
+        working-directory: ${{ runner.temp }}
         run: |
-          if (!$env:CONTROLLER -or !$env:TEAM) { throw 'Set repository variables SPARKWING_CONTROLLER and SPARKWING_TEAM' }
-          $extension = if ($env:RUNNER_OS -eq 'Windows') { '.exe' } else { '' }
-          & (Join-Path $env:RUNNER_TEMP "sparkwing-runner$extension") warm --github-actions --dispatch-receipt $env:DISPATCH_RECEIPT --controller $env:CONTROLLER --team $env:TEAM --idle-exit 2m
-          exit $LASTEXITCODE
+          set -euo pipefail
+          ext=""
+          if [ "$RUNNER_OS" = Windows ]; then ext=.exe; fi
+          "./sparkwing-runner$ext" version -o json
+          "./sparkwing-runner$ext" warm --help
