@@ -504,9 +504,14 @@ requires the runner label and trust conditions documented below.
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
 Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
 repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
-is a token for its target fixture team with permission to start and observe the
-example and read its logs. Missing prerequisites report that the scan could not
-run, rather than clearing prior Bitwing findings.
+needs `runs.write`, `runs.read` and `logs.read` in the target deployment's team that owns
+the GitHub App installation covering `sparkwing-dev/sparkwing`. Production uses the existing
+source-owning team's `/kikd-prod/sparkwing/deploy/scan-submit-token`, also used by its smoke.
+A QA fixture token with no installation cannot submit this repository-backed scan. Keep the
+source installation bound to its existing team. The optional `--smoke-profile` and
+`--smoke-checkout` example probe also needs access to `sparkwing-dev/sparkwing-ci-smoke`;
+the detached scan does not enable that probe. Missing prerequisites report that the scan
+could not run, rather than clearing prior Bitwing findings.
 
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed

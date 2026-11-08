@@ -56,6 +56,9 @@ pipelines:
   - name: store-postgres
     entrypoint: StorePostgres
 
+  - name: local-controller-e2e
+    entrypoint: LocalControllerE2E
+
   # Manual synthetic workloads for comparing local admission modes. Keep each
   # shape under a stable pipeline name so learned profiles never mix costs.
   - name: admission-stress
