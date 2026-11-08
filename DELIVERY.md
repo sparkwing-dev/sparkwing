@@ -1737,7 +1737,10 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
 skips when `[Unreleased]` has no entries, and requires the latest push run of
 `ci.yaml` at the selected commit to have completed successfully. It then runs
 the existing `release` pipeline in that private checkout with its own
-`SPARKWING_HOME`. Its default minor bump stays on v0.x. Release cuts are
+`SPARKWING_HOME`. The exact-source green CI receipt supplies verification evidence. Under the
+pre-launch desktop-load waiver, the scheduled cut starts at `version-freshness`
+and keeps the release-specific guards; it skips the broader release build,
+lint and short-suite steps. Incremental push CI is not full-suite evidence. Its default minor bump stays on v0.x. Release cuts are
 pre-approved. The scheduled entrypoint supplies the cut's
 `--sw-allow-risk destructive,prod` authorization.
 
@@ -1794,7 +1797,7 @@ GitHub CLI authentication for CI reads, Go, Bitwing, Xwing and Sparkwing on PATH
 ```sh
 export SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery"
 export SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/secrets.key"
-sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-sdk-cli,owned-sdk-main --unpinned
+sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-release/weekly-sdk-cli,owned-sdk-main/owned-sdk-main --unpinned
 sparkwing schedules list
 ```
 

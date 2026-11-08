@@ -132,9 +132,13 @@ func TestReleaseCommitRecordsPreparedFilesOnce(t *testing.T) {
 }
 
 func TestReleaseCommitPreservesUnrelatedStagedFiles(t *testing.T) {
-	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "3")
 	t.Setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
 	t.Setenv("GIT_CONFIG_VALUE_0", "false")
+	t.Setenv("GIT_CONFIG_KEY_1", "user.name")
+	t.Setenv("GIT_CONFIG_VALUE_1", "Test")
+	t.Setenv("GIT_CONFIG_KEY_2", "user.email")
+	t.Setenv("GIT_CONFIG_VALUE_2", "test@example.invalid")
 	repo := atomicReleaseRepo(t, fixtureChangelog)
 	ctx := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"version": json.RawMessage(`"v0.9.0"`)}}).Context(t.Context())
 	version := sparkwing.Ref[string]{JobID: "version"}
@@ -145,9 +149,9 @@ func TestReleaseCommitPreservesUnrelatedStagedFiles(t *testing.T) {
 	gitRun(t, repo, "add", "--", "unrelated.txt")
 	hooks := t.TempDir()
 	writeDeliveryTool(t, filepath.Join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n")
-	t.Setenv("GIT_CONFIG_COUNT", "2")
-	t.Setenv("GIT_CONFIG_KEY_1", "core.hooksPath")
-	t.Setenv("GIT_CONFIG_VALUE_1", hooks)
+	t.Setenv("GIT_CONFIG_COUNT", "4")
+	t.Setenv("GIT_CONFIG_KEY_3", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_3", hooks)
 	if err := (&commitChangelogJob{RepoDir: repo, Version: version}).run(ctx); err != nil {
 		t.Fatal(err)
 	}

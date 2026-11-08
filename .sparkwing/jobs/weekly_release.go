@@ -105,14 +105,15 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 			return err
 		}
 		if run.ID == "" {
-			return errors.New("Bitwing returned no release workflow run id")
+			return errors.New("bitwing returned no release workflow run id")
 		}
 		workflow = run.ID
 		if err := releaseWorkflowHandoff(ctx, workflow, "Cut starting from main@"+head+" for "+version+"."); err != nil {
 			return err
 		}
 	}
-	args := []string{"run", "release", "-C", checkout, "--sw-route", "local"}
+	// perf: reuse exact-source CI evidence to avoid a broad desktop suite; retain the release-specific guards.
+	args := []string{"run", "release", "-C", checkout, "--sw-route", "local", "--sw-start-at", "version-freshness"}
 	if dry {
 		args = append(args, "--sw-dry-run")
 	} else {

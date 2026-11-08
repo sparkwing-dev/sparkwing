@@ -131,15 +131,16 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 	})
 	budget.step(w, "test", runShortTest)
 	// safety: these checks only read, so a dry run reports what the cut would refuse.
-	budget.step(w, "version-freshness", func(ctx context.Context) error {
+	// perf: a shared policy root keeps every release guard selected when desktop cuts reuse CI evidence.
+	freshness := budget.step(w, "version-freshness", func(ctx context.Context) error {
 		return checkPublishedVersionsFreshness(ctx, sparkwing.WorkDir())
 	}).SafeWithoutDryRun()
-	budget.step(w, "go-directives", checkGoDirectives).SafeWithoutDryRun()
+	budget.step(w, "go-directives", checkGoDirectives).Needs(freshness).SafeWithoutDryRun()
 	budget.step(w, "sdk-pins", func(context.Context) error {
 		return checkReleasePins(sparkwing.WorkDir())
-	}).SafeWithoutDryRun()
-	budget.step(w, "changelog-links", checkChangelogLinks).SafeWithoutDryRun()
-	budget.step(w, "docs-sidebar", checkDocsSidebar).SafeWithoutDryRun()
+	}).Needs(freshness).SafeWithoutDryRun()
+	budget.step(w, "changelog-links", checkChangelogLinks).Needs(freshness).SafeWithoutDryRun()
+	budget.step(w, "docs-sidebar", checkDocsSidebar).Needs(freshness).SafeWithoutDryRun()
 	budget.verdict(w)
 	return nil, nil
 }
