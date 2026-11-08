@@ -17,7 +17,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -212,7 +214,7 @@ type billingPageTransport func(*http.Request) (*http.Response, error)
 func (f billingPageTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
-	f := newDeploymentScheduleHTTPFixture(t, deploymenttest.Metered(t))
+	f := newDeploymentScheduleHTTPFixture(t, deploymenttest.Parse(t, deployment.Inputs{PaymentMode: "test"}, license.FeatureMetering))
 	f.s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = append(f.facts.snapshot.Authorities[0].Principal.Capability.Grants, capability.TeamAdmin)
 	writer := &billingWriterFake{team: store.DefaultTeam}
@@ -234,7 +236,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 		if mode == 3 {
 			return nil, errors.New("private-provider-password")
 		}
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_test_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
 	})}}
 	for _, tc := range []struct {
 		path, body string
@@ -254,6 +256,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 					want = 409
 				case 2:
 					writer.page.URL = "https://checkout.stripe.com/replay"
+					writer.page.ProviderID = "cs_test_17"
 				case 3:
 					want = 503
 				case 4:
