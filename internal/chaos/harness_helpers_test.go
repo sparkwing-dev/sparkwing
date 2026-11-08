@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/utils/clock"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -82,13 +84,14 @@ func soakConfig(seed int64, d time.Duration) config {
 }
 
 type harness struct {
-	cfg      config
-	t        testing.TB
-	home     string
-	rng      *rand.Rand
-	jr       *journal
-	dummyBin string
-	sparkBin string
+	timeSource clock.WithTicker
+	cfg        config
+	t          testing.TB
+	home       string
+	rng        *rand.Rand
+	jr         *journal
+	dummyBin   string
+	sparkBin   string
 
 	mu             sync.Mutex
 	actors         map[string]*actor
@@ -192,6 +195,13 @@ func run(t testing.TB, cfg config) {
 	}
 }
 
+func (h *harness) clock() clock.WithTicker {
+	if h.timeSource != nil {
+		return h.timeSource
+	}
+	return clock.RealClock{}
+}
+
 func (h *harness) buildBinaries() {
 	h.dummyBin = h.build("github.com/sparkwing-dev/sparkwing/internal/chaos/crashdummy", true)
 	if h.cfg.EnableCLI {
@@ -214,9 +224,9 @@ func (h *harness) build(pkg string, required bool) string {
 }
 
 func (h *harness) loop() {
-	deadline := time.Now().Add(h.cfg.Duration)
-	lastOS := time.Now()
-	for time.Now().Before(deadline) {
+	deadline := h.clock().Now().Add(h.cfg.Duration)
+	lastOS := h.clock().Now()
+	for h.clock().Now().Before(deadline) {
 		if h.t.Failed() {
 			return
 		}
@@ -225,15 +235,15 @@ func (h *harness) loop() {
 		if h.t.Failed() {
 			return
 		}
-		if time.Since(lastOS) > 300*time.Millisecond {
+		if h.clock().Since(lastOS) > 300*time.Millisecond {
 			h.checkOS()
 			h.scanDaemonPanic()
-			lastOS = time.Now()
+			lastOS = h.clock().Now()
 		}
 		if h.t.Failed() {
 			return
 		}
-		time.Sleep(time.Duration(15+h.rng.Intn(70)) * time.Millisecond)
+		h.clock().Sleep(time.Duration(15+h.rng.Intn(70)) * time.Millisecond)
 	}
 }
 
@@ -415,7 +425,7 @@ func (h *harness) finishActor(a *actor, force bool) error {
 	h.mu.Lock()
 	a.cleanupFailed = false
 	a.exited = true
-	a.exitedAt = time.Now()
+	a.exitedAt = h.clock().Now()
 	h.mu.Unlock()
 	h.jr.append(event{Kind: "exit", Run: a.runID})
 	return nil
@@ -440,7 +450,7 @@ func (h *harness) killActor(a *actor, kind string) {
 		return
 	}
 	a.killed = true
-	a.killedAt = time.Now()
+	a.killedAt = h.clock().Now()
 	group := a.group
 	h.mu.Unlock()
 	_ = group.Kill()
@@ -453,7 +463,7 @@ func (h *harness) killDaemon() {
 		return
 	}
 	h.mu.Lock()
-	h.daemonKilledAt = time.Now()
+	h.daemonKilledAt = h.clock().Now()
 	if h.ctl != nil {
 		_ = h.ctl.Close()
 		h.ctl = nil
@@ -475,7 +485,7 @@ func (h *harness) takeover() {
 	ver := fmt.Sprintf("v1.0.%d", h.verSeq)
 	h.nextID++
 	runID := "t" + strconv.Itoa(h.nextID)
-	h.daemonKilledAt = time.Now()
+	h.daemonKilledAt = h.clock().Now()
 	h.mu.Unlock()
 
 	args := []string{
@@ -592,14 +602,14 @@ func (h *harness) startProcessGuard() func() {
 	var stopOnce sync.Once
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(interval)
+		ticker := h.clock().NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			guard.check()
 			select {
 			case <-stop:
 				return
-			case <-ticker.C:
+			case <-ticker.C():
 			}
 		}
 	}()
@@ -646,7 +656,7 @@ func (g *processGuard) check() {
 		return
 	}
 
-	now := time.Now()
+	now := g.h.clock().Now()
 	owned := 0
 	present := make(map[zombie]bool)
 	for _, process := range processes {
@@ -752,7 +762,7 @@ func (h *harness) leakStable() bool {
 		return true
 	}
 	grace := time.Duration(h.cfg.DaemonGraceMS) * time.Millisecond
-	return time.Since(h.daemonKilledAt) > grace+h.cfg.Settle
+	return h.clock().Since(h.daemonKilledAt) > grace+h.cfg.Settle
 }
 
 func (h *harness) processSets() (live, known map[string]bool) {
@@ -762,7 +772,7 @@ func (h *harness) processSets() (live, known map[string]bool) {
 	known = map[string]bool{}
 	for id, a := range h.actors {
 		known[id] = true
-		settling := a.exited && time.Since(a.exitedAt) < h.cfg.Settle
+		settling := a.exited && h.clock().Since(a.exitedAt) < h.cfg.Settle
 		if !a.exited || settling {
 			live[id] = true
 		}
@@ -807,18 +817,18 @@ func (h *harness) quiesce() {
 			pending = append(pending, a)
 			if !a.killed && a.cmd != nil && a.cmd.Process != nil {
 				a.killed = true
-				a.killedAt = time.Now()
+				a.killedAt = h.clock().Now()
 				_ = a.group.Kill()
 			}
 		}
 	}
 	h.mu.Unlock()
-	deadline := time.Now().Add(h.cfg.Settle + 3*time.Second)
-	for time.Now().Before(deadline) {
+	deadline := h.clock().Now().Add(h.cfg.Settle + 3*time.Second)
+	for h.clock().Now().Before(deadline) {
 		if h.allExited(pending) {
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		h.clock().Sleep(50 * time.Millisecond)
 	}
 	if !h.allExited(pending) {
 		h.fail("process-cleanup", []string{"actors did not exit within the quiescence bound"}, wingwire.QueueState{})
@@ -883,7 +893,7 @@ func (h *harness) homeResidentViolations() []string {
 	if read == nil {
 		read = homeResidents
 	}
-	deadline := time.Now().Add(h.processWait())
+	deadline := h.clock().Now().Add(h.processWait())
 	var pids []int
 	for {
 		found, err := read(h.home)
@@ -897,10 +907,10 @@ func (h *harness) homeResidentViolations() []string {
 			return []string{fmt.Sprintf("inspecting the processes holding chaos home %s reached no verdict: %v", h.home, err)}
 		}
 		pids = found
-		if len(pids) == 0 || !time.Now().Before(deadline) {
+		if len(pids) == 0 || !h.clock().Now().Before(deadline) {
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
+		h.clock().Sleep(20 * time.Millisecond)
 	}
 	violations := make([]string, len(pids))
 	for i, pid := range pids {
@@ -947,19 +957,19 @@ func (h *harness) allExited(as []*actor) bool {
 }
 
 func (h *harness) converge() {
-	deadline := time.Now().Add(h.cfg.Settle + 5*time.Second)
+	deadline := h.clock().Now().Add(h.cfg.Settle + 5*time.Second)
 	var last []string
-	for time.Now().Before(deadline) {
+	for h.clock().Now().Before(deadline) {
 		qs, err := h.readState()
 		if err != nil {
-			time.Sleep(100 * time.Millisecond)
+			h.clock().Sleep(100 * time.Millisecond)
 			continue
 		}
 		last = checkConverged(qs)
 		if len(last) == 0 {
 			break
 		}
-		time.Sleep(150 * time.Millisecond)
+		h.clock().Sleep(150 * time.Millisecond)
 	}
 	if len(last) > 0 {
 		h.fail("convergence", last, wingwire.QueueState{})

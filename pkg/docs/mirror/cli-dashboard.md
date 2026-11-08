@@ -42,7 +42,7 @@ Read a bounded dashboard log tail
 
 Print a one-time sign-in link for the local dashboard
 
-Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket and carries a one-time code in its fragment that works once, expires after 60 seconds and only at the dashboard address it names. The page exchanges it for a session token kept in localStorage and sent as an Authorization bearer header; it lasts at most 30 days, and Log out or any controller restart revokes it. No cookie is set or accepted; every write also needs the dashboard's own Origin. The local socket needs no session.
+Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket and carries a one-time code in its fragment that works once, expires after 60 seconds and only at the dashboard address it names. The page exchanges it for a session token kept in localStorage and sent as an Authorization bearer header; it lasts at most 30 days, and Log out or any controller restart revokes it. No cookie is set or accepted; every write also needs the dashboard's own Origin. The local socket needs no session. With --host, mint for the exact DNS name in dashboard.allowed_hosts using HTTPS; the proxy keeps the loopback bind and supplies no authentication.
 
 ### Flags
 
@@ -52,6 +52,7 @@ Print a one-time sign-in link for the local dashboard, starting the local contro
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+| `--host NAME` | Exact DNS name from dashboard.allowed_hosts for an HTTPS sign-in link through Tailscale Serve. |
 
 ## `sparkwing dashboard status`
 

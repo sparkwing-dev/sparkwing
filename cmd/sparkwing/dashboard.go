@@ -23,7 +23,7 @@ type dashboardServices struct {
 	units     wingd.ManagedUnitManager
 	options   wingd.LocalStartOptions
 	openLog   func(context.Context) (*os.File, error)
-	mintLogin func(context.Context) (wingd.DashboardLogin, error)
+	mintLogin func(context.Context, string) (wingd.DashboardLogin, error)
 	// safety: only daemon stop retires the runner; a restart must leave it and its jobs running.
 	retireRunner func(context.Context) error
 }
@@ -71,7 +71,7 @@ func runDashboardCommand(ctx context.Context, inv clisurface.Invocation, out io.
 		return streamDashboardLogs(ctx, inv, services.openLog, out, mode)
 	}
 	if inv.Command.Path == "sparkwing dashboard open" {
-		return openDashboard(ctx, services, out, mode)
+		return openDashboard(ctx, services, inv.Value("host"), out, mode)
 	}
 	result, err := executeDashboard(ctx, inv, services)
 	if err != nil {

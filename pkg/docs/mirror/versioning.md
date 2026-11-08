@@ -135,7 +135,10 @@ pseudo-version from that base and the commit metadata. A release-tag build
 keeps its exact release version. A prerelease base uses Go's corresponding
 prerelease pseudo-version form; production policy classification requires a
 stable release base. The build fails when no release base is reachable. `--tag`
-overrides the stamp.
+overrides the stamp. Source image builds require a clean checkout and label both
+controller and runner images with the full Git HEAD revision, the resolved
+version and the canonical repository URL. Runtime-only bases carry no source
+binary and do not require a clean checkout.
 
 Cloud controllers and every launcher refuse to run work from a development
 build. A controller with `--deployment=cloud` refuses to start unless it is
@@ -198,8 +201,8 @@ Store incompatibility is an actionable refusal. It never silently opens another
 store.
 Before 1.0, schema changes may require a reset after configured data has been
 preserved. The binary refuses a mismatched store with a
-move-aside remedy for an older local store. Schemas 30 through 33 upgrade in
-place to schema 34. Earlier baselines are refused unchanged. A reset must preserve
+move-aside remedy for an older local store. Schemas 30 through 36 upgrade in
+place to schema 37. Earlier baselines are refused unchanged. A reset must preserve
 configured data, especially secrets and their keys. Billing records require
 separate review. See
 [Schema compatibility](backup-restore.md#schema-compatibility). Explicit standalone CI mode uses the same controller code in process.

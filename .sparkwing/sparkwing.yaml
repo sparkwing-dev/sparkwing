@@ -26,6 +26,9 @@ pipelines:
   - name: test
     entrypoint: Test
 
+  - name: feature-e2e
+    entrypoint: FeatureE2E
+
   - name: static-analysis
     entrypoint: StaticAnalysis
 

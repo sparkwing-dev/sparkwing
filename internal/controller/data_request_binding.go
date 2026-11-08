@@ -20,7 +20,7 @@ func decodeDataTarget(r *http.Request) (capability.RequestEvidence, error) {
 		err = decodeEngineRequest(r, &body)
 		target.Operation, target.Digest = capability.DataDownload, string(body.Digest)
 	case "POST /api/v1/data/has-many":
-		var body dataPresenceRequest
+		var body controllerwire.DataHasManyRequest
 		err = decodeEngineRequest(r, &body)
 		target.Operation = capability.DataHasMany
 		if body.Digests != nil {
