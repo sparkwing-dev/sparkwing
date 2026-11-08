@@ -75,7 +75,20 @@ tar -xf "$archive" --no-same-owner --strip-components=1 -C %s %s
 	return nil
 }
 
+func configureCloudGoBudget() error {
+	for key, value := range map[string]string{"CI": "true", "GOMAXPROCS": fmt.Sprint(overlappedGoSuiteCPUs)} {
+		if err := os.Setenv(key, value); err != nil {
+			return err
+		}
+	}
+	runtime.GOMAXPROCS(overlappedGoSuiteCPUs)
+	return nil
+}
+
 func prepareCloudGateTools(ctx context.Context, goCache string) error {
+	if err := configureCloudGoBudget(); err != nil {
+		return err
+	}
 	for _, name := range []string{"bash", "git", "go", "curl", "tar", "sha256sum", "xz", "node", "npm", "diff"} {
 		if _, err := exec.LookPath(name); err != nil {
 			return fmt.Errorf("cloud gate requires runner image tool %s: %w", name, err)

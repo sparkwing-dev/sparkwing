@@ -55,7 +55,7 @@ Go build/test results use Sparkwing dependency caches. Fresh workers can reuse
 the policy job's compiled dependencies and later runs can reuse those caches.
 Gate tests and race tests each keep a separate build cache because Sparkwing
 dependency caches save only on a miss. The policy seed contains no test or race
-objects. Cloud jobs set CI and a four-core runtime budget at startup, so compiler
+objects. Cloud toolchain bootstrap sets CI and a four-core runtime budget before checks, so compiler
 steps use two workers instead of inheriting control-plane limits.
 Full scans still use `sparkwing run gate -- --full`.
 The wrapper passes this repository's tracked secret-shaped fixtures, listed in

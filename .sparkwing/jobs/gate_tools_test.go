@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -95,5 +96,21 @@ func TestCloudPnpmEntrypointMatchesItsPinnedPackage(t *testing.T) {
 		if tool.name == "pnpm" && tool.executable != manifest.Bin["pnpm"] {
 			t.Fatalf("pnpm executable %q differs from its published package entrypoint %q", tool.executable, manifest.Bin["pnpm"])
 		}
+	}
+}
+
+func TestCloudGoBudgetUsesTheDeclaredCoresBeforeChecks(t *testing.T) {
+	previous := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	t.Setenv("CI", "")
+	t.Setenv("GOMAXPROCS", "1")
+	if err := configureCloudGoBudget(); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOMAXPROCS(0) != overlappedGoSuiteCPUs || !currentHost().singleTenant {
+		t.Fatalf("runtime budget=%d host=%+v", runtime.GOMAXPROCS(0), currentHost())
+	}
+	if got := goStepParallelism(currentHost()); got != goStepParallelism(hostShape{cpus: min(runtime.NumCPU(), overlappedGoSuiteCPUs), singleTenant: true}) {
+		t.Fatalf("Go workers=%d", got)
 	}
 }

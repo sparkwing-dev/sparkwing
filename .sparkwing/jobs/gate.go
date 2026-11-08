@@ -76,7 +76,7 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 		}
 		for _, job := range jobs {
 			if job.ID() == rc.Pipeline || job.ID() == "race-touched" || job.ID() == policyJobID {
-				job.Cores(overlappedGoSuiteCPUs).Env("CI", "true", sparkwing.Startup()).Env("GOMAXPROCS", "4", sparkwing.Startup())
+				job.Cores(overlappedGoSuiteCPUs)
 			}
 			job.BeforeRun(func(ctx context.Context) error {
 				return fetchGateBase(ctx, "https://github.com/sparkwing-dev/sparkwing.git", in.Base)
