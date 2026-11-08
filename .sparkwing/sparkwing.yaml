@@ -1,8 +1,3 @@
-allow_secret_files:
-  - .gitleaks.toml
-  - charts/sparkwing-full/examples/external-secrets.yaml
-  - design/rewrite/proposals/thin-sdk-step1/measurements.json
-
 pipelines:
   # pre-commit is the source-policy tier and runs from the git pre-commit hook;
   # pre-push is the fast push-boundary tier and runs from the git pre-push hook;
