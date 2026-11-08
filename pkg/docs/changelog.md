@@ -42,6 +42,7 @@ unlock.
 
 ### Fixed
 
+- **cli:** Reject step ranges that select no steps in a job instead of reporting success with every step skipped
 - **build-images:** Source-built controller and runner images record the clean full Git HEAD, version and source URL in OCI labels so deployment can verify their revision.
 
 - **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller’s configuration and index untouched.
