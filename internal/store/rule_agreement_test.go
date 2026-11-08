@@ -35,6 +35,31 @@ func TestGoSQLRuleAgreement(t *testing.T) {
 					t.Error(err)
 				}
 			})
+			db.SetMaxOpenConns(1)
+			if dialect == DialectPostgres {
+				schema := fmt.Sprintf("rule_agreement_%d", time.Now().UnixNano())
+				if _, err := db.ExecContext(t.Context(), `CREATE SCHEMA `+schema); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if _, err := db.Exec(`DROP SCHEMA ` + schema + ` CASCADE`); err != nil {
+						t.Error(err)
+					}
+				})
+				if _, err := db.ExecContext(t.Context(), `SET search_path TO `+schema); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				rewriteSchemaExec(t, db, `PRAGMA foreign_keys = ON`)
+			}
+			schema, err := translateSchema(schemaNeutral, dialect)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(t.Context(), schema); err != nil {
+				t.Fatal(err)
+			}
+			t.Run("overflow budget", func(t *testing.T) { overflowBudgetAgreement(t, db, dialect) })
 			t.Run("repository tiers", func(t *testing.T) { repositoryTiersAgreement(t, db, dialect) })
 			t.Run("tier eligibility", func(t *testing.T) { repositoryTierMatchAgreement(t, db, dialect) })
 			t.Run("placement holds", func(t *testing.T) { placementHoldsAgreement(t, db, dialect) })
@@ -180,9 +205,9 @@ func repositoryTierMatchAgreement(t *testing.T, db *sql.DB, dialect Dialect) {
 		for j, fact := range facts {
 			t.Run(fmt.Sprintf("tier=%d/facts=%d", i, j), func(t *testing.T) {
 				q := claimSQL{dialect: dialect}
-				query := `WITH s(target,selectors) AS (SELECT CAST(? AS TEXT),CAST(? AS TEXT)),c(facts) AS (SELECT CAST(? AS TEXT)) SELECT ` + q.repositoryTierMatch("s", "c.facts") + ` FROM s CROSS JOIN c`
+				query := `WITH s(target,selectors,runner,workflow) AS (SELECT CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS TEXT)),c(facts) AS (SELECT CAST(? AS TEXT)) SELECT ` + q.repositoryTierMatch("s", "c.facts") + ` FROM s CROSS JOIN c`
 				var got bool
-				if err := db.QueryRowContext(t.Context(), rewritePh(dialect, query), "repo:"+tier.Target, agreementJSON(t, tier.Labels), agreementJSON(t, fact)).Scan(&got); err != nil {
+				if err := db.QueryRowContext(t.Context(), rewritePh(dialect, query), "repo:"+tier.Target, agreementJSON(t, tier.Labels), tier.Runner, tier.Workflow, agreementJSON(t, fact)).Scan(&got); err != nil {
 					t.Fatal(err)
 				}
 				if want := repositoryTierMatches(tier, fact); got != want {
@@ -281,6 +306,78 @@ func placementHoldsAgreement(t *testing.T, db *sql.DB, dialect Dialect) {
 				}
 				if want := waits[2].OpensIn == 0; got != want {
 					t.Fatalf("SQL cloud available=%v, Go opens in %s", got, waits[2].OpensIn)
+				}
+			})
+		}
+	}
+}
+
+func overflowBudgetAgreement(t *testing.T, db *sql.DB, dialect Dialect) {
+	for _, limits := range []struct {
+		name             string
+		monthly, request *int64
+	}{
+		{"unlimited", nil, nil},
+		{"monthly only", new(int64(3)), nil},
+		{"request only", nil, new(int64(3))},
+		{"monthly lower", new(int64(3)), new(int64(4))},
+		{"request lower", new(int64(4)), new(int64(3))},
+		{"equal limits", new(int64(3)), new(int64(3))},
+		{"monthly zero", new(int64(0)), nil},
+		{"request zero", nil, new(int64(0))},
+	} {
+		for _, used := range []int64{0, 180 - SliceSeconds - 1, 180 - SliceSeconds, 180 - SliceSeconds + 1, 179, 180, 181, 240} {
+			t.Run(fmt.Sprintf("%s/used=%d", limits.name, used), func(t *testing.T) {
+				now := time.Date(2026, time.November, 8, 12, 0, 0, 0, time.UTC)
+				s := &Store{db: db, dialect: dialect, pinnedClock: func() time.Time { return now }}
+				tx, err := s.beginTx(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = tx.Rollback() }()
+				exec := func(query string, args ...any) {
+					t.Helper()
+					if _, err := tx.tx.ExecContext(t.Context(), rewritePh(dialect, query), args...); err != nil {
+						t.Fatal(err)
+					}
+				}
+				exec(`INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+				exec(`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
+				request := runspec.SealedRequest{Request: runspec.Request{Burst: &runspec.BurstPlacement{OverflowMinutes: limits.request}}}
+				body, err := json.Marshal(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','pending',?,'request',1,'gh:1','host','execute','owner',1,'r30',30)`, body)
+				if limits.monthly != nil {
+					exec(`INSERT INTO overflow_controls(team,account_id,monthly_minutes) VALUES ('a','owner',?)`, *limits.monthly)
+				}
+				exec(`INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,requester_account) VALUES ('a','award','cloud','run',1,'a',1,'cloud','at_start','node','job',?,'owner')`, now.UnixNano())
+				exec(`INSERT INTO credit_charges(team,id,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('a','reservation','run','job','cloud','reservation',?,1,?)`, used, now.UnixNano())
+				exhausted, control, err := overflowExhaustedTx(t.Context(), tx, "a", "run", SliceSeconds)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if control.UsedSeconds != used {
+					t.Fatalf("Go usage=%d, seeded reservation=%d", control.UsedSeconds, used)
+				}
+				facts, err := claimOverflowUsageTx(t.Context(), tx, []claimOverflowFacts{{Team: "a", Account: "owner"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				q := claimSQL{dialect: dialect, overflow: facts}
+				cte, err := q.overflowFactsSQL()
+				if err != nil {
+					t.Fatal(err)
+				}
+				minutes := "CAST(" + q.param(limits.request) + " AS BIGINT)"
+				query := `WITH ` + cte + `,budget(minutes) AS (SELECT ` + minutes + `) SELECT ` + q.overflowBudgetAllowedSQL("'a'", "'owner'", "budget.minutes", "1") + ` FROM budget`
+				var allowed bool
+				if err := tx.QueryRowContext(t.Context(), query, q.args...).Scan(&allowed); err != nil {
+					t.Fatal(err)
+				}
+				if allowed == exhausted {
+					t.Fatalf("monthly=%v request=%v used=%d reservation=%d: SQL allowed=%v Go exhausted=%v", limits.monthly, limits.request, used, SliceSeconds, allowed, exhausted)
 				}
 			})
 		}
