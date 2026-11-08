@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -44,8 +45,8 @@ func TestAffectedTestsRunTheWholeModuleWhenTheGraphCannotSeeTheChange(t *testing
 		if !p.whole {
 			t.Errorf("%s: plan = %+v, want every package", file, p)
 		}
-		if commands := p.commands(hostShape{cpus: 8}); len(commands) != 1 || !strings.HasSuffix(commands[0], " ./...") {
-			t.Errorf("%s: commands = %q, want one ./... run", file, commands)
+		if commands := p.commands(hostShape{cpus: 8}); len(commands) != 1 || !strings.Contains(commands[0], "m/leaf") || !strings.Contains(commands[0], "m/top") {
+			t.Errorf("%s: commands = %q, want every package in the module", file, commands)
 		}
 	}
 }
@@ -65,7 +66,7 @@ func TestAffectedSchemaRunsStoreAndItsReadersWithoutWideningTheModule(t *testing
 func TestAffectedModuleChangesKeepCriticalTestsUnshortened(t *testing.T) {
 	p := planAffectedTests(".", []string{"."}, []string{"go.mod"}, affectedFixturePackages, map[string][]string{"leaf": {"TestGuard"}})
 	commands := p.commands(hostShape{cpus: 2})
-	if len(commands) != 2 || !strings.Contains(commands[0], "-short ") || !strings.HasSuffix(commands[0], " ./...") || strings.Contains(commands[1], "-short ") || !strings.Contains(commands[1], "TestGuard") {
+	if len(commands) != 2 || !strings.Contains(commands[0], "-short ") || !strings.Contains(commands[0], "m/top") || strings.Contains(commands[1], "-short ") || !strings.Contains(commands[1], "TestGuard") {
 		t.Fatalf("commands = %q, want the whole fast class and full critical tests", commands)
 	}
 }
@@ -280,5 +281,59 @@ func TestDocsOnlyChangeSkipsTheGoStepsAndTheSDKSuite(t *testing.T) {
 	gitCommitAll(t, root, "go")
 	if skipUnlessGoTouched("vet")(ctx) {
 		t.Fatal("a Go change skipped vet")
+	}
+}
+
+func TestAffectedCompilerChecksSkipOtherModulesAndRejectBrokenTouchedCode(t *testing.T) {
+	root := gateFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "quiet", "quiet.go"), "package quiet\nfunc Broken( {\n")
+	gitCommitAll(t, root, "base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	file := filepath.Join(root, ".sparkwing", "jobs.go")
+	writeGoFile(t, file, "package pipelines\nfunc Jobs() int { return 2 }\n")
+	gitAddAll(t, root)
+	for _, check := range []func(context.Context) error{runAffectedVet, runAffectedBuild} {
+		if err := check(t.Context()); err != nil {
+			t.Fatalf("unaffected broken module ran: %v", err)
+		}
+	}
+	writeGoFile(t, file, "package pipelines\nfunc Jobs() int { return missing }\n")
+	for _, check := range []func(context.Context) error{runAffectedVet, runAffectedBuild} {
+		if err := check(t.Context()); err == nil {
+			t.Fatal("broken affected package passed")
+		}
+	}
+}
+
+func TestAffectedBuildSkipsPackagesContainingOnlyTests(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	writeGoFile(t, filepath.Join(root, "onlytests", "only_test.go"), "package onlytests\nimport \"testing\"\nfunc TestOnly(t *testing.T) {}\n")
+	gitAddAll(t, root)
+	if err := runAffectedBuild(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAffectedPackageDeletionKeepsItsImportersChecked(t *testing.T) {
+	packages := []modulePackage{{importPath: "m/reader", dir: "reader", imports: []string{"m/deleted"}, hasGo: true}}
+	p := planAffectedTests(".", []string{"."}, []string{"deleted/source.go"}, packages, nil)
+	if !p.whole || !slices.Equal(p.packages, []string{"m/reader"}) || !slices.Equal(p.buildPackages, []string{"m/reader"}) {
+		t.Fatalf("deleted package plan = %+v, want its remaining module checked", p)
+	}
+}
+
+func TestAffectedBuildLeavesNoCommandBinary(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	writeGoFile(t, filepath.Join(root, "cmd", "tool", "main.go"), "package main\nfunc main() {}\n")
+	gitAddAll(t, root)
+	if err := runAffectedBuild(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tool")); !os.IsNotExist(err) {
+		t.Fatalf("build left a command binary: %v", err)
 	}
 }

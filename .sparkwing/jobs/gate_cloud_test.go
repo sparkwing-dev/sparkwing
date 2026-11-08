@@ -57,6 +57,9 @@ func TestCloudGatePreparesTheBaselineInEveryJobWorkspace(t *testing.T) {
 		} else if len(job.Caches) != 3 {
 			t.Fatalf("%s has no tool, Go build and module caches: %+v", job.ID, job.Caches)
 		}
+		if job.ID == "race-touched" && job.Caches[1].Path == gateGoCachePath {
+			t.Fatal("race uses the immutable non-race policy seed")
+		}
 		if len(job.Closures.BeforeRun) != want {
 			t.Fatalf("%s has no baseline preparation: %+v", job.ID, job.Closures)
 		}

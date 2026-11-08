@@ -75,7 +75,7 @@ tar -xf "$archive" --no-same-owner --strip-components=1 -C %s %s
 	return nil
 }
 
-func prepareCloudGateTools(ctx context.Context) error {
+func prepareCloudGateTools(ctx context.Context, goCache string) error {
 	for _, name := range []string{"bash", "git", "go", "curl", "tar", "sha256sum", "xz", "node", "npm", "diff"} {
 		if _, err := exec.LookPath(name); err != nil {
 			return fmt.Errorf("cloud gate requires runner image tool %s: %w", name, err)
@@ -98,7 +98,7 @@ func prepareCloudGateTools(ctx context.Context) error {
 	if err := os.Setenv("PATH", strings.Join([]string{filepath.Join(root, "golangci-lint"), pnpm, filepath.Join(root, "zig"), os.Getenv("PATH")}, string(os.PathListSeparator))); err != nil {
 		return err
 	}
-	if err := os.Setenv("GOCACHE", sparkwing.Path(gateGoCachePath)); err != nil {
+	if err := os.Setenv("GOCACHE", sparkwing.Path(goCache)); err != nil {
 		return err
 	}
 	if err := os.Setenv("CGO_ENABLED", "1"); err != nil {

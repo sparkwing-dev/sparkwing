@@ -84,14 +84,16 @@ type modulePackage struct {
 	importPath string
 	dir        string
 	imports    []string
+	hasGo      bool
 }
 
 type affectedTestPlan struct {
-	module   string
-	reason   string
-	whole    bool
-	packages []string
-	critical map[string][]string
+	module        string
+	reason        string
+	whole         bool
+	packages      []string
+	buildPackages []string
+	critical      map[string][]string
 }
 
 func runAffectedTest(ctx context.Context) error {
@@ -105,24 +107,15 @@ func runAffectedTest(ctx context.Context) error {
 // perf: land passes the files a merge of origin/main changed, so a clean merge
 // re-runs only the packages main touched instead of the whole gate.
 func runAffectedTestFiles(ctx context.Context, files []string, scope string) error {
-	modules, err := committedModuleDirs(ctx)
-	if err != nil {
-		return err
-	}
 	critical, err := criticalTests(ctx)
 	if err != nil {
 		return err
 	}
-	byDir := map[string]string{}
-	var plans []affectedTestPlan
-	for _, module := range modules {
-		packages, err := listModulePackages(ctx, module)
-		if err != nil {
-			return fmt.Errorf("%s: %w", module, err)
-		}
-		addRepoPackages(byDir, module, packages)
-		plans = append(plans, planAffectedTests(module, modules, files, packages, critical[module]))
+	plans, byDir, err := planAffectedModules(ctx, files, critical)
+	if err != nil {
+		return err
 	}
+
 	sparkwing.Info(ctx, "affected tests: %s", scope)
 	if goChange(files, byDir) == "" {
 		sparkwing.Info(ctx, "affected tests: no Go source changed, so the critical set stays for hosted CI")
@@ -148,13 +141,75 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string) err
 	})
 }
 
+func planAffectedModules(ctx context.Context, files []string, critical map[string]map[string][]string) ([]affectedTestPlan, map[string]string, error) {
+	modules, err := committedModuleDirs(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	byDir := map[string]string{}
+	var plans []affectedTestPlan
+	for _, module := range modules {
+		packages, err := listModulePackages(ctx, module)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", module, err)
+		}
+		addRepoPackages(byDir, module, packages)
+		plans = append(plans, planAffectedTests(module, modules, files, packages, critical[module]))
+	}
+	return plans, byDir, nil
+}
+
+func runAffectedVet(ctx context.Context) error   { return runAffectedCompileCheck(ctx, "vet") }
+func runAffectedBuild(ctx context.Context) error { return runAffectedCompileCheck(ctx, "build") }
+
+func runAffectedCompileCheck(ctx context.Context, verb string) error {
+	files, scope, err := affectedChangeScope(ctx)
+	if err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "affected go %s: %s", verb, scope)
+	return runAffectedCompileFiles(ctx, verb, files)
+}
+
+func runAffectedCompileFiles(ctx context.Context, verb string, files []string) error {
+	plans, _, err := planAffectedModules(ctx, files, nil)
+	if err != nil {
+		return err
+	}
+	var failures []string
+	for _, p := range plans {
+		packages := p.packages
+		if verb == "build" {
+			packages = p.buildPackages
+		}
+		if len(packages) == 0 {
+			continue
+		}
+		dir, err := filepath.Abs(filepath.Join(regexCheckRoot(), p.module))
+		if err != nil {
+			return err
+		}
+		args := quoteAll(packages)
+		if verb == "build" {
+			args = "-o " + shellQuote(os.DevNull) + " " + args
+		}
+		script := fmt.Sprintf("env -C %s %s", shellQuote(dir), boundedGoCommand(currentHost(), verb, args))
+		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+			failures = append(failures, describeModuleFailure(p.module, err))
+		}
+		sparkwing.Info(ctx, "affected go %s: %s: %d package(s)", verb, p.module, len(packages))
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("go %s failed:\n  - %s", verb, strings.Join(failures, "\n  - "))
+	}
+	return nil
+}
+
 func (p affectedTestPlan) commands(h hostShape) []string {
 	var out []string
 	timeout := "-timeout " + productGoTestTimeout + " "
 	short := "-short " + timeout
-	if p.whole {
-		out = append(out, boundedGoCommand(h, "test", short+"./..."))
-	} else if len(p.packages) > 0 {
+	if len(p.packages) > 0 {
 		out = append(out, boundedGoCommand(h, "test", short+quoteAll(p.packages)))
 	}
 	if len(p.critical) > 0 {
@@ -204,6 +259,8 @@ func planAffectedTests(module string, modules, files []string, packages []module
 		}
 		if pkg := owningPackage(rel, byDir); pkg != "" {
 			changed[pkg] = true
+		} else if strings.HasSuffix(rel, ".go") {
+			p.whole, p.reason = true, "a changed Go file no longer has a package"
 		}
 	}
 	// safety: test imports count too, because a package can exercise another
@@ -223,7 +280,17 @@ func planAffectedTests(module string, modules, files []string, packages []module
 			}
 		}
 	}
+	for _, pkg := range packages {
+		if p.whole {
+			affected[pkg.importPath] = true
+		}
+	}
 	p.packages = mapKeys(affected)
+	for _, pkg := range packages {
+		if pkg.hasGo && affected[pkg.importPath] {
+			p.buildPackages = append(p.buildPackages, pkg.importPath)
+		}
+	}
 	p.critical = map[string][]string{}
 	for dir, tests := range critical {
 		pkg, ok := byDir[dir]
@@ -265,7 +332,7 @@ func owningPackage(rel string, byDir map[string]string) string {
 }
 
 func listModulePackages(ctx context.Context, module string) ([]modulePackage, error) {
-	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}`
+	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}{{"\t"}}{{if or .GoFiles .CgoFiles}}1{{else}}0{{end}}`
 	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
@@ -278,15 +345,15 @@ func listModulePackages(ctx context.Context, module string) ([]modulePackage, er
 	scanner := bufio.NewScanner(strings.NewReader(out))
 	scanner.Buffer(make([]byte, 1<<20), 16<<20)
 	for scanner.Scan() {
-		fields := strings.SplitN(scanner.Text(), "\t", 3)
-		if len(fields) != 3 || strings.Contains("/"+fields[0]+"/", "/node_modules/") {
+		fields := strings.SplitN(scanner.Text(), "\t", 4)
+		if len(fields) != 4 || strings.Contains("/"+fields[0]+"/", "/node_modules/") {
 			continue
 		}
 		rel, err := filepath.Rel(root, fields[1])
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
-		packages = append(packages, modulePackage{importPath: fields[0], dir: filepath.ToSlash(rel), imports: strings.Fields(fields[2])})
+		packages = append(packages, modulePackage{importPath: fields[0], dir: filepath.ToSlash(rel), imports: strings.Fields(fields[2]), hasGo: fields[3] == "1"})
 	}
 	return packages, scanner.Err()
 }

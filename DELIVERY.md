@@ -53,6 +53,8 @@ Zig supplies the C compiler and libc headers for race builds through
 coreutils. Go module downloads and
 Go build/test results use Sparkwing dependency caches. Fresh workers can reuse
 the policy job's compiled dependencies and later runs can reuse those caches.
+Race keeps a separate build cache because Sparkwing dependency caches save only
+on a miss, and the policy seed contains no race-instrumented objects.
 Full scans still use `sparkwing run gate -- --full`.
 The wrapper passes this repository's tracked secret-shaped fixtures, listed in
 `cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
@@ -779,7 +781,8 @@ file. Other syntax and workflow checks remain active.
   start beside running gates instead of queueing behind them. A simulation of
   six concurrent lands found declaring 4 or 6 cores for the gate pair slower
   than this under external load.
-  Without `--full`, its test step runs `go test -short` on changed packages
+  Without `--full`, vet and build cover the affected dependency closure. Its test step
+  runs `go test -short` on changed packages
   and their reverse dependency closure, including production, internal-test
   and external-test imports. The critical set runs separately without
   `-short`, including critical tests in affected packages. A `go.mod` or
