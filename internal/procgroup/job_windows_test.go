@@ -3,15 +3,18 @@
 package procgroup
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
 
-const sleepTree = `start /b ping -n 60 127.0.0.1 >nul & ping -n 60 127.0.0.1 >nul`
+const sleepTree = `start /b ping -n 60 127.0.0.1 >nul & echo ready & ping -n 60 127.0.0.1 >nul`
 
 func TestProcessBirthIsStableForALiveProcessAndAbsentForAMissingOne(t *testing.T) {
 	first, err := ProcessBirth(os.Getpid())
@@ -35,22 +38,38 @@ func startTreeInJob(t *testing.T) (*Job, *exec.Cmd) {
 	}
 	t.Cleanup(func() { _ = job.Close() })
 	cmd := exec.Command("cmd", "/c", sleepTree)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stdout.Close() })
 	if err := job.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		n, err := job.ActiveProcesses()
+	ready := make(chan error, 1)
+	go func() {
+		line, err := bufio.NewReader(stdout).ReadString('\n')
+		if err == nil && strings.TrimSpace(line) != "ready" {
+			err = fmt.Errorf("invalid tree readiness: %q", line)
+		}
+		ready <- err
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	select {
+	case err := <-ready:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n >= 2 || time.Now().After(deadline) {
-			if n < 2 {
-				t.Fatalf("job holds %d processes, want the shell and its background ping", n)
-			}
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
+	case <-ctx.Done():
+		t.Fatal("job tree did not publish readiness")
+	}
+	n, err := job.ActiveProcesses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 2 {
+		t.Fatalf("job holds %d processes, want the shell and its background ping", n)
 	}
 	return job, cmd
 }
@@ -60,11 +79,13 @@ func TestTerminateJobByNameEndsEveryMember(t *testing.T) {
 	if err := TerminateJobByName(job.Name); err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
 	select {
 	case <-waited:
-	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the job leader outlived TerminateJobByName")
 	}
 	n, err := job.ActiveProcesses()
@@ -87,11 +108,13 @@ func TestClosingTheJobEndsItsMembers(t *testing.T) {
 	if err := job.Close(); err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
 	select {
 	case <-waited:
-	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the job leader outlived the closed job handle")
 	}
 	if err := TerminateJobByName(job.Name); err != nil {

@@ -140,7 +140,7 @@ type dashboardLoginResult struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-func openDashboard(ctx context.Context, services dashboardServices, out io.Writer, mode string) error {
+func openDashboard(ctx context.Context, services dashboardServices, host string, out io.Writer, mode string) error {
 	if services.mintLogin == nil {
 		return dashboardUnavailable("local controller sign-in links")
 	}
@@ -157,7 +157,7 @@ func openDashboard(ctx context.Context, services dashboardServices, out io.Write
 			Hint: "free the port or set dashboard.address in config.yaml, then run sparkwing daemon restart --force",
 		}
 	}
-	login, err := services.mintLogin(ctx)
+	login, err := services.mintLogin(ctx, host)
 	if err != nil {
 		return err
 	}

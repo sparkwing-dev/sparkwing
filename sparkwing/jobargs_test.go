@@ -125,7 +125,7 @@ func TestJobArgs_NoneForJobsWithoutWithArgs(t *testing.T) {
 }
 
 func TestJobArgs_SecretsRetainClassification(t *testing.T) {
-	isolateProtocolDiscoveryRegistry(t)
+	isolateRegistry(t)
 	Register[NoInputs]("job-secrets", func() Pipeline[NoInputs] {
 		return protocolDiscoveryPipeline[NoInputs]{declare: func(p *Plan, _ NoInputs) error {
 			Job(p, "s", &jobargsJobSecret{})

@@ -72,6 +72,14 @@ func RegisterSQLite(t T, st *store.Store, path string) {
 	}
 }
 
+// RegisterPostgres records a schema-scoped store created from historical DDL.
+func RegisterPostgres(t T, st *store.Store, dsn string) {
+	t.Helper()
+	if err := register(t, st, location{dialect: store.DialectPostgres, dsn: dsn}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func register(t T, st *store.Store, loc location) error {
 	db, err := openLocation(loc)
 	if err != nil {

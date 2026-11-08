@@ -34,7 +34,7 @@ func TestTemplateVerifyWindowsLockExcludesAnotherHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	if err := lockTemplateVerifyFile(first); err != nil {
+	if err := lockExclusiveFile(first); err != nil {
 		t.Fatal(err)
 	}
 	var overlapped windows.Overlapped

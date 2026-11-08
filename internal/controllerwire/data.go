@@ -48,10 +48,10 @@ type DataSignedTransfer struct {
 	Size      int64             `json:"size"`
 }
 
-// DataHasManyRequest queries authorized presence under an optional budget.
+// DataHasManyRequest queries authorized presence under an explicit deadline.
 type DataHasManyRequest struct {
 	Digests  []blob.Digest `json:"digests"`
-	Deadline *time.Time    `json:"deadline,omitempty"`
+	Deadline time.Time     `json:"deadline"`
 }
 
 // DataPresence contains only digests requested and authorized by this caller.
@@ -86,6 +86,7 @@ type DataRecord struct {
 // DataRecordLookupResult carries a found record and its persisted members.
 type DataRecordLookupResult struct {
 	Found           bool         `json:"found"`
+	PreparedParent  bool         `json:"prepared_parent,omitempty"`
 	VerifiedDefault bool         `json:"verified_default,omitempty"`
 	Record          *DataRecord  `json:"record,omitempty"`
 	Members         []DataMember `json:"members"`

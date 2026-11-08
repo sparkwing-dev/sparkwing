@@ -20,6 +20,7 @@ import (
 
 func gateFixtureRepo(t *testing.T) string {
 	t.Helper()
+	isolateTestHome(t)
 	root := t.TempDir()
 	gitInit(t, root)
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.25\n")

@@ -116,7 +116,7 @@ handlers in `wingd.LocalHTTP`. The API reads the verified socket identity from
 Wingd's connection context. Explicit credentials keep precedence. Browser
 requests supply their own authentication. These handlers expose the same capability policy routes as the network controller.
 
-Schedule, invitation, build-trust, billing and storage reads use member
+Schedule, invitation, billing and storage reads use member
 capability policy. The same holds for GitHub App installation, repository,
 trigger and extra-repository reads. Schedule and review mutations pass the verified
 `Authorized` value to tenant transactions through `WithScheduleWriter` and
