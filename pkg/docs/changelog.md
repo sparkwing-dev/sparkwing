@@ -29,7 +29,6 @@ unlock.
 
 - **releases:** `sparkwing run release -- --commit SHA` cuts a green source in a detached worktree while main keeps accepting lands. Publication tags the prepared release commit and merges its metadata into fresh main, preserving newer code and unreleased notes.
 
-- **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-36).
 - **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/_unreleased.md#bound-object-presence-requests).
 
 
