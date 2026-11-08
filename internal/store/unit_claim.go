@@ -197,6 +197,11 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err = lockOwnerUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
+	if unit.Kind == capability.UnitNode {
+		if err := lockControllerCapacityTx(ctx, tx, team, string(unit.RunID)); err != nil {
+			return UnitClaim{}, err
+		}
+	}
 	if err = lockStateRunTx(ctx, tx, team, string(unit.RunID)); err != nil {
 		return UnitClaim{}, err
 	}

@@ -137,7 +137,7 @@ func ensureLocalProcess(ctx context.Context, opts wingd.LocalStartOptions) (wing
 	options := Options{Home: opts.Home, Version: opts.Version, Logf: func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "sparkwing: "+format+"\n", args...)
 	}, Spawn: func(home, version string) error {
-		return spawnDetached(opts.Executable, home, version)
+		return spawnDetached(opts.Executable, home, version, opts.ScheduleTick)
 	}}
 	ctx, cancel := context.WithTimeout(ctx, daemonStartupBudget(options))
 	defer cancel()

@@ -239,7 +239,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		return localRunPreparation{}, errors.New("local source acquisition returned no entry")
 	}
 	if entry.Engine.Identity.Pin.Replacement != "" {
-		_, digest, err := pinLocalRunnerExecutable(home, entry.Engine.Executable)
+		_, digest, err := pinLocalRunnerExecutable(home, entry.Engine.Executable, entry.Engine.Identity.ManifestDigest)
 		if err != nil {
 			return localRunPreparation{}, err
 		}

@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,7 +57,10 @@ case "$1" in
  run)
   [ "$2" = build ]
   printf 'build\n' >> "$WEB_TEST_TRACE"
-  if [ "${WEB_TEST_DELAY:-}" = 1 ]; then sleep 1; fi
+  if [ "${WEB_TEST_BLOCK:-}" = 1 ]; then
+    printf 'WEB_TEST_BUILD_READY\n'
+    IFS= read -r release
+  fi
   if [ "${WEB_TEST_FAIL:-}" = 1 ]; then exit 23; fi
   mkdir -p out
   cat src/page.tsx > out/index.html
@@ -275,53 +282,110 @@ func TestWebBuildProofDoesNotStoreEnvironmentValues(t *testing.T) {
 	}
 }
 
+type webBuildReadyWriter struct {
+	writer   io.Writer
+	ready    chan struct{}
+	pending  []byte
+	notified bool
+}
+
+func (w *webBuildReadyWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if !w.notified {
+		w.pending = append(w.pending, p[:n]...)
+		if bytes.Contains(w.pending, []byte("WEB_TEST_BUILD_READY\n")) {
+			w.notified = true
+			w.pending = nil
+			close(w.ready)
+		}
+	}
+	return n, err
+}
+
 func TestWebBuildSerializesConcurrentReuse(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow: 1.2s of real work; the fast class runs under -short")
+		t.Skip("slow: starts two build scripts and Node proof helpers")
 	}
 	f := newWebBuildFixture(t)
-	log, err := os.CreateTemp(t.TempDir(), "first-build")
+	log, err := os.CreateTemp(t.TempDir(), "concurrent-build")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
+	t.Cleanup(func() {
 		if err := log.Close(); err != nil {
 			t.Error(err)
 		}
-	}()
-	first := exec.Command("bash", filepath.Join(f.root, "bin/build-web.sh"), "--reuse")
-	first.Env = append(append([]string{}, f.env...), "WEB_TEST_DELAY=1")
-	first.Stdout, first.Stderr = log, log
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	ready := &webBuildReadyWriter{writer: log, ready: make(chan struct{})}
+	first := exec.CommandContext(ctx, "bash", filepath.Join(f.root, "bin/build-web.sh"), "--reuse")
+	first.Env = append(append([]string{}, f.env...), "WEB_TEST_BLOCK=1")
+	first.Stdout, first.Stderr = ready, log
+	first.WaitDelay = 5 * time.Second
+	release, err := first.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := first.Start(); err != nil {
 		t.Fatal(err)
 	}
-	waited := false
-	defer func() {
-		if !waited {
+	firstWaited := false
+	t.Cleanup(func() {
+		_ = release.Close()
+		cancel()
+		if !firstWaited {
 			if err := first.Wait(); err != nil {
-				t.Error(err)
+				t.Logf("first build cleanup: %v", err)
 			}
 		}
-	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		data, readErr := os.ReadFile(f.trace)
-		if readErr != nil && !os.IsNotExist(readErr) {
-			t.Fatal(readErr)
-		}
-		if strings.Contains(string(data), "build\n") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("first build did not start")
-		}
-		time.Sleep(10 * time.Millisecond)
+	})
+	started, stop := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stop()
+	select {
+	case <-ready.ready:
+	case <-started.Done():
+		t.Fatal("first build did not publish readiness")
 	}
-	f.mustRun(t)
-	if err := first.Wait(); err != nil {
+	probe := exec.CommandContext(ctx, "flock", "-n", filepath.Join(f.root, "internal/web/.build-state/lock"), "bash", "-c", ":")
+	probe.Env = f.env
+	probeErr := probe.Run()
+	var exit *exec.ExitError
+	if !errors.As(probeErr, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("the first build did not hold its export lock: %v", probeErr)
+	}
+	second := exec.CommandContext(ctx, "bash", filepath.Join(f.root, "bin/build-web.sh"), "--reuse")
+	second.Env = f.env
+	second.Stdout, second.Stderr = log, log
+	second.WaitDelay = 5 * time.Second
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	secondWaited := false
+	t.Cleanup(func() {
+		cancel()
+		if !secondWaited {
+			if err := second.Wait(); err != nil {
+				t.Logf("second build cleanup: %v", err)
+			}
+		}
+	})
+	if _, err := release.Write([]byte("\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := release.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = first.Wait()
+	firstWaited = true
+	if err != nil {
 		t.Fatalf("first build: %v", err)
 	}
-	waited = true
+	err = second.Wait()
+	secondWaited = true
+	if err != nil {
+		t.Fatalf("second build: %v", err)
+	}
 	if got := f.builds(t); got != 1 {
 		t.Fatalf("concurrent reuse launched %d builds", got)
 	}

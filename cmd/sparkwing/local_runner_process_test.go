@@ -2,9 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -105,14 +110,14 @@ func TestPinnedLocalRunnerExecutableSurvivesInstallAndRejectsCorruption(t *testi
 	if err := os.WriteFile(source, []byte("first"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	first, build, err := pinLocalRunnerExecutable(home, source)
+	first, build, err := pinLocalRunnerExecutable(home, source, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(source, []byte("next"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	next, nextBuild, err := pinLocalRunnerExecutable(home, source)
+	next, nextBuild, err := pinLocalRunnerExecutable(home, source, "")
 	if err != nil || first == next || build == nextBuild {
 		t.Fatalf("install did not preserve builds: %s %s %v", first, next, err)
 	}
@@ -123,8 +128,123 @@ func TestPinnedLocalRunnerExecutableSurvivesInstallAndRejectsCorruption(t *testi
 	if err := os.WriteFile(next, []byte("corrupt"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := pinLocalRunnerExecutable(home, source); err == nil {
+	if _, _, err := pinLocalRunnerExecutable(home, source, ""); err == nil {
 		t.Fatal("reused corrupt image")
+	}
+}
+
+func TestPinnedLocalRunnerExecutableReusesOnlyIdenticalBytes(t *testing.T) {
+	for _, change := range []string{"unchanged", "same-size", "shorter", "longer"} {
+		t.Run(change, func(t *testing.T) {
+			home := t.TempDir()
+			source := filepath.Join(home, "installed")
+			original := strings.Repeat("first", 20000)
+			if err := os.WriteFile(source, []byte(original), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path, build, err := pinLocalRunnerExecutable(home, source, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			contents := original
+			switch change {
+			case "same-size":
+				contents = original[:len(original)-1] + "x"
+			case "shorter":
+				contents = original[:len(original)-1]
+			case "longer":
+				contents = original + "x"
+			}
+			if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			next, nextBuild, err := pinLocalRunnerExecutable(home, source, "")
+			if change == "unchanged" {
+				if err != nil || path != next || build != nextBuild {
+					t.Fatalf("reuse = %s %s %v", next, nextBuild, err)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("reused changed executable")
+				}
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				next, nextBuild, err := pinLocalRunnerExecutable(home, source, build)
+				if err != nil || next != path || nextBuild != build {
+					t.Fatalf("restore missing image = %s %s %v", next, nextBuild, err)
+				}
+			}
+			files, err := os.ReadDir(filepath.Dir(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 1 {
+				t.Fatalf("staged files survived: %v", files)
+			}
+		})
+	}
+}
+
+func TestPinnedLocalRunnerReusesAcceptedImageWithoutDirectoryWrites(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows directory modes do not remove write access")
+	}
+	home := t.TempDir()
+	source := filepath.Join(home, "installed")
+	if err := os.WriteFile(source, []byte("accepted"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	first, build, err := pinLocalRunnerExecutable(home, source, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(first)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	next, nextBuild, err := pinLocalRunnerExecutable(home, source, build)
+	if err != nil || next != first || nextBuild != build {
+		t.Fatalf("reuse without staging = %s %s %v", next, nextBuild, err)
+	}
+}
+
+func TestPinnedLocalRunnerRefusesChangedAcceptedSource(t *testing.T) {
+	for _, retained := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retained=%t", retained), func(t *testing.T) {
+			home := t.TempDir()
+			source := filepath.Join(home, "installed")
+			contents := []byte("accepted")
+			sum := sha256.Sum256(contents)
+			build := hex.EncodeToString(sum[:])
+			if err := os.WriteFile(source, contents, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if retained {
+				path, _, err := pinLocalRunnerExecutable(home, source, build)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("replaced"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			replacement := filepath.Join(home, "replacement")
+			if err := os.WriteFile(replacement, []byte("replaced"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(replacement, source); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := pinLocalRunnerExecutable(home, source, build); err == nil {
+				t.Fatal("accepted source replacement")
+			}
+			files, err := os.ReadDir(filepath.Join(home, "runners", "builds"))
+			if err != nil || len(files) != map[bool]int{false: 0, true: 1}[retained] {
+				t.Fatalf("unexpected retained/staged files: %v %v", files, err)
+			}
+		})
 	}
 }
 

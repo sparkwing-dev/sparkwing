@@ -1083,11 +1083,6 @@ CREATE TABLE uploads (
     )
 );
 
-CREATE TABLE team_build_trust (
-    team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
-    trust_local_builds BIGINT NOT NULL DEFAULT 0 CHECK(trust_local_builds IN (0,1))
-);
-
 -- safety: account audit events precede team creation, so this operator table permits no team.
 CREATE TABLE audit_events (
     id TEXT NOT NULL PRIMARY KEY,

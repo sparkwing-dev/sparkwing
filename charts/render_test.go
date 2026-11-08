@@ -26,8 +26,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.4.0" {
-		t.Fatalf("full chart version = %q, want 0.4.0", chart.Version)
+	if chart.Version != "0.4.1" {
+		t.Fatalf("full chart version = %q, want 0.4.1", chart.Version)
 	}
 }
 
@@ -1452,6 +1452,9 @@ func TestRunnerBundleMountsNoServiceAccountTokens(t *testing.T) {
 	for _, resource := range resources {
 		if resource.Kind == "ServiceAccount" {
 			created[resource.Metadata.Name] = true
+			if resource.AutomountServiceAccountToken == nil || *resource.AutomountServiceAccountToken {
+				t.Errorf("ServiceAccount %s defaults to mounting a token", resource.Metadata.Name)
+			}
 		}
 	}
 	for name, component := range accounts {
@@ -1467,6 +1470,10 @@ func TestFullChartGrantsTheControllerNoKubernetesAccess(t *testing.T) {
 	}
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default"))
 	controller := componentResource(t, resources, "Deployment", "controller")
+	account := componentResource(t, resources, "ServiceAccount", "controller")
+	if account.AutomountServiceAccountToken == nil || *account.AutomountServiceAccountToken {
+		t.Error("controller ServiceAccount defaults to mounting a token")
+	}
 	if pod := controller.Spec.Template.Spec; pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
 		t.Error("controller pod automounts a ServiceAccount token")
 	}
@@ -1518,7 +1525,14 @@ func TestFullChartVendorsTheTightenedRunnerRBAC(t *testing.T) {
 	if pod := runner.Spec.Template.Spec; pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
 		t.Error("vendored runner pod automounts a ServiceAccount token")
 	}
+	foundAccount := false
 	for _, resource := range resources {
+		if resource.Kind == "ServiceAccount" && resource.Metadata.Name == runner.Spec.Template.Spec.ServiceAccountName {
+			foundAccount = true
+			if resource.AutomountServiceAccountToken == nil || *resource.AutomountServiceAccountToken {
+				t.Error("vendored runner ServiceAccount defaults to mounting a token")
+			}
+		}
 		if resource.Kind != "Role" {
 			continue
 		}
@@ -1529,6 +1543,9 @@ func TestFullChartVendorsTheTightenedRunnerRBAC(t *testing.T) {
 				}
 			}
 		}
+	}
+	if !foundAccount {
+		t.Error("vendored runner names a ServiceAccount that the chart never creates")
 	}
 }
 

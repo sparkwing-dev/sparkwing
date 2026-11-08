@@ -105,11 +105,11 @@ allow the host to wait for cleanup before closing the process.
 
 | Operation | Request fields after `id` and `op` | Result |
 |---|---|---|
-| `hello` | `protocol`, `engine`, `runner`, optional `binding` and `features` | `protocol`, `sdk`, `features` |
+| `hello` | `protocol`, `engine`, `runner`, optional `binding` | `protocol`, `sdk` |
 | `describe` | None | `pipelines` |
-| `plan` | `pipeline`, `args`, `run` | Flat plan document |
-| `run_step` | `job`, `step`, positive `attempt`, `settled`, optional `failure` | `outcome`, optional `output` or `error` |
-| `eval` | `closure`, optional `input`; step predicates also carry `attempt`, `settled` | `value`, optional `error` |
+| `plan` | `pipeline`, `args`, `run` | `jobs`, optional `concurrency`, `priority`, `claim_wait_ms`, `admission_class`, `source` |
+| `run_step` | `job`, `step`, positive `attempt`, `settled`, optional `args`, `failure` | `outcome`, optional `output` or `error` |
+| `eval` | `closure`, optional `args`, `input`; step predicates also carry `attempt`, `settled` | `value`, optional `error`, `arguments`, `declarations_known` |
 | `cancel` | `job` with optional `step`, or `target` | `{}` |
 
 ### Describe and plan
@@ -168,7 +168,7 @@ Each job is flat:
 
 | Fields | Meaning |
 |---|---|
-| `id`, `groups` | Job and grouping identifiers |
+| `id`, `groups`, `arguments` | Job and grouping identifiers, and job argument metadata |
 | `deps`, `deps_if_present`, `needs_generated` | Required, optional and generated dependencies |
 | `steps`, `result_step`, `failure_policy` | Step graph, selected typed result and failure handling |
 | `retry`, `timeout_ms`, `no_progress_timeout_ms` | Application retry and execution deadlines |
@@ -177,7 +177,7 @@ Each job is flat:
 | `closures`, `skip_if_budget_ms` | Opaque callback IDs and condition budget |
 | `approval` | Manual decision with message, timeout and timeout policy |
 | `memo`, `caches`, `artifacts`, `consumes`, `pipeline_refs` | Result reuse, files and declared read edges |
-
+| `children` | Allowed child targets, each with `pipeline` and optional `repository` |
 | `env`, `requires`, `prefers`, `inline`, `concurrency` | Execution declarations |
 
 A `pipeline_refs` entry reads successful verified default-branch output by default.
@@ -185,6 +185,14 @@ Its optional `from_any_run: true` permits other successful runs. The latest-outp
 request must opt out with `from_any_run=true`, and the controller refuses that
 request unless the declared reference permits it. Direct job-output reads enforce
 the same default.
+
+`from_proven_run: true` selects a successful run at the reader's sealed commit,
+proven for the reader's repository, with every job selected and dry run disabled.
+The latest-output query uses `from_proven_run=true` and requires the matching
+declaration. `from_any_run` and `from_proven_run` are mutually exclusive.
+
+A job's `children` array declares which pipelines it may start. Each entry has a
+`pipeline` and optional `repository`; omission inherits the parent repository.
 
 Executable jobs declare one or more steps. An approval has no step body. Steps
 have `id`, optional `needs`, `groups`, `finally`, `risks`, `optional`,
@@ -196,8 +204,8 @@ a `verify` ID and a `memo_key` ID. These identify code without serializing it.
 Approvals support skip conditions and separate recovery jobs.
 
 `memo.input` carries a typed recipe instead of `closures.memo_key`. Exactly one
-is required when `memo` is present. Recipe kinds are `files` and `repo_files`
-(with `patterns`), `tree` (with `root`), `env` (with `names`), `parts` (with ordered
+is required when `memo` is present. Recipe kinds are `const` (with a nonempty
+string `value`), `files` and `repo_files` (with `patterns`), `tree` (with `root`), `env` (with `names`), `parts` (with ordered
 JSON `parts`), and `compose` (with nested `inputs`). The executing host evaluates
 recipes against its checkout and effective job environment under admission.
 Callbacks return values for the same host canonical JSON hash. Both paths use a
@@ -230,6 +238,13 @@ and contradictory declarations. Omitted optional fields remain unset. It
 rejects registered secret values contained in any job, step, group, approval or
 identifier-bearing reference. Errors name the field path without echoing the
 secret. Host acceptance separately checks authorization and resolved settings.
+
+A declaration with a constant memo key, a proven output reference and a child
+target uses these shapes:
+
+```json
+{"jobs":[{"id":"build","steps":[{"id":"compile"}],"memo":{"input":{"kind":"const","value":"build-v1"}},"pipeline_refs":[{"pipeline":"prepare","job":"bundle","from_proven_run":true}],"children":[{"pipeline":"publish"}]}]}
+```
 
 ### Steps and settlement
 
@@ -269,7 +284,7 @@ recovery uses a separate disruption allowance.
 | `skip_if` | Boolean |
 | `memo_key` | JSON value, or null to bypass reuse. Empty strings fail |
 | `before_run`, `after_run`, `verify` | Null |
-| `generate` | Array of flat job declarations |
+| `generate` | PlanDoc object with a required `jobs` array |
 
 Executable-job `skip_if` and `memo_key` closures run on the executing host under
 the actual job award after concurrency and machine admission. The host checks
@@ -282,12 +297,20 @@ receives the final step-result shape in `input`, preserving the final failure.
 Successful completion passes no error to the Go hook.
 
 Generators run after successful or memoized source outputs. Each generated job
-names exactly one of the source's generator IDs in its `groups`. The host wraps
-the returned jobs in a plan and validates them against existing topology and
+names exactly one of the source's generator IDs in its `groups`. The SDK returns
+a PlanDoc object in `eval.value`, with optional `arguments` and
+`declarations_known` metadata beside `value`. The host requires the expansion
+plan to contain jobs only and validates it against existing topology and
 concurrency declarations. It accepts at most 256 jobs per generator, preserving
 empty generator groups. Acceptance, replay, source generation and cancellation
 checks occur at the store boundary. Failed, skipped, cancelled and superseded
 sources settle their barriers without invoking generators.
+
+For a generator declared as `build/generate/0`, an empty expansion is:
+
+```json
+{"reply":"9","ok":true,"result":{"value":{"jobs":[]},"declarations_known":true}}
+```
 
 ### Cancellation
 
@@ -335,8 +358,7 @@ lines before the result. An optional base64 `stdin` is written to the command.
 with `signaled: true`. A command that never started has `exit_code: -1`, a
 `start_error` and `not_found: true` when the executable is missing. Host lines
 share the request pipe and are identified by their first key. TypeScript output
-callbacks receive captured bytes through the same host relay.
-SDK command spawning and older hosts are unsupported.
+callbacks consume the streamed `exec_output` chunks.
 
 ## Host service routes
 
@@ -350,17 +372,18 @@ error object in its `error` member.
 <!-- node-routes:start -->
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/node/v1/secrets/{name}` | None | `{value, masked}` |
+| GET | `/node/v1/secrets/{name}` | Optional `variable=true` query | `{value, masked}` |
 | GET | `/node/v1/jobs/{job}/output` | None | `{output}` |
-| GET | `/node/v1/pipelines/{name}/latest` | `job`, `max_age_ms`, optional `from_any_run=true` query | `{output}` |
+| GET | `/node/v1/pipelines/{name}/latest` | `job`, `max_age_ms`, optional `from_any_run=true` or `from_proven_run=true` query | `{output}` |
 | POST | `/node/v1/oidc-token` | `{audience}` | `{token}` |
 | POST | `/node/v1/children` | `{pipeline, job, args, repo?, branch?}` | `{run_id}` |
 | GET | `/node/v1/children/{run}/await` | `job`, `wait_ms` query | `{status, output?, error?}` |
 | POST | `/node/v1/cleanups` | `{argv, description}` | `{id}` |
-| DELETE | `/node/v1/cleanups/{id}` | None | Successful status |
+| DELETE | `/node/v1/cleanups/{cleanup}` | None | Successful status |
 | POST | `/node/v1/masks` | `{value}` | `{}` |
 | POST | `/node/v1/annotations` | `{level, message, file?, line?, end_line?, column?, step?}` | `{}` |
 | POST | `/node/v1/summary` | `{markdown, step?}` | `{}` |
+| POST | `/node/v1/helpers` | `{operation, args, dir, env, step?}` | `{result, error?, code?}` |
 <!-- node-routes:end -->
 
 Service request fields cannot be null. SDK encoders send empty objects and
@@ -405,13 +428,12 @@ failures and missing required output reads fail the job.
 
 ## Version selection
 
-The pinned SDK version selects a matching engine. Each engine negotiates its
-node protocol once through hello. Optional wire fields, routes, error codes and
-log events are additive. Optional operations are advertised in `features`.
-Breaking wire changes require a new major. Strict plan fields must be understood
-by the accepting engine.
+The pinned SDK version selects a matching engine. Hello checks protocol major 2
+once and identifies the SDK language and version. The host checks that identity
+against the sealed SDK pin. Core operations and host services are called directly.
+Strict plan fields must be understood by the accepting engine.
 
-### Host helpers
+## Host helpers
 
 Both SDKs POST typed operations to `/node/v1/helpers` through the bound process
 routes. Requests contain `operation`, an `args` array, absolute `dir`, and `env`.
@@ -419,5 +441,3 @@ Git, Docker and service behavior runs in the host. The host filters command
 environments, resolves paths against `dir`, masks errors, and owns resource
 cleanup through the process cleanup ledger. Responses contain `result`, or
 `error` and its optional sentinel `code`. SDKs decode results and render output.
-Generators return a complete plan document in `eval.value`; the host requires
-expansions to contain jobs only before accepting their declarations.

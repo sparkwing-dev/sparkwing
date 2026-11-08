@@ -295,3 +295,67 @@ func TestWindowsCapturedEnvironmentIgnoresDriveMetadata(t *testing.T) {
 		t.Fatalf("values=%v err=%v", values, err)
 	}
 }
+
+func TestWindowsHostCommandFiltersEngineCredentials(t *testing.T) {
+	t.Setenv("SPARKWING_NODE_TOKEN", "fixture-only")
+	for _, explicit := range []bool{false, true} {
+		req := nodeproto.ExecRequest{ID: "credentials", Argv: []string{"cmd", "/c", "if defined SPARKWING_NODE_TOKEN (exit 23) else (echo filtered)"}, Dir: t.TempDir(), Env: os.Environ(), Capture: true}
+		if explicit {
+			req.Env = append(req.Env, "SPARKWING_NODE_TOKEN=fixture-override")
+		}
+		var output strings.Builder
+		done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), func(stream string, chunk []byte, _ bool) error {
+			if stream == "stdout" {
+				output.Write(chunk)
+			}
+			return nil
+		}, nil)
+		if session != nil {
+			if err := endCommandSessions([]*commandSession{session}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if done.StartError != "" || done.ExitCode != 0 || strings.TrimSpace(output.String()) != "filtered" {
+			t.Fatalf("explicit=%v: credential filtering result=%+v, output=%q", explicit, done, output.String())
+		}
+	}
+}
+
+func TestWindowsHostCommandUsesCommandPath(t *testing.T) {
+	directory := t.TempDir()
+	source, err := exec.LookPath("cmd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "host-tool.exe"), body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, path string }{
+		{"host-tool", directory},
+		{filepath.Join(directory, "host-tool"), t.TempDir()},
+		{`.\host-tool`, t.TempDir()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := nodeproto.ExecRequest{ID: "lookup", Argv: []string{tc.name, "/c", "echo resolved"}, Dir: directory, Env: append(os.Environ(), "PATH="+tc.path, "PATHEXT=.EXE"), Capture: true}
+			var output strings.Builder
+			done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), func(stream string, chunk []byte, _ bool) error {
+				if stream == "stdout" {
+					output.Write(chunk)
+				}
+				return nil
+			}, nil)
+			if session != nil {
+				if err := endCommandSessions([]*commandSession{session}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if done.StartError != "" || done.ExitCode != 0 || strings.TrimSpace(output.String()) != "resolved" {
+				t.Fatalf("command PATH result=%+v, output=%q", done, output.String())
+			}
+		})
+	}
+}

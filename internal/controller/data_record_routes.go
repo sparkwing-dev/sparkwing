@@ -88,6 +88,7 @@ func (s *Server) handleDataRecordLookup(w http.ResponseWriter, r *http.Request, 
 	}
 	response := controllerwire.DataRecordLookupResult{Found: result.Found, Members: []controllerwire.DataMember{}}
 	if result.Found {
+		response.PreparedParent = result.PreparedParent
 		response.VerifiedDefault = result.VerifiedDefault
 		record := dataRecordResponse(result.Record)
 		response.Record = &record

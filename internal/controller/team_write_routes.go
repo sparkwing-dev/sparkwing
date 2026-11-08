@@ -16,7 +16,6 @@ type teamWriter interface {
 	DeleteAuthorizedTeam(context.Context, capability.Authorized) (store.TeamDeletion, error)
 	CreateAuthorizedInvitation(context.Context, capability.Authorized, string, store.Role, string) (store.Invitation, error)
 	DeleteAuthorizedInvitation(context.Context, capability.Authorized, string) error
-	SetAuthorizedBuildTrust(context.Context, capability.Authorized, bool) error
 	DeleteAuthorizedRun(context.Context, capability.Authorized, func(context.Context) error) error
 }
 
@@ -32,7 +31,6 @@ func (s *Server) teamWriteEndpoints() []controllerwire.Endpoint {
 		{Method: "DELETE", Pattern: "/api/v1/team", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteTeam},
 		{Method: "POST", Pattern: "/api/v1/team/invitations", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleInvite},
 		{Method: "DELETE", Pattern: "/api/v1/team/invitations/{invitation}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteInvitation},
-		{Method: "PUT", Pattern: "/api/v1/team/build-trust", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePutBuildTrust},
 		{Method: "DELETE", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleDeleteRun},
 	}
 }

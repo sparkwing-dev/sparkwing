@@ -191,15 +191,22 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 		stopMeasure = time.AfterFunc(commandMeasureDelay, func() { measure(pid, birth) }).Stop
 	}
 	exited := make(chan struct{})
-	watchDone := make(chan struct{})
+	cleanupDone := make(chan struct{})
 	go func() {
-		defer close(watchDone)
+		defer close(cleanupDone)
 		select {
 		case <-kill:
 			session.kill()
 		case <-closed:
 			session.kill()
 		case <-exited:
+			select {
+			case <-kill:
+				session.kill()
+			case <-closed:
+				session.kill()
+			default:
+			}
 		}
 	}()
 	tails := [2]*commandTail{{keep: !req.Capture, mask: masker.Stream()}, {keep: !req.Capture, mask: masker.Stream()}}
@@ -261,7 +268,8 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 	waitErr := cmd.Wait()
 	stopMeasure()
 	close(exited)
-	<-watchDone
+	// safety: reaping the leader can finish before cancellation has killed its other process groups.
+	<-cleanupDone
 	// safety: a background child holding the pipes ends the drain at the deadline.
 	deadline := time.Now().Add(commandDrainGrace)
 	if outR.SetReadDeadline(deadline) != nil || errR.SetReadDeadline(deadline) != nil {
