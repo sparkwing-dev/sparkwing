@@ -12,17 +12,26 @@ import (
 
 func TestLinuxSampleOwned_KeepsATreeWhoseNewChildTheScanCanDate(t *testing.T) {
 	root := os.Getpid()
-	roots := []OwnedRoot{{PID: root, HeldSince: time.Now()}}
+	now := time.Now()
+	clock := func() time.Time { return now }
+	roots := []OwnedRoot{{PID: root, HeldSince: now}}
 	cores := float64(runtime.NumCPU())
 	sampler := newOwnedCPUSampler()
 
-	if _, ok := sampler.sampleOwnedFrom(time.Now, roots, cores); !ok {
+	if _, ok := sampler.sampleOwnedFrom(clock, roots, cores); !ok {
 		t.Fatal("the scan could not list this machine's processes, so it never reached the dating this test is about")
 	}
 
 	// safety: the child is first seen by the second scan, which is the one path that
 	// asks a process's age. Without it, a scan dating nothing still keeps the tree.
-	child := exec.Command("sleep", "30")
+	input, release, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	defer release.Close()
+	child := exec.Command("cat")
+	child.Stdin = input
 	if err := child.Start(); err != nil {
 		t.Fatalf("start a child under this test's tree: %v", err)
 	}
@@ -31,13 +40,22 @@ func TestLinuxSampleOwned_KeepsATreeWhoseNewChildTheScanCanDate(t *testing.T) {
 		_ = child.Wait()
 	}()
 
-	// safety: a sparse /proc scans in microseconds, and one tick of child CPU exceeds
-	// that window's ceiling, so the capacity bound would decide here instead.
-	time.Sleep(50 * time.Millisecond)
+	process, ok := linuxProcess(child.Process.Pid)
+	if !ok {
+		t.Fatal("the child has no process identity")
+	}
+	identity := processIdentity{pid: child.Process.Pid, startTicks: process.startTicks}
 
-	byRoot, ok := sampler.sampleOwnedFrom(time.Now, roots, cores)
+	// safety: the injected window keeps this process's unrelated CPU from deciding
+	// the capacity bound before the child's start date is checked.
+	now = now.Add(time.Hour)
+
+	byRoot, ok := sampler.sampleOwnedFrom(clock, roots, cores)
 	if !ok {
 		t.Fatal("the second scan could not list this machine's processes")
+	}
+	if _, sampled := sampler.last[identity]; !sampled {
+		t.Fatal("the second scan did not see the new child")
 	}
 	if _, kept := byRoot[root]; !kept {
 		t.Errorf("the scan dropped this tree's figure after a child appeared under it; want the tree kept: an undated child is refused first-sight credit and takes the whole tree out of the reading, so owned CPU reads short, external reads high, and admission grants fewer cores than the host has free")

@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -18,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
@@ -583,7 +584,7 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 }
 
 func moduleFiles(root string) ([]string, error) {
-	cmd := exec.Command("git", "-C", root, "ls-files", "-z", "--", "*.go", "*go.mod")
+	cmd := testgit.Command("git", "-C", root, "ls-files", "-z", "--", "*.go", "*go.mod")
 	data, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("list tracked module files: %w", err)

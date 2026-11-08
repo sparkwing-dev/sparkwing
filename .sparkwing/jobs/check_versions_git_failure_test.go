@@ -5,12 +5,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestLocalBehindRemoteDistinguishesGitFailures(t *testing.T) {
@@ -91,12 +92,7 @@ func TestLocalBehindRemoteDistinguishesGitFailures(t *testing.T) {
 
 func versionFixtureGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false"}, args...)...)
-	for _, item := range os.Environ() {
-		if !strings.HasPrefix(item, "GIT_") {
-			cmd.Env = append(cmd.Env, item)
-		}
-	}
+	cmd := testgit.CommandContext(t.Context(), "git", append([]string{"-C", dir, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false"}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("fixture git %v: %v: %s", args, err, out)

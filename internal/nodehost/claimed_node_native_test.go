@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -15,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -226,13 +227,13 @@ func hostSourceCheckout(t *testing.T) (string, string) {
 		{"init", "--quiet"},
 		{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "source"},
 	} {
-		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+		cmd := testgit.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(testgit.Env(os.Environ()), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git: %v: %s", err, out)
 		}
 	}
-	cmd := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
+	cmd := testgit.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
 	sha, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
