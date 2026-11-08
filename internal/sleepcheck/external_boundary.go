@@ -27,6 +27,11 @@ type sourcePosition struct {
 
 var approvedExternalBoundaries = []externalBoundary{
 	{
+		file: "internal/nodehost/host_exec_windows_test.go", function: "TestWindowsHostCommandKeepsBufferedOutputPastSlowSink",
+		duration: "2 * commandDrainGrace",
+		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",
+	},
+	{
 		file: "internal/nodehost/host_exec_stdin_unix_test.go", function: "TestHostCommandKeepsBufferedOutputPastASlowSink",
 		duration: "2 * commandDrainGrace",
 		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",

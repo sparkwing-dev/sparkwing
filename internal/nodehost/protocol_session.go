@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
@@ -447,10 +446,6 @@ func (s *protocolSession) readProtocolFrames(file *os.File) {
 			continue
 		}
 		if frame.Exec != nil {
-			if runtime.GOOS == "windows" {
-				s.failProtocol(protocolSessionError(apierr.ProtocolError, "SDK sent a command to a host that does not run commands"))
-				return
-			}
 			s.startExec(*frame.Exec)
 			continue
 		}

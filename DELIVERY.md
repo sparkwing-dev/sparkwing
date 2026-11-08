@@ -1592,6 +1592,22 @@ file. Other syntax and workflow checks remain active.
   isolation. `sparkwing run integration` runs them through its full `./...`
   suite against the local PostgreSQL fixture.
 
+- **Native Windows CLI smoke:** `TestWindowsLocalRunStartsControllerAndFinishes`
+  (`cmd/sparkwing`) builds the CLI and runs a Go pipeline through standalone
+  and shared controllers in private homes. Both modes require a successful
+  `run_finish` receipt and a zero process exit status. Run it on Windows with
+  `go test -p 1 ./cmd/sparkwing -run TestWindowsLocalRunStartsControllerAndFinishes`.
+  `TestWindowsLocalHTTPKeepsRequestAliveAcrossReuse` in `internal/wingd`
+  guards the named-pipe deadline contract beneath startup and runner claims.
+
+- **Standalone client shutdown:**
+  `TestStandaloneRunClosesUnusedClientDialBeforeControllerDrain` (`cmd/sparkwing`,
+  Unix) cancels a request while its dial completes, then shuts down the real
+  standalone runtime. It requires the CLI to close the unused connection before
+  controller draining, without changing the API drain deadline. Native Windows
+  verification repeats standalone pipeline runs and requires both successful
+  `run_finish` receipts and zero process exits.
+
 - **Local controller smoke:** `TestLocalControllerSmoke` (`cmd/sparkwing`,
   part of the full suite) builds the CLI and drives every local controller
   command against a fresh local controller in a private home. It fails when
