@@ -1784,6 +1784,13 @@ fails the unit and leaves the installed binaries unchanged. Once idle, it
 renames the staged binaries into `~/.local/bin` and restarts the controllers
 that were running. The standalone runner service keeps its running process.
 Its replacement binary takes effect at that service's next restart.
+If the CLI rename fails after replacing the runner, the updater restores the
+previous runner and exits with a retry message. A failed restore names the
+retained binary and destination for manual repair. Replayable keyed run intake
+can wait up to 30 seconds across a controller restart, covering land starts
+that arrive after the idle snapshot.
+Install the intake retry fix while the queue is idle before arming unattended
+updates. Processes already running an older CLI keep that client's retry budget.
 
 The pipeline result confirms the handoff. Read the activation result with
 `journalctl --user -u sparkwing-desktop-update`. Use

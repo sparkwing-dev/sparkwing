@@ -72,10 +72,21 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		}
 	}
 	mayRetry := policy.Retry == capability.RetrySafe || policy.Retry == capability.RetryExactBody || policy.Retry == capability.RetryIdempotencyKey && key != ""
+	retries := unavailableRetries
+	recoverIntake := false
 	// safety: intake replay cannot recover a lost one-time here bearer.
 	switch input := input.(type) {
 	case controllerwire.CreateRunRequest:
 		mayRetry = mayRetry && input.Request.Options.Runner.Value.Kind != runspec.RunnerHere
+		recoverIntake = mayRetry
+		if recoverIntake {
+			// safety: keyed intake must span controller replacement without losing its request identity.
+			retries = 8
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			req = req.WithContext(ctx)
+		}
 	case controllerwire.RetryRequest:
 		// safety: the source run's sealed runner selection is unavailable at this boundary.
 		mayRetry = false
@@ -87,7 +98,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 	for attempt := 0; ; attempt++ {
 		resp, requestErr := c.http.Do(req)
 		if requestErr != nil {
-			if !mayRetry || attempt >= unavailableRetries || ctx.Err() != nil || !RetryableTransportError(requestErr) {
+			if !mayRetry || attempt >= retries || ctx.Err() != nil || !RetryableTransportError(requestErr) {
 				return fmt.Errorf("cannot connect to controller %s: %w; check its URL with sparkwing profiles show --profile NAME, repair it with sparkwing profiles set --profile NAME --controller URL, and check your network and whether the controller is running", c.base, requestErr)
 			}
 			if err := waitFor(ctx, time.Duration(1<<attempt)*100*time.Millisecond); err != nil {
@@ -95,11 +106,13 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 			}
 		} else {
 			retry, err := c.readResponse(resp, output)
-			if !mayRetry || attempt >= unavailableRetries || !retry {
+			if !mayRetry || attempt >= retries || !retry {
 				return err
 			}
 			wait, ok := parseRetryAfter(resp)
-			if !ok {
+			if recoverIntake {
+				wait = max(wait, time.Duration(1<<attempt)*100*time.Millisecond)
+			} else if !ok {
 				return err
 			}
 			if err := waitFor(ctx, wait); err != nil {

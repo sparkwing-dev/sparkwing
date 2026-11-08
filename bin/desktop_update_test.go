@@ -14,7 +14,7 @@ func TestDesktopUpdateWaitsForWorkAndRefusesUnverifiedIdle(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux systemd updater")
 	}
-	for _, mode := range []string{"idle", "drain", "run", "trigger", "lease", "land", "opaque-land", "status-error", "malformed", "missing-count", "units-error", "malformed-units", "show-error", "red", "build-error", "restart-error", "stopped"} {
+	for _, mode := range []string{"idle", "drain", "run", "trigger", "lease", "land", "opaque-land", "status-error", "malformed", "missing-count", "units-error", "malformed-units", "show-error", "red", "build-error", "rename-error", "rollback-error", "restart-error", "stopped"} {
 		t.Run(mode, func(t *testing.T) {
 			root, err := filepath.Abs(".")
 			if err != nil {
@@ -115,6 +115,15 @@ esac
 			write(filepath.Join(bin, "sleep"), "#!/bin/sh\ntouch \"$HOME/drained\"\n")
 			write(filepath.Join(bin, "go"), "#!/bin/sh\nexit 1\n")
 			write(filepath.Join(bin, "pnpm"), "#!/bin/sh\nexit 1\n")
+			write(filepath.Join(bin, "mv"), `#!/bin/bash
+set -eu
+if [[ ( "$MODE" == rename-error || "$MODE" == rollback-error ) && "${@: -1}" == "$HOME/.local/bin/sparkwing" ]]; then
+  echo 'injected CLI rename failure' >&2
+  exit 30
+fi
+if [[ "$MODE" == rollback-error && "$*" == *previous-runner* ]]; then exit 31; fi
+exec /bin/mv "$@"
+`)
 			write(filepath.Join(dest, "sparkwing-runner"), "old runner\n")
 			before, err := os.ReadFile(filepath.Join(dest, "sparkwing"))
 			if err != nil {
@@ -157,11 +166,18 @@ esac
 				if mode == "drain" && !strings.Contains(string(out), "waiting for sw-land-42.service") {
 					t.Fatalf("land unit was not awaited: %s", out)
 				}
+			} else if mode == "rollback-error" {
+				if string(cli) != string(before) || string(runner) != "new runner\n" || strings.Contains(string(calls), "restart") || !strings.Contains(string(out), "mixed versions installed; restore") || !strings.Contains(string(out), "previous-runner to "+dest+"/sparkwing-runner before retrying") {
+					t.Fatalf("failed rollback lacks repair guidance: %s (%s)", calls, out)
+				}
 			} else if string(cli) != string(before) || string(runner) != "old runner\n" || strings.Contains(string(calls), "restart") {
 				t.Fatalf("refused update changed installation: %s (%s)", calls, out)
 			}
 			if !success && !strings.Contains(string(out), "desktop-update:") {
 				t.Fatalf("failure lacks updater diagnostic: %s", out)
+			}
+			if mode == "rename-error" && !strings.Contains(string(out), "previous binaries restored") {
+				t.Fatalf("CLI rename failure lacks recovery diagnostic: %s", out)
 			}
 		})
 	}

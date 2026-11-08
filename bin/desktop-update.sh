@@ -87,8 +87,13 @@ while true; do
 done
 
 echo "desktop-update: idle; installing main@$sha"
+cp -p -- "$dest/sparkwing-runner" "$stage/previous-runner"
 mv -f -- "$stage/bin/sparkwing-runner" "$dest/sparkwing-runner"
-mv -f -- "$stage/bin/sparkwing" "$dest/sparkwing"
+if ! mv -f -- "$stage/bin/sparkwing" "$dest/sparkwing"; then
+  mv -f -- "$stage/previous-runner" "$dest/sparkwing-runner" \
+    || fail "CLI swap and runner rollback failed; mixed versions installed; restore $stage/previous-runner to $dest/sparkwing-runner before retrying"
+  fail 'CLI swap failed; previous binaries restored; retry the desktop update'
+fi
 for home in "${restart_homes[@]}"; do
   SPARKWING_HOME="$home" timeout 40s "$dest/sparkwing" daemon restart --force -o json
 done

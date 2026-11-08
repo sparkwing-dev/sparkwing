@@ -8,6 +8,11 @@ Intake and hosts derive plan placement from the sealed request. Local runs,
 local triggered runs, runner-hosted runs, launcher runs, `--runner here` and
 GitHub Actions use the same capability table for initial plans and expansions.
 
+Replayable run intake with an idempotency key retries controller connection
+failures and temporary unavailability for up to 30 seconds so a daemon restart
+can finish. A shorter caller deadline still applies. Here intake cannot be
+replayed because its host credential is issued only once.
+
 If the pipeline's `go.mod` replaces the Go SDK, Sparkwing uses the installed CLI's
 engine and warns that engine pinning is off for that run. The shared installer
 builds the replacement locally. Local preparation retains that engine's exact
