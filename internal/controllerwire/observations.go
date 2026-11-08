@@ -97,6 +97,7 @@ type ReceiptCost struct {
 type RunReader interface {
 	ReadRun(context.Context, string) (RunDetail, error)
 	ListRuns(context.Context, RunQuery) (RunPage, error)
+	LatestPipeline(context.Context, string, []string) (LatestRun, error)
 	ReadSteps(context.Context, string) (RunSteps, error)
 	ReadReceipt(context.Context, string) (Receipt, error)
 }

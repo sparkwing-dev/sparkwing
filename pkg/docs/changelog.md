@@ -22,15 +22,49 @@ unlock.
 
 ### Changed
 
-- **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-36).
+- **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/_unreleased.md#bound-object-presence-requests).
 
-- **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/_unreleased.md#declare-upload-allowances-in-repository-config).
 
-- **local controller:** Windows queued work runs in a detached same-user runner that survives controller replacement. A matching live runner is reused; a new build starts a successor while held work drains. The enclosing Job Object must permit breakaway. `daemon stop` drains through the local API. See [the migration guide](docs/migrations/_unreleased.md#windows-local-runners-survive-controller-replacement).
 
-- **controller (Breaking):** The schema baseline advances to version 35, adding durable GitHub Actions approvals and dispatch receipts, upgrading recognized schema 34 stores in place. Explicit repository Actions tiers require a receipt from the approved workflow on a GitHub-hosted image. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-35).
+
+- **controller (Breaking):** Remove the ineffective `trust_local_builds` setting and its team API.
+  The schema baseline advances to version 37. Existing configured data upgrades
+  in place. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-37).
+  Execution trust continues to use sealed provenance and host facts.
+- **runs:** Select latest pipeline observations through one store owner. CLI
+  repository status and dashboard summaries use the same start-time, run-number
+  and run-ID order. Reference authorization and success-pin policy stay unchanged.
 
 ### Fixed
+
+- **schedules:** Timer-started Linux controllers leave the timer's cgroup when the systemd user manager is available
+- **scheduling:** Run status and the run page keep GitHub Actions dispatch receipts, provider links and lost-race counts after award, cancellation and completion.
+- **billing:** Refuse checkout and card setup sessions whose Stripe mode differs from the controller's payment mode
+- **Security CI:** Identify the updater's private staging files to avoid path traversal false positives.
+- **Cloud execution:** Exact-source child runs can reuse their direct parent's verified source and installed pipeline. Changed build inputs log the mismatch and prepare fresh. Corrupt artifacts fail, and host logs separate source preparation stages.
+- **deployment:** Smoke observation wakes when all runs finish and takes a final NodeClaim sample before checking claims and logs. Deploy status follows poll every second.
+
+- **controller:** Runner claims succeed when another run waits for the same plan concurrency slot
+- **local execution:** Command cancellation waits for cleanup of children in separate process groups before returning a result.
+
+- **Go SDK:** Windows commands honor their own `PATH` and `PATHEXT` and strip engine credentials from child environments. Pipeline tests no longer pull controller dependencies into the SDK module closure.
+## [v0.71.0] - 2026-11-08
+### Changed
+
+- **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/v0.71.0.md#upgrade-the-store-in-place-to-schema-baseline-36).
+
+- **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/v0.71.0.md#declare-upload-allowances-in-repository-config).
+
+- **local controller:** Windows queued work runs in a detached same-user runner that survives controller replacement. A matching live runner is reused; a new build starts a successor while held work drains. The enclosing Job Object must permit breakaway. `daemon stop` drains through the local API. See [the migration guide](docs/migrations/v0.71.0.md#windows-local-runners-survive-controller-replacement).
+
+- **controller (Breaking):** The schema baseline advances to version 35, adding durable GitHub Actions approvals and dispatch receipts, upgrading recognized schema 34 stores in place. Explicit repository Actions tiers require a receipt from the approved workflow on a GitHub-hosted image. See [the migration guide](docs/migrations/v0.71.0.md#upgrade-the-store-in-place-to-schema-baseline-35).
+
+### Fixed
+
+- **Release downloads:** Installer, updater, engine and runner downloads fall back to GitHub’s asset API after a release-route server error or timeout, preserving signature and checksum verification.
+- **template verification:** Render local sparks-core template text and verification manifests when a checkout is discovered, and report the selected source.
+- **cli:** Reject step ranges that select no steps in a job instead of reporting success with every step skipped
+- **build-images:** Source-built controller and runner images record the clean full Git HEAD, version and source URL in OCI labels so deployment can verify their revision.
 
 - **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller’s configuration and index untouched.
 - **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
@@ -44,6 +78,8 @@ unlock.
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
 ### Added
+
+- **local dashboard:** Tailscale Serve can proxy the loopback dashboard through exact `dashboard.allowed_hosts` DNS names. `sparkwing dashboard open --host NAME` prints an HTTPS sign-in link bound to that origin. Browser sessions still require the socket-minted code.
 
 - **scheduling:** GitHub Actions fallback dispatches one workflow per waiting job generation after earlier placement holds open. Team-approved workflows and images use receipt-bound OIDC credentials limited to that job's original trust. Status shows refused and uncertain sends, cancellation cancels known provider runs, and only an audited operator retry opens a new dispatch generation. Each installation must approve the App's Actions write permission. The approved ref must be a dedicated protected branch, never the default branch or a tag, and fork pull requests are never dispatched. See [on-demand fallback](docs/github-actions-runners.md#on-demand-fallback).
 

@@ -9,7 +9,7 @@ require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/lib/pq v1.10.9
 	github.com/sparkwing-dev/sparks-core/templates v0.34.1
-	github.com/sparkwing-dev/sparkwing v0.70.0
+	github.com/sparkwing-dev/sparkwing v0.71.0
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.41.0
 	golang.org/x/sys v0.48.0
@@ -57,11 +57,3 @@ require (
 	modernc.org/sqlite v1.50.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 )
-
-// The pipelines tree is consumed as the same module path the SDK
-// itself ships, so the require above is a placeholder; this replace
-// pins it to the parent checkout (the sparkwing repo root). The
-// pattern follows the standard "consumer .sparkwing/ uses a local
-// replace during development" convention; here the parent IS the
-// SDK rather than a sibling.
-replace github.com/sparkwing-dev/sparkwing => ..

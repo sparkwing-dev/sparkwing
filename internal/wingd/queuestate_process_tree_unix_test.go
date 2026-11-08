@@ -3,7 +3,9 @@
 package wingd_test
 
 import (
-	"io"
+	"bufio"
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -11,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
@@ -27,8 +28,13 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 		StallWindow:      60 * time.Millisecond,
 	})
 
-	holderProcess := exec.Command("sh", "-c", "{ printf r; while :; do :; done; } & child=$!; wait $child")
+	holderProcess := exec.Command("sh", "-c", `exec 3<&0; "$0" -test.run=^TestProcSamplerCPUChild$ <&3 & wait`, os.Args[0])
 	holderProcess.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	input, err := holderProcess.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
 	ready, err := holderProcess.StdoutPipe()
 	if err != nil {
 		t.Fatalf("create child readiness pipe: %v", err)
@@ -41,8 +47,9 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 		_ = holderProcess.Wait()
 	})
 
-	if _, err := io.ReadFull(ready, make([]byte, 1)); err != nil {
-		t.Fatalf("wait for active child: %v", err)
+	reader := bufio.NewReader(ready)
+	if line, err := reader.ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("child readiness = %q, %v", line, err)
 	}
 
 	holder := ensure(t, home, "")
@@ -52,12 +59,40 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 	positions, _ := acquireAsync(t, waiter, semHostReq("waiting", "builder", os.Getpid(), "deploy"))
 	waitForQueue(t, positions)
 
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	observation := time.NewTimer(500 * time.Millisecond)
-	defer observation.Stop()
-	for {
-		qs, err := client.Query(t.Context(), client.Options{Home: home, Version: "v1.0.0"})
+	const bursts = 4
+	work := make(chan error, bursts)
+	go func() {
+		for range bursts {
+			if _, err := input.Write([]byte{1}); err != nil {
+				work <- err
+				return
+			}
+			var cpu int64
+			_, err := fmt.Fscanln(reader, &cpu)
+			if err == nil && cpu < int64(150*time.Millisecond) {
+				err = fmt.Errorf("child consumed only %d CPU nanoseconds", cpu)
+			}
+			work <- err
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	q := ensure(t, home, "")
+	// safety: measured CPU work must outlast the extended descendant stall window.
+	for range bursts {
+		select {
+		case err := <-work:
+			if err != nil {
+				t.Fatalf("child CPU oracle: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("child never completed its CPU work")
+		}
+		qs, err := q.QueueState(ctx)
 		if err != nil {
 			t.Fatalf("queue state: %v", err)
 		}
@@ -66,11 +101,6 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 		}
 		if qs.Holders[0].Stalled {
 			t.Fatalf("holder with active child process was flagged stalled: %+v", qs.Holders[0])
-		}
-		select {
-		case <-poll.C:
-		case <-observation.C:
-			return
 		}
 	}
 }

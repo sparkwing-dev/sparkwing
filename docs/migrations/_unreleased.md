@@ -1,41 +1,20 @@
 # Migrating to the next release
 
-## Upgrade the store in place to schema baseline 36
+## Bound object presence requests
 
-Schema 36 adds direct team foreign keys to GitHub Actions approvals and dispatch
-receipts. The existing parent foreign keys already enforce team membership
-through their parent rows. This upgrade preserves the store's direct team-key
-invariant. Recognized schema 35 stores upgrade automatically on open. SQLite
-backs up the old store and rebuilds only these two tables in the upgrade
-transaction. PostgreSQL adds constraints in place. Configured secrets, teams,
-credentials, runners, installations, schedules and existing Actions rows survive.
-Older binaries refuse the upgraded store. Keep the automatic SQLite backup or
-a PostgreSQL backup if you need to return to an older binary.
+`POST /api/v1/data/has-many` requires a nonzero RFC3339 `deadline` alongside
+`digests`. Send the caller's query deadline; a missing deadline returns `400`.
+Both Go data clients require an explicit presence budget. The server stops
+presence work at the earlier of the caller's deadline and its 30-second response
+window. Requests that expire or are cancelled return an error without partial
+presence results.
 
-## Upgrade the store in place to schema baseline 35
+## Upgrade the store in place to schema baseline 37
 
-Schema 35 adds approved GitHub Actions workflow/image pairs and durable dispatch
-receipts. Recognized schema 34 stores upgrade in place, preserving configured
-secrets, teams, credentials, runners, installations and schedules. Older binaries
-refuse the upgraded store. The real GitHub App permission update is a separate
-operator action. Existing Actions workers need a matching dispatch receipt to
-claim jobs whose repository placement explicitly lists GitHub Actions.
-
-## Windows local runners survive controller replacement
-
-Windows queued work now runs in a detached process under the same user, with
-independent stdio and Job Object breakaway. An enclosing Job Object must permit
-breakaway; startup reports an error when it forbids it. The controller records
-the runner's process birth and reuses a matching live runner after restart, or
-starts a successor when it exits. Held work keeps its existing drain behavior.
-`sparkwing daemon stop` drains the runner through the local API before stopping
-the controller. Windows controllers start on demand; `daemon install` remains
-a Linux/macOS command.
-
-## Declare upload allowances in repository config
-
-The `--allow-secret-file` flag is removed. For Cloud source uploads and
-working-tree triggers, list literal repository-relative paths under the
-`allow_secret_files` key in `.sparkwing/sparkwing.yaml`. These exceptions allow
-public credential-shaped fixtures through the file scan. Secret-value scanning
-still applies, and repository local restrictions remain binding.
+Schemas 30 through 36 upgrade in place. Schema 37 drops the unused team
+build-trust table and preserves secrets, teams, tokens, runner registrations,
+GitHub App installations, schedules, subscriptions and Actions records, including
+both direct team foreign keys. The `/api/v1/team/build-trust` route, including
+its GET and PUT operations, is removed. Remove calls to this endpoint. Execution
+trust still follows sealed provenance and host facts. Older binaries refuse the
+upgraded store.

@@ -70,7 +70,6 @@ blob_selection_access_test.go
 blob_source_setup_test.go
 blob_staging_test.go
 bootstrap_capability_test.go
-build_trust_test.go
 burst_overflow_retention_test.go
 burst_placement_test.go
 business_events_internal_test.go
