@@ -1797,7 +1797,7 @@ GitHub CLI authentication for CI reads, Go, Bitwing, Xwing and Sparkwing on PATH
 ```sh
 export SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery"
 export SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/secrets.key"
-sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-sdk-cli,owned-sdk-main --unpinned
+sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-release/weekly-sdk-cli,owned-sdk-main/owned-sdk-main --unpinned
 sparkwing schedules list
 ```
 
