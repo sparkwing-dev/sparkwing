@@ -248,13 +248,13 @@ works. Local CI uses the controller on your machine.
 The run's final output includes its ID and commands to inspect it:
 
 ```bash
-sparkwing runs list
-sparkwing runs status --run RUN_ID
-sparkwing runs logs --run RUN_ID
+sparkwing runs list --profile=
+sparkwing runs status --profile= --run RUN_ID
+sparkwing runs logs --profile= --run RUN_ID
 ```
 
 Fix the failing job and run the pipeline again. If a run stays pending, inspect
-`sparkwing queue list` and the controller log at
+`sparkwing queue list --profile=` and the controller log at
 `~/.sparkwing/wingd/d.log`. On a systemd Linux host,
 local jobs need a working user manager. Check `systemctl --user status` from
 your login session. See [local runner supervision](local-execution.md).
@@ -270,15 +270,17 @@ git commit -m "Add daily report"
 sparkwing run report
 sparkwing schedules install --profile= --schedule report
 sparkwing schedules list --profile=
-sparkwing schedules list --timer
+sparkwing schedules list --profile= --timer
 ```
 
 The template declares 09:00 UTC daily in `.sparkwing/sparkwing.yaml`. Edit that
 cadence before installing. A declaration alone does not arm a schedule.
 Installation proves and pins the pipeline, captures its environment, and installs
 a systemd user timer on Linux or a launchd agent on macOS. The timer starts the
-local controller on demand through `__tick`; Windows uses the controller's
-schedule evaluator. The machine must be awake for work to run. Reinstall after
+local controller on demand through `__tick`. Windows installation records
+schedules but does not fire them automatically. Use `sparkwing schedules run
+--profile= --schedule report` to start one explicitly. The machine must be awake
+for timer-started work. Reinstall after
 changing the pipeline to update its pin, or choose `--unpinned` to compile the
 checkout on every fire.
 
@@ -341,7 +343,7 @@ What still wants the network is visible in advance:
 A **pipeline** is anything `sparkwing` (or `sparkwing run`) can invoke. Two
 shapes share the same surface:
 
-- **triggered pipeline** - a YAML entry with an `on:` trigger. Push and webhook triggers need a connected controller. Local schedules fire after `sparkwing schedules install`. Implemented as a Go type whose factory is registered via `sparkwing.Register`.
+- **triggered pipeline** - a YAML entry with an `on:` trigger. Push and webhook triggers need a connected controller. On Linux/macOS, local schedules fire after `sparkwing schedules install --profile=`. Implemented as a Go type whose factory is registered via `sparkwing.Register`.
 - **manual pipeline** - a YAML entry with no `on:` trigger. Runs only when explicitly invoked. Same Go registration; it's "triggered" vs "manual" distinguishes auto-firing from operator-initiated.
 
 Both produce a Run in the local store on each invocation. The dashboard's

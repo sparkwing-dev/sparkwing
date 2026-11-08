@@ -144,7 +144,9 @@ identity durably. Proofs and later pin changes use that captured environment.
 Environment values stay in private host storage and do not appear in schedule
 views. Installation pins a proved binary unless `--unpinned` is selected.
 Linux and macOS managed timers invoke the stable hidden `sparkwing __tick` entrypoint and start the local
-controller on demand. Windows schedules run through that controller.
+controller on demand. Windows installation records schedules, but automatic
+schedule evaluation is unavailable. Run them explicitly with
+`sparkwing schedules run --profile= --schedule NAME`.
 `sparkwing update` refreshes managed units. Reinstall units that still invoke
 the removed `crons` command with `sparkwing schedules install`.
 

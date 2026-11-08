@@ -145,7 +145,8 @@ flat reference.
 For scheduled local work, scaffold `--template scheduled-report`, review and
 commit the files, then run `sparkwing schedules install --profile=`. Installation
 pins the pipeline and arms its declared cadence through the native timer on
-Linux/macOS or the local controller on Windows. The machine must be awake.
+Linux/macOS. Windows installation records schedules but does not fire them
+automatically. The machine must be awake for timer-started work.
 Inspect it with `sparkwing schedules list --profile=`. See
 [`docs/schedules.md`](./docs/schedules.md).
 
