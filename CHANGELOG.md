@@ -20,6 +20,16 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **controller (Breaking):** Remove the ineffective `trust_local_builds` setting and its team API.
+  The schema baseline advances to version 37. Existing configured data upgrades
+  in place. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-37).
+  Execution trust continues to use sealed provenance and host facts.
+- **runs:** Select latest pipeline observations through one store owner. CLI
+  repository status and dashboard summaries use the same start-time, run-number
+  and run-ID order. Reference authorization and success-pin policy stay unchanged.
+
 ### Fixed
 
 - **Security CI:** Identify the updater's private staging files to avoid path traversal false positives.
@@ -33,14 +43,6 @@ unlock.
 ## [v0.71.0] - 2026-11-08
 ### Changed
 
-- **controller (Breaking):** Remove the ineffective `trust_local_builds` setting and its team API.
-  The schema baseline advances to version 37. Existing configured data upgrades
-  in place. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-37).
-  Execution trust continues to use sealed provenance and host facts.
-- **runs:** Select latest pipeline observations through one store owner. CLI
-  repository status and dashboard summaries use the same start-time, run-number
-  and run-ID order. Reference authorization and success-pin policy stay unchanged.
-- **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-36).
 - **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/v0.71.0.md#upgrade-the-store-in-place-to-schema-baseline-36).
 
 - **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/v0.71.0.md#declare-upload-allowances-in-repository-config).
