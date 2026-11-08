@@ -2,10 +2,13 @@ package store_test
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -99,5 +102,63 @@ func TestSQLiteRefusedUpgradeTakesNoBackup(t *testing.T) {
 	}
 	if backups, _ := filepath.Glob(path + ".schema-*"); len(backups) != 0 {
 		t.Fatalf("a refused upgrade left backups: %v", backups)
+	}
+}
+
+func TestSQLiteUpgradePrunesBackupsOnlyAfterSuccess(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failed=%t", fail), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.db")
+			st, err := store.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !fail {
+				if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=33, baseline_digest='b4ac52448bafd4ea378d1ed2e1d9aec0c610d3a5e27df4a7a780c178f425a47b'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+			for i, name := range []string{"state.db.schema-9-old.bak", "state.db.schema-10-middle.bak", "state.db.schema-32-newest.bak", "other.db.schema-1-old.bak", "state.db.schema-partial"} {
+				backup := filepath.Join(filepath.Dir(path), name)
+				if err := os.WriteFile(backup, []byte(name), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				stamp := time.Unix(int64(i+1), 0)
+				if err := os.Chtimes(backup, stamp, stamp); err != nil {
+					t.Fatal(err)
+				}
+			}
+			directory := path + ".schema-directory.bak"
+			if err := os.Mkdir(directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			upgraded, err := store.Open(path)
+			if fail {
+				if err == nil {
+					_ = upgraded.Close()
+					t.Fatal("upgrade with an existing index succeeded")
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := upgraded.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, name := range []string{"state.db.schema-9-old.bak", "state.db.schema-10-middle.bak", "state.db.schema-32-newest.bak", "other.db.schema-1-old.bak", "state.db.schema-partial", "state.db.schema-directory.bak"} {
+				_, err := os.Stat(filepath.Join(filepath.Dir(path), name))
+				removed := !fail && (strings.Contains(name, "9-old") || strings.Contains(name, "10-middle"))
+				if removed && !os.IsNotExist(err) || !removed && err != nil {
+					t.Errorf("%s: %v, removed=%t", name, err, removed)
+				}
+			}
+		})
 	}
 }

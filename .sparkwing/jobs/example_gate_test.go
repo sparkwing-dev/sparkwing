@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,5 +178,43 @@ func TestExampleBuildCLISignsInBeforePublishingTheWrapper(t *testing.T) {
 	}
 	if resolved, ok := exampleLifecycle(in, rc); !ok || resolved.APIProfile != exampleProbeProfile {
 		t.Fatalf("probes cannot resolve the built CLI: %+v", resolved)
+	}
+}
+
+func TestExampleFailOnceUsesReusedSourceIdentityWithoutCLI(t *testing.T) {
+	for _, tc := range []struct {
+		name, origin, run string
+		failOnce          bool
+		want              string
+	}{
+		{"source", "source-run", "source-run", true, "deterministic failure"},
+		{"retry", "source-run", "retry-run", true, ""},
+		{"refused-reuse", "retry-run", "retry-run", true, "deterministic failure"},
+		{"missing-run", "source-run", "", true, "executing run ID is missing"},
+		{"missing-output", "", "retry-run", true, "predecessor output was lost"},
+		{"normal", "source-run", "source-run", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SPARKWING_RUN_ID", tc.run)
+			origin, err := json.Marshal(tc.origin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			host := sparkwingtest.New(sparkwingtest.Options{Outputs: map[string]json.RawMessage{"source": origin, "memo": []byte(`"token"`)}})
+			defer func() {
+				if err := host.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			plan := sparkwing.NewPlan()
+			// safety: retry planning may retain the source context, so only the executing identity distinguishes it.
+			if err := (ExampleProbe{}).Plan(t.Context(), plan, ExampleProbeInputs{Token: "token", FailOnce: tc.failOnce, CLI: "/no-cli-on-cloud"}, sparkwing.RunContext{RunID: "source-run"}); err != nil {
+				t.Fatal(err)
+			}
+			_, err = host.RunStep(t.Context(), plan, "probe", "run")
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("probe error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

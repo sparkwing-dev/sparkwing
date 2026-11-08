@@ -643,8 +643,10 @@ sparkwing run example -- --secret-name EXAMPLE_GATE_SECRET
 sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/sparkwing-ci-smoke
 ```
 
-`--fail-once` asks the probe to fail on its first attempt. The failed-only retry
+`--fail-once` asks the probe to fail on its source run. The failed-only retry
 must reuse its successful predecessors, read their outputs and finish green.
+The source job returns its run identity, so the probe recognizes a retry from
+that saved output and `SPARKWING_RUN_ID` without needing a CLI in its job host.
 `--secret-name` selects the declared optional secret `EXAMPLE_GATE_SECRET`.
 The secret job skips with a reason when no name or stored value is configured.
 OIDC skips only when the run has no issuer. Otherwise it mints a token and
