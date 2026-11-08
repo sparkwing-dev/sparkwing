@@ -504,9 +504,14 @@ requires the runner label and trust conditions documented below.
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
 Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
 repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
-is a token for its target fixture team with permission to start and observe the
-example and read its logs. Missing prerequisites report that the scan could not
-run, rather than clearing prior Bitwing findings.
+needs `runs.write`, `runs.read` and `logs.read` in the target deployment's team that owns
+the GitHub App installation covering `sparkwing-dev/sparkwing`. Production uses the existing
+source-owning team's `/kikd-prod/sparkwing/deploy/scan-submit-token`, also used by its smoke.
+A QA fixture token with no installation cannot submit this repository-backed scan. Keep the
+source installation bound to its existing team. The optional `--smoke-profile` and
+`--smoke-checkout` example probe also needs access to `sparkwing-dev/sparkwing-ci-smoke`;
+the detached scan does not enable that probe. Missing prerequisites report that the scan
+could not run, rather than clearing prior Bitwing findings.
 
 Each target team must own a GitHub App installation covering
 `sparkwing-dev/sparkwing`, because the scan submits a repository-backed example.
@@ -552,6 +557,34 @@ schema with production before changing the controller pin, and wait for its
 rollout before updating the launcher and planning runner. Then observe a new
 push-triggered deploy through both environments.
 
+#### Delivery timing budgets
+
+The targets are five minutes to land on main, five minutes from main to staging
+proof, and five minutes from staging proof to production acceptance. Report
+staging rollout separately from staging proof. Proof includes the blocking
+smokes. Production acceptance includes its smoke, NodeClaim/log checks and scan
+submission, while the detached scan finishes separately.
+
+Every delivery comparison retains the full elapsed leg and a named **cold Cloud
+provisioning** segment. Measure that segment from NodeClaim creation to its
+successful Initialized transition, with the claim name and both timestamps.
+Record each claim once, including capacity used by child and successor jobs.
+Land on our own hardware records this segment as `not applicable`. A Cloud leg
+without those boundaries records `unknown`, with any observed capacity wait
+alongside it. Use zero only when evidence proves the leg required no new capacity.
+
+Include cold provisioning in the full elapsed leg when comparing it with the
+five-minute target. Keep image pull, source preparation, execution and observation
+tail separate because they have different causes. Component intervals can overlap, so only sum non-overlapping critical-path
+intervals. Run acceptance follows preparation and can follow provisioning, so a
+controller run-duration headline cannot substitute for the full delivery leg.
+Compare cold samples with cold samples and report any provisioning change before
+attributing a change to preparation or execution.
+
+Retain measured samples with their raw timing boundaries in the delivery evidence
+record. A sample is a baseline, not a timeout or guaranteed provisioning ceiling.
+Warm capacity is forbidden for our delivery work.
+
 #### Deploy cost estimate
 
 These are estimates from the code path, not observed deploy timings. The ranges assume a warm
@@ -565,6 +598,7 @@ exceed them. The watched staging deploy should record phase durations before set
 | Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
 | Publish and verify both multi-arch images | 30 seconds-3 minutes | One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
 | GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap) and rollout (5-minute cap). Argo's default poll alone can cost up to 3 minutes per push. |
+| Cold Cloud provisioning, per new claim | Measure per leg, no fixed estimate | Creation to Initialized. Included in smoke elapsed time when on its critical path. Report separately from image pull and preparation. |
 | Staging gate | 1-10 minutes with available capacity | Candidate CLI build plus two overlapping pipeline runs. Each run has a 45-minute limit. |
 | Production smoke | 1-5 minutes with available capacity | CLI build plus two concurrent fixture runs, NodeClaim sampling and log scan. Each run has a 20-minute limit. |
 | Production rollback, on failure | Similar to the two rollouts | Two reverse GitOps commits. Budget: 35 minutes. |

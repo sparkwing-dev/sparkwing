@@ -202,7 +202,7 @@ undo` or `helm rollback` without checking this database boundary.
    ```bash
    set -eu
    test ! -e /srv/sparkwing-recovered
-   cp -a /srv/backups/sparkwing/pre-upgrade/home /srv/sparkwing-recovered
+   cp -a /srv/backups/sparkwing/pre-upgrade/controller /srv/sparkwing-recovered
    sqlite3 /srv/sparkwing-recovered/state.db 'PRAGMA integrity_check;'
    ```
 

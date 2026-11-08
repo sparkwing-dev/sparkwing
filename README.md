@@ -44,7 +44,7 @@ needs OpenSSL 3.0 or newer.
 
 Building from source via `go install` is supported, but the Next.js
 dashboard bundle is a generated artifact and is not checked into the
-repository, so a source build will refuse to start `sparkwing dashboard`
+repository, so a source build will refuse to open `sparkwing dashboard open`
 with a clear message. Use a release binary for the dashboard, or
 generate the bundle locally first (`bash bin/build-web.sh && go install
 ./cmd/sparkwing` from a sparkwing checkout).
@@ -142,10 +142,17 @@ pipeline name: the scaffold's `name: hello` entry has `entrypoint: Hello`.
 for the full reference; [`docs/sdk.md`](./docs/sdk.md) is the SDK
 flat reference.
 
-A pipeline that declares an `on.schedule` cadence runs on a cadence from any
-machine whose schedules have been installed. The final timer contract uses a
-stable hidden tick entrypoint with the captured home. Native timer installation
-and controller-owned tick execution still need integration in this worktree. See [`docs/schedules.md`](./docs/schedules.md).
+For scheduled local work, scaffold `--template scheduled-report`, review and
+commit the files, then run `sparkwing schedules install --profile=`. Installation
+pins the pipeline and arms its declared cadence through the native timer on
+Linux/macOS. Windows installation records schedules but does not fire them
+automatically. The machine must be awake for timer-started work.
+Inspect it with `sparkwing schedules list --profile=`. See
+[`docs/schedules.md`](./docs/schedules.md).
+
+The local controller starts on demand and serves the dashboard while it runs.
+`sparkwing dashboard open` prints a one-time sign-in link. On Linux/macOS,
+`sparkwing daemon install` installs the controller as a login service.
 
 ## Dashboard
 
