@@ -37,6 +37,7 @@ unlock.
 
 ### Fixed
 
+- **cli:** Show one admission-wait progress stream with holder charges, held and free capacity, external load and expected clear time. Print updates only for material queue changes at increasing intervals.
 - **billing:** Refuse checkout and card setup sessions whose Stripe mode differs from the controller's payment mode
 - **Security CI:** Identify the updater's private staging files to avoid path traversal false positives.
 - **Cloud execution:** Exact-source child runs can reuse their direct parent's verified source and installed pipeline. Changed build inputs log the mismatch and prepare fresh. Corrupt artifacts fail, and host logs separate source preparation stages.
