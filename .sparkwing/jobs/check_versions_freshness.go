@@ -123,6 +123,15 @@ func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
 	if err != nil {
 		return fmt.Sprintf("scaffold fallback pin: %v", err)
 	}
+	if semver.Compare(pinned, latest) > 0 {
+		published, err := tagExistsOnRemote(ctx, repoRoot, pinned)
+		if err != nil {
+			return fmt.Sprintf("scaffold fallback pin: cannot verify publication of %s (%v)", pinned, err)
+		}
+		if published {
+			latest = pinned
+		}
+	}
 	return scaffoldFallbackProblem(pinned, latest)
 }
 

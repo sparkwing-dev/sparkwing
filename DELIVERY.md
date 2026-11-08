@@ -221,7 +221,9 @@ only at the next cut, whose `version-freshness` step refuses with "scaffold
 fallback pin ... is behind latest release"; the fix then is this same command
 and a land before the cut, which is how v0.69.0 found v0.68.7's missing pin.
 
-The scaffold fallback also refuses pins ahead of the latest released tag.
+The scaffold fallback refuses pins ahead of the local release tags unless
+the exact tag exists on origin. This also verifies hosted release fixtures
+whose selected release tag was removed locally.
 
 The local release pipeline ends at the tag push because the new module must
 exist before the pins can resolve it. Pre-release leaves the tag's own commit
