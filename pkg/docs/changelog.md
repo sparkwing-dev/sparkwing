@@ -132,6 +132,8 @@ unlock.
 
 ### Docs
 
+- **controller:** Add SQLite and PostgreSQL backup and recovery procedures, controller-first upgrades, configured-data preservation and Cloud roll-forward and RDS recovery
+
 - **auth:** Explain that browser sign-out ends `sparkwing login` tokens and enrollment cookies should come from a separate private browser window
 
 ## [v0.69.2] - 2026-11-05
