@@ -75,9 +75,9 @@ backup=/srv/backups/sparkwing/pre-upgrade
 test -f "$store_home/state.db"
 mkdir -p /srv/backups/sparkwing
 mkdir "$backup"
-cp -a "$store_home" "$backup/home"
-sqlite3 "$backup/home/state.db" 'PRAGMA integrity_check;'
-sqlite3 "$backup/home/state.db" \
+cp -a "$store_home" "$backup/controller"
+sqlite3 "$backup/controller/state.db" 'PRAGMA integrity_check;'
+sqlite3 "$backup/controller/state.db" \
   'SELECT version, baseline_digest FROM sparkwing_schema_version;'
 ```
 
@@ -201,7 +201,7 @@ undo` or `helm rollback` without checking this database boundary.
    ```bash
    set -eu
    test ! -e /srv/sparkwing-recovered
-   cp -a /srv/backups/sparkwing/pre-upgrade/home /srv/sparkwing-recovered
+   cp -a /srv/backups/sparkwing/pre-upgrade/controller /srv/sparkwing-recovered
    sqlite3 /srv/sparkwing-recovered/state.db 'PRAGMA integrity_check;'
    ```
 
