@@ -476,8 +476,11 @@ before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
 `deploy-smoke` once in the production team that owns the source repository installation, using
 the existing `/kikd-prod/sparkwing/deploy/scan-submit-token` (one NodeClaim, no controller or launcher
-WARN or ERROR after both controller and launcher rollouts complete). Recovered
-startup probe failures before readiness remain visible in pod logs but do not
+WARN or ERROR after both controller and launcher rollouts complete).
+Smoke status follows poll every second. NodeClaim sampling interrupts its wait
+when all followers finish, then takes a final sample before checking the claims
+and logs.
+Recovered startup probe failures before readiness remain visible in pod logs but do not
 fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Each environment's deployed and previous digests are its job output. Credentials come
 from the run's OIDC token through the `sparkwing-deploy` role in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).

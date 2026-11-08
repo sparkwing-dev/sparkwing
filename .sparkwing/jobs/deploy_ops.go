@@ -974,7 +974,7 @@ func (d *deployer) runTimeout(profile string) time.Duration {
 
 func (d *deployer) followRun(ctx context.Context, profile string, runID *string) error {
 	return d.act(ctx, "follow the run on "+profile+" until it succeeds", func() error {
-		_, err := d.sw(ctx, "", "runs", "status", "--run", *runID, "--profile", profile, "--follow", "--timeout", d.runTimeout(profile).String(), "-o", "json")
+		_, err := d.sw(ctx, "", "runs", "status", "--run", *runID, "--profile", profile, "--follow", "--poll", "1s", "--timeout", d.runTimeout(profile).String(), "-o", "json")
 		if err != nil {
 			return fmt.Errorf("run %s did not succeed: %w", *runID, err)
 		}
@@ -1038,6 +1038,8 @@ func (d *deployer) productionSmoke(ctx context.Context, images deployImages, sin
 	claims := make([]map[string]bool, len(runs))
 	err := d.act(ctx, "follow production smoke runs and record the NodeClaims each one uses", func() error {
 		done := make(chan struct{})
+		waitCtx, stopWaiting := context.WithCancel(ctx)
+		defer stopWaiting()
 		var wg sync.WaitGroup
 		errs := make([]error, len(runs))
 		for i, team := range d.cfg.SmokeProfiles {
@@ -1047,24 +1049,35 @@ func (d *deployer) productionSmoke(ctx context.Context, images deployImages, sin
 				errs[i] = d.followRun(ctx, team, &runs[i])
 			}()
 		}
-		go func() { wg.Wait(); close(done) }()
+		go func() {
+			wg.Wait()
+			close(done)
+			stopWaiting()
+		}()
 		for i := range claims {
 			claims[i] = map[string]bool{}
 		}
 		for {
+			finished := false
+			select {
+			case <-done:
+				finished = true
+			default:
+			}
 			observeErr := d.observeClaims(ctx, runs, claims)
 			if observeErr != nil && d.refreshRole(ctx) == nil {
 				observeErr = d.observeClaims(ctx, runs, claims)
 			}
-			select {
-			case <-done:
+			if finished {
 				return errors.Join(append(errs, observeErr)...)
-			default:
 			}
 			if observeErr != nil {
 				d.tools.say(ctx, "NodeClaim observation: "+observeErr.Error())
 			}
-			if err := d.tools.wait(ctx, d.cfg.PollInterval); err != nil {
+			if err := d.tools.wait(waitCtx, d.cfg.PollInterval); err != nil {
+				if ctx.Err() == nil && waitCtx.Err() != nil {
+					continue
+				}
 				<-done
 				return err
 			}
