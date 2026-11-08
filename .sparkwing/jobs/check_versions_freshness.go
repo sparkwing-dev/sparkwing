@@ -665,19 +665,19 @@ func requireCleanSparkwingPinArtifacts(ctx context.Context, repoRoot, version st
 			return fmt.Errorf("sparkwing pin artifact %s is not tracked", path)
 		}
 	}
-	args := append([]string{"-C", repoRoot, "status", "--porcelain", "--"}, pinBumpArtifacts(version)...)
-	out, err := exec.CommandContext(ctx, "git", args...).Output()
+	args := append([]string{"status", "--porcelain", "--"}, pinBumpArtifacts(version)...)
+	out, err := captureGit(ctx, repoRoot, args...)
 	if err != nil {
 		return err
 	}
-	if len(bytes.TrimSpace(out)) != 0 {
+	if strings.TrimSpace(out) != "" {
 		return fmt.Errorf("sparkwing pin artifacts have uncommitted changes")
 	}
-	out, err = exec.CommandContext(ctx, "git", "-C", repoRoot, "diff", "--cached", "--name-only").Output()
+	out, err = captureGit(ctx, repoRoot, "diff", "--cached", "--name-only")
 	if err != nil {
 		return err
 	}
-	if len(bytes.TrimSpace(out)) != 0 {
+	if strings.TrimSpace(out) != "" {
 		return fmt.Errorf("sparkwing pin artifacts have uncommitted changes")
 	}
 	return nil
@@ -685,7 +685,7 @@ func requireCleanSparkwingPinArtifacts(ctx context.Context, repoRoot, version st
 
 func restoreSparkwingPinArtifacts(ctx context.Context, repoRoot, version string) error {
 	for _, path := range pinBumpArtifacts(version) {
-		if err := exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "-e", "HEAD:"+path).Run(); err != nil {
+		if _, err := captureGit(ctx, repoRoot, "cat-file", "-e", "HEAD:"+path); err != nil {
 			if _, err := captureGit(ctx, repoRoot, "rm", "--cached", "--ignore-unmatch", "--", path); err != nil {
 				return err
 			}
