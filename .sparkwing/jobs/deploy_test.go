@@ -596,6 +596,16 @@ func (f *fakeDeploy) config() deployConfig {
 
 func (f *fakeDeploy) deployer(dry bool) *deployer {
 	tools := deployTools{
+		startChild: func(_ context.Context, pipeline string, args map[string]string) (string, error) {
+			raw, err := json.Marshal(args)
+			if err != nil {
+				return "", err
+			}
+			f.mu.Lock()
+			f.calls = append(f.calls, "child start "+pipeline+" "+string(raw))
+			f.mu.Unlock()
+			return "run-" + pipeline + "-" + args["environment"], nil
+		},
 		run:      f.run,
 		registry: f.registry,
 		oidc: func(context.Context, string) (string, error) {
@@ -747,6 +757,8 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 	joined := strings.Join(c.Args, " ")
 	envDir := map[string]string{"sparkwing-staging": "sparkwing-staging", "sparkwing": "sparkwing"}
 	switch {
+	case strings.Contains(joined, "annotate application"):
+		return "", nil
 	case strings.Contains(joined, "rollout status"):
 		return "", nil
 	case strings.Contains(joined, "get application"):
@@ -883,8 +895,8 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if author := deployGitIn(t, f.bare, "log", "-1", "--format=%an <%ae>", "main"); author != "Sparkwing deploy <deploy@sparkwing.dev>" {
 		t.Fatalf("deploy commit author = %q", author)
 	}
-	if slices.ContainsFunc(f.calls, func(c string) bool { return strings.Contains(c, "annotate") || strings.Contains(c, "patch") }) {
-		t.Fatalf("the deploy wrote to an Argo application: %q", f.calls)
+	if got := slices.DeleteFunc(slices.Clone(f.calls), func(c string) bool { return !strings.Contains(c, "annotate application sparkwing-staging") }); len(got) != 2 {
+		t.Fatalf("expected refresh after each staging push: %q", f.calls)
 	}
 	controllerRender := deployGitIn(t, f.bare, "show", "main~1:sparkwing-staging/rendered.yaml")
 	if !strings.Contains(controllerRender, "@"+images.Controller.Digest) || !strings.Contains(controllerRender, "@"+f.old.Runner.Digest) ||
@@ -904,13 +916,13 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gate.ExampleRun != "run-example-staging" || gate.ReferenceRun != "run-hello-staging" || !gate.Images.sameDigests(images) {
+	if gate.SmokeRun != "run-deploy-smoke-staging" || gate.ReferenceRun != "run-hello-staging" || !gate.Images.sameDigests(images) {
 		t.Fatalf("gate record = %+v", gate)
 	}
 	if !slices.ContainsFunc(f.calls, func(c string) bool {
-		return strings.Contains(c, "pipeline trigger example -C "+f.repo) && strings.Contains(c, "--ref "+f.head) && strings.HasSuffix(c, "-- --api-controller "+defaultDeployConfig().Staging.ControllerURL)
+		return strings.Contains(c, "pipeline trigger deploy-smoke -C "+f.repo) && strings.Contains(c, "--ref "+f.head) && strings.HasSuffix(c, "-- --child")
 	}) {
-		t.Fatalf("example was not triggered at the candidate commit with the staging controller for its probes: %q", f.calls)
+		t.Fatalf("smoke was not triggered at the candidate commit with its child check: %q", f.calls)
 	}
 
 	prod, err := f.deployer(false).promote(t.Context(), images)
@@ -923,7 +935,7 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if prod.Environment != "production" || prod.Previous.Launcher != f.old.Runner || prod.WindowStart == "" {
 		t.Fatalf("production record = %+v", prod)
 	}
-	if runs := f.triggered("deploy-smoke"); fmt.Sprint(runs) != "[run-deploy-smoke-production-smoke]" {
+	if runs := f.triggered("deploy-smoke"); fmt.Sprint(runs) != "[run-deploy-smoke-staging run-deploy-smoke-production-smoke]" {
 		t.Fatalf("smoke runs = %v", runs)
 	}
 
@@ -1238,7 +1250,7 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		"clone " + f.bare, "pin the staging controller", "render sparkwing-staging/rendered.yaml",
 		"commit \"deploy(staging): controller", "wait for Argo application sparkwing-staging", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-full-controller",
 		"pin the staging launcher", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-runner-bundle-launcher",
-		"build the candidate CLI", "add CLI profile staging", "trigger example", "trigger hello",
+		"build the candidate CLI", "add CLI profile staging", "trigger deploy-smoke", "trigger hello",
 		"is still the tip of origin/main", "is not older than the production version",
 		"pin the production controller", "wait for Argo application sparkwing to be", "pin the production launcher",
 		"add CLI profile production-smoke ", "trigger deploy-smoke", "follow production smoke runs", "check each smoke run used one NodeClaim",

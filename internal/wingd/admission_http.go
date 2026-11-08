@@ -372,6 +372,7 @@ func (d *Daemon) getAdmissionHTTP(w http.ResponseWriter, r *http.Request, subjec
 		}
 		select {
 		case <-r.Context().Done():
+			admissionHTTPFailure(w, r.Context().Err())
 			return
 		case <-timer.C:
 			wait = false
