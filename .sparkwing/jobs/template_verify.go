@@ -329,21 +329,12 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
 		return out, fmt.Errorf("%s: go build: %w", m.Name, err)
 	}
-<<<<<<< HEAD
-	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint", "--pipeline", m.Name).Run(); err != nil {
-		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
-	}
-	if err := gitInitFixture(ctx, scratch); err != nil {
-		return out, fmt.Errorf("%s: commit scaffold: %w", m.Name, err)
-	}
-=======
 	if err := gitInitFixture(ctx, scratch); err != nil {
 		return out, fmt.Errorf("%s: source fixture: %w", m.Name, err)
 	}
-	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint").Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint", "--pipeline", m.Name).Run(); err != nil {
 		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
 	}
->>>>>>> origin/main
 	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "plan", "--pipeline", m.Name).Dir(scratch).Run(); err != nil {
 		return out, fmt.Errorf("%s: explain: %w", m.Name, err)
 	}
@@ -510,9 +501,6 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 
 // safety: `pipeline new` builds the repository the example has to compile in;
 // the example rendered with its verify parameters then replaces the job file.
-<<<<<<< HEAD
-func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manifest) error {
-=======
 func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manifest, sdkRoot string) error {
 	directory := filepath.Join(scratch, ".sparkwing")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -523,7 +511,6 @@ func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manif
 		return err
 	}
 
->>>>>>> origin/main
 	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "new", "--pipeline", m.Name, "--template", "minimal").Run(); err != nil {
 		return err
 	}
@@ -551,11 +538,7 @@ func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manif
 		return err
 	}
 	config := fmt.Sprintf("pipelines:\n  - name: %q\n    entrypoint: %q\n", m.Name, m.Name)
-<<<<<<< HEAD
-	return os.WriteFile(filepath.Join(scratch, ".sparkwing", "sparkwing.yaml"), []byte(config), 0o644)
-=======
 	return os.WriteFile(filepath.Join(directory, "sparkwing.yaml"), []byte(config), 0o644)
->>>>>>> origin/main
 }
 
 func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[string]string) error {
