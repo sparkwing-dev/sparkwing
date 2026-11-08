@@ -24,3 +24,11 @@ func fileIdentity(info os.FileInfo, now time.Time) (string, bool) {
 	}
 	return fmt.Sprintf("%d:%d:%d:%d:%d", stat.Dev, stat.Ino, info.Size(), info.ModTime().UnixNano(), changed.UnixNano()), true
 }
+
+func directoryIdentity(info os.FileInfo) string {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d:%d:%d:%d", stat.Dev, stat.Ino, info.Size(), info.ModTime().UnixNano(), changeTime(stat).UnixNano())
+}
