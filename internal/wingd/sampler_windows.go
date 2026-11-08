@@ -64,12 +64,12 @@ func sampleHost() (HostStat, error) {
 }
 
 func (p *procSampler) sample(pid int) (ProcUsage, bool) {
-	usages := p.sampleMany([]int{pid})
+	usages := p.sampleMany([]int{pid}, nil)
 	usage, ok := usages[pid]
 	return usage, ok
 }
 
-func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
+func (p *procSampler) sampleMany(pids []int, _ map[int][]int) map[int]ProcUsage {
 	procs, ok := windowsProcesses()
 	if !ok {
 		p.unmeasuredMetrics(pids)
