@@ -10,13 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: these tracked public fixtures only look like credentials; the upload's secret-value scan still applies.
-var cloudGateSecretShapedFixtures = []string{
-	".gitleaks.toml",
-	"charts/sparkwing-full/examples/external-secrets.yaml",
-	"design/rewrite/proposals/thin-sdk-step1/measurements.json",
-}
-
 type landCloudGate struct {
 	sparkwing.Base
 	sparkwing.Produces[string]
@@ -36,13 +29,6 @@ func (j *landCloudGate) run(ctx context.Context) (string, error) {
 		return "", err
 	}
 	args := []string{"run", "gate", "--sw-route", "cloud", "--profile", j.Profile, "-o", "json"}
-	allowed, err := git(ctx, append([]string{"ls-files", "--"}, cloudGateSecretShapedFixtures...)...)
-	if err != nil {
-		return "", err
-	}
-	if allowed != "" {
-		args = append(args, "--allow-secret-file", strings.Join(strings.Fields(allowed), ","))
-	}
 	// safety: full mode covers every package; the public base keeps policy and lint scoped to this change.
 	result, err := sparkwing.Exec(ctx, "sparkwing", append(args, "--", "--full", "--base", head.Base)...).Dir(j.RepoDir).Run()
 	if err != nil {

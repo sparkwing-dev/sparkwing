@@ -19,6 +19,9 @@ var (
 
 // Validate validates typed checkout declarations for seal-point consumers.
 func Validate(cfg Config) error {
+	if err := ValidateSourceFiles(cfg.AllowSecretFiles); err != nil {
+		return userconfig.Invalid("allow_secret_files", err.Error())
+	}
 	if cfg.Defaults != nil {
 		if err := validateRunRestrictions("defaults.run", cfg.Defaults.Run); err != nil {
 			return err
