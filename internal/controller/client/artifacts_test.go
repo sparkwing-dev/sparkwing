@@ -25,7 +25,7 @@ func TestArtifactDownloadsVerifyBytesAndKeepControllerCredentialsPrivate(t *test
 					if req.Header.Get("Authorization") != "" {
 						t.Fatal("controller credential reached object storage")
 					}
-					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(contents)), Header: make(http.Header)}, nil
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(contents)), Header: make(http.Header)}, nil
 				}
 				if req.URL.RequestURI() != "/api/v1/runs/run/jobs/job/artifacts?path=dir%2Fa+b" || req.Header.Get("Authorization") != "Bearer private-controller-token" {
 					t.Fatalf("artifact request = %s", req.URL)

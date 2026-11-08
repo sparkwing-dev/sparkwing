@@ -71,7 +71,7 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 		defer func() {
 			if !complete {
 				_ = file.Close()
-				_ = os.Remove(dest)
+				err = errors.Join(err, os.Remove(dest))
 			}
 		}()
 		entry, readErr := reader.DownloadArtifact(ctx, run, job, path, file)

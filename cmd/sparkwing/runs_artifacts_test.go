@@ -23,9 +23,11 @@ type artifactTestReader struct {
 func (r artifactTestReader) ReadRun(context.Context, string) (controllerwire.RunDetail, error) {
 	return controllerwire.RunDetail{ID: "canonical", Jobs: []controllerwire.JobDetail{{ID: "build"}, {ID: "test"}}}, nil
 }
+
 func (r artifactTestReader) ReadArtifacts(_ context.Context, run, job string) ([]blob.ManifestEntry, error) {
 	return r.read(run, job)
 }
+
 func (r artifactTestReader) DownloadArtifact(_ context.Context, _, _, _ string, out io.Writer) (blob.ManifestEntry, error) {
 	return r.download(out)
 }
