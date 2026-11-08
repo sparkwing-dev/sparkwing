@@ -148,7 +148,7 @@ func (d *Daemon) measurementSample() []OwnedRoot {
 	defer d.mu.Unlock()
 	roots := make([]OwnedRoot, 0, len(d.byRun))
 	for c, pid := range d.measurementPIDsLocked() {
-		roots = append(roots, OwnedRoot{PID: pid, HeldSince: c.startAt})
+		roots = append(roots, OwnedRoot{PID: pid, HeldSince: c.startAt, Members: c.measuredCommands()})
 	}
 	sort.Slice(roots, func(i, j int) bool { return roots[i].PID < roots[j].PID })
 	return roots
@@ -156,8 +156,12 @@ func (d *Daemon) measurementSample() []OwnedRoot {
 
 func (d *Daemon) sampleProcessUsage(roots []OwnedRoot) {
 	pids := make([]int, 0, len(roots))
+	members := map[int][]int{}
 	for _, root := range roots {
 		pids = append(pids, root.PID)
+		if len(root.Members) > 0 {
+			members[root.PID] = root.Members
+		}
 	}
 	if sampler, ok := d.procSampler.(*procSampler); ok {
 		sampler.mu.Lock()
@@ -167,7 +171,7 @@ func (d *Daemon) sampleProcessUsage(roots []OwnedRoot) {
 		measurement := sampler.measurement
 		sampler.mu.Unlock()
 		measurement.retainMetrics(roots)
-		measurement.CPUUsages(pids)
+		measurement.sampleMany(pids, members)
 		return
 	}
 	if sampler, ok := d.procSampler.(procBatchSampler); ok {

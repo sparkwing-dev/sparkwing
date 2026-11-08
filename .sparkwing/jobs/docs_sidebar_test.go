@@ -40,16 +40,15 @@ func TestDocsSidebarGatesPolicyAndReleaseCut(t *testing.T) {
 			writeFile(t, filepath.Join(repo, "docs", "_sidebar.json"), `{"categories":[{"label":"CLI","slugs":["index"]}]}`)
 			writeFile(t, filepath.Join(repo, "docs", "index.md"), "# Docs\n")
 			t.Chdir(repo)
-			host, plan, doc := prepareWork(t, tc.job)
+			_, _, doc := prepareWork(t, tc.job)
 			if findStep(doc, "docs-sidebar") == nil {
 				t.Fatal("missing docs-sidebar step")
 			}
-			if _, err := host.RunStep(t.Context(), plan, "job", "docs-sidebar"); err != nil {
+			if err := runReleaseStateCheck(t, repo, "docs-sidebar"); err != nil {
 				t.Fatalf("valid sidebar: %v", err)
 			}
 			writeFile(t, filepath.Join(repo, "docs", "cli-login.md"), "# Login\n")
-			host, plan, _ = prepareWork(t, tc.job)
-			if _, err := host.RunStep(t.Context(), plan, "job", "docs-sidebar"); err == nil || !strings.Contains(err.Error(), "cli-login.md") {
+			if err := runReleaseStateCheck(t, repo, "docs-sidebar"); err == nil || !strings.Contains(err.Error(), "cli-login.md") {
 				t.Fatalf("unlisted page passed or was not named: %v", err)
 			}
 		})

@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/testshell"
@@ -15,7 +16,7 @@ import (
 
 func TestHostHelpersUsePipelineDirectoryAndEnvironment(t *testing.T) {
 	dir := t.TempDir()
-	cmd := exec.Command("git", "-C", dir, "init", "--initial-branch=main")
+	cmd := testgit.Command("git", "-C", dir, "init", "--initial-branch=main")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s: %v", out, err)
 	}
@@ -23,7 +24,7 @@ func TestHostHelpersUsePipelineDirectoryAndEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	routes, _, auth := serviceFixture(t)
-	request := nodeproto.HelperRequest{Operation: "git.FilesetHash", Dir: dir, Env: os.Environ(), Args: json.RawMessage(`["."]`)}
+	request := nodeproto.HelperRequest{Operation: "git.FilesetHash", Dir: dir, Env: testgit.Env(os.Environ()), Args: json.RawMessage(`["."]`)}
 	body, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +62,7 @@ case "$1" in
 esac
 `)
 	record := filepath.Join(dir, "commands")
-	environment := append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_RECORD="+record, "SPARKWING_API_TOKEN=engine-private")
+	environment := append(testgit.Env(os.Environ()), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_RECORD="+record, "SPARKWING_API_TOKEN=engine-private")
 	routes, service, auth := serviceFixture(t)
 	service.Cleanups = &ProcessCleanups{}
 	invoke := func(operation, args string) nodeproto.HelperResponse {
@@ -128,7 +129,7 @@ func TestHostHelperMasksCompleteOutputBeforeLogLimits(t *testing.T) {
 	testshell.Install(t, filepath.Join(dir, "docker"), "#!/bin/sh\ncase \"$1\" in start) printf '%s' \"$HELPER_BYTES\";; esac\n")
 	service.Cleanups = &ProcessCleanups{}
 	output := strings.Repeat("x", (64<<10)-3) + secret + "\n"
-	env := append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_BYTES="+output)
+	env := append(testgit.Env(os.Environ()), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_BYTES="+output)
 	body, _ := json.Marshal(nodeproto.HelperRequest{Step: "container", Operation: "docker.Run", Dir: dir, Env: env, Args: json.RawMessage(`[{"image":"fixture"}]`)})
 	response, err := callService(t, routes, auth, "/node/v1/helpers", string(body))
 	if err != nil {

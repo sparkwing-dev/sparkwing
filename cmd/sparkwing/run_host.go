@@ -299,9 +299,6 @@ func validateLocalRunFlags(flags runFlags) error {
 	if flags.profile != "" && flags.route != "cloud" {
 		return errors.New("run: --profile requires --sw-route cloud")
 	}
-	if len(flags.allowSecretFiles) != 0 && flags.route != "cloud" {
-		return errors.New("run: --allow-secret-file requires --sw-route cloud")
-	}
 	if flags.route != "" && flags.route != "local" && flags.route != "cloud" {
 		return errors.New("run: --sw-route must be local or cloud")
 	}

@@ -26,7 +26,7 @@ func LocalRunnerServiceName(home, id string) string {
 }
 
 // RemoveLocalRunnerStartupEnvironment removes private launcher inputs after the
-// service manager has loaded them. Neither backend restarts a retired identity.
+// service manager has loaded them. Retired identities are never restarted.
 func RemoveLocalRunnerStartupEnvironment(home, id string) error {
 	dir := filepath.Join(home, "runners", LocalRunnerServiceName(home, id))
 	var result error
@@ -66,7 +66,7 @@ func StartLocalRunnerProcess(ctx context.Context, host crontimer.Host, id string
 	case "darwin":
 		return startLocalRunnerDarwin(ctx, host, id)
 	case "windows":
-		return errors.New("wingd: same-account detached runner supervision is unavailable on Windows")
+		return startUnmanagedLocalRunner(ctx, host, id)
 	default:
 		return fmt.Errorf("wingd: local runner supervision is unavailable on %q", host.GOOS)
 	}

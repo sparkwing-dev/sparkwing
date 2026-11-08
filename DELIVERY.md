@@ -23,39 +23,8 @@ sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate
 sparkwing run land --sw-allow-risk destructive,prod                         # land on main
 ```
 
-Our lands run on our own desktop hardware. Cloud is reserved for checks that
-prove Cloud itself. For an explicit Cloud-only check, use the `cloud` profile
-for team `korey-gam`:
-
-```bash
-sparkwing run land --sw-route local --sw-stop-at verify --sw-allow-risk destructive,prod -- --cloud-profile cloud
-sparkwing run land --sw-route local --sw-allow-risk destructive,prod -- --cloud-profile cloud
-```
-
-`--sw-route local` keeps land on the developer's machine. With `--cloud-profile`, its
-local policy job runs first, then a light `cloud-gate` job invokes
-`sparkwing run gate --sw-route cloud --profile cloud -o json -- --full --base SHA` while
-the local review runs beside it. Cloud runs the policy, broad `gate`,
-`race-touched` and `record-tree` jobs. Each Cloud job fetches the exact public
-`origin/main` commit captured by preconditions over HTTPS, without developer
-credentials. That commit bounds policy and lint findings even though the uploaded
-snapshot has no ancestry. Full mode runs every package. The two heavy jobs each
-request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
-requires a successful Cloud receipt and an unchanged clean HEAD before and
-after the remote gate. The landing record's `gate_run` names the Cloud run.
-The wrapper passes this repository's tracked secret-shaped fixtures, listed in
-`cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
-that kind fails the Cloud upload until it is added there.
-Preconditions, review, verification and push retain the original checkout and
-its git credentials. A merge after the gate still runs its existing build and
-affected-test recheck locally.
-
-This option needs a CLI with invocation routing on PATH and a configured Cloud
-profile. It makes no machine-wide routing change. Cloud observation can be
-interrupted without cancelling the remote run. Follow or cancel that run using
-`sparkwing runs logs` or `sparkwing runs cancel` with `--profile cloud --run ID`.
-Do not route the whole land pipeline to Cloud because the push and review use
-local credentials and records.
+Lands run on owned hardware. Policy, gate, review and push use that machine.
+The land queue invokes it with `--sw-route local`.
 
 The risk check covers the whole plan even when `--sw-stop-at verify` leaves
 the push out, so the stop-at form needs the risks too; the push step still
@@ -91,7 +60,8 @@ suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
 
-The `land` job's `verify` step requires the review record's tree to be HEAD's
+The `land` job reads the review JSON from the shared Git directory instead of
+resolving a review output blob. Its `verify` step requires the review record's tree to be HEAD's
 tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
@@ -130,6 +100,7 @@ landing record names both.
 A release is a tag push. The `release` pipeline resolves the version, renames
 `## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
 checks the section covers any schema or wire change since the previous tag,
+aligns scaffold and pipeline SDK pins to the chosen version with local replacements,
 then commits and atomically pushes that commit to `main` with an annotated
 `vX.Y.Z` tag. Run it from the sparkwing checkout under a temporary home,
 which the pipeline requires so a
@@ -1435,10 +1406,12 @@ file. Other syntax and workflow checks remain active.
   origin/main when nothing is staged, so a new offender fails from the first
   run while the tests written before the rule keep passing until they are
   edited. `GOWORK=off go run ./internal/sleepcheck .` judges every test file in
-  the tree, which is how to size the remaining purge. Korey approved two
-  external-boundary exceptions: the process-exit bound and paced status poll
-  in `internal/controller/direct_source_e2e_test.go`, which bound cleanup of an
-  external runner and avoid a busy HTTP loop.
+  the tree, which is how to size the remaining purge. The external-boundary
+  allowlist covers the paced runner status polls in
+  `internal/controller/direct_source_e2e_test.go` and
+  `cmd/sparkwing/local_runner_restart_linux_test.go`, and the OS pipe-drain
+  deadline in `internal/nodehost/host_exec_stdin_unix_test.go`. Runner cleanup
+  uses a context hang bound and needs no exception.
   Each `time.After` has a `// sleepcheck:external-boundary` reason immediately
   above its select receive arm. The checker allows only the listed path,
   function, duration, select arm and exact marker, and fails if an exception
@@ -1729,6 +1702,84 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   be built at the same store schema as the real one. Verify SDK,
   templates, integrations, browser behavior, or release assets when those
   surfaces changed.
+
+## Weekly SDK and CLI delivery
+
+`weekly-release` runs Monday at 09:00 America/Denver. It clones origin/main,
+skips when `[Unreleased]` has no entries, and requires the latest push run of
+`ci.yaml` at the selected commit to have completed successfully. It then runs
+the existing `release` pipeline in that private checkout with its own
+`SPARKWING_HOME`. The exact-source green CI receipt supplies verification evidence. Under the
+pre-launch desktop-load waiver, the scheduled cut starts at `version-freshness`
+and keeps the release-specific guards; it skips the broader release build,
+lint and short-suite steps. Incremental push CI is not full-suite evidence. Its default minor bump stays on v0.x. Release cuts are
+pre-approved. The scheduled entrypoint supplies the cut's
+`--sw-allow-risk destructive,prod` authorization.
+
+The cut retains its changelog, migration-guide, schema, wire and release-cut
+checks. It prepares the scaffold fallback, API snapshot and both pipeline module pins
+for the chosen version using their local SDK replacements. It commits only the
+prepared notes and pin paths with `--no-verify` after the gates pass, then
+atomically pushes main and the tag.
+That tag makes the Go SDK module available and starts the existing
+`.github/workflows/release.yaml` publication steps for signed CLI binaries,
+images and the TypeScript package. Before cutting, the weekly pipeline starts
+or resumes the Bitwing `sparkwing-release` workflow using the version as its
+idempotency key. It records the cut's immutable tag and commit in a blocked
+`cut` handoff. The release owner resumes with `bitwing workflow next --run WR-N`
+to confirm hosted publication, publish matching sparkwing-product docs, verify
+production through kikd-infra, and reconcile downstream pins. The checklist
+stays open until every required step has evidence. A failed cut retains the
+private checkout at the path printed in its job log.
+
+Run the same path sooner, or preview the cut:
+
+```sh
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release -- --bump patch
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release -- --version v0.70.0
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release --sw-dry-run
+```
+
+`owned-sdk-main` runs daily at 08:00 America/Denver. It resolves green
+Sparkwing main to an exact v0 Go module version. For each eligible repository,
+it sets both the SDK requirement and a versioned replacement to that version,
+tidies the pipeline module, commits only its go.mod and go.sum, and invokes
+`xwing env land`. The replacement lets development pipelines use the installed
+host without requesting an unpublished signed engine release.
+
+Eligible repos are immediate children of `~/code` with a Go pipeline module,
+a GitHub origin owned by `koreyGambill` or `sparkwing-dev`, and an Xwing policy
+with `landing.branch: main` and a verification command. Pull-request policies
+and Sparkwing itself are excluded. Xwing applies the repo's committed landing
+policy and verification. An unchanged main pin is skipped. A retained candidate
+that already has the target pin still retries landing and its verification. A failed update retains
+its Xwing environment for repair, while the pipeline tries the remaining repos
+and reports all failures. TypeScript repos keep their published SDK pins and
+can use `sparkwing pipeline upgrade` after a release.
+
+```sh
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main --sw-dry-run -- --repos-root "$HOME/code"
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main -- --repos-root "$HOME/code"
+```
+
+Arm both declarations from the main checkout on a host with Git push access,
+GitHub CLI authentication for CI reads, Go, Bitwing, Xwing and Sparkwing on PATH:
+
+```sh
+export SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery"
+export SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/secrets.key"
+sparkwing schedules install -C "$HOME/code/sparkwing" --schedule weekly-release/weekly-sdk-cli,owned-sdk-main/owned-sdk-main --unpinned
+sparkwing schedules list
+```
+
+The dedicated state directory keeps release work out of the operational runs
+store. The private key-file provider also works on headless hosts. Use those
+same exports for manual runs. Keep HOME at the operator's home so Git signing and GitHub authentication
+remain available. Sparkwing owns cadence and overlap handling through its
+schedule evaluator and managed timer. `--unpinned` compiles the main checkout
+on each fire so later pipeline fixes take effect. This installation command
+selects only these schedules and preserves other installed schedules.
 
 ## Release failure policy
 

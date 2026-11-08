@@ -30,6 +30,8 @@ func (l processTrackingLease) TrackProcess(ctx context.Context, pid int) error {
 	return l.track(ctx, pid)
 }
 
+func (processTrackingLease) TrackCommand(context.Context, int, string) error { return nil }
+
 func TestAdmissionRegistersSpawnedJobProcessBeforeProtocolRequests(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "registered", true: "registration failed"}[fail], func(t *testing.T) {

@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestCandidateInstallUsesSelectedSourceAndPrivateDestination(t *testing.T) {
@@ -36,7 +38,7 @@ func TestCandidateInstallUsesSelectedSourceAndPrivateDestination(t *testing.T) {
 	copyScript("install.sh")
 	copyScript("web-build-lock.sh")
 	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "fixture"}, {"tag", "v0.1.0"}} {
-		cmd := exec.Command("git", append([]string{"-C", source}, args...)...)
+		cmd := testgit.Command("git", append([]string{"-C", source}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git fixture: %v %s", err, out)
 		}

@@ -128,10 +128,8 @@ func (a *LocalAdmission) hold(parent context.Context, ref runspec.NodeRef, reque
 		err = errors.Join(err, localAdmissionFailure(context.Cause(ctx)), releaseErr, watchErr)
 	}()
 	if err == nil && context.Cause(ctx) == nil {
-		if tracker, ok := held.(interface {
-			TrackProcess(context.Context, int) error
-		}); ok {
-			ctx = context.WithValue(ctx, admissionProcessObserverKey{}, tracker.TrackProcess)
+		if tracker, ok := held.(admissionProcessTracker); ok {
+			ctx = context.WithValue(ctx, admissionProcessObserverKey{}, tracker)
 		}
 		err = body(ctx, held)
 	}
@@ -140,9 +138,21 @@ func (a *LocalAdmission) hold(parent context.Context, ref runspec.NodeRef, reque
 
 type admissionProcessObserverKey struct{}
 
+type admissionProcessTracker interface {
+	TrackProcess(ctx context.Context, pid int) error
+	TrackCommand(ctx context.Context, pid int, birth string) error
+}
+
 func observeAdmissionProcess(ctx context.Context, pid int) error {
-	if observe, ok := ctx.Value(admissionProcessObserverKey{}).(func(context.Context, int) error); ok {
-		return observe(ctx, pid)
+	if tracker, ok := ctx.Value(admissionProcessObserverKey{}).(admissionProcessTracker); ok {
+		return tracker.TrackProcess(ctx, pid)
+	}
+	return nil
+}
+
+func commandMeasurement(ctx context.Context) func(context.Context, int, string) error {
+	if tracker, ok := ctx.Value(admissionProcessObserverKey{}).(admissionProcessTracker); ok {
+		return tracker.TrackCommand
 	}
 	return nil
 }
