@@ -28,6 +28,8 @@ unlock.
 
 ### Fixed
 
+- **cli:** Reject step ranges that select no steps in a job instead of reporting success with every step skipped
+
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
 ### Added
