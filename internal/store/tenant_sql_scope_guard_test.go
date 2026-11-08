@@ -16,6 +16,11 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).NextActionsDispatch":            "the deployment sender expires leases and discovers work across teams; every approval, binding, installation, node and receipt joins on that work row team",
+	"(*Operator).PendingActionsCancellations":    "the deployment sender invalidates and enumerates receipts across teams; consent, runs and attempts correlate with each receipt team and exact job",
+	"(*Operator).FinishActionsDispatch":          "the deployment sender records one outcome by the globally unique receipt it took from the cross-team queue",
+	"(*Operator).FinishActionsCancellation":      "the deployment sender acknowledges one provider cancellation by its globally unique receipt",
+	"(*Operator).FinishSkippedActionsDispatch":   "the deployment sender cancels its own unsent receipt by the globally unique queue identity",
 	"(*Operator).unawaitedChildrenQuery":         "the maintenance sweep finds abandoned children across all teams; parent and node joins equate their teams to the child team",
 	"(*Operator).DeleteExpiredLogObjects":        "maintenance deletes every team's log objects past their retention class, matching each slot to its own stream and retiring it by its own team key",
 	"(*Operator).ClaimFailedRefundNotices":       "the billing pass finds every team's failed queued refunds once and marks each announced by its own team key",
@@ -216,6 +221,9 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 				seen[stmt.key+"|"+tables[0]] = true
 				continue
 			}
+		}
+		if stmt.key == "actionsTeamForeignKeyUpgrade" && preservesSchema35ActionsRows(stmt.text) {
+			continue
 		}
 		unscoped := unscopedSubqueries(stmt.text)
 		if outerCarriesTeam(stmt.text) && len(unscoped) == 0 {
@@ -895,5 +903,50 @@ func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
 	}
 	if !found {
 		t.Error("the guard no longer reads SQL built in package-level initializers")
+	}
+}
+
+// safety: the migration copies all teams, but must retain every selected column and the source team verbatim.
+func preservesSchema35ActionsRows(query string) bool {
+	tokens := scopeTokens(query)
+	table, columns, tail := scopeInsert(tokens)
+	if table != "github_actions_approvals" && table != "github_actions_dispatches" {
+		return false
+	}
+	if len(tail) < 4 || tail[0] != "select" {
+		return false
+	}
+	from := slices.Index(tail, "from")
+	if from < 0 || from+2 != len(tail) || tail[from+1] != table+"_schema35" {
+		return false
+	}
+	fields := scopeParts(tail[1:from], ",")
+	if len(fields) != len(columns) {
+		return false
+	}
+	team := false
+	for i, column := range columns {
+		if len(column) != 1 || !slices.Equal(column, fields[i]) {
+			return false
+		}
+		team = team || column[0] == "team"
+	}
+	return team
+}
+
+func TestSchema35ActionsCopyRetainsTeamAndColumns(t *testing.T) {
+	for _, test := range []struct {
+		query string
+		want  bool
+	}{
+		{`INSERT INTO github_actions_approvals(team,approval_id) SELECT team,approval_id FROM github_actions_approvals_schema35`, true},
+		{`INSERT INTO github_actions_approvals(team,approval_id) SELECT other_team,approval_id FROM github_actions_approvals_schema35`, false},
+		{`INSERT INTO github_actions_approvals(team,approval_id) SELECT team,approval_id FROM github_actions_approvals_schema35 WHERE team=?`, false},
+		{`INSERT INTO github_actions_dispatches(receipt) SELECT receipt FROM github_actions_dispatches_schema35`, false},
+		{`INSERT INTO github_actions_approvals(team,approval_id) SELECT team,approval_id FROM github_actions_dispatches_schema35`, false},
+	} {
+		if got := preservesSchema35ActionsRows(test.query); got != test.want {
+			t.Errorf("%s: got %v", test.query, got)
+		}
 	}
 }

@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
@@ -372,15 +374,15 @@ func offlineMarkerLines(t *testing.T, marker string) []string {
 func offlineRunCLI(cli, dir string, env []string, args ...string) (string, error) {
 	cmd := exec.Command(cli, args...)
 	cmd.Dir = dir
-	cmd.Env = env
+	cmd.Env = testgit.Env(env)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
 func offlineRunTool(tool, dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command(tool, args...)
+	cmd := testgit.Command(tool, args...)
 	cmd.Dir = dir
-	cmd.Env = env
+	cmd.Env = testgit.Env(env)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -438,13 +440,13 @@ func offlineWriteFixture(t *testing.T, gitBin, toolPath, fixtureHome string) (re
 	writeFile(t, filepath.Join(sparkwingDir, "jobs", "jobs.go"), offlineFixtureJobs)
 	writeFile(t, filepath.Join(sparkwingDir, "main.go"), offlineFixtureMain)
 
-	cmd := exec.Command(gitBin, "init", "-q")
+	cmd := testgit.Command(gitBin, "init", "-q")
 	cmd.Dir = repoDir
 	cmd.Env = []string{"HOME=" + fixtureHome, "PATH=" + toolPath, "GIT_CONFIG_NOSYSTEM=1"}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v\n%s", repoDir, err, out)
 	}
-	cmd = exec.Command(gitBin, "-c", "user.name=Offline Test", "-c", "user.email=offline@example.test", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial")
+	cmd = testgit.Command(gitBin, "-c", "user.name=Offline Test", "-c", "user.email=offline@example.test", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial")
 	cmd.Dir = repoDir
 	cmd.Env = []string{"HOME=" + fixtureHome, "PATH=" + toolPath, "GIT_CONFIG_NOSYSTEM=1"}
 	if out, err := cmd.CombinedOutput(); err != nil {
