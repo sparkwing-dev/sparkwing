@@ -65,7 +65,20 @@ esac
 			if (err != nil) != (mode == "failed-land") {
 				t.Fatalf("update = %v", err)
 			}
+			if mode == "failed-land" {
+				beforeRetry := gitRun(t, candidate, "rev-parse", "HEAD")
+				t.Setenv("OWNED_TEST_MODE", "land")
+				if err := updateOwnedSDK(ctx, repo, "fixture", version, sha, false); err != nil {
+					t.Fatalf("retry land: %v", err)
+				}
+				if afterRetry := gitRun(t, candidate, "rev-parse", "HEAD"); afterRetry != beforeRetry {
+					t.Fatal("retry created another pin commit")
+				}
+			}
 			calls, readErr := os.ReadFile(log)
+			if mode == "failed-land" && strings.Count(string(calls), "env land ") != 2 {
+				t.Fatalf("landing was not retried: %s", calls)
+			}
 			if mode == "current" || mode == "dry-run" {
 				if !os.IsNotExist(readErr) {
 					t.Fatalf("preview or unchanged pin invoked Xwing: %s", calls)
@@ -156,6 +169,24 @@ func TestOwnedSDKOnlySelectsOwnedGoReposWithAMainLandPolicy(t *testing.T) {
 		if got := ownedGoRepo(ctx, repo); got != tc.want {
 			origin, err := runGitIn(ctx, repo, "remote", "get-url", "origin")
 			t.Fatalf("selected %s with %s = %v, want %v (origin %q, error %v, match %v)", tc.origin, tc.policy, got, tc.want, origin, err, ownedOrigin.MatchString(strings.TrimSpace(origin)))
+		}
+	}
+}
+
+func TestOwnedSDKCurrentUsesTheEffectiveReplacement(t *testing.T) {
+	const version = "v0.9.0"
+	for _, tc := range []struct {
+		replace string
+		want    bool
+	}{
+		{"replace " + sdkModulePath + " v0.8.0 => " + sdkModulePath + " " + version, false},
+		{"replace " + sdkModulePath + " " + version + " => " + sdkModulePath + " " + version, true},
+		{"replace " + sdkModulePath + " => " + sdkModulePath + " " + version, true},
+		{"replace " + sdkModulePath + " => " + sdkModulePath + " " + version + "\nreplace " + sdkModulePath + " " + version + " => ../wrong", false},
+	} {
+		got, err := ownedSDKCurrent([]byte("module fixture\nrequire "+sdkModulePath+" "+version+"\n"+tc.replace+"\n"), version)
+		if err != nil || got != tc.want {
+			t.Fatalf("%s: %v, %v; want %v", tc.replace, got, err, tc.want)
 		}
 	}
 }

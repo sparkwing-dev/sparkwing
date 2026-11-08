@@ -133,14 +133,24 @@ func ownedSDKCurrent(body []byte, version string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	required, replaced := false, false
+	required := false
 	for _, r := range f.Require {
 		required = required || r.Mod.Path == sdkModulePath && r.Mod.Version == version
 	}
+	var replacement *modfile.Replace
 	for _, r := range f.Replace {
-		replaced = replaced || r.Old.Path == sdkModulePath && r.New.Path == sdkModulePath && r.New.Version == version
+		if r.Old.Path != sdkModulePath {
+			continue
+		}
+		if r.Old.Version == version {
+			replacement = r
+			break
+		}
+		if r.Old.Version == "" {
+			replacement = r
+		}
 	}
-	return required && replaced, nil
+	return required && replacement != nil && replacement.New.Path == sdkModulePath && replacement.New.Version == version, nil
 }
 
 func updateOwnedSDK(ctx context.Context, repo, name, version, sha string, dry bool) error {
@@ -179,33 +189,35 @@ func updateOwnedSDK(ctx context.Context, repo, name, version, sha string, dry bo
 		return err
 	}
 	current, err = ownedSDKCurrent(bodyBytes, version)
-	if err != nil || current {
-		return err
-	}
-	// safety: remove version-qualified replacements too, because they outrank the new all-version pin.
-	f, err := modfile.Parse("go.mod", bodyBytes, nil)
 	if err != nil {
 		return err
 	}
-	edit := []string{"mod", "edit"}
-	for _, r := range f.Replace {
-		if r.Old.Path == sdkModulePath {
-			edit = append(edit, "-dropreplace="+r.Old.String())
+	if !current {
+		// safety: remove version-qualified replacements too, because they outrank the new all-version pin.
+		f, err := modfile.Parse("go.mod", bodyBytes, nil)
+		if err != nil {
+			return err
 		}
-	}
-	edit = append(edit, "-require="+sdkModulePath+"@"+version, "-replace="+sdkModulePath+"="+sdkModulePath+"@"+version)
-	if _, err := sparkwing.Exec(ctx, "go", edit...).Dir(mod).Env("GOWORK", "off").Run(); err != nil {
-		return err
-	}
-	if _, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(mod).Env("GOWORK", "off").Run(); err != nil {
-		return err
-	}
-	if _, err := runGitIn(ctx, attached.Path, "add", "--", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
-		return err
-	}
-	if _, err := runGitIn(ctx, attached.Path, "commit", "--no-verify", "-m", "chore(ci): follow Sparkwing main at "+sha[:12],
-		"--", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
-		return err
+		edit := []string{"mod", "edit"}
+		for _, r := range f.Replace {
+			if r.Old.Path == sdkModulePath {
+				edit = append(edit, "-dropreplace="+r.Old.String())
+			}
+		}
+		edit = append(edit, "-require="+sdkModulePath+"@"+version, "-replace="+sdkModulePath+"="+sdkModulePath+"@"+version)
+		if _, err := sparkwing.Exec(ctx, "go", edit...).Dir(mod).Env("GOWORK", "off").Run(); err != nil {
+			return err
+		}
+		if _, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(mod).Env("GOWORK", "off").Run(); err != nil {
+			return err
+		}
+		if _, err := runGitIn(ctx, attached.Path, "add", "--", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
+			return err
+		}
+		if _, err := runGitIn(ctx, attached.Path, "commit", "--no-verify", "-m", "chore(ci): follow Sparkwing main at "+sha[:12],
+			"--", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
+			return err
+		}
 	}
 	_, err = sparkwing.Exec(ctx, "xwing", "env", "land", "--session", session, "--repo", name).Run()
 	return err

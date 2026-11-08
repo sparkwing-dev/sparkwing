@@ -130,6 +130,7 @@ landing record names both.
 A release is a tag push. The `release` pipeline resolves the version, renames
 `## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
 checks the section covers any schema or wire change since the previous tag,
+aligns scaffold and pipeline SDK pins to the chosen version with local replacements,
 then commits and atomically pushes that commit to `main` with an annotated
 `vX.Y.Z` tag. Run it from the sparkwing checkout under a temporary home,
 which the pipeline requires so a
@@ -1741,11 +1742,19 @@ pre-approved. The scheduled entrypoint supplies the cut's
 `--sw-allow-risk destructive,prod` authorization.
 
 The cut retains its changelog, migration-guide, schema, wire and release-cut
-checks. It commits the rolled notes and atomically pushes main and the tag.
+checks. It prepares the scaffold fallback, API snapshot and both pipeline module pins
+for the chosen version using their local SDK replacements. It commits only the
+prepared notes and pin paths with `--no-verify` after the gates pass, then
+atomically pushes main and the tag.
 That tag makes the Go SDK module available and starts the existing
 `.github/workflows/release.yaml` publication steps for signed CLI binaries,
-images and the TypeScript package. The weekly pipeline finishes after the cut.
-Inspect the tag workflow for publication completion. A failed cut retains the
+images and the TypeScript package. Before cutting, the weekly pipeline starts
+or resumes the Bitwing `sparkwing-release` workflow using the version as its
+idempotency key. It records the cut's immutable tag and commit in a blocked
+`cut` handoff. The release owner resumes with `bitwing workflow next --run WR-N`
+to confirm hosted publication, publish matching sparkwing-product docs, verify
+production through kikd-infra, and reconcile downstream pins. The checklist
+stays open until every required step has evidence. A failed cut retains the
 private checkout at the path printed in its job log.
 
 Run the same path sooner, or preview the cut:
@@ -1768,7 +1777,8 @@ Eligible repos are immediate children of `~/code` with a Go pipeline module,
 a GitHub origin owned by `koreyGambill` or `sparkwing-dev`, and an Xwing policy
 with `landing.branch: main` and a verification command. Pull-request policies
 and Sparkwing itself are excluded. Xwing applies the repo's committed landing
-policy and verification. An unchanged pin is skipped. A failed update retains
+policy and verification. An unchanged main pin is skipped. A retained candidate
+that already has the target pin still retries landing and its verification. A failed update retains
 its Xwing environment for repair, while the pipeline tries the remaining repos
 and reports all failures. TypeScript repos keep their published SDK pins and
 can use `sparkwing pipeline upgrade` after a release.
@@ -1779,7 +1789,7 @@ SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-m
 ```
 
 Arm both declarations from the main checkout on a host with Git push access,
-GitHub CLI authentication for CI reads, Go, Xwing and Sparkwing on PATH:
+GitHub CLI authentication for CI reads, Go, Bitwing, Xwing and Sparkwing on PATH:
 
 ```sh
 export SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery"

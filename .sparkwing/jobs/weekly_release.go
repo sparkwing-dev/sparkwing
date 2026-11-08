@@ -22,7 +22,7 @@ func (WeeklyRelease) ShortHelp() string {
 }
 
 func (WeeklyRelease) Help() string {
-	return "Clone origin/main into a private checkout, skip an empty [Unreleased] section, require the latest push CI run at that exact SHA to pass, then invoke the existing release pipeline. Defaults to a v0 minor bump. Pass --bump patch or --version for an earlier release. The tag workflow publishes the CLI, Go module and TypeScript package. Dry runs preview the same release cut without committing or pushing. A failed cut retains its checkout for inspection."
+	return "Clone origin/main into a private checkout, skip an empty [Unreleased] section, require the latest push CI run at that exact SHA to pass, then invoke the existing release pipeline. Defaults to a v0 minor bump. Pass --bump patch or --version for an earlier release. The tag workflow publishes the CLI, Go module and TypeScript package. A per-version Bitwing sparkwing-release workflow records the cut handoff for publication, docs, production verification and downstream pins. Dry runs preview the same release cut without committing or pushing. A failed cut retains its checkout for inspection."
 }
 
 func (*WeeklyRelease) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
@@ -86,19 +86,39 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 	if err = requireGreenMain(ctx, checkout, head); err != nil {
 		return err
 	}
+	version, err := (&resolveVersionJob{Explicit: j.Args.Version, Bump: j.Args.Bump, RepoDir: checkout}).run(ctx)
+	if err != nil {
+		return err
+	}
+	workflow := ""
+	if !dry {
+		result, err := sparkwing.Exec(ctx, "bitwing", "workflow", "start", "--name", "sparkwing-release",
+			"--repo", "sparkwing", "--title", "Sparkwing "+version, "--idempotency-key", "sparkwing-release-"+version,
+			"--context", "Weekly release authorized by schedule or manual invocation; version "+version, "-o", "json").Run()
+		if err != nil {
+			return fmt.Errorf("start release workflow: %w", err)
+		}
+		var run struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(result.Stdout), &run); err != nil {
+			return err
+		}
+		if run.ID == "" {
+			return errors.New("Bitwing returned no release workflow run id")
+		}
+		workflow = run.ID
+		if err := releaseWorkflowHandoff(ctx, workflow, "Cut starting from main@"+head+" for "+version+"."); err != nil {
+			return err
+		}
+	}
 	args := []string{"run", "release", "-C", checkout, "--sw-route", "local"}
 	if dry {
 		args = append(args, "--sw-dry-run")
 	} else {
 		args = append(args, "--sw-allow-risk", "destructive,prod")
 	}
-	args = append(args, "--")
-	if j.Args.Version != "" {
-		args = append(args, "--version", j.Args.Version)
-	}
-	if j.Args.Bump != "" {
-		args = append(args, "--bump", j.Args.Bump)
-	}
+	args = append(args, "--", "--version", version)
 	sparkwing.Info(ctx, "release source main@%s (%d unreleased entries)", head, entries)
 	state := filepath.Join(dir, "state")
 	defer func() {
@@ -111,6 +131,23 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 	_, err = sparkwing.Exec(ctx, "sparkwing", args...).Dir(checkout).
 		Env("SPARKWING_HOME", state).Env("SPARKWING_SECRETS_KEY_FILE", filepath.Join(state, "secrets.key")).
 		Env("GOWORK", "off").Run()
+	if err != nil {
+		return err
+	}
+	if !dry {
+		commit, err := runGitIn(ctx, checkout, "rev-parse", version+"^{commit}")
+		if err != nil {
+			return err
+		}
+		return releaseWorkflowHandoff(ctx, workflow, "Local release cut succeeded; immutable tag "+version+" at "+strings.TrimSpace(commit)+".")
+	}
+	return nil
+}
+
+func releaseWorkflowHandoff(ctx context.Context, run, cut string) error {
+	note := cut + " Release owner: resume with bitwing workflow next --run " + run +
+		". Confirm hosted publication and artifact identity, publish matching sparkwing-product docs, verify production through kikd-infra, and reconcile downstream pins before finishing this workflow."
+	_, err := sparkwing.Exec(ctx, "bitwing", "workflow", "step", "--run", run, "--step", "cut", "--status", "blocked", "--note", note).Run()
 	return err
 }
 

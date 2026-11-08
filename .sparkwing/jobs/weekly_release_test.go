@@ -44,6 +44,11 @@ func TestWeeklyReleaseUsesFreshMainAndTheExistingCut(t *testing.T) {
 			}
 			t.Setenv("RELEASE_TEST_CI", string(ci))
 			writeDeliveryTool(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' \"$RELEASE_TEST_CI\"\n")
+			writeDeliveryTool(t, filepath.Join(bin, "bitwing"), `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$RELEASE_TEST_CALL.workflow"
+if [ "$2" = start ]; then printf '{"id":"WR-123"}\n'; fi
+`)
 			writeDeliveryTool(t, filepath.Join(bin, "sparkwing"), `#!/bin/sh
 set -eu
 [ "$SPARKWING_SECRETS_KEY_FILE" = "$SPARKWING_HOME/secrets.key" ]
@@ -54,6 +59,7 @@ fi
 printf '%s\n' "$@" > "$RELEASE_TEST_CALL"
 printf '%s\n' "$SPARKWING_HOME" >> "$RELEASE_TEST_CALL"
 git -C "$4" rev-parse HEAD >> "$RELEASE_TEST_CALL"
+case "$*" in *--sw-dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 `)
 			ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
 			err := (&weeklyReleaseJob{RepoDir: repo, Args: ReleaseArgs{Bump: "patch"}}).run(ctx, mode == "dry-run")
@@ -71,7 +77,7 @@ git -C "$4" rev-parse HEAD >> "$RELEASE_TEST_CALL"
 					t.Fatal(readErr)
 				}
 				text := string(got)
-				for _, want := range []string{"run\nrelease\n-C\n", "--bump\npatch\n", head} {
+				for _, want := range []string{"run\nrelease\n-C\n", "--version\nv0.1.0\n", head} {
 					if !strings.Contains(text, want) {
 						t.Fatalf("cut call lacks %q: %s", want, text)
 					}
@@ -81,6 +87,18 @@ git -C "$4" rev-parse HEAD >> "$RELEASE_TEST_CALL"
 				}
 				if strings.Contains(text, "--sw-allow-risk") != (mode == "release") {
 					t.Fatalf("risk propagation: %s", text)
+				}
+				workflow, workflowErr := os.ReadFile(call + ".workflow")
+				if mode == "dry-run" {
+					if !os.IsNotExist(workflowErr) {
+						t.Fatalf("preview wrote workflow: %s", workflow)
+					}
+				} else {
+					for _, want := range []string{"start --name sparkwing-release", "--idempotency-key sparkwing-release-v0.1.0", "--step cut --status blocked", "immutable tag v0.1.0 at " + head, "sparkwing-product", "kikd-infra", "downstream pins"} {
+						if !strings.Contains(string(workflow), want) {
+							t.Fatalf("workflow handoff lacks %q: %s (%v)", want, workflow, workflowErr)
+						}
+					}
 				}
 				stop, err := os.ReadFile(call + ".stop")
 				if err != nil || strings.TrimSpace(string(stop)) != "daemon stop" {
