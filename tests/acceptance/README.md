@@ -9,3 +9,58 @@ Evidence binds to the worktree digest at run time, the executing platform and
 the selected driver. Running a saved binary compiled earlier with `go test -c`
 against a changed tree is out of scope. Normal `go test` rebuilds from the
 current source.
+
+## Feature scenarios against a local controller
+
+`TestFeatureE2E` builds the controller and CLI from the checkout, then starts
+each scenario with a fresh HOME, credential epoch, SQLite database and filesystem
+blob store. Two enrolled runners advertise different labels. Separate
+account credentials submit and cancel work through HTTP. Runner actors drive the
+real claim, admission, report, data and heartbeat APIs. They do not launch the
+runner executable or execute an SDK pipeline body.
+
+Run through local Sparkwing admission:
+
+```sh
+sparkwing run feature-e2e --sw-route local
+sparkwing run feature-e2e --sw-route local -- --scenario placement --repeat 3
+sparkwing run feature-e2e --sw-route local -- --scenario retry_failed
+sparkwing run feature-e2e --sw-route local -- --scenario child_cancellation
+```
+
+The pipeline reserves two cores and builds with `-p 1`. It runs no Cloud jobs
+and needs no staging credentials. Each repeat rebuilds from the tested checkout
+and creates fresh state. To test `origin/main`, run it from an Xwing worktree
+created with that base. The ordinary full acceptance suite includes these tests,
+so the nightly full grid picks them up. `-short` skips them because the child
+scenarios cross real ten-second recovery intervals.
+
+| Scenario | Outcomes asserted |
+| --- | --- |
+| `placement` | Fallback waits for the original three-second hold, including after an unstarted award is returned. The deadline opens within one extra second. Another runner joins during a hold and completes the sole attempt. |
+| `retry_failed` | Four successful jobs retain output JSON and downloadable artifacts through three retries. Only the failed job gets an attempt. A second account cancels a running retry, its holder sees cancellation on heartbeat, and the run settles cancelled. |
+| `child_cancellation` | A running child is cancelled within the ten-second recovery interval plus two seconds when its parent is cancelled, fails, or its creating job ends while the parent remains live. A manual child retry survives another recovery sweep and succeeds. |
+
+Placement and child scenarios use personal runners. The retry scenario seeds a
+pending run with GitHub source provenance, then uses repository-scoped shared
+runners on an isolated `high_trust` team. Those runners can publish reusable
+shared records. Source authentication is fixture input because GitHub verification
+is outside this scenario. Plan acceptance, execution, uploads, retries and
+cancellation all use the external controller. Personal runners keep private
+result scopes even on a high-trust team, so their results fall back to execution.
+No setting on a real team changes. Placement advertises two free runner slots
+so the preferred runner remains eligible after returning its provisional award.
+
+Verbose output records run IDs, retry lineage and observed timings. Sparkwing
+retains that output in the scenario job's logs. Each controller exits and is
+reaped before its private state is removed. Failed tests include its last sixty
+log lines. A child scenario can take about ninety seconds because cancellation,
+retry survival and terminal settlement each cross controller sweeps.
+
+For a focused Go invocation from another directory:
+
+```sh
+GOWORK=off GOMAXPROCS=2 go -C /absolute/path/to/sparkwing test -p 1 \
+  -count=1 -v -timeout 10m ./tests/acceptance \
+  -run '^TestFeatureE2E$/^retry_failed$'
+```
