@@ -263,6 +263,8 @@ func TestPrepareDaemonSocket_ClearsAStaleSocket(t *testing.T) {
 }
 
 func TestDaemon_BindsAPrivateSocket(t *testing.T) {
+	wait, stop := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stop()
 	home := t.TempDir()
 	d, err := New(Config{Home: home, Version: "v1.0.0"})
 	if err != nil {
@@ -276,7 +278,7 @@ func TestDaemon_BindsAPrivateSocket(t *testing.T) {
 	case <-d.Ready():
 	case err := <-errc:
 		t.Fatalf("daemon exited before serving: %v", err)
-	case <-time.After(3 * time.Second):
+	case <-wait.Done():
 		t.Fatal("daemon never became ready")
 	}
 
@@ -298,7 +300,7 @@ func TestDaemon_BindsAPrivateSocket(t *testing.T) {
 	cancel()
 	select {
 	case <-errc:
-	case <-time.After(3 * time.Second):
+	case <-wait.Done():
 		t.Fatal("daemon did not stop after cancel")
 	}
 }
