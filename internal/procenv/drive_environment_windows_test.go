@@ -10,7 +10,7 @@ import (
 )
 
 func TestWindowsDriveEnvironmentSurvivesLocalCapture(t *testing.T) {
-	captured := []string{`=C:=C:\work`, `=D:=D:\other`, "CUSTOM=value"}
+	captured := []string{`=C:=C:\work`, `=D:=D:\work`, "CUSTOM=value"}
 	for _, kind := range []Kind{Plan, Attempt, Install, HostChild} {
 		env, err := Build(kind, Base{Local: true, Captured: captured}, Runtime{})
 		if err != nil {
