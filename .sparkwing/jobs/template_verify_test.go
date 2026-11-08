@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -25,6 +26,43 @@ func TestTemplateVerifyCLIPathUsesPlatformExecutableName(t *testing.T) {
 		if got, want := templateVerifyCLIPath(dir, tc.goos), filepath.Join(dir, tc.name); got != want {
 			t.Errorf("%s executable = %q, want %q", tc.goos, got, want)
 		}
+	}
+}
+
+func TestTemplateVerifierCompilesAndPlansFreshTemplate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the CLI and a fresh template")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := templateVerifyCLIPath(t.TempDir(), runtime.GOOS)
+	build := exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-o", bin, "./cmd/sparkwing")
+	build.Dir = root
+	build.Env = append(os.Environ(), "GOWORK=off")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build verifier CLI: %v\n%s", err, output)
+	}
+	for key, value := range readGoEnv(t.Context()) {
+		t.Setenv(key, value)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	var manifest templates.Manifest
+	for _, candidate := range verifyTemplates {
+		if candidate.Manifest.Name == "lint-test-go" {
+			manifest = candidate.Manifest
+			break
+		}
+	}
+	if manifest.Name == "" {
+		t.Fatal("lint-test-go verification template is missing")
+	}
+	manifest.Verify = templates.VerifyCompileOnly
+	outcome, err := verifyTemplate(t.Context(), manifest, verifyEnv{CLI: bin, Root: root})
+	if err != nil || outcome.Tier != templates.VerifyCompileOnly || outcome.Skipped {
+		t.Fatalf("fresh-template verification: %+v: %v", outcome, err)
 	}
 }
 

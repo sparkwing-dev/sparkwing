@@ -65,7 +65,7 @@ func (TemplateVerify) ShortHelp() string {
 }
 
 func (TemplateVerify) Help() string {
-	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline plan --static`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with --sw-dry-run so the engine seals dry-run mode and cloud mutations echo instead of executing. Skipped dry-run jobs or steps are reported as partial verification and never record a reusable proof. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. Run this check explicitly with `sparkwing run template-verify`. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless of recorded proofs."
+	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline plan`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with --sw-dry-run so the engine seals dry-run mode and cloud mutations echo instead of executing. Skipped dry-run jobs or steps are reported as partial verification and never record a reusable proof. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. Run this check explicitly with `sparkwing run template-verify`. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless of recorded proofs."
 }
 
 func (TemplateVerify) Examples() []sparkwing.Example {
@@ -319,10 +319,13 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
 		return out, fmt.Errorf("%s: go build: %w", m.Name, err)
 	}
-	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint", "--all").Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint", "--pipeline", m.Name).Run(); err != nil {
 		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
 	}
-	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "plan", "--static", "--name", m.Name).Dir(scratch).Run(); err != nil {
+	if err := gitInitFixture(ctx, scratch); err != nil {
+		return out, fmt.Errorf("%s: commit scaffold: %w", m.Name, err)
+	}
+	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "plan", "--pipeline", m.Name).Dir(scratch).Run(); err != nil {
 		return out, fmt.Errorf("%s: explain: %w", m.Name, err)
 	}
 
@@ -488,7 +491,7 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 // safety: `pipeline new` builds the repository the example has to compile in;
 // the example rendered with its verify parameters then replaces the job file.
 func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manifest) error {
-	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "new", "--name", m.Name, "--template", "minimal").Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "new", "--pipeline", m.Name, "--template", "minimal").Run(); err != nil {
 		return err
 	}
 	params := make(map[string]string, len(m.VerifyParams)+1)
@@ -511,7 +514,11 @@ func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manif
 	if len(jobs) != 1 {
 		return fmt.Errorf("pipeline new wrote %d job files, want 1", len(jobs))
 	}
-	return os.WriteFile(jobs[0], []byte(body), 0o644)
+	if err := os.WriteFile(jobs[0], []byte(body), 0o644); err != nil {
+		return err
+	}
+	config := fmt.Sprintf("pipelines:\n  - name: %q\n    entrypoint: %q\n", m.Name, m.Name)
+	return os.WriteFile(filepath.Join(scratch, ".sparkwing", "sparkwing.yaml"), []byte(config), 0o644)
 }
 
 func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[string]string) error {
