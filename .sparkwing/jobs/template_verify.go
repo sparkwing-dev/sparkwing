@@ -67,7 +67,7 @@ func (TemplateVerify) ShortHelp() string {
 }
 
 func (TemplateVerify) Help() string {
-	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline plan --pipeline <name>`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with --sw-dry-run so the engine seals dry-run mode and cloud mutations echo instead of executing. Skipped dry-run jobs or steps are reported as partial verification and never record a reusable proof. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. Run this check explicitly with `sparkwing run template-verify`. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless of recorded proofs."
+	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline plan --pipeline <name>`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with --sw-dry-run so the engine seals dry-run mode and cloud mutations echo instead of executing. Skipped dry-run jobs or steps are reported as partial verification and never record a reusable proof. Unused failure recovery after a successful parent does not count as skipped work. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. Run this check explicitly with `sparkwing run template-verify`. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless of recorded proofs."
 }
 
 func (TemplateVerify) Examples() []sparkwing.Example {
@@ -420,6 +420,7 @@ func classifyTemplateDryRun(runID, raw string) (templateOutcome, error) {
 		Outcome      string `json:"outcome"`
 		Reason       string `json:"reason"`
 		StatusDetail string `json:"status_detail"`
+		OnFailureOf  string `json:"on_failure_of"`
 	}
 	var detail struct {
 		ID     string   `json:"id"`
@@ -433,9 +434,16 @@ func classifyTemplateDryRun(runID, raw string) (templateOutcome, error) {
 	if runID == "" || detail.ID != runID || detail.Status != "dry_run" {
 		return out, errors.New("missing completed dry-run job or step evidence")
 	}
+	rows := append([]result{}, detail.Steps...)
+	for _, job := range detail.Jobs {
+		if job.OnFailureOf != "" && job.Outcome == "skipped" && job.Reason == "parent_did_not_fail" {
+			continue
+		}
+		rows = append(rows, job)
+	}
 	allSucceeded := true
 	// safety: the public step view omits skip reasons, so every skipped step is partial evidence.
-	for _, r := range append(detail.Jobs, detail.Steps...) {
+	for _, r := range rows {
 		if r.Status == "skipped" || r.Outcome == "skipped" || strings.Contains(r.Reason+r.StatusDetail, "no_dry_run_defined") {
 			out.Skipped, out.SkipReason = true, "dry-run jobs or steps skipped"
 			return out, nil

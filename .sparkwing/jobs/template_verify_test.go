@@ -278,6 +278,23 @@ func TestTemplateDryRunEvidenceControlsProofRecording(t *testing.T) {
 			partial: true,
 		},
 		{
+			name:  "successful deploy leaves recovery unused",
+			jobs:  `[{"id":"deploy","status":"done","outcome":"success"},{"id":"rollback","status":"done","outcome":"skipped","reason":"parent_did_not_fail","on_failure_of":"deploy"}]`,
+			steps: `[{"job_id":"deploy","id":"run","status":"passed","outcome":"success"}]`,
+		},
+		{
+			name:    "ordinary skipped job still lacks proof",
+			jobs:    `[{"id":"deploy","status":"done","outcome":"skipped","reason":"parent_did_not_fail"}]`,
+			steps:   `[]`,
+			partial: true,
+		},
+		{
+			name:    "recovery without preview still lacks proof",
+			jobs:    `[{"id":"deploy","status":"done","outcome":"success"},{"id":"rollback","status":"done","outcome":"skipped","reason":"no_dry_run_defined","on_failure_of":"deploy"}]`,
+			steps:   `[{"job_id":"deploy","id":"run","status":"passed","outcome":"success"}]`,
+			partial: true,
+		},
+		{
 			name:  "fully executed preview",
 			jobs:  `[{"id":"deploy","status":"done","outcome":"success"}]`,
 			steps: `[{"job_id":"deploy","id":"run","status":"passed","outcome":"success"}]`,

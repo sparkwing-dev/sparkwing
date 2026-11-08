@@ -28,6 +28,10 @@ unlock.
 
 ### Fixed
 
+- **templates:** Pin sparks-core templates v0.34.1 for executable cloud and publish
+  previews. Verification accepts unused failure recovery after a successful deploy,
+  while skipped dry-run bodies and steps still prevent reusable proof.
+
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
 ### Added
