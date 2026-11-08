@@ -213,7 +213,7 @@ func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
 	for _, mode := range []string{"json", "plain", "pretty"} {
 		t.Run(mode, func(t *testing.T) {
 			minted := 0
-			services := dashboardServices{lifecycle: &dashboardLifecycleFake{}, mintLogin: func(context.Context) (wingd.DashboardLogin, error) { minted++; return login, nil }}
+			services := dashboardServices{lifecycle: &dashboardLifecycleFake{}, mintLogin: func(context.Context, string) (wingd.DashboardLogin, error) { minted++; return login, nil }}
 			var output bytes.Buffer
 			if err := runDashboardCommandArgs(t.Context(), []string{"open", "-o", mode}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil }); err != nil {
 				t.Fatal(err)
@@ -234,7 +234,7 @@ func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
 	}
 	t.Run("starts the controller before minting", func(t *testing.T) {
 		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, PID: 123, Version: "v1.2.3"}}
-		services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: "/private/home", Version: "v1.2.3"}, mintLogin: func(context.Context) (wingd.DashboardLogin, error) {
+		services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: "/private/home", Version: "v1.2.3"}, mintLogin: func(context.Context, string) (wingd.DashboardLogin, error) {
 			if len(lifecycle.calls) == 0 {
 				t.Error("minted before the controller was ensured")
 			}
@@ -250,7 +250,7 @@ func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
 	})
 	t.Run("names a dashboard that could not bind", func(t *testing.T) {
 		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, DashboardError: "dashboard listen on 127.0.0.1:4343: address already in use"}}
-		services := dashboardServices{lifecycle: lifecycle, mintLogin: func(context.Context) (wingd.DashboardLogin, error) {
+		services := dashboardServices{lifecycle: lifecycle, mintLogin: func(context.Context, string) (wingd.DashboardLogin, error) {
 			t.Error("minted a link for a dashboard that is not serving")
 			return login, nil
 		}}
@@ -264,13 +264,29 @@ func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
 	t.Run("keeps a refused start", func(t *testing.T) {
 		refused := errors.New("controller startup failed")
 		lifecycle := &dashboardLifecycleFake{err: refused}
-		services := dashboardServices{lifecycle: lifecycle, mintLogin: func(context.Context) (wingd.DashboardLogin, error) { return login, nil }}
+		services := dashboardServices{lifecycle: lifecycle, mintLogin: func(context.Context, string) (wingd.DashboardLogin, error) { return login, nil }}
 		var output bytes.Buffer
 		err := runDashboardCommandArgs(t.Context(), []string{"open"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
 		if !errors.Is(err, refused) || output.Len() != 0 {
 			t.Fatalf("error=%v output=%q", err, &output)
 		}
 	})
+}
+
+func TestDashboardOpenSelectsConfiguredServeHost(t *testing.T) {
+	const host = "desk.example.ts.net"
+	const link = "https://" + host + "/#code=one-time-code"
+	services := dashboardServices{lifecycle: &dashboardLifecycleFake{}, mintLogin: func(_ context.Context, selected string) (wingd.DashboardLogin, error) {
+		if selected != host {
+			t.Fatalf("selected host = %q", selected)
+		}
+		return wingd.DashboardLogin{URL: link}, nil
+	}}
+	var output bytes.Buffer
+	err := runDashboardCommandArgs(t.Context(), []string{"open", "--host", host, "-o", "plain"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+	if err != nil || output.String() != link+"\n" {
+		t.Fatalf("Serve sign-in link: %v, output %q", err, &output)
+	}
 }
 
 func TestDashboardStatusReportsAnOlderDashboardStillRunning(t *testing.T) {

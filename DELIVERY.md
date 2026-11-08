@@ -23,39 +23,8 @@ sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate
 sparkwing run land --sw-allow-risk destructive,prod                         # land on main
 ```
 
-Our lands run on our own desktop hardware. Cloud is reserved for checks that
-prove Cloud itself. For an explicit Cloud-only check, use the `cloud` profile
-for team `korey-gam`:
-
-```bash
-sparkwing run land --sw-route local --sw-stop-at verify --sw-allow-risk destructive,prod -- --cloud-profile cloud
-sparkwing run land --sw-route local --sw-allow-risk destructive,prod -- --cloud-profile cloud
-```
-
-`--sw-route local` keeps land on the developer's machine. With `--cloud-profile`, its
-local policy job runs first, then a light `cloud-gate` job invokes
-`sparkwing run gate --sw-route cloud --profile cloud -o json -- --full --base SHA` while
-the local review runs beside it. Cloud runs the policy, broad `gate`,
-`race-touched` and `record-tree` jobs. Each Cloud job fetches the exact public
-`origin/main` commit captured by preconditions over HTTPS, without developer
-credentials. That commit bounds policy and lint findings even though the uploaded
-snapshot has no ancestry. Full mode runs every package. The two heavy jobs each
-request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
-requires a successful Cloud receipt and an unchanged clean HEAD before and
-after the remote gate. The landing record's `gate_run` names the Cloud run.
-The wrapper passes this repository's tracked secret-shaped fixtures, listed in
-`cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
-that kind fails the Cloud upload until it is added there.
-Preconditions, review, verification and push retain the original checkout and
-its git credentials. A merge after the gate still runs its existing build and
-affected-test recheck locally.
-
-This option needs a CLI with invocation routing on PATH and a configured Cloud
-profile. It makes no machine-wide routing change. Cloud observation can be
-interrupted without cancelling the remote run. Follow or cancel that run using
-`sparkwing runs logs` or `sparkwing runs cancel` with `--profile cloud --run ID`.
-Do not route the whole land pipeline to Cloud because the push and review use
-local credentials and records.
+Lands run on owned hardware. Policy, gate, review and push use that machine.
+The land queue invokes it with `--sw-route local`.
 
 The risk check covers the whole plan even when `--sw-stop-at verify` leaves
 the push out, so the stop-at form needs the risks too; the push step still
@@ -91,7 +60,8 @@ suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
 
-The `land` job's `verify` step requires the review record's tree to be HEAD's
+The `land` job reads the review JSON from the shared Git directory instead of
+resolving a review output blob. Its `verify` step requires the review record's tree to be HEAD's
 tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
@@ -551,6 +521,21 @@ entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push r
 through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
 through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
 retried old run cannot roll production back.
+
+The deployment pipeline pins a published SDK without a local replacement, so
+Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
+selects the planning host's installed executable instead and requires every job
+host to retain those exact bytes. A main-built Cloud runner and a released desktop
+runner therefore cannot share that replacement engine identity. Keep SDK source
+development outside the committed deployment module's engine pin.
+
+A local `pipeline plan` can pass while an older Cloud planning runner rejects the
+same source before any job starts. Deploy a wire-contract change to staging and
+production before later pipelines depend on it. If that ordering breaks,
+bootstrap with an exact image already proven by the staging smokes, compare its
+schema with production before changing the controller pin, and wait for its
+rollout before updating the launcher and planning runner. Then observe a new
+push-triggered deploy through both environments.
 
 #### Deploy cost estimate
 

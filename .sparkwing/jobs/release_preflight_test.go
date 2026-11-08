@@ -13,12 +13,22 @@ import (
 func runReleaseStateCheck(t *testing.T, repo, name string) error {
 	t.Helper()
 	t.Chdir(repo)
-	host, plan, doc := prepareWork(t, &releaseCutChecksJob{})
-	if findStep(doc, name) == nil {
-		t.Fatalf("release class has no %s check", name)
+	ctx := newTestContext(t)
+	switch name {
+	case "version-freshness":
+		return checkPublishedVersionsFreshness(ctx, repo)
+	case "go-directives":
+		return checkGoDirectives(ctx)
+	case "docs-sidebar":
+		return checkDocsSidebar(ctx)
+	case "sdk-pins":
+		return checkReleasePins(repo)
+	case "changelog-links":
+		return checkChangelogLinks(ctx)
+	default:
+		t.Fatalf("unknown release state check %s", name)
+		return nil
 	}
-	_, err := host.RunStep(t.Context(), plan, "job", name)
-	return err
 }
 
 func TestReleaseStateChecksRefuseStalePublishedVersions(t *testing.T) {

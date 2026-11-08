@@ -130,6 +130,7 @@ type (
 )
 
 type auditMutation struct {
+	Reason    *auditDigest   `json:"reason_digest,omitempty"`
 	SubjectID string         `json:"-"`
 	Operation auditOperation `json:"operation"`
 }
@@ -469,5 +470,5 @@ func validAuditStanding(value auditStanding) bool {
 }
 
 func validAuditOperation(value auditOperation) bool {
-	return auditOneOf(value, "RenameAuthorizedTeam", "SetAuthorizedBuildTrust", "CreateAuthorizedInvitation", "DeleteAuthorizedInvitation", "DeleteAuthorizedTeam", "RotateCredentials", "WriteSecret", "RemoveSecret", "WriteGitCredential", "RemoveGitCredential", "ConfirmGitCredentialFor", "PutAuthorizedGitHubTrigger", "DeleteAuthorizedGitHubTrigger", "PutAuthorizedGitHubAutomation", "DeleteAuthorizedGitHubAutomation", "ProcessGitHubDeliveryAgain", "SetAuthorizedGitHubExtraRepos", "SetAuthorizedTeamSettings", "membership.removed", "membership.role:owner", "membership.role:admin", "membership.role:editor", "membership.role:reader", "runner.metered", "authority.revoked", "WriteCloudUpsizeEnabled", "WriteComputeLimits", "WriteWarmCapacity", "WriteSignUpSettings", "WriteStorageSettings", "WriteTeamStorageQuota", "WriteStorageQuota", "WriteStorageAllowance", "UnbindAuthorizedGitHubInstallation", "RegisterGitHubRunner", "RevokeGitHubRunner", "PauseAppSchedule", "ResumeAppSchedule", "githubConnectTx", "billingMutationTx")
+	return auditOneOf(value, "PutActionsApproval", "RetryActionsDispatch", "RenameAuthorizedTeam", "SetAuthorizedBuildTrust", "CreateAuthorizedInvitation", "DeleteAuthorizedInvitation", "DeleteAuthorizedTeam", "RotateCredentials", "WriteSecret", "RemoveSecret", "WriteGitCredential", "RemoveGitCredential", "ConfirmGitCredentialFor", "PutAuthorizedGitHubTrigger", "DeleteAuthorizedGitHubTrigger", "PutAuthorizedGitHubAutomation", "DeleteAuthorizedGitHubAutomation", "ProcessGitHubDeliveryAgain", "SetAuthorizedGitHubExtraRepos", "SetAuthorizedTeamSettings", "membership.removed", "membership.role:owner", "membership.role:admin", "membership.role:editor", "membership.role:reader", "runner.metered", "authority.revoked", "WriteCloudUpsizeEnabled", "WriteComputeLimits", "WriteWarmCapacity", "WriteSignUpSettings", "WriteStorageSettings", "WriteTeamStorageQuota", "WriteStorageQuota", "WriteStorageAllowance", "UnbindAuthorizedGitHubInstallation", "RegisterGitHubRunner", "RevokeGitHubRunner", "PauseAppSchedule", "ResumeAppSchedule", "githubConnectTx", "billingMutationTx")
 }
