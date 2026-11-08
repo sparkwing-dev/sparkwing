@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -59,6 +60,7 @@ func TestGoSQLRuleAgreement(t *testing.T) {
 			if _, err := db.ExecContext(t.Context(), schema); err != nil {
 				t.Fatal(err)
 			}
+			t.Run("Actions tenant correlations", func(t *testing.T) { actionsSQLTenantCorrelations(t, db, dialect) })
 			t.Run("overflow budget", func(t *testing.T) { overflowBudgetAgreement(t, db, dialect) })
 			t.Run("repository tiers", func(t *testing.T) { repositoryTiersAgreement(t, db, dialect) })
 			t.Run("tier eligibility", func(t *testing.T) { repositoryTierMatchAgreement(t, db, dialect) })
@@ -381,5 +383,69 @@ func overflowBudgetAgreement(t *testing.T, db *sql.DB, dialect Dialect) {
 				}
 			})
 		}
+	}
+}
+
+func actionsSQLTenantCorrelations(t *testing.T, db *sql.DB, dialect Dialect) {
+	for _, statement := range []string{
+		`INSERT INTO teams(name,created_at,updated_at) VALUES('actions-a',1,1),('actions-b',1,1)`,
+		`INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES(41,'actions-a',7,'acme','Organization',1,1)`,
+		`INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_at,repo_key,installation_id) VALUES('actions-a',42,7,'acme/repo',1,'gh:42',41)`,
+		`INSERT INTO github_app_automation(team,repository_id,repository,installation_id,enabled_by,enabled_at,repo_key) VALUES('actions-a',42,'acme/repo',41,'owner',1,'gh:42')`,
+		`INSERT INTO github_actions_approvals VALUES('actions-a',42,'.github/workflows/ci.yaml','ubuntu-latest','refs/heads/main','approval')`,
+		`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES('actions-a','actions-run',1,'ci','pending',X'7b7d','hash',1,'gh:42','controller','execute','owner',1,'standard',7)`,
+		`INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES('actions-a','actions-run','job','pending',1,X'7b7d',X'7b7d')`,
+		`INSERT INTO github_actions_dispatches(receipt,team,run_id,node_id,queue_started_at,generation,approval_id,installation_id,repository_id,repository_owner_id,repository,workflow,workflow_ref,runner,policy_revision,state,provider_run_id,provider_attempt) VALUES('actions-receipt','actions-a','actions-run','job',1,1,'approval',41,42,7,'acme/repo','.github/workflows/ci.yaml','refs/heads/main','ubuntu-latest','policy','accepted','provider-run','1')`,
+	} {
+		if dialect == DialectPostgres {
+			statement = strings.ReplaceAll(statement, "X'7b7d'", "decode('7b7d','hex')")
+		}
+		if _, err := db.ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	push := capability.PushScope{Receipt: "actions-receipt", WorkflowRunID: "provider-run", WorkflowRunAttempt: "1", RunnerEnvironment: "github-hosted", RunnerImage: "ubuntu-latest"}
+	for _, team := range []string{"actions-a", "actions-b"} {
+		q := claimSQL{dialect: dialect}
+		raw, err := q.jsonParam(claimFacts{Team: team, Tier: tierActions, Pushes: []capability.PushScope{push}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		query := `WITH s(target,selectors,runner,workflow) AS (SELECT 'repo:github-actions','[]','ubuntu-latest','.github/workflows/ci.yaml'),c(facts) AS (SELECT ` + raw + `) SELECT ` + q.repositoryTierMatch("s", "c.facts") + ` FROM s CROSS JOIN c`
+		var got bool
+		if err := db.QueryRowContext(t.Context(), rewritePh(dialect, query), q.args...).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != (team == "actions-a") {
+			t.Fatalf("tier receipt for team %s: %v", team, got)
+		}
+		q = claimSQL{dialect: dialect}
+		raw, err = q.jsonParam(push)
+		if err != nil {
+			t.Fatal(err)
+		}
+		query = `SELECT ` + q.actionsReceiptScopeSQL("w.push", "w") + ` FROM (SELECT ` + raw + ` AS push,` + q.param(team) + ` AS team,'actions-run' AS run_id,'job' AS node_id,'node' AS kind) w`
+		if err := db.QueryRowContext(t.Context(), rewritePh(dialect, query), q.args...).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != (team == "actions-a") {
+			t.Fatalf("work receipt for team %s: %v", team, got)
+		}
+	}
+	if _, err := db.ExecContext(t.Context(), `UPDATE github_actions_dispatches SET provider_run_id='',provider_attempt='',state='sending' WHERE receipt='actions-receipt'`); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{db: db, dialect: dialect}
+	for _, team := range []string{"actions-b", "actions-a"} {
+		spec := capability.ProvisionSpec{Team: team, Binding: capability.Binding{Push: &push}}
+		spec.Binding.Push.RepositoryKey = "gh:42"
+		err := s.inTx(t.Context(), func(tx *storeTx) error { return consumeActionsExchangeTx(t.Context(), tx, spec) })
+		if (err == nil) != (team == "actions-a") {
+			t.Fatalf("exchange for team %s: %v", team, err)
+		}
+	}
+	var team string
+	if err := db.QueryRowContext(t.Context(), `SELECT team FROM github_actions_exchanges WHERE run_id='provider-run'`).Scan(&team); err != nil || team != "actions-a" {
+		t.Fatalf("exchange team %q: %v", team, err)
 	}
 }

@@ -4,14 +4,16 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
 
 type schemaUpgrade struct {
-	from       int
-	release    string
-	digest     string
-	statements []string
+	from               int
+	release            string
+	digest             string
+	statements         []string
+	postgresStatements []string
 }
 
 // safety: only a store at a listed version whose digest matches that release is changed; every step runs inside
@@ -53,7 +55,19 @@ var schemaUpgrades = []schemaUpgrade{
 	},
 	{
 		from: 34, release: "schema 34", digest: "187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012",
-		statements: []string{`CREATE TABLE github_actions_approvals (
+		statements: schema35ActionsStatements,
+	},
+	{
+		from: 35, release: "schema 35", digest: "4d4bc4dc64181ee22e7d1bc02925b4587dde2395469658c9b06b6c6ee59a81a2",
+		statements: actionsTeamForeignKeyUpgrade(),
+		postgresStatements: []string{
+			`ALTER TABLE github_actions_approvals ADD CONSTRAINT github_actions_approvals_team_fkey FOREIGN KEY(team) REFERENCES teams(name)`,
+			`ALTER TABLE github_actions_dispatches ADD CONSTRAINT github_actions_dispatches_team_fkey FOREIGN KEY(team) REFERENCES teams(name)`,
+		},
+	},
+}
+
+var schema35ActionsStatements = []string{`CREATE TABLE github_actions_approvals (
     team TEXT NOT NULL,
     repository_id BIGINT NOT NULL,
     workflow TEXT NOT NULL,
@@ -87,8 +101,21 @@ var schemaUpgrades = []schemaUpgrade{
     cancel_sent BIGINT NOT NULL DEFAULT 0,
     UNIQUE(team,run_id,node_id,queue_started_at,generation),
     FOREIGN KEY(team,run_id,node_id) REFERENCES nodes(team,run_id,node_id) ON DELETE CASCADE
-)`, `CREATE INDEX idx_actions_dispatch_sender ON github_actions_dispatches(state,send_until) WHERE state IN ('requested','sending')`, `CREATE INDEX idx_actions_dispatch_live ON github_actions_dispatches(state) WHERE state<>'cancelled'`, `CREATE INDEX idx_actions_dispatch_cancellation ON github_actions_dispatches(state,cancel_sent) WHERE provider_run_id<>''`},
-	},
+)`, `CREATE INDEX idx_actions_dispatch_sender ON github_actions_dispatches(state,send_until) WHERE state IN ('requested','sending')`, `CREATE INDEX idx_actions_dispatch_live ON github_actions_dispatches(state) WHERE state<>'cancelled'`, `CREATE INDEX idx_actions_dispatch_cancellation ON github_actions_dispatches(state,cancel_sent) WHERE provider_run_id<>''`}
+
+// safety: SQLite cannot add a foreign key, and these schema 35 tables have no inbound references.
+func actionsTeamForeignKeyUpgrade() []string {
+	return []string{
+		`ALTER TABLE github_actions_approvals RENAME TO github_actions_approvals_schema35`,
+		strings.Replace(schema35ActionsStatements[0], "team TEXT NOT NULL,", "team TEXT NOT NULL REFERENCES teams(name),", 1),
+		`INSERT INTO github_actions_approvals(team,repository_id,workflow,runner,workflow_ref,approval_id) SELECT team,repository_id,workflow,runner,workflow_ref,approval_id FROM github_actions_approvals_schema35`,
+		`DROP TABLE github_actions_approvals_schema35`,
+		`ALTER TABLE github_actions_dispatches RENAME TO github_actions_dispatches_schema35`,
+		strings.Replace(schema35ActionsStatements[1], "team TEXT NOT NULL,", "team TEXT NOT NULL REFERENCES teams(name),", 1),
+		`INSERT INTO github_actions_dispatches(receipt,team,run_id,node_id,queue_started_at,generation,approval_id,installation_id,repository_id,repository_owner_id,repository,workflow,workflow_ref,workflow_sha,runner,policy_revision,state,reason,send_until,provider_run_id,provider_attempt,cancel_sent) SELECT receipt,team,run_id,node_id,queue_started_at,generation,approval_id,installation_id,repository_id,repository_owner_id,repository,workflow,workflow_ref,workflow_sha,runner,policy_revision,state,reason,send_until,provider_run_id,provider_attempt,cancel_sent FROM github_actions_dispatches_schema35`,
+		`DROP TABLE github_actions_dispatches_schema35`,
+		schema35ActionsStatements[2], schema35ActionsStatements[3], schema35ActionsStatements[4],
+	}
 }
 
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {
@@ -118,7 +145,11 @@ func upgradeSchemaTx(ctx context.Context, tx *storeTx, version int, path string)
 				return err
 			}
 		}
-		for _, statement := range step.statements {
+		statements := step.statements
+		if tx.dialect == DialectPostgres && step.postgresStatements != nil {
+			statements = step.postgresStatements
+		}
+		for _, statement := range statements {
 			translated, err := translateSchema(statement, tx.dialect)
 			if err == nil {
 				_, err = tx.execContext(ctx, translated)
