@@ -1426,3 +1426,33 @@ func TestDeployRollbackFindingMissingTrustedHelperNeverUsesPATH(t *testing.T) {
 		t.Fatal("executed untrusted finding helper")
 	}
 }
+
+func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
+	f := newFakeDeploy(t)
+	if err := os.WriteFile(filepath.Join(f.repo, "candidate.txt"), []byte("candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deployGitIn(t, f.repo, "add", "candidate.txt")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "candidate")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+	origin := deployGitIn(t, f.repo, "remote", "get-url", "origin")
+	shallow := filepath.Join(t.TempDir(), "shallow")
+	deployGitIn(t, f.repo, "clone", "--quiet", "--depth", "1", "file://"+origin, shallow)
+	f.repo = shallow
+	deployGitIn(t, f.repo, "fetch", "--quiet", "origin", f.head)
+	before, err := os.ReadFile(filepath.Join(f.repo, ".git", "FETCH_HEAD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(f.repo, ".git", "FETCH_HEAD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("schema lookup overwrote candidate fetch proof: before %q, after %q", before, after)
+	}
+}
