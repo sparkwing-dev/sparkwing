@@ -99,7 +99,6 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 		RepoDir:   repoDir,
 		RunID:     rc.RunID,
 		Head:      sparkwing.RefTo[landHead](pre),
-		Review:    sparkwing.RefTo[reviewRecord](review),
 		CloudGate: cloudGate,
 	}).Inline().Cores(lightJobCores).Needs(needs...)
 	return nil
@@ -238,7 +237,6 @@ type landJob struct {
 	RepoDir   string
 	RunID     string
 	Head      sparkwing.Ref[landHead]
-	Review    sparkwing.Ref[reviewRecord]
 	CloudGate sparkwing.Ref[string]
 	// safety: the push step sets it to what it pushed, so the record names the
 	// pushed commit and tree rather than the gated ones.
@@ -247,7 +245,10 @@ type landJob struct {
 
 func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	verify := sparkwing.Step(w, "verify", func(ctx context.Context) error {
-		review, ok := j.review(ctx)
+		review, ok, err := j.review(ctx)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			sparkwing.Info(ctx, "dry run: the review job has no dry-run body, so no review record is checked")
 			review = reviewRecord{Tree: j.Head.Get(ctx).Tree, Result: resultPass}
@@ -276,20 +277,37 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}).SafeWithoutDryRun().Needs(push), nil
 }
 
-// safety: only a dry run, whose review job does not run, may land without a
-// review record; a real run still fails on the absent output.
-// bug: the host reports a dry-run job's missing output as a read failure
-// rather than an absence, so TryGet panics; a dry run must not resolve it.
-func (j *landJob) review(ctx context.Context) (reviewRecord, bool) {
+// safety: the review persists in the shared git directory before its job succeeds; land reads that
+// canonical record instead of depending on a second copy's blob retention.
+func (j *landJob) review(ctx context.Context) (reviewRecord, bool, error) {
 	if sparkwing.IsDryRun(ctx) {
-		return reviewRecord{}, false
+		return reviewRecord{}, false, nil
 	}
-	return j.Review.Get(ctx), true
+	head := j.Head.Get(ctx)
+	common, err := gitIn(j.RepoDir)(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return reviewRecord{}, false, fmt.Errorf("land: locate the review record: %w", err)
+	}
+	file := reviewRecordPath(filepath.Join(common, "sparkwing-review"), head.Branch)
+	rec, err := loadReviewRecord(file)
+	if err != nil {
+		return reviewRecord{}, false, err
+	}
+	if rec == nil {
+		return reviewRecord{}, false, fmt.Errorf("land: review record %s is missing; rerun sparkwing run land", file)
+	}
+	if rec.Branch != head.Branch {
+		return reviewRecord{}, false, fmt.Errorf("land: review record belongs to branch %q instead of %q; rerun sparkwing run land", rec.Branch, head.Branch)
+	}
+	return *rec, true, nil
 }
 
 func (j *landJob) record(ctx context.Context) (landingRecord, error) {
 	head := j.Head.Get(ctx)
-	review, ok := j.review(ctx)
+	review, ok, err := j.review(ctx)
+	if err != nil {
+		return landingRecord{}, err
+	}
 	if !ok {
 		review = reviewRecord{Branch: head.Branch, Result: "not run (dry run)"}
 	}
