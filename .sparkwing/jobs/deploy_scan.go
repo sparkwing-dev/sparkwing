@@ -26,7 +26,7 @@ func (DeployScan) ShortHelp() string {
 }
 
 func (DeployScan) Help() string {
-	return "Started as a detached child by deploy after each environment smoke, inheriting its verified repository and revision. Uses an independent per-environment concurrency group and the deploy-kikd-prod runner toolchain. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
+	return "Started as a detached child by deploy after each environment smoke, inheriting its verified repository and revision. Uses the deploy-kikd-prod desktop runner for the wrapper and hosts the full example on that same hardware with --runner here. A one-hour memoized admission receipt coalesces each environment and immutable revision, including failed scan attempts. Uses an independent per-environment concurrency group. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
 }
 
 type deployScanSecrets struct {
@@ -56,11 +56,35 @@ func (DeployScan) Plan(_ context.Context, plan *sparkwing.Plan, in DeployScanArg
 	if rc.Git != nil {
 		sourceCommit = rc.Git.SHA
 	}
+	admit := sparkwing.Job(plan, "admit", &deployScanAdmission{RunID: rc.RunID}).Requires(labels...).Timeout(time.Minute)
+	if !dry {
+		admit.Memo(func(context.Context) (sparkwing.MemoValue, error) {
+			rec, err := decodeScanRecord(in.Record, env.Name, sourceCommit, false)
+			if err != nil {
+				return nil, err
+			}
+			return sparkwing.MemoKey(env.Name, rec.Images.Commit), nil
+		}, sparkwing.MemoTTL(time.Hour))
+	}
+	owner := sparkwing.RefTo[string](admit)
 	sparkwing.Job(plan, "scan", &deployScanJob{
 		Job:         deployJob{Cfg: cfg, Dry: dry, RunID: rc.RunID, Name: "scan"},
 		Environment: env, Record: in.Record, SourceCommit: sourceCommit,
-	}).Requires(labels...).Timeout(cfg.RunTimeout + 15*time.Minute)
+	}).Needs(admit).Requires(labels...).Timeout(cfg.RunTimeout + 15*time.Minute).
+		SkipIf(func(ctx context.Context) bool { return owner.Get(ctx) != rc.RunID })
 	return nil
+}
+
+type deployScanAdmission struct {
+	sparkwing.Base
+	sparkwing.Produces[string]
+	RunID string
+}
+
+func (j *deployScanAdmission) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "claim", func(context.Context) (string, error) {
+		return j.RunID, nil
+	}), nil
 }
 
 func decodeScanRecord(raw, environment, sourceCommit string, dry bool) (deployScanRecord, error) {
@@ -143,7 +167,7 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 	}); err != nil {
 		return rec, err
 	}
-	if err = d.triggerRun(ctx, profile, "example", d.repoDir, images.Commit, &rec.ExampleRun, "--api-controller", env.ControllerURL); err != nil {
+	if err = d.triggerRun(ctx, profile, "here", "example", d.repoDir, images.Commit, &rec.ExampleRun, "--cli", d.cliBin()); err != nil {
 		return rec, err
 	}
 	if !d.dry {

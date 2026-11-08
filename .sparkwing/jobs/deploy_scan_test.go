@@ -66,7 +66,7 @@ func TestDeployScanBindsRevisionAndReportsObservedOutcome(t *testing.T) {
 					t.Fatalf("scan lost deployment identity: %+v", rec)
 				}
 				if !slices.ContainsFunc(f.calls, func(call string) bool {
-					return strings.Contains(call, "pipeline trigger example") && strings.Contains(call, "--ref "+f.head) && strings.HasSuffix(call, "-- --api-controller "+env.ControllerURL)
+					return strings.Contains(call, "pipeline trigger example") && strings.Contains(call, "--ref "+f.head) && strings.Contains(call, "--runner here") && !strings.Contains(call, "--detach") && strings.HasSuffix(call, "-- --cli "+d.cliBin())
 				}) {
 					t.Fatalf("scan is not revision-bound: %v", f.calls)
 				}
@@ -259,7 +259,7 @@ func TestDeployScanPipelineSeparatesConcurrencyAndPinsSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(doc.Jobs) != 1 || doc.Jobs[0].ID != "scan" || !slices.Equal(doc.Jobs[0].Requires, []string{"deploy-kikd-prod"}) || len(doc.Concurrency) != 1 || doc.Concurrency[0].Group != "sparkwing-post-deploy-"+environment {
+		if len(doc.Jobs) != 2 || doc.Jobs[1].ID != "scan" || !slices.Equal(doc.Jobs[1].Requires, []string{"deploy-kikd-prod"}) || len(doc.Concurrency) != 1 || doc.Concurrency[0].Group != "sparkwing-post-deploy-"+environment {
 			t.Fatalf("scan must use its own concurrency group: %+v", doc)
 		}
 		rec.Images.Commit = strings.Repeat("a", 40)
@@ -378,5 +378,60 @@ func TestDeployScanFeedbackReportsMissingUserInstall(t *testing.T) {
 	}
 	if err := d.recordScanFinding(t.Context(), deployScanRecord{Environment: "staging"}, true, errors.New("scan failed")); err == nil || !strings.Contains(err.Error(), "runner user's PATH") {
 		t.Fatalf("missing installation was hidden: %v", err)
+	}
+}
+
+func TestDeployScanAdmissionCoalescesRevisionForAnHour(t *testing.T) {
+	f := newFakeDeploy(t)
+	var firstKey string
+	for _, tc := range []struct {
+		run, deploy, owner string
+		wantSkip           bool
+	}{
+		{"run-first", "deploy-first", "run-first", false},
+		{"run-second", "deploy-second", "run-first", true},
+	} {
+		t.Run(tc.run, func(t *testing.T) {
+			rc := sparkwing.RunContext{RunID: tc.run, Git: sparkwing.NewGit(f.repo, f.head, "main", "main", "sparkwing-dev/sparkwing", "https://github.com/sparkwing-dev/sparkwing")}
+			raw, err := json.Marshal(deployScanRecord{Environment: "staging", DeployRun: tc.deploy, Images: f.candidate()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			in := DeployScanArgs{Environment: "staging", Record: string(raw)}
+			owner, err := json.Marshal(tc.owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			host := newTestHost(t, sparkwingtest.Options{Run: rc, Outputs: map[string]json.RawMessage{"admit": owner}})
+			plan := sparkwing.NewPlan()
+			if err := (DeployScan{}).Plan(t.Context(), plan, in, rc); err != nil {
+				t.Fatal(err)
+			}
+			doc, err := host.Plan(t.Context(), "DeployScan", map[string]string{"environment": in.Environment, "record": in.Record})
+			if err != nil {
+				t.Fatal(err)
+			}
+			admit, scan := doc.Jobs[0], doc.Jobs[1]
+			if admit.Memo == nil || admit.Memo.TTLMS == nil || *admit.Memo.TTLMS != time.Hour.Milliseconds() {
+				t.Fatalf("admission retention = %+v", admit.Memo)
+			}
+			key, err := host.Eval(t.Context(), plan, admit.ID, admit.Closures.MemoKey, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if firstKey == "" {
+				firstKey = string(key)
+			} else if string(key) != firstKey {
+				t.Fatalf("new deploy changed revision admission key: %s, want %s", key, firstKey)
+			}
+			skip, err := host.Eval(t.Context(), plan, scan.ID, scan.Closures.SkipIf[0], nil)
+			if err != nil || string(skip) != fmt.Sprint(tc.wantSkip) {
+				t.Fatalf("scan skip = %s, %v; want %t", skip, err, tc.wantSkip)
+			}
+			claim, err := host.RunStep(t.Context(), plan, "admit", "claim")
+			if err != nil || string(claim) != fmt.Sprintf("%q", tc.run) {
+				t.Fatalf("new admission owner = %s, %v", claim, err)
+			}
+		})
 	}
 }

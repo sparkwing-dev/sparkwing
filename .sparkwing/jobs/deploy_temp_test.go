@@ -92,7 +92,7 @@ func TestDeployCLIUsesWritableModuleCache(t *testing.T) {
 		t.Fatal("candidate CLI was not built")
 	}
 	var runID string
-	if err := d.triggerRun(t.Context(), "staging", "example", d.repoDir, "", &runID); err != nil {
+	if err := d.triggerRun(t.Context(), "staging", "cloud", "example", d.repoDir, "", &runID); err != nil {
 		t.Fatal(err)
 	}
 	if !triggered {

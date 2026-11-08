@@ -929,20 +929,26 @@ func (d *deployer) profileToken(ctx context.Context, profile, url, token string)
 	return errors.Join(err, os.Remove(file))
 }
 
-func (d *deployer) triggerRun(ctx context.Context, profile, pipeline, checkout, ref string, runID *string, pipelineArgs ...string) error {
-	args := []string{"pipeline", "trigger", pipeline, "-C", checkout, "--profile", profile, "--runner", "cloud", "--detach", "-o", "json"}
+func (d *deployer) triggerRun(ctx context.Context, profile, runner, pipeline, checkout, ref string, runID *string, pipelineArgs ...string) error {
+	args := []string{"pipeline", "trigger", pipeline, "-C", checkout, "--profile", profile, "--runner", runner, "-o", "json"}
+	if runner == "here" {
+		args = append(args, "--reason", "internal CI runs on owned hardware")
+	} else {
+		args = append(args, "--detach")
+	}
 	if ref != "" {
 		args = append(args, "--ref", ref)
 	}
 	if len(pipelineArgs) > 0 {
 		args = append(append(args, "--"), pipelineArgs...)
 	}
-	return d.act(ctx, "trigger "+pipeline+" from "+checkout+" on "+profile+" Cloud", func() error {
+	return d.act(ctx, "trigger "+pipeline+" from "+checkout+" on "+profile+" runner "+runner, func() error {
 		out, err := d.sw(ctx, "", args...)
-		if err != nil {
+		*runID = acceptedRunID(out)
+		if err != nil && (runner != "here" || *runID == "") {
 			return err
 		}
-		if *runID = acceptedRunID(out); *runID == "" {
+		if *runID == "" {
 			return fmt.Errorf("trigger printed no run_id: %q", out)
 		}
 		d.tools.say(ctx, pipeline+" on "+profile+" is "+*runID)
@@ -994,7 +1000,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	if err := d.addProfile(ctx, profile, d.cfg.Staging.ControllerURL, d.cfg.Params.StagingToken); err != nil {
 		return rec, err
 	}
-	if err := d.triggerRun(ctx, profile, "deploy-smoke", d.repoDir, images.Commit, &rec.SmokeRun, "--child"); err != nil {
+	if err := d.triggerRun(ctx, profile, "cloud", "deploy-smoke", d.repoDir, images.Commit, &rec.SmokeRun, "--child"); err != nil {
 		return rec, err
 	}
 	reference := filepath.Join(d.tmp, "reference")
@@ -1008,7 +1014,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	}); err != nil {
 		return rec, err
 	}
-	if err := d.triggerRun(ctx, profile, d.cfg.ReferenceName, reference, "", &rec.ReferenceRun); err != nil {
+	if err := d.triggerRun(ctx, profile, "here", d.cfg.ReferenceName, reference, "", &rec.ReferenceRun); err != nil {
 		return rec, err
 	}
 	if err := errors.Join(d.followRun(ctx, profile, &rec.SmokeRun), d.followRun(ctx, profile, &rec.ReferenceRun)); err != nil {
@@ -1031,7 +1037,7 @@ func (d *deployer) productionSmoke(ctx context.Context, images deployImages, sin
 		if err := d.addProfile(ctx, team, env.ControllerURL, d.cfg.Params.SmokeToken); err != nil {
 			return err
 		}
-		if err := d.triggerRun(ctx, team, "deploy-smoke", d.repoDir, images.Commit, &runs[i]); err != nil {
+		if err := d.triggerRun(ctx, team, "cloud", "deploy-smoke", d.repoDir, images.Commit, &runs[i]); err != nil {
 			return err
 		}
 	}

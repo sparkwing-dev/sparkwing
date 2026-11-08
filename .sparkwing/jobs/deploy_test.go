@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
@@ -1315,18 +1315,44 @@ func TestDeployBuildsUntaggedMainWithoutARelease(t *testing.T) {
 }
 
 func TestDeployRepositoryPushRunsThroughProduction(t *testing.T) {
-	file, err := os.Open(filepath.Join("..", "sparkwing.yaml"))
+	file, err := os.ReadFile(filepath.Join("..", "sparkwing.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = file.Close() }()
-	cfg, err := pipelines.Parse(file)
+	cfg, err := projectconfig.Parse(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := cfg.Find("deploy")
-	if entry == nil || entry.Args["stop-after"] != "" || entry.On.Push == nil || !slices.Equal(entry.On.Push.Branches, []string{"main"}) {
+	index := slices.IndexFunc(cfg.Pipelines, func(p projectconfig.Pipeline) bool { return p.Name == "deploy" })
+	if index < 0 {
+		t.Fatal("deploy pipeline is missing")
+	}
+	entry := cfg.Pipelines[index]
+	if entry.Args["stop-after"] != "" || entry.On == nil || entry.On.Push == nil || !slices.Equal(entry.On.Push.Branches, []string{"main"}) {
 		t.Fatalf("push deploy configuration = %+v", entry)
+	}
+	for _, name := range []string{"deploy", "deploy-scan"} {
+		index := slices.IndexFunc(cfg.Pipelines, func(p projectconfig.Pipeline) bool { return p.Name == name })
+		if index < 0 {
+			t.Fatalf("missing %s", name)
+		}
+		placement := cfg.Pipelines[index].Placement
+		if placement == nil || len(placement.Prefer) != 1 || placement.Prefer[0].Target != "team" || !slices.Equal(placement.Prefer[0].Labels, []string{"deploy-kikd-prod"}) {
+			t.Fatalf("%s may leave owned hardware: %+v", name, placement)
+		}
+	}
+	for _, name := range []string{"land", "weekly-release", "owned-sdk-main"} {
+		index := slices.IndexFunc(cfg.Pipelines, func(p projectconfig.Pipeline) bool { return p.Name == name })
+		if index < 0 {
+			t.Fatalf("missing %s", name)
+		}
+		entry := cfg.Pipelines[index]
+		if entry.Run == nil || entry.Run.Route == nil || *entry.Run.Route != "local" {
+			t.Fatalf("%s must use the local route: %+v", name, entry.Run)
+		}
+		if name != "land" && (entry.On == nil || len(entry.On.Schedule) != 1 || entry.On.Schedule[0].Where != "local") {
+			t.Fatalf("%s must schedule locally: %+v", name, entry.On)
+		}
 	}
 }
 

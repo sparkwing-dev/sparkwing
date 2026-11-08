@@ -46,6 +46,8 @@ pipelines:
   # fast-forward of main to the commit both judged.
   - name: land
     entrypoint: Land
+    run:
+      route: local
 
   - name: integration
     entrypoint: Integration
@@ -117,12 +119,20 @@ pipelines:
 
   - name: deploy
     entrypoint: Deploy
+    placement:
+      prefer:
+        - target: team
+          labels: [deploy-kikd-prod]
     on:
       push:
         branches: [main]
 
   - name: deploy-scan
     entrypoint: DeployScan
+    placement:
+      prefer:
+        - target: team
+          labels: [deploy-kikd-prod]
 
   - name: deploy-smoke
     entrypoint: DeploySmoke

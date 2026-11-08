@@ -78,7 +78,7 @@ An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, 
 | `/kikd-prod/sparkwing/deploy/staging-gate-token` | staging team token, `runs.read,logs.read,runs.write` | staging fixture team `stg-qa` |
 | `/kikd-prod/sparkwing/deploy/scan-submit-token` | production source-owning team token, `runs.read,logs.read,runs.write` | production smoke and scan submission |
 
-The full `example` run also reads `EXAMPLE_PROBE_TOKEN` from its target fixture team's Sparkwing secrets, rather than SSM. It holds a separate token for that team with `runs.read,logs.read,runs.write`. Its lifecycle probes use it to start, cancel, retry and read `example-probe` runs from inside the Cloud job. Without it they skip.
+The internal scan hosts `example` on the deploy runner with `--runner here` and passes its built CLI through `--cli`. Lifecycle probes use that CLI's isolated local controller. The full scan and its lifecycle probes run on owned hardware. Only `deploy-smoke` uses Cloud.
 
 The production controller also scopes `DEPLOY_SCAN_STAGING_TOKEN` and
 `DEPLOY_SCAN_PRODUCTION_TOKEN` to the `deploy` pipeline: a same-revision child
