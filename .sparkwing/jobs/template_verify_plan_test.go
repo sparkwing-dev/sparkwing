@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"sort"
 	"strings"
@@ -60,5 +61,59 @@ func TestRequireTemplateVerifyDisk_FailsBeforeWorkBelowFloor(t *testing.T) {
 	}
 	if err := requireTemplateVerifyDisk(10 << 30); err != nil {
 		t.Fatalf("disk at floor rejected: %v", err)
+	}
+}
+
+func TestTemplateVerifyOnlyPlansSelectedTemplate(t *testing.T) {
+	name := verifyTemplates[0].Manifest.Name
+	for _, exhaustive := range []bool{false, true} {
+		host, plan, doc := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+			return (TemplateVerify{}).Plan(ctx, plan, TemplateVerifyArgs{Only: name, Exhaustive: exhaustive}, sparkwing.RunContext{})
+		})
+		var ids []string
+		for _, job := range doc.Jobs {
+			ids = append(ids, job.ID)
+		}
+		sort.Strings(ids)
+		want := []string{"build-cli", "summary", "verify-" + name}
+		if !slices.Equal(ids, want) {
+			t.Fatalf("selected plan = %v, want %v", ids, want)
+		}
+		output, err := host.RunStep(t.Context(), plan, "summary", "run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var summary TemplateVerifySummary
+		if err := json.Unmarshal(output, &summary); err != nil {
+			t.Fatal(err)
+		}
+		if summary.Total != 1 || summary.Only != name {
+			t.Fatalf("selected summary = %+v", summary)
+		}
+	}
+}
+
+func TestTemplateVerifyOnlyRejectsUnknownName(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	err := (TemplateVerify{}).Plan(t.Context(), plan, TemplateVerifyArgs{Only: "missing-template-name"}, sparkwing.RunContext{})
+	if err == nil || !strings.Contains(err.Error(), "unknown template") {
+		t.Fatalf("unknown selection = %v", err)
+	}
+}
+
+func TestTemplateVerifyFullSummaryCoversRegistry(t *testing.T) {
+	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (TemplateVerify{}).Plan(ctx, plan, TemplateVerifyArgs{}, sparkwing.RunContext{})
+	})
+	output, err := host.RunStep(t.Context(), plan, "summary", "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary TemplateVerifySummary
+	if err := json.Unmarshal(output, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.Total != len(verifyTemplates) || summary.Only != "" {
+		t.Fatalf("full summary = %+v", summary)
 	}
 }
