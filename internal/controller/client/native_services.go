@@ -128,7 +128,7 @@ func (c *NativeProcessClient) Latest(ctx context.Context, pipeline, job string, 
 }
 
 // StartChild submits sealed parent lineage through the shared intake endpoint.
-func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, args map[string]string, repo, branch string) (string, error) {
+func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, args map[string]string, repo, branch string, detached bool) (string, error) {
 	parent := c.request
 	request := runspec.Request{
 		Version: parent.Version, Pipeline: pipeline, RequestedArgs: args, Origin: runspec.OriginChild,
@@ -140,7 +140,7 @@ func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, a
 		},
 		EnvironmentSource: parent.EnvironmentSource, Env: parent.Env, Options: settings.InheritedOptions(parent.Options), PullRequest: parent.PullRequest,
 		ExecutionLocation: parent.ExecutionLocation,
-		Lineage:           runspec.Lineage{ParentRunID: c.run, ParentJobID: c.job, RepoInherited: repo == ""},
+		Lineage:           runspec.Lineage{ParentRunID: c.run, ParentJobID: c.job, RepoInherited: repo == "", Detached: detached},
 	}
 	if repo != "" && repo != string(request.Git.Repository.Key) {
 		remote := repo

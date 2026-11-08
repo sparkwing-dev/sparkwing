@@ -14,6 +14,7 @@ const (
 
 // ChildRequest starts a child pipeline and selects its eventual output job.
 type ChildRequest struct {
+	Detached bool              `json:"detached,omitempty"`
 	Pipeline string            `json:"pipeline"`
 	Job      string            `json:"job,omitempty"`
 	Args     map[string]string `json:"args,omitempty"`

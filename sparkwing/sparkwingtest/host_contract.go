@@ -25,6 +25,7 @@ type Options struct {
 	OIDCToken   func(context.Context, string) (string, error)
 	Latest      func(context.Context, string, string) (json.RawMessage, error)
 	RunPipeline func(context.Context, string, map[string]string) (json.RawMessage, error)
+	StartChild  func(context.Context, string, map[string]string) (string, error)
 }
 
 // Host exercises author code through the same plan and operation contract as a real host.

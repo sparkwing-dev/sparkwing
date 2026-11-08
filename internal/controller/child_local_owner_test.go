@@ -81,7 +81,7 @@ func TestNativeChildOwnerBudgetFollowsAuthenticatedLocalPlacement(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			id, err := process.StartChild(t.Context(), "deploy", nil, "", "")
+			id, err := process.StartChild(t.Context(), "deploy", nil, "", "", false)
 			if tc.zero {
 				var failure *apierr.Error
 				if !errors.As(err, &failure) || failure.Code != apierr.BadRequest || !strings.Contains(failure.Message, "remote owner duration must be positive") {

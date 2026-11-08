@@ -34,6 +34,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])` -- RegisterEntrypoint declares a named SDK entrypoint.
 - `func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error)` -- RunAndAwait triggers a fresh run of pipeline and waits for it to reach terminal state, returning the typed output of nodeID from that run.
 - `func Secret(ctx context.Context, name string) (string, error)` -- Secret resolves a masked value through the resolver installed on ctx.
+- `func StartChild(ctx context.Context, pipeline string, args map[string]string) (string, error)` -- StartChild submits a same-repository, same-revision child and returns its run ID without awaiting completion.
 - `func StepGet[T any](ctx context.Context, step *WorkStep) T` -- StepGet blocks until step has completed, then returns its typed output as T. Used inside another step's body when composing values from upstream typed steps.
 - `func Summary(ctx context.Context, markdown string)` -- Summary emits markdown for the active job or step.
 - `func Variable(ctx context.Context, name string) (string, error)` -- Variable distinguishes a declared unmasked value from a secret.
