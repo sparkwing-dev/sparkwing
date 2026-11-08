@@ -74,14 +74,6 @@ func (t *Tenant) RenameAuthorizedTeam(ctx context.Context, a capability.Authoriz
 	return out, nil
 }
 
-// SetAuthorizedBuildTrust commits this team's execution policy under current administration.
-func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Authorized, trust bool) error {
-	return t.teamMutationTx(ctx, a, "SetAuthorizedBuildTrust", string(t.team), func(tx *storeTx, _ capability.Principal) error {
-		_, err := tx.execContext(ctx, `INSERT INTO team_build_trust(team,trust_local_builds) VALUES (?,?) ON CONFLICT(team) DO UPDATE SET trust_local_builds=excluded.trust_local_builds`, t.team, boolInt(trust))
-		return err
-	})
-}
-
 // CreateAuthorizedInvitation creates or replays an invitation under current administration.
 func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Authorized, email string, role Role, key string) (Invitation, error) {
 	var out Invitation

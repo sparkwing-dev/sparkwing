@@ -334,11 +334,45 @@ func TestCanonicalWorkflowPrintsStoredDiagnosticsAfterFailure(t *testing.T) {
 	requireWorkflowText(t, body,
 		`--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`,
 		"- name: Print failed canonical run diagnostics\n        if: ${{ failure() }}\n        continue-on-error: true\n        timeout-minutes: 2",
-		`bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing"`,
+		`bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing" "$RUNNER_TEMP/canonical-run.log"`,
 	)
 	if got := strings.Count(body, `--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 4 {
 		t.Fatalf("canonical run-handle publication count = %d, want broad gate, race, pre-release and store race part", got)
 	}
+}
+
+func TestCanonicalWorkflowRetainsFailureLog(t *testing.T) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")), &doc); err != nil {
+		t.Fatal(err)
+	}
+	steps := mappingValue(mappingValue(mappingValue(&doc, "jobs"), "gate"), "steps")
+	for _, step := range steps.Content {
+		if name := mappingValue(step, "name"); name == nil || name.Value != "Retain failed canonical run log" {
+			continue
+		}
+		for key, want := range map[string]string{
+			"if":                "${{ failure() }}",
+			"continue-on-error": "true",
+			"uses":              "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+		} {
+			if got := mappingValue(step, key); got == nil || got.Value != want {
+				t.Fatalf("log artifact %s = %v, want %s", key, got, want)
+			}
+		}
+		for key, want := range map[string]string{
+			"name":              "canonical-run-log-${{ matrix.gate }}-${{ github.run_id }}-${{ github.run_attempt }}",
+			"path":              "${{ runner.temp }}/canonical-run.log",
+			"retention-days":    "14",
+			"if-no-files-found": "warn",
+		} {
+			if got := mappingValue(mappingValue(step, "with"), key); got == nil || got.Value != want {
+				t.Fatalf("log artifact %s = %v, want %s", key, got, want)
+			}
+		}
+		return
+	}
+	t.Fatal("canonical workflow discards its failed run log")
 }
 
 func TestCanonicalWorkflowPinsEveryExternalAction(t *testing.T) {

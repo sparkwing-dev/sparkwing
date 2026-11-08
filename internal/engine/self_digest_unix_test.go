@@ -30,7 +30,7 @@ func TestExecutableDigestRecordSurvivesProcessesButNotRewrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := selfDigestRecord()
+	record := selfDigestRecord(path)
 	body, err := os.ReadFile(record)
 	if err != nil || !strings.HasSuffix(strings.TrimSpace(string(body)), " "+first) {
 		t.Fatalf("record = %q, %v; want the digest under the file identity", body, err)
@@ -54,5 +54,41 @@ func TestExecutableDigestRecordSurvivesProcessesButNotRewrites(t *testing.T) {
 	got, err := executableDigest(context.Background(), path)
 	if err != nil || got == planted || got == first {
 		t.Fatalf("digest after rewrite = %s, %v; want a fresh hash", got, err)
+	}
+}
+
+func TestExecutableDigestRecordsDoNotEvictAnotherExecutable(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	previous := stableAfter
+	stableAfter = 0
+	t.Cleanup(func() { stableAfter = previous; resetSelfDigestMemory() })
+	installed := filepath.Join(t.TempDir(), "sparkwing")
+	retained := filepath.Join(t.TempDir(), "sparkwing")
+	for _, path := range []string{installed, retained} {
+		if err := os.WriteFile(path, []byte("same executable"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resetSelfDigestMemory()
+	if _, err := executableDigest(t.Context(), installed); err != nil {
+		t.Fatal(err)
+	}
+	record := selfDigestRecord(installed)
+	body, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, _, _ := strings.Cut(strings.TrimSpace(string(body)), " ")
+	planted := strings.Repeat("a", 64)
+	if err := os.WriteFile(record, []byte(identity+" "+planted+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resetSelfDigestMemory()
+	if _, err := executableDigest(t.Context(), retained); err != nil {
+		t.Fatal(err)
+	}
+	resetSelfDigestMemory()
+	if got, err := executableDigest(t.Context(), installed); err != nil || got != planted {
+		t.Fatalf("another executable evicted the installed digest: %s, %v", got, err)
 	}
 }

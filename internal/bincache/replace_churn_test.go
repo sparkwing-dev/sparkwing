@@ -132,3 +132,45 @@ func TestEmbeddedUnderscoreAndDotDirectoriesChangeTheKey(t *testing.T) {
 		}
 	}
 }
+
+func TestHashDetectsLateCreationWithRestoredDirectoryTime(t *testing.T) {
+	for _, hashAllFiles := range []bool{false, true} {
+		t.Run(fmt.Sprintf("hash_all_files=%t", hashAllFiles), func(t *testing.T) {
+			root := newGitPipelineDir(t)
+			writeFile(t, filepath.Join(root, ".gitignore"), "*.generated\n")
+			assets := filepath.Join(root, "assets")
+			writeFile(t, filepath.Join(assets, "existing"), "original")
+			writeFile(t, filepath.Join(root, "z-last.go"), "package main\n")
+			var expected bytes.Buffer
+			if _, err := hashDirIntoCounted(&expected, root, allFiles, hashAllFiles); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(assets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			walks := 0
+			keep := func(name string) bool {
+				if name == "z-last.go" {
+					walks++
+					if walks == 2 {
+						writeFile(t, filepath.Join(assets, "late.generated"), "included only with hash-all-files")
+						if err := os.Chtimes(assets, info.ModTime(), info.ModTime()); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				return true
+			}
+			var digest bytes.Buffer
+			_, err = hashDirIntoCounted(&digest, root, keep, hashAllFiles)
+			if hashAllFiles {
+				if !errors.Is(err, ErrUnstableInputs) || digest.Len() != 0 {
+					t.Fatalf("late included file escaped = %q %v", digest.Bytes(), err)
+				}
+			} else if err != nil || !bytes.Equal(digest.Bytes(), expected.Bytes()) {
+				t.Fatalf("late excluded file changed the key = %q %v", digest.Bytes(), err)
+			}
+		})
+	}
+}

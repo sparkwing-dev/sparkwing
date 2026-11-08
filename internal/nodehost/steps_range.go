@@ -39,6 +39,20 @@ func validateStepRange(doc nodeproto.PlanDoc, start, stop string) error {
 		}
 		return fmt.Errorf("%s (available steps: %s)", msg, strings.Join(known, ", "))
 	}
+	for _, job := range doc.Jobs {
+		if len(job.Steps) == 0 {
+			continue
+		}
+		children := map[string][]string{}
+		for _, step := range job.Steps {
+			for _, need := range step.Needs {
+				children[need] = append(children[need], step.ID)
+			}
+		}
+		if len(rangeSkips(job.Steps, children, start, stop)) == len(job.Steps) {
+			return fmt.Errorf("sparkwing: --sw-start-at=%q --sw-stop-at=%q selects no steps in job %q; bounds must follow a dependency path (use a single bound or omit both to run parallel steps)", start, stop, job.ID)
+		}
+	}
 	return nil
 }
 

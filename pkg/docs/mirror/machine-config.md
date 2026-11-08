@@ -117,7 +117,8 @@ secrets, and sign-out. The controller reads this section when it starts, so run
 ### Tailscale Serve
 
 Keep the dashboard bound to loopback and add the machine's exact Tailscale DNS
-name to `dashboard.allowed_hosts`:
+name to `dashboard.allowed_hosts`. Replace `dashboard.example.com` below with
+that Tailscale DNS name:
 
 ```yaml
 dashboard:
