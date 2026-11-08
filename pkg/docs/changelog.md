@@ -40,6 +40,7 @@ unlock.
 - **Windows CLI:** Native shell drive-directory metadata no longer blocks environment capture, so commands launched through `cmd.exe` can submit pipelines
 - **Windows controller:** Reused named-pipe HTTP connections keep requests alive, so local runners can claim work and reconnect after daemon restart
 - **Windows credentials:** Created and rotated credential-epoch files receive private access lists, so the controller can reopen its state
+- **Go SDK:** Windows commands honor their own `PATH` and `PATHEXT` and strip engine credentials from child environments. Pipeline tests no longer pull controller dependencies into the SDK module closure.
 
 ## [v0.70.0] - 2026-11-08
 ### Breaking
