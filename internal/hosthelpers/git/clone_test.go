@@ -2,10 +2,11 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestCloneAndFetchUpstream(t *testing.T) {
@@ -26,7 +27,7 @@ func TestCloneAndFetchUpstream(t *testing.T) {
 	if err := Fetch(t.Context(), dest); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("git", "-C", dest, "show", "origin/main:second.txt")
+	cmd := testgit.Command("git", "-C", dest, "show", "origin/main:second.txt")
 	if got, err := cmd.Output(); err != nil || string(got) != "second" {
 		t.Fatalf("fetched bytes = %q, %v", got, err)
 	}
@@ -67,7 +68,7 @@ func newTestRepo(t *testing.T, dir, file string) string {
 
 func runTestGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.invalid"}, args...)...)
+	cmd := testgit.Command("git", append([]string{"-C", dir, "-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.invalid"}, args...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
 	}
@@ -77,7 +78,7 @@ func TestCloneAndFetchUseOriginDirectly(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
 	dest := filepath.Join(root, "clone")
-	command := exec.Command("git", "init", "--bare", source)
+	command := testgit.Command("git", "init", "--bare", source)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("init: %v %s", err, out)
 	}

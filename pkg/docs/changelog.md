@@ -69,6 +69,8 @@ unlock.
 
 ### Fixed
 
+- **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller's configuration and index untouched
+
 - **controller:** Run listings load at most the requested page plus one lookahead row per batch, reducing database work for small pages while preserving filters and stable cursors.
 
 - **CLI:** A foreground run keeps its confirmed terminal exit status when log observation loses its connection. The CLI warns with a command for reading retained logs. Permission, protocol and integrity refusals remain errors.

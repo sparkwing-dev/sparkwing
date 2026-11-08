@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -304,8 +306,8 @@ func TestGitStagesIntoThisSuitesOwnIndex(t *testing.T) {
 func gateIndexSnapshot(t *testing.T, root string) string {
 	t.Helper()
 	index := filepath.Join(t.TempDir(), "gate.index")
-	cmd := exec.Command("git", "-C", root, "add", "-A")
-	cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
+	cmd := testgit.Command("git", "-C", root, "add", "-A")
+	cmd.Env = append(testgit.Env(os.Environ()), "GIT_INDEX_FILE="+index)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("stage the gate's index: %v: %s", err, out)
 	}

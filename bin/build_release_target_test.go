@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestReleaseTargetBuildsAllSupportedBinaries(t *testing.T) {
@@ -22,7 +24,7 @@ func TestReleaseTargetBuildsAllSupportedBinaries(t *testing.T) {
 				initReleaseRepo(t, dir)
 				cmd := exec.Command("bash", script)
 				cmd.Dir = dir
-				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS="+target, "GOARCH="+arch, "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls"))
+				cmd.Env = append(testgit.Env(os.Environ()), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS="+target, "GOARCH="+arch, "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls"))
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("%v: %s", err, out)
 				}
@@ -68,7 +70,7 @@ func TestReleaseTargetFailsWhenAnyBinaryBuildFails(t *testing.T) {
 	initReleaseRepo(t, dir)
 	cmd := exec.Command("bash", script)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS=linux", "GOARCH=amd64", "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls"), "FAIL_PACKAGE=sparkwing-controller")
+	cmd.Env = append(testgit.Env(os.Environ()), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS=linux", "GOARCH=amd64", "TAG=v0.52.4", "CALLS_FILE="+filepath.Join(dir, "calls"), "FAIL_PACKAGE=sparkwing-controller")
 	out, err := cmd.CombinedOutput()
 	exitErr, ok := err.(*exec.ExitError)
 	if !ok || exitErr.ExitCode() != 17 {
@@ -147,7 +149,7 @@ func TestReleaseTargetPublishesOnlyStampedBinariesOfTheRightFlavour(t *testing.T
 			}
 			cmd := exec.Command("bash", script)
 			cmd.Dir = dir
-			cmd.Env = append(append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS=linux", "GOARCH=amd64", "TAG="+tc.release, "CALLS_FILE="+filepath.Join(dir, "calls")), tc.env...)
+			cmd.Env = append(append(testgit.Env(os.Environ()), "PATH="+dir+":"+os.Getenv("PATH"), "GOOS=linux", "GOARCH=amd64", "TAG="+tc.release, "CALLS_FILE="+filepath.Join(dir, "calls")), tc.env...)
 			out, err := cmd.CombinedOutput()
 			if (err == nil) != tc.ok {
 				t.Fatalf("err=%v, want ok=%v: %s", err, tc.ok, out)
@@ -157,7 +159,7 @@ func TestReleaseTargetPublishesOnlyStampedBinariesOfTheRightFlavour(t *testing.T
 				t.Fatalf("refused build left %d binaries in dist", len(published))
 			}
 			if !tc.tagged {
-				tags := exec.Command("git", "-C", dir, "tag", "-l")
+				tags := testgit.Command("git", "-C", dir, "tag", "-l")
 				if listed, err := tags.Output(); err != nil || len(listed) != 0 {
 					t.Fatalf("script left tags %q (%v)", listed, err)
 				}
@@ -174,8 +176,8 @@ func initReleaseRepo(t *testing.T, dir string) {
 
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(testgit.Env(os.Environ()), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
@@ -215,7 +217,7 @@ func TestReleaseTargetUsesGoVersionWithoutTaggingMain(t *testing.T) {
 			version := tc.base
 			if !tc.release {
 				gitIn(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "main")
-				info, err := exec.Command("git", "-C", dir, "show", "-s", "--format=%H%n%cI", "HEAD").Output()
+				info, err := testgit.Command("git", "-C", dir, "show", "-s", "--format=%H%n%cI", "HEAD").Output()
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -237,7 +239,7 @@ func TestReleaseTargetUsesGoVersionWithoutTaggingMain(t *testing.T) {
 			}
 			cmd := exec.Command("bash", script)
 			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "PATH="+toolDir+":"+os.Getenv("PATH"), "REAL_GO="+goPath, "BASE_TAG="+tc.base, "GOOS=linux", "GOARCH=amd64", "TAG="+version)
+			cmd.Env = append(testgit.Env(os.Environ()), "PATH="+toolDir+":"+os.Getenv("PATH"), "REAL_GO="+goPath, "BASE_TAG="+tc.base, "GOOS=linux", "GOARCH=amd64", "TAG="+version)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
 			}
