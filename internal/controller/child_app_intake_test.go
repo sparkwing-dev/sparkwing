@@ -27,7 +27,7 @@ import (
 
 func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 	const pinnedConfig = "pipelines:\n  - name: deploy\n    entrypoint: deploy\n    source: refs/heads/code\n"
-	for _, kind := range []string{"exact", "changed", "fetch-identical", "fetch-ahead", "fetch-unreachable", "fetch-behind", "fetch-unknown", "fetch-403", "fetch-422", "fetch-429", "fetch-503", "fetch-network", "fetch-metadata-403", "fetch-retry", "fetch-pinned", "fetch-pinned-source-unreachable", "fetch-pinned-execution-unreachable", "cross-repository"} {
+	for _, kind := range []string{"exact", "exact-detached", "changed", "fetch-identical", "fetch-ahead", "fetch-unreachable", "fetch-behind", "fetch-unknown", "fetch-403", "fetch-422", "fetch-429", "fetch-503", "fetch-network", "fetch-metadata-403", "fetch-retry", "fetch-pinned", "fetch-pinned-source-unreachable", "fetch-pinned-execution-unreachable", "cross-repository"} {
 		t.Run(kind, func(t *testing.T) {
 			pinned := strings.HasPrefix(kind, "fetch-pinned")
 			repo, original := sourcetest.Repository(t)
@@ -133,13 +133,13 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 				t.Fatal(err)
 			}
 			remote, branch := "", ""
-			if kind != "exact" {
+			if kind != "exact" && kind != "exact-detached" {
 				branch = "deploy"
 			}
 			if kind == "cross-repository" {
 				remote = "https://github.com/acme/child"
 			}
-			id, err := process.StartChild(t.Context(), "deploy", nil, remote, branch)
+			id, err := process.StartChild(t.Context(), "deploy", nil, remote, branch, kind == "exact-detached")
 			if err != nil {
 				t.Fatalf("POST children: %v", err)
 			}
@@ -153,8 +153,11 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 			if pinned && (child.Request.Request.Source.Ref != original || child.Request.Request.Git.SHA != selected) {
 				t.Fatalf("child lost separate source and execution revisions: %+v", child.Request.Request)
 			}
+			if child.Lineage.Detached != (kind == "exact-detached") {
+				t.Fatalf("child lost detachment intent: %+v", child.Lineage)
+			}
 			got := child.Request.Provenance
-			if kind == "exact" {
+			if kind == "exact" || kind == "exact-detached" {
 				if got != proof {
 					t.Fatalf("exact child changed seal: %+v, want %+v", got, proof)
 				}

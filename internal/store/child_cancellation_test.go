@@ -65,7 +65,7 @@ func TestUnawaitedChildSweepReadsOnlyLiveChildren(t *testing.T) {
 	if tenant.s.dialect != DialectSQLite {
 		t.Skip("plan text is SQLite's")
 	}
-	rows, err := tenant.s.query(t.Context(), "EXPLAIN QUERY PLAN "+unawaitedChildrenQuery, 100)
+	rows, err := tenant.s.query(t.Context(), "EXPLAIN QUERY PLAN "+tenant.s.unawaitedChildrenQuery(), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,5 +85,35 @@ func TestUnawaitedChildSweepReadsOnlyLiveChildren(t *testing.T) {
 	// perf: the sweep must start from idx_runs_live_children, not a scan of run history.
 	if len(plan) == 0 || plan[0] != "SCAN c USING INDEX idx_runs_live_children" {
 		t.Fatalf("sweep plan does not start from the live child index:\n%s", strings.Join(plan, "\n"))
+	}
+}
+
+func TestDetachedChildrenSurviveFinishedOrCancelledParents(t *testing.T) {
+	for _, parent := range []string{"run_finished", "job_finished", "run_cancelled"} {
+		t.Run(parent, func(t *testing.T) {
+			tenant, request := childIntakeFixture(t)
+			request.Request.Lineage.Detached = true
+			child, err := tenant.AdmitRun(t.Context(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch parent {
+			case "run_finished":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET status='success',finished_at=1 WHERE id='run'`)
+			case "job_finished":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE run_id='run' AND node_id='job'`)
+			case "run_cancelled":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET status='cancelled',finished_at=1,cancel_requested_at=1 WHERE id='run'`)
+			}
+			for range 2 {
+				if _, err := tenant.s.AsOperator().ReapUnits(t.Context(), 1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			row, err := tenant.ReadRun(t.Context(), child.RunID)
+			if err != nil || row.CancelRequestedAt != nil || !row.Lineage.Detached {
+				t.Fatalf("detached child after %s: state %s, cancel %v, detached %t, error %v", parent, row.State, row.CancelRequestedAt, row.Lineage.Detached, err)
+			}
+		})
 	}
 }

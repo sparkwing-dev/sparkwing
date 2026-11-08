@@ -45,6 +45,8 @@ unlock.
 ### Added
 
 - **releases:** A weekly Sparkwing schedule cuts v0 SDK and CLI releases from green main when unreleased notes exist. Maintainers can run it sooner, and a daily pipeline updates owned Go repos to exact main SDK versions through their Xwing landing checks.
+- **local controller:** Before upgrading a SQLite store's schema, the binary copies the store beside it as `state.db.schema-<N>-<time>.bak` under the upgrade's write lock. After a successful upgrade, it keeps only the two newest schema backups. A failed copy refuses the upgrade and leaves the store unchanged. An older binary refusing a newer store names the backup to restore. PostgreSQL stores still need an operator snapshot. See [the migration guide](docs/migrations/_unreleased.md#local-stores-are-copied-before-schema-upgrades).
+- **Go SDK:** `StartChild(ctx, pipeline, args)` submits a same-revision child without waiting. It inherits the parent's verified repository identity and continues after the parent job ends or is cancelled. Declare its target with `StartsChildren`; ordinary `RunAndAwait` children keep their parent-cancellation behavior.
 
 - **SDK protocol:** Hosts on Linux and macOS offer `host_exec` in hello. Go and TypeScript SDKs that see it hand `Exec`/`Bash` (`ctx.exec`/`ctx.bash`) commands to the host, which owns the process tree, writes output straight to the masked job log, relays captured output and kills commands on cancellation. Older SDKs and older hosts keep SDK-side execution. Host-run commands never receive engine-minted credentials such as `SPARKWING_NODE_TOKEN`, which Go SDKs previously passed through when a pipeline set them.
 - **scheduling:** Pipelines in `.sparkwing/sparkwing.yaml` can declare `placement.prefer`, an ordered list of `team`, `name=<runner>`, `cloud` and `github-actions` tiers with per-tier holds, and per-job overrides under `jobs`. GitHub App push, pull request and release runs, App-armed schedules and Run now on a fetched commit seal the list from the default branch's head; a branch cannot change it, a child run takes its parent job's list, and an App runner setting or `--runner` conflicts with it. The list is the whole allowed set, holds run from the job's queue start and open later tiers only while an earlier tier has a live runner with a free slot, and the controller and ranking holds do not apply to listed jobs. `sparkwing pipeline lint` previews each job's list, and `sparkwing runs status` and the run page show each held job's tiers with a `placement_hold` notice. See [scheduling](docs/scheduling.md#repository-placement).
@@ -68,6 +70,7 @@ unlock.
 
 ### Fixed
 
+- **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
 - **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.
 
 - **CI:** hosted gates and security scans provision a private controller key inside their temporary Sparkwing home, allowing headless checks to start.
