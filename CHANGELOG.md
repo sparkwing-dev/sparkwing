@@ -20,6 +20,20 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **local controller:** Windows runs an independent local runner that survives daemon restart. `daemon stop` drains it. An enclosing Job Object must allow breakaway. See [the migration guide](docs/migrations/_unreleased.md#detached-windows-local-runner).
+
+### Changed
+
+- **SDK (Breaking):** Windows runs Go and TypeScript commands in the host, with Job Object tree cleanup, masked 64 KiB `Run` tails and full `Capture` relay. Upgrade SDK pins with the host. See [the migration guide](docs/migrations/_unreleased.md#parse-command-output-with-capture).
+
+### Fixed
+
+- **Windows CLI:** Native shell drive-directory metadata no longer blocks environment capture, so commands launched through `cmd.exe` can submit pipelines
+- **Windows controller:** Reused named-pipe HTTP connections keep requests alive, so local runners can claim work and reconnect after daemon restart
+- **Windows credentials:** Created and rotated credential-epoch files receive private access lists, so the controller can reopen its state
+
 ## [v0.70.0] - 2026-11-08
 ### Breaking
 
@@ -49,12 +63,10 @@ unlock.
 - **Go SDK:** `StartChild(ctx, pipeline, args)` submits a same-revision child without waiting. It inherits the parent's verified repository identity and continues after the parent job ends or is cancelled. Declare its target with `StartsChildren`; ordinary `RunAndAwait` children keep their parent-cancellation behavior.
 
 - **SDK protocol:** Linux and macOS hosts execute Go and TypeScript `Exec`/`Bash` (`ctx.exec`/`ctx.bash`) commands, own their process trees, write output to masked job logs, relay captured output and kill commands on cancellation. Host-run commands never receive engine-minted credentials such as `SPARKWING_NODE_TOKEN`, which Go SDKs previously passed through when a pipeline set them.
-- **SDK protocol:** Go and TypeScript SDKs hand `Exec`/`Bash` (`ctx.exec`/`ctx.bash`) commands to the host on Linux, macOS and Windows. The host owns the process tree, writes output straight to the masked job log, relays captured output and kills commands on cancellation. Host-run commands never receive engine-minted credentials such as `SPARKWING_NODE_TOKEN`, which Go SDKs previously passed through when a pipeline set them.
 - **scheduling:** Pipelines in `.sparkwing/sparkwing.yaml` can declare `placement.prefer`, an ordered list of `team`, `name=<runner>`, `cloud` and `github-actions` tiers with per-tier holds, and per-job overrides under `jobs`. GitHub App push, pull request and release runs, App-armed schedules and Run now on a fetched commit seal the list from the default branch's head; a branch cannot change it, a child run takes its parent job's list, and an App runner setting or `--runner` conflicts with it. The list is the whole allowed set, holds run from the job's queue start and open later tiers only while an earlier tier has a live runner with a free slot, and the controller and ranking holds do not apply to listed jobs. `sparkwing pipeline lint` previews each job's list, and `sparkwing runs status` and the run page show each held job's tiers with a `placement_hold` notice. See [scheduling](docs/scheduling.md#repository-placement).
 - **local controller:** Before upgrading a SQLite store's schema, the binary copies the store beside it as `state.db.schema-<N>-<time>.bak` under the upgrade's write lock. A failed copy refuses the upgrade and leaves the store unchanged. An older binary refusing a newer store names the backup to restore. PostgreSQL stores still need an operator snapshot. See [the migration guide](docs/migrations/v0.70.0.md#local-stores-are-copied-before-schema-upgrades).
 
 - **local controller:** Verified socket peers register, activate, drain and observe runner instances under `/api/v1/local/runners`. `GET /api/v1/local/runners?state=active` discovers the persisted active instance for the socket account. Activation atomically enables a successor and stops the prior instance's new queue claims and owner self-claims. Held owners can await children while the successor executes newly ready dependencies. An independent lifecycle watch drains saturated loops while held awards finish. On Linux and macOS, queued work runs in a separate process or service that survives controller replacement. Matching live runners are reused; a new executable starts a successor while the old runner drains. Dependencies keep their accepted development engine from retained executable bytes. Windows queued hosting remains embedded. Foreground local runs without publication execute in the runner while the CLI observes persisted output, reconnects reads through controller outages, and preserves first-interrupt cancellation and second-interrupt detachment. Standalone, foreground publication and remote here execution retain CLI hosting. See [the migration guide](docs/migrations/v0.70.0.md#upgrade-the-store-in-place-to-schema-baseline-33).
-- **local controller:** Verified socket peers register, activate, drain and observe runner instances under `/api/v1/local/runners`. `GET /api/v1/local/runners?state=active` discovers the persisted active instance for the socket account. Activation atomically enables a successor and stops the prior instance's new queue claims and owner self-claims. Held owners can await children while the successor executes newly ready dependencies. An independent lifecycle watch drains saturated loops while held awards finish. On Linux, macOS and Windows, queued work runs in a separate process or service that survives controller replacement. Matching live runners are reused; a new executable starts a successor while the old runner drains. Dependencies keep their accepted development engine from retained executable bytes. Windows launches a detached runner under the same user outside the controller's Job Object, which must allow breakaway. `daemon stop` drains it through the local API. Foreground local runs without publication execute in the runner while the CLI observes persisted output, reconnects reads through controller outages, and preserves first-interrupt cancellation and second-interrupt detachment. Standalone, foreground publication and remote here execution retain CLI hosting. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
 - **local controller:** The local queue obtains a claim-only delegate and claims work through authenticated socket HTTP. Its credential is revoked after hosts finish cleanup. The verified peer may delegate exactly `triggers.claim` and `nodes.claim` through `POST /api/v1/tokens`. That token expires within seven days, the default when `expires_at` is omitted, and a later `expires_at` is refused. Each runner rolls to a fresh instance and token after a day, so held work has the remaining six days to finish. See [the migration guide](docs/migrations/v0.70.0.md#local-queue-claims-use-http).
 
@@ -67,7 +79,6 @@ unlock.
 ### Changed
 
 - Landing gates compile, vet and run fast tests across affected package dependencies, keep full critical checks and touched-package race checks, and leave PostgreSQL and long integration suites to full and release runs. Lint starts alongside tests with bounded workers and bypasses the global serial-runner lock, and affected race results can reuse Go's test cache. Resumed reviews receive the current objective after a scope change.
-- **SDK (Breaking):** Windows runs Go and TypeScript commands in the host, with Job Object tree cleanup, masked 64 KiB `Run` tails and full `Capture` relay. SDK command spawning is removed. Upgrade SDK pins with the host.
 
 - **examples:** The `example` pipeline's memoized-step, cancellation and logs-history probes now run on Sparkwing Cloud instead of skipping. A new `lifecycle-cli` job builds the CLI from the checkout and signs in to `--api-controller` with the optional `EXAMPLE_PROBE_TOKEN` secret, and the deploy pipeline's staging gate passes the staging controller. Without a CLI on the host, a controller or that secret, the probes still skip with the reason.
 

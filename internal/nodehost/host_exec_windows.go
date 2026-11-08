@@ -31,7 +31,7 @@ func configureHostCommand(cmd *exec.Cmd) {
 	const limit = 32767 - len(variable) - 2
 	program := cmd.Args[2]
 	if len(utf16.Encode([]rune(program))) > limit {
-		cmd.Err = fmt.Errorf("Windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
+		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
 		return
 	}
 	cmd.Args[2] = `eval 'unset ` + variable + `;' "$` + variable + `"`
@@ -46,11 +46,11 @@ func startHostCommand(cmd *exec.Cmd, _ []string) (*commandSession, error) {
 		return nil, err
 	}
 	if err := job.Start(cmd); err != nil {
-		_ = job.Close()
+		closeErr := job.Close()
 		if cmd.Process != nil {
-			_ = cmd.Wait()
+			err = errors.Join(err, cmd.Wait())
 		}
-		return nil, err
+		return nil, errors.Join(err, closeErr)
 	}
 	return &commandSession{job: job}, nil
 }
@@ -86,8 +86,7 @@ func commandPipe() (*os.File, *os.File, error) {
 	}
 	write, err := windows.CreateFile(name, windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, 0, 0)
 	if err != nil {
-		_ = windows.CloseHandle(read)
-		return nil, nil, err
+		return nil, nil, errors.Join(err, windows.CloseHandle(read))
 	}
 	return os.NewFile(uintptr(read), "exec-read"), os.NewFile(uintptr(write), "exec-write"), nil
 }
@@ -101,7 +100,9 @@ func bufferedBytes(f *os.File) int {
 	}
 	var available uint32
 	if err := conn.Control(func(fd uintptr) {
-		_, _, _ = peekNamedPipe.Call(fd, 0, 0, 0, uintptr(unsafe.Pointer(&available)), 0)
+		if ok, _, callErr := peekNamedPipe.Call(fd, 0, 0, 0, uintptr(unsafe.Pointer(&available)), 0); ok == 0 && callErr != nil {
+			available = 0
+		}
 	}); err != nil {
 		return 0
 	}

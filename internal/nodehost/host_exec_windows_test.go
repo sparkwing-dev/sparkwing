@@ -251,12 +251,14 @@ func TestWindowsHostCommandLongBashProgram(t *testing.T) {
 	if err != nil {
 		t.Skip("Git Bash is unavailable")
 	}
-	for _, program := range []string{`read -r value; printf '%s' "$value"; bash -c 'test -z "${SPARKWING_BASH_PROGRAM+x}"'`, strings.Repeat(":;", 6000) + `printf 'input with spaces'`} {
+	for _, program := range []string{`read -r value; printf '%s' "$value"; bash -c 'test -z "${SPARKWING_BASH_PROGRAM+x}"'`, strings.Repeat(":\n", 6000) + `printf 'input with spaces'`} {
 		req := nodeproto.ExecRequest{ID: "bash", Argv: []string{shell, "-c", program}, Dir: t.TempDir(), Env: append(os.Environ(), "SPARKWING_BASH_PROGRAM=exit 42"), Stdin: []byte("input with spaces\n"), Capture: true}
-		var output strings.Builder
+		var output, diagnostic strings.Builder
 		done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), func(stream string, chunk []byte, _ bool) error {
 			if stream == "stdout" {
 				output.Write(chunk)
+			} else {
+				diagnostic.Write(chunk)
 			}
 			return nil
 		})
@@ -266,7 +268,7 @@ func TestWindowsHostCommandLongBashProgram(t *testing.T) {
 			}
 		}
 		if done.StartError != "" || done.ExitCode != 0 || output.String() != "input with spaces" {
-			t.Fatalf("Bash result: %+v, output=%q", done, output.String())
+			t.Fatalf("Bash %q result: %+v, output=%q stderr=%q", shell, done, output.String(), diagnostic.String())
 		}
 	}
 }
@@ -276,5 +278,20 @@ func TestWindowsHostCommandRejectsOversizedBashProgram(t *testing.T) {
 	configureHostCommand(cmd)
 	if cmd.Err == nil || !strings.Contains(cmd.Err.Error(), "exceeds environment limit") {
 		t.Fatalf("oversized Bash program error = %v", cmd.Err)
+	}
+}
+
+func TestWindowsCapturedEnvironmentIgnoresDriveMetadata(t *testing.T) {
+	snapshots, err := NewFileEnvironmentSnapshots(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal, err := snapshots.Capture(t.Context(), []string{`=C:=C:\work`, "CUSTOM=value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := snapshots.Load(t.Context(), seal)
+	if err != nil || len(values) != 1 || values[0] != "CUSTOM=value" {
+		t.Fatalf("values=%v err=%v", values, err)
 	}
 }
