@@ -3,6 +3,7 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
+	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -65,7 +67,7 @@ func (TemplateVerify) ShortHelp() string {
 }
 
 func (TemplateVerify) Help() string {
-	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline plan`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with --sw-dry-run so the engine seals dry-run mode and cloud mutations echo instead of executing. Skipped dry-run jobs or steps are reported as partial verification and never record a reusable proof. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. Run this check explicitly with `sparkwing run template-verify`. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless of recorded proofs."
+	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline plan --pipeline <name>`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with --sw-dry-run so the engine seals dry-run mode and cloud mutations echo instead of executing. Skipped dry-run jobs or steps are reported as partial verification and never record a reusable proof. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. Run this check explicitly with `sparkwing run template-verify`. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless of recorded proofs."
 }
 
 func (TemplateVerify) Examples() []sparkwing.Example {
@@ -144,10 +146,21 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	} else {
 		sparkwing.Info(ctx, "verifying every template: %s", proof.Reason)
 	}
+	stateHome := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateHome, 0o700); err != nil {
+		return verifyEnv{}, err
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return verifyEnv{}, err
+	}
+	if err := os.WriteFile(filepath.Join(stateHome, "secrets.key"), key, 0o600); err != nil {
+		return verifyEnv{}, err
+	}
 	return verifyEnv{
 		CLI:        bin,
 		Root:       root,
-		StateHome:  filepath.Join(dir, "state"),
+		StateHome:  stateHome,
 		SparksCore: core,
 		GoEnv:      readGoEnv(ctx),
 		Proof:      proof,
@@ -302,7 +315,7 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
 
-	if err := scaffoldExample(ctx, bin, scratch, m); err != nil {
+	if err := scaffoldExample(ctx, bin, scratch, m, env.Root); err != nil {
 		return out, fmt.Errorf("%s: scaffold: %w", m.Name, err)
 	}
 
@@ -313,18 +326,24 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	if err := pinLocalSparksCore(ctx, dotSparkwing, env.SparksCore); err != nil {
 		return out, fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
 	}
-	if err := pinLocalSparkwingSDK(ctx, dotSparkwing, env.Root); err != nil {
-		return out, fmt.Errorf("%s: pin sparkwing SDK: %w", m.Name, err)
-	}
 	if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
 		return out, fmt.Errorf("%s: go build: %w", m.Name, err)
 	}
+<<<<<<< HEAD
 	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint", "--pipeline", m.Name).Run(); err != nil {
 		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
 	}
 	if err := gitInitFixture(ctx, scratch); err != nil {
 		return out, fmt.Errorf("%s: commit scaffold: %w", m.Name, err)
 	}
+=======
+	if err := gitInitFixture(ctx, scratch); err != nil {
+		return out, fmt.Errorf("%s: source fixture: %w", m.Name, err)
+	}
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint").Run(); err != nil {
+		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
+	}
+>>>>>>> origin/main
 	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "plan", "--pipeline", m.Name).Dir(scratch).Run(); err != nil {
 		return out, fmt.Errorf("%s: explain: %w", m.Name, err)
 	}
@@ -441,7 +460,8 @@ func classifyTemplateDryRun(runID, raw string) (templateOutcome, error) {
 
 func templateRunAdmissionEnv(stateHome string) map[string]string {
 	return map[string]string{
-		"SPARKWING_HOME": stateHome,
+		"SPARKWING_HOME":             stateHome,
+		"SPARKWING_SECRETS_KEY_FILE": filepath.Join(stateHome, "secrets.key"),
 	}
 }
 
@@ -490,7 +510,20 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 
 // safety: `pipeline new` builds the repository the example has to compile in;
 // the example rendered with its verify parameters then replaces the job file.
+<<<<<<< HEAD
 func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manifest) error {
+=======
+func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manifest, sdkRoot string) error {
+	directory := filepath.Join(scratch, ".sparkwing")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	module := fmt.Sprintf("module sparkwing-pipelines\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing %s\n\nreplace github.com/sparkwing-dev/sparkwing => %q\n", scaffold.FallbackSDKVersion, sdkRoot)
+	if err := os.WriteFile(filepath.Join(directory, "go.mod"), []byte(module), 0o644); err != nil {
+		return err
+	}
+
+>>>>>>> origin/main
 	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "new", "--pipeline", m.Name, "--template", "minimal").Run(); err != nil {
 		return err
 	}
@@ -518,7 +551,11 @@ func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manif
 		return err
 	}
 	config := fmt.Sprintf("pipelines:\n  - name: %q\n    entrypoint: %q\n", m.Name, m.Name)
+<<<<<<< HEAD
 	return os.WriteFile(filepath.Join(scratch, ".sparkwing", "sparkwing.yaml"), []byte(config), 0o644)
+=======
+	return os.WriteFile(filepath.Join(directory, "sparkwing.yaml"), []byte(config), 0o644)
+>>>>>>> origin/main
 }
 
 func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[string]string) error {
@@ -538,30 +575,6 @@ func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[strin
 	for _, mp := range sortedKeys(core) {
 		fmt.Fprintf(&b, "\nreplace %s => %s\n", mp, core[mp])
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return err
-	}
-	if _, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
-		return fmt.Errorf("go mod tidy: %w", err)
-	}
-	return nil
-}
-
-func pinLocalSparkwingSDK(ctx context.Context, dotSparkwing, root string) error {
-	if root == "" {
-		return nil
-	}
-	path := filepath.Join(dotSparkwing, "go.mod")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var b strings.Builder
-	b.Write(body)
-	if len(body) > 0 && body[len(body)-1] != '\n' {
-		b.WriteByte('\n')
-	}
-	fmt.Fprintf(&b, "\nreplace github.com/sparkwing-dev/sparkwing => %s\n", root)
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return err
 	}

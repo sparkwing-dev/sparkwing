@@ -20,6 +20,8 @@ import {
 } from "../src/command.ts";
 import { runScope } from "../src/scope.ts";
 
+import {hostCommand} from "./host-command.ts";
+
 interface CommandEvent {
   event: string;
   attrs: Record<string, unknown>;
@@ -59,7 +61,7 @@ function context(signal = new AbortController().signal) {
       return createCommand(ctx, ["bash", "-c", script], options);
     },
   };
-  registerCommandContext(ctx, (event, attrs) => events.push({ event, attrs }), { BODY_VALUE: "body" });
+  registerCommandContext(ctx, (event, attrs) => events.push({ event, attrs }), { BODY_VALUE: "body" },(request,signal)=>hostCommand({...request,onOutput:(stream,data)=>{request.onOutput?.(stream,data);if(!request.capture)events.push({event:"exec_chunk",attrs:{stream:"host:"+stream,source:stream,data:data.toString("base64")}})}},signal).then(result=>{if(!request.capture)for(const source of ["stdout","stderr"])events.push({event:"exec_chunk",attrs:{stream:"host:"+source,source,end:true}});return result}));
   return { ctx, events };
 }
 
@@ -377,8 +379,10 @@ test("commands do not inherit either protocol descriptor", async (t) => {
   `;
   const parent = `
     import fs from 'node:fs';
-    import { createCommand } from ${JSON.stringify(new URL("../src/command.ts", import.meta.url).href)};
+    import { createCommand,registerCommandContext } from ${JSON.stringify(new URL("../src/command.ts", import.meta.url).href)};
     const ctx = { signal: new AbortController().signal, log: { info() {} } };
+    const {hostCommand}=await import(${JSON.stringify(new URL("./host-command.ts",import.meta.url).href)});
+    registerCommandContext(ctx,()=>{},{},hostCommand);
     const result = await createCommand(ctx, [process.execPath, '-e', ${JSON.stringify(child)}, ${JSON.stringify(marker)}], { cwd: ${JSON.stringify(root)} }).json();
     fs.writeSync(1, JSON.stringify(result));
   `;

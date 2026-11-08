@@ -49,7 +49,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 				if request.Binding != nil || !reflect.DeepEqual(request.Runner, &input.Runner) {
 					t.Fatal("planning hello gained route authority or lost granted runner identity")
 				}
-				return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}, Features: []string{}}, nil
+				return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}}, nil
 			case nodeproto.OpDescribe:
 				if err := log(ctx, nodeproto.FrameLog{Message: defaultValue + " " + supplied, Attrs: json.RawMessage(`{"sdk-private-def\u0061ult":"public"}`)}); err != nil {
 					return nil, err
@@ -134,7 +134,7 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 			process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 				switch request.Op {
 				case nodeproto.OpHello:
-					return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}, Features: []string{}}, nil
+					return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}}, nil
 				case nodeproto.OpDescribe:
 					return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Extra: true, Args: []nodeproto.ArgumentDescription{}}}}, nil
 				}
@@ -379,7 +379,7 @@ func TestSDKPlanningRefusesChangedEngineAndSDK(t *testing.T) {
 					process, err := start(ctx, input, log)
 					proc := process.(*executorProcess)
 					proc.answer = func(context.Context, nodeproto.Request) (any, error) {
-						return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "other"}, Features: []string{}}, nil
+						return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "other"}}, nil
 					}
 					return process, err
 				}

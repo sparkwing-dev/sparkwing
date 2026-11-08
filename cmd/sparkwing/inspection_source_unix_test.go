@@ -55,7 +55,7 @@ func TestInspectionAcquiresSelectedCodeAndEngine(t *testing.T) {
 	dir, _ := inspectionSourceRepo(t)
 	bin, requests := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
 	hello := filepath.Join(filepath.Dir(bin), "hello")
-	writeRepoFile(t, hello, `"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v1.2.3"},"features":[]}}`)
+	writeRepoFile(t, hello, `"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v1.2.3"}}}`)
 	home := t.TempDir()
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}

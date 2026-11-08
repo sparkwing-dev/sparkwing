@@ -7,14 +7,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers"
+	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -39,7 +43,10 @@ type ProcessServices struct {
 	StartChild     func(context.Context, capability.Authorized, ChildRequest) (string, error)
 	AwaitChild     func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error)
 	Cleanups       *ProcessCleanups
+	HelperStream   func(context.Context, string, nodeproto.FrameLog, []byte, bool) error
 }
+
+var helperSequence atomic.Uint64
 
 // ProcessEndpointRegistrar is implemented by the common policy router.
 type ProcessEndpointRegistrar interface {
@@ -53,6 +60,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 		return errors.New("process services require policy router and live resolver")
 	}
 	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/node/v1/helpers"},
 		{http.MethodPost, "/node/v1/masks"},
 		{http.MethodPost, "/node/v1/annotations"},
 		{http.MethodPost, "/node/v1/summary"},
@@ -182,6 +190,62 @@ func serviceEvidence(request *http.Request, pattern string) (capability.RequestE
 
 func (s *ProcessServices) serve(request *http.Request, auth capability.Authorized, path string) (any, int, error) {
 	switch path {
+	case "/node/v1/helpers":
+		var body nodeproto.HelperRequest
+		if err := decodeService(request, &body); err != nil {
+			return nil, 0, err
+		}
+		ctx := request.Context()
+		if s.Cleanups != nil {
+			ctx = helperruntime.WithCleanups(ctx, s.Cleanups.register, s.Cleanups.finish)
+		}
+		if body.Operation == "docker.Login" {
+			var args []json.RawMessage
+			if json.Unmarshal(body.Args, &args) == nil && len(args) == 3 {
+				var secret string
+				if json.Unmarshal(args[2], &secret) == nil {
+					if err := s.Masks.registerValue(secret); err != nil {
+						return nil, 0, err
+					}
+				}
+			}
+		}
+		var finishOutput func() error
+		if body.Operation == "docker.Run" {
+			var args []struct {
+				CaptureOutput bool `json:"captureOutput"`
+			}
+			if json.Unmarshal(body.Args, &args) == nil && len(args) == 1 && !args[0].CaptureOutput {
+				if s.HelperStream == nil {
+					return nil, 0, serviceUnavailable()
+				}
+				key := fmt.Sprintf("helper:%d:", helperSequence.Add(1))
+				writer := func(stream string) helperOutputWriter {
+					return func(chunk []byte) (int, error) {
+						base := nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Step: body.Step, Event: "exec_line"}
+						err := s.HelperStream(ctx, key+stream, base, chunk, false)
+						return len(chunk), err
+					}
+				}
+				ctx = helperruntime.WithOutput(ctx, writer("stdout"), writer("stderr"))
+				finishOutput = func() error {
+					for _, stream := range []string{"stdout", "stderr"} {
+						if err := s.HelperStream(ctx, key+stream, nodeproto.FrameLog{Level: "info", Step: body.Step, Event: "exec_line"}, nil, true); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
+			}
+		}
+		response := hosthelpers.Run(ctx, body)
+		if finishOutput != nil {
+			if err := finishOutput(); err != nil {
+				return nil, 0, err
+			}
+		}
+		response.Error = s.Masks.mask(response.Error)
+		return response, http.StatusOK, nil
 	case "/node/v1/masks", "/node/v1/annotations", "/node/v1/summary":
 		return nodeproto.ServiceAcknowledged{}, http.StatusOK, s.write(request, auth, path)
 	case "/node/v1/cleanups":
@@ -326,3 +390,7 @@ func decodeService(request *http.Request, target any) error {
 	}
 	return nil
 }
+
+type helperOutputWriter func([]byte) (int, error)
+
+func (write helperOutputWriter) Write(chunk []byte) (int, error) { return write(chunk) }

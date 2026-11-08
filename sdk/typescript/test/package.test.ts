@@ -27,7 +27,6 @@ test("public root exposes the declared SDK without runtime plumbing or removed a
     "git",
     "gitFromTree",
     "githubOwnerRepo",
-    "glob",
     "goModules",
     "ignore",
     "main",
@@ -35,8 +34,6 @@ test("public root exposes the declared SDK without runtime plumbing or removed a
     "noMemo",
     "npm",
     "parts",
-    "path",
-    "readFile",
     "refTo",
     "refToLastRun",
     "repoFiles",
@@ -45,7 +42,6 @@ test("public root exposes the declared SDK without runtime plumbing or removed a
     "tree",
     "withCommandEnv",
     "workDir",
-    "writeFile",
   ];
   assert.deepEqual(Object.keys(sdk).sort(), values.sort());
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));

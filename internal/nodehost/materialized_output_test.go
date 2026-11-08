@@ -57,7 +57,7 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 					if string(request.Input) != `{"count":2}` {
 						t.Fatalf("generator lost copied output: %s", request.Input)
 					}
-					return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+					return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 				}
 				return nil, nil
 			}
@@ -83,7 +83,7 @@ func TestOwnerEvaluationGivesAnUntypedSourceANullResult(t *testing.T) {
 			if string(request.Input) != `null` {
 				t.Fatalf("untyped source evaluated with %s", request.Input)
 			}
-			return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+			return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 		}
 		return nil, nil
 	}

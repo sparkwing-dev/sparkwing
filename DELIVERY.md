@@ -639,37 +639,10 @@ ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
 
 ### Check tiers
 
-| Historical SDK compatibility | `pre-commit` | `pre-push` | `gate` | `pre-release` |
-| --- | --- | --- | --- | --- |
-| Candidate nodehost against frozen released Go and TypeScript SDKs | None | None | Warm fixture preparation when host, SDK, protocol, environment, process, secret or pin code changes. `--full` always runs it. | Every cell with cold fixture preparation. |
-
-The `sdk-compat` step runs `TestHistoricalSDKCompatibility` through the candidate
-nodehost compiled into the test binary. It passes `-sdk-compat=warm` in `gate`
-and `-sdk-compat=cold` in `pre-release`, with `-count=1` so the candidate host runs
-every time. It bypasses engine selection and validates each released SDK's real
-hello identity. Acquisition failures fail the check. The test logs retain fixture
-identities, per-cell outcomes and raw preparation/execution timings.
-
-The affected selector lives in `.sparkwing/jobs/sdk_compat.go`. It includes the
-host and its protocol, process, environment, masking and pin dependencies, both
-SDK trees, fixture sources and the compatibility check itself. Documentation and
-unrelated UI or billing changes skip acquisition. Neither hook tier acquires
-historical SDK artifacts.
-
-Immutable fixture preparation is shared across cells in the worktree's
-`.sparkwing/cache/sdk-compat/` directory and cached by fixture source, released
-artifact, toolchain and platform. TypeScript installs also key on lock integrity
-and Node runtime. Candidate host source is excluded from that
-cache because every matrix invocation compiles and executes today's nodehost.
-Cold pre-release preparation rebuilds the fixtures to check artifact acquisition
-and compiler assumptions. npm uses a private empty download cache. Go retains
-its configured module and compiler caches. Linux measurements, raw per-cell
-records and the focused pipeline run are retained in
-`design/rewrite/proposals/thin-sdk-step1/REPORT.md`: 17.52 seconds warm and
-20.09 seconds with cold fixture preparation, including Go test setup.
-The matrix uses isolated homes, local workspaces and
-fake providers. This matrix does not replace production resolver routing or
-native platform checks.
+Current SDK verification runs the Go and TypeScript unit suites and the host
+execution scenarios in `TestHostExecMatchesSDKExecution`. Helpers run through the
+bound host service routes. Historical SDK acquisition and compatibility matrices
+are removed. Old SDK pins require an upgrade to the current contract.
 
 Canonical hosted jobs retain a `canonical-timings` JSON artifact for 30 days
 on success and failure. It contains run and step timestamps, outcomes, available
@@ -682,7 +655,25 @@ an absent artifact is missing evidence, not a successful export.
 
 Pre-release records each check as a sequential WorkStep. A failed check does
 not suppress later checks; the parent reports the first failure, while the run
-logs and step states retain every individual failure. The canonical timing
+logs and step states retain every individual failure. `--platform-cells` adds
+the `macos` and `windows` cells as dispatched jobs requiring `os=darwin` and
+`os=windows`; they run the `macos-verify` and `windows-verify` checks. A local
+run cannot place them and hosted CI does not pass the flag. Trigger the run on
+the team controller; each cell waits visibly for a team runner reporting its
+operating system:
+
+```bash
+sparkwing pipeline trigger pre-release --profile prod -- --platform-cells
+```
+
+Enroll each machine once as a shared team runner scoped to this repository,
+piping a dedicated administrator session to stdin, then keep its runner service
+running. The service reports `os=darwin` or `os=windows` itself:
+
+```bash
+sparkwing runners add --runner build-mac --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
+sparkwing runners add --runner build-windows --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
+``` The canonical timing
 artifact retains those step outcomes and durations but excludes their error text.
 
 Pinned actionlint v1.7.12 does not recognize GitHub's `concurrency.queue`.

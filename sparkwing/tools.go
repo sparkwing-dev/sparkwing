@@ -1,7 +1,6 @@
 package sparkwing
 
 import (
-	"fmt"
 	"slices"
 	"time"
 
@@ -12,26 +11,16 @@ import (
 // PATH. Each name adds the selector term tool:<name>, the label an agent
 // advertises for each tool it detects at startup, so NeedsTools("terraform")
 // is Requires("tool:terraform") that survives a later Requires call. Names
-// come from a fixed list (aws, buildx, crane, docker, git, go, golangci-lint,
-// helm, kubectl, node, npm, shellcheck, terraform); any other name panics at
-// plan time. A node no agent can claim waits and marks its run as needing
+// are relayed as selectors so new host-detected tools need no SDK release.
+// A node no agent can claim waits and marks its run as needing
 // attention until one can, for up to its plan's ClaimWait.
 func (n *JobNode) NeedsTools(names ...string) *JobNode {
-	mustKnowTools("NeedsTools", names)
 	for _, name := range names {
 		if label := match.ToolPrefix + name; !slices.Contains(n.tools, label) {
 			n.tools = append(n.tools, label)
 		}
 	}
 	return n
-}
-
-func mustKnowTools(caller string, names []string) {
-	for _, name := range names {
-		if !match.IsKnownTool(name) {
-			panic(fmt.Sprintf("sparkwing: %s(%q): not a known tool; known tools are %v", caller, name, match.KnownTools))
-		}
-	}
 }
 
 // ClaimWait declares how long each ready job may wait for a runner claim.

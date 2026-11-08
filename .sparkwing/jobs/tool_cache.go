@@ -8,7 +8,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func pipelineCacheDir(tool string) string { return sparkwing.Path(".sparkwing", "cache", tool) }
+func pipelineCacheDir(tool string) string {
+	return filepath.Join(sparkwing.WorkDir(), ".sparkwing", "cache", tool)
+}
 
 // perf: the source key walked the 80,000-file cache inside the tree, so runs
 // started a minute late; the git dir is outside that walk and goes with the

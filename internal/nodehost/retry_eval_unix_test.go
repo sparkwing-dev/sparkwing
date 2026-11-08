@@ -167,7 +167,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 		}
 		jobs := retryGeneratedJobs()
 		jobs[0].Steps[0].ID = "changed"
-		raw, err := json.Marshal(jobs)
+		raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 		return nodeproto.EvalResult{Value: raw}, err
 	}
 	host, err := NewNodeExecutor(ExecutorDependencies{

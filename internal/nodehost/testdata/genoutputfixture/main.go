@@ -74,7 +74,7 @@ func main() {
 			if q.Binding != nil {
 				routes = q.Binding.Routes
 			}
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}, Features: []string{}}
+			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}}
 		case "describe":
 			result = map[string]any{"pipelines": []any{map[string]any{"name": "probe", "args": []any{}}}}
 		case "plan":

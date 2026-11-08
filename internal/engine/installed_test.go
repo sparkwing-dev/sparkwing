@@ -94,3 +94,31 @@ func FuzzReplacementEngineCannotSubstituteAcceptedBinary(f *testing.F) {
 type installedTransport func(*http.Request) (*http.Response, error)
 
 func (f installedTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestLocalTypeScriptSDKSelectsInstalledEngineWithoutNetwork(t *testing.T) {
+	dir := t.TempDir()
+	localSDK(t, dir, "0.70.0")
+	writeFixture(t, dir, "package.json", []byte(`{"dependencies":{"@sparkwing/sdk":"file:sdk.tgz"}}`))
+	writeFixture(t, dir, "package-lock.json", []byte(`{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"file:sdk.tgz"}},"node_modules/@sparkwing/sdk":{"version":"0.70.0","resolved":"file:sdk.tgz"}}}`))
+	pin, err := ReadPin(dir, engineid.TypeScriptSDK)
+	if err != nil || pin.Replacement != "sdk.tgz" {
+		t.Fatalf("local pin=%+v error=%v", pin, err)
+	}
+	resolver, err := NewResolver(Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: installedTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("local SDK downloaded a published engine")
+		return nil, errors.New("unexpected download")
+	})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := resolver.Resolve(t.Context(), pin, releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Identity.Pin != pin {
+		t.Fatalf("selected pin=%+v", selected.Identity.Pin)
+	}
+	if err := selected.verifyInstalledEngine(); err != nil {
+		t.Fatal(err)
+	}
+}

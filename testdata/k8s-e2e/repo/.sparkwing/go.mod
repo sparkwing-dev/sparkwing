@@ -2,7 +2,7 @@ module sparkwing-k8s-e2e-pipelines
 
 go 1.26.0
 
-require github.com/sparkwing-dev/sparkwing v0.69.1
+require github.com/sparkwing-dev/sparkwing v0.70.0
 
 require (
 	golang.org/x/crypto v0.57.0 // indirect

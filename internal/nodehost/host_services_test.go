@@ -107,7 +107,7 @@ func TestHostServices(t *testing.T) {
 
 func checkRegisteredServiceReads(t *testing.T, routes *processServiceRoutes, service *ProcessServices, auth capability.Authorized) {
 	t.Helper()
-	if len(routes.endpoints) != 11 {
+	if len(routes.endpoints) != 12 {
 		t.Fatal("node-host registration is incomplete")
 	}
 	service.Secrets = []string{"TOKEN"}

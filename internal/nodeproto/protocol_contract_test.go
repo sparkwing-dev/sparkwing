@@ -90,9 +90,8 @@ func TestProtocolRejectsNestedNullsAndDuplicateFields(t *testing.T) {
 		})
 	}
 	for name, raw := range map[string]string{
-		"null_feature":       `{"protocol":2,"sdk":{"language":"go","version":"v1"},"features":[null]}`,
-		"duplicate_language": `{"protocol":2,"sdk":{"language":"go","language":"typescript","version":"v1"},"features":[]}`,
-		"aliased_language":   `{"protocol":2,"sdk":{"language":"go","LANGUAGE":"typescript","version":"v1"},"features":[]}`,
+		"duplicate_language": `{"protocol":2,"sdk":{"language":"go","language":"typescript","version":"v1"}}`,
+		"aliased_language":   `{"protocol":2,"sdk":{"language":"go","LANGUAGE":"typescript","version":"v1"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			var hello HelloResult

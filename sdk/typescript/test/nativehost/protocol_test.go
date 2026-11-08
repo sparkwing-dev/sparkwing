@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
@@ -78,7 +79,7 @@ func nativeHello(t *testing.T, h *host) {
 			URL: "http://127.0.0.1:1", Bearer: "hello-only-bearer",
 		}},
 	}, &hello)
-	if hello.Protocol != 2 || hello.SDK.Language != "typescript" || hello.SDK.Version == "" || hello.Features == nil {
+	if hello.Protocol != 2 || hello.SDK.Language != "typescript" || hello.SDK.Version == "" {
 		t.Fatalf("hello: %+v", hello)
 	}
 	manifest, err := os.ReadFile(filepath.Join(h.command.Dir, "package.json"))
@@ -177,8 +178,9 @@ func nativeEvals(t *testing.T, h *host, job nodeproto.JobSpec, output json.RawMe
 	}
 	var generated nodeproto.EvalResult
 	h.call(nodeproto.Request{ID: "generate", Op: nodeproto.OpEval, Closure: job.Closures.Generate[0], Input: output}, &generated)
-	var jobs []nodeproto.JobSpec
-	decode(t, generated.Value, &jobs)
+	var document nodeproto.PlanDoc
+	decode(t, generated.Value, &document)
+	jobs := document.Jobs
 	if generated.Error != nil || len(jobs) != 1 || jobs[0].ID != "generated" || len(jobs[0].Groups) != 1 || jobs[0].Groups[0] != job.Closures.Generate[0] {
 		t.Fatalf("generated: %+v, error: %v", jobs, generated.Error)
 	}
@@ -281,12 +283,33 @@ func (h *host) frame() wireFrame {
 		h.t.Fatalf("frame EOF: %v\n%s", h.frames.Err(), h.stderr.String())
 	}
 	line := h.frames.Bytes()
-	h.transcript.Write(line)
-	h.transcript.WriteByte('\n')
 	parsed, err := nodeproto.ParseFrame(line)
 	if err != nil {
 		h.t.Fatalf("frame: %v\n%s", err, line)
 	}
+	if parsed.Exec != nil {
+		req := *parsed.Exec
+		write := func(value any) error {
+			body, err := json.Marshal(value)
+			if err != nil {
+				return err
+			}
+			_, err = h.requests.Write(append(body, '\n'))
+			return err
+		}
+		done := nodehost.ExecuteCommand(h.t.Context(), req, func(stream string, data []byte, eof bool) error {
+			if !req.Capture || eof {
+				return nil
+			}
+			return write(nodeproto.ExecOutput{ID: req.ID, Stream: stream, Data: data})
+		})
+		if err := write(done); err != nil {
+			h.t.Fatal(err)
+		}
+		return wireFrame{}
+	}
+	h.transcript.Write(line)
+	h.transcript.WriteByte('\n')
 	var frame wireFrame
 	if parsed.Reply != nil {
 		frame.Reply = *parsed.Reply

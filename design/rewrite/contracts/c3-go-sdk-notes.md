@@ -27,7 +27,7 @@ The author SDK owns declarations, typed input and output access, protocol servin
 - Describe builds declarations with pipeline defaults and initialized extra-argument bags, separately from execution input validation. Required run inputs do not erase job metadata. Declaration errors and panics fail discovery with a pipeline-attributed, secret-masked canonical error. Describe never returns a successful partial schema. Execution still validates all required pipeline and job arguments.
 - Generated jobs bind `WithArgs` from the original run argument snapshot before their expansion becomes executable. Defaults, required values and enums apply to generated recovery jobs too. Their flags cannot collide with pipeline inputs, initial jobs or prior expansions. Flags introduced only during generation can arrive through the pipeline's `flag:",extra"` bag. Describe does not execute generators to discover them.
 - Cross-pipeline `Ref.TryGet` treats JSON null as absent, including null surrounded by JSON whitespace. `Ref.Get` returns the zero value. An in-run null output remains present, and the JSON string `"null"` remains a value. Invalid JSON fails instead of becoming absence.
-- `sparkwingtest.Host.Context` installs only the fixture's runner, inputs, secret classification and service answers. `Plan`, `RunStep` and `Eval` exercise SDK operations without controller/store imports. Planning has no execution binding, so secret, variable, output, latest-output, child, OIDC and Mask calls fail before reading fixture answers or invoking callbacks. Declaration logs remain available. RunStep records carry the host-bound job. Plan and eval records go to run logs without a job. Records and masks are snapshots. Cancelled service calls never invoke fixture callbacks. `Close` cancels outstanding fake requests and releases resources. Fixtures share no mutable global state.
+- `sparkwingtest.Host.Context` installs the fixture's runner, inputs, secret classification, local host command service and helper relays. `Plan`, `RunStep` and `Eval` exercise SDK operations without starting a controller or opening a store. Commands share the host runner, including captured bytes, masked logs and cancellation. Git, Docker and sidecar requests use the host helpers. Planning has no execution binding, so secret, variable, output, latest-output, child, OIDC and Mask calls fail before reading fixture answers or invoking callbacks. Declaration logs remain available. RunStep records carry the host-bound job. Plan and eval records go to run logs without a job. Records and masks are snapshots. Cancelled service calls never invoke fixture callbacks. `Close` cancels outstanding requests, joins command sessions and releases helper resources. Fixtures share no mutable global state.
 
 ## Dependency cache keys
 
@@ -303,10 +303,6 @@ Each row names one exported type or function. Retain means its declared signatur
 | `sparkwing.Cmd.Lines` | `sparkwing/exec.go` | Lines runs the command silently and returns stdout split on "\n", with each line trimmed and blanks dropped. |
 | `sparkwing.Cmd.JSON` | `sparkwing/exec.go` | JSON runs the command silently and decodes stdout into out via encoding/json. |
 | `sparkwing.Cmd.MustBeEmpty` | `sparkwing/exec.go` | MustBeEmpty runs the command silently and returns nil only if its stdout (after TrimSpace) is empty. |
-| `sparkwing.Path` | `sparkwing/fs.go` | Path joins parts onto WorkDir() and returns the absolute path. |
-| `sparkwing.ReadFile` | `sparkwing/fs.go` | ReadFile reads the named file. |
-| `sparkwing.WriteFile` | `sparkwing/fs.go` | WriteFile writes data to the named file with perm 0o644 (creating or truncating). |
-| `sparkwing.Glob` | `sparkwing/fs.go` | Glob expands a shell-style glob pattern. |
 | `git.CloneOption` | `sparkwing/git/clone.go` | CloneOption configures optional git-clone behavior. |
 | `git.WithDepth` | `sparkwing/git/clone.go` | WithDepth limits the clone to the most recent n commits (--depth n). |
 | `git.Clone` | `sparkwing/git/clone.go` | Clone clones url into destDir. |
@@ -448,6 +444,7 @@ Each row names one exported type or function. Retain means its declared signatur
 
 | Symbol | Source | Purpose |
 |---|---|---|
+| `sparkwing.Path`, `sparkwing.ReadFile`, `sparkwing.WriteFile`, `sparkwing.Glob` | `sparkwing/fs.go` | Use `path/filepath` and `os` with `sparkwing.WorkDir()` for file operations. |
 | `sparkwing.Plan.AdmissionClassValue` | `sparkwing/admission.go` | Remove the old API during SDK decoupling. |
 | `sparkwing.Admission` | `sparkwing/admission.go` | Remove the old API during SDK decoupling. |
 | `sparkwing.Admitted` | `sparkwing/admission.go` | Remove the old API during SDK decoupling. |

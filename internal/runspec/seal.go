@@ -24,6 +24,14 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 			return SealedRequest{}, err
 		}
 	}
+	if request.Placement != nil {
+		if request.Burst != nil {
+			return SealedRequest{}, errors.New("burst and repository placement cannot both apply")
+		}
+		if err := request.Placement.Validate(); err != nil {
+			return SealedRequest{}, err
+		}
+	}
 	if err := ValidateAgent(request.Agent); err != nil {
 		return SealedRequest{}, &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
