@@ -191,23 +191,34 @@ fi
 
 log "installing $BINARIES $VERSION ($GOOS/$GOARCH)"
 base="${RELEASE_BASE_URL%/}/${VERSION}"
-# One curl process reuses its connections to the release host and the host it
-# redirects to, where a call per file sets both up again. Nothing is trusted
-# until the checks below pass.
+# The API bypasses GitHub's web redirect service; verification below still
+# authenticates every file before installation.
+download_asset() {
+  name="$1"
+  status=0
+  code="$(curl -fsSL --connect-timeout 60 --speed-limit 1 --speed-time 60 -w '%{http_code}' -o "$WORK/$name" "$base/$name")" || status=$?
+  [ "$status" = 0 ] && return 0
+  case "${RELEASE_BASE_URL%/}" in "https://github.com/${REPO}/releases/download") ;; *) return "$status" ;; esac
+  case "$code:$status" in 5??:*|*:28) ;; *) return "$status" ;; esac
+  api="https://api.github.com/repos/$REPO/releases"
+  if [ ! -s "$WORK/release-api.json" ]; then
+    curl -fsSL --connect-timeout 60 --speed-limit 1 --speed-time 60 "$api/tags/$VERSION" -o "$WORK/release-api.json" || return $?
+  fi
+  asset_url="$(awk -v name="$name" 'BEGIN { RS="}" }
+    { gsub(/[[:space:]]/, "") }
+    index($0, "\"name\":\"" name "\"") && match($0, /"url":"https:\/\/api.github.com\/repos\/[^"]+\/releases\/assets\/[0-9]+"/) {
+      value=substr($0, RSTART+7, RLENGTH-8); print value; exit
+    }' "$WORK/release-api.json")"
+  case "$asset_url" in "$api/assets/"*) ;; *) return 1 ;; esac
+  curl -fsSL --connect-timeout 60 --speed-limit 1 --speed-time 60 -H 'Accept: application/octet-stream' "$asset_url" -o "$WORK/$name"
+}
 FILES="SHA256SUMS SHA256SUMS.sig"
 for binary in $BINARIES; do
   FILES="$FILES $binary-${GOOS}-${GOARCH}${EXT} $binary-${GOOS}-${GOARCH}${EXT}.sig"
 done
-set --
 for name in $FILES; do
-  set -- "$@" "$base/$name" -o "$WORK/$name"
+  download_asset "$name" || err "could not download $base/$name"
 done
-if ! curl -fsSL --fail-early "$@"; then
-  for name in $FILES; do
-    [ -s "$WORK/$name" ] || err "could not download $base/$name"
-  done
-  err "could not download the $VERSION release files from $base"
-fi
 
 # The key that signed the manifest must also have signed the asset, so a
 # rotation cannot leave one file checked against a retired key.

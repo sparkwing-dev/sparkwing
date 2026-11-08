@@ -30,6 +30,8 @@ unlock.
 
 ### Fixed
 
+- **Release downloads:** Installer, updater, engine and runner downloads fall back to GitHub’s asset API after a release-route server error or timeout, preserving signature and checksum verification.
+
 - **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
 - **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
 
