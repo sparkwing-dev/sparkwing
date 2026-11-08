@@ -681,7 +681,7 @@ func tagExistsOnRemote(ctx context.Context, repoDir, tag string) (bool, error) {
 }
 
 func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
-	res, err := sparkwing.Exec(ctx, "git", args...).Dir(dir).Run()
+	res, err := sparkwing.Exec(ctx, "git", args...).Dir(dir).Capture()
 	if err != nil {
 		msg := strings.TrimSpace(res.Stderr)
 		if msg == "" {

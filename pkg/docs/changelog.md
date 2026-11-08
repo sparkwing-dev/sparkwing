@@ -44,6 +44,7 @@ unlock.
 
 ### Added
 
+- **local controller:** Before upgrading a SQLite store's schema, the binary copies the store beside it as `state.db.schema-<N>-<time>.bak` under the upgrade's write lock. After a successful upgrade, it keeps only the two newest schema backups. A failed copy refuses the upgrade and leaves the store unchanged. An older binary refusing a newer store names the backup to restore. PostgreSQL stores still need an operator snapshot. See [the migration guide](docs/migrations/_unreleased.md#local-stores-are-copied-before-schema-upgrades).
 - **Go SDK:** `StartChild(ctx, pipeline, args)` submits a same-revision child without waiting. It inherits the parent's verified repository identity and continues after the parent job ends or is cancelled. Declare its target with `StartsChildren`; ordinary `RunAndAwait` children keep their parent-cancellation behavior.
 
 - **SDK protocol:** Hosts on Linux and macOS offer `host_exec` in hello. Go and TypeScript SDKs that see it hand `Exec`/`Bash` (`ctx.exec`/`ctx.bash`) commands to the host, which owns the process tree, writes output straight to the masked job log, relays captured output and kills commands on cancellation. Older SDKs and older hosts keep SDK-side execution. Host-run commands never receive engine-minted credentials such as `SPARKWING_NODE_TOKEN`, which Go SDKs previously passed through when a pipeline set them.
@@ -68,6 +69,9 @@ unlock.
 
 ### Fixed
 
+- **scaffold:** Source-built CLIs pin fresh projects to the latest published SDK instead of an unavailable future release.
+
+- **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
 - **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.
 
 - **CI:** hosted gates and security scans provision a private controller key inside their temporary Sparkwing home, allowing headless checks to start.

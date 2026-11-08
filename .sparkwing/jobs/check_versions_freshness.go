@@ -187,6 +187,9 @@ func scaffoldFallbackProblem(pinned, latest string) string {
 			pinned,
 		)
 	}
+	if semver.Compare(pinned, latest) > 0 {
+		return fmt.Sprintf("scaffold fallback pin %s is ahead of latest release %s (keep the published pin until the new tag is released)", pinned, latest)
+	}
 	if semver.Compare(pinned, latest) < 0 {
 		return fmt.Sprintf(
 			"scaffold fallback pin %s is behind latest release %s (bump scaffold.FallbackSDKVersion to %s so fresh source-built scaffolds build green)",

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -50,4 +52,34 @@ func copySQLiteSnapshot(ctx context.Context, path, final string) (err error) {
 		return err
 	}
 	return os.Link(partial, final)
+}
+
+func pruneSQLiteSchemaBackups(path string) error {
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	var backups []os.FileInfo
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), filepath.Base(path)+".schema-") || !strings.HasSuffix(entry.Name(), ".bak") || !entry.Type().IsRegular() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		backups = append(backups, info)
+	}
+	slices.SortFunc(backups, func(a, b os.FileInfo) int {
+		if order := b.ModTime().Compare(a.ModTime()); order != 0 {
+			return order
+		}
+		return strings.Compare(b.Name(), a.Name())
+	})
+	for _, backup := range backups[min(2, len(backups)):] {
+		if err := os.Remove(filepath.Join(filepath.Dir(path), backup.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }

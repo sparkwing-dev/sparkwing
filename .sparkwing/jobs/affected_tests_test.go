@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"path"
 	"path/filepath"
 	"slices"
@@ -104,7 +103,7 @@ func TestAffectedTestStepRunsTheChangeAndTheCriticalSetOnly(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "changed", "changed_test.go"),
 		"package changed\n\nimport \"testing\"\n\nfunc TestChanged(t *testing.T) { t.Fatal(\"changed package ran\") }\n")
 	gitCommitAll(t, root, "change")
-	ctx := context.Background()
+	ctx := newTestContext(t)
 	err := runAffectedTest(ctx)
 	if err == nil || !strings.Contains(err.Error(), "changed package ran") || !strings.Contains(err.Error(), "critical ran") || strings.Contains(err.Error(), "unaffected package ran") {
 		t.Fatalf("err = %v, want the changed package and the critical test run and the unrelated package left alone", err)
@@ -117,7 +116,7 @@ func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 		t.Fatal("could not locate the repository root from this file's compile-time path")
 	}
 	t.Chdir(root)
-	critical, err := criticalTests(context.Background())
+	critical, err := criticalTests(newTestContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +139,7 @@ func TestFrontendSuitesRunOnlyWhenTheirInputsChange(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
-	ctx := context.Background()
+	ctx := newTestContext(t)
 	writeGoFile(t, filepath.Join(root, "internal", "sound.go"), "package internal\n\nfunc Sound() int { return 2 }\n")
 	gitCommitAll(t, root, "go only")
 	if why, err := frontendChange(ctx, false); err != nil || why != "" {
@@ -186,7 +185,7 @@ func TestAffectedTestsRunTheReadersOfFilesOutsideEveryPackage(t *testing.T) {
 		t.Fatal("could not locate the repository root from this file's compile-time path")
 	}
 	t.Chdir(root)
-	ctx := context.Background()
+	ctx := newTestContext(t)
 	modules, err := committedModuleDirs(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -242,7 +241,7 @@ func TestDocsOnlyChangeSkipsTheGoStepsAndTheSDKSuite(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
-	ctx := context.Background()
+	ctx := newTestContext(t)
 	writeGoFile(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n")
 	gitCommitAll(t, root, "docs")
 	if !skipUnlessGoTouched("vet")(ctx) || !skipTypeScriptSDKUnlessTouched(ctx) {
