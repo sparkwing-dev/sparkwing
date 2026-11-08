@@ -135,7 +135,10 @@ pseudo-version from that base and the commit metadata. A release-tag build
 keeps its exact release version. A prerelease base uses Go's corresponding
 prerelease pseudo-version form; production policy classification requires a
 stable release base. The build fails when no release base is reachable. `--tag`
-overrides the stamp.
+overrides the stamp. Source image builds require a clean checkout and label both
+controller and runner images with the full Git HEAD revision, the resolved
+version and the canonical repository URL. Runtime-only bases carry no source
+binary and do not require a clean checkout.
 
 Cloud controllers and every launcher refuse to run work from a development
 build. A controller with `--deployment=cloud` refuses to start unless it is

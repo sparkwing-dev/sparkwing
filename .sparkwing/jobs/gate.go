@@ -843,11 +843,19 @@ func withProductTestHome(run func(home string) error) error {
 
 // perf: go test replays a pass only while the environment its tests read
 // repeats, so a fresh home per run reran every package reading SPARKWING_HOME.
-// Keyed by checkout and step and emptied around use; two runs of one step in
-// one checkout at once share it and fail loudly rather than pass wrongly.
+// A lock beside the home covers creation, execution and cleanup, so overlapping
+// runs of the same step cannot remove each other's state.
 func withStableProductTestHome(step string, run func(home string) error) error {
 	sum := sha256.Sum256([]byte(regexCheckRoot()))
 	home := filepath.Join(os.TempDir(), fmt.Sprintf("sparkwing-gate-home-%s-%x", step, sum[:6]))
+	lock, err := os.OpenFile(home+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open the suite's home lock: %w", err)
+	}
+	defer lock.Close()
+	if err := lockExclusiveFile(lock); err != nil {
+		return fmt.Errorf("lock the suite's sparkwing home: %w", err)
+	}
 	if err := os.RemoveAll(home); err != nil {
 		return fmt.Errorf("empty the suite's sparkwing home: %w", err)
 	}

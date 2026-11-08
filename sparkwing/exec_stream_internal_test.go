@@ -56,9 +56,11 @@ func TestDrainStreams_GivesUpWhenAWriterOutlivesTheCommand(t *testing.T) {
 		drainStreams(&wg, r)
 		close(returned)
 	}()
+	ctx, cancel := context.WithTimeout(t.Context(), streamDrainGrace+30*time.Second)
+	defer cancel()
 	select {
 	case <-returned:
-	case <-time.After(streamDrainGrace + 30*time.Second):
+	case <-ctx.Done():
 		t.Fatal("drainStreams never returned; a surviving writer wedges the node")
 	}
 }

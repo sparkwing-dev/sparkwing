@@ -239,8 +239,8 @@ func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, 
 		return fssecure.OpenPrivateConfig(log)
 	}
 	result.options = wingd.LocalStartOptions{Home: home, Executable: host.Binary, Version: host.Version}
-	result.mintLogin = func(ctx context.Context) (wingd.DashboardLogin, error) {
-		return wingdclient.MintDashboardLogin(ctx, home)
+	result.mintLogin = func(ctx context.Context, host string) (wingd.DashboardLogin, error) {
+		return wingdclient.MintDashboardLogin(ctx, home, host)
 	}
 	result.retireRunner = func(ctx context.Context) error {
 		err := wingdclient.Stop(ctx, wingdclient.Options{Home: home, RetireRunner: true})

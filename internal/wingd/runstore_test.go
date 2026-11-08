@@ -32,14 +32,14 @@ func TestSlowRunStoreDoesNotBlockOtherConnections(t *testing.T) {
 
 	blocked := ensure(t, home, "")
 	_, admitted := acquireAsync(t, blocked, coreReq("slow-store", 1))
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
 	select {
 	case <-entered:
-	case <-time.After(2 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("admission never reached the store")
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
 	other, err := client.EnsureDaemon(ctx, client.Options{Home: home, Version: "v1.0.0", Spawn: errSpawn, DialTimeout: time.Second, Backoff: 10 * time.Millisecond})
 	if err != nil {
 		unblock()
