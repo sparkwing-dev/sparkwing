@@ -57,20 +57,17 @@ func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 	}
 	spawn := func(home, version string) error { return spawnDetached(bin, home, version) }
 
-	start := time.Now()
-	_, err := EnsureDaemon(context.Background(), Options{
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err := EnsureDaemon(ctx, Options{
 		Home:        home,
 		Spawn:       spawn,
 		NoTakeover:  true,
 		DialTimeout: 200 * time.Millisecond,
 		Backoff:     10 * time.Millisecond,
 	})
-	elapsed := time.Since(start)
 	if !errors.Is(err, errDaemonHostFailed) {
 		t.Fatalf("error %v does not match errDaemonHostFailed", err)
-	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("waited %s for a host that died immediately; the socket budget is ~%s", elapsed, daemonStartupBudget(Options{}))
 	}
 	for _, want := range []string{bin, "unknown subcommand"} {
 		if !strings.Contains(err.Error(), want) {
