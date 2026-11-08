@@ -61,6 +61,8 @@ unlock.
 ### Fixed
 
 - **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
+- **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.
+
 - **CI:** hosted gates and security scans provision a private controller key inside their temporary Sparkwing home, allowing headless checks to start.
 
 - **deploy:** production smoke checks controller and launcher logs after both rollouts complete, so recovered startup probe failures do not trigger rollback; warnings and errors after readiness still fail the gate.
