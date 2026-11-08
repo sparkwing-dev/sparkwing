@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **local execution:** Avoid rehashing unchanged engine digests across installed and retained paths, and compare pinned runner bytes without a second SHA-256 pass.
+
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
 ### Added

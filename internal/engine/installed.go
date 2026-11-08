@@ -125,7 +125,7 @@ func executableDigest(ctx context.Context, path string) (string, error) {
 	record := ""
 	// hack: go test binaries resolve themselves as the engine; they must not leave records in a real home.
 	if !strings.HasSuffix(filepath.Base(path), ".test") {
-		record = selfDigestRecord()
+		record = selfDigestRecord(path)
 	}
 	if stable && record != "" {
 		if body, err := os.ReadFile(record); err == nil {
@@ -162,13 +162,13 @@ func fullExecutableDigest(ctx context.Context, path string) (string, error) {
 }
 
 // perf: each sparkwing process hashed its own 100 MB executable (250 ms) before running a replacement-pin
-// pipeline; the digest is kept on disk under the exact file identity, so only a new binary is hashed.
-func selfDigestRecord() string {
+// pipeline; each executable path keeps its exact file identity so installed and retained copies do not evict each other.
+func selfDigestRecord(path string) string {
 	p, err := paths.DefaultPaths()
 	if err != nil || p.Root == "" {
 		return ""
 	}
-	return filepath.Join(p.Root, "cache", "engine-self-digest")
+	return filepath.Join(p.Root, "cache", "engine-self-digests", digest([]byte(path)))
 }
 
 // safety: a lost or torn record only costs one hash; the read requires an exact identity and a valid digest.
