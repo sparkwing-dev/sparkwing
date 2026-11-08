@@ -143,8 +143,12 @@ does not authorize the Serve address. `dashboard.read_only` applies to both.
 The signed-out static shell is visible to anyone who can reach the Serve URL;
 API data still requires a session.
 
-Use Serve rather than Funnel. Tailscale warns that paths sharing a backend port
-can share exposure: review all mappings before exposing that port. See the
+Use Serve rather than Funnel. Serve the dashboard alone at that HTTPS name on
+port 443: any other app served under the same name, including another path, shares
+the browser origin and can read the dashboard session. `tailscale serve --bg 4343`
+takes over `/` on port 443, replacing an existing root mapping. List only names
+you control, typically your MagicDNS name: whoever controls a listed name's DNS
+and certificate controls its origin. See the
 [Serve guide](https://tailscale.com/docs/features/tailscale-serve).
 
 ## Runner labels
