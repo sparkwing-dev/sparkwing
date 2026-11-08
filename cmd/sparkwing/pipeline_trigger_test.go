@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -37,7 +38,7 @@ func enterGitCheckout(t *testing.T, origin string) {
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-c", "commit.gpgSign=false"}, args...)...)
+		cmd := testgit.Command("git", append([]string{"-c", "commit.gpgSign=false"}, args...)...)
 		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		if err != nil {

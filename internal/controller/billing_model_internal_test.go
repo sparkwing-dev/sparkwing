@@ -65,7 +65,7 @@ func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)
 		}
-		if response.Claim == nil || response.Claim.Binding.Deadline == nil || time.Until(*response.Claim.Binding.Deadline) > 4*time.Hour {
+		if response.Claim == nil || response.Claim.Binding.Deadline == nil || !response.Claim.Binding.Deadline.Equal(teststore.Now(e.Store).Add(4*time.Hour)) {
 			t.Fatalf("wire award deadline=%+v", response.Claim)
 		}
 	}

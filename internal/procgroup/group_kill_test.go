@@ -12,8 +12,10 @@ import (
 )
 
 func TestKillAnswersWhileCleanupWaitsOnStubbornDescendants(t *testing.T) {
-	g, releaseDescendants := parkCleanupOnStubbornDescendants(t)
+	g, releaseDescendants, finished := parkCleanupOnStubbornDescendants(t)
 
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
 	killed := make(chan error, 1)
 	go func() { killed <- g.Kill() }()
 	select {
@@ -21,19 +23,23 @@ func TestKillAnswersWhileCleanupWaitsOnStubbornDescendants(t *testing.T) {
 		if err != nil {
 			t.Fatalf("kill during cleanup: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-ctx.Done():
 		t.Fatal("kill blocked behind the descendant wait it exists to shortcut")
 	}
 
 	releaseDescendants()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	for !g.Reaped() {
-		select {
-		case <-deadline.C:
-			t.Fatalf("group %d was not reaped after the descendants cleared", g.ID())
-		case <-time.After(10 * time.Millisecond):
+	joined, stop := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stop()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("finish after descendants cleared: %v", err)
 		}
+	case <-joined.Done():
+		t.Fatalf("group %d did not finish after the descendants cleared", g.ID())
+	}
+	if !g.Reaped() {
+		t.Fatalf("group %d finished without reaping its leader", g.ID())
 	}
 }
 
@@ -41,27 +47,25 @@ func TestTerminateLeavesOnItsOwnDeadlineWhileCleanupIsParked(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	g, _ := parkCleanupOnStubbornDescendants(t)
+	g, _, _ := parkCleanupOnStubbornDescendants(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	terminated := make(chan error, 1)
-	start := time.Now()
 	go func() { terminated <- g.Terminate(ctx, 10*time.Millisecond) }()
+	joined, stop := context.WithTimeout(t.Context(), 2*time.Second)
+	defer stop()
 	select {
 	case err := <-terminated:
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("terminate during a parked cleanup = %v, want its own deadline", err)
 		}
-		if elapsed := time.Since(start); elapsed > 2*time.Second {
-			t.Fatalf("terminate took %s to honour a 500ms deadline", elapsed)
-		}
-	case <-time.After(2 * time.Second):
+	case <-joined.Done():
 		t.Fatal("terminate blocked past its deadline behind a parked cleanup")
 	}
 }
 
-func parkCleanupOnStubbornDescendants(t *testing.T) (*Group, func()) {
+func parkCleanupOnStubbornDescendants(t *testing.T) (*Group, func(), <-chan error) {
 	t.Helper()
 	g := startHelper(t, "short")
 	t.Cleanup(func() {
@@ -69,9 +73,11 @@ func parkCleanupOnStubbornDescendants(t *testing.T) (*Group, func()) {
 			terminateForTest(g)
 		}
 	})
+	ready, stop := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stop()
 	select {
 	case <-g.LeaderExited():
-	case <-time.After(3 * time.Second):
+	case <-ready.Done():
 		t.Fatal("leader did not exit")
 	}
 
@@ -102,19 +108,23 @@ func parkCleanupOnStubbornDescendants(t *testing.T) (*Group, func()) {
 	}()
 	t.Cleanup(func() {
 		releaseDescendants()
+		joined, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
 		select {
 		case <-finished:
-		case <-time.After(5 * time.Second):
+		case <-joined.Done():
 			t.Error("timed out joining the cleanup that held the descendant wait")
 		}
 	})
 
+	parked, stopParked := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopParked()
 	select {
 	case <-waiting:
 	case err := <-finished:
 		t.Fatalf("cleanup returned before it reached the descendant wait: %v", err)
-	case <-time.After(5 * time.Second):
+	case <-parked.Done():
 		t.Fatal("cleanup never reached the descendant wait")
 	}
-	return g, releaseDescendants
+	return g, releaseDescendants, finished
 }

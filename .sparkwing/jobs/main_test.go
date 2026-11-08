@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 // safety: a pipeline node hands its children the machine's sparkwing home, so
@@ -12,6 +14,10 @@ import (
 // runs store. Nothing here needs that home; a test wanting its own still calls
 // t.Setenv.
 func TestMain(m *testing.M) {
+	if err := testgit.Unbind(); err != nil {
+		fmt.Fprintln(os.Stderr, "jobs test: scrub Git environment:", err)
+		os.Exit(1)
+	}
 	home, err := os.MkdirTemp("", "sparkwing-jobs-home-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "jobs test: create sparkwing home:", err)

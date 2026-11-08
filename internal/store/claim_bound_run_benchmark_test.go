@@ -5,7 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -104,7 +104,7 @@ func BenchmarkClaimBoundRun4000(b *testing.B) {
 			poll()
 			trace.examine = false
 			b.ReportMetric(float64(examined.Load()), "replayed_pending_predicate_evals/op")
-			sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+			slices.Sort(samples)
 			b.ReportMetric(float64(samples[(len(samples)*95+99)/100-1].Nanoseconds()), "p95-ns/op")
 			b.ReportMetric(4000, "ready_jobs")
 		})

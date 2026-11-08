@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -27,46 +28,47 @@ func TestBackoffPollDoublesUpToItsCap(t *testing.T) {
 }
 
 func TestWaitDescendantsEmptyBacksOffWhileTheTreeRefusesToDie(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
-	const window = 500 * time.Millisecond
-	probes := &atomic.Int64{}
-	g := &Group{id: 4242}
-	g.SetDescendantProbe(func(int, bool, bool) (bool, error) {
-		probes.Add(1)
-		return false, nil
+	synctest.Test(t, func(t *testing.T) {
+		const window = 500 * time.Millisecond
+		probes := &atomic.Int64{}
+		g := &Group{id: 4242}
+		g.SetDescendantProbe(func(int, bool, bool) (bool, error) {
+			probes.Add(1)
+			return false, nil
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), window)
+		defer cancel()
+		if err := g.waitDescendantsEmpty(ctx); err == nil {
+			t.Fatal("wait returned success while descendants remained")
+		}
+
+		unpaced := int64(window / guardedSessionPollInterval)
+		if got := probes.Load(); got >= unpaced/2 {
+			t.Fatalf("process-table probes = %d in %s; an unpaced wait would be about %d", got, window, unpaced)
+		}
+		if got := probes.Load(); got < 2 {
+			t.Fatalf("process-table probes = %d; the wait stopped watching", got)
+		}
 	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), window)
-	defer cancel()
-	if err := g.waitDescendantsEmpty(ctx); err == nil {
-		t.Fatal("wait returned success while descendants remained")
-	}
-
-	unpaced := int64(window / guardedSessionPollInterval)
-	if got := probes.Load(); got >= unpaced/2 {
-		t.Fatalf("process-table probes = %d in %s; an unpaced wait would be about %d", got, window, unpaced)
-	}
-	if got := probes.Load(); got < 2 {
-		t.Fatalf("process-table probes = %d; the wait stopped watching", got)
-	}
 }
 
 func TestWaitDescendantsEmptyStillAnswersQuickly(t *testing.T) {
-	probes := &atomic.Int64{}
-	g := &Group{id: 4243}
-	g.SetDescendantProbe(func(int, bool, bool) (bool, error) {
-		return probes.Add(1) > 1, nil
-	})
+	synctest.Test(t, func(t *testing.T) {
+		probes := &atomic.Int64{}
+		g := &Group{id: 4243}
+		g.SetDescendantProbe(func(int, bool, bool) (bool, error) {
+			return probes.Add(1) > 1, nil
+		})
 
-	start := time.Now()
-	if err := g.waitDescendantsEmpty(context.Background()); err != nil {
-		t.Fatalf("wait for an emptied group: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
-		t.Fatalf("observing an emptied group took %s, want about the base poll interval", elapsed)
-	}
+		start := time.Now()
+		if err := g.waitDescendantsEmpty(context.Background()); err != nil {
+			t.Fatalf("wait for an emptied group: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed != guardedSessionPollInterval {
+			t.Fatalf("observing an emptied group took %s, want the base poll interval", elapsed)
+		}
+	})
 }
 
 func TestSessionEmptyAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {

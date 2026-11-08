@@ -2,10 +2,11 @@ package jobs
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
@@ -116,9 +117,9 @@ func TestCommentStepIncludesSnapshotFilesWhenTheBaselineIsMissing(t *testing.T) 
 
 func runTestGitWithIndex(t *testing.T, dir, index string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
+	cmd.Env = append(testgit.Env(os.Environ()), "GIT_INDEX_FILE="+index)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}

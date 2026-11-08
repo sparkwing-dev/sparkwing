@@ -28,19 +28,21 @@ func runDaemon(t *testing.T, home, version string) chan error {
 	}()
 	t.Cleanup(func() {
 		cancel()
-		timer := time.NewTimer(time.Second)
-		defer timer.Stop()
+		ctx, stop := context.WithTimeout(context.Background(), time.Second)
+		defer stop()
 		select {
 		case <-finished:
-		case <-timer.C:
+		case <-ctx.Done():
 			t.Error("daemon did not stop within 1s of cleanup cancellation")
 		}
 	})
+	ready, stop := context.WithTimeout(t.Context(), stopTestWait)
+	defer stop()
 	select {
 	case <-d.Ready():
 	case err := <-done:
 		t.Fatalf("daemon exited before serving: %v", err)
-	case <-time.After(stopTestWait):
+	case <-ready.Done():
 		t.Fatal("daemon never became ready")
 	}
 	return done
@@ -61,7 +63,7 @@ func TestStop_EndsTheDaemonAndLeavesNothingAnswering(t *testing.T) {
 		if err != nil {
 			t.Fatalf("daemon Run returned %v, want a clean stop", err)
 		}
-	case <-time.After(stopTestWait):
+	case <-ctx.Done():
 		t.Fatal("daemon kept running after Stop returned")
 	}
 	if _, err := Query(ctx, Options{Home: home}); !errors.Is(err, ErrNoDaemon) {
@@ -84,7 +86,7 @@ func TestStop_ReturnsOnlyAfterTheDaemonReleasedTheHome(t *testing.T) {
 				cancel()
 				t.Fatalf("stop: %v", err)
 			}
-			cancel()
+			defer cancel()
 
 			held, err := wingd.LockHeld(home)
 			if err != nil {
@@ -102,7 +104,7 @@ func TestStop_ReturnsOnlyAfterTheDaemonReleasedTheHome(t *testing.T) {
 				if err != nil {
 					t.Fatalf("daemon Run returned %v, want a clean stop", err)
 				}
-			case <-time.After(stopTestWait):
+			case <-ctx.Done():
 				t.Fatal("daemon kept running after Stop returned")
 			}
 		})
@@ -144,7 +146,7 @@ func TestStop_KeepsANewerBuildFromTakingOverInstead(t *testing.T) {
 	}
 	select {
 	case <-done:
-	case <-time.After(stopTestWait):
+	case <-ctx.Done():
 		t.Fatal("daemon kept running after Stop returned")
 	}
 }

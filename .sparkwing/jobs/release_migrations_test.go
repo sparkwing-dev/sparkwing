@@ -3,10 +3,11 @@ package jobs
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 const twoBreakingChangelog = `# Changelog
@@ -483,7 +484,7 @@ func TestRepositoryUnreleasedSectionDeclaresEveryWireCut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("git", "-C", root, "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD").Output()
+	out, err := testgit.Command("git", "-C", root, "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD").Output()
 	if err != nil {
 		t.Skipf("no release tag in this checkout's history: %v", err)
 	}

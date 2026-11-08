@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
@@ -54,7 +56,7 @@ func withRepo(t *testing.T) string {
 
 func runHost(t *testing.T, name string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
+	cmd := testgit.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
@@ -409,7 +411,7 @@ func TestComputeTagsDetachedHead(t *testing.T) {
 	writeFile(t, "a.txt", "hello")
 	commit(t, "init")
 
-	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	out, err := testgit.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("rev-parse: %v", err)
 	}

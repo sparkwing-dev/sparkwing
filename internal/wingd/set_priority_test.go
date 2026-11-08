@@ -35,19 +35,13 @@ func waiterPriority(qs wingwire.QueueState, id string) (int, bool) {
 	return 0, false
 }
 
-func waitForParticipant(t *testing.T, home, participantID string) wingwire.QueueState {
+func participantQueueState(t *testing.T, home, participantID string) wingwire.QueueState {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		qs := queueOnce(t, home)
-		if _, ok := waiterPriority(qs, participantID); ok {
-			return qs
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("participant %q never appeared as a waiter: %+v", participantID, qs.Waiters)
-		}
-		time.Sleep(10 * time.Millisecond)
+	qs := queueOnce(t, home)
+	if _, ok := waiterPriority(qs, participantID); !ok {
+		t.Fatalf("participant %q missing after its queue update: %+v", participantID, qs.Waiters)
 	}
+	return qs
 }
 
 func TestSetPriority_WaiterIsReRankedAndAdmitted(t *testing.T) {
@@ -84,7 +78,7 @@ func TestSetPriority_WaiterIsReRankedAndAdmitted(t *testing.T) {
 	if r := waitResult(t, secondResult, 3*time.Second); r.err != nil {
 		t.Fatalf("second never admitted after the raise: %v", r.err)
 	}
-	qs := waitForWaiter(t, home, "first")
+	qs := waiterQueueState(t, home, "first")
 	if _, still := waiterPriority(qs, "second"); still {
 		t.Fatalf("second is still queued after outranking first: %+v", qs.Waiters)
 	}
@@ -162,7 +156,7 @@ func TestSetPriority_RelativeModesExcludeTheRunsOwnParticipants(t *testing.T) {
 	if ack := setPriority(t, home, "mover", 0, "back"); ack.Priority != -3 || ack.Previous != 5 {
 		t.Fatalf("back ack = %+v, want priority -3 from 5", ack)
 	}
-	qs := waitForWaiter(t, home, "mover")
+	qs := waiterQueueState(t, home, "mover")
 	if p, ok := waiterPriority(qs, "mover"); !ok || p != -3 {
 		t.Fatalf("mover priority = %d (present %v), want -3", p, ok)
 	}
@@ -190,7 +184,7 @@ func TestSetPriority_OverrideAppliesToASubsequentOwnerRequest(t *testing.T) {
 	nodePositions, _ := acquireAsync(t, nodeCl, nodeReq)
 	waitForQueue(t, nodePositions)
 
-	qs := waitForParticipant(t, home, "node-1")
+	qs := participantQueueState(t, home, "node-1")
 	if p, ok := waiterPriority(qs, "node-1"); !ok || p != 7 {
 		t.Fatalf("node priority = %d (present %v), want the run's 7 rather than the carried 0", p, ok)
 	}

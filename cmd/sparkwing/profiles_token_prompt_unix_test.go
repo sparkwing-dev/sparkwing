@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"runtime"
@@ -12,6 +13,8 @@ import (
 )
 
 func TestRestoreEchoOnSignalRestoresTheTerminalBeforeExiting(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	restored := make(chan struct{})
 	exited := make(chan int, 1)
 	original := exitOnSignal
@@ -29,7 +32,7 @@ func TestRestoreEchoOnSignalRestoresTheTerminalBeforeExiting(t *testing.T) {
 	}
 	select {
 	case <-restored:
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("an interrupt during the password prompt did not restore terminal echo")
 	}
 	select {
@@ -37,12 +40,14 @@ func TestRestoreEchoOnSignalRestoresTheTerminalBeforeExiting(t *testing.T) {
 		if want := 128 + int(syscall.SIGINT); code != want {
 			t.Errorf("exit code = %d, want %d", code, want)
 		}
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the interrupt handler did not end the process")
 	}
 }
 
 func TestRestoreEchoOnSignalStopsListeningAfterTheRead(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	restored := make(chan struct{}, 1)
 	original := exitOnSignal
 	exitOnSignal = func(int) { runtime.Goexit() }
@@ -59,7 +64,7 @@ func TestRestoreEchoOnSignalStopsListeningAfterTheRead(t *testing.T) {
 	}
 	select {
 	case <-observed:
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the test never observed the interrupt")
 	}
 	select {

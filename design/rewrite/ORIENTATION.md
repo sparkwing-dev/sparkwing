@@ -354,6 +354,16 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 
 ## Test and gate workflow
 
+The shared test sandbox and the pipeline module's TestMain scrub Git bindings
+before production code can inherit them. Git fixtures use `pkg/gitenv/testgit`
+for commands and custom environments.
+Shell tests source `bin/test-git-env.sh` before invoking Git. Both remove ambient
+Git controls while preserving config selection and prompt policy. Bind a fixture index or config
+explicitly after scrubbing when the behavior under test needs one.
+`TestRepositoryGitFixturesUseTheScrubbedEnvironment` guards direct test calls,
+and `TestCommandsLeaveAnAmbientRepositoryUntouched` proves native and shell
+fixtures leave an ambient repository's config and index untouched.
+
 A lane test script exports its environment once and runs every command with
 `-C`:
 
