@@ -150,23 +150,31 @@ absolute path in scripts and services.
 
 ## Quick Start
 
+Install [Go](https://go.dev/doc/install) and Git on PATH. The Go scaffold runs
+`go mod tidy`, and the first run downloads the SDK before compiling.
+
 ```bash
-# 1. Set up your repo
-cd your-project
-sparkwing pipeline new --pipeline release   # single-node minimal template by default
+# 1. Scaffold in your Git repository
+sparkwing pipeline new --pipeline hello
 
-# 2. Run your first pipeline
-sparkwing run release
+# 2. Review and commit the generated files
+sparkwing pipeline plan --pipeline hello
+git add .sparkwing
+git commit -m "Add local CI pipeline"
 
-# 3. (Optional) Watch runs in the browser
-sparkwing dashboard open     # one-time sign-in link for the dashboard on :4343
+# 3. Run it, then repeat to reuse the compiled pipeline cache
+sparkwing run hello
+sparkwing run hello
+
+# 4. Print a one-time sign-in link and visit it in your browser
+sparkwing dashboard open
 ```
 
 In a new Git repository, preview the scaffold before your first commit with
-`sparkwing pipeline plan --pipeline release`. Running requires an initial
+`sparkwing pipeline plan --pipeline hello`. Running requires an initial
 commit so intake can record a commit identity. Review and commit your files,
 or run `git commit --allow-empty -m 'Initial commit'`, then retry
-`sparkwing run release`.
+`sparkwing run hello`.
 
 The scaffold adds `sparkwing-pipeline` to `.sparkwing/.gitignore` so Git
 ignores an untracked generated binary. Git does not untrack a binary already
@@ -213,18 +221,65 @@ than importing it, `sparkwing pipeline sparks inflate --library <name>`
 copies its source into your repo. See
 [inflating a spark library](sparks.md#inflating-a-spark-library).
 
-Each `sparkwing` invocation compiles `.sparkwing/` and runs the pipeline as a host
-subprocess. Run state lives under `~/.sparkwing/` (SQLite + log files).
-The local controller starts on demand and the dashboard commands manage its
-lifecycle. See [Local dashboard](native-mode.md) for service installation.
-Dashboard records include `url` when known. Use `--output plain` for a single
+`sparkwing run` compiles `.sparkwing/` when its sources or dependencies change
+and reuses the cached binary otherwise. The local runner executes jobs on this
+machine. Run state lives under `~/.sparkwing/` (SQLite + log files).
+The local controller starts on demand and serves the dashboard for its whole
+lifetime. `sparkwing dashboard open` prints a sign-in link. On Linux and macOS,
+`sparkwing daemon install` keeps the controller running as a login service.
+Use `sparkwing daemon status` to inspect it and `sparkwing daemon stop` to stop
+it. See [Local dashboard](native-mode.md) for service requirements.
+Daemon records include `url` when known. Use `--output plain` for a single
 `running` or `stopped` value, or `--output pretty` for the terminal layout.
-A stopped `status` still exits 1; stopping an absent server exits 0.
+A stopped `daemon status` exits 1; stopping an absent controller exits 0.
 
 If you want a local Kubernetes cluster as a deploy target for user apps
 (not for sparkwing itself), bring your own - any local Kubernetes setup
-works. Sparkwing does not run in-cluster locally; the controller is a
-prod-only component.
+works. Local CI uses the controller on your machine.
+
+### Inspect a failed run
+
+The run's final output includes its ID and commands to inspect it:
+
+```bash
+sparkwing runs list
+sparkwing runs status --run RUN_ID
+sparkwing runs logs --run RUN_ID
+```
+
+Fix the failing job and run the pipeline again. If a run stays pending, inspect
+`sparkwing queue list` and the controller log at
+`~/.sparkwing/wingd/d.log`. On a systemd Linux host,
+local jobs need a working user manager. Check `systemctl --user status` from
+your login session. See [local runner supervision](local-execution.md).
+
+### Schedule local work
+
+Scaffold a daily report, review and commit it, then arm its schedule:
+
+```bash
+sparkwing pipeline new --pipeline report --template scheduled-report
+git add .sparkwing
+git commit -m "Add daily report"
+sparkwing run report
+sparkwing schedules install --profile= --schedule report
+sparkwing schedules list --profile=
+sparkwing schedules list --timer
+```
+
+The template declares 09:00 UTC daily in `.sparkwing/sparkwing.yaml`. Edit that
+cadence before installing. A declaration alone does not arm a schedule.
+Installation proves and pins the pipeline, captures its environment, and installs
+a systemd user timer on Linux or a launchd agent on macOS. The timer starts the
+local controller on demand through `__tick`; Windows uses the controller's
+schedule evaluator. The machine must be awake for work to run. Reinstall after
+changing the pipeline to update its pin, or choose `--unpinned` to compile the
+checkout on every fire.
+
+`sparkwing schedules run --profile= --schedule report` starts an immediate run
+without changing the cadence. `sparkwing schedules uninstall --profile= --schedule report` removes it. `--no-timer` registers the declaration without
+arming a native timer. See [Schedules](schedules.md) for timezone, catch-up and
+pause controls.
 
 ### Storage class
 
@@ -280,7 +335,7 @@ What still wants the network is visible in advance:
 A **pipeline** is anything `sparkwing` (or `sparkwing run`) can invoke. Two
 shapes share the same surface:
 
-- **triggered pipeline** - a YAML entry with an `on:` trigger; runs itself on push / webhook / schedule. Implemented as a Go type whose factory is registered via `sparkwing.Register`.
+- **triggered pipeline** - a YAML entry with an `on:` trigger. Push and webhook triggers need a connected controller. Local schedules fire after `sparkwing schedules install`. Implemented as a Go type whose factory is registered via `sparkwing.Register`.
 - **manual pipeline** - a YAML entry with no `on:` trigger. Runs only when explicitly invoked. Same Go registration; it's "triggered" vs "manual" distinguishes auto-firing from operator-initiated.
 
 Both produce a Run in the local store on each invocation. The dashboard's
