@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -55,20 +57,17 @@ func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 	}
 	spawn := func(home, version string) error { return spawnDetached(bin, home, version) }
 
-	start := time.Now()
-	_, err := EnsureDaemon(context.Background(), Options{
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err := EnsureDaemon(ctx, Options{
 		Home:        home,
 		Spawn:       spawn,
 		NoTakeover:  true,
 		DialTimeout: 200 * time.Millisecond,
 		Backoff:     10 * time.Millisecond,
 	})
-	elapsed := time.Since(start)
 	if !errors.Is(err, errDaemonHostFailed) {
 		t.Fatalf("error %v does not match errDaemonHostFailed", err)
-	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("waited %s for a host that died immediately; the socket budget is ~%s", elapsed, daemonStartupBudget(Options{}))
 	}
 	for _, want := range []string{bin, "unknown subcommand"} {
 		if !strings.Contains(err.Error(), want) {
@@ -186,7 +185,7 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 		t.Skip("git not available; the release pipeline carries the same check")
 	}
 	root := repoRootForTest(t)
-	cmd := exec.Command("git", "tag", "--list", firstHostingRelease)
+	cmd := testgit.Command("git", "tag", "--list", firstHostingRelease)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -196,7 +195,7 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 		return
 	}
 	const marker = "internal/wingd/supervise/supervise.go"
-	probe := exec.Command("git", "cat-file", "-e", firstHostingRelease+":"+marker)
+	probe := testgit.Command("git", "cat-file", "-e", firstHostingRelease+":"+marker)
 	probe.Dir = root
 	if err := probe.Run(); err != nil {
 		t.Fatalf("firstHostingRelease names %s, a released tag that does not contain %s -- that build cannot host a "+

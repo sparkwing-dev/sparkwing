@@ -4,7 +4,9 @@ package wingd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -77,18 +79,22 @@ func startAPIDaemon(t *testing.T, cfg Config) (*Daemon, *apiRecorder, <-chan err
 	}()
 	t.Cleanup(func() {
 		cancel()
+		ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
 		select {
 		case <-finished:
-		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
 			t.Error("daemon did not stop after cancel")
 		}
 	})
+	ready, stop := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stop()
 	select {
 	case <-d.Ready():
 	case err := <-errc:
 		cancel()
 		t.Fatalf("daemon exited before serving: %v", err)
-	case <-time.After(3 * time.Second):
+	case <-ready.Done():
 		cancel()
 		t.Fatal("daemon never became ready")
 	}
@@ -96,10 +102,12 @@ func startAPIDaemon(t *testing.T, cfg Config) (*Daemon, *apiRecorder, <-chan err
 }
 
 func TestAPISocketSitsBesideAdmissionAtMode0600(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
 	d, rec, _ := startAPIDaemon(t, Config{})
 	select {
 	case <-rec.serve:
-	case <-time.After(3 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the daemon never handed the API listener over")
 	}
 	sock := d.layout.apiSock
@@ -125,7 +133,7 @@ func TestAPISocketSitsBesideAdmissionAtMode0600(t *testing.T) {
 	select {
 	case accepted := <-rec.held:
 		defer func() { _ = accepted.Close() }()
-	case <-time.After(3 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the API server never saw the connection")
 	}
 	peers := rec.peers()
@@ -135,24 +143,22 @@ func TestAPISocketSitsBesideAdmissionAtMode0600(t *testing.T) {
 }
 
 func TestAPISocketRefusesAPeerFromAnotherAccount(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
 	restore := readPeerUID
 	foreign := os.Getuid() + 1
 	readPeerUID = func(net.Conn) (int, bool, error) { return foreign, true, nil }
 	t.Cleanup(func() { readPeerUID = restore })
 
-	var mu sync.Mutex
-	var logs strings.Builder
+	refused := make(chan struct{})
 	d, rec, _ := startAPIDaemon(t, Config{Logf: func(format string, args ...any) {
-		mu.Lock()
-		defer mu.Unlock()
-		fmt.Fprintf(&logs, format+"\n", args...)
+		if strings.Contains(fmt.Sprintf(format, args...), fmt.Sprintf("refused a connection from uid %d", foreign)) {
+			close(refused)
+		}
 	}})
 	select {
 	case <-rec.serve:
-	case <-time.After(3 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the daemon never handed the API listener over")
 	}
 
@@ -162,23 +168,23 @@ func TestAPISocketRefusesAPeerFromAnotherAccount(t *testing.T) {
 	}
 	defer func() { _ = nc.Close() }()
 
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		mu.Lock()
-		got := logs.String()
-		mu.Unlock()
-		if strings.Contains(got, fmt.Sprintf("refused a connection from uid %d", foreign)) {
-			break
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := nc.SetReadDeadline(deadline); err != nil {
+			t.Fatal(err)
 		}
-		if !time.Now().Before(deadline) {
-			t.Fatalf("the daemon log does not record the refusal:\n%s", got)
-		}
-		time.Sleep(20 * time.Millisecond)
+	}
+	if n, err := nc.Read(make([]byte, 1)); n != 0 || !errors.Is(err, io.EOF) {
+		t.Fatalf("foreign connection was not closed: n=%d err=%v", n, err)
+	}
+	select {
+	case <-refused:
+	case <-ctx.Done():
+		t.Fatal("the daemon did not record the refusal")
 	}
 	select {
 	case <-rec.held:
 		t.Fatal("the API server was handed a connection from another account")
-	case <-time.After(200 * time.Millisecond):
+	default:
 	}
 	if peers := rec.peers(); len(peers) != 0 {
 		t.Fatalf("peer uids %v, want none", peers)

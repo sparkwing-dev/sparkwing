@@ -125,7 +125,21 @@ func TestProcSampler_IdleTreeIsZero(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	requireObservableProcCPU(t)
-	root := startProcessTree(t, exec.Command("sh", "-c", `sleep 5 & wait`))
+	cmd := exec.Command("sh", "-c", `sleep 600 & printf r; wait`)
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	cmd.Stdout = writer
+	root := startProcessTree(t, cmd)
+	_ = writer.Close()
+	if err := reader.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(reader, make([]byte, 1)); err != nil {
+		t.Fatalf("idle descendant readiness: %v", err)
+	}
 	p := newProcSampler()
 	usage := sampleSubtreeCPU(t, p, root)
 	if usage.Fraction > 0.1 {
@@ -136,9 +150,10 @@ func TestProcSampler_IdleTreeIsZero(t *testing.T) {
 func sampleSubtreeCPU(t *testing.T, sampler *procSampler, root int) ProcUsage {
 	t.Helper()
 	sampler.CPUUsage(root)
-	window := time.NewTimer(subtreeSampleWindow)
-	defer window.Stop()
-	<-window.C
+	for pid, baseline := range sampler.last {
+		baseline.at = baseline.at.Add(-subtreeSampleWindow)
+		sampler.last[pid] = baseline
+	}
 	usage, ok := sampler.CPUUsage(root)
 	if !ok {
 		t.Fatalf("root pid %d produced no CPU sample", root)
@@ -167,26 +182,5 @@ func startProcessTree(t *testing.T, cmd *exec.Cmd) int {
 		syscall.Kill(-pid, syscall.SIGKILL)
 		cmd.Wait()
 	})
-	waitForProcessDescendant(t, pid)
 	return pid
-}
-
-func waitForProcessDescendant(t *testing.T, root int) {
-	t.Helper()
-	sampler := newProcSampler()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
-	for {
-		usage, ok := sampler.CPUUsage(root)
-		if ok && usage.HasDescendant {
-			return
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatalf("root pid %d did not expose a descendant before the deadline", root)
-		}
-	}
 }

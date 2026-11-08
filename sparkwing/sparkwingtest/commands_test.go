@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/docker"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/git"
@@ -59,7 +61,7 @@ func TestFakeHostRelaysGitAndDockerHelpers(t *testing.T) {
 		t.Skip("git unavailable")
 	}
 	dir := t.TempDir()
-	command := exec.Command("git", "-C", dir, "init", "--initial-branch=main")
+	command := testgit.Command("git", "-C", dir, "init", "--initial-branch=main")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s: %v", output, err)
 	}

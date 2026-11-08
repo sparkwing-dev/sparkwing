@@ -10,11 +10,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -76,7 +77,7 @@ func main(){sparkwing.Register[inputs]("gate",func() sparkwing.Pipeline[inputs]{
 `)
 	git := func(args ...string) string {
 		t.Helper()
-		c := exec.CommandContext(t.Context(), "git", append([]string{"-C", upload}, args...)...)
+		c := testgit.CommandContext(t.Context(), "git", append([]string{"-C", upload}, args...)...)
 		out, err := c.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
@@ -99,7 +100,7 @@ func main(){sparkwing.Register[inputs]("gate",func() sparkwing.Pipeline[inputs]{
 		t.Fatal(err)
 	}
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
-	base := procenv.Base{Local: true, Captured: os.Environ()}
+	base := procenv.Base{Local: true, Captured: testgit.Env(os.Environ())}
 	entry, err := source.Acquire(t.Context(), source.Spec{RepoKey: "git:example.test/team/repo", RemoteURL: "https://example.test/team/repo", SHA: sha, BundleDigest: hex.EncodeToString(digest[:])}, source.Options{Access: uploadedBundle(body), BundleTransport: uploadedBundle(body), Workspace: filepath.Join(root, "workspaces"), Engines: resolver, Target: target, Base: base})
 	if err != nil {
 		t.Fatalf("uploaded Go pipeline acquisition through sparkwing-runner: %v", err)

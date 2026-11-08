@@ -222,10 +222,11 @@ func (e *directSourceE2E) startRunner(name, command string) {
 		_ = cmd.Process.Signal(os.Interrupt)
 		done := make(chan struct{})
 		go func() { _ = cmd.Wait(); close(done) }()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		select {
 		case <-done:
-		// sleepcheck:external-boundary external runner gets ten seconds to exit before kill
-		case <-time.After(10 * time.Second):
+		case <-ctx.Done():
 			_ = cmd.Process.Kill()
 			<-done
 		}

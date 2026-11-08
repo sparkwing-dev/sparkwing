@@ -2,10 +2,11 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -20,7 +21,7 @@ func pushedAndLocalCommits(t *testing.T) (work, pushed, local string) {
 	commit := func(msg string) string {
 		gitInRepo(t, work, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgSign=false",
 			"commit", "--quiet", "--allow-empty", "-m", msg)
-		out, err := exec.Command("git", "-C", work, "rev-parse", "HEAD").Output()
+		out, err := testgit.Command("git", "-C", work, "rev-parse", "HEAD").Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +38,7 @@ func pushedAndLocalCommits(t *testing.T) (work, pushed, local string) {
 func TestTriggerPreflightSeesOnlyPushedCommits(t *testing.T) {
 	work, pushed, local := pushedAndLocalCommits(t)
 	check := func(directory, sha string) error {
-		selected := preparedTriggerSource{git: runspec.Git{SHA: sha}, source: runspec.Source{Ref: sha}, checkout: triggerCheckout{directory: directory, environment: os.Environ()}}
+		selected := preparedTriggerSource{git: runspec.Git{SHA: sha}, source: runspec.Source{Ref: sha}, checkout: triggerCheckout{directory: directory, environment: testgit.Env(os.Environ())}}
 		return selected.checkReachable(t.Context())
 	}
 	if err := check(work, pushed); err != nil {
@@ -53,7 +54,7 @@ func TestTriggerPreflightSeesOnlyPushedCommits(t *testing.T) {
 func TestTriggerPreflightRejectsCommitOnlyOnAnotherRemote(t *testing.T) {
 	work, _, local := pushedAndLocalCommits(t)
 	gitInRepo(t, work, "update-ref", "refs/remotes/upstream/main", local)
-	selection := preparedTriggerSource{git: runspec.Git{SHA: local}, source: runspec.Source{Ref: local}, checkout: triggerCheckout{directory: work, environment: os.Environ()}}
+	selection := preparedTriggerSource{git: runspec.Git{SHA: local}, source: runspec.Source{Ref: local}, checkout: triggerCheckout{directory: work, environment: testgit.Env(os.Environ())}}
 	if err := selection.checkReachable(t.Context()); err == nil || !strings.Contains(err.Error(), "not on origin") {
 		t.Fatalf("preflight accepted an unpushed origin commit: %v", err)
 	}

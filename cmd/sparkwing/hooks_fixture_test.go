@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 type chainFixture struct {
@@ -79,7 +81,7 @@ func (f *chainFixture) git(t *testing.T, args ...string) string {
 
 func (f *chainFixture) tryGit(dir string, args ...string) (string, error) {
 	args = append([]string{"-c", "user.name=sparkwing test", "-c", "user.email=test@example.invalid"}, args...)
-	cmd := exec.Command("git", args...)
+	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
 	if dir == "" {
 		cmd.Dir = f.repo
