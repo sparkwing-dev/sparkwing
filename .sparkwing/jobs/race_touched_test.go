@@ -131,6 +131,21 @@ func TestRaceTouchedRunsTheRaceDetectorOnTheChangedPackage(t *testing.T) {
 	}
 }
 
+func TestAffectedRaceDefersLongIntegrationBodies(t *testing.T) {
+	root := gateFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "internal", "slow_test.go"), `package internal
+import "testing"
+func TestSlowIntegration(t *testing.T) {
+	if testing.Short() { t.Skip("integration") }
+	t.Fatal("long integration body ran in the affected gate")
+}
+`)
+	gitCommitAll(t, root, "base")
+	if err := runAffectedRaceModules(context.Background(), map[string][]string{".": {"./internal"}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 const racyTest = `package internal
 
 import (

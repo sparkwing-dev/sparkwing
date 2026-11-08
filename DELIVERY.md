@@ -102,7 +102,7 @@ push, the step fetches main and checks its ancestry. It merges main only when
 main is not an ancestor of the pushed commit. Otherwise it preserves the
 remote's reason and says the push can be retried. The job's output is the
 landing record (branch, the commit and tree pushed, the gated tree, base,
-merges, gate run, review record path and result). The gate's `test` step summary lists the slowest packages and tests.
+merges, gate run, review record path and result). The gate's `test` step reports the affected package count and critical tests.
 
 When `origin/main` is not an ancestor of HEAD at push time, the `push` step
 merges it into the branch in the checkout (`git merge --no-ff`, the default
@@ -767,10 +767,14 @@ file. Other syntax and workflow checks remain active.
   start beside running gates instead of queueing behind them. A simulation of
   six concurrent lands found declaring 4 or 6 cores for the gate pair slower
   than this under external load.
-  Without
-  `--full` its test step runs the changed packages (importers still build and
-  vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
-  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. A
+  Without `--full`, its test step runs `go test -short` on changed packages
+  and their reverse dependency closure, including production, internal-test
+  and external-test imports. The critical set runs separately without
+  `-short`, including critical tests in affected packages. A `go.mod` or
+  `go.sum` change runs its whole module's fast class and critical set.
+  A store schema change selects `internal/store` and its importers.
+  Long integration bodies guarded by `testing.Short()` and the PostgreSQL
+  suite run in `gate -- --full`, nightly CI and pre-release. A
   file outside every package runs the packages whose tests read it, from the
   `nonPackageReaders` table in `.sparkwing/jobs/affected_tests.go` (`.github/`
   and `bin/` run `.sparkwing/jobs`, `docs/` runs `internal/doccheck` and
@@ -779,14 +783,22 @@ file. Other syntax and workflow checks remain active.
   `internal/apispec/` or `api/` also run `.sparkwing/jobs`, including
   `TestRepositoryUnreleasedSectionDeclaresEveryWireCut`, because the release
   wire-cut check reads the protocol and API surfaces outside its package.
-  Its lint step lints only the packages holding changed Go
+  Lint starts independently of the test step because it has no test-result
+  dependency. Its lint step lints only the packages holding changed Go
   files (every package when `go.mod`, `go.sum` or `.golangci.yml` changed),
   since `--new-from-rev` drops findings outside the change anyway. With
   `--full`, race tests cover every package but `internal/store` and the
   PostgreSQL suite always runs, so a full pass does not depend on the
   producer's `origin/main`. The broad job's 70-minute deadline already allows
   the full Go suite and the 30-minute PostgreSQL limit; hosted CI runs the race
-  job without `--full`, so its touched-package budget is unchanged. After
+  job without `--full` for pushes and pull requests, so it runs the fast race
+  class on touched packages. Nightly and dispatched race lanes pass `--full`
+  to retain long race tests across every package except the deferred store.
+  Affected race runs use the stable private test home and native Go test cache,
+  without `-count=1`. Full race runs keep the uncached shard path. The Go build
+  cache already survives runs, and hosted jobs restore and save it through
+  their existing cache steps. No successful policy or review check is skipped
+  by a package cache hit. After
   both jobs run and pass on a clean checkout, `record-tree` outputs HEAD's tree, the
   `.sparkwing` definition fingerprint, the mode and the engine version. Each
   gate job reads that output through a `sw.FromProvenRunAtCommit()` reference
@@ -972,8 +984,8 @@ file. Other syntax and workflow checks remain active.
   real-store risk-admission test that requires
   an unapproved submission to leave the queue empty. First-run compilation,
   ref selection and pinned-binary risk fixtures remain in the full class.
-  `gate` runs the suite without `-short`, which is where every guarded test is
-  still judged. On 2026-10-29, with the cut's `GOMAXPROCS=7 -p 7` on a shared
+  `gate -- --full` runs the suite without `-short`, which is where every
+  guarded test is still judged. Affected landing gates use the short class. On 2026-10-29, with the cut's `GOMAXPROCS=7 -p 7` on a shared
   16-core host at load 9 to 15, `cmd/sparkwing`, `internal/controller` and
   `internal/store` took 241 s, 832 s and 617 s under `-short`, two of them past
   Go's ten-minute package limit. The tests that measured 1 s or more there

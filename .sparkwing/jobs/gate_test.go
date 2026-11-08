@@ -110,10 +110,13 @@ func TestGateKeepsRaceInAnIndependentRequiredJob(t *testing.T) {
 		t.Errorf("race job timeout = %s, want %s", got, raceTouchedStepTimeout)
 	}
 	w := inspectWork(t, &Gate{})
+	if got := findStep(w, "lint").Needs; len(got) != 0 {
+		t.Errorf("lint dependencies = %v, want independent lint", got)
+	}
 	if findStep(w, "race-touched") != nil {
 		t.Fatal("broad checks still run race in their own process")
 	}
-	for _, id := range []string{"lint", "store-postgres"} {
+	for _, id := range []string{"store-postgres"} {
 		if got := findStep(w, id).Needs; !slices.Equal(got, []string{"test"}) {
 			t.Errorf("%s dependencies = %v, want [test]", id, got)
 		}

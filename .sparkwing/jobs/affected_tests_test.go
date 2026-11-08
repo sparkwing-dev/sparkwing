@@ -11,23 +11,23 @@ import (
 
 var affectedFixturePackages = []modulePackage{
 	{importPath: "m/leaf", dir: "leaf"},
-	{importPath: "m/mid", dir: "mid"},
-	{importPath: "m/top", dir: "top"},
+	{importPath: "m/mid", dir: "mid", imports: []string{"m/leaf"}},
+	{importPath: "m/top", dir: "top", imports: []string{"m/mid"}},
 	{importPath: "m/billing", dir: "billing"},
 }
 
-func TestAffectedTestsCoverOnlyTheChangedPackages(t *testing.T) {
+func TestAffectedTestsCoverTheReverseDependencyClosure(t *testing.T) {
 	critical := map[string][]string{"billing": {"TestRefund"}, "leaf": {"TestLeaf"}}
 	p := planAffectedTests(".", []string{"."}, []string{"leaf/leaf.go", "leaf/old.go", "docs/readme.md"}, affectedFixturePackages, critical)
-	if want := []string{"m/leaf"}; !slices.Equal(p.packages, want) {
-		t.Fatalf("affected = %v, want only the changed package %v; importers run after deploy", p.packages, want)
+	if want := []string{"m/leaf", "m/mid", "m/top"}; !slices.Equal(p.packages, want) {
+		t.Fatalf("affected = %v, want the changed package and transitive importers %v", p.packages, want)
 	}
-	if want := map[string][]string{"m/billing": {"TestRefund"}}; len(p.critical) != 1 || !slices.Equal(p.critical["m/billing"], want["m/billing"]) {
-		t.Fatalf("critical = %v, want only the critical tests outside the affected set", p.critical)
+	if len(p.critical) != 2 || !slices.Equal(p.critical["m/billing"], []string{"TestRefund"}) || !slices.Equal(p.critical["m/leaf"], []string{"TestLeaf"}) {
+		t.Fatalf("critical = %v, want every critical test without short mode", p.critical)
 	}
 	commands := p.commands(hostShape{cpus: 8})
-	if len(commands) != 2 || !strings.Contains(commands[1], `-run '^(TestRefund)$' 'm/billing'`) {
-		t.Fatalf("commands = %q, want an affected run and a critical run", commands)
+	if len(commands) != 2 || !strings.Contains(commands[0], "-short ") || strings.Contains(commands[1], "-short ") || !strings.Contains(commands[1], "TestRefund") {
+		t.Fatalf("commands = %q, want affected fast tests and unshortened critical tests", commands)
 	}
 }
 
@@ -39,7 +39,7 @@ func TestAffectedTestsChargeTestdataToTheOwningPackage(t *testing.T) {
 }
 
 func TestAffectedTestsRunTheWholeModuleWhenTheGraphCannotSeeTheChange(t *testing.T) {
-	for _, file := range []string{"go.mod", "go.sum", "internal/store/schema.sql"} {
+	for _, file := range []string{"go.mod", "go.sum"} {
 		p := planAffectedTests(".", []string{"."}, []string{file}, affectedFixturePackages, nil)
 		if !p.whole {
 			t.Errorf("%s: plan = %+v, want every package", file, p)
@@ -47,6 +47,26 @@ func TestAffectedTestsRunTheWholeModuleWhenTheGraphCannotSeeTheChange(t *testing
 		if commands := p.commands(hostShape{cpus: 8}); len(commands) != 1 || !strings.HasSuffix(commands[0], " ./...") {
 			t.Errorf("%s: commands = %q, want one ./... run", file, commands)
 		}
+	}
+}
+
+func TestAffectedSchemaRunsStoreAndItsReadersWithoutWideningTheModule(t *testing.T) {
+	packages := []modulePackage{
+		{importPath: "m/store", dir: "internal/store"},
+		{importPath: "m/controller", dir: "internal/controller", imports: []string{"m/store"}},
+		{importPath: "m/other", dir: "internal/other"},
+	}
+	p := planAffectedTests(".", []string{"."}, []string{"internal/store/schema.sql"}, packages, nil)
+	if p.whole || !slices.Equal(p.packages, []string{"m/controller", "m/store"}) {
+		t.Fatalf("schema plan = %+v, want store and its readers", p)
+	}
+}
+
+func TestAffectedModuleChangesKeepCriticalTestsUnshortened(t *testing.T) {
+	p := planAffectedTests(".", []string{"."}, []string{"go.mod"}, affectedFixturePackages, map[string][]string{"leaf": {"TestGuard"}})
+	commands := p.commands(hostShape{cpus: 2})
+	if len(commands) != 2 || !strings.Contains(commands[0], "-short ") || !strings.HasSuffix(commands[0], " ./...") || strings.Contains(commands[1], "-short ") || !strings.Contains(commands[1], "TestGuard") {
+		t.Fatalf("commands = %q, want the whole fast class and full critical tests", commands)
 	}
 }
 
@@ -94,7 +114,10 @@ func TestAffectedTestStepRunsTheChangeAndTheCriticalSetOnly(t *testing.T) {
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "other", "other.go"), "package other\n")
 	writeGoFile(t, filepath.Join(root, "other", "other_test.go"),
-		"package other\n\nimport \"testing\"\n\n//sparkwing:critical\nfunc TestGuard(t *testing.T) { t.Fatal(\"critical ran\") }\n")
+		"package other\n\nimport \"testing\"\n\n//sparkwing:critical\nfunc TestGuard(t *testing.T) { if testing.Short() { t.Skip(\"critical short guard\") }; t.Fatal(\"critical ran\") }\n")
+	writeGoFile(t, filepath.Join(root, "importer", "importer.go"), "package importer\n")
+	writeGoFile(t, filepath.Join(root, "importer", "importer_test.go"),
+		"package importer_test\n\nimport (\"testing\"; _ \"fixture/changed\")\nfunc TestImporter(t *testing.T) { t.Fatal(\"test importer ran\") }\n")
 	writeGoFile(t, filepath.Join(root, "quiet", "quiet.go"), "package quiet\n")
 	writeGoFile(t, filepath.Join(root, "quiet", "quiet_test.go"),
 		"package quiet\n\nimport \"testing\"\n\nfunc TestUnrelated(t *testing.T) { t.Fatal(\"unaffected package ran\") }\n")
@@ -106,7 +129,7 @@ func TestAffectedTestStepRunsTheChangeAndTheCriticalSetOnly(t *testing.T) {
 	gitCommitAll(t, root, "change")
 	ctx := context.Background()
 	err := runAffectedTest(ctx)
-	if err == nil || !strings.Contains(err.Error(), "changed package ran") || !strings.Contains(err.Error(), "critical ran") || strings.Contains(err.Error(), "unaffected package ran") {
+	if err == nil || !strings.Contains(err.Error(), "changed package ran") || !strings.Contains(err.Error(), "critical ran") || !strings.Contains(err.Error(), "test importer ran") || strings.Contains(err.Error(), "unaffected package ran") {
 		t.Fatalf("err = %v, want the changed package and the critical test run and the unrelated package left alone", err)
 	}
 }

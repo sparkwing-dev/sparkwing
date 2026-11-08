@@ -23,9 +23,8 @@ var criticalTestFunc = regexp.MustCompile(`^func (Test\w*)\(\s*\w+\s+\*testing\.
 // perf: a change to one of these files reaches tests the import graph cannot
 // see, so its module runs every package.
 var wholeModuleTriggers = map[string]string{
-	"go.mod":                    "module requirements changed",
-	"go.sum":                    "module checksums changed",
-	"internal/store/schema.sql": "the store schema changed, and a redeploy cannot undo a schema change",
+	"go.mod": "module requirements changed",
+	"go.sum": "module checksums changed",
 }
 
 // perf: tests read these files through paths the import graph cannot see, so a
@@ -84,6 +83,7 @@ func readerPackages(module string, modules []string, file string, byDir map[stri
 type modulePackage struct {
 	importPath string
 	dir        string
+	imports    []string
 }
 
 type affectedTestPlan struct {
@@ -151,11 +151,11 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string) err
 func (p affectedTestPlan) commands(h hostShape) []string {
 	var out []string
 	timeout := "-timeout " + productGoTestTimeout + " "
+	short := "-short " + timeout
 	if p.whole {
-		return []string{boundedGoCommand(h, "test", timeout+"./...")}
-	}
-	if len(p.packages) > 0 {
-		out = append(out, boundedGoCommand(h, "test", timeout+quoteAll(p.packages)))
+		out = append(out, boundedGoCommand(h, "test", short+"./..."))
+	} else if len(p.packages) > 0 {
+		out = append(out, boundedGoCommand(h, "test", short+quoteAll(p.packages)))
 	}
 	if len(p.critical) > 0 {
 		pkgs := mapKeys(p.critical)
@@ -179,7 +179,7 @@ func (p affectedTestPlan) describe() string {
 	for _, tests := range p.critical {
 		count += len(tests)
 	}
-	return fmt.Sprintf("%s: %d affected package(s), %d critical test(s) in %d other package(s)",
+	return fmt.Sprintf("%s: %d affected package(s), %d critical test(s) in %d package(s)",
 		p.module, len(p.packages), count, len(p.critical))
 }
 
@@ -200,20 +200,34 @@ func planAffectedTests(module string, modules, files []string, packages []module
 		}
 		if why, ok := wholeModuleTriggers[rel]; ok {
 			p.whole, p.reason = true, why
-			return p
+			continue
 		}
 		if pkg := owningPackage(rel, byDir); pkg != "" {
 			changed[pkg] = true
 		}
 	}
-	// safety: importers still compile and vet in the build and vet steps; their
-	// tests run after deploy, with every other suite, under --full.
+	// safety: test imports count too, because a package can exercise another
+	// package without importing it in production.
 	affected := changed
+	for added := true; added; {
+		added = false
+		for _, pkg := range packages {
+			if affected[pkg.importPath] {
+				continue
+			}
+			for _, dep := range pkg.imports {
+				if affected[dep] {
+					affected[pkg.importPath], added = true, true
+					break
+				}
+			}
+		}
+	}
 	p.packages = mapKeys(affected)
 	p.critical = map[string][]string{}
 	for dir, tests := range critical {
 		pkg, ok := byDir[dir]
-		if !ok || affected[pkg] {
+		if !ok {
 			continue
 		}
 		p.critical[pkg] = tests
@@ -251,7 +265,7 @@ func owningPackage(rel string, byDir map[string]string) string {
 }
 
 func listModulePackages(ctx context.Context, module string) ([]modulePackage, error) {
-	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}`
+	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}`
 	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
@@ -264,15 +278,15 @@ func listModulePackages(ctx context.Context, module string) ([]modulePackage, er
 	scanner := bufio.NewScanner(strings.NewReader(out))
 	scanner.Buffer(make([]byte, 1<<20), 16<<20)
 	for scanner.Scan() {
-		fields := strings.SplitN(scanner.Text(), "\t", 2)
-		if len(fields) != 2 || strings.Contains("/"+fields[0]+"/", "/node_modules/") {
+		fields := strings.SplitN(scanner.Text(), "\t", 3)
+		if len(fields) != 3 || strings.Contains("/"+fields[0]+"/", "/node_modules/") {
 			continue
 		}
 		rel, err := filepath.Rel(root, fields[1])
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
-		packages = append(packages, modulePackage{importPath: fields[0], dir: filepath.ToSlash(rel)})
+		packages = append(packages, modulePackage{importPath: fields[0], dir: filepath.ToSlash(rel), imports: strings.Fields(fields[2])})
 	}
 	return packages, scanner.Err()
 }

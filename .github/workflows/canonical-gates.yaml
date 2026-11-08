@@ -229,7 +229,12 @@ jobs:
         if: matrix.gate == 'race-touched'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-        run: '"$RUNNER_TEMP/sparkwing" run gate --sw-only race-touched --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"'
+        run: |
+          race_args=()
+          if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            race_args=(-- --full)
+          fi
+          "$RUNNER_TEMP/sparkwing" run gate --sw-only race-touched --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" "${race_args[@]}"
 
       - name: Run canonical pre-release
         if: matrix.gate == 'pre-release'

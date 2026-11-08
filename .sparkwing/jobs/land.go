@@ -525,8 +525,8 @@ func changedBetween(ctx context.Context, dir, from, to string) ([]string, error)
 	return files, nil
 }
 
-// safety: build catches an importer the merge broke, which the affected
-// selection leaves to the build step; the tests cover the packages it changed.
+// safety: build catches compile errors before the merge delta runs its fast
+// dependency closure and the full critical set.
 func recheckMergeDelta(ctx context.Context, files []string) error {
 	if err := runBuild(ctx); err != nil {
 		return err

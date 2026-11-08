@@ -221,6 +221,37 @@ func TestCanonicalSourceOverrideRetainsItsWholeGateGraph(t *testing.T) {
 	t.Fatal("canonical workflow has no broad gate")
 }
 
+func TestCanonicalRaceRunsFullOnlyForScans(t *testing.T) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")), &doc); err != nil {
+		t.Fatal(err)
+	}
+	steps := mappingValue(mappingValue(mappingValue(&doc, "jobs"), "gate"), "steps")
+	for _, step := range steps.Content {
+		if name := mappingValue(step, "name"); name == nil || name.Value != "Run canonical touched-package race" {
+			continue
+		}
+		for _, event := range []string{"push", "pull_request", "schedule", "workflow_dispatch"} {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "sparkwing"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", mappingValue(step, "run").Value)
+			cmd.Env = append(os.Environ(), "RUNNER_TEMP="+dir, "GITHUB_EVENT_NAME="+event)
+			got, err := cmd.Output()
+			want := []string{"run", "gate", "--sw-only", "race-touched", "--sw-run-handle-file", filepath.Join(dir, "canonical-run.json")}
+			if event == "schedule" || event == "workflow_dispatch" {
+				want = append(want, "--", "--full")
+			}
+			if err != nil || !slices.Equal(strings.Fields(string(got)), want) {
+				t.Errorf("event=%s args=%s err=%v, want %v", event, got, err, want)
+			}
+		}
+		return
+	}
+	t.Fatal("canonical workflow has no race gate")
+}
+
 func TestCanonicalRequiredGateRejectsMissingOrFailedChecks(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	var doc yaml.Node

@@ -80,16 +80,16 @@ func TestStoreFilesKeepOnlyTheStorePackage(t *testing.T) {
 	}
 }
 
-func TestStorePostgresStepPassesWithoutPostgresWhenTheStoreIsUntouched(t *testing.T) {
+func TestAffectedGateDefersPostgresEvenWhenTheStoreChanges(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
-	writeGoFile(t, filepath.Join(root, "internal", "other.go"), "package internal\n\nfunc Other() int { return 2 }\n")
+	writeGoFile(t, filepath.Join(root, "internal", "store", "other.go"), "package internal\n\nfunc Other() int { return 2 }\n")
 	gitAddAll(t, root)
 	t.Setenv("SPARKWING_TEST_PG_URL", "postgres://nobody@127.0.0.1:1/unreachable")
 
 	if err := runStorePostgresIfTouched(context.Background(), gateAffected); err != nil {
-		t.Fatalf("store-postgres ran or failed with internal/store untouched: %v", err)
+		t.Fatalf("affected gate started the deferred PostgreSQL suite: %v", err)
 	}
 }
 
