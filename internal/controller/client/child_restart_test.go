@@ -63,7 +63,7 @@ func TestHereChildIntakeRemainsSingleShotDuringOutage(t *testing.T) {
 	})}
 	process.request.Options.Runner.Set = true
 	process.request.Options.Runner.Value.Kind = runspec.RunnerHere
-	_, err := process.StartChild(t.Context(), "child", nil, "", "")
+	_, err := process.StartChild(t.Context(), "child", nil, "", "", false)
 	if err == nil || calls != 1 {
 		t.Fatalf("unsafe child intake was replayed: calls=%d error=%v", calls, err)
 	}

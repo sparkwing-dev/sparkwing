@@ -317,3 +317,19 @@ func TestHostLatestCarriesExplicitTrustOptOut(t *testing.T) {
 		t.Fatalf("output=%s err=%v", output, err)
 	}
 }
+
+func TestHostRoutesDetachedChildStartDoesNotAwait(t *testing.T) {
+	calls := 0
+	submit := fakeTransport(t, "POST", "/node/v1/children", `{"pipeline":"scan","job":"","args":{"target":"staging"},"detached":true}`, `{"run_id":"child/scan"}`)
+	s := &routeServices{binding: fakeBinding, dial: routeTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls > 1 {
+			t.Error("start-only child must not await")
+		}
+		return submit(r)
+	}).dial}
+	id, err := s.StartChild(t.Context(), ChildRequest{Pipeline: "scan", Args: map[string]string{"target": "staging"}, Detached: true})
+	if err != nil || id != "child/scan" || calls != 1 {
+		t.Fatalf("start-only request: %q, calls %d, error %v", id, calls, err)
+	}
+}

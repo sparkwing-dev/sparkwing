@@ -179,6 +179,7 @@ type SourceLocation struct {
 // safety: Lineage records retriers separately from immutable original actor and git facts.
 // RootRunID bounds structural nesting and descendant counts.
 type Lineage struct {
+	Detached      bool            `json:"detached,omitempty"`
 	RepoInherited bool            `json:"repo_inherited,omitempty"`
 	ParentRunID   string          `json:"parent_run_id"`
 	RootRunID     string          `json:"root_run_id,omitempty"`
