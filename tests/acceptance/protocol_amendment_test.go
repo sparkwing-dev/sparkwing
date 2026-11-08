@@ -137,11 +137,12 @@ func testGoSDKMaskRegistryGuardsLaterDeclarations(t *testing.T) {
 			}
 			_, err := host.Eval(t.Context(), plan, "source", generator.ID(), nil)
 			if registrationFirst {
-				if err == nil || err.Error() != "generator declaration failed" {
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), "mask-value") {
 					t.Fatalf("failed generator = %v", err)
 				}
-				if len(host.Records()) != 0 {
-					t.Fatalf("failed declarations released output: %+v", host.Records())
+				if records := host.Records(); len(records) != 1 || records[0].Msg != "before declaration ***" {
+					t.Fatalf("failed declaration logs lost masking: %+v", records)
 				}
 				return
 			}

@@ -63,7 +63,8 @@ func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error) {
 }
 
 // ReadNode returns persisted state without interpreting an elapsed lease as an implicit requeue.
-func (t *Tenant) ReadNode(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
+func (t *Tenant) ReadNode(ctx context.Context, ref runspec.NodeRef) (row runstate.NodeRow, err error) {
+	defer func() { err = snapshotReadError(ctx, err) }()
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return runstate.NodeRow{}, err
@@ -73,13 +74,23 @@ func (t *Tenant) ReadNode(ctx context.Context, ref runspec.NodeRef) (runstate.No
 }
 
 // ReadSnapshot prevents scheduling from a mix of states observed in different transactions.
-func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (RunSnapshot, error) {
+func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (snapshot RunSnapshot, err error) {
+	defer func() { err = snapshotReadError(ctx, err) }()
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return RunSnapshot{}, err
 	}
 	defer rollbackOrLog(tx)
 	return readSnapshotTx(ctx, tx, t.team, runID)
+}
+
+// SQLite can surface its interrupt code instead of the context cancellation that caused it.
+func snapshotReadError(ctx context.Context, err error) error {
+	var coded interface{ Code() int }
+	if cause := context.Cause(ctx); cause != nil && errors.As(err, &coded) && coded.Code() == 9 {
+		return cause
+	}
+	return err
 }
 
 // ReadStateEvents resumes strictly after the caller's sequence; state transitions own lifecycle event writes.

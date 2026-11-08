@@ -306,12 +306,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if err := json.Unmarshal(evaluated.Result, &result); err != nil || result.Error != nil {
 		t.Fatalf("generator: %+v %v", result, err)
 	}
-	body, err := json.Marshal(struct {
-		Jobs json.RawMessage `json:"jobs"`
-	}{result.Value})
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := result.Value
 	registration, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{})
 	if err != nil {
 		t.Fatal(err)
