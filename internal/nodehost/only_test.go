@@ -221,6 +221,38 @@ func TestOwnerRefusesUnknownStepWindowBeforeDispatch(t *testing.T) {
 	}
 }
 
+func TestStepWindowRejectsEmptyJobs(t *testing.T) {
+	for _, tc := range []struct {
+		name, start, stop string
+		steps             []nodeproto.StepSpec
+		wantRefusal       bool
+	}{
+		{"parallel", "terraform-fmt", "markdownlint", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "shellcheck"}, {ID: "markdownlint"}}, true},
+		{"reversed", "markdownlint", "terraform-fmt", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint", Needs: []string{"terraform-fmt"}}}, true},
+		{"connected", "terraform-fmt", "markdownlint", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint", Needs: []string{"terraform-fmt"}}}, false},
+		{"same step", "terraform-fmt", "terraform-fmt", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
+		{"start only", "terraform-fmt", "", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
+		{"stop only", "", "markdownlint", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
+		{"unfiltered", "", "", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "unrelated", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "pre-push", Steps: tc.steps},
+			}}
+			var options runspec.Options
+			options.StartAt.Value, options.StopAt.Value = tc.start, tc.stop
+			_, err := selectionSkips(plan, options)
+			if (err != nil) != tc.wantRefusal {
+				t.Fatalf("selection error=%v, want refusal=%v", err, tc.wantRefusal)
+			}
+			if err != nil && (!strings.Contains(err.Error(), "selects no steps in job \"pre-push\"") || !strings.Contains(err.Error(), "dependency path")) {
+				t.Fatalf("unhelpful selection error: %v", err)
+			}
+		})
+	}
+}
+
 func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 	for _, dryRun := range []bool{true, false} {
 		input, state, _, _ := executorFixture(t)

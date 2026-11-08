@@ -1,15 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -41,15 +40,16 @@ func TestLocalReleaseRefusalPreservesPopulatedStoreAndShowsRemedy(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runSparkwing([]string{"-C", root, "run", "release", "--sw-dry-run", "--sw-no-update", "--sw-allow-unadmitted", "-o=plain"})
-	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.IsolatedHomeRequired {
+	command := exec.CommandContext(t.Context(), os.Args[0], "run", "release", "--sw-dry-run", "--sw-no-update", "--sw-allow-unadmitted", "-o=plain")
+	command.Dir = root
+	diagnostic, err := command.CombinedOutput()
+	var refusal *exec.ExitError
+	if !errors.As(err, &refusal) || refusal.ExitCode() != 1 {
 		t.Fatalf("release preview did not refuse the operational home: %v", err)
 	}
-	var diagnostic bytes.Buffer
-	writeFailure(&diagnostic, err)
-	if !strings.Contains(diagnostic.String(), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)"`) {
-		t.Fatalf("release refusal hid its recovery command: %s", &diagnostic)
+	if !strings.Contains(string(diagnostic), "pipeline requires an isolated Sparkwing home") ||
+		!strings.Contains(string(diagnostic), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)"`) {
+		t.Fatal("release refusal hid its recovery command")
 	}
 	after, err := os.ReadFile(db)
 	if err != nil {

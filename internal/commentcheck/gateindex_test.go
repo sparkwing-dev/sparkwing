@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
@@ -96,7 +98,7 @@ func writeSource(t *testing.T, path, body string) {
 
 func gitWith(t *testing.T, dir, index string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + dir,

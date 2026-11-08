@@ -4,11 +4,11 @@ package wingd
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -19,40 +19,37 @@ import (
 func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
 	home := t.TempDir()
 	seedOversizedLog(t, home)
-	var mu sync.Mutex
-	var lines []string
+	dumped := make(chan struct{})
 	d := &Daemon{
 		cfg: Config{Home: home, Version: "v0.0.0-test", Logf: func(format string, args ...any) {
-			mu.Lock()
-			defer mu.Unlock()
-			lines = append(lines, format)
+			if strings.HasPrefix(format, "diagnostics: goroutine dump") {
+				close(dumped)
+			}
 		}},
 		quit: make(chan struct{}),
 	}
 	done := make(chan struct{})
-	defer close(done)
-	d.startDiagnostics(done)
+	finished := d.startDiagnostics(done)
+	t.Cleanup(func() {
+		close(done)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			t.Error("diagnostics did not stop")
+		}
+	})
 
 	if err := syscall.Kill(os.Getpid(), syscall.SIGUSR1); err != nil {
 		t.Fatalf("raise SIGUSR1: %v", err)
 	}
-
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	for {
-		mu.Lock()
-		got := strings.Join(lines, "\n")
-		mu.Unlock()
-		if strings.Contains(got, "goroutine dump") {
-			return
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatal("SIGUSR1 produced no goroutine dump in the daemon log")
-		}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	select {
+	case <-dumped:
+	case <-ctx.Done():
+		t.Fatal("SIGUSR1 produced no goroutine dump in the daemon log")
 	}
 }
 

@@ -300,7 +300,9 @@ func uncredentialedSSHCommands(t *testing.T, remote string, base procenv.Base) [
 	dir, sha := sourcetest.Repository(t)
 	log := sourcetest.Remote(t, map[string]string{remote: dir})
 	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk"},
-		source.Options{Base: base, GitAccess: gitAccessFor(base), BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
+		source.Options{Base: base, GitAccess: gitAccessFor(base), BuildEnvironment: sourcetest.BuildEnvironment, LookupHost: func(_ context.Context, host string) ([]net.IPAddr, error) {
+			return nil, &net.DNSError{Err: "fixture SSH alias", Name: host, IsNotFound: true}
+		}, Workspace: t.TempDir(), Access: &access{}})
 	if err != nil {
 		t.Fatal(err)
 	}

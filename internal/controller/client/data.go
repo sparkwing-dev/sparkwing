@@ -149,13 +149,16 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 		return blob.RecordLookupResult{}, err
 	}
 	if !result.Found {
-		if result.Record != nil || result.VerifiedDefault || len(result.Members) != 0 {
+		if result.Record != nil || result.PreparedParent || result.VerifiedDefault || len(result.Members) != 0 {
 			return blob.RecordLookupResult{}, dataProtocolError("missing record includes a payload")
 		}
 		return blob.RecordLookupResult{}, nil
 	}
 	if result.Record == nil {
 		return blob.RecordLookupResult{}, dataProtocolError("record lookup has no payload")
+	}
+	if result.PreparedParent && input.Key.Kind != blob.KindPrepared {
+		return blob.RecordLookupResult{}, dataProtocolError("parent preparation returned for another record kind")
 	}
 	record := decodeDataRecord(*result.Record, input.Key.Team)
 	expected := input.Key
@@ -176,7 +179,7 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 	for _, member := range result.Members {
 		members = append(members, blob.Member{Team: key.Team, ManifestDigest: manifest, Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
 	}
-	return blob.RecordLookupResult{Found: true, VerifiedDefault: result.VerifiedDefault, Record: record, Members: members}, nil
+	return blob.RecordLookupResult{Found: true, PreparedParent: result.PreparedParent, VerifiedDefault: result.VerifiedDefault, Record: record, Members: members}, nil
 }
 
 func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRequest) (blob.Record, error) {

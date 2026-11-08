@@ -381,8 +381,9 @@ can seed acquisition, which still verifies the sealed commit.
 
 ### Backups and upgrades
 
-[Backup, restore, and upgrade](backup-restore.md) records schema compatibility.
-Recovery is manual; follow the operator runbook kept outside this repository.
+[Backup, restore, and upgrade](backup-restore.md) covers database and key backups,
+restore drills, controller-first upgrades, schema-safe rollback and Cloud recovery.
+Use the restore acceptance checks before resuming work.
 
 ## Add workstation capacity
 

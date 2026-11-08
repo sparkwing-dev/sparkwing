@@ -27,7 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
-// Prepared binds a same-run installation to authenticated storage and the intake seal.
+// Prepared binds source installation to authenticated run storage and sealed acquisition inputs.
 // Publish is reserved for the Cloud-awarded planning owner, before any pipeline code executes.
 type Prepared struct {
 	Bytes       blob.Store
@@ -378,7 +378,10 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 	if comparable.DefaultBranch == "" {
 		comparable.DefaultBranch = manifest.DefaultBranch
 	}
-	if manifest.Inputs.Format != 1 || manifest.Inputs.RequestHash != p.RequestHash || !samePreparedSource(manifest.Inputs.Source, comparable) || manifest.Inputs.Target != options.Target || spec.Engine != nil && manifest.Inputs.Engine != *spec.Engine {
+	if manifest.Inputs.Format != 1 || !hit.PreparedParent && manifest.Inputs.RequestHash != p.RequestHash || !samePreparedSource(manifest.Inputs.Source, comparable) || manifest.Inputs.Target != options.Target || spec.Engine != nil && manifest.Inputs.Engine != *spec.Engine {
+		if hit.PreparedParent {
+			slog.InfoContext(ctx, "skipping parent preparation: source, engine or target differs")
+		}
 		return nil, nil
 	}
 	spec.Engine = &manifest.Inputs.Engine
@@ -396,11 +399,19 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 	// safety: Snapshot is not recomputed on restore. Integrity comes from the verified
 	// blob digest and server-enforced Cloud-only write authority; the publisher is trusted.
 	inputs.Snapshot = manifest.Inputs.Snapshot
+	if hit.PreparedParent {
+		// safety: the store attests exact parent source; arguments and pipeline names
+		// select runtime execution without changing the installed entry.
+		inputs.RequestHash = manifest.Inputs.RequestHash
+	}
 	currentKey, err := hashJSON(inputs)
 	if err != nil {
 		return nil, err
 	}
 	if currentKey != manifest.Key {
+		if hit.PreparedParent {
+			slog.InfoContext(ctx, "skipping parent preparation: environment or toolchain differs")
+		}
 		return nil, nil
 	}
 	resolved, err := resolveEngine(ctx, spec, options, directory)

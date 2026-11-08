@@ -36,7 +36,7 @@ func (Test) Examples() []sparkwing.Example {
 func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, in TestArgs, rc sparkwing.RunContext) error {
 	pkgs := strings.Fields(in.Packages)
 	if len(pkgs) == 0 {
-		sparkwing.Job(plan, rc.Pipeline, p.run(testGoCommand(currentHost())))
+		sparkwing.Job(plan, rc.Pipeline, p.run(""))
 		return nil
 	}
 
@@ -47,8 +47,12 @@ func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, in TestArgs, rc spa
 
 func (p *Test) run(cmd string) func(context.Context) error {
 	return func(ctx context.Context) error {
+		command := cmd
+		if command == "" {
+			command = testGoCommand(currentHost())
+		}
 		return withStableProductTestHome("test", func(home string) error {
-			if _, err := sparkwing.Bash(ctx, productTestScript(cmd, home)).Run(); err != nil {
+			if _, err := sparkwing.Bash(ctx, productTestScript(command, home)).Run(); err != nil {
 				return err
 			}
 			sparkwing.Info(ctx, "go test: all packages passed")

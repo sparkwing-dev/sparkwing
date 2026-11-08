@@ -27,6 +27,8 @@ jobs:
       - name: Install sparkwing-runner
         shell: bash
         working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           case "$RUNNER_OS" in Linux) os=linux ;; macOS) os=darwin ;; Windows) os=windows ;; *) echo "unsupported runner OS $RUNNER_OS" >&2; exit 1 ;; esac
@@ -35,7 +37,16 @@ jobs:
           if [ "$os" = windows ]; then ext=.exe; fi
           asset="sparkwing-runner-$os-$arch$ext"
           base="https://github.com/sparkwing-dev/sparkwing/releases/download/$SPARKWING_RUNNER_VERSION"
-          curl --fail-early --retry 3 --retry-delay 1 -fsSL -o "$asset" "$base/$asset" -o SHA256SUMS "$base/SHA256SUMS" -o SHA256SUMS.sig "$base/SHA256SUMS.sig"
+          download_asset() {
+            local name="$1" status=0 code id
+            code="$(curl --fail-early --retry 3 --retry-delay 1 -fsSL --connect-timeout 60 --speed-limit 1 --speed-time 60 -w '%{http_code}' -o "$name" "$base/$name")" || status=$?
+            [ "$status" = 0 ] && return 0
+            case "$code:$status" in 5??:*|*:28) ;; *) return "$status" ;; esac
+            id="$(gh api "repos/sparkwing-dev/sparkwing/releases/tags/$SPARKWING_RUNNER_VERSION" --jq ".assets[] | select(.name == \"$name\") | .id")"
+            [ -n "$id" ] || return 1
+            gh api -H 'Accept: application/octet-stream' "repos/sparkwing-dev/sparkwing/releases/assets/$id" >"$name"
+          }
+          for name in "$asset" SHA256SUMS SHA256SUMS.sig; do download_asset "$name"; done
           # macOS ships LibreSSL, which cannot verify ed25519; the hosted image also carries OpenSSL 3.
           verifier=""
           for candidate in openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
