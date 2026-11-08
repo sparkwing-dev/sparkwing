@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 type stubGenerator struct {
@@ -229,7 +231,7 @@ func TestEvalHarnessEndToEnd(t *testing.T) {
 		t.Skip("set SPARKWING_PIPELINEGEN_E2E=1 to run the compile+explain+lint corpus")
 	}
 
-	root, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	root, err := testgit.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		t.Fatalf("locate repo root: %v", err)
 	}

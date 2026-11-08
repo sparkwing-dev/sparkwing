@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -380,6 +382,15 @@ type fakeDeployRegistry struct {
 	digests   map[string]string
 	revisions map[string]string
 	published []PublishImagesArgs
+	retained  []imagePin
+	retainErr error
+}
+
+func (r *fakeDeployRegistry) retain(_ context.Context, _ string, pin imagePin) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.retained = append(r.retained, pin)
+	return r.retainErr
 }
 
 func (r *fakeDeployRegistry) digest(_ context.Context, _, ref string) (string, error) {
@@ -506,9 +517,9 @@ func (f *fakeDeploy) commitValues(dir, values string) {
 
 func deployGitIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
+	cmd.Env = append(testgit.Env(os.Environ()), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -660,9 +671,9 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 	joined := strings.Join(c.Args, " ")
 	switch name := filepath.Base(c.Name); {
 	case name == "git":
-		cmd := exec.CommandContext(ctx, "git", c.Args...)
+		cmd := testgit.CommandContext(ctx, "git", c.Args...)
 		cmd.Dir = c.Dir
-		cmd.Env = os.Environ()
+		cmd.Env = testgit.Env(os.Environ())
 		for k, v := range c.Env {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}

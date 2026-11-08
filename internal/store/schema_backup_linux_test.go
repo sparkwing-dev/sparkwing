@@ -28,7 +28,10 @@ func TestBackupWriteFailureRefusesUpgradeAndLeavesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE github_actions_dispatches`,
+		`DROP TABLE github_actions_approvals`,
 		`DROP TABLE local_runner_instances`,
+		`DROP INDEX idx_runs_live_children`,
 		`UPDATE sparkwing_schema_version SET version=32, baseline_digest='8229dac48bd08544fb5b2cddfe2f9c9d0f0f3c41968eda4db1591aff9f247f61'`,
 		`CREATE TABLE backup_probe(data BLOB)`,
 		`INSERT INTO backup_probe VALUES(zeroblob(2097152))`,
