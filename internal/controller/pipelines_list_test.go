@@ -64,3 +64,27 @@ func TestControllerPipelines_ListIsTheCallersTeamOnly(t *testing.T) {
 		t.Errorf("limit=0 status %d, want 400", got)
 	}
 }
+
+func TestControllerLatestPipelineRepositoryFilterNarrowsTeamObservations(t *testing.T) {
+	f := newCronsFixture(t)
+	teststore.SeedTeam(t, f.store, teamB)
+	started := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	for i, row := range []struct {
+		id, repo, status string
+		team             store.Team
+	}{
+		{"own", "acme/one", "failed", store.DefaultTeam},
+		{"other", "acme/two", "success", store.DefaultTeam},
+		{"foreign", "acme/one", "success", teamB},
+	} {
+		if err := teststore.SeedRun(f.store, t.Context(), row.team, store.Run{RunSummary: runstate.RunSummary{ID: row.id, Pipeline: "shared", Status: row.status, DeclaredRepo: row.repo, StartedAt: started.Add(time.Duration(i) * time.Minute)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var latest store.Run
+	f.call(http.MethodGet, "/api/v1/pipelines/shared/latest?status=failed,success&from_any_run=true&repo=acme/one", f.reader, nil, http.StatusOK, &latest)
+	if latest.ID != "own" || latest.Status != "failed" {
+		t.Fatalf("latest observation: %+v", latest.RunSummary)
+	}
+	f.call(http.MethodGet, "/api/v1/pipelines/shared/latest?status=failed,success&from_any_run=true&repo=missing", f.reader, nil, http.StatusNotFound, nil)
+}

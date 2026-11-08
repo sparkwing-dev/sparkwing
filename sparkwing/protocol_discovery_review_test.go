@@ -47,21 +47,8 @@ func (p protocolDiscoveryPipeline[T]) Plan(_ context.Context, plan *Plan, in T, 
 	return p.declare(plan, in)
 }
 
-func isolateProtocolDiscoveryRegistry(t *testing.T) {
-	t.Helper()
-	registryMu.Lock()
-	prior := registry
-	registry = map[string]*registration{}
-	registryMu.Unlock()
-	t.Cleanup(func() {
-		registryMu.Lock()
-		registry = prior
-		registryMu.Unlock()
-	})
-}
-
 func TestProtocolDescribeRequiredInputsPreserveJobMetadata(t *testing.T) {
-	isolateProtocolDiscoveryRegistry(t)
+	isolateRegistry(t)
 	Register[protocolDiscoveryInputs]("deploy", func() Pipeline[protocolDiscoveryInputs] {
 		return protocolDiscoveryPipeline[protocolDiscoveryInputs]{declare: func(p *Plan, in protocolDiscoveryInputs) error {
 			if in.Target != "" {
@@ -121,7 +108,7 @@ func TestProtocolDescribeReportsDiscoveryFailures(t *testing.T) {
 	cause := errors.New("declaration failed")
 	for _, kind := range []string{"error", "panic-error", "panic-string"} {
 		t.Run(kind, func(t *testing.T) {
-			isolateProtocolDiscoveryRegistry(t)
+			isolateRegistry(t)
 			Register[NoInputs]("broken", func() Pipeline[NoInputs] {
 				return protocolDiscoveryPipeline[NoInputs]{declare: func(p *Plan, _ NoInputs) error {
 					if kind == "panic-error" {
@@ -264,7 +251,7 @@ func FuzzDescribePublishesOnlyCompletePipelineSecrets(f *testing.F) {
 	f.Add("error\x00\n秘密", true)
 	f.Fuzz(func(t *testing.T, cause string, first bool) {
 		for _, stage := range []string{"factory", "secrets", "plan"} {
-			isolateProtocolDiscoveryRegistry(t)
+			isolateRegistry(t)
 			broken := "z-broken"
 			if first {
 				broken = "a-broken"

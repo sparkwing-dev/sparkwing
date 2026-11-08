@@ -17,7 +17,7 @@ func TestWindowsPinnedLocalRunnerExecutableStarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pinned, _, err := pinLocalRunnerExecutable(t.TempDir(), executable)
+	pinned, _, err := pinLocalRunnerExecutable(t.TempDir(), executable, "")
 	if err != nil {
 		t.Fatal(err)
 	}

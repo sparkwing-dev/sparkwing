@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	clocktest "k8s.io/utils/clock/testing"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
@@ -87,6 +89,9 @@ func TestHomeResidentViolationsPassesAQuietHome(t *testing.T) {
 func TestHomeResidentViolationsWaitsOutAProcessOnItsWayOut(t *testing.T) {
 	h, journal := newProcessHarness(t)
 	defer journal.Close()
+	clock := clocktest.NewFakeClock(time.Unix(1_700_000_000, 0))
+	started := clock.Now()
+	h.timeSource = clock
 	h.cfg.Settle = time.Second
 	h.home = t.TempDir()
 	calls := 0
@@ -100,6 +105,9 @@ func TestHomeResidentViolationsWaitsOutAProcessOnItsWayOut(t *testing.T) {
 
 	if violations := h.homeResidentViolations(); len(violations) != 0 {
 		t.Fatalf("violations = %v, want none once the process exits inside the settle window", violations)
+	}
+	if clock.Since(started) != 40*time.Millisecond {
+		t.Fatal("resident settle probes did not use the injected clock")
 	}
 }
 
