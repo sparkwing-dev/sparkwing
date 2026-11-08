@@ -24,6 +24,7 @@ unlock.
 
 - **Helm:** Confine launcher node updates and NodeClaim deletes to its Sparkwing capacity, allow only binding-label additions and reservation/quarantine taint changes, and disable API token automount on its ServiceAccount
 - **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
+- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
 
 ### Changed
 
@@ -40,10 +41,6 @@ unlock.
 - **runs:** Select latest pipeline observations through one store owner. CLI
   repository status and dashboard summaries use the same start-time, run-number
   and run-ID order. Reference authorization and success-pin policy stay unchanged.
-
-### Security
-
-- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
 
 ### Fixed
 
