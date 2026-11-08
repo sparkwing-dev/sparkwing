@@ -43,6 +43,8 @@ unlock.
 
 ### Added
 
+- **local dashboard:** Tailscale Serve can proxy the loopback dashboard through exact `dashboard.allowed_hosts` DNS names. `sparkwing dashboard open --host NAME` prints an HTTPS sign-in link bound to that origin. Browser sessions still require the socket-minted code.
+
 - **scheduling:** GitHub Actions fallback dispatches one workflow per waiting job generation after earlier placement holds open. Team-approved workflows and images use receipt-bound OIDC credentials limited to that job's original trust. Status shows refused and uncertain sends, cancellation cancels known provider runs, and only an audited operator retry opens a new dispatch generation. Each installation must approve the App's Actions write permission. The approved ref must be a dedicated protected branch, never the default branch or a tag, and fork pull requests are never dispatched. See [on-demand fallback](docs/github-actions-runners.md#on-demand-fallback).
 
 - **releases:** A weekly Sparkwing schedule cuts v0 SDK and CLI releases from green main when unreleased notes exist. Maintainers can run it sooner, and a daily pipeline updates owned Go repos to exact main SDK versions through their Xwing landing checks.

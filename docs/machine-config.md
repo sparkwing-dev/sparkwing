@@ -104,15 +104,48 @@ daemon reads the budget at start, so restart it after a change.
 
 The shared local controller serves the dashboard whenever it runs.
 `dashboard.address` is the loopback IP and port it binds, `127.0.0.1:4343` by
-default. A non-loopback or host-name address is refused. The dashboard answers
-only its own loopback origin, so a browser on another machine reaches it through
-an SSH port forward, for example `ssh -N -L 4343:127.0.0.1:4343 user@host`; a
-reverse proxy that presents another host name is refused. Port `0` picks a free port, which suits an isolated
+default. A non-loopback or host-name bind address is refused. A browser on
+another machine can use an SSH port forward, for example
+`ssh -N -L 4343:127.0.0.1:4343 user@host`, or Tailscale Serve as described below.
+Port `0` picks a free port, which suits an isolated
 `SPARKWING_HOME` that would otherwise contend for the default; `sparkwing
 dashboard status` prints the bound address. `dashboard.read_only: true` refuses
 browser writes while still allowing signed-in reads, including decrypted
 secrets, and sign-out. The controller reads this section when it starts, so run
 `sparkwing daemon restart --force` after a change.
+
+### Tailscale Serve
+
+Keep the dashboard bound to loopback and add the machine's exact Tailscale DNS
+name to `dashboard.allowed_hosts`:
+
+```yaml
+dashboard:
+  address: 127.0.0.1:4343
+  allowed_hosts: [workstation.example.ts.net]
+```
+
+Entries are DNS names without a scheme, port, path, trailing dot or wildcard.
+Loopback names and IP addresses are refused. Restart the controller, then run
+these commands on the machine serving the dashboard:
+
+```bash
+sparkwing daemon restart --force
+tailscale serve --bg 4343
+sparkwing dashboard open --host workstation.example.ts.net
+```
+
+Open the printed HTTPS link from a device on the tailnet. Serve terminates TLS
+and preserves the browser's Host and Origin. Sparkwing derives HTTPS from the
+configured host, ignores forwarded identity headers, and requires the socket-minted
+sign-in code. Sessions stay bound to that exact origin, so a loopback session
+does not authorize the Serve address. `dashboard.read_only` applies to both.
+The signed-out static shell is visible to anyone who can reach the Serve URL;
+API data still requires a session.
+
+Use Serve rather than Funnel. Tailscale warns that paths sharing a backend port
+can share exposure: review all mappings before exposing that port. See the
+[Serve guide](https://tailscale.com/docs/features/tailscale-serve).
 
 ## Runner labels
 
