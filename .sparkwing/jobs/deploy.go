@@ -345,10 +345,13 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 	if len(rec.Changes) == 0 {
 		return rec, err
 	}
+	// safety: a newer candidate may already have migrated the store; require roll forward even if startup failed before proving migration.
 	if rec.CandidateSchema > rec.PreviousSchema || rec.PreviousSchema <= 0 || rec.CandidateSchema <= 0 {
 		feedbackErr := d.recordUnsafeRollback(ctx, rec, err)
 		if feedbackErr != nil {
-			err = errors.Join(err, fmt.Errorf("bitwing rollback finding could not be recorded: %w", feedbackErr))
+			failure := fmt.Errorf("bitwing rollback finding could not be recorded: %w", feedbackErr)
+			d.tools.say(context.WithoutCancel(ctx), failure.Error())
+			err = errors.Join(err, failure)
 		}
 		return rec, fmt.Errorf("automatic rollback disabled: controller schema %d -> %d; candidate images retained, production requires roll forward: %w", rec.PreviousSchema, rec.CandidateSchema, err)
 	}

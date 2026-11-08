@@ -1204,10 +1204,6 @@ func (d *deployer) recordUnsafeRollback(ctx context.Context, rec envDeployment, 
 	if err := os.WriteFile(file, body, 0o600); err != nil {
 		return err
 	}
-	path, err := d.tools.lookPath("bitwing")
-	if err != nil {
-		return err
-	}
-	_, err = d.tools.run(feedback, deployCommand{Name: path, Args: []string{"finding", "record", "--source", "sparkwing-production-rollback", "--file", file}})
+	_, err = d.cmd(feedback, deployCommand{Name: "bitwing", Args: []string{"finding", "record", "--source", "sparkwing-production-rollback", "--file", file}})
 	return err
 }

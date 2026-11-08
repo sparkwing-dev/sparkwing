@@ -1296,7 +1296,7 @@ func TestDeployBuildsReleaseTagUnchanged(t *testing.T) {
 	}
 }
 
-func TestDeploySchemaUpgradeNeverRollsBackOnSmokeFailure(t *testing.T) {
+func TestDeploySchemaUpgradeNeverRollsBackOnSmokeOrFeedbackFailure(t *testing.T) {
 	f := newFakeDeploy(t)
 	if err := os.WriteFile(filepath.Join(f.repo, "internal/store/store.go"), []byte("package store\nconst expectedSchemaVersion = 35\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1306,9 +1306,21 @@ func TestDeploySchemaUpgradeNeverRollsBackOnSmokeFailure(t *testing.T) {
 	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
 	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
 	f.failRuns["run-deploy-smoke-production-smoke"] = true
-	_, err := f.deployer(false).promote(t.Context(), f.candidate())
+	d := f.deployer(false)
+	run := d.tools.run
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		out, err := run(ctx, c)
+		if filepath.Base(c.Name) == "bitwing" {
+			return "", errors.New("trusted feedback helper unavailable")
+		}
+		return out, err
+	}
+	_, err := d.promote(t.Context(), f.candidate())
 	if err == nil || !strings.Contains(err.Error(), "roll forward") {
 		t.Fatalf("promote = %v", err)
+	}
+	if !strings.Contains(err.Error(), "trusted feedback helper unavailable") || !strings.Contains(strings.Join(f.said, "\n"), "bitwing rollback finding could not be recorded") {
+		t.Fatalf("missing feedback failure in log or deploy error: %v, %v", err, f.said)
 	}
 	got := f.pinsOnMain("sparkwing")
 	if got.Controller != f.candidate().Controller || got.Launcher != f.candidate().Runner {
@@ -1364,5 +1376,41 @@ func TestProductionSmokeUsesSourceOwnerToken(t *testing.T) {
 	calls := strings.Join(f.calls, "\n")
 	if !strings.Contains(calls, cfg.Params.SmokeToken) || strings.Contains(calls, "smoke-token-qa-team") {
 		t.Fatalf("wrong production smoke credential path: %s", calls)
+	}
+}
+
+func TestDeployRollbackFindingUsesTrustedToolchain(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.cfg.ToolDir = t.TempDir()
+	path := filepath.Join(d.cfg.ToolDir, "bitwing")
+	if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	run := d.tools.run
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		if c.Name != path || c.Env["PATH"] != d.cfg.ToolDir+":/usr/bin:/bin" || ctx.Err() != nil {
+			t.Fatalf("unsafe feedback command: %+v", c)
+		}
+		return run(ctx, c)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := d.recordUnsafeRollback(ctx, envDeployment{PreviousSchema: 30, CandidateSchema: 34}, errors.New("smoke failed")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeployRollbackFindingMissingTrustedHelperNeverUsesPATH(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.cfg.ToolDir = t.TempDir()
+	d.tools.lookPath = func(string) (string, error) { t.Fatal("finding fell back to PATH"); return "", nil }
+	err := d.recordUnsafeRollback(t.Context(), envDeployment{PreviousSchema: 30, CandidateSchema: 34}, errors.New("smoke failed"))
+	if err == nil || !strings.Contains(err.Error(), "bitwing is not in the deploy toolchain") {
+		t.Fatalf("missing feedback reason: %v", err)
+	}
+	if strings.Contains(strings.Join(f.calls, "\n"), "finding record") {
+		t.Fatal("executed untrusted finding helper")
 	}
 }

@@ -181,8 +181,7 @@ type gitopsChange struct {
 	Commit string `json:"commit"`
 }
 
-// safety: a failed promote rolls back from this run's own record: it reverts
-// Changes newest first and names Previous as what production returns to.
+// safety: rollback uses this run's own changes and schema evidence, so failure cannot revert another deploy or cross a schema upgrade.
 type envDeployment struct {
 	Environment     string         `json:"environment"`
 	Images          deployImages   `json:"images"`
