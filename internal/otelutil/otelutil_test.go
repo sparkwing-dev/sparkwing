@@ -202,9 +202,11 @@ func TestInitRegistersOTLPBeforeShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
 		select {
 		case <-handler.ready:
-		case <-time.After(time.Second):
+		case <-ctx.Done():
 			t.Error("log initialization did not finish")
 		}
 		if err := telemetry.Shutdown(context.Background()); err != nil {
@@ -246,9 +248,11 @@ func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
 		done <- telemetry
 	}()
 	var telemetry *Telemetry
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	select {
 	case telemetry = <-done:
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		// A wedged Init holds the log mutex, so restoring the writer would hang too.
 		t.Fatal("Init did not return with the built-in slog handler installed")
 	}
@@ -261,9 +265,11 @@ func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
 
 	printed := make(chan struct{})
 	go func() { log.Printf("after-init"); slog.Info("after-init"); close(printed) }()
+	logging, stop := context.WithTimeout(t.Context(), 2*time.Second)
+	defer stop()
 	select {
 	case <-printed:
-	case <-time.After(2 * time.Second):
+	case <-logging.Done():
 		t.Fatal("logging after Init did not return")
 	}
 }

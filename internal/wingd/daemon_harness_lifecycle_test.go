@@ -22,8 +22,8 @@ func TestDaemonHarnessOwnsBackgroundRunLifecycle(t *testing.T) {
 		cleanupPos       token.Pos
 		readySelectPos   token.Pos
 		stopCalled       bool
-		stopTimer        bool
-		stopTimerStopped bool
+		stopDeadline     bool
+		deadlineCanceled bool
 		boundedJoin      bool
 	)
 	for _, decl := range file.Decls {
@@ -86,6 +86,13 @@ func TestDaemonHarnessOwnsBackgroundRunLifecycle(t *testing.T) {
 					}
 				}
 			}
+			if isStopWait {
+				if deferred, ok := node.(*ast.DeferStmt); ok {
+					if fn, ok := deferred.Call.Fun.(*ast.Ident); ok && fn.Name == "cancel" {
+						deadlineCanceled = true
+					}
+				}
+			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
@@ -117,10 +124,8 @@ func TestDaemonHarnessOwnsBackgroundRunLifecycle(t *testing.T) {
 				switch {
 				case receiver.Name == "td" && sel.Sel.Name == "stop":
 					stopCalled = true
-				case receiver.Name == "time" && sel.Sel.Name == "NewTimer":
-					stopTimer = true
-				case receiver.Name == "timer" && sel.Sel.Name == "Stop":
-					stopTimerStopped = true
+				case receiver.Name == "context" && sel.Sel.Name == "WithTimeout":
+					stopDeadline = true
 				}
 			}
 			return true
@@ -131,7 +136,7 @@ func TestDaemonHarnessOwnsBackgroundRunLifecycle(t *testing.T) {
 				if !ok {
 					return true
 				}
-				var waitsFinished, waitsTimer bool
+				var waitsFinished, waitsDeadline bool
 				for _, stmt := range selection.Body.List {
 					clause, ok := stmt.(*ast.CommClause)
 					if !ok {
@@ -145,15 +150,18 @@ func TestDaemonHarnessOwnsBackgroundRunLifecycle(t *testing.T) {
 					if !ok || recv.Op != token.ARROW {
 						continue
 					}
-					channel, ok := recv.X.(*ast.SelectorExpr)
-					if !ok || channel.Sel.Name == "" {
-						continue
+					if channel, ok := recv.X.(*ast.SelectorExpr); ok {
+						recvIdent, _ := channel.X.(*ast.Ident)
+						waitsFinished = waitsFinished || (recvIdent != nil && recvIdent.Name == "td" && channel.Sel.Name == "finished")
 					}
-					recvIdent, _ := channel.X.(*ast.Ident)
-					waitsFinished = waitsFinished || (recvIdent != nil && recvIdent.Name == "td" && channel.Sel.Name == "finished")
-					waitsTimer = waitsTimer || (recvIdent != nil && recvIdent.Name == "timer" && channel.Sel.Name == "C")
+					if call, ok := recv.X.(*ast.CallExpr); ok {
+						if method, ok := call.Fun.(*ast.SelectorExpr); ok {
+							recvIdent, _ := method.X.(*ast.Ident)
+							waitsDeadline = waitsDeadline || (recvIdent != nil && recvIdent.Name == "ctx" && method.Sel.Name == "Done")
+						}
+					}
 				}
-				boundedJoin = waitsFinished && waitsTimer
+				boundedJoin = waitsFinished && waitsDeadline
 				return true
 			})
 		}
@@ -164,7 +172,7 @@ func TestDaemonHarnessOwnsBackgroundRunLifecycle(t *testing.T) {
 	if !cleanupPos.IsValid() || !readySelectPos.IsValid() || cleanupPos >= readySelectPos {
 		t.Error("startDaemon must register stopAndWait cleanup before readiness can fail")
 	}
-	if !stopCalled || !stopTimer || !stopTimerStopped || !boundedJoin {
+	if !stopCalled || !stopDeadline || !deadlineCanceled || !boundedJoin {
 		t.Error("stopAndWait must cancel the daemon and boundedly join its completed worker")
 	}
 }

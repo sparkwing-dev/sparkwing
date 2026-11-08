@@ -3,11 +3,12 @@ package jobs
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 type landRemote struct {
@@ -37,7 +38,7 @@ func newLandRemote(t *testing.T) *landRemote {
 
 func (r *landRemote) git(dir string, args ...string) string {
 	r.t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -181,7 +182,7 @@ func TestLandStopsAfterThreeMergesWhenMainKeepsMoving(t *testing.T) {
 	if len(recheck.calls) != landMaxMerges {
 		t.Fatalf("re-checked %d times, want %d", len(recheck.calls), landMaxMerges)
 	}
-	if out, err := exec.Command("git", "-C", r.bare, "merge-base", "--is-ancestor", head.Commit, "main").CombinedOutput(); err == nil {
+	if out, err := testgit.Command("git", "-C", r.bare, "merge-base", "--is-ancestor", head.Commit, "main").CombinedOutput(); err == nil {
 		t.Fatalf("the branch reached main although every push was refused: %s", out)
 	}
 }

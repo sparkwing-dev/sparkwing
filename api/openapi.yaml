@@ -210,6 +210,8 @@ components:
                 $ref: '#/components/schemas/internal.blob.Member'
               type: array
             - type: "null"
+        PreparedParent:
+          type: boolean
         ReadSet:
           $ref: '#/components/schemas/internal.blob.ReadSet'
         Record:
@@ -218,6 +220,7 @@ components:
           type: boolean
       required:
         - Found
+        - PreparedParent
         - VerifiedDefault
         - Record
         - Members
@@ -1320,6 +1323,8 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.DataMember'
               type: array
             - type: "null"
+        prepared_parent:
+          type: boolean
         record:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.DataRecord'

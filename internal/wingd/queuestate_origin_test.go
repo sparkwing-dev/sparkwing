@@ -1,12 +1,9 @@
 package wingd_test
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -34,9 +31,10 @@ func TestQueueState_OriginTagsHoldersAndWaiters(t *testing.T) {
 	})
 
 	waiterConn := ensure(t, home, "v1")
-	acquireAsync(t, waiterConn, wingwire.AdmissionRequest{RunID: "ctrl-waiter", Pipeline: "test", Origin: wingwire.OriginController, Resources: wingwire.HostResources{Cores: 6}})
+	positions, result := acquireAsync(t, waiterConn, wingwire.AdmissionRequest{RunID: "ctrl-waiter", Pipeline: "test", Origin: wingwire.OriginController, Resources: wingwire.HostResources{Cores: 6}})
 
-	qs := waitForWaiter(t, home, "ctrl-waiter")
+	waitQueued(t, positions, result)
+	qs := waiterQueueState(t, home, "ctrl-waiter")
 
 	origins := map[string]wingwire.Origin{}
 	for _, h := range qs.Holders {
@@ -56,26 +54,14 @@ func TestQueueState_OriginTagsHoldersAndWaiters(t *testing.T) {
 	}
 }
 
-func waitForWaiter(t *testing.T, home, runID string) wingwire.QueueState {
+func waiterQueueState(t *testing.T, home, runID string) wingwire.QueueState {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	poll := time.NewTicker(5 * time.Millisecond)
-	defer poll.Stop()
-	for {
-		qs, err := client.Query(ctx, client.Options{Home: home, Version: "v1"})
-		if err != nil {
-			t.Fatalf("query: %v", err)
-		}
-		for _, w := range qs.Waiters {
-			if w.RunID == runID {
-				return qs
-			}
-		}
-		select {
-		case <-poll.C:
-		case <-ctx.Done():
-			t.Fatalf("waiter %q never appeared", runID)
+	qs := queueOnce(t, home)
+	for _, waiter := range qs.Waiters {
+		if waiter.RunID == runID {
+			return qs
 		}
 	}
+	t.Fatalf("waiter %q missing after its queue update: %+v", runID, qs.Waiters)
+	return qs
 }

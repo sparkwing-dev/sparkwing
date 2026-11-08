@@ -38,14 +38,18 @@ func executeCommand(ctx context.Context, name string, args []string, dir string,
 		}
 	}
 
-	var environment []string
+	environment := os.Environ()
 	if len(extraEnv) > 0 {
-		environment = os.Environ()
 		for k, v := range extraEnv {
 			environment = append(environment, k+"="+v)
 		}
 	}
-	cmd := commandContext(ctx, environment, name, args...)
+	path, err := procenv.LookupCommand(name, environment, dir)
+	if err != nil {
+		return ExecResult{Command: display, ExitCode: ExitNotStarted}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
+	}
+	cmd := commandContext(ctx, environment, path, args...)
+	cmd.Args[0] = name
 	cmd.Dir = dir
 	streamsDone := make(chan struct{})
 	configureProcessGroup(ctx, cmd, streamsDone)
@@ -271,7 +275,7 @@ func (l *diagnosticOutputLimiter) capture(raw []byte) []byte {
 
 func processCommandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
 	if environment == nil {
-		return procenv.HostCommandContext(ctx, name, args...)
+		environment = os.Environ()
 	}
-	return procenv.ControlCommandContext(ctx, environment, name, args...)
+	return procenv.SDKCommandContext(ctx, environment, name, args...)
 }

@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestGateIndexVar_KeepsTheNameOtherModulesReadItBy(t *testing.T) {
@@ -215,7 +217,7 @@ func writeFile(t *testing.T, path string) {
 func initRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.Command("git", "init", "-b", "main", dir)
+	cmd := testgit.Command("git", "init", "-b", "main", dir)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1"}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v\n%s", dir, err, out)
@@ -229,7 +231,13 @@ func initRepo(t *testing.T) string {
 
 func gitDirOf(t *testing.T, dir string) string {
 	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--absolute-git-dir").CombinedOutput()
+	cmd := testgit.Command("git", "-C", dir, "rev-parse", "--absolute-git-dir")
+	for _, name := range []string{"GIT_DIR", "GIT_WORK_TREE"} {
+		if value, ok := os.LookupEnv(name); ok {
+			cmd.Env = append(cmd.Env, name+"="+value)
+		}
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git -C %s rev-parse: %v\n%s", dir, err, out)
 	}

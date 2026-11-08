@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
@@ -377,7 +379,7 @@ func readRepoFile(t *testing.T, path string) string {
 
 func TestHooksUninstallStillRemovesHooksAfterTheProjectFilesAreGone(t *testing.T) {
 	repo := t.TempDir()
-	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+	if out, err := testgit.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
@@ -403,7 +405,7 @@ func TestHooksUninstallStopsAtAnUninspectableDirectory(t *testing.T) {
 		t.Skip("root traverses a mode-000 directory")
 	}
 	root := t.TempDir()
-	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+	if out, err := testgit.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 	if err := os.MkdirAll(filepath.Join(root, ".sparkwing"), 0o755); err != nil {
@@ -437,7 +439,7 @@ func TestDiscoveryRefusesTheDefaultStateDirWhenTheHomeIsRedirected(t *testing.T)
 		t.Fatal(err)
 	}
 	checkout := filepath.Join(home, "code", "app")
-	if out, err := exec.Command("git", "init", "-q", checkout).CombinedOutput(); err != nil {
+	if out, err := testgit.Command("git", "init", "-q", checkout).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 	if _, ok, err := nearestDotSparkwing(checkout); ok || err != nil {

@@ -11,13 +11,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -261,7 +262,7 @@ func initializeScheduleCheckout(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "source"}} {
-		command := exec.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
+		command := testgit.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
 		if out, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("prepare scheduled checkout: %v: %s", err, out)
 		}
@@ -300,7 +301,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 		t.Fatal(err)
 	}
 	initializeScheduleCheckout(t, checkout)
-	if out, err := exec.CommandContext(t.Context(), "git", "-C", checkout, "update-ref", "refs/remotes/origin/main", "HEAD").CombinedOutput(); err != nil {
+	if out, err := testgit.CommandContext(t.Context(), "git", "-C", checkout, "update-ref", "refs/remotes/origin/main", "HEAD").CombinedOutput(); err != nil {
 		t.Fatalf("origin/main: %s %v", out, err)
 	}
 	project, err := projectconfig.Parse(config)

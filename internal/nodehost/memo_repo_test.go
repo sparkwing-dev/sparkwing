@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
@@ -19,7 +20,7 @@ func createTestRepository(t *testing.T, files map[string]string) string {
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", args...)
+		cmd := testgit.Command("git", args...)
 		cmd.Dir = dir
 		cmd.Stdout, cmd.Stderr = nil, nil
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -430,7 +431,7 @@ func TestRepoFilesIncludesSymlinkType(t *testing.T) {
 
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -441,7 +442,7 @@ func TestRepoFilesRejectsDirectoryComponentReplacedAfterListing(t *testing.T) {
 	dir := createTestRepository(t, map[string]string{"dir/file": "original"})
 	outside := t.TempDir()
 	writeAll(t, outside, map[string]string{"file": "outside"})
-	environment, err := procenv.Build(procenv.Attempt, procenv.Base{Local: true, Captured: os.Environ()}, procenv.Runtime{})
+	environment, err := procenv.Build(procenv.Attempt, procenv.Base{Local: true, Captured: testgit.Env(os.Environ())}, procenv.Runtime{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,6 +16,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 // safety: helper children inherit this, which is how they tell a re-exec of the
@@ -44,6 +45,10 @@ func markHost() bool {
 func enterSandbox() string {
 	if reExec {
 		return ""
+	}
+	if err := testgit.Unbind(); err != nil {
+		fmt.Fprintf(os.Stderr, "testleak: cannot scrub the Git environment: %v\n", err)
+		os.Exit(2) //nolint:forbidigo // inherited bindings can redirect fixture writes into the developer's repository.
 	}
 	// safety: the Go caches and settings default to paths under HOME, so moving
 	// HOME without pinning them sends every build a test runs to an empty cache
