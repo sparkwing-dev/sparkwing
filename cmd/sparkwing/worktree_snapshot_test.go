@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
@@ -55,7 +56,7 @@ func TestCaptureWorktreeSnapshotPreservesExactWorkingTreeWithoutMutatingReposito
 	}
 	refsBefore := runSnapshotGit(t, repo, "show-ref")
 
-	snapshot, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+	snapshot, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err != nil {
 		t.Fatalf("captureWorktreeSnapshot: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestCaptureWorktreeSnapshotPreservesExactWorkingTreeWithoutMutatingReposito
 	if string(indexAfter) != string(indexBefore) {
 		t.Fatal("real Git index changed")
 	}
-	if exec.Command("git", "-C", repo, "cat-file", "-e", snapshot.SHA).Run() == nil {
+	if testgit.Command("git", "-C", repo, "cat-file", "-e", snapshot.SHA).Run() == nil {
 		t.Fatal("snapshot commit leaked into the source repository object database")
 	}
 
@@ -101,10 +102,10 @@ func TestCaptureWorktreeSnapshotPreservesExactWorkingTreeWithoutMutatingReposito
 	if got := strings.Fields(runSnapshotGit(t, checkout, "rev-list", "--all")); len(got) != 1 || got[0] != snapshot.SHA {
 		t.Fatalf("snapshot history = %q, want only %s", got, snapshot.SHA)
 	}
-	if exec.Command("git", "-C", checkout, "cat-file", "-e", snapshot.BaseSHA+"^{commit}").Run() == nil {
+	if testgit.Command("git", "-C", checkout, "cat-file", "-e", snapshot.BaseSHA+"^{commit}").Run() == nil {
 		t.Fatal("source HEAD history entered the snapshot bundle")
 	}
-	if exec.Command("git", "-C", checkout, "cat-file", "-e", deletedBlob+"^{blob}").Run() == nil {
+	if testgit.Command("git", "-C", checkout, "cat-file", "-e", deletedBlob+"^{blob}").Run() == nil {
 		t.Fatal("a blob deleted from the working tree entered the snapshot bundle")
 	}
 	bundleHeads := strings.Fields(runSnapshotGit(t, checkout, "bundle", "list-heads", snapshot.BundlePath))
@@ -138,7 +139,7 @@ func TestCaptureWorktreeSnapshotPreservesExactWorkingTreeWithoutMutatingReposito
 		assertSnapshotFile(t, checkout, "odd\nname.txt", "newline path\r\n")
 	}
 
-	again, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+	again, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err != nil {
 		t.Fatalf("second capture: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestCaptureWorktreeSnapshotRejectsUnmergedIndex(t *testing.T) {
 	blob := strings.TrimSpace(runSnapshotGitInput(t, repo, "ours\n", "hash-object", "-w", "--stdin"))
 	runSnapshotGitInput(t, repo, "100644 "+blob+" 1\tfile.txt\n100644 "+blob+" 2\tfile.txt\n100644 "+blob+" 3\tfile.txt\n", "update-index", "--index-info")
 
-	_, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+	_, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err == nil || !strings.Contains(err.Error(), "unmerged index") {
 		t.Fatalf("error = %v", err)
 	}
@@ -179,7 +180,7 @@ func TestCaptureWorktreeSnapshotRejectsGitlinksAndContentFilters(t *testing.T) {
 		runSnapshotGit(t, repo, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", nested, "nested")
 		runSnapshotGit(t, repo, "commit", "-m", "submodule")
 
-		_, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+		_, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 		if err == nil || !strings.Contains(err.Error(), "submodules") {
 			t.Fatalf("error = %v", err)
 		}
@@ -192,7 +193,7 @@ func TestCaptureWorktreeSnapshotRejectsGitlinksAndContentFilters(t *testing.T) {
 		runSnapshotGit(t, repo, "add", ".gitattributes")
 		runSnapshotGit(t, repo, "commit", "-m", "base")
 
-		_, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+		_, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 		if err == nil || !strings.Contains(err.Error(), `content filter "lfs"`) {
 			t.Fatalf("error = %v", err)
 		}
@@ -211,11 +212,11 @@ func TestCaptureWorktreeSnapshotRejectsUnsupportedRepositoryShapesEarly(t *testi
 		writeSnapshotFile(t, origin, "value", "two\n", 0o644)
 		runSnapshotGit(t, origin, "commit", "-am", "two")
 		checkout := filepath.Join(t.TempDir(), "shallow")
-		cmd := exec.Command("git", "clone", "--quiet", "--depth", "1", "file://"+origin, checkout)
+		cmd := testgit.Command("git", "clone", "--quiet", "--depth", "1", "file://"+origin, checkout)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("shallow clone: %v: %s", err, out)
 		}
-		_, err := captureWorktreeSnapshot(context.Background(), os.Environ(), checkout, nil)
+		_, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), checkout, nil)
 		if err == nil || !strings.Contains(err.Error(), "complete repository") {
 			t.Fatalf("error = %v", err)
 		}
@@ -226,7 +227,7 @@ func TestCaptureWorktreeSnapshotRejectsUnsupportedRepositoryShapesEarly(t *testi
 		if err := os.Mkdir(repo, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command("git", "-C", repo, "init", "--quiet", "--object-format=sha256")
+		cmd := testgit.Command("git", "-C", repo, "init", "--quiet", "--object-format=sha256")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Skipf("Git does not support SHA-256 repositories: %v: %s", err, out)
 		}
@@ -235,7 +236,7 @@ func TestCaptureWorktreeSnapshotRejectsUnsupportedRepositoryShapesEarly(t *testi
 		writeSnapshotFile(t, repo, "value", "one\n", 0o644)
 		runSnapshotGit(t, repo, "add", "value")
 		runSnapshotGit(t, repo, "commit", "-m", "one")
-		_, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+		_, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 		if err == nil || !strings.Contains(err.Error(), "SHA-1 repositories only") {
 			t.Fatalf("error = %v", err)
 		}
@@ -263,7 +264,7 @@ func TestCaptureWorktreeSnapshotRejectsUnsafeSymlinks(t *testing.T) {
 			}
 			runSnapshotGit(t, repo, "add", ".")
 			runSnapshotGit(t, repo, "commit", "-m", tc.name)
-			if _, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("capture error = %v, want %q", err, tc.want)
 			} else if strings.Contains(err.Error(), ".env-production-secret") || strings.Contains(err.Error(), "outside-secret") {
 				t.Fatalf("capture error exposed a source filename or symlink target: %v", err)
@@ -280,7 +281,7 @@ func TestCaptureWorktreeSnapshotRejectsUnsafeSymlinks(t *testing.T) {
 		}
 		runSnapshotGit(t, repo, "add", ".")
 		runSnapshotGit(t, repo, "commit", "-m", "cycle")
-		if _, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil); err == nil || !strings.Contains(err.Error(), "symlink cycle") {
+		if _, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil); err == nil || !strings.Contains(err.Error(), "symlink cycle") {
 			t.Fatalf("capture error = %v", err)
 		}
 	})
@@ -292,7 +293,7 @@ func TestCaptureWorktreeSnapshotRejectsCompressibleUncompressedOversize(t *testi
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-m", "compressible source")
 
-	snapshot, err := captureWorktreeSnapshotWithLimits(context.Background(), os.Environ(), repo, worktreeSnapshotLimits{
+	snapshot, err := captureWorktreeSnapshotWithLimits(context.Background(), testgit.Env(os.Environ()), repo, worktreeSnapshotLimits{
 		bytes: 1024,
 		files: maxWorktreeSnapshotFiles,
 	}, nil)
@@ -316,7 +317,7 @@ func TestCaptureWorktreeSnapshotRejectsFileCountOversize(t *testing.T) {
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-m", "two files")
 
-	snapshot, err := captureWorktreeSnapshotWithLimits(context.Background(), os.Environ(), repo, worktreeSnapshotLimits{
+	snapshot, err := captureWorktreeSnapshotWithLimits(context.Background(), testgit.Env(os.Environ()), repo, worktreeSnapshotLimits{
 		bytes: maxWorktreeSnapshotBytes,
 		files: 1,
 	}, nil)
@@ -360,7 +361,7 @@ func runSnapshotGit(t *testing.T, repo string, args ...string) string {
 
 func runSnapshotGitInput(t *testing.T, repo, input string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-c", "commit.gpgSign=false", "-C", repo}, args...)...)
+	cmd := testgit.Command("git", append([]string{"-c", "commit.gpgSign=false", "-C", repo}, args...)...)
 	cmd.Stdin = strings.NewReader(input)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -401,7 +402,7 @@ func TestCaptureWorktreeSnapshotRecordsTheBaselineTheBranchForkedFrom(t *testing
 	runSnapshotGit(t, repo, "commit", "-m", "base")
 	forkPoint := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
 
-	snapshot, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+	snapshot, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err != nil {
 		t.Fatalf("captureWorktreeSnapshot: %v", err)
 	}
@@ -418,7 +419,7 @@ func TestCaptureWorktreeSnapshotRecordsTheBaselineTheBranchForkedFrom(t *testing
 	runSnapshotGit(t, repo, "commit", "-m", "branch")
 	writeSnapshotFile(t, repo, "uncommitted.txt", "edit\n", 0o644)
 
-	snapshot, err = captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+	snapshot, err = captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err != nil {
 		t.Fatalf("captureWorktreeSnapshot: %v", err)
 	}
@@ -448,7 +449,7 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 	writeSnapshotFile(t, repo, "notes/api.txt", "\tKeys: runtimePlumbingKeys{\n", 0o644)
 	writeSnapshotFile(t, repo, "internal/keys_test.go", "const fixture = `-----BEGIN RSA PRIVATE KEY-----`\n", 0o644)
 
-	_, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+	_, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err == nil {
 		t.Fatal("expected a refusal naming the secret-shaped files")
 	}
@@ -456,7 +457,7 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 	for _, want := range []string{
 		".env (name, untracked)", "deploy/service.conf (content, tracked)",
 		"notes/backup.txt (content, untracked)",
-		"git rm --cached", ".gitignore", "--allow-secret-file",
+		"git rm --cached", ".gitignore", "allow_secret_files",
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("refusal = %q, want it to mention %q", message, want)
@@ -468,18 +469,18 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 		}
 	}
 
-	if _, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, []string{".env"}); err == nil ||
+	if _, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, []string{".env"}); err == nil ||
 		!strings.Contains(err.Error(), "deploy/service.conf (content") || strings.Contains(err.Error(), ".env (name") {
 		t.Fatalf("naming one path = %v, want the other path still refused", err)
 	}
 
-	if _, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, []string{"nowhere/.env"}); err == nil ||
+	if _, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, []string{"nowhere/.env"}); err == nil ||
 		!strings.Contains(err.Error(), "which no file in the working-tree snapshot matches") {
 		t.Fatalf("naming an absent path = %v, want it reported", err)
 	}
 
-	snapshot, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo,
-		[]string{"./.env", "deploy/service.conf", "notes/backup.txt"})
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "allow_secret_files: [.env, deploy/service.conf, notes/backup.txt]\n", 0o644)
+	snapshot, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err != nil {
 		t.Fatalf("captureWorktreeSnapshot with both paths named: %v", err)
 	}
@@ -501,14 +502,14 @@ func TestCaptureWorktreeSnapshotJudgesAFilePrefixAndSkipsBinaryFiles(t *testing.
 	writeSnapshotFile(t, repo, "fixtures/image.conf", "\x00\x01api_token = A1b2C3d4E5f6G7h8I9j0\n", 0o644)
 	writeSnapshotFile(t, repo, "fixtures/tail.conf", filler+"api_token = A1b2C3d4E5f6G7h8I9j0\n", 0o644)
 
-	snapshot, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil)
+	snapshot, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil)
 	if err != nil {
 		t.Fatalf("captureWorktreeSnapshot: %v", err)
 	}
 	defer func() { _ = snapshot.close() }()
 
 	writeSnapshotFile(t, repo, "fixtures/head.conf", "api_token = A1b2C3d4E5f6G7h8I9j0\n"+filler, 0o644)
-	if _, err := captureWorktreeSnapshot(context.Background(), os.Environ(), repo, nil); err == nil ||
+	if _, err := captureWorktreeSnapshot(context.Background(), testgit.Env(os.Environ()), repo, nil); err == nil ||
 		!strings.Contains(err.Error(), "fixtures/head.conf (content, untracked)") {
 		t.Fatalf("large file with a credential in its prefix = %v, want a refusal", err)
 	}

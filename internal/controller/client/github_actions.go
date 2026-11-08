@@ -16,7 +16,7 @@ import (
 
 // ExchangeGitHubActions requests the job's ID token for this controller and exchanges it for push-bound access.
 // Token request and controller URLs require HTTPS except on loopback.
-func ExchangeGitHubActions(ctx context.Context, options EngineOptions, team, requestURL, requestToken string) (capability.Issued, error) {
+func ExchangeGitHubActions(ctx context.Context, options EngineOptions, team, requestURL, requestToken, receipt string) (capability.Issued, error) {
 	c, err := newEngineClient(options)
 	if err != nil {
 		return capability.Issued{}, err
@@ -68,7 +68,8 @@ func ExchangeGitHubActions(ctx context.Context, options EngineOptions, team, req
 	input := struct {
 		Team    string `json:"team"`
 		IDToken string `json:"id_token"`
-	}{team, proof.Value}
+		Receipt string `json:"receipt,omitempty"`
+	}{team, proof.Value, receipt}
 	if err := c.request(ctx, http.MethodPost, "/api/v1/runners/github/exchange", "/api/v1/runners/github/exchange", "", input, &issued); err != nil {
 		return capability.Issued{}, err
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"log/slog"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -21,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -192,40 +189,16 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 	server.WithLocalSchedules(schedules, func(ctx context.Context, root, pipeline string, environment []string) (crons.Proof, error) {
 		return proveLocalSchedule(ctx, b.Home, root, pipeline, environment)
 	}, snapshots)
-	socket, err := wingd.APISocketPath(b.Home)
-	if err != nil {
-		return localcontroller.Services{}, err
-	}
-	transport := wingdclient.NewAPIClient(socket)
-	lifecycle, err := wingdclient.NewLocalRunnerClient(b.Home, installedVersion())
-	if err != nil {
-		return localcontroller.Services{}, err
-	}
 	policies := server.StorePolicies()
 	policies.ClaimProfiles = profile
 	policies.LocalSecrets = cipher
 	return localcontroller.Services{
 		Policies: policies,
-		State:    state, HTTP: server.HTTP(), Close: func() error {
-			transport.CloseIdleConnections()
-			return objects.Close()
-		},
+		State:    state, HTTP: server.HTTP(), Close: objects.Close,
 		Maintain: server.MaintainStorage,
 		Complete: server.ReconcileRunEffects,
 		Runner: func(ctx context.Context) error {
-			if runtime.GOOS != "windows" {
-				return superviseLocalRunnerProcess(ctx, timerHost)
-			}
-			return runRollingLocalQueue(ctx, func(ctx context.Context, claimsStopped func()) error {
-				return runLocalQueue(ctx, rand.Text(), client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}, &runners.Loop{
-					Config: runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
-					CheckVersion: func(ctx context.Context, version string) error {
-						return b.Controller.LocalRunnerPolicy.CheckRunner(ctx, version)
-					},
-					Host:            localRunnerHosting(b.Home, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}),
-					OnClaimsStopped: claimsStopped,
-				}, lifecycle)
-			})
+			return superviseLocalRunnerProcess(ctx, timerHost)
 		},
 	}, nil
 }
@@ -266,8 +239,8 @@ func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, 
 		return fssecure.OpenPrivateConfig(log)
 	}
 	result.options = wingd.LocalStartOptions{Home: home, Executable: host.Binary, Version: host.Version}
-	result.mintLogin = func(ctx context.Context) (wingd.DashboardLogin, error) {
-		return wingdclient.MintDashboardLogin(ctx, home)
+	result.mintLogin = func(ctx context.Context, host string) (wingd.DashboardLogin, error) {
+		return wingdclient.MintDashboardLogin(ctx, home, host)
 	}
 	result.retireRunner = func(ctx context.Context) error {
 		err := wingdclient.Stop(ctx, wingdclient.Options{Home: home, RetireRunner: true})

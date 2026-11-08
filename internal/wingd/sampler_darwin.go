@@ -18,7 +18,7 @@ import (
 )
 
 func (p *procSampler) sample(pid int) (ProcUsage, bool) {
-	usages := p.sampleMany([]int{pid})
+	usages := p.sampleMany([]int{pid}, nil)
 	usage, ok := usages[pid]
 	return usage, ok
 }
@@ -26,7 +26,7 @@ func (p *procSampler) sample(pid int) (ProcUsage, bool) {
 // hack: kinfo_proc's own P_pctcpu field is unmaintained on current macOS
 // releases -- it reads zero even for a pegged process -- so the CPU
 // percentages come from ps while the sysctl supplies only the tree shape.
-func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
+func (p *procSampler) sampleMany(pids []int, members map[int][]int) map[int]ProcUsage {
 	procs, ok := darwinProcesses()
 	if !ok {
 		p.unmeasuredMetrics(pids)
@@ -47,7 +47,14 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 		if _, ok := byPID[pid]; !ok {
 			continue
 		}
-		tree := collectSubtree(pid, children)
+		var live []int
+		for _, member := range members[pid] {
+			// safety: ps fails the whole sample when any listed PID is gone.
+			if _, ok := byPID[member]; ok {
+				live = append(live, member)
+			}
+		}
+		tree := collectSubtree(pid, children, live...)
 		trees[pid] = tree
 		for _, treePID := range tree {
 			if _, ok := seen[treePID]; ok {

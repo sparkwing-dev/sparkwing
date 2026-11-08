@@ -1,4 +1,4 @@
-package sparkwing_test
+package acceptance_test
 
 import (
 	"context"

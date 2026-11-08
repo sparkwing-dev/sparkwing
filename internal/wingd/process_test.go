@@ -103,8 +103,8 @@ func startProcEnv(t *testing.T, extraEnv []string, args ...string) *procHandle {
 
 func (ph *procHandle) waitOK(timeout time.Duration) string {
 	ph.t.Helper()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	ctx, cancel := context.WithTimeout(ph.t.Context(), timeout)
+	defer cancel()
 	for {
 		select {
 		case line, ok := <-ph.lines:
@@ -114,7 +114,7 @@ func (ph *procHandle) waitOK(timeout time.Duration) string {
 			if tok, found := strings.CutPrefix(line, "OK "); found {
 				return tok
 			}
-		case <-timer.C:
+		case <-ctx.Done():
 			ph.t.Fatal("timed out waiting for OK")
 		}
 	}
@@ -122,8 +122,8 @@ func (ph *procHandle) waitOK(timeout time.Duration) string {
 
 func (ph *procHandle) waitLine(prefix string, timeout time.Duration) string {
 	ph.t.Helper()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	ctx, cancel := context.WithTimeout(ph.t.Context(), timeout)
+	defer cancel()
 	for {
 		select {
 		case line, ok := <-ph.lines:
@@ -133,16 +133,16 @@ func (ph *procHandle) waitLine(prefix string, timeout time.Duration) string {
 			if rest, found := strings.CutPrefix(line, prefix); found {
 				return strings.TrimSpace(rest)
 			}
-		case <-timer.C:
+		case <-ctx.Done():
 			ph.t.Fatalf("timed out waiting for %q", prefix)
 		}
 	}
 }
 
-func (ph *procHandle) mustStayQueued(within time.Duration) {
+func (ph *procHandle) waitQueued(within time.Duration) {
 	ph.t.Helper()
-	timer := time.NewTimer(within)
-	defer timer.Stop()
+	ctx, cancel := context.WithTimeout(ph.t.Context(), within)
+	defer cancel()
 	for {
 		select {
 		case line, ok := <-ph.lines:
@@ -150,51 +150,19 @@ func (ph *procHandle) mustStayQueued(within time.Duration) {
 				ph.t.Fatal("process exited while expected to remain queued")
 			}
 			if strings.HasPrefix(line, "OK ") {
-				ph.t.Fatalf("process was admitted early: %q", line)
+				ph.t.Fatalf("process was admitted before queueing: %q", line)
 			}
-		case <-timer.C:
-			return
+			if strings.HasPrefix(line, "QUEUED ") {
+				return
+			}
+		case <-ctx.Done():
+			ph.t.Fatal("process did not report its queued state")
 		}
 	}
 }
 
 func (ph *procHandle) kill() {
 	_ = ph.cmd.Process.Kill()
-}
-
-func readDaemonPid(t *testing.T, home string) int {
-	t.Helper()
-	path := filepath.Join(home, "wingd", "daemons.log")
-	data := waitForNonblankFile(t, path, 3*time.Second, 50*time.Millisecond)
-	lines := strings.Fields(strings.TrimSpace(string(data)))
-	last := lines[len(lines)-1]
-	pid, err := strconv.Atoi(last)
-	if err != nil {
-		t.Fatalf("parse daemon pid %q: %v", last, err)
-	}
-	return pid
-}
-
-func waitForNonblankFile(t *testing.T, path string, timeout, interval time.Duration) []byte {
-	t.Helper()
-	poll := time.NewTicker(interval)
-	defer poll.Stop()
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	for {
-		data, err := os.ReadFile(path)
-		if err == nil && len(strings.TrimSpace(string(data))) > 0 {
-			return data
-		}
-		if err != nil && !os.IsNotExist(err) {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatalf("%s remained blank for %s", path, timeout)
-		}
-	}
 }
 
 func daemonLineCount(t *testing.T, home string) int {
@@ -204,24 +172,6 @@ func daemonLineCount(t *testing.T, home string) int {
 		t.Fatalf("read daemons.log: %v", err)
 	}
 	return len(strings.Fields(strings.TrimSpace(string(data))))
-}
-
-func waitForDaemonLineCount(t *testing.T, home string, want int, timeout time.Duration) {
-	t.Helper()
-	poll := time.NewTicker(20 * time.Millisecond)
-	defer poll.Stop()
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	for {
-		if got := daemonLineCount(t, home); got >= want {
-			return
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatalf("daemon history contains fewer than %d entries after %s", want, timeout)
-		}
-	}
 }
 
 func stopProcessDaemonOnCleanup(t *testing.T, home string) {
@@ -275,7 +225,7 @@ func TestProcess_ClientKillReleasesAndPromotes(t *testing.T) {
 	a.waitOK(10 * time.Second)
 
 	b := startProc(t, "hold", "--home", home, "--run", "b", "--sem", "lock")
-	b.mustStayQueued(500 * time.Millisecond)
+	b.waitQueued(5 * time.Second)
 
 	a.kill()
 	b.waitOK(5 * time.Second)
@@ -311,7 +261,10 @@ func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 	h.waitOK(10 * time.Second)
 
 	logPath := filepath.Join(home, "wingd", "d.log")
-	data := waitForNonblankFile(t, logPath, 5*time.Second, 20*time.Millisecond)
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(string(data), "wingd:") || !strings.Contains(string(data), "elected") {
 		t.Fatalf("daemon log lacks a meaningful history line:\n%s", data)
 	}

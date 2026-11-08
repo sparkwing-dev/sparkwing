@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -52,7 +53,7 @@ func superviseLocalRunnerProcess(ctx context.Context, host crontimer.Host) error
 	host.Env = make(map[string]string)
 	for _, assignment := range os.Environ() {
 		name, value, ok := strings.Cut(assignment, "=")
-		if ok {
+		if ok && name != "" {
 			host.Env[name] = value
 		}
 	}
@@ -168,7 +169,11 @@ func pinLocalRunnerExecutable(home, executable string) (_, _ string, result erro
 		return "", "", err
 	}
 	build := hex.EncodeToString(digest.Sum(nil))
-	path := filepath.Join(dir, build)
+	name := build
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(dir, name)
 	if existing, err := os.Open(path); err == nil {
 		found := sha256.New()
 		_, copyErr := io.Copy(found, existing)

@@ -1,14 +1,12 @@
-//go:build !linux && !darwin
+//go:build !linux && !darwin && !windows
 
 package wingd
 
 import (
-	"context"
 	"errors"
-
-	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"os/exec"
 )
 
-func startUnmanagedLocalRunner(context.Context, crontimer.Host, string) error {
+func configureDetachedLocalRunner(*exec.Cmd) error {
 	return errors.New("wingd: unmanaged runner detachment is unavailable on this operating system")
 }

@@ -59,6 +59,14 @@ func (s *Server) verifyActionsExchange(r *http.Request) error {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub Actions signing keys are unavailable"}, err)
 	}
 	team := store.NormalizeTeam(store.Team(request.Team))
+	if request.Receipt != "" {
+		spec, err := s.actionsReceiptProvision(r.Context(), team, request.Receipt, claims)
+		if err != nil {
+			return err
+		}
+		*r = *r.WithContext(context.WithValue(r.Context(), actionsProofKey{}, actionsProof{spec: spec, repository: claims.Repository}))
+		return nil
+	}
 	branch, isBranch := strings.CutPrefix(claims.Ref, "refs/heads/")
 	if team == "" || !githubRunnerEvents[claims.EventName] || !isBranch || branch == "" || !runspec.IsCommitID(claims.SHA) || claims.RunID == "" || claims.RunAttempt == "" || !strings.HasPrefix(claims.WorkflowRef, claims.Repository+"/.github/workflows/") || !strings.HasSuffix(claims.WorkflowRef, "@"+claims.Ref) {
 		return actionsExchangeRefusal()

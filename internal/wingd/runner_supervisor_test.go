@@ -199,18 +199,6 @@ func TestLocalRunnerLaunchdCapturesArgvAndDoesNotResurrectInstance(t *testing.T)
 	}
 }
 
-func TestLocalRunnerWindowsRefusesCrossAccountSupervision(t *testing.T) {
-	host := runnerSupervisorHost(t)
-	host.GOOS = "windows"
-	host.Exec = func(context.Context, string, ...string) (string, error) {
-		t.Fatal("SCM must not launch a runner under a different account")
-		return "", nil
-	}
-	if err := StartLocalRunnerProcess(t.Context(), host, "instance"); err == nil || !strings.Contains(err.Error(), "same-account") {
-		t.Fatalf("Windows startup = %v", err)
-	}
-}
-
 func TestLocalRunnerStartupEnvironmentRetiresWithoutRemovingLogs(t *testing.T) {
 	host := runnerSupervisorHost(t)
 	dir, err := localRunnerDirectory(host, "instance")

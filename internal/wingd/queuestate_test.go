@@ -16,9 +16,6 @@ import (
 )
 
 func TestQueueState_HostPressureExplainsWait(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
 	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
@@ -31,15 +28,11 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	})
 
 	cl := ensure(t, home, "v1")
-	_, result := acquireAsync(t, cl, wingwire.AdmissionRequest{
+	positions, result := acquireAsync(t, cl, wingwire.AdmissionRequest{
 		RunID:     "heavy",
 		Resources: wingwire.HostResources{Cores: 5},
 	})
-	select {
-	case r := <-result:
-		t.Fatalf("run was admitted (%v); it should queue on host pressure", r.err)
-	case <-time.After(300 * time.Millisecond):
-	}
+	waitQueued(t, positions, result)
 
 	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
 	if err != nil {
@@ -97,15 +90,8 @@ func TestQueueState_PositiveGrantRestoresExternalPressureAccounting(t *testing.T
 		SubLease:     true,
 		Resources:    wingwire.HostResources{Cores: 8, MemoryBytes: 2 << 30},
 	})
-	select {
-	case q := <-positions:
-		if !strings.Contains(q.BlockingReason, "cores") || !strings.Contains(q.BlockingReason, "external load") {
-			t.Fatalf("initial blocking reason = %q, want restored CPU pressure accounting", q.BlockingReason)
-		}
-	case r := <-result:
-		t.Fatalf("memory-bound participant resolved: lease=%v err=%v", r.lease, r.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("memory-bound participant neither queued nor resolved")
+	if q := waitQueued(t, positions, result); !strings.Contains(q.BlockingReason, "cores") || !strings.Contains(q.BlockingReason, "external load") {
+		t.Fatalf("initial blocking reason = %q, want restored CPU pressure accounting", q.BlockingReason)
 	}
 
 	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
@@ -138,9 +124,6 @@ func TestQueueState_PositiveGrantRestoresExternalPressureAccounting(t *testing.T
 }
 
 func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
 	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
@@ -292,16 +275,16 @@ func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
 func waitForStalledHolder(
 	t *testing.T,
 	q *client.Client,
+	proc *fakeProcSampler,
 	description string,
 	selectHolder func([]wingwire.Holder) (wingwire.Holder, bool),
 ) wingwire.Holder {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
 	var last []wingwire.Holder
 	for {
+		_, changed := proc.observation()
 		qs, err := q.QueueState(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -314,31 +297,32 @@ func waitForStalledHolder(
 			return holder
 		}
 		select {
-		case <-poll.C:
+		case <-changed:
 		case <-ctx.Done():
 			t.Fatalf("%s never flagged stalled: %+v", description, last)
 		}
 	}
 }
 
-func observeQueueStateFor(t *testing.T, q *client.Client, duration time.Duration, assert func(wingwire.QueueState)) {
+func observeQueueStateFor(t *testing.T, q *client.Client, proc *fakeProcSampler, duration time.Duration, assert func(wingwire.QueueState)) {
 	t.Helper()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	observation := time.NewTimer(duration)
-	defer observation.Stop()
+	started, _ := proc.observation()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
 	for {
-		queryCtx, cancelQuery := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		qs, err := q.QueueState(queryCtx)
-		cancelQuery()
+		at, changed := proc.observation()
+		qs, err := q.QueueState(ctx)
 		if err != nil {
 			t.Fatalf("queue state: %v", err)
 		}
 		assert(qs)
-		select {
-		case <-poll.C:
-		case <-observation.C:
+		if at.Sub(started) >= duration {
 			return
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			t.Fatal("process sampler stopped before the observation window completed")
 		}
 	}
 }
@@ -352,6 +336,7 @@ func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 		Sampler:          newFakeSampler(4, 8<<30),
 		HeadroomFraction: -1,
 		ProcSampler:      proc,
+		Now:              proc.now,
 		StallInterval:    5 * time.Millisecond,
 		StallWindow:      20 * time.Millisecond,
 	})
@@ -381,7 +366,7 @@ func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "v1")
-	target := waitForStalledHolder(t, q, "idle holder", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
+	target := waitForStalledHolder(t, q, proc, "idle holder", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
 		for _, holder := range holders {
 			if holder.ParticipantID == "internal-holder" {
 				return holder, true
@@ -466,15 +451,39 @@ func TestQueueState_ResourceRowsReconcile(t *testing.T) {
 }
 
 type fakeProcSampler struct {
-	mu    sync.Mutex
-	usage map[int]wingd.ProcUsage
+	mu      sync.Mutex
+	usage   map[int]wingd.ProcUsage
+	at      time.Time
+	changed chan struct{}
 }
 
 func (f *fakeProcSampler) CPUUsage(pid int) (wingd.ProcUsage, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.at = f.at.Add(10 * time.Millisecond)
+	if f.changed != nil {
+		close(f.changed)
+	}
+	f.changed = make(chan struct{})
 	v, ok := f.usage[pid]
 	return v, ok
+}
+
+func (f *fakeProcSampler) observation() (time.Time, <-chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.at.IsZero() {
+		f.at = time.Unix(1_700_000_000, 0)
+	}
+	if f.changed == nil {
+		f.changed = make(chan struct{})
+	}
+	return f.at, f.changed
+}
+
+func (f *fakeProcSampler) now() time.Time {
+	now, _ := f.observation()
+	return now
 }
 
 func semHostReq(runID, pipeline string, pid int, key string) wingwire.AdmissionRequest {
@@ -680,6 +689,7 @@ func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 		Sampler:          newFakeSampler(4, 8<<30),
 		HeadroomFraction: -1,
 		ProcSampler:      proc,
+		Now:              proc.now,
 		StallInterval:    5 * time.Millisecond,
 		StallWindow:      20 * time.Millisecond,
 	})
@@ -692,7 +702,7 @@ func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
-	target := waitForStalledHolder(t, q, "idle holder", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
+	target := waitForStalledHolder(t, q, proc, "idle holder", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
 		if len(holders) != 1 {
 			return wingwire.Holder{}, false
 		}
@@ -714,6 +724,7 @@ func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 		Sampler:          newFakeSampler(1, 8<<30),
 		HeadroomFraction: -1,
 		ProcSampler:      proc,
+		Now:              proc.now,
 		StallInterval:    5 * time.Millisecond,
 		StallWindow:      20 * time.Millisecond,
 	})
@@ -747,7 +758,7 @@ func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
-	observeQueueStateFor(t, q, 150*time.Millisecond, func(qs wingwire.QueueState) {
+	observeQueueStateFor(t, q, proc, 150*time.Millisecond, func(qs wingwire.QueueState) {
 		if len(qs.Holders) != 2 || len(qs.Waiters) != 1 {
 			t.Fatalf("queue rows = %d holders, %d waiters; want 2 and 1: %+v", len(qs.Holders), len(qs.Waiters), qs)
 		}
@@ -788,6 +799,7 @@ func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 		Sampler:          newFakeSampler(4, 8<<30),
 		HeadroomFraction: -1,
 		ProcSampler:      proc,
+		Now:              proc.now,
 		StallInterval:    5 * time.Millisecond,
 		StallWindow:      20 * time.Millisecond,
 	})
@@ -800,7 +812,7 @@ func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
-	observeQueueStateFor(t, q, 150*time.Millisecond, func(qs wingwire.QueueState) {
+	observeQueueStateFor(t, q, proc, 150*time.Millisecond, func(qs wingwire.QueueState) {
 		if len(qs.Holders) != 1 {
 			t.Fatalf("holders = %+v, want one", qs.Holders)
 		}
@@ -811,9 +823,6 @@ func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 }
 
 func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{os.Getpid(): {HasDescendant: true}}}
 	startDaemon(t, wingd.Config{
@@ -821,6 +830,7 @@ func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
 		Sampler:          newFakeSampler(4, 8<<30),
 		HeadroomFraction: -1,
 		ProcSampler:      proc,
+		Now:              proc.now,
 		StallInterval:    5 * time.Millisecond,
 		StallWindow:      20 * time.Millisecond,
 	})
@@ -833,7 +843,7 @@ func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
-	waitForStalledHolder(t, q, "idle descendant tree", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
+	waitForStalledHolder(t, q, proc, "idle descendant tree", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
 		if len(holders) != 1 {
 			return wingwire.Holder{}, false
 		}

@@ -3,6 +3,8 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +15,21 @@ import (
 func atomicReleaseRepo(t *testing.T, body string) string {
 	t.Helper()
 	repo := migrationRepo(t, body, twoBreakingGuide, migrationIndexFixture)
+	for _, dir := range []string{"pkg/scaffold", ".apidiff", ".sparkwing", kubernetesE2EPipelineModuleRel, "bin"} {
+		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(repo, scaffoldFallbackRel), "package scaffold\nconst FallbackSDKVersion = \"v0.1.0\"\n")
+	writeFile(t, filepath.Join(repo, scaffoldAPISnapshotRel), "const FallbackSDKVersion = \"v0.1.0\"\n")
+	writeFile(t, filepath.Join(repo, "go.mod"), "module "+sdkModulePath+"\n\ngo 1.26.0\n")
+	writeFile(t, filepath.Join(repo, "sdk.go"), "package sdk\n")
+	for _, module := range []string{".sparkwing", kubernetesE2EPipelineModuleRel} {
+		writeFile(t, filepath.Join(repo, module, "go.mod"), "module fixture\n\ngo 1.26.0\nrequire "+sdkModulePath+" v0.1.0\nreplace "+sdkModulePath+" => "+filepath.ToSlash(repo)+"\n")
+		writeFile(t, filepath.Join(repo, module, "go.sum"), "")
+		writeFile(t, filepath.Join(repo, module, "main.go"), "package main\nimport _ \""+sdkModulePath+"\"\nfunc main() {}\n")
+	}
+	writeFile(t, filepath.Join(repo, "bin/regen-api-snapshot.sh"), "mkdir -p \"$1\"\ncp pkg/scaffold/version.go \"$1/pkg_scaffold.txt\"\n")
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
@@ -111,5 +128,46 @@ func TestReleaseCommitRecordsPreparedFilesOnce(t *testing.T) {
 				t.Fatal("repeat commit changed HEAD or left uncommitted files")
 			}
 		})
+	}
+}
+
+func TestReleaseCommitPreservesUnrelatedStagedFiles(t *testing.T) {
+	t.Setenv("GIT_CONFIG_COUNT", "3")
+	t.Setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
+	t.Setenv("GIT_CONFIG_VALUE_0", "false")
+	t.Setenv("GIT_CONFIG_KEY_1", "user.name")
+	t.Setenv("GIT_CONFIG_VALUE_1", "Test")
+	t.Setenv("GIT_CONFIG_KEY_2", "user.email")
+	t.Setenv("GIT_CONFIG_VALUE_2", "test@example.invalid")
+	repo := atomicReleaseRepo(t, fixtureChangelog)
+	ctx := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"version": json.RawMessage(`"v0.9.0"`)}}).Context(t.Context())
+	version := sparkwing.Ref[string]{JobID: "version"}
+	if err := (&prepareChangelogJob{RepoDir: repo, Version: version}).run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, "unrelated.txt"), "keep staged")
+	gitRun(t, repo, "add", "--", "unrelated.txt")
+	hooks := t.TempDir()
+	writeDeliveryTool(t, filepath.Join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n")
+	t.Setenv("GIT_CONFIG_COUNT", "4")
+	t.Setenv("GIT_CONFIG_KEY_3", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_3", hooks)
+	if err := (&commitChangelogJob{RepoDir: repo, Version: version}).run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitRun(t, repo, "diff", "--cached", "--name-only")); got != "unrelated.txt" {
+		t.Fatalf("staged files = %q", got)
+	}
+	if got, aligned, err := coherentReleaseVersionArtifacts(repo); err != nil || !aligned || got != "v0.9.0" {
+		t.Fatalf("pins = %s, %v, %v", got, aligned, err)
+	}
+	for _, rel := range []string{scaffoldFallbackRel, scaffoldAPISnapshotRel, ".sparkwing/go.mod", kubernetesE2EPipelineModuleRel + "/go.mod"} {
+		if body := gitRun(t, repo, "show", "HEAD:"+rel); !strings.Contains(body, "v0.9.0") {
+			t.Fatalf("committed pin %s: %s", rel, body)
+		}
+	}
+	gitRun(t, repo, "tag", "v0.9.0")
+	if problem := checkScaffoldFallbackPin(ctx, repo); problem != "" {
+		t.Fatalf("next cut sees stale pins: %s", problem)
 	}
 }

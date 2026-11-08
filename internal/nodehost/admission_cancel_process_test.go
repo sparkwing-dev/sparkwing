@@ -9,10 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 type cancelProcessSampler struct{}
@@ -114,4 +118,64 @@ func TestMachineLeaseWatchMeasuresCancelToJobProcessExit(t *testing.T) {
 		t.Fatalf("job did not stop through its lease watch: %v", err)
 	}
 	t.Logf("cancel request to observed job process exit over the verified API socket: %s", latency)
+}
+
+func TestQueuedMachineCancellationReportsCancelledWithoutStarting(t *testing.T) {
+	home := t.TempDir()
+	controller, err := wingd.New(wingd.Config{Home: home, Version: "test", Sampler: cancelProcessSampler{}, HeadroomFraction: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, stop := context.WithCancel(context.WithoutCancel(t.Context()))
+	done := make(chan error, 1)
+	go func() { done <- controller.Run(ctx) }()
+	t.Cleanup(func() {
+		stop()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	select {
+	case <-controller.Ready():
+	case err := <-done:
+		done <- err
+		t.Fatalf("controller startup: %v", err)
+	}
+	client, err := wingdclient.EnsureDaemon(t.Context(), wingdclient.Options{Home: home, Version: "test", NoTakeover: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	held, err := client.Acquire(t.Context(), wingwire.AdmissionRequest{RunID: "blocker", Resources: wingwire.HostResources{Cores: 2}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := held.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	input, state, host, processes := claimedNodeFixture(t)
+	input.Attempt, state.row.Attempt = 0, 0
+	admission := MachineAdmission(home, "test")
+	queued := false
+	admission.Queued = func(_ context.Context, _ runspec.NodeRef, _ wingwire.Queued) {
+		if queued {
+			return
+		}
+		queued = true
+		found, err := client.CancelLease(t.Context(), input.Accepted.RunID)
+		if err != nil || !found {
+			t.Errorf("cancel queued run: found=%t error=%v", found, err)
+		}
+	}
+	host.Admission = ComposeStartGate(state, admission, false)
+	err = host.Execute(t.Context(), input)
+	if !queued || len(*processes) != 0 || len(state.changes) != 1 {
+		t.Fatalf("queued=%t processes=%d changes=%+v error=%v", queued, len(*processes), state.changes, err)
+	}
+	result := state.changes[0].Extra.Result
+	if state.changes[0].Cause != runstate.CauseReport || result.Outcome != runstate.NodeCancelled || result.Reason != string(apierr.ReasonCancelled) || state.row.Attempt != 0 {
+		t.Fatalf("queued cancellation reported %s/%s attempt=%d: %v", result.Outcome, result.Reason, state.row.Attempt, err)
+	}
 }
