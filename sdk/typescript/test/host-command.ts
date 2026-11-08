@@ -7,7 +7,7 @@ import type { HostExec } from "../src/command.ts";
 const root=resolve(fileURLToPath(new URL("../../..",import.meta.url)));
 let binary:string|undefined;
 export const hostCommand:HostExec=async(request,signal)=>{
- if(!binary){binary=join(mkdtempSync(join(tmpdir(),"sdk-command-host-")),"host");execFileSync("go",["-C",root,"build","-p","1","-o",binary,"./sdk/typescript/test/commandhost"],{env:{...process.env,GOWORK:"off",GOMAXPROCS:"2"}})}
+ if(!binary){binary=join(mkdtempSync(join(tmpdir(),"sdk-command-host-")),"host");execFileSync("go",["-C",root,"build","-p","1","-o",binary,"./sdk/typescript/test/testdata/commandhost"],{env:{...process.env,GOWORK:"off",GOMAXPROCS:"2"}})}
  return await new Promise((resolveResult,reject)=>{
  const child=spawn(binary!,[],{stdio:["pipe","pipe","pipe"]});
  let buffer="";const stdout:Buffer[]=[],stderr:Buffer[]=[];let final:any;
