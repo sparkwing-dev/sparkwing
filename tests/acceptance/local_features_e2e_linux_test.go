@@ -338,7 +338,14 @@ func TestLocalControllerFeatureE2E(t *testing.T) {
 		if err := db.QueryRow("SELECT value FROM secrets WHERE name='PRESERVED'").Scan(&sealed); err != nil {
 			t.Fatal(err)
 		}
-		for _, query := range []string{"DROP TABLE github_actions_dispatches", "DROP TABLE github_actions_approvals", "UPDATE sparkwing_schema_version SET version=34,baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'"} {
+		for _, query := range []string{
+			`CREATE TABLE team_build_trust (
+    team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
+    trust_local_builds BIGINT NOT NULL DEFAULT 0 CHECK(trust_local_builds IN (0,1))
+)`,
+			"DROP TABLE github_actions_dispatches", "DROP TABLE github_actions_approvals",
+			"UPDATE sparkwing_schema_version SET version=34,baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'",
+		} {
 			if _, err := db.Exec(query); err != nil {
 				t.Fatal(err)
 			}
@@ -379,7 +386,7 @@ func TestLocalControllerFeatureE2E(t *testing.T) {
 			}
 			featureCheckStore(t, backup, 34, sealed)
 		}
-		featureCheckStore(t, path, 36, sealed)
+		featureCheckStore(t, path, 37, sealed)
 	})
 }
 
