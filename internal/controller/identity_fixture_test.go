@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
@@ -68,7 +70,11 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	clock := new(atomic.Int64)
 	clock.Store(time.Now().UTC().UnixNano())
 	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return time.Unix(0, clock.Load()).UTC() }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
-		srv = controller.NewDeployment(st, deploymenttest.Cloud(t, "https://controller.test"), o.logger).WithSecretsCipher(testCipher(t)).
+		cfg := deploymenttest.Cloud(t, "https://controller.test")
+		if o.checkoutURL != "" {
+			cfg = deploymenttest.Parse(t, deployment.Inputs{Kind: "cloud", Store: "postgres", PGURL: "postgres://test.invalid/sparkwing", PublicOrigin: "https://controller.test", PaymentMode: "test"}, license.FeatureMultiTeam)
+		}
+		srv = controller.NewDeployment(st, cfg, o.logger).WithSecretsCipher(testCipher(t)).
 			WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
 			WithBillingCheckout(o.checkoutURL, o.checkoutToken).

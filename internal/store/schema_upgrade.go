@@ -65,6 +65,10 @@ var schemaUpgrades = []schemaUpgrade{
 			`ALTER TABLE github_actions_dispatches ADD CONSTRAINT github_actions_dispatches_team_fkey FOREIGN KEY(team) REFERENCES teams(name)`,
 		},
 	},
+	{
+		from: 36, release: "schema 36", digest: "afbe14b512e2e182e9f8322685477a29ce5fe337a01faf0003856ca317d23f24",
+		statements: []string{`DROP TABLE team_build_trust`},
+	},
 }
 
 var schema35ActionsStatements = []string{`CREATE TABLE github_actions_approvals (

@@ -379,6 +379,8 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 // controllerShutdownBudget bounds how long ServeWith waits for listeners to drain.
 const controllerShutdownBudget = 5 * time.Second
 
+const controllerWriteTimeout = 30 * time.Second
+
 // Listeners are the sockets a Server serves on, bound by the caller before
 // startup changes any stored state, so a port that cannot be had fails the
 // start without side effects.
@@ -416,7 +418,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 			ErrorLog:          slog.NewLogLogger(s.logger.Handler(), slog.LevelError),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      30 * time.Second,
+			WriteTimeout:      controllerWriteTimeout,
 			IdleTimeout:       2 * time.Minute,
 		}
 	}

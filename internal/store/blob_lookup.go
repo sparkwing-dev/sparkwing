@@ -81,6 +81,19 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if err != nil {
 		return result, err
 	}
+	if !found && key.Kind == blob.KindPrepared && key == blob.PreparedRecordKey(key.Team, a.source.RunID, a.authority.Repo, a.pipeline) {
+		parent, eligible, err := preparedParentTx(ctx, tx, a)
+		if err != nil || !eligible {
+			return result, err
+		}
+		request.Key = blob.PreparedRecordKey(key.Team, a.request.Lineage.ParentRunID, a.authority.Repo, parent.Pipeline)
+		inherited, err := r.lookupRecordTx(ctx, tx, a, request)
+		if inherited.Found {
+			inherited.Record.Key = key
+			inherited.PreparedParent = true
+		}
+		return inherited, err
+	}
 	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now(ctx))) {
 		return result, nil
 	}

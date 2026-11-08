@@ -30,7 +30,7 @@ func (Deploy) ShortHelp() string {
 
 func (Deploy) Help() string {
 	return "Turns the Sparkwing Cloud deploy lanes into one DAG. build-images builds linux/amd64 and linux/arm64 binaries with bin/build-release-target.sh and appends them to the runtime bases with publish-images, " +
-		"reusing images an earlier run already published for the same commit. staging-deploy and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
+		"reusing images an earlier run already published for the same commit. Before changing GitOps, deploy protects candidate and previous image indexes and platform manifests with immutable cloud-deploy-<digest> retention tags. A tagging failure stops deployment. staging-deploy and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
 		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate runs deploy-smoke with a child run and the hello reference pipeline on staging Cloud. " +
 		"production requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in the " +
 		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs after both rollouts complete. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
@@ -90,7 +90,7 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 			Proven: sparkwing.RefToLastRun[stagingGateRecord]("deploy", "staging-gate", sparkwing.MaxAge(maxAge)),
 			MaxAge: maxAge,
 			Dry:    base.Dry,
-		}).Inline().Requires(runnerLabels...)
+		}).Inline()
 	} else {
 		staging := sparkwing.Job(plan, "staging-deploy", &deployStagingJob{Job: base.named("staging-deploy"), Images: images}).
 			Needs(build).Requires(runnerLabels...).Timeout(cfg.stagingBudget())
