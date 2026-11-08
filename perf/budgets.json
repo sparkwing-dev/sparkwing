@@ -238,6 +238,18 @@
       "baselines": {}
     },
     {
+      "route": "/api/v1/team/github-app/actions-approval",
+      "kind": "api",
+      "exempt": "PUT and DELETE change a team owner's workflow consent and fence live dispatch receipts, and approval reads the repository from GitHub. A probe would measure rejection rather than the authorized operation. In-process tests verify authorization, audit and ref refusal. Authorized latency remains unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/operator/teams/{team}/actions-dispatches/{receipt}/retry",
+      "kind": "api",
+      "exempt": "An audited operator mutation that can start a billed GitHub workflow; it needs a refused or uncertain receipt absent from the dashboard corpus. A probe would measure rejection rather than the authorized operation. In-process tests verify the retry generation and refusals. Authorized latency remains unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/team/github",
       "kind": "page",
       "baselines": {}

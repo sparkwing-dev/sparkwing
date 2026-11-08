@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"path"
 	"slices"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // ActionsApproval permits one workflow ref and hosted image in a bound repository.
@@ -164,6 +166,12 @@ func (op *Operator) NextActionsDispatch(ctx context.Context) (*ActionsDispatch, 
 					if exists > 0 {
 						continue
 					}
+					if serves, err := actionsImageServesTx(ctx, tx, k.team, run, wait.JobID, tier.Tier.Runner); err != nil || !serves {
+						if err != nil {
+							return err
+						}
+						continue
+					}
 					d := ActionsDispatch{Team: k.team, RunID: k.run, JobID: wait.JobID, QueueStartedAt: wait.ReadyAt.UnixNano(), Generation: 1, Workflow: tier.Tier.Workflow, Runner: tier.Tier.Runner, PolicyRevision: wait.Revision, State: "requested"}
 					err = tx.QueryRowContext(ctx, `SELECT a.approval_id,a.workflow_ref,b.repository_id,b.repository_owner_id,b.repository,b.installation_id FROM github_actions_approvals a JOIN github_runner_bindings b ON b.team=a.team AND b.repository_id=a.repository_id WHERE a.team=? AND b.repo_key=? AND a.workflow=? AND a.runner=?`, k.team, run.Request.Request.Git.Repository.Key, d.Workflow, d.Runner).Scan(&d.ApprovalID, &d.WorkflowRef, &d.RepositoryID, &d.RepositoryOwnerID, &d.Repository, &d.InstallationID)
 					if errors.Is(err, sql.ErrNoRows) {
@@ -227,17 +235,21 @@ func (op *Operator) FinishActionsDispatch(ctx context.Context, receipt, state, r
 	return err
 }
 
+// safety: a node clears its queue timestamps when it starts or ends, and a returned award moves ready_at, so a
+// receipt's workflow is matched to its job by the claim holder the receipt's exchange names, which node_attempts keeps.
+const actionsHolderSQL = `'github:' || CAST(d.repository_id AS TEXT) || ':' || CAST(d.repository_owner_id AS TEXT) || ':' || d.provider_run_id || ':' || d.provider_attempt`
+
 // PendingActionsCancellations invalidates receipts before asking the provider to cancel known runs.
-// A job that finished without a cancellation request leaves its workflow to exit on its own,
-// so GitHub reports that run's real outcome instead of a cancellation.
+// A receipt stays live while its queue generation still waits or its own workflow holds the job. A job its own
+// workflow finished without a cancellation request leaves that workflow to exit with its real outcome.
 func (op *Operator) PendingActionsCancellations(ctx context.Context) ([]ActionsDispatch, error) {
 	var out []ActionsDispatch
 	err := op.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='cancelled',reason='job finished',cancel_sent=1 WHERE state<>'cancelled' AND EXISTS (SELECT 1 FROM nodes n WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at AND n.status='done' AND n.outcome<>'cancelled' AND n.cancel_requested_at IS NULL)`)
+		_, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='cancelled',reason='job finished',cancel_sent=1 WHERE state<>'cancelled' AND provider_run_id<>'' AND EXISTS (SELECT 1 FROM nodes n JOIN node_attempts a ON a.team=n.team AND a.run_id=n.run_id AND a.node_id=n.node_id AND a.attempt=n.attempt WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND n.status='done' AND n.outcome<>'cancelled' AND n.cancel_requested_at IS NULL AND a.holder=`+actionsHolderSQL+`)`)
 		if err != nil {
 			return err
 		}
-		_, err = tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='cancelled',reason='job ended or consent withdrawn' WHERE state<>'cancelled' AND (NOT (`+actionsConsentSQL+`) OR NOT EXISTS (SELECT 1 FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at AND n.status IN ('pending','running') AND n.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.status IN ('pending','running')))`)
+		_, err = tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='cancelled',reason='job ended or consent withdrawn' WHERE state<>'cancelled' AND (NOT (`+actionsConsentSQL+`) OR NOT EXISTS (SELECT 1 FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND n.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.status IN ('pending','running') AND (n.status='pending' AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at OR d.provider_run_id<>'' AND n.claimed_by=`+actionsHolderSQL+`)))`)
 		if err != nil {
 			return err
 		}
@@ -327,6 +339,36 @@ func actionsForkWork(run RunRow) bool {
 	return pr.Set && pr.Value.Fork
 }
 
+// safety: mirrors the profile a receipt runner presents at claim, an agent with no labels whose OS comes from its
+// image; its arch is observed only at claim, so an arch term never refuses here.
+func actionsImageServesTx(ctx context.Context, tx *storeTx, team Team, run RunRow, jobID, image string) (bool, error) {
+	var body []byte
+	if err := tx.QueryRowContext(ctx, `SELECT execution_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, run.ID, jobID).Scan(&body); err != nil {
+		return false, err
+	}
+	var execution runspec.JobExecutionSettings
+	if err := json.Unmarshal(body, &execution); err != nil {
+		return false, err
+	}
+	selector := slices.Clone(execution.Requires.Value)
+	switch selected := run.Request.Request.Options.Runner.Value; selected.Kind {
+	case runspec.RunnerName:
+		return false, nil
+	case runspec.RunnerLabel:
+		selector = append(selector, selected.Value)
+	}
+	profile := match.Profile{Class: match.ClassAgent, OS: actionsImageOS(image)}
+	for _, term := range selector {
+		if strings.TrimSpace(term) != "" && !slices.ContainsFunc(strings.Split(term, ","), func(alt string) bool {
+			alt = strings.TrimSpace(alt)
+			return alt != "" && (strings.HasPrefix(alt, "arch=") || match.TermSatisfied(profile, alt))
+		}) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func actionsImageOS(image string) string {
 	for prefix, system := range map[string]string{"ubuntu-": "linux", "macos-": "darwin", "windows-": "windows"} {
 		if strings.HasPrefix(image, prefix) {
@@ -392,6 +434,14 @@ func actionsPlacementWaitTx(ctx context.Context, tx *storeTx, team Team, run Run
 		}
 		if actionsForkWork(run) {
 			tier.Unavailable = "fork pull requests cannot use the GitHub Actions fallback"
+			continue
+		}
+		serves, err := actionsImageServesTx(ctx, tx, team, run, wait.JobID, tier.Tier.Runner)
+		if err != nil {
+			return err
+		}
+		if !serves {
+			tier.Unavailable = "the job's requirements exclude the " + tier.Tier.Runner + " image"
 			continue
 		}
 		var approved int

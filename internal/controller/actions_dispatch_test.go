@@ -519,23 +519,51 @@ func TestActionsCancellationsHandleEachReceiptAlone(t *testing.T) {
 	}
 }
 
-func TestActionsFinishedJobLeavesProviderRunAlone(t *testing.T) {
+func TestActionsReceiptWorkflowSurvivesReturnStartAndFinish(t *testing.T) {
 	f := newDispatchFixture(t)
 	d := f.dispatch(t)
+	f.now = f.now.Add(time.Second)
+	engineSQL(t, f.e.Store, `UPDATE nodes SET ready_at=? WHERE node_id='job'`, f.now.UnixNano())
 	spec, err := f.e.Server.actionsReceiptProvision(t.Context(), "a", d.Receipt, f.claims())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.e.Store.AsOperator().ProvisionCapability(t.Context(), spec); err != nil {
+	issued, err := f.e.Store.AsOperator().ProvisionCapability(t.Context(), spec)
+	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, f.e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE node_id='job'`, f.now.UnixNano())
+	claim, err := f.e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// hack: the fixture run has no planned spec, so these writes mirror node_state.go start and report transitions.
+	engineSQL(t, f.e.Store, `UPDATE nodes SET status='running',queue_started_at=NULL,attempt=1,started_at=? WHERE node_id='job'`, f.now.UnixNano())
+	engineSQL(t, f.e.Store, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES('a','run','job',1,?,?,?,'runner','gh','github',?)`, int64(claim.Award.Generation), claim.Award.Holder, claim.Award.CapabilityPrefix, f.now.UnixNano())
 	if err := f.e.Server.processPendingActionsCancellations(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	finished, err := f.e.Store.AsOperator().ReadActionsDispatch(t.Context(), "a", d.Receipt)
-	if err != nil || finished.Reason != "job finished" || len(f.app.CancelledRuns()) != 0 {
+	if running, err := f.e.Store.AsOperator().ReadActionsDispatch(t.Context(), "a", d.Receipt); err != nil || running.State != "accepted" || len(f.app.CancelledRuns()) != 0 {
+		t.Fatalf("running workflow cancelled: %+v %v %v", running, f.app.CancelledRuns(), err)
+	}
+	engineSQL(t, f.e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=?,ready_at=NULL,queue_started_at=NULL,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE node_id='job'`, f.now.UnixNano())
+	if err := f.e.Server.processPendingActionsCancellations(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if finished, err := f.e.Store.AsOperator().ReadActionsDispatch(t.Context(), "a", d.Receipt); err != nil || finished.Reason != "job finished" || len(f.app.CancelledRuns()) != 0 {
 		t.Fatalf("finished job cancelled its workflow: %+v %v %v", finished, f.app.CancelledRuns(), err)
+	}
+}
+
+func TestActionsReceiptCancelledWhenAnotherRunnerRunsTheJob(t *testing.T) {
+	f := newDispatchFixture(t)
+	d := f.dispatch(t)
+	engineSQL(t, f.e.Store, `UPDATE github_actions_dispatches SET provider_run_id='1000',provider_attempt='1' WHERE receipt=?`, d.Receipt)
+	engineSQL(t, f.e.Store, `UPDATE nodes SET status='running',queue_started_at=NULL,claimed_by='team-runner',capability_prefix='team',lease_expires_at=?,started_at=?,attempt=1,generation=1 WHERE node_id='job'`, f.now.Add(time.Minute).UnixNano(), f.now.UnixNano())
+	if err := f.e.Server.processPendingActionsCancellations(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.app.CancelledRuns(); !slices.Equal(got, []string{"1000"}) {
+		t.Fatalf("idle fallback workflow kept: %v", got)
 	}
 }
 
@@ -611,4 +639,27 @@ func TestActionsFallbackRefMustBeDedicatedBranch(t *testing.T) {
 			t.Fatal("exchange accepted a fallback ref that became the default branch")
 		}
 	})
+}
+
+func TestActionsDispatchSkipsImagesTheJobExcludes(t *testing.T) {
+	for requires, dispatched := range map[string]bool{`["os=darwin"]`: false, `["os=linux","arch=arm64"]`: true, `["gpu"]`: false, `["os=darwin,os=linux"]`: true} {
+		t.Run(requires, func(t *testing.T) {
+			f := newDispatchFixture(t)
+			engineSQL(t, f.e.Store, `UPDATE nodes SET execution_json=? WHERE node_id='job'`, []byte(`{"requires":{"set":true,"value":`+requires+`}}`))
+			sent, err := f.e.Server.processActionsDispatch(t.Context())
+			if err != nil || sent != dispatched || len(f.app.ActionsCalls()) != map[bool]int{false: 0, true: 1}[dispatched] {
+				t.Fatalf("dispatch sent=%v err=%v calls=%d", sent, err, len(f.app.ActionsCalls()))
+			}
+			if dispatched {
+				return
+			}
+			view, err := f.tenant.ReadRunView(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(view.PlacementWaits) != 1 || !strings.Contains(view.PlacementWaits[0].Tiers[1].Unavailable, "ubuntu-latest") {
+				t.Fatalf("image refusal not visible: %+v", view.PlacementWaits)
+			}
+		})
+	}
 }

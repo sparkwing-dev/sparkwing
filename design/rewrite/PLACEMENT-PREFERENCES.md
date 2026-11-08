@@ -312,9 +312,14 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
   pull-request code would inherit any cloud role that trusts it. Approval,
   dispatch and registration each refuse the live default branch (security
   review H1, pending Korey's ratification).
-- A job that finished without a cancellation request leaves its workflow to exit
-  on its own; cancellation goes to GitHub only for cancelled jobs and withdrawn
-  consent, one receipt at a time.
+- A receipt stays live while its queue generation waits or its own workflow
+  holds the job, matched by the claim holder because start and finish clear the
+  queue timestamps. A job that workflow finished leaves it to exit on its own;
+  cancellation goes to GitHub for cancelled jobs, jobs another runner took and
+  withdrawn consent, one receipt at a time.
+- Dispatch skips an approved image the job's `requires` exclude, evaluated as
+  the receipt runner's claim profile: an agent with no labels whose OS comes
+  from the image and whose arch is known only at claim.
 - `pipeline lint` prints the preview in table and plain output; JSON output
   keeps findings only.
 

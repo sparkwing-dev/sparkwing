@@ -185,7 +185,11 @@ authenticated `PUT /api/v1/team/github-app/actions-approval` request:
 }
 ```
 
-Repeat for each approved image. `DELETE` on the same endpoint withdraws an
+Repeat for each approved image. The controller dispatches an image only when the
+job's `requires` admit a GitHub-hosted runner on it: the image fixes the operating
+system, and such a runner carries no other labels. A tier whose image the job
+excludes shows as unavailable instead of spending minutes on an idle workflow.
+`DELETE` on the same endpoint withdraws an
 approval using the repository ID, workflow and runner fields. Replacing or
 withdrawing approval invalidates its earlier receipts. The repository's default
 branch must contain the workflow. The approved branch supplies the workflow
@@ -226,8 +230,10 @@ refuses them. Each workflow attempt exchanges once.
 
 Run status and the run page show dispatch acceptance, refusal or uncertainty,
 the receipt and a provider link once registration identifies the run. Cancellation
-invalidates the receipt and cancels a known provider run. A job that finishes on
-its own leaves its workflow to exit with its real outcome. GitHub answers that
+invalidates the receipt and cancels a known provider run. A receipt stays live
+while its queue generation still waits, including after a returned award, and
+while its own workflow holds the job. A job that workflow finishes leaves it to
+exit with its real outcome; one that another runner takes cancels the idle workflow. GitHub answers that
 the run is gone or already finished count as done; a removed, suspended or
 refused installation is logged once for an operator and not retried. A lost response or sender
 restart never resends the generation. An operator can make an audited retry with
