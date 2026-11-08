@@ -33,7 +33,6 @@ func TestTeamWritesUseNativeTenantTransactions(t *testing.T) {
 		return w
 	}
 	request("PATCH", "/api/v1/team", `{"display_name":"Team A"}`, 200)
-	request("PUT", "/api/v1/team/build-trust", `{"trust_local_builds":true}`, 200)
 	response := request("POST", "/api/v1/team/invitations", `{"email":"guest@example.test","role":"reader"}`, 201)
 	var invitation struct {
 		ID string `json:"id"`
@@ -50,9 +49,6 @@ func TestTeamWritesUseNativeTenantTransactions(t *testing.T) {
 	}
 	if info, err := tenant.Info(t.Context()); err != nil || info.DisplayName != "Team A" {
 		t.Fatalf("team=%+v: %v", info, err)
-	}
-	if trust, err := tenant.TrustLocalBuilds(t.Context()); err != nil || !trust {
-		t.Fatalf("trust=%v: %v", trust, err)
 	}
 	var actor string
 	if err := teststore.SQL(t, s.store).QueryRow(`SELECT invited_by FROM invitations WHERE id=?`, invitation.ID).Scan(&actor); err != nil || actor != "member" {

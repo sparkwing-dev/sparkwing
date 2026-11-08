@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,4 +117,64 @@ func InstallSchema35ActionsForTest(t testing.TB, s *Store) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// OpenSchema36ForTest creates the shipped schema before any current migration runs.
+func OpenSchema36ForTest(t testing.TB, dialect Dialect, target string, opts ...Option) *Store {
+	t.Helper()
+	const trust = `CREATE TABLE team_build_trust (
+    team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
+    trust_local_builds BIGINT NOT NULL DEFAULT 0 CHECK(trust_local_builds IN (0,1))
+);
+
+`
+	neutral := strings.Replace(schemaNeutral, "CREATE TABLE audit_events (", trust+"CREATE TABLE audit_events (", 1)
+	// safety: the digest proves the fixture is the shipped DDL, including both direct team foreign keys.
+	neutral = strings.Replace(neutral, "-- safety: account audit events precede team creation, so this operator table permits no team.\n"+trust, trust+"-- safety: account audit events precede team creation, so this operator table permits no team.\n", 1)
+	const digest = "afbe14b512e2e182e9f8322685477a29ce5fe337a01faf0003856ca317d23f24"
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(neutral))); got != digest {
+		t.Fatalf("schema 36 fixture digest %s, want %s", got, digest)
+	}
+	db, err := rawDBForTest(dialect, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	st := &Store{db: db, dialect: dialect}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	tx, err := st.beginTx(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rollbackOrLog(tx)
+	translated, err := translateSchema(neutral, dialect)
+	if err == nil {
+		err = execStatements(t.Context(), tx, translated)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.operator.installAuditProtection(t.Context(), tx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.execContext(t.Context(), `INSERT INTO sparkwing_schema_version(version,applied_at,baseline_digest) VALUES(36,1,?)`, digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordDefaultTeamTx(t.Context(), tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedSignUpGateTx(t.Context(), tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.configurePolicyOptions(opts); err != nil {
+		t.Fatal(err)
+	}
+	return st
 }

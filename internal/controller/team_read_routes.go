@@ -13,7 +13,6 @@ func (s *Server) teamReadEndpoints() []controllerwire.Endpoint {
 		{Method: "GET", Pattern: "/api/v1/schedules", Decode: authorityTarget, Handle: s.handleListCrons},
 		{Method: "GET", Pattern: "/api/v1/schedules/{schedule}", Decode: authorityTarget, Handle: s.handleGetCron},
 		{Method: "GET", Pattern: "/api/v1/team/invitations", Decode: authorityTarget, Handle: s.handleListInvitations},
-		{Method: "GET", Pattern: "/api/v1/team/build-trust", Decode: authorityTarget, Handle: s.handleGetBuildTrust},
 		{Method: "GET", Pattern: "/api/v1/team/github-app", Decode: authorityTarget, Handle: s.handleGitHubAppShow},
 		{Method: "GET", Pattern: "/api/v1/team/github-app/installations/{installation}/repositories", Decode: authorityTarget, Handle: s.handleGitHubAppRepositories},
 		{Method: "GET", Pattern: "/api/v1/team/github-app/triggers", Decode: authorityTarget, Handle: s.handleListGitHubAppTriggers},

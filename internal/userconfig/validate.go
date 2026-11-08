@@ -51,6 +51,13 @@ func ValidateConfig(cfg Config) error {
 			return err
 		}
 	}
+	if cfg.Dashboard != nil {
+		for _, host := range cfg.Dashboard.AllowedHosts {
+			if !validDashboardHost(host) {
+				return Invalid("dashboard.allowed_hosts", "expected exact DNS names without a scheme, port, path or wildcard; loopback names and IP addresses are refused")
+			}
+		}
+	}
 	if cfg.Cache != nil {
 		if cfg.Cache.MaxEntries != nil && *cfg.Cache.MaxEntries < 0 {
 			return Invalid("cache.max_entries", "must be non-negative")
@@ -92,7 +99,7 @@ func ValidateConfig(cfg Config) error {
 	return nil
 }
 
-// safety: the dashboard binds loopback only; a remote browser reaches it through an SSH port forward.
+// safety: remote browsers use a proxy or SSH forwarding while the dashboard keeps its loopback bind.
 // Port 0 lets an isolated home pick a free port instead of contending for the shared default.
 func validateDashboardAddress(addr string) error {
 	host, port, err := net.SplitHostPort(addr)
@@ -102,6 +109,24 @@ func validateDashboardAddress(addr string) error {
 		return Invalid("dashboard.address", "expected a loopback IP and port such as 127.0.0.1:4343")
 	}
 	return nil
+}
+
+func validDashboardHost(host string) bool {
+	host = strings.ToLower(host)
+	if len(host) > 253 || !strings.Contains(host, ".") || net.ParseIP(host) != nil || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validURL(raw string) bool {

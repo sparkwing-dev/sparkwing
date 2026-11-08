@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,8 +32,8 @@ func TestExec_WindowsLongBashProgram(t *testing.T) {
 			t.Setenv("SPARKWING_BASH_PROGRAM", "exit 41")
 			for _, count := range []int{1, 300} {
 				want := strings.Repeat("quoted argument with spaces\n", count) + "quotes ' \" $ ; &\npresent\n"
-				program := "printf '%s\\n'" + strings.Repeat(` "quoted argument with spaces"`, count) + "\nprintf '%s\\n' \"quotes ' \\\" \\$ ; &\" \"$SPARKWING_TEST_VARIABLE\"\nbash -c 'test -z \"${SPARKWING_BASH_PROGRAM+x}\"'"
-				result, err := Bash(context.Background(), program).Dir(t.TempDir()).Env("SPARKWING_TEST_VARIABLE", "present").Env("SPARKWING_BASH_PROGRAM", "exit 42").Capture()
+				program := "printf '%s\\n'" + strings.Repeat(` "quoted argument with spaces"`, count) + "\nprintf '%s\\n' \"quotes ' \\\" \\$ ; &\" \"$VERIFY_BASH_VARIABLE\"\nbash -c 'test -z \"${SPARKWING_BASH_PROGRAM+x}\"'"
+				result, err := Bash(context.Background(), program).Dir(t.TempDir()).Env("VERIFY_BASH_VARIABLE", "present").Env("SPARKWING_BASH_PROGRAM", "exit 42").Capture()
 				if err != nil {
 					t.Fatalf("shell program with %d arguments failed with exit %d; stderr: %s", count, result.ExitCode, result.Stderr)
 				}
@@ -157,34 +158,35 @@ func TestExec_CancelTerminatesTheStepJobAndClearsItsRecord(t *testing.T) {
 	p := paths.PathsAt(home)
 	ledger := sessionledger.Open(p.SessionLedgerDir())
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
+	ready := &windowsStepReady{ready: make(chan struct{})}
+	ctx = context.WithValue(ctx, keyLogger, ready)
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		_, _ = execCmd(ctx, "cmd", []string{"/c", `start /b ping -n 60 127.0.0.1 >nul & ping -n 60 127.0.0.1 >nul`}, t.TempDir(), nil)
+		_, _ = execCmd(ctx, "cmd", []string{"/c", `start /b ping -n 60 127.0.0.1 >nul & echo ready & ping -n 60 127.0.0.1 >nul`}, t.TempDir(), nil)
 	}()
 
-	var jobName string
-	deadline := time.Now().Add(10 * time.Second)
-	for jobName == "" {
-		if time.Now().After(deadline) {
-			t.Fatal("the running step was never recorded")
-		}
-		recs, _ := ledger.List()
-		if len(recs) == 1 {
-			jobName = recs[0].Handle.JobName
-		}
-		time.Sleep(20 * time.Millisecond)
+	select {
+	case <-ready.ready:
+	case <-finished:
+		t.Fatal("step exited before reporting readiness")
+	case <-ctx.Done():
+		t.Fatal("step never reported readiness")
 	}
-	if jobName == "" {
-		t.Fatal("record carries no job name")
+	recs, err := ledger.List()
+	if err != nil || len(recs) != 1 || recs[0].Handle.JobName == "" {
+		t.Fatalf("running step record = %+v, %v", recs, err)
 	}
+	jobName := recs[0].Handle.JobName
+	wait, stop := context.WithTimeout(t.Context(), 15*time.Second)
+	defer stop()
 
 	cancel()
 	select {
 	case <-finished:
-	case <-time.After(15 * time.Second):
+	case <-wait.Done():
 		t.Fatal("cancelled step did not return")
 	}
 	if recs, _ := ledger.List(); len(recs) != 0 {
@@ -192,5 +194,58 @@ func TestExec_CancelTerminatesTheStepJobAndClearsItsRecord(t *testing.T) {
 	}
 	if err := procgroup.TerminateJobByName(jobName); err != nil {
 		t.Fatalf("job %s still reachable after the step returned: %v", jobName, err)
+	}
+}
+
+type windowsStepReady struct {
+	nopLogger
+	ready chan struct{}
+	once  sync.Once
+}
+
+func (l *windowsStepReady) Emit(record LogRecord) {
+	if record.Event == "exec_line" && strings.Contains(string(record.streamData), "ready") {
+		l.once.Do(func() { close(l.ready) })
+	}
+}
+
+func TestExec_WindowsFiltersEngineCredentials(t *testing.T) {
+	t.Setenv("SPARKWING_NODE_TOKEN", "fixture-only")
+	for _, explicit := range []bool{false, true} {
+		cmd := Exec(t.Context(), "cmd", "/c", "if defined SPARKWING_NODE_TOKEN (exit 23) else (echo filtered)")
+		if explicit {
+			cmd.Env("SPARKWING_NODE_TOKEN", "fixture-override")
+		}
+		result, err := cmd.Capture()
+		if err != nil || strings.TrimSpace(result.Stdout) != "filtered" {
+			t.Fatalf("explicit=%v: credential reached tool: %v", explicit, err)
+		}
+	}
+}
+
+func TestExec_WindowsUsesCommandPath(t *testing.T) {
+	directory := t.TempDir()
+	source, err := exec.LookPath("cmd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "sdk-tool.exe"), body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, path string }{
+		{"sdk-tool", directory},
+		{filepath.Join(directory, "sdk-tool"), t.TempDir()},
+		{`.\sdk-tool`, t.TempDir()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Exec(t.Context(), tc.name, "/c", "echo resolved").Dir(directory).Env("PATH", tc.path).Env("PATHEXT", ".EXE").Capture()
+			if err != nil || strings.TrimSpace(result.Stdout) != "resolved" {
+				t.Fatalf("command PATH lookup: %v", err)
+			}
+		})
 	}
 }

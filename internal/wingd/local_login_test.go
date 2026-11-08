@@ -109,7 +109,7 @@ func withSessionFrom(session, origin string) func(*http.Request) {
 func signInThrough(t testing.TB, logins *dashboardLogins) string {
 	t.Helper()
 	uid := uint32(1000)
-	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
+	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}, "")
 	if failure != nil {
 		t.Fatal(failure)
 	}
@@ -136,7 +136,7 @@ func exchangeRequest(handler http.Handler, link, origin string) *httptest.Respon
 
 func servingLogins(clock func() time.Time, origin string) *dashboardLogins {
 	logins := newDashboardLogins(clock)
-	logins.serving(origin)
+	logins.serving(origin, nil)
 	return logins
 }
 
@@ -399,7 +399,7 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 func TestLocalDashboardLinkRedeemsOnlyAtItsOrigin(t *testing.T) {
 	logins := servingLogins(nil, "http://127.0.0.1:4343")
 	uid := uint32(7)
-	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
+	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}, "")
 	if failure != nil {
 		t.Fatal(failure)
 	}
@@ -423,7 +423,7 @@ func TestLocalDashboardLinkRedeemsOnlyAtItsOrigin(t *testing.T) {
 func TestLocalDashboardMintRefusesWithoutServingDashboard(t *testing.T) {
 	logins := newDashboardLogins(nil)
 	uid := uint32(7)
-	if _, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}); failure == nil || failure.Hint == "" {
+	if _, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}, ""); failure == nil || failure.Hint == "" {
 		t.Fatalf("mint without a dashboard = %v", failure)
 	}
 	response := httptest.NewRecorder()
@@ -663,7 +663,7 @@ func TestLocalDashboardDefaultPortOrigins(t *testing.T) {
 		for _, requested := range []string{"http://127.0.0.1", "http://127.0.0.1:80"} {
 			t.Run(minted+"/"+requested, func(t *testing.T) {
 				logins := servingLogins(nil, minted)
-				login, failure := logins.mint(localhostwire.LocalPeerIdentity{})
+				login, failure := logins.mint(localhostwire.LocalPeerIdentity{}, "")
 				if failure != nil {
 					t.Fatal(failure)
 				}

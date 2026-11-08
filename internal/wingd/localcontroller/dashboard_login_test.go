@@ -31,7 +31,7 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	if err := probe.Close(); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{Admission: wingd.Config{Home: home}, Dashboard: wingd.DashboardSettings{Address: address}, Open: factory.Open})
+	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{Admission: wingd.Config{Home: home}, Dashboard: wingd.DashboardSettings{Address: address, AllowedHosts: []string{"desk.example.ts.net"}}, Open: factory.Open})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,9 +45,16 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	login, err := wingclient.MintDashboardLogin(t.Context(), home)
+	login, err := wingclient.MintDashboardLogin(t.Context(), home, "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	serveLogin, err := wingclient.MintDashboardLogin(t.Context(), home, "desk.example.ts.net")
+	if err != nil || !strings.HasPrefix(serveLogin.URL, "https://desk.example.ts.net/#code=") {
+		t.Fatalf("client selected Serve origin: %v", err)
+	}
+	if _, err := wingclient.MintDashboardLogin(t.Context(), home, "unknown.example.ts.net"); err == nil {
+		t.Fatal("client minted an unconfigured origin")
 	}
 	origin, code, _ := strings.Cut(login.URL, "/#code=")
 	local, err := lifecycle.Status(t.Context())
@@ -138,7 +145,7 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	request(http.MethodPost, base+"/logout", session, http.StatusNoContent)
 	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusUnauthorized)
 
-	again, err := wingclient.MintDashboardLogin(t.Context(), home)
+	again, err := wingclient.MintDashboardLogin(t.Context(), home, "")
 	if err != nil {
 		t.Fatal(err)
 	}
