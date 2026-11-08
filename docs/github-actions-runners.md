@@ -162,3 +162,61 @@ without running pipelines; its removed `--static` flag is rejected.
 `--max-concurrent` defaults to one job. Trigger owners have separate capacity
 with the same bound, because an owner waits for its jobs to finish. The default
 runner can hold one owner and execute one job at a time.
+
+## On-demand fallback
+
+A repository `placement.prefer` list can end with a `github-actions` tier.
+The controller dispatches one workflow per job queue generation once earlier
+holds permit it. Team runners remain eligible while dispatch is outstanding.
+GitHub bills the repository account for fallback startup and execution, including
+workflows that lose the claim race.
+
+A team owner first enrolls the repository as an Actions runner repository,
+connects its GitHub App installation and enables repository automation or a
+pipeline subscription. Approve the workflow ref and hosted image with an
+authenticated `PUT /api/v1/team/github-app/actions-approval` request:
+
+```json
+{
+  "repository_id": 123456,
+  "workflow": ".github/workflows/sparkwing-fallback.yaml",
+  "ref": "refs/heads/main",
+  "runner": "macos-latest"
+}
+```
+
+Repeat for each approved image. `DELETE` on the same endpoint withdraws an
+approval using the repository ID, workflow and runner fields. Replacing or
+withdrawing approval invalidates its earlier receipts. The repository's default
+branch must contain the workflow. The approved branch or tag supplies the
+workflow revision, while the original event supplies the workload revision.
+Use the dispatch-only [fallback workflow](https://github.com/sparkwing-dev/sparkwing/blob/main/.github/workflows/sparkwing-fallback.yaml)
+as the template. Set repository variables `SPARKWING_CONTROLLER` and
+`SPARKWING_TEAM`, and use a runner release that supports `--dispatch-receipt`.
+The workflow needs `run-name: sparkwing:${{ inputs.receipt }}`, inputs named
+`receipt` and `runner`, `id-token: write` and `contents: read`. It invokes
+`sparkwing-runner warm --github-actions --dispatch-receipt <receipt>`.
+It has only `workflow_dispatch`, so pushes do not start fallback workers.
+
+The App's repository permission must include **Actions: Read and write**.
+Each installation owner approves the permission update in GitHub. Until approved,
+the waiting-job notice names the installation approval link. Source-fetch tokens
+keep Contents read only. The dispatch token stays in the controller and is
+restricted to the numeric repository ID.
+
+A receipt is a correlation value, not a bearer credential. Registration verifies
+GitHub OIDC, workflow ref and SHA, numeric repository and owner, provider run and
+attempt, and the OIDC job's provider-reported image label. Only a GitHub-hosted
+runner can claim an explicit Actions tier. The resulting credential claims only
+the receipt's original job, with its original source and trust. A default-branch
+workflow cannot upgrade pull-request code to default-branch trust. Fork pull
+requests remain refused. Each workflow attempt exchanges once.
+
+Run status and the run page show dispatch acceptance, refusal or uncertainty,
+the receipt and a provider link once registration identifies the run. Cancellation
+invalidates the receipt and cancels a known provider run. A lost response or sender
+restart never resends the generation. An operator can make an audited retry with
+`POST /api/v1/operator/teams/<team>/actions-dispatches/<receipt>/retry`, supplying
+`{"reason":"provider recovery checked"}`. This invalidates the old receipt before
+opening a new generation and refuses while a live award exists. A delayed old
+workflow can still spend GitHub startup minutes.

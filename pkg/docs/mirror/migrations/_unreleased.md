@@ -325,3 +325,12 @@ Sign-in links now carry their code in the fragment (`/#code=...`). The page
 stores the session token and sends it as `Authorization: Bearer`; every write
 needs the dashboard's own `Origin`. Sessions live only in controller memory, so
 run `sparkwing dashboard open` again after any controller restart.
+
+## Upgrade the store in place to schema baseline 35
+
+Schema 35 adds approved GitHub Actions workflow/image pairs and durable dispatch
+receipts. Recognized schema 34 stores upgrade in place, preserving configured
+secrets, teams, credentials, runners, installations and schedules. Older binaries
+refuse the upgraded store. The real GitHub App permission update is a separate
+operator action. Existing Actions workers need a matching dispatch receipt to
+claim jobs whose repository placement explicitly lists GitHub Actions.

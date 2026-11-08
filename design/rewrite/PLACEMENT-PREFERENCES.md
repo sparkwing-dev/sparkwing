@@ -1,7 +1,6 @@
 # Placement preferences for repository runs
 
-Status: slices 1-4 implemented; slices 5 (on-demand GitHub Actions) and 6
-(docs and live acceptance) remain. Date: 2026-11-07.
+Status: slices 1-5 implemented; slice 6 (docs and live acceptance) remains. Date: 2026-11-07.
 
 This note is the short version Korey reviews. The longer
 [repository run preferences proposal](proposals/repository-run-preferences.md)
@@ -42,8 +41,9 @@ ranking moves into the runner, the console, the Cloud launcher or a workflow.
 GitHub Actions work today comes from an eager workflow (`on: push`) running
 `sparkwing-runner warm --github-actions`, bound to the push's repository, ref
 and commit. On Sparkwing Cloud, App runs go to the Cloud launcher unless the
-automation pins `runner: github-actions` or a pool. Nothing dispatches a
-workflow on demand yet, and the App has no `actions: write` permission.
+automation pins `runner: github-actions` or a pool. Explicit repository tiers dispatch on demand through approved workflows and
+GitHub-hosted images. The App requires installation approval of `actions: write`;
+source tokens retain Contents read only.
 
 ## Config shape
 
@@ -233,10 +233,8 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
 5. **On-demand GitHub Actions (L).** App `actions: write` and approval flow,
    owner-approved workflow and images, dispatch intents and sender lease,
    receipt-bound OIDC exchange for tag and PR refs, cancellation, fallback
-   workflow with no event triggers. Until then a `github-actions` tier is
-   matched by tier class only: its `workflow` and `runner` are validated and
-   sealed but bind nothing, so any live Actions runner of the team can claim.
-   Slice 5 must bind the claim to the dispatched workflow and image.
+   workflow with no event triggers. Explicit Actions tiers accept only the
+   receipt's job through the approved workflow revision and hosted image.
 6. **Docs and live acceptance (S).** Config reference, scheduling and Actions
    docs with their drift checks, then the live scenario below.
 
@@ -303,8 +301,12 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
   upgrade the controller and CLIs before adding the keys. The repository's own
   pre-release YAML moves to a separate configuration change after the installed
   CLI is rebuilt.
-- A `github-actions` tier takes only an Actions runner already polling until
-  slice 5 adds dispatch. The projection says so.
+- An explicit `github-actions` tier requires a dispatch receipt. Approval binds
+  the workflow path, ref and image. Registration checks signed OIDC and provider
+  run/job metadata; the receipt credential has only node-claim authority for its
+  job. The fallback workflow runs on its approved ref and preserves the workload's
+  original source and trust. Sender leases fence concurrent replicas and a lost
+  outcome remains uncertain until an audited operator retry.
 - `pipeline lint` prints the preview in table and plain output; JSON output
   keeps findings only.
 

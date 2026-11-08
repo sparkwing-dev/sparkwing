@@ -51,6 +51,7 @@ func (s *Server) githubVerifier() *githuboidc.Verifier {
 }
 
 type githubExchangeReq struct {
+	Receipt string `json:"receipt,omitempty"`
 	IDToken string `json:"id_token"`
 	Team    string `json:"team"`
 }

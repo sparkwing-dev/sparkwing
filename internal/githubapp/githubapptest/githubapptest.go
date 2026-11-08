@@ -51,7 +51,8 @@ type Installation struct {
 	Suspended bool
 	// NoChecks is an installation whose owner has not accepted the App's
 	// checks permission: GitHub refuses to mint a token that asks for it.
-	NoChecks bool
+	NoChecks  bool
+	NoActions bool
 }
 
 // MintedToken records one installation token the fake issued.
@@ -95,6 +96,16 @@ type issuedToken struct {
 
 // GitHub is the fake.
 type GitHub struct {
+	ActionsRun       githubapp.WorkflowRun
+	ActionsLabels    []string
+	ActionsStatus    int
+	LostDispatch     bool
+	DispatchStarted  chan<- string
+	DispatchContinue <-chan struct{}
+	actionsCalls     []map[string]string
+	cancelledRuns    []string
+	actionsReceipt   string
+
 	URL              string
 	Key              *rsa.PrivateKey
 	t                testing.TB
@@ -140,6 +151,11 @@ func New(t testing.TB) *GitHub {
 		checkRuns:       map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches", g.handleActionsDispatch)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/actions/runs/{run}", g.handleActionsRun)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/actions/runs/{run}/attempts/{attempt}/jobs", g.handleActionsJobs)
+	mux.HandleFunc("POST /repos/{owner}/{repo}/actions/runs/{run}/cancel", g.handleActionsCancel)
+
 	mux.HandleFunc("POST /login/oauth/access_token", g.handleAccessToken)
 	mux.HandleFunc("GET /user", g.handleUser)
 	mux.HandleFunc("GET /user/installations", g.handleUserInstallations)
@@ -641,6 +657,10 @@ func (g *GitHub) handleMint(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if _, actions := req.Permissions["actions"]; actions && inst.NoActions {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "The permissions requested are not granted to this installation."})
+		return
+	}
 	if _, checks := req.Permissions["checks"]; checks && inst.NoChecks {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "The permissions requested are not granted to this installation."})
 		return

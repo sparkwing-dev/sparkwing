@@ -1,0 +1,48 @@
+name: Sparkwing fallback
+run-name: sparkwing:${{ inputs.receipt }}
+on:
+  workflow_dispatch:
+    inputs:
+      receipt:
+        description: Controller dispatch receipt
+        required: true
+        type: string
+      runner:
+        description: Team-approved GitHub-hosted image
+        required: true
+        type: string
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  sparkwing:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Install sparkwing-runner
+        shell: pwsh
+        run: |
+          $os = switch ($env:RUNNER_OS) { 'Linux' { 'linux' } 'macOS' { 'darwin' } 'Windows' { 'windows' } default { throw 'Unsupported runner OS' } }
+          $arch = switch ($env:RUNNER_ARCH) { 'X64' { 'amd64' } 'ARM64' { 'arm64' } default { throw 'Unsupported runner architecture' } }
+          $extension = if ($os -eq 'windows') { '.exe' } else { '' }
+          $asset = "sparkwing-runner-$os-$arch$extension"
+          $base = 'https://github.com/sparkwing-dev/sparkwing/releases/latest/download'
+          $binary = Join-Path $env:RUNNER_TEMP "sparkwing-runner$extension"
+          Invoke-WebRequest "$base/$asset" -OutFile $binary
+          $sums = (Invoke-WebRequest "$base/SHA256SUMS").Content
+          $line = ($sums -split "`n" | Where-Object { $_.TrimEnd().EndsWith(" $asset") })
+          if (@($line).Count -ne 1) { throw 'Missing release checksum' }
+          $expected = ($line -split '\s+')[0]
+          if ((Get-FileHash $binary -Algorithm SHA256).Hash -ine $expected) { throw 'Release checksum mismatch' }
+          if ($os -ne 'windows') { chmod +x $binary }
+      - name: Claim the dispatched Sparkwing job
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DISPATCH_RECEIPT: ${{ inputs.receipt }}
+          CONTROLLER: ${{ vars.SPARKWING_CONTROLLER }}
+          TEAM: ${{ vars.SPARKWING_TEAM }}
+        run: |
+          if (!$env:CONTROLLER -or !$env:TEAM) { throw 'Set repository variables SPARKWING_CONTROLLER and SPARKWING_TEAM' }
+          $extension = if ($env:RUNNER_OS -eq 'Windows') { '.exe' } else { '' }
+          & (Join-Path $env:RUNNER_TEMP "sparkwing-runner$extension") warm --github-actions --dispatch-receipt $env:DISPATCH_RECEIPT --controller $env:CONTROLLER --team $env:TEAM --idle-exit 2m
+          exit $LASTEXITCODE
