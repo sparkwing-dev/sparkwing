@@ -69,6 +69,8 @@ unlock.
 
 ### Fixed
 
+- **scaffold:** Source-built CLIs pin fresh projects to the latest published SDK instead of an unavailable future release.
+
 - **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
 - **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.
 
