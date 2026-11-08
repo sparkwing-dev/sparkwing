@@ -71,6 +71,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** Run listings load at most the requested page plus one lookahead row per batch, reducing database work for small pages while preserving filters and stable cursors.
+
+- **CLI:** A foreground run keeps its confirmed terminal exit status when log observation loses its connection. The CLI warns with a command for reading retained logs. Permission, protocol and integrity refusals remain errors.
 - **scaffold:** Source-built CLIs pin fresh projects to the latest published SDK instead of an unavailable future release.
 
 - **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.

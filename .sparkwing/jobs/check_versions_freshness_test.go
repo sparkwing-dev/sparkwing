@@ -38,6 +38,27 @@ func TestScaffoldFallbackProblem(t *testing.T) {
 	}
 }
 
+func TestScaffoldFallbackChecksPublicationWithoutTheLocalReleaseTag(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	gitRun(t, repo, "tag", "v0.1.0")
+	gitRun(t, repo, "tag", "v0.2.0")
+	gitRun(t, repo, "push", "origin", "v0.2.0")
+	gitRun(t, repo, "tag", "--delete", "v0.2.0")
+	ctx := newTestContext(t)
+	for _, version := range []string{"v0.2.0", "v0.3.0"} {
+		if err := bumpFallbackSDKVersionFile(repo, version); err != nil {
+			t.Fatal(err)
+		}
+		problem := checkScaffoldFallbackPin(ctx, repo)
+		if version == "v0.2.0" && problem != "" {
+			t.Fatalf("published release fixture refused: %s", problem)
+		}
+		if version == "v0.3.0" && !strings.Contains(problem, "ahead of latest release") {
+			t.Fatalf("unpublished pin problem = %q, want publication refusal", problem)
+		}
+	}
+}
+
 func TestBumpFallbackSDKVersionFile(t *testing.T) {
 	cases := []struct {
 		name       string
