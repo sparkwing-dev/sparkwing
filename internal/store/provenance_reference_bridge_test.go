@@ -365,7 +365,7 @@ func admitReferenceChild(t *testing.T, s *Store, parent runspec.Provenance, pare
 	claim.ExpiresAt = &expiry
 	authorityPersist(t, s, claim)
 	child.Version, child.Team, child.Mode, child.Dispatch = 1, "a", runspec.IntakeExecute, runspec.DispatchHost
-	child.Lineage = runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}
+	child.Lineage = runspec.Lineage{ParentRunID: "run", ParentJobID: "job", Detached: child.Lineage.Detached}
 	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, IdempotencyKey: "child", Request: child})
 	return tenant, result.RunID, err
 }

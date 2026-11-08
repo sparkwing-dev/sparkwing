@@ -143,7 +143,7 @@ func TestNativeChildBuildToDeployPlansItsOwnSDKEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := process.StartChild(t.Context(), "Deploy", nil, "", "")
+	id, err := process.StartChild(t.Context(), "Deploy", nil, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
