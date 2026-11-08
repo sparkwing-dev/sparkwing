@@ -116,7 +116,7 @@ func TestWindowsHostCommandCancellationKillsTree(t *testing.T) {
 			}
 			finished := make(chan nodeproto.ExecDone, 1)
 			go func() {
-				done, session := runHostCommand(req, nil, kill, closed, sink)
+				done, session := runHostCommand(req, nil, kill, closed, sink, nil)
 				if session != nil {
 					_ = endCommandSessions([]*commandSession{session})
 				}
@@ -175,7 +175,7 @@ func TestWindowsHostCommandBackgroundDrainAndClose(t *testing.T) {
 			output.Write(chunk)
 		}
 		return nil
-	})
+	}, nil)
 	if session == nil {
 		t.Fatalf("background command did not start: %+v", done)
 	}
@@ -216,7 +216,7 @@ func TestWindowsHostCommandKeepsBufferedOutputPastSlowSink(t *testing.T) {
 			}
 		}
 		return nil
-	})
+	}, nil)
 	if session != nil {
 		if err := endCommandSessions([]*commandSession{session}); err != nil {
 			t.Fatal(err)
@@ -261,7 +261,7 @@ func TestWindowsHostCommandLongBashProgram(t *testing.T) {
 				diagnostic.Write(chunk)
 			}
 			return nil
-		})
+		}, nil)
 		if session != nil {
 			if err := endCommandSessions([]*commandSession{session}); err != nil {
 				t.Fatal(err)
