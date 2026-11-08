@@ -60,6 +60,10 @@ func trackHostCommand(cmd *exec.Cmd, env []string) *commandSession {
 	return c
 }
 
+func (c *commandSession) leader() (int, string, bool) {
+	return c.identity.LeaderPID, c.identity.BirthToken, c.captured
+}
+
 func (c *commandSession) kill() {
 	if c.captured {
 		if err := procgroup.KillSession(c.identity); err != nil {

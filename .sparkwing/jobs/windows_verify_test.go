@@ -113,7 +113,7 @@ func TestWindowsVerifyIsolatesSubcommandsAndPreservesFailures(t *testing.T) {
 		fmt.Fprintf(&probe, `[ "${%s+x}" != x ] || exit 33; `, name)
 	}
 	probe.WriteString(`printf '%s' "$SPARKWING_HOME"; exit 17`)
-	err := runPlatformIsolated(t.Context(), probe.String())
+	err := runPlatformIsolated(newTestContext(t), probe.String())
 	if err == nil {
 		t.Fatal("subcommand failure was masked")
 	}

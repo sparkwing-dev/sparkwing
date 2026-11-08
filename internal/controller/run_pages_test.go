@@ -55,6 +55,29 @@ func TestPersistedRunPagesUsePublicDetailsAndStableNumberBoundary(t *testing.T) 
 	}
 }
 
+func TestPersistedRunPageDoesNotReadBeyondItsLookahead(t *testing.T) {
+	server, _ := engineRuntimeStore(t)
+	for number := 2; number <= 4; number++ {
+		logSearchCandidate(t, server.Store, "candidate-"+strconv.Itoa(number), number, "ci")
+	}
+	options, _, _ := memberObservationOptions(t, server.Store, nil)
+	if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, []byte(`{invalid`)); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := client.NewRunReader(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := controllerwire.RunQuery{Limit: 1}
+	for _, want := range []string{"candidate-4", "candidate-3"} {
+		page, err := reader.ListRuns(t.Context(), query)
+		if err != nil || len(page.Runs) != 1 || page.Runs[0].ID != want || !page.Truncated {
+			t.Fatalf("page %s: %+v: %v", want, page, err)
+		}
+		query.Cursor = page.NextCursor
+	}
+}
+
 func TestPersistedRunPagesFilterBeforeLimitAndPreserveCurrentNotices(t *testing.T) {
 	server, tenant := engineRuntimeStore(t)
 	run, err := tenant.ReadRun(t.Context(), "run")

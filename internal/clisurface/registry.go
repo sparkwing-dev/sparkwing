@@ -878,7 +878,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner version", Flags: []Flag{
 			{Name: "offline"},
 		}},
-		{Path: "sparkwing-runner warm", Rules: []string{"Claim triggers and jobs with controller-awarded leases. GitHub Actions exchange scopes work to the authorized push."}, Flags: []Flag{
+		{Path: "sparkwing-runner warm", Rules: []string{"Claim triggers and jobs with controller-awarded leases. GitHub Actions exchange scopes ordinary workers to their authorized push. --dispatch-receipt binds an on-demand worker to one job and its original workload trust."}, Flags: []Flag{
 			{Name: "controller", Argument: "VALUE"},
 			{Name: "poll", Argument: "DURATION"},
 			{Name: "max-concurrent", Argument: "N"},
@@ -888,6 +888,7 @@ func Registry() []Command {
 			{Name: "claim-jobs"},
 			{Name: "local-admission"},
 			{Name: "github-actions"},
+			{Name: "dispatch-receipt", Argument: "VALUE", Meaning: "Controller receipt for an on-demand GitHub Actions job"},
 			{Name: "team", Argument: "VALUE"},
 			{Name: "idle-exit", Argument: "DURATION"},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},

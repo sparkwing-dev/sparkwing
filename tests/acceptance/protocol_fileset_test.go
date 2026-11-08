@@ -6,9 +6,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 func testGoSDKFilesetPathNames(t *testing.T) {
@@ -37,6 +40,9 @@ func testGoSDKFilesetPathNames(t *testing.T) {
 				}
 				t.Run(name, func(t *testing.T) {
 					recordLeaf(t)
+					host := sparkwingtest.New(sparkwingtest.Options{})
+					t.Cleanup(func() { _ = host.Close() })
+					ctx := host.Context(t.Context())
 					dir := t.TempDir()
 					command := exec.CommandContext(t.Context(), "git", "init", "--quiet", dir)
 					if output, err := command.CombinedOutput(); err != nil {
@@ -53,14 +59,14 @@ func testGoSDKFilesetPathNames(t *testing.T) {
 						}
 					}
 					view := sparkwing.NewGit(dir, "", "", "", "", "")
-					first, err := view.FilesetHash(t.Context())
+					first, err := view.FilesetHash(ctx)
 					if err != nil || first == "" {
 						t.Fatalf("first fingerprint = %q, %v", first, err)
 					}
 					if err := os.WriteFile(path, []byte("second"), 0o600); err != nil {
 						t.Fatal(err)
 					}
-					second, err := view.FilesetHash(t.Context())
+					second, err := view.FilesetHash(ctx)
 					if err != nil || second == "" || second == first {
 						t.Fatalf("changed input fingerprint = %q, %v; original = %q", second, err, first)
 					}
@@ -78,6 +84,9 @@ func testGoSDKFilesetIgnoreReadFailure(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			recordLeaf(t)
+			host := sparkwingtest.New(sparkwingtest.Options{})
+			t.Cleanup(func() { _ = host.Close() })
+			ctx := host.Context(t.Context())
 			dir := t.TempDir()
 			command := exec.CommandContext(t.Context(), "git", "init", "--quiet", dir)
 			if output, err := command.CombinedOutput(); err != nil {
@@ -89,17 +98,17 @@ func testGoSDKFilesetIgnoreReadFailure(t *testing.T) {
 				}
 			}
 			view := sparkwing.NewGit(dir, "", "", "", "", "")
-			if _, err := view.FilesetHash(t.Context()); err != nil {
+			if _, err := view.FilesetHash(ctx); err != nil {
 				t.Fatalf("context without ignore rules: %v", err)
 			}
 			ignore := filepath.Join(dir, ".dockerignore")
 			if err := os.Mkdir(ignore, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			key, err := view.FilesetHash(t.Context())
-			var failure *os.PathError
-			if key != "" || !errors.As(err, &failure) || failure.Path != ignore {
-				t.Fatalf("unreadable ignore rules = (%q, %v), want no key and path error", key, err)
+			key, err := view.FilesetHash(ctx)
+			var failure *sdkserve.HelperError
+			if key != "" || !errors.As(err, &failure) || !strings.Contains(failure.Message, ignore) {
+				t.Fatalf("unreadable ignore rules = (%q, %v), want no key and host helper path error", key, err)
 			}
 		})
 	}

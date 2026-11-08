@@ -37,7 +37,7 @@ func (Land) Help() string {
 		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
 		"with no force, adding --no-verify when the pushed tree is the tree the gate and review judged, since the gate covers every check the pre-push hook makes; " +
 		"a merged tree pushes through the hook. When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
-		"into the branch (a merge commit under the default git identity, never a rebase), runs `bash bin/check-changelog.sh --fix` and commits the result when the union merge repeated a CHANGELOG.md heading, builds every module and runs the affected tests over the files " +
+		"into the branch (a merge commit under the default git identity, never a rebase), runs `bash bin/check-changelog.sh --fix` and commits the result when the union merge repeated a CHANGELOG.md heading, builds the affected package closure and runs the affected tests over the files " +
 		"that differ between the gated tree and the merged tree, then pushes the merge; the review is not run again. It merges at most 3 times; a conflict fails " +
 		"and names the merge to run by hand. The push step carries the destructive and prod risks, " +
 		"so a real landing needs --sw-allow-risk destructive,prod. The land job's output is the landing record: branch, the commit and tree pushed, " +
@@ -543,10 +543,10 @@ func changedBetween(ctx context.Context, dir, from, to string) ([]string, error)
 	return files, nil
 }
 
-// safety: build catches an importer the merge broke, which the affected
-// selection leaves to the build step; the tests cover the packages it changed.
+// safety: build catches compile errors before the merge delta runs its fast
+// dependency closure and the full critical set.
 func recheckMergeDelta(ctx context.Context, files []string) error {
-	if err := runBuild(ctx); err != nil {
+	if err := runAffectedCompileFiles(ctx, "build", files); err != nil {
 		return err
 	}
 	if err := ensureFrontendDeps(ctx); err != nil {

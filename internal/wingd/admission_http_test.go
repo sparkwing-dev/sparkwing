@@ -185,14 +185,17 @@ func TestMachineAdmissionLongPollWakesAndDroppedPollKeepsArrival(t *testing.T) {
 		waiting := admissionResponse(t, admissionHTTPCall(t, d, http.MethodPost, "/requests", admissionTestInput(t, "waiting", 2)))
 		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan struct{})
+		response := httptest.NewRecorder()
 		go func() {
 			defer close(done)
-			response := httptest.NewRecorder()
 			d.admissionHTTP(http.NotFoundHandler()).ServeHTTP(response, admissionHTTPRequest(t, ctx, http.MethodGet, "/requests/"+waiting.ID+"?wait=true", nil))
 		}()
 		synctest.Wait()
 		cancel()
 		<-done
+		if response.Code != http.StatusServiceUnavailable || !json.Valid(response.Body.Bytes()) {
+			t.Fatalf("cancelled admission poll returned HTTP %d with body %q, want an unavailable JSON response", response.Code, response.Body.String())
+		}
 		replay := admissionResponse(t, admissionHTTPCall(t, d, http.MethodGet, "/requests/"+waiting.ID, nil))
 		if replay.Arrival != waiting.Arrival || replay.Queued == nil {
 			t.Fatal("dropped poll lost queue position")

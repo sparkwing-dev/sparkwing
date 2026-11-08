@@ -90,6 +90,9 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 	if push == nil {
 		return bindingRefusal()
 	}
+	if push.Receipt != "" {
+		return checkReceiptEnrollmentTx(ctx, tx, spec)
+	}
 	var repositoryID, ownerID int64
 	err := tx.QueryRowContext(ctx, `SELECT repository_id,repository_owner_id FROM github_runner_bindings WHERE team=? AND repo_key=?`+tx.forShare(), spec.Team, push.RepositoryKey).Scan(&repositoryID, &ownerID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -111,6 +114,19 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 
 func consumeActionsExchangeTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	push := spec.Binding.Push
+	if push.Receipt != "" {
+		result, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET provider_run_id=?,provider_attempt=?,state='accepted' WHERE receipt=? AND provider_run_id='' AND state IN ('sending','accepted','uncertain') AND `+actionsConsentSQL, push.WorkflowRunID, push.WorkflowRunAttempt, push.Receipt)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return actionsExchangeUsed()
+		}
+	}
 	result, err := tx.execContext(ctx, `INSERT INTO github_actions_exchanges(team,repository_key,run_id,run_attempt) VALUES (?,?,?,?) ON CONFLICT(team,repository_key,run_id,run_attempt) DO NOTHING`, spec.Team, push.RepositoryKey, push.WorkflowRunID, push.WorkflowRunAttempt)
 	if err != nil {
 		return err

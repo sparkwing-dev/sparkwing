@@ -123,6 +123,15 @@ func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
 	if err != nil {
 		return fmt.Sprintf("scaffold fallback pin: %v", err)
 	}
+	if semver.Compare(pinned, latest) > 0 {
+		published, err := tagExistsOnRemote(ctx, repoRoot, pinned)
+		if err != nil {
+			return fmt.Sprintf("scaffold fallback pin: cannot verify publication of %s (%v)", pinned, err)
+		}
+		if published {
+			latest = pinned
+		}
+	}
 	return scaffoldFallbackProblem(pinned, latest)
 }
 
@@ -186,6 +195,9 @@ func scaffoldFallbackProblem(pinned, latest string) string {
 			"scaffold fallback pin %q is not a valid release version (set scaffold.FallbackSDKVersion to a published tag)",
 			pinned,
 		)
+	}
+	if semver.Compare(pinned, latest) > 0 {
+		return fmt.Sprintf("scaffold fallback pin %s is ahead of latest release %s (keep the published pin until the new tag is released)", pinned, latest)
 	}
 	if semver.Compare(pinned, latest) < 0 {
 		return fmt.Sprintf(
