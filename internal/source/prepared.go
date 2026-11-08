@@ -380,7 +380,7 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 	}
 	if manifest.Inputs.Format != 1 || !hit.PreparedParent && manifest.Inputs.RequestHash != p.RequestHash || !samePreparedSource(manifest.Inputs.Source, comparable) || manifest.Inputs.Target != options.Target || spec.Engine != nil && manifest.Inputs.Engine != *spec.Engine {
 		if hit.PreparedParent {
-			return nil, fmt.Errorf("%w: parent preparation differs from sealed source, engine or target", blob.ErrIntegrity)
+			slog.InfoContext(ctx, "skipping parent preparation: source, engine or target differs")
 		}
 		return nil, nil
 	}
@@ -410,7 +410,7 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 	}
 	if currentKey != manifest.Key {
 		if hit.PreparedParent {
-			return nil, fmt.Errorf("%w: parent preparation environment or toolchain differs", blob.ErrIntegrity)
+			slog.InfoContext(ctx, "skipping parent preparation: environment or toolchain differs")
 		}
 		return nil, nil
 	}

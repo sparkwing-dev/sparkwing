@@ -320,8 +320,8 @@ func TestAcquirePreparedRejectsCorruptOrUnauthorizedBytesBeforeInstall(t *testin
 	}
 }
 
-func TestAcquireParentPreparationRejectsMismatchesBeforeInstall(t *testing.T) {
-	for _, change := range []string{"environment", "source", "engine", "target", "corrupt"} {
+func TestAcquireParentPreparationRebuildsMismatchesAndRejectsCorruption(t *testing.T) {
+	for _, change := range []string{"environment", "source", "checkout policy", "engine", "target", "corrupt"} {
 		t.Run(change, func(t *testing.T) {
 			f := newPreparedFixture(t, engineid.GoSDK)
 			f.publish(t)
@@ -332,18 +332,41 @@ func TestAcquireParentPreparationRejectsMismatchesBeforeInstall(t *testing.T) {
 				f.options.Base.Captured = append(f.options.Base.Captured, "HOME="+t.TempDir())
 			case "source":
 				f.spec.HashAllFiles = true
+			case "checkout policy":
+				f.spec.Checkout.Policy.Tags = new(true)
 			case "engine":
 				identity := f.resolver.resolved.Identity
 				identity.ManifestDigest = "another-engine"
 				f.spec.Engine = &identity
+				f.resolver.resolved.Identity = identity
 			case "target":
 				f.options.Target.GOARCH = "arm64"
+				f.resolver.resolved.Target = f.options.Target
 			case "corrupt":
 				f.storage.corrupt = true
 			}
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
 			entry, err := source.Acquire(t.Context(), f.spec, f.options)
-			if !errors.Is(err, blob.ErrIntegrity) || entry != nil || f.installs != 1 {
+			if change == "corrupt" {
+				if !errors.Is(err, blob.ErrIntegrity) || entry != nil || f.installs != 1 {
+					t.Fatalf("corrupt preparation: entry=%v err=%v installs=%d", entry, err, f.installs)
+				}
+				return
+			}
+			if err != nil || entry == nil || f.installs != 2 {
 				t.Fatalf("changed %s: entry=%v err=%v installs=%d", change, entry, err, f.installs)
+			}
+			defer func() {
+				if err := entry.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			assertPreparedExecution(t, entry)
+			if !strings.Contains(logs.String(), "skipping parent preparation:") {
+				t.Fatalf("changed %s has no mismatch reason: %s", change, &logs)
 			}
 		})
 	}

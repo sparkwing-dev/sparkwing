@@ -298,10 +298,11 @@ policy and provenance. The child still plans and runs its own jobs and assertion
 Pipeline names and arguments select execution after installation.
 
 Restoration checks the content digest, engine, target, environment and toolchain.
-An inherited artifact with mismatched inputs fails before execution. Missing
-artifacts and changed inputs within the same run use fresh preparation. Corrupt
-artifacts always fail. Records follow the publishing run's retention. A grandchild
-prepares fresh when its direct parent has no published record.
+Missing artifacts and changed build inputs use fresh preparation. Inherited
+source, engine, target, environment or toolchain mismatches log the reason before
+preparing fresh. Corrupt artifacts always fail. Records follow the publishing
+run's retention. A grandchild prepares fresh when its direct parent has no
+published record.
 
 Host logs report `source preparation` stages for restore, checkout, engine
 selection, SDK installation (including dependency resolution and compilation),
