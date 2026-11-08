@@ -24,7 +24,10 @@ func (c *localController) RecordAdmissionEvent(holder, kind string, data map[str
 		return nil
 	}
 	node, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil || len(node) == 0 {
+	if err != nil {
+		return err
+	}
+	if len(node) == 0 {
 		return nil
 	}
 	event := ""

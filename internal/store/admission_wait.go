@@ -3,12 +3,13 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func fillAdmissionWaitsTx(ctx context.Context, tx *storeTx, team Team, snapshot *RunSnapshot) error {
+func fillAdmissionWaitsTx(ctx context.Context, tx *storeTx, team Team, snapshot *RunSnapshot) (err error) {
 	waiting := map[string]int{}
 	for i, node := range snapshot.Nodes {
 		if node.Status == runstate.StatusPending && node.ClaimedBy != "" && node.StatusDetail == "" {
@@ -23,7 +24,7 @@ func fillAdmissionWaitsTx(ctx context.Context, tx *storeTx, team Team, snapshot 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
 		var node, kind string
 		var raw []byte
