@@ -61,6 +61,8 @@ unlock.
 
 ### Fixed
 
+- **deploy:** Keep candidate production images after a schema upgrade if rollout or smoke fails, report the required roll forward in Bitwing, and run production smoke in the team that owns the source repository installation.
+
 - **deploy:** Restore the controller runtime base index after registry retention expired it. Keep both runtime bases under the existing retention tags so a pinned digest survives the rolling release-image window.
 
 - **local controller:** `sparkwing daemon stop` retires the local runner before the controller exits, so an idle runner records its stop and revokes its claim credential instead of failing against a missing socket, and a runner holding jobs stops claiming and finishes them. `sparkwing daemon restart` keeps the runner and its jobs running.

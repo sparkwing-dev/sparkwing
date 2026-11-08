@@ -32,8 +32,8 @@ func (Deploy) Help() string {
 	return "Turns the Sparkwing Cloud deploy lanes into one DAG. build-images builds linux/amd64 and linux/arm64 binaries with bin/build-release-target.sh and appends them to the runtime bases with publish-images, " +
 		"reusing images an earlier run already published for the same commit. staging-deploy and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
 		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate runs the example pipeline and the sparkwing-ci-smoke reference pipeline on staging Cloud. " +
-		"production requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in each " +
-		"QA fixture team and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs. A failed production deploy or smoke reverts the run's GitOps commits, launcher first, even after cancellation. " +
+		"production requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in the " +
+		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
 		"Take a manual snapshot before a risky migration. Each environment's deployed and previous digests are that job's output. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Every deploy job refuses a commit that is no longer the tip of origin/main, and " +
@@ -337,13 +337,23 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 		err = d.productionSmoke(ctx, images, rec.WindowStart)
 	}
 	if d.dry {
-		d.tools.say(ctx, "dry-run: on a failed production deploy or smoke, would renew the role session and revert this run's GitOps commits newest first, waiting for each rollout, even after cancellation")
+		d.tools.say(ctx, "dry-run: on a failed production deploy or smoke, would renew the role session and revert this run's GitOps commits newest first only if the controller schema did not increase; otherwise retain candidate images and record a Bitwing finding requiring roll forward")
 	}
 	if err == nil {
 		return rec, nil
 	}
 	if len(rec.Changes) == 0 {
 		return rec, err
+	}
+	// safety: a newer candidate may already have migrated the store; uncertain migration progress requires roll forward.
+	if rec.CandidateSchema > rec.PreviousSchema || rec.PreviousSchema <= 0 || rec.CandidateSchema <= 0 {
+		feedbackErr := d.recordUnsafeRollback(ctx, rec, err)
+		if feedbackErr != nil {
+			failure := fmt.Errorf("bitwing rollback finding could not be recorded: %w", feedbackErr)
+			d.tools.say(context.WithoutCancel(ctx), failure.Error())
+			err = errors.Join(err, failure)
+		}
+		return rec, fmt.Errorf("automatic rollback disabled: controller schema %d -> %d; candidate images retained, production requires roll forward: %w", rec.PreviousSchema, rec.CandidateSchema, err)
 	}
 	d.tools.say(ctx, "production failed, rolling back: "+err.Error())
 	if rbErr := d.rollbackDetached(ctx, env, rec, gitEnv); rbErr != nil {
@@ -355,7 +365,7 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 type DeploySmoke struct{ sparkwing.Base }
 
 func (DeploySmoke) ShortHelp() string {
-	return "Two-job Cloud smoke the deploy pipeline runs in the production QA teams"
+	return "Two-job Cloud smoke the deploy pipeline runs in the production source-owning team"
 }
 
 func (DeploySmoke) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {

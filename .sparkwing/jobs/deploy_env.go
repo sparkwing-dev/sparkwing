@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +34,7 @@ type deployConfig struct {
 	Params         deployParams
 	Staging        deployEnv
 	Production     deployEnv
-	SmokeTeams     []string
+	SmokeProfiles  []string
 	ArgoTimeout    time.Duration
 	RolloutTimeout time.Duration
 	RunTimeout     time.Duration
@@ -78,10 +79,10 @@ func (c deployConfig) productionBudget() time.Duration {
 }
 
 type deployParams struct {
-	GitopsKey      string
-	ReferenceKey   string
-	StagingToken   string
-	SmokeTokenBase string
+	GitopsKey    string
+	ReferenceKey string
+	StagingToken string
+	SmokeToken   string
 }
 
 type deployEnv struct {
@@ -113,10 +114,10 @@ func defaultDeployConfig() deployConfig {
 		CommitName:     "Sparkwing deploy",
 		CommitEmail:    "deploy@sparkwing.dev",
 		Params: deployParams{
-			GitopsKey:      "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
-			ReferenceKey:   "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
-			StagingToken:   "/kikd-prod/sparkwing/deploy/staging-gate-token",
-			SmokeTokenBase: "/kikd-prod/sparkwing/deploy/smoke-token-",
+			GitopsKey:    "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
+			ReferenceKey: "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
+			StagingToken: "/kikd-prod/sparkwing/deploy/staging-gate-token",
+			SmokeToken:   "/kikd-prod/sparkwing/deploy/scan-submit-token",
 		},
 		Staging: deployEnv{
 			Name:                 "staging",
@@ -138,7 +139,7 @@ func defaultDeployConfig() deployConfig {
 			LauncherDeployment:   "sparkwing-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://api.sparkwing.dev",
 		},
-		SmokeTeams:     []string{"qa-team", "qa-team-b"},
+		SmokeProfiles:  []string{"production-smoke"},
 		ArgoTimeout:    10 * time.Minute,
 		RolloutTimeout: 5 * time.Minute,
 		RunTimeout:     45 * time.Minute,
@@ -180,14 +181,15 @@ type gitopsChange struct {
 	Commit string `json:"commit"`
 }
 
-// safety: a failed promote rolls back from this run's own record: it reverts
-// Changes newest first and names Previous as what production returns to.
+// safety: this run's rollback record prevents reverting another deploy or crossing a schema upgrade.
 type envDeployment struct {
-	Environment string         `json:"environment"`
-	Images      deployImages   `json:"images"`
-	Previous    valuesPins     `json:"previous"`
-	Changes     []gitopsChange `json:"changes"`
-	WindowStart string         `json:"window_start"`
+	Environment     string         `json:"environment"`
+	Images          deployImages   `json:"images"`
+	Previous        valuesPins     `json:"previous"`
+	Changes         []gitopsChange `json:"changes"`
+	WindowStart     string         `json:"window_start"`
+	PreviousSchema  int            `json:"previous_schema"`
+	CandidateSchema int            `json:"candidate_schema"`
 }
 
 type stagingGateRecord struct {
@@ -520,4 +522,18 @@ func spliceControllerDeployment(previous, next, namespace, deployment string) (s
 		return "", fmt.Errorf("the current render has no %s", want)
 	}
 	return strings.Join(parts, "---"), nil
+}
+
+var deploySchemaVersion = regexp.MustCompile(`(?m)^const expectedSchemaVersion = ([0-9]+)$`)
+
+func readDeploySchemaVersion(source string) (int, error) {
+	match := deploySchemaVersion.FindStringSubmatch(source)
+	if len(match) != 2 {
+		return 0, errors.New("cannot establish controller schema version; production was not changed")
+	}
+	version, err := strconv.Atoi(match[1])
+	if err != nil || version <= 0 {
+		return 0, errors.New("invalid controller schema version; production was not changed")
+	}
+	return version, nil
 }
