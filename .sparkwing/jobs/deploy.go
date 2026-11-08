@@ -90,7 +90,7 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 			Proven: sparkwing.RefToLastRun[stagingGateRecord]("deploy", "staging-gate", sparkwing.MaxAge(maxAge)),
 			MaxAge: maxAge,
 			Dry:    base.Dry,
-		}).Inline().Requires(runnerLabels...)
+		}).Inline()
 	} else {
 		staging := sparkwing.Job(plan, "staging-deploy", &deployStagingJob{Job: base.named("staging-deploy"), Images: images}).
 			Needs(build).Requires(runnerLabels...).Timeout(cfg.stagingBudget())
