@@ -41,6 +41,7 @@ unlock.
 
 ### Fixed
 
+- **runner:** Child awaits pace controller reads with jittered backoff and reuse the authorized host request while waiting
 - **schedules:** Timer-started Linux controllers leave the timer's cgroup when the systemd user manager is available
 - **scheduling:** Run status and the run page keep GitHub Actions dispatch receipts, provider links and lost-race counts after award, cancellation and completion.
 - **billing:** Refuse checkout and card setup sessions whose Stripe mode differs from the controller's payment mode
