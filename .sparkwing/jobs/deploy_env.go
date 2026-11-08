@@ -34,7 +34,7 @@ type deployConfig struct {
 	Params         deployParams
 	Staging        deployEnv
 	Production     deployEnv
-	SmokeTeams     []string
+	SmokeProfiles  []string
 	ArgoTimeout    time.Duration
 	RolloutTimeout time.Duration
 	RunTimeout     time.Duration
@@ -79,10 +79,10 @@ func (c deployConfig) productionBudget() time.Duration {
 }
 
 type deployParams struct {
-	GitopsKey      string
-	ReferenceKey   string
-	StagingToken   string
-	SmokeTokenBase string
+	GitopsKey    string
+	ReferenceKey string
+	StagingToken string
+	SmokeToken   string
 }
 
 type deployEnv struct {
@@ -114,10 +114,10 @@ func defaultDeployConfig() deployConfig {
 		CommitName:     "Sparkwing deploy",
 		CommitEmail:    "deploy@sparkwing.dev",
 		Params: deployParams{
-			GitopsKey:      "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
-			ReferenceKey:   "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
-			StagingToken:   "/kikd-prod/sparkwing/deploy/staging-gate-token",
-			SmokeTokenBase: "/kikd-prod/sparkwing/deploy/smoke-token-",
+			GitopsKey:    "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
+			ReferenceKey: "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
+			StagingToken: "/kikd-prod/sparkwing/deploy/staging-gate-token",
+			SmokeToken:   "/kikd-prod/sparkwing/deploy/scan-submit-token",
 		},
 		Staging: deployEnv{
 			Name:                 "staging",
@@ -139,7 +139,7 @@ func defaultDeployConfig() deployConfig {
 			LauncherDeployment:   "sparkwing-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://api.sparkwing.dev",
 		},
-		SmokeTeams:     []string{"qa-team", "qa-team-b"},
+		SmokeProfiles:  []string{"production-smoke"},
 		ArgoTimeout:    10 * time.Minute,
 		RolloutTimeout: 5 * time.Minute,
 		RunTimeout:     45 * time.Minute,

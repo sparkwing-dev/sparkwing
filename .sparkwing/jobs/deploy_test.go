@@ -723,11 +723,6 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 				return "", fmt.Errorf("profile added without a token file or isolated home")
 			}
 			return "", nil
-		case strings.HasPrefix(joined, "run deploy-smoke"):
-			if arg("--sw-route") != "cloud" || !slices.Contains(c.Args, "--sw-detached") || slices.Contains(c.Args, "--ref") {
-				return "", errors.New("smoke must upload source to Cloud")
-			}
-			return fmt.Sprintf(`{"run_id":"run-deploy-smoke-%s"}`+"\n", arg("--profile")), nil
 		case strings.HasPrefix(joined, "pipeline trigger"):
 			return fmt.Sprintf(`{"run_id":"run-%s-%s"}`+"\n", c.Args[2], arg("--profile")), nil
 		case strings.HasPrefix(joined, "runs status"):
@@ -799,9 +794,6 @@ func (f *fakeDeploy) triggered(pipeline string) []string {
 	var runs []string
 	for _, call := range f.calls {
 		fields := strings.Fields(call)
-		if len(fields) > 2 && fields[1] == "run" && fields[2] == pipeline {
-			runs = append(runs, "run-"+pipeline+"-"+fields[slices.Index(fields, "--profile")+1])
-		}
 		if len(fields) > 3 && fields[1] == "pipeline" && fields[2] == "trigger" && fields[3] == pipeline {
 			runs = append(runs, "run-"+pipeline+"-"+fields[slices.Index(fields, "--profile")+1])
 		}
@@ -931,7 +923,7 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if prod.Environment != "production" || prod.Previous.Launcher != f.old.Runner || prod.WindowStart == "" {
 		t.Fatalf("production record = %+v", prod)
 	}
-	if runs := f.triggered("deploy-smoke"); fmt.Sprint(runs) != "[run-deploy-smoke-qa-team run-deploy-smoke-qa-team-b]" {
+	if runs := f.triggered("deploy-smoke"); fmt.Sprint(runs) != "[run-deploy-smoke-production-smoke]" {
 		t.Fatalf("smoke runs = %v", runs)
 	}
 
@@ -1101,7 +1093,7 @@ func TestDeployRollbackOutlivesCancelTimeoutAndSession(t *testing.T) {
 
 func TestDeploySmokeLogCheckRenewsAnExpiredSession(t *testing.T) {
 	f := newFakeDeploy(t)
-	// safety: both smoke runs are followed concurrently, so expiring on each status read
+	// safety: smoke observation may renew the role session, so expiring on each status read
 	// could expire the renewed session too, depending on which run reports first.
 	var once sync.Once
 	f.onSmoke = func(string) error {
@@ -1122,7 +1114,7 @@ func TestDeploySmokeLogCheckRenewsAnExpiredSession(t *testing.T) {
 
 func TestDeployRollsBackFailedProductionSmoke(t *testing.T) {
 	for name, breakIt := range map[string]func(*fakeDeploy){
-		"failed run":   func(f *fakeDeploy) { f.failRuns["run-deploy-smoke-qa-team-b"] = true },
+		"failed run":   func(f *fakeDeploy) { f.failRuns["run-deploy-smoke-production-smoke"] = true },
 		"extra claim":  func(f *fakeDeploy) { f.claimsPerRun = 2 },
 		"no claim":     func(f *fakeDeploy) { f.claimsPerRun = 0 },
 		"warning logs": func(f *fakeDeploy) { f.dirtyLogs = true },
@@ -1203,7 +1195,7 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		"build the candidate CLI", "add CLI profile staging", "trigger example", "trigger hello",
 		"is still the tip of origin/main", "is not older than the production version",
 		"pin the production controller", "wait for Argo application sparkwing to be", "pin the production launcher",
-		"add CLI profile qa-team ", "trigger deploy-smoke", "add CLI profile qa-team-b", "follow both smoke runs", "check each smoke run used one NodeClaim",
+		"add CLI profile production-smoke ", "trigger deploy-smoke", "follow production smoke runs", "check each smoke run used one NodeClaim",
 		"on a failed production deploy or smoke, would renew the role session and revert",
 	}
 	next := 0
@@ -1313,7 +1305,7 @@ func TestDeploySchemaUpgradeNeverRollsBackOnSmokeFailure(t *testing.T) {
 	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "upgrade schema")
 	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
 	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
-	f.failRuns["run-deploy-smoke-qa-team"] = true
+	f.failRuns["run-deploy-smoke-production-smoke"] = true
 	_, err := f.deployer(false).promote(t.Context(), f.candidate())
 	if err == nil || !strings.Contains(err.Error(), "roll forward") {
 		t.Fatalf("promote = %v", err)
@@ -1357,5 +1349,20 @@ func TestDeploySchemaUpgradeKeepsCandidateAfterCancellation(t *testing.T) {
 	}
 	if got := f.pinsOnMain("sparkwing"); got.Controller != f.candidate().Controller || got.Launcher != f.candidate().Runner {
 		t.Fatalf("unsafe rollback: %+v", got)
+	}
+}
+
+func TestProductionSmokeUsesSourceOwnerToken(t *testing.T) {
+	cfg := defaultDeployConfig()
+	if fmt.Sprint(cfg.SmokeProfiles) != "[production-smoke]" || cfg.Params.SmokeToken != "/kikd-prod/sparkwing/deploy/scan-submit-token" {
+		t.Fatalf("production smoke config = %+v", cfg)
+	}
+	f := newFakeDeploy(t)
+	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Join(f.calls, "\n")
+	if !strings.Contains(calls, cfg.Params.SmokeToken) || strings.Contains(calls, "smoke-token-qa-team") {
+		t.Fatalf("wrong production smoke credential path: %s", calls)
 	}
 }

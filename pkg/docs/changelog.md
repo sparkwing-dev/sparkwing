@@ -60,7 +60,7 @@ unlock.
 
 ### Fixed
 
-- **deploy:** Keep candidate production images after a schema upgrade if rollout or smoke fails, report the required roll forward in Bitwing, and submit production QA smoke with uploaded source so it needs no GitHub App installation.
+- **deploy:** Keep candidate production images after a schema upgrade if rollout or smoke fails, report the required roll forward in Bitwing, and run production smoke in the team that owns the source repository installation.
 
 - **deploy:** Restore the controller runtime base index after registry retention expired it. Keep both runtime bases under the existing retention tags so a pinned digest survives the rolling release-image window.
 

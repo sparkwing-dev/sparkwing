@@ -76,8 +76,7 @@ An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, 
 | `/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key` | ed25519 private key of a write deploy key | `sparkwing-dev/sparkwing-gitops` only |
 | `/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key` | ed25519 private key of a read-only deploy key | `sparkwing-dev/sparkwing-ci-smoke` only |
 | `/kikd-prod/sparkwing/deploy/staging-gate-token` | staging team token, `runs.read,logs.read,runs.write` | staging fixture team `stg-qa` |
-| `/kikd-prod/sparkwing/deploy/smoke-token-qa-team` | production team token, `runs.read,logs.read,runs.write` | `qa-team` |
-| `/kikd-prod/sparkwing/deploy/smoke-token-qa-team-b` | production team token, `runs.read,logs.read,runs.write` | `qa-team-b` |
+| `/kikd-prod/sparkwing/deploy/scan-submit-token` | production source-owning team token, `runs.read,logs.read,runs.write` | production smoke and scan submission |
 
 The `example` run the staging gate starts also reads `EXAMPLE_PROBE_TOKEN`, a Sparkwing secret stored on `stg-qa` rather than in SSM, holding a separate `stg-qa` token with `runs.read,logs.read,runs.write`. Its lifecycle probes use it to start, cancel, retry and read `example-probe` runs from inside the Cloud job. Without it they skip.
 
@@ -116,7 +115,7 @@ Later deploys then compare image versions and run unattended.
 
 1. Done 2026-11-04: the role, policy, access entry, RBAC and AppProject are applied, with `sparkwing_deploy_team` defaulting to `spark-sharks`. Confirm the production team slug that covers `sparkwing-dev/sparkwing`; a different slug is a one-line Terraform change.
 2. Allow deploy keys in the `sparkwing-dev` organisation (it refuses them today), then create the write key on `sparkwing-gitops` and the read-only key on `sparkwing-ci-smoke` and store their private halves; mint the three team tokens and store them.
-3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` installation must also cover `sparkwing-dev/sparkwing` and `sparkwing-ci-smoke`, because its gate triggers repository-backed runs. Production QA smoke uses uploaded candidate source, so `qa-team` and `qa-team-b` need no GitHub App installation. Each installation belongs to one team; do not reconnect the main team's installation to a QA team.
+3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` installation must also cover `sparkwing-dev/sparkwing` and `sparkwing-ci-smoke`, because its gate triggers repository-backed runs. Production smoke uses `/kikd-prod/sparkwing/deploy/scan-submit-token`, the existing token for the production team that owns the source installation, to trigger the two-job `deploy-smoke` at the candidate commit. It does not use `qa-team` or `qa-team-b`, which have no production source installation. Each installation belongs to one team; do not reconnect the main team's installation to a QA team.
 4. Run `sparkwing run deploy -- --dry-run --stop-after staging` from a checkout and read the printed actions.
 5. The `deploy` entry declares `on: push` for `main` with `args: {stop-after: staging}`. Watch the push deploy and gate staging. Remove the `args` line after that pass so the next push promotes to production.
 

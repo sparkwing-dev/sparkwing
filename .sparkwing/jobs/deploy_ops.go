@@ -947,7 +947,7 @@ func acceptedRunID(out string) string {
 }
 
 func (d *deployer) runTimeout(profile string) time.Duration {
-	if slices.Contains(d.cfg.SmokeTeams, profile) {
+	if slices.Contains(d.cfg.SmokeProfiles, profile) {
 		return d.cfg.SmokeTimeout
 	}
 	return d.cfg.RunTimeout
@@ -997,26 +997,26 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 
 // safety: nodes outlive a run only briefly, so NodeClaims are sampled while
 // the smoke runs rather than counted afterwards.
-func (d *deployer) productionSmoke(ctx context.Context, since string) error {
+func (d *deployer) productionSmoke(ctx context.Context, images deployImages, since string) error {
 	if err := d.buildCLI(ctx); err != nil {
 		return err
 	}
 	env := d.cfg.Production
-	runs := make([]string, len(d.cfg.SmokeTeams))
-	for i, team := range d.cfg.SmokeTeams {
-		if err := d.addProfile(ctx, team, env.ControllerURL, d.cfg.Params.SmokeTokenBase+team); err != nil {
+	runs := make([]string, len(d.cfg.SmokeProfiles))
+	for i, team := range d.cfg.SmokeProfiles {
+		if err := d.addProfile(ctx, team, env.ControllerURL, d.cfg.Params.SmokeToken); err != nil {
 			return err
 		}
-		if err := d.uploadSmoke(ctx, team, &runs[i]); err != nil {
+		if err := d.triggerRun(ctx, team, "deploy-smoke", d.repoDir, images.Commit, &runs[i]); err != nil {
 			return err
 		}
 	}
 	claims := make([]map[string]bool, len(runs))
-	err := d.act(ctx, "follow both smoke runs and record the NodeClaims each one uses", func() error {
+	err := d.act(ctx, "follow production smoke runs and record the NodeClaims each one uses", func() error {
 		done := make(chan struct{})
 		var wg sync.WaitGroup
 		errs := make([]error, len(runs))
-		for i, team := range d.cfg.SmokeTeams {
+		for i, team := range d.cfg.SmokeProfiles {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -1189,30 +1189,6 @@ func (r ecrRegistry) publish(ctx context.Context, password string, in PublishIma
 		sparkwing.Info(ctx, "published %s (linux/amd64, linux/arm64)", ref)
 	}
 	return err
-}
-
-// safety: uploaded source gives the QA teams real Cloud jobs without borrowing another team's GitHub installation.
-func (d *deployer) uploadSmoke(ctx context.Context, team string, runID *string) error {
-	return d.act(ctx, "trigger deploy-smoke with uploaded source on "+team+" Cloud", func() error {
-		args := []string{"run", "deploy-smoke", "-C", d.repoDir, "--sw-route", "cloud", "--profile", team, "--sw-detached", "-o", "json"}
-		allowed, err := d.sourceGit(ctx, append([]string{"ls-files", "--"}, cloudGateSecretShapedFixtures...)...)
-		if err != nil {
-			return err
-		}
-		if allowed != "" {
-			args = append(args, "--allow-secret-file", strings.Join(strings.Fields(allowed), ","))
-		}
-		out, err := d.sw(ctx, "", args...)
-		if err != nil {
-			return err
-		}
-		*runID = acceptedRunID(out)
-		if *runID == "" {
-			return fmt.Errorf("uploaded smoke printed no run_id: %q", out)
-		}
-		d.tools.say(ctx, "deploy-smoke on "+team+" is "+*runID)
-		return nil
-	})
 }
 
 func (d *deployer) recordUnsafeRollback(ctx context.Context, rec envDeployment, cause error) error {
