@@ -74,7 +74,10 @@ Before a binary upgrades a local SQLite store, it copies the store beside it as
 before the upgrade. The copy is taken under the upgrade's write lock, so it
 matches the state the upgrade started from. It has mode 0600 on Linux and macOS
 and the store directory's ACL on Windows, holds the same encrypted secrets as
-the store, and is never pruned. When the copy fails,
+the store. After a successful upgrade, only the two newest schema backups are
+kept, ordered by modification time. A failed upgrade preserves all backups.
+A pruning failure is logged and does not prevent the upgraded store from opening.
+When the copy fails,
 the binary refuses the upgrade and leaves the store unchanged; free disk space
 and start again. To return to the older binary, stop the controller, move the
 store and its `-wal` and `-shm` files aside, and copy the newest backup for that

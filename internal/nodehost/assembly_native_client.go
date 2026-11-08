@@ -63,7 +63,7 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 			return ProcessOIDCToken{Token: token, ExpiresAt: expiry}, err
 		}
 		service.StartChild = func(ctx context.Context, _ capability.Authorized, request ChildRequest) (string, error) {
-			return remote.StartChild(ctx, request.Pipeline, request.Args, request.Repo, request.Branch)
+			return remote.StartChild(ctx, request.Pipeline, request.Args, request.Repo, request.Branch, request.Detached)
 		}
 		service.AwaitChild = func(ctx context.Context, _ capability.Authorized, run, job string, wait time.Duration) (ProcessChildResult, error) {
 			child, err := remote.Child(ctx, run, wait)

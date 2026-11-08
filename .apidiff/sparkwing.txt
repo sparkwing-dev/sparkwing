@@ -367,6 +367,7 @@ type SkipPredicate func(ctx context.Context) bool
 const Skipped Outcome = "skipped"
 const StageAction FailureStage = iota
 const StageVerify
+func StartChild(ctx context.Context, pipeline string, args map[string]string) (string, error)
 func Startup() EnvOption
 func Step(w *Work, id string, fn any) *WorkStep
 type StepError struct {

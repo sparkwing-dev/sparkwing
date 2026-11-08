@@ -1363,7 +1363,15 @@ func (s *Store) createBaseline(ctx context.Context, path string) error {
 		if err := upgradeSchemaTx(ctx, tx, version, path); err != nil {
 			return err
 		}
-		return tx.Commit()
+		if err := tx.Commit(); err != nil { //nolint:contextcheck // Commit uses the context captured by beginTx.
+			return err
+		}
+		if s.dialect == DialectSQLite && path != "" {
+			if err := pruneSQLiteSchemaBackups(path); err != nil {
+				slog.Warn("could not prune old store schema backups", "store", path, "error", err)
+			}
+		}
+		return nil
 	}
 	translated, err := translateSchema(schemaNeutral, s.dialect)
 	if err == nil {
