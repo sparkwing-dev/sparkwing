@@ -1,9 +1,8 @@
-//go:build unix
-
 package nodehost
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
+
+const hostExecSecret = "hostexec-secret-value"
 
 func TestHostCommandMasksBeforeOutputCuts(t *testing.T) {
 	for _, stream := range []string{"stdout", "stderr"} {
@@ -39,11 +40,11 @@ func TestHostCommandMasksBeforeOutputCuts(t *testing.T) {
 						t.Fatal(err)
 					}
 				}()
-				script := `cat "$P"`
-				if stream == "stderr" {
-					script += " >&2"
+				executable, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
 				}
-				req := nodeproto.ExecRequest{ID: "boundary", Argv: []string{"sh", "-c", script}, Dir: dir, Env: []string{"PATH=" + os.Getenv("PATH"), "P=" + path}, Capture: capture}
+				req := nodeproto.ExecRequest{ID: "boundary", Argv: []string{executable, "-test.run=^TestHostCommandOutputHelper$", "--", "--host-command-output", stream, path}, Dir: dir, Env: os.Environ(), Capture: capture}
 				done, session := runHostCommand(req, masker, make(chan struct{}), make(chan struct{}), func(gotStream string, chunk []byte, eof bool) error {
 					if capture {
 						captured.Write(chunk)
@@ -80,4 +81,23 @@ func TestHostCommandMasksBeforeOutputCuts(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestHostCommandOutputHelper(t *testing.T) {
+	if len(os.Args) < 4 || os.Args[len(os.Args)-3] != "--host-command-output" {
+		return
+	}
+	file, err := os.Open(os.Args[len(os.Args)-1])
+	if err != nil {
+		os.Exit(10)
+	}
+	out := os.Stdout
+	if os.Args[len(os.Args)-2] == "stderr" {
+		out = os.Stderr
+	}
+	if _, err := io.Copy(out, file); err != nil {
+		os.Exit(11)
+	}
+	_ = file.Close()
+	os.Exit(0)
 }

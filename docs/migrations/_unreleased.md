@@ -2,7 +2,7 @@
 
 ## Parse command output with Capture
 
-Hosts on Linux and macOS now run SDK commands themselves. A command run with `Run`
+Hosts on Linux, macOS and Windows run SDK commands themselves. A command run with `Run`
 writes its output straight to the masked job log, and its result keeps only the last
 64 KiB of masked stdout and stderr, enough for error messages. Masking happens
 before truncation so a secret crossing the cut cannot leak a suffix. Code that reads
@@ -290,8 +290,8 @@ No route, wire field or SDK surface is removed.
 ## Use the current thin SDK contract
 
 Upgrade Go and TypeScript pins together with the host. Historical SDKs and older
-hosts are unsupported. Linux and macOS always execute SDK commands in the host.
-Windows keeps SDK command spawning. Hello carries no feature negotiation, and
+hosts are unsupported. Linux, macOS and Windows always execute SDK commands in
+the host. Hello carries no feature negotiation, and
 jobs always send their declared core requests.
 
 Git, Docker and sidecar functions keep their typed APIs and send host requests.

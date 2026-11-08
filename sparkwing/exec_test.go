@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -81,10 +80,7 @@ func TestCommandRelaysArgumentsEnvironmentAndCapture(t *testing.T) {
 	}
 }
 
-func TestUnixCommandRequiresHost(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows owns command execution")
-	}
+func TestCommandRequiresHost(t *testing.T) {
 	if _, err := Exec(t.Context(), "sh", "-c", "exit 0").Run(); err == nil {
 		t.Fatal("command ran without a host")
 	}
