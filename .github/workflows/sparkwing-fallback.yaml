@@ -39,7 +39,7 @@ jobs:
           base="https://github.com/sparkwing-dev/sparkwing/releases/download/$SPARKWING_RUNNER_VERSION"
           download_asset() {
             local name="$1" status=0 code id
-            code="$(curl -fsSL --connect-timeout 60 --speed-limit 1 --speed-time 60 -w '%{http_code}' -o "$name" "$base/$name")" || status=$?
+            code="$(curl --fail-early --retry 3 --retry-delay 1 -fsSL --connect-timeout 60 --speed-limit 1 --speed-time 60 -w '%{http_code}' -o "$name" "$base/$name")" || status=$?
             [ "$status" = 0 ] && return 0
             case "$code:$status" in 5??:*|*:28) ;; *) return "$status" ;; esac
             id="$(gh api "repos/sparkwing-dev/sparkwing/releases/tags/$SPARKWING_RUNNER_VERSION" --jq ".assets[] | select(.name == \"$name\") | .id")"

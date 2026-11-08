@@ -423,7 +423,12 @@ Transport failures never trigger a second claim in the adapter.
 `sparkwing-jobs`. Deadlines come from the award rather than a launcher flag.
 `sparkwing-runner launch --poll <duration>` sets the interval between claim and
 reconciliation cycles. The duration must be positive. Omitting it keeps the
-runtime's configured interval, which defaults to five seconds.
+runtime's configured interval, which defaults to five seconds. While a held
+same-run successor waits for predecessor teardown, reconciliation and placement
+recheck at most one second apart (or the shorter configured poll). New claims
+retain their configured interval and controller backoff. The faster checks stop
+when placement succeeds or the existing 30-second teardown wait expires; fresh
+capacity waits keep the configured poll.
 `--idle-grace <duration>` sets how long a used node may sit unreserved before
 retirement. It defaults to 60 seconds and must be at least the claim poll plus
 the 30-second retirement interval, so a ready successor is claimed and reserves
