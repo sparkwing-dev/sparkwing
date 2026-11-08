@@ -167,7 +167,6 @@ func runHold(args []string) {
 	}
 	lease, err := cl.Acquire(context.Background(), req, func(q wingwire.Queued) {
 		fmt.Printf("QUEUED %d\n", q.Position)
-		_ = os.Stdout.Sync()
 	})
 	if err != nil {
 		fail("acquire: %v", err)
@@ -229,9 +228,7 @@ func daemonSpawner(home, version string) error {
 	}
 	_ = writer.Close()
 	if err := reader.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return err
+		return errors.Join(err, cmd.Process.Kill(), cmd.Wait())
 	}
 	var ready [6]byte
 	n, err := io.ReadFull(reader, ready[:])
@@ -239,12 +236,12 @@ func daemonSpawner(home, version string) error {
 		return cmd.Wait()
 	}
 	if err != nil || string(ready[:]) != "READY\n" {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
 		if err != nil {
-			return fmt.Errorf("daemon readiness: %w", err)
+			err = fmt.Errorf("daemon readiness: %w", err)
+		} else {
+			err = fmt.Errorf("invalid daemon readiness: %q", ready)
 		}
-		return fmt.Errorf("invalid daemon readiness: %q", ready)
+		return errors.Join(err, cmd.Process.Kill(), cmd.Wait())
 	}
 	return cmd.Process.Release()
 }
