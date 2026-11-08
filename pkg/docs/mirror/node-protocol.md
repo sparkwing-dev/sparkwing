@@ -48,17 +48,15 @@ pipe or argv handle argument, respectively.
 
 ```text
 -> {"id":"1","op":"hello","protocol":2,"engine":{"version":"v0.71.0"},"runner":{"name":"local","type":"local","labels":["os=linux"]},"binding":{"run_id":"r1","job_id":"build","routes":{"url":"http://127.0.0.1:41873","bearer":"example-bearer"}}}
-<- {"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v0.71.0"},"features":[]}}
+<- {"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v0.71.0"}}}
 ```
 
 Hello occurs exactly once. A major mismatch returns `protocol_mismatch` with
 `supported_majors` in error details. The selected major applies to the process.
 Documents and HTTP requests carry their own data without another version stamp.
-The SDK's optional operations are advertised in hello's `features` array.
-The host's hello request may carry its own `features` array naming optional
-plan declarations it accepts. An SDK leaves a declaration out of the plan when
-the host does not name it, so a newer pipeline still plans on an older host.
-Today the only host feature is `job_cores`, which admits a job's `cores`.
+The current SDK and host use the same protocol contract. Hello carries identities
+and the process binding. Core requests and host services are sent directly.
+Linux and macOS run SDK commands in the host. Windows runs commands in the SDK.
 
 ## Framing
 
@@ -306,6 +304,35 @@ has stopped. That operation also receives its own reply.
 <- {"reply":"8","ok":true,"result":{}}
 ```
 
+### Host-run commands
+
+On Linux and macOS, SDKs send commands as frames and the host owns execution,
+masking, cancellation and crash cleanup. `env` is the complete SDK process
+environment plus command overrides. The host strips engine credentials and
+protocol variables. `dir` must be absolute. Both clients use the command's `PATH`,
+resolving relative and empty entries against `dir`. An absent `PATH` searches
+`/bin:/usr/bin`. Executable text without `#!` runs through `/bin/sh`.
+Children a
+command leaves running in the background survive its exit, as they did under the
+SDK, and the host kills them when the SDK session ends.
+
+```text
+<- {"exec":"4","step":"compile","argv":["go","build","./..."],"dir":"/repo","env":["PATH=/usr/bin:/bin","LANG=C.UTF-8"]}
+-> {"exec_done":"4","exit_code":0,"stderr":"Z286IGRvd25sb2FkaW5nCg=="}
+```
+
+Without `capture` the host writes output to the job log as `exec_line` records
+and the result carries at most the last 64 KiB of each stream, base64 encoded,
+for error messages. With `"capture":true` nothing is logged and every byte returns
+in order as `{"exec_output":"<id>","stream":"stdout"|"stderr","data":"<base64>"}`
+lines before the result. An optional base64 `stdin` is written to the command.
+`{"exec_cancel":"<id>"}` kills a running command; its `exec_done` still follows,
+with `signaled: true`. A command that never started has `exit_code: -1`, a
+`start_error` and `not_found: true` when the executable is missing. Host lines
+share the request pipe and are identified by their first key. Commands that need
+their output as it arrives, such as TypeScript output callbacks, still run in the
+SDK, as do all commands under an older host.
+
 ## Host service routes
 
 Bound SDK calls use the URL and bearer supplied by hello. Every request carries
@@ -378,3 +405,14 @@ node protocol once through hello. Optional wire fields, routes, error codes and
 log events are additive. Optional operations are advertised in `features`.
 Breaking wire changes require a new major. Strict plan fields must be understood
 by the accepting engine.
+
+### Host helpers
+
+Both SDKs POST typed operations to `/node/v1/helpers` through the bound process
+routes. Requests contain `operation`, an `args` array, absolute `dir`, and `env`.
+Git, Docker and service behavior runs in the host. The host filters command
+environments, resolves paths against `dir`, masks errors, and owns resource
+cleanup through the process cleanup ledger. Responses contain `result`, or
+`error` and its optional sentinel `code`. SDKs decode results and render output.
+Generators return a complete plan document in `eval.value`; the host requires
+expansions to contain jobs only before accepting their declarations.

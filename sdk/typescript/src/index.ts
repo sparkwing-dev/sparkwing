@@ -3,7 +3,7 @@ export { definePipeline, Plan, Job, Step, ConcurrencyGroup, startup, goModules, 
 export { main } from "./main.ts";
 export { SDKError, InputError, VerifyError, StepError, NoProjectError } from "./errors.ts";
 export { ExecError, exitNotStarted, withCommandEnv } from "./command.ts";
-export { workDir, path, readFile, writeFile, glob } from "./helpers/files.ts";
+export { projectRoot as workDir } from "./scope.ts";
 export { noMemo, memoKey, parts, ignore, files, repoFiles, tree, env, constant, compose } from "./helpers/memo.ts";
 export { Git, gitFromTree, githubOwnerRepo, git } from "./helpers/git.ts";
 export { docker } from "./helpers/docker.ts";

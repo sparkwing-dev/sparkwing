@@ -9,11 +9,11 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 Part of the authoring surface too -- a pipeline that builds an image or reads the branch imports these. Each has its own page:
 
 - [`sparkwing/cleanup`](sdk-cleanup.md) -- Package cleanup lets a sparks library register best-effort cleanup for resources outside the step's process tree.
-- [`sparkwing/docker`](sdk-docker.md) -- Package docker provides build, push, login, and container helpers using the Docker CLI and buildx bundled in Sparkwing Cloud.
-- [`sparkwing/git`](sdk-git.md) -- Package git is the sparkwing SDK's repo-inspection helper layer: commit SHA, branch, dirty-tree detection, deterministic fileset hash, tag listing, and safe tag push.
+- [`sparkwing/docker`](sdk-docker.md)
+- [`sparkwing/git`](sdk-git.md)
 - [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs declares memo inputs for evaluation by the executing host.
-- [`sparkwing/services`](sdk-services.md) -- Package services is the sparkwing SDK's sidecar-container helper: start sidecars for a function, wait for readiness, and clean up services whose startup succeeded on return, error, panic, or context cancellation.
-- [`sparkwing/sparkwingtest`](sdk-sparkwingtest.md) -- Package sparkwingtest supplies a fake protocol host without a controller or store.
+- [`sparkwing/services`](sdk-services.md) -- Package services manages host-owned sidecars for a callback.
+- [`sparkwing/sparkwingtest`](sdk-sparkwingtest.md) -- Package sparkwingtest supplies an in-process host for pipeline and helper-library tests.
 
 ## Functions
 
@@ -21,7 +21,6 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug record; the host decides whether to retain it.
 - `func Error(ctx context.Context, format string, args ...any)` -- Error emits an error-level message.
 - `func GithubOwnerRepo(slug string) (owner, repo string)` -- GithubOwnerRepo splits a "owner/name" slug into its parts.
-- `func Glob(pattern string) ([]string, error)` -- Glob expands a shell-style glob pattern.
 - `func Info(ctx context.Context, format string, args ...any)` -- Info emits an info-level message to the active logger.
 - `func Inputs[T any](ctx context.Context) T` -- Inputs returns the typed Inputs struct that the orchestrator parsed for the current run -- the same value the pipeline's Plan(ctx, plan, in T, rc) method received.
 - `func IsDryRun(ctx context.Context) bool` -- IsDryRun reports whether ctx is in dry-run mode.
@@ -30,9 +29,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func MustSecret(ctx context.Context, name string) string` -- MustSecret is Secret that panics on error.
 - `func MustVariable(ctx context.Context, name string) string` -- MustVariable makes a missing required plain value fail the job.
 - `func OIDCToken(ctx context.Context, audience string) (string, error)` -- OIDCToken returns an ID token the controller signed for this run, with aud set to audience.
-- `func Path(parts ...string) string` -- Path joins parts onto WorkDir() and returns the absolute path.
 - `func PipelineSecrets[T any](ctx context.Context) *T` -- PipelineSecrets returns the typed Secrets struct installed on ctx, resolving it when none is installed, or nil when the pipeline doesn't implement SecretsProvider.
-- `func ReadFile(path string) ([]byte, error)` -- ReadFile reads the named file.
 - `func Register[T any](name string, factory func() Pipeline[T])` -- Register installs a pipeline under the given name.
 - `func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])` -- RegisterEntrypoint declares a named SDK entrypoint.
 - `func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error)` -- RunAndAwait triggers a fresh run of pipeline and waits for it to reach terminal state, returning the typed output of nodeID from that run.
@@ -43,7 +40,6 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Warn(ctx context.Context, format string, args ...any)` -- Warn emits a warn-level message.
 - `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
 - `func WorkDir() string` -- WorkDir returns the pipeline working directory (the repo root).
-- `func WriteFile(path string, data []byte) error` -- WriteFile writes data to the named file with perm 0o644 (creating or truncating).
 
 ## Types
 

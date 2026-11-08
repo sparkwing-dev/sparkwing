@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -206,7 +207,7 @@ func (p *BuildImages) buildWebBundle(ctx context.Context) error {
 		return nil
 	}
 	sparkwing.Info(ctx, "running bin/build-web.sh (npm ci + next build)")
-	_, err := sparkwing.Exec(ctx, "bash", sparkwing.Path("bin/build-web.sh")).Run()
+	_, err := sparkwing.Exec(ctx, "bash", filepath.Join(sparkwing.WorkDir(), "bin/build-web.sh")).Run()
 	return err
 }
 
@@ -219,7 +220,7 @@ func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
 
 	args := []string{
 		"buildx", "build",
-		"--file", sparkwing.Path(dockerfile),
+		"--file", filepath.Join(sparkwing.WorkDir(), dockerfile),
 		"--build-arg", "BINARY=" + spec.name,
 		"--build-arg", "SPARKWING_VERSION=" + p.tag,
 		"--build-arg", "SPARKWING_IMAGE_REFRESH=" + p.tag,
@@ -236,7 +237,7 @@ func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
 	} else {
 		args = append(args, "--load")
 	}
-	args = append(args, sparkwing.Path("."))
+	args = append(args, filepath.Join(sparkwing.WorkDir(), "."))
 
 	sparkwing.Info(ctx, "docker buildx build %s -> %s (%s)", spec.name, imageRef, dockerfile)
 	_, err := sparkwing.Exec(ctx, "docker", args...).Run()

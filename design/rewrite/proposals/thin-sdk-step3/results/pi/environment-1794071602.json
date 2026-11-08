@@ -1,0 +1,53 @@
+{
+ "uname": [
+  "Linux",
+  "<pi-host>",
+  "6.8.0-1065-raspi",
+  "#69-Ubuntu SMP PREEMPT_DYNAMIC Tue Sep  8 18:10:10 UTC 2026",
+  "aarch64",
+  "aarch64"
+ ],
+ "cpu_count": 4,
+ "initial_load": [
+  1.3935546875,
+  0.77099609375,
+  0.2880859375
+ ],
+ "argv": [
+  "bench.py",
+  "run",
+  "--binary",
+  "<pi-home>/sdkstep3/nodehost.test",
+  "--root",
+  "<pi-home>/sdkstep3/tree",
+  "--out",
+  "<pi-home>/sdkstep3/pi-20261107T171321Z",
+  "--node-dir",
+  "<pi-home>/.local/node-v22.18.0-linux-arm64/bin",
+  "--conditions",
+  "quiet,loaded",
+  "--rounds",
+  "5",
+  "--small-count",
+  "1000",
+  "--bulk-bytes",
+  "8388608",
+  "--quiet-threshold",
+  "2.0",
+  "--stabilize",
+  "30"
+ ],
+ "binary_sha256": "e26755b97bb087fc58396e6a7fa667780002675f9ad03fedc94b8f0004d5cac0",
+ "versions": {
+  "node": "v22.18.0",
+  "kernel": "6.8.0-1065-raspi"
+ },
+ "small_count": 1000,
+ "bulk_bytes": 8388608,
+ "rounds": 5,
+ "quiet_threshold": 2.0,
+ "languages": "go,typescript",
+ "conditions": "quiet,loaded",
+ "concurrency": "1,8",
+ "meminfo": "MemTotal:        3874892 kB\nMemFree:         1814568 kB\nMemAvailable:    3283876 kB\nBuffers:          109944 kB\nCached:          1501780 kB\nSwapCached:            0 kB\nActive:           500316 kB\nInactive:        1239240 kB\nActive(anon):     131148 kB\nInactive(anon):        0 kB\nActive(file):     369168 kB\nInactive(file):  1239240 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:               356 kB\nWriteback:             0 kB\nAnonPages:        127876 kB\nMapped:           182816 kB\nShmem:              3316 kB\nKReclaimable:      83360 kB\nSlab:             166744 kB\nSReclaimable:      83360 kB\nSUnreclaim:        83384 kB\nKernelStack:        3584 kB\nPageTables:         3848 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     1937444 kB\nCommitted_AS:     953056 kB\nVmallocTotal:   133141626880 kB\nVmallocUsed:       20284 kB\nVmallocChunk:          0 kB\nPercpu:             8176 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:         524288 kB\nCmaFree:          513164 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\n"
+}

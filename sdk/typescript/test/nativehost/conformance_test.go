@@ -235,7 +235,7 @@ func checkGenerated(t *testing.T, corpus sharedCorpus, plan nodeproto.PlanDoc, g
 	if result.Error != nil {
 		t.Fatal(result.Error)
 	}
-	raw := append(append([]byte(`{"jobs":`), result.Value...), '}')
+	raw := result.Value
 	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Secrets: fixtureSecrets{}, Placement: nodeproto.PlacementLocal, Expansion: true, SourceJob: "task", ExistingJobs: plan.Jobs}); err != nil {
 		t.Fatal(err)
 	}
@@ -255,10 +255,11 @@ func checkGenerated(t *testing.T, corpus sharedCorpus, plan nodeproto.PlanDoc, g
 	if !found {
 		t.Fatalf("missing vector %s", vectorName)
 	}
-	var jobs []nodeproto.JobSpec
-	if err := json.Unmarshal(result.Value, &jobs); err != nil {
+	var document nodeproto.PlanDoc
+	if err := json.Unmarshal(result.Value, &document); err != nil {
 		t.Fatal(err)
 	}
+	jobs := document.Jobs
 	if generated != nil && !bytes.Equal(mustJSON(t, generated), mustJSON(t, jobs)) {
 		t.Fatal("generated replay drifted")
 	}

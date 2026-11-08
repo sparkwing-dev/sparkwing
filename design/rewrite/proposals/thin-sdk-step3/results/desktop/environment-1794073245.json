@@ -1,0 +1,52 @@
+{
+ "uname": [
+  "Linux",
+  "<desktop-host>",
+  "6.18.54.1-microsoft-standard-WSL2",
+  "#1 SMP PREEMPT_DYNAMIC Tue Oct  6 19:13:07 UTC 2026",
+  "x86_64",
+  "x86_64"
+ ],
+ "cpu_count": 16,
+ "initial_load": [
+  11.39208984375,
+  14.70654296875,
+  12.6240234375
+ ],
+ "argv": [
+  "/var/tmp/sw-lead-tmp/sdkstep3-wt/design/rewrite/proposals/thin-sdk-step3/bench.py",
+  "run",
+  "--binary",
+  "/var/tmp/sw-lead-tmp/sdkstep3-bench/nodehost.test",
+  "--root",
+  "/var/tmp/sw-lead-tmp/sdkstep3-wt",
+  "--out",
+  "/var/tmp/sw-lead-tmp/sdkstep3-bench/desktop-20261107T171916Z",
+  "--node-dir",
+  "<desktop-home>/.xwing/envs/1099/.tools/vite-plus/bin",
+  "--conditions",
+  "quiet",
+  "--rounds",
+  "5",
+  "--small-count",
+  "2000",
+  "--bulk-bytes",
+  "33554432",
+  "--quiet-idle",
+  "0.6"
+ ],
+ "binary_sha256": "f600c936102795596fbd7773cf266b236a05ef8e5d47a86a321bae81c5bcef88",
+ "versions": {
+  "node": "v26.13.0",
+  "kernel": "6.18.54.1-microsoft-standard-WSL2"
+ },
+ "small_count": 2000,
+ "bulk_bytes": 33554432,
+ "rounds": 5,
+ "quiet_threshold": 2.0,
+ "quiet_idle": 0.6,
+ "languages": "go,typescript",
+ "conditions": "quiet",
+ "concurrency": "1,8",
+ "meminfo": "MemTotal:       41074552 kB\nMemFree:         3878156 kB\nMemAvailable:   25403216 kB\nBuffers:         3200072 kB\nCached:         17043032 kB\nSwapCached:        18620 kB\nActive:         16564692 kB\nInactive:       16447456 kB\nActive(anon):    1639480 kB\nInactive(anon): 11140276 kB\nActive(file):   14925212 kB\nInactive(file):  5307180 kB\nUnevictable:         124 kB\nMlocked:              64 kB\nSwapTotal:      16777216 kB\nSwapFree:       15966828 kB\nDirty:            244940 kB\nWriteback:             0 kB\nAnonPages:      12763124 kB\nMapped:           879552 kB\nShmem:             10804 kB\nKReclaimable:    1737172 kB\nSlab:            2134876 kB\nSReclaimable:    1737172 kB\nSUnreclaim:       397704 kB\nKernelStack:       28336 kB\nPageTables:       266456 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    37314492 kB\nCommitted_AS:   26292268 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      130332 kB\nVmallocChunk:          0 kB\nPercpu:            11328 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:     96256 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      121856 kB\nDirectMap2M:    29237248 kB\nDirectMap1G:    20971520 kB\n"
+}

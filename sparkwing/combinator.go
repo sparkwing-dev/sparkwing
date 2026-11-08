@@ -128,7 +128,6 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 // NeedsTools restricts every member to agents that have the named tools. See
 // [JobNode.NeedsTools].
 func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
-	mustKnowTools("JobGroup.NeedsTools", names)
 	for _, m := range g.Members() {
 		m.NeedsTools(names...)
 	}

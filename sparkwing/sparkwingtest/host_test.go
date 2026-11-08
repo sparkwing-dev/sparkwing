@@ -195,7 +195,13 @@ func TestFakeHostEvaluatesGeneratorAndClosesContexts(t *testing.T) {
 			Needs  []string `json:"deps"`
 			Groups []string `json:"groups"`
 		}
-		if err := json.Unmarshal(output, &jobs); err != nil {
+		var document struct {
+			Jobs json.RawMessage `json:"jobs"`
+		}
+		if err := json.Unmarshal(output, &document); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(document.Jobs, &jobs); err != nil {
 			t.Fatal(err)
 		}
 		if len(jobs) != 1 || jobs[0].ID != "child-ready" || len(jobs[0].Needs) != 1 || jobs[0].Needs[0] != "source" ||

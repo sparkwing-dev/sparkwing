@@ -48,7 +48,7 @@ func replacementEngineAt(ctx context.Context, pin engineid.Pin, target releaseas
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, err
 	}
-	if pin.SDK != engineid.GoSDK || pin.Replacement == "" || target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
+	if (pin.SDK != engineid.GoSDK && pin.SDK != engineid.TypeScriptSDK) || pin.Replacement == "" || target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		return Resolved{}, invalid("SDK replacement requires this machine's installed Sparkwing engine", "Run the pipeline on the installed CLI's platform.")
 	}
 	info, err := buildinfo.ReadFile(path)

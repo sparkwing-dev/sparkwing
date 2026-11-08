@@ -19,7 +19,7 @@ func testGoSDKReplyResultReuse(t *testing.T) {
 	t.Run("hello-required-fields", func(t *testing.T) {
 		recordLeaf(t)
 		var greeting nodeproto.HelloResult
-		complete := nodeproto.Reply{ID: "first", OK: true, Result: json.RawMessage(`{"protocol":2,"sdk":{"language":"go","version":"v1"},"features":[]}`)}
+		complete := nodeproto.Reply{ID: "first", OK: true, Result: json.RawMessage(`{"protocol":2,"sdk":{"language":"go","version":"v1"}}`)}
 		if err := complete.Decode(&greeting); err != nil {
 			t.Fatal(err)
 		}

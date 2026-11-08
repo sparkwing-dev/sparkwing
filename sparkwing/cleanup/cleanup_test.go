@@ -2,95 +2,56 @@ package cleanup
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
-func TestRegisterWritesACommandRecordAndReleaseRemovesIt(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv("SPARKWING_RUN_ID", "run-1")
-	t.Setenv("SPARKWING_JOB_ID", "build")
-	ledger := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir())
+type cleanupFixture struct {
+	sdkserve.Services
+	argv        []string
+	description string
+	released    bool
+	releaseErr  error
+}
 
-	release, err := Register(context.Background(), Spec{Argv: []string{"docker", "rm", "-f", "c1"}, Description: "cleanup helper"})
+func (f *cleanupFixture) RegisterCleanup(_ context.Context, argv []string, description string) (string, error) {
+	f.argv = argv
+	f.description = description
+	return "owned", nil
+}
+
+func (f *cleanupFixture) ReleaseCleanup(ctx context.Context, id string) error {
+	f.released = id == "owned"
+	f.releaseErr = ctx.Err()
+	return nil
+}
+
+func TestCleanupRelaysToHostAndReleasesAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	host := &cleanupFixture{}
+	ctx = sdkserve.WithServices(ctx, host)
+	release, err := Register(ctx, Spec{Argv: []string{"docker", "rm", "-f", "owned"}, Description: "container"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _ := ledger.List()
-	if len(got) != 1 || got[0].Handle.Kind != "command" || got[0].Description != "cleanup helper" {
-		t.Fatalf("record = %+v", got)
+	cancel()
+	release()
+	if len(host.argv) != 4 || host.description != "container" || !host.released || host.releaseErr != nil {
+		t.Fatalf("host=%+v", host)
 	}
-	if got[0].Handle.Argv[0] != "docker" || got[0].Handle.ID == "" {
-		t.Fatalf("handle = %+v", got[0].Handle)
+}
+
+func TestCleanupRequiresHost(t *testing.T) {
+	if _, err := Register(t.Context(), Spec{Argv: []string{"cleanup"}}); err == nil {
+		t.Fatal("cleanup registered without a host")
+	}
+}
+
+func TestEmptyCleanupNeedsNoHost(t *testing.T) {
+	release, err := Register(t.Context(), Spec{})
+	if err != nil {
+		t.Fatal(err)
 	}
 	release()
-	if got, _ := ledger.List(); len(got) != 0 {
-		t.Fatalf("release did not remove the record: %+v", got)
-	}
-}
-
-func TestRegisterOutsideARunIsANoOp(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv("SPARKWING_RUN_ID", "")
-	t.Setenv("SPARKWING_JOB_ID", "")
-	release, err := Register(context.Background(), Spec{Argv: []string{"docker", "rm", "-f", "c1"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	release()
-	if got, _ := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir()).List(); len(got) != 0 {
-		t.Fatalf("registered a cleanup outside a run: %+v", got)
-	}
-}
-
-func TestRegisterIgnoresRemovedNodeIdentity(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv("SPARKWING_RUN_ID", "run-1")
-	t.Setenv("SPARKWING_JOB_ID", "")
-	t.Setenv("SPARKWING_NODE_ID", "retired-job")
-	release, err := Register(t.Context(), Spec{Argv: []string{"cleanup"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
-	records, err := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir()).List()
-	if err != nil || len(records) != 0 {
-		t.Fatalf("removed identity registered a cleanup: %+v (%v)", records, err)
-	}
-}
-
-func TestRegisterWithNoArgvIsANoOp(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv("SPARKWING_RUN_ID", "run-1")
-	t.Setenv("SPARKWING_JOB_ID", "build")
-	if _, err := Register(context.Background(), Spec{}); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := sessionledger.Open(filepath.Join(home, "sessions")).List(); len(got) != 0 {
-		t.Fatalf("empty spec registered something: %+v", got)
-	}
-}
-
-// An absent label leaves diagnostics to use a fixed description.
-func TestRegisterWithoutADescriptionDoesNotDeriveOneFromArgv(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv("SPARKWING_RUN_ID", "run-1")
-	t.Setenv("SPARKWING_JOB_ID", "build")
-	release, err := Register(context.Background(), Spec{Argv: []string{"/usr/bin/vault", "token", "revoke", "hunter2-token"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
-	got, _ := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir()).List()
-	if len(got) != 1 || got[0].Description != "" {
-		t.Fatalf("record = %+v, want no argv-derived description", got)
-	}
 }

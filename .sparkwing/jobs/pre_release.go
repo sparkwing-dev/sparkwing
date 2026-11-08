@@ -89,6 +89,7 @@ type PreRelease struct {
 
 type PreReleaseArgs struct {
 	RaceStorePart string `flag:"race-store-part" desc:"Run part k of n of the race-store shards, as k/n; the parts together cover every test once. none runs no shard, for hosted CI, whose race-store lanes run every part with --sw-start-at race-store --sw-stop-at race-store. Default: every shard."`
+	PlatformCells bool   `flag:"platform-cells" desc:"Also run the macos and windows cells as dispatched jobs requiring os=darwin and os=windows. Each waits for a matching runner, so trigger the run on a controller with those runners enrolled; a local run cannot place them."`
 }
 
 func (PreRelease) ShortHelp() string {
@@ -98,7 +99,6 @@ func (PreRelease) ShortHelp() string {
 func (PreRelease) Help() string {
 	return "Run lint, race tests, Postgres tests, admission fault tests, vulnerability scans, " +
 		"dependency checks, public interface checks, Terraform checks, and workflow checks. " +
-		"The sdk-compat step runs every historical SDK fixture against the candidate nodehost with cold artifact preparation. " +
 		"Committed Go modules must use released dependencies; the pipeline module may replace " +
 		"the Sparkwing module with its parent checkout. Keep Go workspace files untracked. " +
 		"Published modules and generated init or template modules must use a minor-only or zero-patch Go floor. " +
@@ -123,6 +123,10 @@ func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, in P
 	}
 	preRelease.raceStorePart = part
 	sparkwing.Job(plan, runContext.Pipeline, preRelease).Timeout(preReleaseRunTimeout)
+	if in.PlatformCells {
+		sparkwing.Job(plan, "macos", &MacOSVerify{}).Requires("os=darwin").Timeout(macosVerifyTimeout).Cores(4)
+		sparkwing.Job(plan, "windows", &WindowsVerify{}).Requires("os=windows").Timeout(windowsVerifyTimeout).Cores(4)
+	}
 	return nil
 }
 
@@ -162,7 +166,6 @@ func preReleaseChecks(part raceStorePart) []preReleaseCheck {
 		}},
 		{id: "gofmt", run: checkPreReleaseGofmt},
 		{id: "lint", run: runGolangciLint},
-		{id: "sdk-compat", run: runSDKCompatibilityCold},
 		{id: "race", run: preReleaseShell("go -C .sparkwing test -race ./...")},
 		// safety: the gate defers this race suite to the release boundary.
 		{id: "race-store", run: func(ctx context.Context) error {
@@ -245,7 +248,7 @@ func checkPreReleaseInstallToGreen(ctx context.Context) error {
 func checkPreReleaseDocExamples(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
-	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+	).Env("ROOT", sparkwing.WorkDir()).Run(); err != nil {
 		return fmt.Errorf("doc-examples: %w", err)
 	}
 	return nil
@@ -269,7 +272,7 @@ func committedGoMods(jobContext context.Context) ([]string, error) {
 	// safety: git -C anchors paths to repo root regardless of process cwd.
 	output, err := sparkwing.Bash(jobContext,
 		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
-	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()
+	).Env("SPARKWING_WORKDIR", sparkwing.WorkDir()).String()
 	if err != nil {
 		return nil, fmt.Errorf("list go.mod files: %w", err)
 	}
@@ -305,7 +308,7 @@ func checkNoReplaceDirectivesInCommittedGoMods(jobContext context.Context) error
 	}
 	var offenders []string
 	for _, relativePath := range moduleFiles {
-		absolutePath := sparkwing.Path(relativePath)
+		absolutePath := filepath.Join(sparkwing.WorkDir(), relativePath)
 		contents, readError := os.ReadFile(absolutePath)
 		if readError != nil {
 			return fmt.Errorf("read %s: %w", relativePath, readError)

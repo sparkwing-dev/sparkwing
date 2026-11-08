@@ -52,3 +52,30 @@ func TestWaitingJobNoticeNamesRequiredLabelAndEnrollmentCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestPlacementHoldNoticeNamesEachTierAndReplacesTheGenericNotice(t *testing.T) {
+	now := time.Now()
+	wait := store.PlacementWait{JobID: "macos", Revision: "0123456789abcdef0123456789abcdef01234567", Tiers: []store.PlacementTierWait{
+		{Tier: runspec.RepositoryTier{Target: runspec.PlacementTeam, Labels: []string{"os=darwin"}, Hold: 5 * time.Second}, Live: []string{"build-mac"}},
+		{Tier: runspec.RepositoryTier{Target: runspec.PlacementGitHubActions, Workflow: ".github/workflows/f.yaml", Runner: "macos-latest"}, OpensIn: 3 * time.Second},
+	}}
+	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: now}, Waiting: &store.UnclaimedUnit{Kind: capability.UnitNode, NodeID: "macos", Since: now.Add(-time.Minute)}, PlacementWaits: []store.PlacementWait{wait}}
+	view.Snapshot.Run.Request.Request.Dispatch = runspec.DispatchController
+	if notice := unclaimedNotice(view); notice != nil {
+		t.Fatalf("generic notice duplicated the placement notice: %+v", notice)
+	}
+	notices := placementNotices(view)
+	if len(notices) != 1 {
+		t.Fatalf("notices=%+v", notices)
+	}
+	for _, want := range []string{"job macos waits for placement", "team os=darwin, hold 5s (build-mac live)", "github-actions macos-latest (opens in 3s)"} {
+		if !strings.Contains(notices[0].Reason, want) {
+			t.Fatalf("reason %q omits %q", notices[0].Reason, want)
+		}
+	}
+	for _, want := range []string{"default branch at 0123456789ab", "Actions minutes"} {
+		if !strings.Contains(notices[0].Hint, want) {
+			t.Fatalf("hint %q omits %q", notices[0].Hint, want)
+		}
+	}
+}

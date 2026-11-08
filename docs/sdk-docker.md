@@ -2,8 +2,6 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # SDK API reference: `sparkwing/docker`
 
-Package docker provides build, push, login, and container helpers using the Docker CLI and buildx bundled in Sparkwing Cloud.
-
 Import as `swdocker "github.com/sparkwing-dev/sparkwing/sparkwing/docker"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
 
 ## Functions
@@ -23,26 +21,26 @@ BuildConfig configures a Docker image build and optional push.
 ```
 type BuildConfig struct {
     // Image is the image name without registry prefix (e.g. "myapp").
-    Image string
+    Image string `json:"image"`
     // Dockerfile is the path to the Dockerfile. Defaults to "Dockerfile".
-    Dockerfile string
+    Dockerfile string `json:"dockerfile"`
     // Context is the build context directory. Defaults to ".".
-    Context string
+    Context string `json:"context"`
     // Platforms is the list of target platforms (e.g.
     // ["linux/amd64", "linux/arm64"]). Empty means local-arch
     // single-platform build via plain `docker build`. Non-empty
     // switches to `docker buildx build` and requires buildx.
-    Platforms []string
+    Platforms []string `json:"platforms"`
     // Registries is the list of registries to push to. Empty means
     // local build only, no push.
-    Registries []string
+    Registries []string `json:"registries"`
     // Tags is the list of tags to apply (and push when registries are
     // set). At least one tag is required.
-    Tags []string
+    Tags []string `json:"tags"`
     // BuildArgs are passed via --build-arg KEY=VAL.
-    BuildArgs map[string]string
+    BuildArgs map[string]string `json:"buildArgs"`
     // Labels are passed via --label KEY=VAL.
-    Labels map[string]string
+    Labels map[string]string `json:"labels"`
 }
 ```
 
@@ -55,13 +53,13 @@ BuildResult is returned by Build / BuildAndPush.
 type BuildResult struct {
     // Image is the fully-qualified image name pushed to the first
     // registry (if any), otherwise the local image reference.
-    Image string
+    Image string `json:"image"`
     // Digests maps each pushed "<registry>/<image>:<tag>" reference to
     // its pushed digest, when one could be resolved. Populated by
     // BuildAndPush and Push only.
-    Digests map[string]string
+    Digests map[string]string `json:"digests"`
     // Registries is the list of registries successfully pushed to.
-    Registries []string
+    Registries []string `json:"registries"`
 }
 ```
 
@@ -75,7 +73,7 @@ ImageTag holds the deterministic image-tag components for a single build: short 
 ```
 type ImageTag struct {
     Commit  string
-    Content string
+    Content string `json:"content"`
     Branch  string
     Dirty   bool
 }
@@ -94,51 +92,42 @@ RunOptions configures a one-shot container invocation.
 ```
 type RunOptions struct {
     // Image is the container image (e.g. "node:22-alpine"). Required.
-    Image string
-
+    Image string `json:"image"`
     // Cmd is the command + args to run inside the container. When
     // empty, the image's default CMD runs.
-    Cmd []string
-
+    Cmd []string `json:"cmd"`
     // WorkDir is the working directory inside the container. Defaults
     // to "/work". InputDir's contents land here when InputDir is set.
-    WorkDir string
-
+    WorkDir string `json:"workDir"`
     // Env adds environment variables to the container.
-    Env map[string]string
-
+    Env map[string]string `json:"env"`
     // User overrides the container user ("uid:gid" or "uid"). Empty
     // uses the image's default user. Named cache volumes often
     // require the image's default user to write, so override with
     // care.
-    User string
-
+    User string `json:"user"`
     // InputDir is a local directory whose contents are copied into the
     // container at WorkDir before Cmd runs. Empty means no inputs are
     // copied (the container starts with whatever the image provides).
-    InputDir string
-
+    InputDir string `json:"inputDir"`
     // OutputDir is a path inside the container whose contents are
     // extracted after Cmd exits successfully. Empty means no outputs
     // are pulled. If the path does not exist after Cmd, Run returns an
     // error rather than silently producing an empty OutputTo.
-    OutputDir string
-
+    OutputDir string `json:"outputDir"`
     // OutputTo is the local destination directory for OutputDir's
     // contents. Created if missing. Required when OutputDir is set.
     // Existing files at OutputTo are NOT cleared first; the caller
     // owns staging.
-    OutputTo string
-
+    OutputTo string `json:"outputTo"`
     // Volumes maps named docker volumes to mount paths inside the
     // container, e.g. {"sparkwing-npm-cache": "/root/.npm"}. Use named
     // volumes (not host paths) so the same code works under DinD.
-    Volumes map[string]string
-
+    Volumes map[string]string `json:"volumes"`
     // Stdout / Stderr receive the container's output during start.
     // Default os.Stdout / os.Stderr.
-    Stdout io.Writer
-    Stderr io.Writer
+    Stdout io.Writer `json:"-"`
+    Stderr io.Writer `json:"-"`
 }
 ```
 

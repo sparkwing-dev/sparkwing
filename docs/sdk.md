@@ -532,7 +532,9 @@ recognizes the cause. Increase the context timeout or make the command faster.
 It reads the process working directory. In author tests, use `t.Chdir(root)`
 to select a fixture repository. Go restores the directory after the test.
 
-File helpers include `ReadFile`, `WriteFile`, `Glob` and similar operations.
+Generic file helpers are removed. Use `os.ReadFile`, `os.WriteFile` and
+`filepath.Glob` in Go, or `node:fs/promises` in TypeScript. Resolve relative
+paths with `filepath.Join(sw.WorkDir(), name)` or Node's `path.resolve(workDir(), name)`.
 Call them inside execution callbacks when their result depends on workspace
 state. Subpackages provide Docker, git and service helpers.
 

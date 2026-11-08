@@ -727,7 +727,7 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	if intake.at.Add(githubAppClockSkew).Before(grant.EnabledAt) {
 		return 0, "the push predates repository automation consent", nil
 	}
-	snapshot, err := s.githubApp.client.FileAtDefaultHead(r.Context(), in.InstallationID, repo.Owner, repo.Name,
+	snapshot, err := s.githubApp.client.FileAtDefaultHead(r.Context(), in.InstallationID, repo.ID, repo.Owner, repo.Name,
 		".sparkwing/"+projectconfig.Filename)
 	if err != nil {
 		return http.StatusBadGateway, "", fmt.Errorf("read GitHub schedule config: %w", err)
@@ -943,6 +943,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 	}
 	resp := githubAppWebhookResp{Status: "dispatched"}
 	failed := 0
+	placement := s.defaultBranchPlacement(in.InstallationID, repo)
 	for _, plan := range planned {
 		// safety: a run this delivery already started answers without spending,
 		// so manually processing a partial delivery again spends only for missing runs.
@@ -950,7 +951,15 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
 		}
-		run, err := s.startGitHubAppRun(r, tenant, in, plan, repo, body)
+		// safety: GitHub never redelivers, so a placement that cannot be read refuses only this run, visibly,
+		// and an operator can process the delivery again once the default branch reads.
+		policy, err := placement(ctx, plan.pipeline)
+		if err != nil {
+			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "refused", Reason: err.Error()})
+			s.logger.Warn("github app run refused: placement unavailable", "team", string(in.Team), "repo", repo.Slug(), "pipeline", plan.pipeline, "err", err)
+			continue
+		}
+		run, err := s.startGitHubAppRun(r, tenant, in, plan, repo, body, policy)
 		if err != nil {
 			var refusal *apierr.Error
 			if errors.As(err, &refusal) && refusal.Details["retry_after_ms"] != nil {
@@ -988,7 +997,7 @@ func githubAppStartedAny(runs []githubAppRun) bool {
 }
 
 func (s *Server) startGitHubAppRun(
-	r *http.Request, tenant *store.Tenant, installation store.GitHubAppInstallation, plan githubAppPlannedRun, repo store.GitHubRepo, body []byte,
+	r *http.Request, tenant *store.Tenant, installation store.GitHubAppInstallation, plan githubAppPlannedRun, repo store.GitHubRepo, body []byte, placement *runspec.RepositoryPlacement,
 ) (githubAppRun, error) {
 	in := plan.intake
 	now := time.Now()
@@ -1031,7 +1040,7 @@ func (s *Server) startGitHubAppRun(
 		unverifiedReason = "Run is unverified because " + unavailable.Error()
 	}
 	result, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (store.AdmissionResult, error) {
-		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified, UnverifiedReason: unverifiedReason})
+		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified, UnverifiedReason: unverifiedReason, RepositoryPlacement: placement})
 	})
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
 		return githubAppRun{Pipeline: plan.pipeline, Status: "ignored"}, nil

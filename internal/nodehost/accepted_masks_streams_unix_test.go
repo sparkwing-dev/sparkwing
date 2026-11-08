@@ -201,7 +201,7 @@ func TestSealedMaskStreamChild(t *testing.T) {
 		var result any
 		switch request.Op {
 		case nodeproto.OpHello:
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: request.Engine.Version}, Features: []string{}}
+			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: request.Engine.Version}}
 		case nodeproto.OpDescribe:
 			result = nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}}}}}
 		case nodeproto.OpPlan:

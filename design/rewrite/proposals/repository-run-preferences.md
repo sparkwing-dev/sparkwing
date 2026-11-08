@@ -2,6 +2,10 @@
 
 Decision date: 2026-11-05. Status: design for implementation.
 
+The decisions, config shape and open questions are summarized in
+[placement preferences](../PLACEMENT-PREFERENCES.md), which wins where the two
+differ. This proposal keeps the detailed dispatch, receipt and failure contract.
+
 Runs started by pushes, pull requests, releases and schedules can prefer team
 runners before using paid or hosted fallback capacity. These are
 repository-proven runs. They use the same ordered `prefer` and `hold` model as
@@ -69,7 +73,6 @@ pipelines:
           runner: ubuntu-latest
     jobs:
       macos:
-        requires: [os=darwin]
         placement:
           prefer:
             - target: team
@@ -79,7 +82,6 @@ pipelines:
               workflow: .github/workflows/sparkwing-fallback.yaml
               runner: macos-latest
       windows:
-        requires: [os=windows]
         placement:
           prefer:
             - target: team
@@ -90,7 +92,8 @@ pipelines:
               runner: windows-latest
 ```
 
-The durations are examples, not defaults. The job IDs are illustrative. The
+The job IDs are illustrative. The cells declare `Requires("os=darwin")` and
+`Requires("os=windows")` in the SDK; job blocks carry only `placement`. The
 implementation must use the accepted pre-release cell IDs. Each cell must be
 a dispatched job. Inline work stays on its owner's host and cannot move tiers.
 Lint must explain that conflict when an inline job receives a placement override.
@@ -359,11 +362,10 @@ behavior when repository placement is absent. Preserve existing queue deadlines,
 runner liveness, concurrency and credential limits. Add no tier-count cap,
 dispatch quota, monthly budget or separate fallback timeout.
 
-**Pending maintainer approval:** recommend an omitted hold of `0s` for this new
-repository surface. Require examples and setup previews to show explicit holds.
-Do not silently inherit the personal burst or team ranking five-second default.
-Also pending maintainer approval is using the example `5s` hold in the generated
-pre-release setup. It trades a short wait for a chance to avoid hosted minutes.
+**Decided (Korey, 2026-11-06):** an omitted hold is `0s` on this repository
+surface; it does not inherit the personal burst or team ranking five-second
+default. The generated pre-release setup suggests `5s` on each team OS tier,
+trading a short wait for a chance to avoid hosted minutes.
 
 GitHub Actions selects a runner with matching `runs-on` labels and groups. It
 requeues an uncollected assignment after 60 seconds and fails a job queued for
@@ -467,9 +469,9 @@ described in [local controller restart](local-controller-restart.md).
 
 | Question | Recommendation |
 | --- | --- |
-| What hold applies when omitted? | Use `0s`, pending maintainer approval. Keep setup holds explicit. The provider comparison is above. |
-| What should pre-release setup suggest? | Suggest `5s` for each team OS tier, pending maintainer approval. Measure dispatch avoidance and queue delay before changing it. |
-| Should Actions receipt scope cover one job or a batch? | Start with one job and placement generation. It makes cost and cancellation traceable. Reuse an existing eligible runner through normal claims. Add batching only with measured need and explicit job bindings. |
+| What hold applies when omitted? | Decided 2026-11-06: `0s`. |
+| What should pre-release setup suggest? | Decided 2026-11-06: `5s` for each team OS tier. Measure dispatch avoidance and queue delay before changing it. |
+| Should Actions receipt scope cover one job or a batch? | Decided 2026-11-06: one workflow run per job and placement generation. Batch only with measured need. |
 | Which revision supplies policy and workflow authority? | Use verified default-branch policy and an owner-approved workflow ref. Preserve the event SHA as execution source. Show both revisions. |
 | Should SDK `Prefers` override repository tier order? | Keep repository tiers outermost. Use SDK selectors within an open tier because they cannot authorize a new provider. |
 | How should uncertain dispatch recover? | Keep earlier tiers claimable and show the uncertainty. Record one dispatch per job placement generation. An audited retry opens a new generation and invalidates the old receipt. Any automatic deadline or retry cap needs maintainer approval. |

@@ -20,7 +20,7 @@ type claimContextPlacement struct {
 }
 
 // A context shares only immutable policy inputs; readiness and authority stay in the claim predicate.
-func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID string, kind capability.UnitKind, requirements string, execution []byte) (string, error) {
+func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, kind capability.UnitKind, requirements string, execution []byte) (string, error) {
 	var request, spec []byte
 	var repoKey, repoDisplay, repository, dispatch, subject, principal string
 	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal); err != nil {
@@ -41,8 +41,9 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 					Display string `json:"display"`
 				} `json:"repository"`
 			} `json:"git"`
-			OriginMachine   string `json:"origin_machine"`
-			LocalForeground bool   `json:"local_foreground"`
+			OriginMachine   string                       `json:"origin_machine"`
+			LocalForeground bool                         `json:"local_foreground"`
+			Placement       *runspec.RepositoryPlacement `json:"placement,omitempty"`
 		} `json:"request"`
 		// safety: pool access rules read these, so units sharing a context share pool access.
 		Provenance struct {
@@ -77,6 +78,11 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 			return "", err
 		}
 	}
+	var tiers []runspec.RepositoryTier
+	if kind == capability.UnitNode {
+		tiers = sealed.Request.Placement.ForJob(nodeID)
+	}
+	sealed.Request.Placement = nil
 	// Missing resolved options retain request fallback; an explicit empty object does not.
 	id, err := stateHash(struct {
 		Kind                                                           capability.UnitKind
@@ -88,7 +94,8 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 		Execution                                                      claimContextPlacement
 		RepoKey, RepoDisplay, Repository, Dispatch, Subject, Principal string
 		Foreground                                                     bool
-	}{kind, requirements, sealed.Request, sealed.Provenance, accepted.Resolved.Settings.Options, accepted.Resolved.Guards, placement, repoKey, repoDisplay, repository, dispatch, subject, principal, sealed.RunID == runID})
+		Placement                                                      []runspec.RepositoryTier `json:",omitempty"`
+	}{kind, requirements, sealed.Request, sealed.Provenance, accepted.Resolved.Settings.Options, accepted.Resolved.Guards, placement, repoKey, repoDisplay, repository, dispatch, subject, principal, sealed.RunID == runID, tiers})
 	if err != nil {
 		return "", err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -45,25 +46,16 @@ func secretResolverFromContext(ctx context.Context) secretResolver {
 //	token, err := sparkwing.Secret(ctx, "ARGOCD_TOKEN")
 //	if err != nil { return err }
 func Secret(ctx context.Context, name string) (string, error) {
-	v, masked, err := resolveValue(ctx, "Secret", name)
-	if err != nil {
-		return "", err
-	}
-	if !masked {
-		return "", fmt.Errorf("sparkwing: Secret(%q): entry is stored with masked=false; use sparkwing.Variable", name)
-	}
-	return v, nil
+	v, _, err := resolveValue(ctx, "Secret", name)
+	return v, err
 }
 
 func resolveValue(ctx context.Context, caller, name string) (string, bool, error) {
-	if name == "" {
-		return "", false, fmt.Errorf("sparkwing: %s: name is required", caller)
-	}
 	r := secretResolverFromContext(ctx)
 	if r == nil {
 		return "", false, fmt.Errorf("sparkwing: %s: no resolver installed -- %s can only be called from step bodies or memo key functions, not from Plan() (resolver is attached at dispatch time)", caller, caller)
 	}
-	v, masked, err := r.resolve(ctx, name)
+	v, masked, err := r.resolve(sdkserve.WithSecretClass(ctx, caller == "Variable"), name)
 	if err != nil {
 		return "", false, fmt.Errorf("sparkwing: %s(%q): %w", caller, name, err)
 	}

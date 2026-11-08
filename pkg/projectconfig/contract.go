@@ -32,6 +32,36 @@ type Pipeline struct {
 	Prefers     []string          `yaml:"prefers,omitempty" json:"prefers,omitempty"`
 	SourceFiles []string          `yaml:"source_files,omitempty" json:"source_files,omitempty"`
 	On          *Events           `yaml:"on,omitempty" json:"on,omitempty"`
+	// Placement orders where repository-proven runs of this pipeline place
+	// their jobs. Only the verified default-branch copy takes effect.
+	Placement *Placement `yaml:"placement,omitempty" json:"placement,omitempty"`
+	// Jobs holds per-job overrides keyed by job ID.
+	Jobs map[string]JobOverride `yaml:"jobs,omitempty" json:"jobs,omitempty"`
+}
+
+// Placement is an ordered tier list. The list is the whole allowed set:
+// a target that is not listed never runs the job.
+type Placement struct {
+	Prefer []PlacementTier `yaml:"prefer" json:"prefer"`
+}
+
+// PlacementTier is one tier. Target is team, name=<runner>, cloud or
+// github-actions. Hold is a Go duration and defaults to 0s. Labels narrow a
+// team or name= tier only. Workflow and Runner name a github-actions tier's
+// approved workflow and hosted image.
+type PlacementTier struct {
+	Target   string   `yaml:"target" json:"target"`
+	Labels   []string `yaml:"labels,omitempty" json:"labels,omitempty"`
+	Hold     *string  `yaml:"hold,omitempty" json:"hold,omitempty"`
+	Workflow *string  `yaml:"workflow,omitempty" json:"workflow,omitempty"`
+	Runner   *string  `yaml:"runner,omitempty" json:"runner,omitempty"`
+}
+
+// JobOverride carries only placement; requirements stay in the SDK and the
+// pipeline's requires. A present placement replaces the pipeline list, and an
+// empty prefer list restores the job's routing without repository placement.
+type JobOverride struct {
+	Placement *Placement `yaml:"placement,omitempty" json:"placement,omitempty"`
 }
 
 // RunRestrictions limits machine-authorized burst routing.

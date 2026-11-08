@@ -12,6 +12,8 @@ import (
 
 const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecWindows|ExecError_|NPMCommand|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|QueryReportsNoDaemonForFreshWindowsHome)`
 
+const windowsVerifyTimeout = 20 * time.Minute
+
 const windowsVerifyTemplateTests = `^TestTemplateVerify(CLIPath|Windows)`
 
 // WindowsVerify checks native Windows process ownership, SDK commands, and installers.
@@ -34,29 +36,29 @@ func (WindowsVerify) Examples() []sparkwing.Example {
 }
 
 func (p *WindowsVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p).Requires("os=windows").Timeout(20 * time.Minute).Cores(4)
+	sparkwing.Job(plan, rc.Pipeline, p).Requires("os=windows").Timeout(windowsVerifyTimeout).Cores(4)
 	return nil
 }
 
-type windowsVerifyCheck struct {
+type platformCheck struct {
 	id  string
 	run func(context.Context) error
 }
 
 func (p *WindowsVerify) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	addWindowsVerifyChecks(work, []windowsVerifyCheck{
+	addPlatformChecks(work, []platformCheck{
 		{id: "runtime-race", run: runWindowsVerifyRuntime},
 		{id: "template-platform", run: func(ctx context.Context) error {
 			command := shellQuoteAll([]string{"go", "-C", ".sparkwing", "test", "./jobs", "-run", windowsVerifyTemplateTests, "-count=1", "-timeout", "1m"})
-			return runWindowsVerifyIsolated(ctx, command)
+			return runPlatformIsolated(ctx, command)
 		}},
-		{id: "source-installer", run: func(ctx context.Context) error { return runWindowsVerifyInstaller(ctx, "bin/install-test.sh") }},
-		{id: "release-installer", run: func(ctx context.Context) error { return runWindowsVerifyInstaller(ctx, "bin/release-install-test.sh") }},
+		{id: "source-installer", run: func(ctx context.Context) error { return runPlatformInstaller(ctx, "bin/install-test.sh") }},
+		{id: "release-installer", run: func(ctx context.Context) error { return runPlatformInstaller(ctx, "bin/release-install-test.sh") }},
 	})
 	return nil, nil
 }
 
-func addWindowsVerifyChecks(work *sparkwing.Work, checks []windowsVerifyCheck) {
+func addPlatformChecks(work *sparkwing.Work, checks []platformCheck) {
 	var previous *sparkwing.WorkStep
 	for _, check := range checks {
 		step := sparkwing.Step(work, check.id, check.run).ContinueOnError()
@@ -77,14 +79,14 @@ func runWindowsVerifyRuntime(ctx context.Context) error {
 		"go", "test", "-race", "-p", "2", "-timeout", "5m", "-count=1", "-run", windowsVerifyRuntimeTests,
 		"./sparkwing", "./internal/pipelineentry", "./internal/wingd/client", "./internal/orchestrator",
 	})
-	return runWindowsVerifyIsolated(ctx, withPinned(command, []string{"CGO_ENABLED=1", "GOOS=windows", "GOARCH=" + shellQuote(runtime.GOARCH)}))
+	return runPlatformIsolated(ctx, withPinned(command, []string{"CGO_ENABLED=1", "GOOS=windows", "GOARCH=" + shellQuote(runtime.GOARCH)}))
 }
 
-func runWindowsVerifyInstaller(ctx context.Context, script string) error {
-	return runWindowsVerifyIsolated(ctx, `"$BASH" `+shellQuote(script))
+func runPlatformInstaller(ctx context.Context, script string) error {
+	return runPlatformIsolated(ctx, `"$BASH" `+shellQuote(script))
 }
 
-func runWindowsVerifyIsolated(ctx context.Context, command string) error {
+func runPlatformIsolated(ctx context.Context, command string) error {
 	return withProductTestHome(func(home string) error {
 		_, err := sparkwing.Bash(ctx, productTestScript(command, home)).Dir(sparkwing.WorkDir()).Env("GOWORK", "off").Env("GOMAXPROCS", "2").Run()
 		return err
