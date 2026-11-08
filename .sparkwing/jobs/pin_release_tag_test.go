@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 )
@@ -10,7 +9,7 @@ func TestAutoBumpLeavesThePinAloneAtTheTagBeingReleased(t *testing.T) {
 	repo := seedReleaseRepo(t)
 	gitRun(t, repo, "tag", "v0.2.0")
 
-	bumped, err := autoBumpSparkwingPinIfStale(commandTestContext(t), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(newTestContext(t), repo)
 	if err != nil {
 		t.Fatalf("autoBumpSparkwingPinIfStale at the release tag: %v", err)
 	}
@@ -32,7 +31,7 @@ func TestAutoBumpStillMovesThePinWhenTheTagIsBehindHead(t *testing.T) {
 	gitRun(t, repo, "add", "doc.go")
 	gitRun(t, repo, "commit", "-m", "move past the tag")
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(newTestContext(t), repo)
 	if err != nil {
 		t.Fatalf("autoBumpSparkwingPinIfStale past the release tag: %v", err)
 	}

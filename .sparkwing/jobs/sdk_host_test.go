@@ -68,6 +68,11 @@ func (j testJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) { retur
 
 var testPipelineNumber atomic.Uint64
 
+func newTestContext(t *testing.T) context.Context {
+	t.Helper()
+	return newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
+}
+
 func newTestHost(t *testing.T, opts sparkwingtest.Options) sparkwingtest.Host {
 	t.Helper()
 	host := sparkwingtest.New(opts)
@@ -77,11 +82,6 @@ func newTestHost(t *testing.T, opts sparkwingtest.Options) sparkwingtest.Host {
 		}
 	})
 	return host
-}
-
-func commandTestContext(t *testing.T) context.Context {
-	t.Helper()
-	return newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
 }
 
 func decodePipeline(t *testing.T, value any) pipelineDocument {

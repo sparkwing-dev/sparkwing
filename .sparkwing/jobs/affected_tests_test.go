@@ -128,7 +128,7 @@ func TestAffectedTestStepRunsTheChangeAndTheCriticalSetOnly(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "changed", "changed_test.go"),
 		"package changed\n\nimport \"testing\"\n\nfunc TestChanged(t *testing.T) { t.Fatal(\"changed package ran\") }\n")
 	gitCommitAll(t, root, "change")
-	ctx := commandTestContext(t)
+	ctx := newTestContext(t)
 	err := runAffectedTest(ctx)
 	if err == nil || !strings.Contains(err.Error(), "changed package ran") || !strings.Contains(err.Error(), "critical ran") || !strings.Contains(err.Error(), "test importer ran") || strings.Contains(err.Error(), "unaffected package ran") {
 		t.Fatalf("err = %v, want the changed package and the critical test run and the unrelated package left alone", err)
@@ -141,7 +141,7 @@ func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 		t.Fatal("could not locate the repository root from this file's compile-time path")
 	}
 	t.Chdir(root)
-	critical, err := criticalTests(commandTestContext(t))
+	critical, err := criticalTests(newTestContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestFrontendSuitesRunOnlyWhenTheirInputsChange(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
-	ctx := commandTestContext(t)
+	ctx := newTestContext(t)
 	writeGoFile(t, filepath.Join(root, "internal", "sound.go"), "package internal\n\nfunc Sound() int { return 2 }\n")
 	gitCommitAll(t, root, "go only")
 	if why, err := frontendChange(ctx, false); err != nil || why != "" {
@@ -210,7 +210,7 @@ func TestAffectedTestsRunTheReadersOfFilesOutsideEveryPackage(t *testing.T) {
 		t.Fatal("could not locate the repository root from this file's compile-time path")
 	}
 	t.Chdir(root)
-	ctx := commandTestContext(t)
+	ctx := newTestContext(t)
 	modules, err := committedModuleDirs(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestDocsOnlyChangeSkipsTheGoStepsAndTheSDKSuite(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
-	ctx := commandTestContext(t)
+	ctx := newTestContext(t)
 	writeGoFile(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n")
 	gitCommitAll(t, root, "docs")
 	if !skipUnlessGoTouched("vet")(ctx) || !skipTypeScriptSDKUnlessTouched(ctx) {
@@ -293,13 +293,13 @@ func TestAffectedCompilerChecksSkipOtherModulesAndRejectBrokenTouchedCode(t *tes
 	writeGoFile(t, file, "package pipelines\nfunc Jobs() int { return 2 }\n")
 	gitAddAll(t, root)
 	for _, check := range []func(context.Context) error{runAffectedVet, runAffectedBuild} {
-		if err := check(commandTestContext(t)); err != nil {
+		if err := check(newTestContext(t)); err != nil {
 			t.Fatalf("unaffected broken module ran: %v", err)
 		}
 	}
 	writeGoFile(t, file, "package pipelines\nfunc Jobs() int { return missing }\n")
 	for _, check := range []func(context.Context) error{runAffectedVet, runAffectedBuild} {
-		if err := check(commandTestContext(t)); err == nil {
+		if err := check(newTestContext(t)); err == nil {
 			t.Fatal("broken affected package passed")
 		}
 	}
@@ -311,7 +311,7 @@ func TestAffectedBuildSkipsPackagesContainingOnlyTests(t *testing.T) {
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	writeGoFile(t, filepath.Join(root, "onlytests", "only_test.go"), "package onlytests\nimport \"testing\"\nfunc TestOnly(t *testing.T) {}\n")
 	gitAddAll(t, root)
-	if err := runAffectedBuild(commandTestContext(t)); err != nil {
+	if err := runAffectedBuild(newTestContext(t)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -330,7 +330,7 @@ func TestAffectedBuildLeavesNoCommandBinary(t *testing.T) {
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	writeGoFile(t, filepath.Join(root, "cmd", "tool", "main.go"), "package main\nfunc main() {}\n")
 	gitAddAll(t, root)
-	if err := runAffectedBuild(commandTestContext(t)); err != nil {
+	if err := runAffectedBuild(newTestContext(t)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "tool")); !os.IsNotExist(err) {
@@ -369,7 +369,7 @@ func TestAffectedClosureCrossesLocalModuleReplacements(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"), "module fixture/pipelines\n\ngo 1.25\nrequire fixture v0.0.0\nreplace fixture => ..\n")
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"), "package pipelines\nimport f \"fixture/internal\"\nfunc Jobs() int { return f.Sound() }\n")
 	gitCommitAll(t, root, "modules")
-	plans, _, err := planAffectedModules(commandTestContext(t), []string{"internal/sound.go"}, nil)
+	plans, _, err := planAffectedModules(newTestContext(t), []string{"internal/sound.go"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

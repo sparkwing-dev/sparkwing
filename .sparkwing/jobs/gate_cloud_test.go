@@ -17,7 +17,7 @@ func TestCloudGateFetchesTheExactPublicBaseForAParentlessSnapshot(t *testing.T) 
 	writeGoFile(t, filepath.Join(snapshot, "HISTORY.md"), "old "+trackerID+"\n")
 	writeGoFile(t, filepath.Join(snapshot, "changed.go"), "package fixture\n\nfunc Changed() {}\n")
 	gitCommitAll(t, snapshot, "uploaded")
-	ctx := commandTestContext(t)
+	ctx := newTestContext(t)
 	if err := fetchGateBase(ctx, origin, base); err != nil {
 		t.Fatal(err)
 	}

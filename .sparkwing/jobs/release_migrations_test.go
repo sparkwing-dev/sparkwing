@@ -488,7 +488,7 @@ func TestRepositoryUnreleasedSectionDeclaresEveryWireCut(t *testing.T) {
 		t.Skipf("no release tag in this checkout's history: %v", err)
 	}
 	prev := strings.TrimSpace(string(out))
-	cuts, err := wireCutsSince(commandTestContext(t), root, prev)
+	cuts, err := wireCutsSince(newTestContext(t), root, prev)
 	if err != nil {
 		t.Fatal(err)
 	}

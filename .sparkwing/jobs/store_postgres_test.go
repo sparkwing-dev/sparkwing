@@ -88,7 +88,7 @@ func TestAffectedGateDefersPostgresEvenWhenTheStoreChanges(t *testing.T) {
 	gitAddAll(t, root)
 	t.Setenv("SPARKWING_TEST_PG_URL", "postgres://nobody@127.0.0.1:1/unreachable")
 
-	if err := runStorePostgresIfTouched(context.Background(), gateAffected); err != nil {
+	if err := runStorePostgresIfTouched(newTestContext(t), gateAffected); err != nil {
 		t.Fatalf("affected gate started the deferred PostgreSQL suite: %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestStorePostgresStepWaitsOnTheTestStep(t *testing.T) {
 
 func TestStorePostgresRunStopsAndRemovesWhenCancelled(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(newTestContext(t))
 	var stopped, removed atomic.Bool
 	running := make(chan struct{})
 	go func() {
@@ -145,7 +145,7 @@ func TestStorePostgresRunStopsAndRemovesOnInterrupt(t *testing.T) {
 		interrupts <- os.Interrupt
 	}()
 
-	err := runStorePostgresSuite(context.Background(), storePostgresRun{
+	err := runStorePostgresSuite(newTestContext(t), storePostgresRun{
 		interrupts: interrupts,
 		start:      func() (string, error) { return "postgres://unused", nil },
 		stop:       func() error { stopped.Store(true); return nil },
@@ -173,7 +173,7 @@ func TestStorePostgresRunReportsTheLogAfterStopping(t *testing.T) {
 	log.WriteString("startup banner\n")
 	var reported string
 
-	err := runStorePostgresSuite(context.Background(), storePostgresRun{
+	err := runStorePostgresSuite(newTestContext(t), storePostgresRun{
 		start: func() (string, error) { return "postgres://unused", nil },
 		stop: func() error {
 			log.WriteString("what the server logged during the suite\n")
@@ -197,7 +197,7 @@ func TestStorePostgresRunKeepsRemovingWhenTheServerWillNotStart(t *testing.T) {
 	t.Parallel()
 	var removed atomic.Bool
 
-	err := runStorePostgresSuite(context.Background(), storePostgresRun{
+	err := runStorePostgresSuite(newTestContext(t), storePostgresRun{
 		start:  func() (string, error) { return "", errors.New("no port") },
 		stop:   func() error { t.Error("stop ran for a server that never started"); return nil },
 		remove: func() error { removed.Store(true); return nil },

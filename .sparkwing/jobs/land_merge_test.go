@@ -70,7 +70,7 @@ func (r *landRemote) moveMain(files map[string]string) string {
 
 func (r *landRemote) head() landHead {
 	r.t.Helper()
-	head, err := checkLandPreconditions(commandTestContext(r.t), gitIn(r.dev), r.dev)
+	head, err := checkLandPreconditions(newTestContext(r.t), gitIn(r.dev), r.dev)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestLandPushesTheGatedCommitWhenMainDidNotMove(t *testing.T) {
 	r := newLandRemote(t)
 	head := r.head()
 	var recheck recordingRecheck
-	landed, err := landOnto(commandTestContext(t), r.dev, head, recheck.run)
+	landed, err := landOnto(newTestContext(t), r.dev, head, recheck.run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestLandMergesMainThatMovedCleanlyAndRechecksOnlyTheMergeDelta(t *testing.T
 		t.Fatalf("preconditions on a branch behind a clean main = %+v", again)
 	}
 	var recheck recordingRecheck
-	landed, err := landOnto(commandTestContext(t), r.dev, head, recheck.run)
+	landed, err := landOnto(newTestContext(t), r.dev, head, recheck.run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,11 +146,11 @@ func TestLandMergeConflictFailsWithTheMergeToRunByHand(t *testing.T) {
 	r := newLandRemote(t)
 	head := r.head()
 	moved := r.moveMain(map[string]string{"a/a.txt": "a1\na2 main\na3\n"})
-	if _, err := checkLandPreconditions(commandTestContext(t), gitIn(r.dev), r.dev); err == nil || !strings.Contains(err.Error(), "merge origin/main") {
+	if _, err := checkLandPreconditions(newTestContext(t), gitIn(r.dev), r.dev); err == nil || !strings.Contains(err.Error(), "merge origin/main") {
 		t.Fatalf("preconditions err = %v, want the conflict refused with the merge remedy", err)
 	}
 	var recheck recordingRecheck
-	_, err := landOnto(commandTestContext(t), r.dev, head, recheck.run)
+	_, err := landOnto(newTestContext(t), r.dev, head, recheck.run)
 	if err == nil || !strings.Contains(err.Error(), "git -C "+r.dev+" merge origin/main") || strings.Contains(err.Error(), "rebase") {
 		t.Fatalf("err = %v, want the merge remedy and no rebase", err)
 	}
@@ -174,7 +174,7 @@ func TestLandStopsAfterThreeMergesWhenMainKeepsMoving(t *testing.T) {
 		n++
 		r.moveMain(map[string]string{"c/c.txt": strings.Repeat("c\n", n)})
 	}}
-	_, err := landOnto(commandTestContext(t), r.dev, head, recheck.run)
+	_, err := landOnto(newTestContext(t), r.dev, head, recheck.run)
 	if err == nil || !strings.Contains(err.Error(), "moved again after 3 merges") {
 		t.Fatalf("err = %v, want the bounded-merge refusal", err)
 	}
@@ -244,7 +244,7 @@ func TestLandMergesTheChangelogHeadingsAUnionMergeRepeats(t *testing.T) {
 	head := r.head()
 	moved := r.moveMain(map[string]string{"CHANGELOG.md": changelogWith("Fixed", "main entry"), "pkg/docs/changelog.md": changelogWith("Fixed", "main entry")})
 	var recheck recordingRecheck
-	landed, err := landOnto(commandTestContext(t), r.dev, head, recheck.run)
+	landed, err := landOnto(newTestContext(t), r.dev, head, recheck.run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestLandMergesTheChangelogHeadingsAUnionMergeRepeats(t *testing.T) {
 func TestLandPreconditionsRefuseABranchChangelogThatRepeatsAHeading(t *testing.T) {
 	r := newLandRemote(t)
 	r.commit(r.dev, map[string]string{"CHANGELOG.md": changelogWith("Added", "one", "Added", "two")}, "repeat a heading")
-	_, err := checkLandPreconditions(commandTestContext(t), gitIn(r.dev), r.dev)
+	_, err := checkLandPreconditions(newTestContext(t), gitIn(r.dev), r.dev)
 	if err == nil || !strings.Contains(err.Error(), "check-changelog.sh --fix") {
 		t.Fatalf("err = %v, want the repeated heading refused with the --fix remedy", err)
 	}

@@ -225,6 +225,8 @@ only at the next cut, whose `version-freshness` step refuses with "scaffold
 fallback pin ... is behind latest release"; the fix then is this same command
 and a land before the cut, which is how v0.69.0 found v0.68.7's missing pin.
 
+The scaffold fallback also refuses pins ahead of the latest released tag.
+
 The local release pipeline ends at the tag push because the new module must
 exist before the pins can resolve it. Pre-release leaves the tag's own commit
 unchanged because a release cannot depend on itself before publication.
@@ -494,8 +496,10 @@ fails with its reference and a repair hint. Reusing published candidate images n
 `staging-deploy` pins the
 digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
-same for the launcher with every other chart change. `staging-gate` starts `example` and the
-`sparkwing-ci-smoke` reference pipeline before waiting for both on staging Cloud. `production`
+same for the launcher with every other chart change. Each GitOps push requests a hard
+Argo refresh before waiting, requiring patch permission on the named Application.
+`staging-gate` starts `deploy-smoke` and the `sparkwing-ci-smoke` reference pipeline
+before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
 `deploy-smoke` once in the production team that owns the source repository installation, using
 the existing `/kikd-prod/sparkwing/deploy/scan-submit-token` (one NodeClaim, no controller or launcher
@@ -510,6 +514,23 @@ The deploy takes no deploy-time snapshot. Recovery is RDS point-in-time recovery
 a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before a risky
 migration. Checking that automated backups are on belongs to external verification through
 stormwing, not the deploy. The deploy role has no RDS permission.
+
+After a successful staging gate or production smoke, the deploy starts a detached child
+`deploy-scan` at the deployed commit and digests using `sparkwing.StartChild`.
+The child inherits verified-default provenance from the deploy, so the existing
+runner trust policy and repository-scoped scan secrets apply; it is exempt from
+the parent-completion child sweep. No manual trigger token is needed. The scan runs the full `example`
+and records its result in the runner user's normal Bitwing ledger. Promotion does
+not wait for it, and its environment-specific concurrency group is separate from
+the deploy group. Bitwing must be installed on that user's PATH. The scan also
+requires the runner label and trust conditions documented below.
+
+The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
+Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
+repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
+is a token for its target fixture team with permission to start and observe the
+example and read its logs. Missing prerequisites report that the scan could not
+run, rather than clearing prior Bitwing findings.
 
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed
@@ -1640,6 +1661,10 @@ file. Other syntax and workflow checks remain active.
   the release pins, with a local replace to the checkout. The harness bundles
   the committed SDK source from HEAD and rewrites that replace inside the
   uploaded repository so runner compilation needs no caller checkout.
+
+The hosted canonical gate installs `sdk/typescript` dependencies with
+`npm ci --ignore-scripts` before Go tests, because the native protocol and
+conformance tests compile the TypeScript SDK. Local runs need the same install.
 
 ## Decisions before landing
 
