@@ -210,10 +210,10 @@ func renderVerifyTemplates(ctx context.Context, root, scratch string, core map[s
 	if err != nil {
 		return nil, "", err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "main.go"), helper, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), helper, 0o600); err != nil { // #nosec G703 -- safety: scratch is private MkdirTemp output and the renderer filename is fixed.
 		return nil, "", err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(manifest), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(manifest), 0o600); err != nil { // #nosec G703 -- safety: scratch is private MkdirTemp output and the renderer filename is fixed.
 		return nil, "", err
 	}
 	res, err := sparkwing.Exec(ctx, "go", "run", "-p", "1", "-mod=mod", ".").Dir(dir).Env("GOWORK", "off").Capture()
