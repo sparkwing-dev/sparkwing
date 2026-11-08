@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	mathrand "math/rand/v2"
 	"net/url"
 	"strconv"
 	"strings"
@@ -170,12 +171,33 @@ func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, a
 	return result.RunID, err
 }
 
-// Child reads an authorized child's current status through the parent relation.
+// Child observes an authorized child until it finishes or the requested wait elapses.
 func (c *NativeProcessClient) Child(ctx context.Context, run string, wait time.Duration) (controllerwire.RunDetail, error) {
 	var result controllerwire.RunDetail
 	query := url.Values{"wait": {wait.String()}}
-	err := retryHeldRead(ctx, func() error {
-		return c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"?"+query.Encode(), "", nil, &result)
-	})
-	return result, err
+	until := time.Now().Add(wait)
+	delay := 500 * time.Millisecond
+	for {
+		err := retryHeldRead(ctx, func() error {
+			return c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"?"+query.Encode(), "", nil, &result)
+		})
+		if err != nil {
+			return result, err
+		}
+		switch result.Status {
+		case "pending", "running", "queued":
+		default:
+			return result, nil
+		}
+		remaining := time.Until(until)
+		if remaining <= 0 {
+			return result, nil
+		}
+		// perf: keep one host await authorized while polling immediate controller snapshots.
+		pause := delay/2 + mathrand.N(delay/2)
+		if err := waitFor(ctx, min(pause, remaining)); err != nil {
+			return result, err
+		}
+		delay = min(2*delay, 5*time.Second)
+	}
 }

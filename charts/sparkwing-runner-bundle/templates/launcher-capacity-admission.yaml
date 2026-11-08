@@ -1,0 +1,84 @@
+{{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
+{{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
+{{- $launcher := printf "system:serviceaccount:%s:%s" .Release.Namespace (include "sparkwing-runner-bundle.launcher.serviceAccountName" .) }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sparkwing-cloud-capacity-{{ $jobs }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["nodes"]
+        scope: Cluster
+      - apiGroups: ["karpenter.sh"]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["nodeclaims"]
+        scope: Cluster
+  variables:
+    - name: launcher
+      expression: {{ $launcher | toJson | quote }}
+    - name: namespace
+      expression: {{ $jobs | toJson | quote }}
+    - name: labels
+      expression: "oldObject == null ? {} : oldObject.metadata.?labels.orValue({})"
+    - name: cloudClasses
+      expression: "['2', '4', '8', '16', '32', '64']"
+    - name: newLabels
+      expression: "request.operation == 'UPDATE' ? object.metadata.?labels.orValue({}) : {}"
+    - name: oldTaints
+      expression: "oldObject == null ? [] : oldObject.spec.?taints.orValue([])"
+    - name: newTaints
+      expression: "request.operation == 'UPDATE' ? object.spec.?taints.orValue([]) : []"
+    - name: oldReservations
+      expression: "variables.oldTaints.filter(t, t.key == 'sparkwing.dev/cloud-reserved')"
+    - name: newReservations
+      expression: "variables.newTaints.filter(t, t.key == 'sparkwing.dev/cloud-reserved')"
+  validations:
+    # New-object labels would let the launcher claim a foreign node in the same write.
+    - expression: >-
+        request.userInfo.username != variables.launcher ||
+        oldObject != null &&
+        variables.labels[?'sparkwing.dev/launcher-namespace'].orValue('') == variables.namespace &&
+        variables.labels[?'node-restriction.kubernetes.io/sparkwing-cloud-class'].orValue('') in variables.cloudClasses &&
+        variables.labels[?'karpenter.sh/nodepool'].orValue('') != '' &&
+        (request.operation != 'DELETE' || !('node-restriction.kubernetes.io/sparkwing-team-node' in variables.labels))
+      message: the launcher may only write capacity from its Sparkwing shared NodePools
+    - expression: >-
+        request.userInfo.username != variables.launcher || request.operation != 'UPDATE' ||
+        object.metadata.?ownerReferences.orValue([]) == oldObject.metadata.?ownerReferences.orValue([]) &&
+        object.metadata.?finalizers.orValue([]) == oldObject.metadata.?finalizers.orValue([]) &&
+        variables.labels.all(k, k in variables.newLabels && variables.newLabels[k] == variables.labels[k]) &&
+        variables.newLabels.all(k, k in variables.labels || k in [
+          'node-restriction.kubernetes.io/sparkwing-team-node',
+          'node-restriction.kubernetes.io/sparkwing-used-team',
+          'node-restriction.kubernetes.io/sparkwing-used-run'])
+      message: the launcher may only add team and run binding labels and must preserve existing labels, ownership and finalizers
+    - expression: >-
+        request.userInfo.username != variables.launcher || request.operation != 'UPDATE' ||
+        variables.newTaints.exists(t, t.key == 'sparkwing.dev/dedicated' &&
+          t.?value.orValue('') == 'true' && t.effect == 'NoSchedule') &&
+        variables.oldTaints.filter(t, !(t.key in ['sparkwing.dev/cloud-reserved', 'sparkwing.dev/quarantined'])) ==
+          variables.newTaints.filter(t, !(t.key in ['sparkwing.dev/cloud-reserved', 'sparkwing.dev/quarantined'])) &&
+        variables.oldTaints.all(t, t.key != 'sparkwing.dev/quarantined' || t in variables.newTaints) &&
+        variables.newTaints.all(t, !(t.key in ['sparkwing.dev/cloud-reserved', 'sparkwing.dev/quarantined']) ||
+          t in variables.oldTaints || t.effect == 'NoSchedule' && !has(t.timeAdded) &&
+          (t.key == 'sparkwing.dev/cloud-reserved' ? t.?value.orValue('') != '' : t.?value.orValue('') == '')) &&
+        size(variables.newReservations) <= 1 &&
+        (size(variables.oldReservations) == 0 || size(variables.newReservations) == 0 ||
+          variables.oldReservations == variables.newReservations)
+      message: the launcher must preserve dedicated and foreign taints, may add or remove a reservation, and may only add quarantine
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sparkwing-cloud-capacity-{{ $jobs }}
+spec:
+  policyName: sparkwing-cloud-capacity-{{ $jobs }}
+  validationActions: [Deny]
+{{- end }}
