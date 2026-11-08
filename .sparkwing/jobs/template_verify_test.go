@@ -238,7 +238,7 @@ func TestNodeFixture_PassesNpm(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"ci"}, {"test"}, {"run", "lint"}} {
-		result, err := sparkwing.Bash(t.Context(), "npm "+strings.Join(args, " ")).Dir(dir).Capture()
+		result, err := sparkwing.Bash(newTestContext(t), "npm "+strings.Join(args, " ")).Dir(dir).Capture()
 		if err != nil {
 			t.Fatalf("npm %v: %v\n%s\n%s", args, err, result.Stdout, result.Stderr)
 		}

@@ -118,6 +118,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      - name: Install TypeScript SDK dependencies
+        if: ${{ !startsWith(matrix.gate, 'race-store-') }}
+        run: npm ci --ignore-scripts --prefix sdk/typescript
+
       - name: Install dashboard dependencies
         if: matrix.gate == 'gate'
         run: pnpm install --frozen-lockfile --ignore-scripts --dir web

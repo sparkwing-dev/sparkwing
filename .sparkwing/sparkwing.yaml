@@ -97,6 +97,9 @@ pipelines:
       push:
         branches: [main]
 
+  - name: deploy-scan
+    entrypoint: DeployScan
+
   - name: deploy-smoke
     entrypoint: DeploySmoke
 
