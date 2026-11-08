@@ -33,7 +33,7 @@ func (Deploy) Help() string {
 		"reusing images an earlier run already published for the same commit. staging-deploy and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
 		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate runs deploy-smoke with a child run and the hello reference pipeline on staging Cloud. " +
 		"production requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in the " +
-		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
+		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs after both rollouts complete. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
 		"Take a manual snapshot before a risky migration. Each environment's deployed and previous digests are that job's output. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Every deploy job refuses a commit that is no longer the tip of origin/main, and " +
@@ -335,6 +335,8 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 	env := d.cfg.Production
 	rec, gitEnv, err := d.deployTo(ctx, env, images)
 	if err == nil {
+		// bug: startup probes can fail before readiness; the smoke judges the settled deployments.
+		rec.WindowStart = d.tools.now().UTC().Format(time.RFC3339Nano)
 		err = d.productionSmoke(ctx, images, rec.WindowStart)
 	}
 	if d.dry {
