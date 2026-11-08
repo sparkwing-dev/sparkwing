@@ -36,6 +36,15 @@ func (f *fakeSampler) Sample() (wingd.HostStat, error) {
 	return f.stat, nil
 }
 
+func (f *fakeSampler) SampleWithOwned(roots []wingd.OwnedRoot, _ float64) (wingd.HostStat, map[int]float64, bool, error) {
+	stat, err := f.Sample()
+	owned := make(map[int]float64, len(roots))
+	for _, root := range roots {
+		owned[root.PID] = 0
+	}
+	return stat, owned, true, err
+}
+
 func (f *fakeSampler) set(stat wingd.HostStat) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

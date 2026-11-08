@@ -79,6 +79,8 @@ func TestValidateSocketPath_RejectsOverLength(t *testing.T) {
 }
 
 func TestDaemon_BindsUnderDeepHome(t *testing.T) {
+	wait, stop := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stop()
 	home := deepHome(t)
 	d, err := New(Config{Home: home, Version: "v1.0.0"})
 	if err != nil {
@@ -93,14 +95,14 @@ func TestDaemon_BindsUnderDeepHome(t *testing.T) {
 	case err := <-errc:
 		cancel()
 		t.Fatalf("daemon exited before serving under deep home: %v", err)
-	case <-time.After(3 * time.Second):
+	case <-wait.Done():
 		cancel()
 		t.Fatal("daemon never became ready under deep home")
 	}
 	cancel()
 	select {
 	case <-errc:
-	case <-time.After(3 * time.Second):
+	case <-wait.Done():
 		t.Fatal("daemon did not stop after cancel")
 	}
 	if _, err := os.Stat(filepath.Dir(d.layout.sock)); !os.IsNotExist(err) {
