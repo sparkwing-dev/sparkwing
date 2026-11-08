@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **landing:** Default and security reviews run concurrently, retaining separate sessions, findings and blocking rules.
+
 - **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-36).
 
 - **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/_unreleased.md#declare-upload-allowances-in-repository-config).

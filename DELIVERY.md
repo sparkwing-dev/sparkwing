@@ -50,8 +50,10 @@ comment changes included; the review job never skips by size or path. A diff
 whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any
 `*.md`, `CHANGELOG*`) runs the default review on the cheaper `docs` reviewer
 (Claude Haiku) instead of the default model; any other file keeps the default.
-The record's `reviewer.model` names the model that ran. The
-gate selects its checks from the change scope (decision 96): vet, build, lint,
+The record's `reviewer.model` names the model that ran. Independent default and
+security profiles run concurrently, and their findings and sessions are combined
+in profile order after both finish. A failed profile leaves the prior review
+record unchanged. The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
 `.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
