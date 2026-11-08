@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
@@ -66,6 +67,38 @@ func TestChildAwaitObservesCompletionAndCancellation(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestChildAwaitReturnsMidAwaitForbiddenImmediately(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		var refusedAt time.Time
+		calls := 0
+		body, err := json.Marshal(map[string]any{"error": &apierr.Error{Code: apierr.Forbidden, Message: "parent attempt cancelled"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		process := &NativeProcessClient{run: "parent", transport: testEngine(t, func(*http.Request) (*http.Response, error) {
+			calls++
+			switch calls {
+			case 1, 2:
+				return childPollResponse(t, "running"), nil
+			case 3:
+				refusedAt = time.Now()
+				return engineResponse(http.StatusForbidden, string(body)), nil
+			default:
+				return childPollResponse(t, "success"), nil
+			}
+		})}
+		_, err = process.Child(t.Context(), "child", time.Minute)
+		var refused *apierr.Error
+		if !errors.As(err, &refused) || refused.Code != apierr.Forbidden || refused.Message != "parent attempt cancelled" {
+			t.Fatalf("child await lost controller refusal: %v", err)
+		}
+		if calls != 3 || !time.Now().Equal(refusedAt) || !refusedAt.After(started) {
+			t.Fatalf("mid-await refusal: %d polls, refused after %s, returned after %s", calls, refusedAt.Sub(started), time.Since(started))
+		}
+	})
 }
 
 func childPollResponse(t *testing.T, status string) *http.Response {
