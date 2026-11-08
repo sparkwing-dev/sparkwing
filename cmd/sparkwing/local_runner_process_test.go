@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -125,6 +126,50 @@ func TestPinnedLocalRunnerExecutableSurvivesInstallAndRejectsCorruption(t *testi
 	}
 	if _, _, err := pinLocalRunnerExecutable(home, source); err == nil {
 		t.Fatal("reused corrupt image")
+	}
+}
+
+func TestPinnedLocalRunnerExecutableReusesOnlyIdenticalBytes(t *testing.T) {
+	for _, change := range []string{"unchanged", "same-size", "shorter", "longer"} {
+		t.Run(change, func(t *testing.T) {
+			home := t.TempDir()
+			source := filepath.Join(home, "installed")
+			original := strings.Repeat("first", 20000)
+			if err := os.WriteFile(source, []byte(original), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path, build, err := pinLocalRunnerExecutable(home, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			contents := original
+			switch change {
+			case "same-size":
+				contents = original[:len(original)-1] + "x"
+			case "shorter":
+				contents = original[:len(original)-1]
+			case "longer":
+				contents = original + "x"
+			}
+			if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			next, nextBuild, err := pinLocalRunnerExecutable(home, source)
+			if change == "unchanged" {
+				if err != nil || path != next || build != nextBuild {
+					t.Fatalf("reuse = %s %s %v", next, nextBuild, err)
+				}
+			} else if err == nil {
+				t.Fatal("reused changed executable")
+			}
+			files, err := os.ReadDir(filepath.Dir(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 1 {
+				t.Fatalf("staged files survived: %v", files)
+			}
+		})
 	}
 }
 
