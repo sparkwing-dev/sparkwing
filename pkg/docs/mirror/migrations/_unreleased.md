@@ -253,7 +253,8 @@ the run's terminal result.
 existing controller-dispatched run and source-upload contracts. No wire field,
 API endpoint or SDK symbol is removed or renamed. `--profile` remains refused
 without `--sw-route cloud`. `--sw-route local` overrides machine routing for one
-run. `--allow-secret-file PATH` also requires `--sw-route cloud`. Repository
+run. The removed `--allow-secret-file` flag is replaced by the repository
+`allow_secret_files` list in `.sparkwing/sparkwing.yaml`. Repository
 local restrictions remain binding.
 
 Explicit Cloud runs can use `--sw-detached` and need no attached here host.

@@ -42,8 +42,8 @@ snapshot has no ancestry. Full mode runs every package. The two heavy jobs each
 request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
 requires a successful Cloud receipt and an unchanged clean HEAD before and
 after the remote gate. The landing record's `gate_run` names the Cloud run.
-The wrapper passes this repository's tracked secret-shaped fixtures, listed in
-`cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
+This repository lists its public secret-shaped fixtures in
+`.sparkwing/sparkwing.yaml` under `allow_secret_files`. A new fixture of
 that kind fails the Cloud upload until it is added there.
 Preconditions, review, verification and push retain the original checkout and
 its git credentials. A merge after the gate still runs its existing build and
@@ -90,7 +90,8 @@ suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
 
-The `land` job's `verify` step requires the review record's tree to be HEAD's
+The `land` job reads the review JSON from the shared Git directory instead of
+resolving a review output blob. Its `verify` step requires the review record's tree to be HEAD's
 tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the

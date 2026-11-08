@@ -57,17 +57,22 @@ unlock.
 
 - **runners:** Award-bound job reports accept optional `X-Sparkwing-Exited-At` observation headers. Job and attempt finish times preserve the runner's observed process exit before final log acknowledgement, cleanup and artifact/cache publication, including delayed reports after controller restart. Event timestamps still use the controller clock. See [the migration guide](docs/migrations/_unreleased.md#observed-job-exit-time).
 
-- **CLI:** `sparkwing run --sw-route cloud --profile NAME` sends planning and jobs directly to Cloud without a terminal or local fallback. `--sw-detached` returns a Cloud receipt. `--allow-secret-file PATH` uploads a named secret-shaped file, as with `pipeline trigger --working-tree`. Source uploads and requester secrets use the burst rules, and repository local restrictions still apply. Direct Cloud uses team credits rather than the burst overflow allowance.
+- **CLI:** `sparkwing run --sw-route cloud --profile NAME` sends planning and jobs directly to Cloud without a terminal or local fallback. `--sw-detached` returns a Cloud receipt. Repository `allow_secret_files` lists the secret-shaped files an upload may include. Source uploads and requester secrets use the burst rules, and repository local restrictions still apply. Direct Cloud uses team credits rather than the burst overflow allowance.
 - **delivery:** `sparkwing run land -- --cloud-profile NAME` runs the full gate and race tests on Cloud while review and push keep the local checkout. The landing record names the Cloud gate run.
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
 
 ### Changed
+
+- **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan. Secret-value scanning still applies.
 
 - **examples:** The `example` pipeline's memoized-step, cancellation and logs-history probes now run on Sparkwing Cloud instead of skipping. A new `lifecycle-cli` job builds the CLI from the checkout and signs in to `--api-controller` with the optional `EXAMPLE_PROBE_TOKEN` secret, and the deploy pipeline's staging gate passes the staging controller. Without a CLI on the host, a controller or that secret, the probes still skip with the reason.
 
 - **storage:** The first 256 MiB of the prepared pipeline Sparkwing Cloud builds for a run no longer counts toward the team's per-run, monthly or object storage quotas, so free-tier teams can run Go pipelines whose binaries are 20 to 40 MB. Bytes past 256 MiB and further uploads from the run's planning credentials count as before. The prepared pipeline stays deduplicated by digest and retained-storage billing still counts it. The free tier's per-run limit rises from 10 MiB to 100 MiB; the paid tier and explicit operator quotas are unchanged. See [limits](docs/limits.md#uploads-and-storage-accounting).
 
 ### Fixed
+
+- **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
+- **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
 
 - **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
 - **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.
