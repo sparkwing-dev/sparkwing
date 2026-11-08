@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **CLI:** List and download committed job files with `sparkwing runs artifacts`
+  JSON emits one record per file. Downloads verify size and SHA-256 and write to a new destination.
+
 ### Changed
 
 - **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/_unreleased.md#bound-object-presence-requests).

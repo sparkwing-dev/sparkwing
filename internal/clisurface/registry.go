@@ -491,6 +491,17 @@ func Registry() []Command {
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "profile", Argument: "NAME"},
 		}},
+		{Path: "sparkwing runs artifacts", Rules: []string{
+			"List files from each job's committed Artifacts manifest. --job narrows the list to one job. Unfinished jobs and absent or expired manifests yield no files. Missing or corrupt retained manifests fail listing; missing or corrupt file bytes fail download.",
+			"Fetch one exact manifest path with --job, --path and --dest. The destination must not exist. Downloads verify the file's size and SHA-256 before reporting success. JSON emits one artifact record per line, with run_id, job_id, path, digest, size and mode; an empty list emits no records. Download records also carry saved_to. Signed download URLs stay private.",
+			"Reads use the selected controller profile or the local controller and require current team membership with runs.read. Execution claims and cache-only data credentials cannot use this read surface.",
+		}, Flags: []Flag{
+			{Name: "run", Argument: "RUN_ID", Required: true},
+			{Name: "job", Argument: "JOB_ID"},
+			{Name: "path", Argument: "PATH"},
+			{Name: "dest", Argument: "FILE"},
+			{Name: "profile", Argument: "NAME"},
+		}},
 		{Path: "sparkwing runs cancel", Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "profile", Argument: "NAME"},

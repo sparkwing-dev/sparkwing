@@ -121,6 +121,7 @@ func wireOperations() map[string]wireOperation {
 	result["POST /api/v1/team/billing/standing-request"] = operation("Contact operators for High standing, higher limits or larger payments", wire.StandingRequestWrite{}, wire.StandingRequest{})
 	result["GET /api/v1/operator/standing-requests"] = operation("List open standing requests", nil, wire.OperatorStandingQueue{})
 	result["POST /api/v1/operator/teams/{team}/standing-request/decline"] = operation("Decline a team's open standing request", wire.StandingDecline{}, wire.StandingRequest{})
+	result["GET /api/v1/runs/{run}/jobs/{job}/artifacts"] = operation("List committed job artifacts or sign an exact path download", nil, wire.JobArtifacts{})
 	result["GET /api/v1/runs/{run}/jobs/{job}/output"] = operation("Read an authorized committed job output", nil, wire.JobOutput{})
 	result["GET /api/v1/runs/{run}/children/{child}/jobs/{job}/output"] = operation("Read an authorized child output", nil, wire.JobOutput{})
 

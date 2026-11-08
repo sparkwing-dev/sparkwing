@@ -34,6 +34,12 @@
       "baselines": {}
     },
     {
+      "route": "/api/v1/runs/{run}/jobs/{job}/artifacts",
+      "kind": "api",
+      "exempt": "Requires a committed job manifest and current team membership, absent from the dashboard corpus. HTTP and CLI smoke tests verify listing, download integrity and authority. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/runs/{run}/children/{child}/jobs/{job}/output",
       "kind": "api",
       "exempt": "Requires a live creating job and a child's committed result, absent from the dashboard corpus. In-process HTTP tests verify authority and output integrity. Authorized latency, cold start and response bytes remain unmeasured.",
