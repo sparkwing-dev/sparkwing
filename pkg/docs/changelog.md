@@ -63,6 +63,7 @@ unlock.
 - **controller:** Run listings load at most the requested page plus one lookahead row per batch, reducing database work for small pages while preserving filters and stable cursors.
 
 - **CLI:** A foreground run keeps its confirmed terminal exit status when log observation loses its connection. The CLI warns with a command for reading retained logs. Permission, protocol and integrity refusals remain errors.
+- **CI:** hosted gates and security scans provision a private controller key inside their temporary Sparkwing home, allowing headless checks to start.
 
 - **deploy:** production smoke checks controller and launcher logs after both rollouts complete, so recovered startup probe failures do not trigger rollback; warnings and errors after readiness still fail the gate.
 
