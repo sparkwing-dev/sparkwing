@@ -26,7 +26,6 @@ type triggerFlags struct {
 	workingTree                      bool
 	trusted                          bool
 	wantHelp                         bool
-	allowSecretFiles                 []string
 	runner                           string
 	reason                           string
 	agent                            string
@@ -38,7 +37,7 @@ func triggerFlagsFromInvocation(inv clisurface.Invocation) (triggerFlags, error)
 	flags := triggerFlags{
 		pipeline: inv.Pipeline, profile: inv.Value("profile"), detach: inv.Bool("detach"),
 		workingTree: inv.Bool("working-tree"), trusted: inv.Bool("trusted"), wantHelp: inv.Help(),
-		allowSecretFiles: inv.Flags["allow-secret-file"], runner: inv.Value("runner"),
+		runner: inv.Value("runner"),
 		reason: inv.Value("reason"), passthrough: inv.Args, resume: inv.Value("resume"),
 		ref: inv.Value("ref"), pipelineRef: inv.Value("pipeline-ref"), output: inv.Output(color.IsInteractiveStdout()),
 	}

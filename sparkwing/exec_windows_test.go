@@ -32,8 +32,8 @@ func TestExec_WindowsLongBashProgram(t *testing.T) {
 			t.Setenv("SPARKWING_BASH_PROGRAM", "exit 41")
 			for _, count := range []int{1, 300} {
 				want := strings.Repeat("quoted argument with spaces\n", count) + "quotes ' \" $ ; &\npresent\n"
-				program := "printf '%s\\n'" + strings.Repeat(` "quoted argument with spaces"`, count) + "\nprintf '%s\\n' \"quotes ' \\\" \\$ ; &\" \"$SPARKWING_TEST_VARIABLE\"\nbash -c 'test -z \"${SPARKWING_BASH_PROGRAM+x}\"'"
-				result, err := Bash(context.Background(), program).Dir(t.TempDir()).Env("SPARKWING_TEST_VARIABLE", "present").Env("SPARKWING_BASH_PROGRAM", "exit 42").Capture()
+				program := "printf '%s\\n'" + strings.Repeat(` "quoted argument with spaces"`, count) + "\nprintf '%s\\n' \"quotes ' \\\" \\$ ; &\" \"$VERIFY_BASH_VARIABLE\"\nbash -c 'test -z \"${SPARKWING_BASH_PROGRAM+x}\"'"
+				result, err := Bash(context.Background(), program).Dir(t.TempDir()).Env("VERIFY_BASH_VARIABLE", "present").Env("SPARKWING_BASH_PROGRAM", "exit 42").Capture()
 				if err != nil {
 					t.Fatalf("shell program with %d arguments failed with exit %d; stderr: %s", count, result.ExitCode, result.Stderr)
 				}
@@ -206,5 +206,46 @@ type windowsStepReady struct {
 func (l *windowsStepReady) Emit(record LogRecord) {
 	if record.Event == "exec_line" && strings.Contains(string(record.streamData), "ready") {
 		l.once.Do(func() { close(l.ready) })
+	}
+}
+
+func TestExec_WindowsFiltersEngineCredentials(t *testing.T) {
+	t.Setenv("SPARKWING_NODE_TOKEN", "fixture-only")
+	for _, explicit := range []bool{false, true} {
+		cmd := Exec(t.Context(), "cmd", "/c", "if defined SPARKWING_NODE_TOKEN (exit 23) else (echo filtered)")
+		if explicit {
+			cmd.Env("SPARKWING_NODE_TOKEN", "fixture-override")
+		}
+		result, err := cmd.Capture()
+		if err != nil || strings.TrimSpace(result.Stdout) != "filtered" {
+			t.Fatalf("explicit=%v: credential reached tool: %v", explicit, err)
+		}
+	}
+}
+
+func TestExec_WindowsUsesCommandPath(t *testing.T) {
+	directory := t.TempDir()
+	source, err := exec.LookPath("cmd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "sdk-tool.exe"), body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, path string }{
+		{"sdk-tool", directory},
+		{filepath.Join(directory, "sdk-tool"), t.TempDir()},
+		{`.\sdk-tool`, t.TempDir()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Exec(t.Context(), tc.name, "/c", "echo resolved").Dir(directory).Env("PATH", tc.path).Env("PATHEXT", ".EXE").Capture()
+			if err != nil || strings.TrimSpace(result.Stdout) != "resolved" {
+				t.Fatalf("command PATH lookup: %v", err)
+			}
+		})
 	}
 }

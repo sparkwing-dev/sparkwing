@@ -76,8 +76,13 @@ body or their `SafeWithoutDryRun` body. Other step bodies are skipped.
 
 `--sw-workers N` bounds simultaneous local foreground job executions. Jobs waiting
 for a worker remain available to the scheduler without consuming a local claim.
-`--sw-start-at` and `--sw-stop-at` bound steps inside jobs. Use `--sw-only` to
-select jobs and their dependencies.
+`--sw-start-at` keeps a step and its descendants; `--sw-stop-at` keeps a step
+and its ancestors. Together they select the dependency paths between the bounds,
+not an interval in declaration order. A job containing neither bound runs all
+its steps. A range selecting no steps in a job fails before work starts, even
+if another job has runnable steps. For parallel checks, omit both bounds to run
+the full gate, or use the same step for both bounds to run one check. Use
+`--sw-only` to select jobs and their dependencies.
 
 For an ordinary foreground local run, Ctrl-C requests cancellation and keeps
 observing until the run finishes and its logs drain. A second interrupt detaches
@@ -486,6 +491,11 @@ same-account code remain inside the machine trust boundary. See
 
 ## Per-host concurrency
 
+CPU admission waits appear as `job_admission_queued` run events with the blocking
+reason, queue position and elapsed `wait_ms`. `job_admission_granted` records the
+completed wait. A claimed job waiting for capacity also shows its reason in run
+status.
+
 Admission arbitrates local CPU and memory. Concurrency groups coordinate declared
 work through the controller. Neither is a credential boundary. Inline placement
 keeps work on its run host without a reserved-label alias.
@@ -561,9 +571,18 @@ execution for one invocation. Repository `run.route: local` still forbids Cloud.
 
 Source-file approval, secret scanning, requester secret selection and masking
 use the burst rules below. The upload refuses tracked files whose names or
-contents look like credentials. `--allow-secret-file PATH` uploads a named
-repository-relative file anyway, as `pipeline trigger --working-tree` does; the
-secret-value scan still applies and an unmatched path fails the run. Requester values stay in controller memory. Direct
+contents look like credentials. The repository lists upload exceptions in
+`.sparkwing/sparkwing.yaml` under `allow_secret_files`, a list of literal
+repository-relative file paths. Cloud runs and `pipeline trigger --working-tree`
+read the same list. The secret-value scan still applies, and an unmatched path
+fails the run. For example:
+
+```yaml
+allow_secret_files:
+  - fixtures/example.key
+```
+
+Requester values stay in controller memory. Direct
 Cloud runs have no attached here host to resupply them after a controller restart.
 If those values are lost, submit a new run. A working-tree run still reads only
 team shared secrets, never repository pipeline secrets. `Inline()` does not return a job to the invoking machine.

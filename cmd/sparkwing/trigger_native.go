@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -20,12 +19,6 @@ import (
 )
 
 func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result controllerwire.CreateRunRequest, resultErr error) {
-	unavailable := func(message string) (controllerwire.CreateRunRequest, error) {
-		return controllerwire.CreateRunRequest{}, &apierr.Error{Code: apierr.Unavailable, Message: message}
-	}
-	if len(flags.allowSecretFiles) != 0 && !flags.workingTree {
-		return unavailable("--allow-secret-file requires --working-tree")
-	}
 	path, err := userconfig.Path()
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
@@ -64,7 +57,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	var snapshot *worktreeSnapshot
 	originalCheckout := checkout
 	if flags.workingTree {
-		snapshot, err = captureWorktreeSnapshot(ctx, captured, checkout, flags.allowSecretFiles)
+		snapshot, err = captureWorktreeSnapshot(ctx, captured, checkout, nil)
 		if err != nil {
 			return result, err
 		}

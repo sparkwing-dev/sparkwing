@@ -101,6 +101,7 @@ func surfaceCommand(path string) Command {
 }
 
 var commandFlagDescriptions = map[string]string{
+	"sparkwing dashboard open --host":                          "Exact DNS name from dashboard.allowed_hosts for an HTTPS sign-in link through Tailscale Serve.",
 	"sparkwing __complete --kind":                              "Which completion candidates to print for the given command words.",
 	"sparkwing billing request-tier --message":                 "What you need, sent to the operators with the team's standing and payment history.",
 	"sparkwing billing request-tier --tier":                    "Standing tier to request.",
@@ -183,7 +184,6 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing pipeline sparks catalog --library":              "Full Go module path of the library whose blocks to list, sparks-core by default, at the version the project declares or latest.",
 	"sparkwing pipeline sparks list --no-resolve":              "Show declared versions only, skipping the module lookup that resolves each to a concrete version.",
 	"sparkwing pipeline sparks remove --spark":                 "Name or source module path of the library to remove from the project's spark list.",
-	"sparkwing pipeline trigger --allow-secret-file":           "Include this repository-relative file in a --working-tree snapshot even though its name or content looks like a secret; the trigger fails if no snapshot file has that path, the secret-value scan still applies, and it is refused without --working-tree.",
 	"sparkwing pipeline trigger --detach":                      "Return once the controller accepts the run instead of following its logs to the end; refused with --runner here.",
 	"sparkwing pipeline trigger --pipeline-ref":                "Git revision to load the pipeline definitions from when it differs from the revision being run; it must match any source pin in the repository's configuration.",
 	"sparkwing pipeline trigger --reason":                      "Text the run records to explain why it ran in this CLI; required with --runner here and refused with any other runner.",

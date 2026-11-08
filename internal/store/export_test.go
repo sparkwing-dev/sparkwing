@@ -102,3 +102,16 @@ func rawDBForTest(dialect Dialect, target string) (*sql.DB, error) {
 	}
 	return sql.Open("sqlite", sqliteDSN(target))
 }
+
+func InstallSchema35ActionsForTest(t testing.TB, s *Store) {
+	t.Helper()
+	for _, ddl := range schema35ActionsStatements {
+		translated, err := translateSchema(ddl, s.dialect)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(translated); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
