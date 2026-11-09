@@ -467,6 +467,12 @@ Production compares it with semantic version ordering, after the base release an
 next release, and refuses older images. A prerelease base uses Go's corresponding prerelease
 pseudo-version form. Release-tag builds keep their exact release version.
 
+`deploy` and `deploy-scan` declare `requires: [deploy-kikd-prod]` in the
+repository configuration so planning and jobs stay on owned hardware. Controller
+intake seals those requirements before a planner selects the replacement-pin
+engine. A detached scan inherits them. Cloud remains for the small smokes that
+exercise Cloud itself.
+
 `build-images` builds linux/amd64 and linux/arm64 binaries with `bin/build-release-target.sh` and
 publishes them through `publish-images`, reusing the image pair when its immutable version tags
 already exist and both revision labels match the candidate commit. A new build checks that both

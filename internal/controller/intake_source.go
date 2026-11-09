@@ -202,7 +202,7 @@ func (s *Server) appSourceSelector(team store.Team) func(context.Context, runspe
 		read := func(ctx context.Context, sha, name string) ([]byte, bool, error) {
 			return s.githubApp.client.FileAtCommit(ctx, installation.InstallationID, repository.ID, repo.Owner, repo.Name, sha, name)
 		}
-		git, selected, err := s.selectIntakeSource(ctx, team, request, read)
+		git, selected, err := s.selectIntakeSource(ctx, team, &request, read)
 		if err != nil {
 			return git, selected, err
 		}
