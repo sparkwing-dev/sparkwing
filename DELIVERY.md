@@ -917,6 +917,12 @@ file. Other syntax and workflow checks remain active.
   start beside running gates instead of queueing behind them. A simulation of
   six concurrent lands found declaring 4 or 6 cores for the gate pair slower
   than this under external load.
+  The `cli-docs` policy step compiles the CLI's registry, help metadata and
+  Markdown renderer through `reference_generate.go`, without linking the
+  execution runtime or embedding the docs it checks. `gen-cli-docs.sh --check`
+  still regenerates every reference page and rejects changed, missing or stale
+  generated pages. `TestCommandReferenceMatchesRegistry` also compares the
+  committed pages with the renderer compiled into the full CLI.
   Without `--full`, vet and build cover the affected dependency closure. Its test step
   runs `go test -short` on changed packages
   and their reverse dependency closure, including production, internal-test
