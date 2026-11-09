@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -57,7 +58,7 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 		// resolves where the parent fetched and never at a requested address.
 		request.Source.Location = from.Source.Location
 	}
-	git, code, err := s.selectIntakeSource(ctx, store.Team(a.Target.Team), *request, nil)
+	git, code, err := s.selectIntakeSource(ctx, store.Team(a.Target.Team), request, nil)
 	if err != nil {
 		return err
 	}
@@ -65,7 +66,7 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	return nil
 }
 
-func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, request runspec.Request, read func(context.Context, string, string) ([]byte, bool, error)) (runspec.Git, runspec.Source, error) {
+func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, request *runspec.Request, read func(context.Context, string, string) ([]byte, bool, error)) (runspec.Git, runspec.Source, error) {
 	spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL, LocalCheckout: request.Source.Location.LocalCheckout}
 	access := &intakeRevisionAccess{server: s, team: team}
 	options := source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: requestMasker(ctx)}, ReadFile: read, LookupHost: s.sourceLookup}
@@ -75,7 +76,13 @@ func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, reques
 	if read != nil && s.githubApp != nil && strings.HasPrefix(spec.RepoKey, "gh:") {
 		options.ResolveRef = access.resolveGitHubAppRef(spec)
 	}
-	git, code, _, err := source.Select(ctx, spec, request.Pipeline, request.Git, request.Source, "", options)
+	git, code, config, err := source.Select(ctx, spec, request.Pipeline, request.Git, request.Source, "", options)
+	// safety: planning must satisfy repository requirements before it selects the run's engine.
+	if err == nil && !request.Options.Requires.Set {
+		if entry := config.Registry().Find(request.Pipeline); entry != nil && entry.Requires != nil {
+			request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: slices.Clone(entry.Requires)}, Origin: runspec.SettingOrigin{Layer: runspec.LayerSealed, Key: "pipeline.requires"}}
+		}
+	}
 	return git, code, err
 }
 

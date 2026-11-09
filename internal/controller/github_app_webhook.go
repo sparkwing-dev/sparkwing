@@ -1014,7 +1014,7 @@ func (s *Server) startGitHubAppRun(
 		},
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/" + repo.Slug() + ".git", PipelineDir: ".sparkwing"}},
 	}
-	git, code, err := s.selectIntakeSource(r.Context(), tenant.Team(), request, func(ctx context.Context, sha, name string) ([]byte, bool, error) {
+	git, code, err := s.selectIntakeSource(r.Context(), tenant.Team(), &request, func(ctx context.Context, sha, name string) ([]byte, bool, error) {
 		return s.githubApp.client.FileAtCommit(ctx, installation.InstallationID, repo.ID, repo.Owner, repo.Name, sha, name)
 	})
 	if refusal := (*apierr.Error)(nil); errors.As(err, &refusal) && refusal.Code == apierr.InvalidArgs {

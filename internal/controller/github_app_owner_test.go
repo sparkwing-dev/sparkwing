@@ -1,8 +1,12 @@
 package controller_test
 
 import (
+	"crypto/sha256"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -280,5 +284,54 @@ func TestGitHubAppAutomationListingReadsAContinuationPage(t *testing.T) {
 	}
 	if code := f.call("GET", "/api/v1/team/github-app/automation?repository=acme/widgets&limit=1", olga.auth, nil, nil); code != http.StatusBadRequest {
 		t.Fatalf("repository preview with a page size = %d, want 400", code)
+	}
+}
+
+func TestDeployPlanningRequiresTheOwnedRunner(t *testing.T) {
+	for _, pipeline := range []string{"deploy", "deploy-scan"} {
+		t.Run(pipeline, func(t *testing.T) {
+			f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
+			owner := f.ghUser(501, "olga")
+			f.connect(owner, 501, 7, acmeAdmin)
+			config, err := os.ReadFile(filepath.Join("..", "..", ".sparkwing", "sparkwing.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.app.SetCommit("acme/widgets", "main", headSHA)
+			f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", config)
+			if code := f.subscribe(owner, "acme/widgets", pipeline, nil); code != http.StatusOK {
+				t.Fatalf("subscribe: %d", code)
+			}
+			code, response := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
+			ids := startedRunIDs(t, response)
+			if code != http.StatusAccepted || len(ids) != 1 {
+				t.Fatalf("dispatch: %d %+v", code, response)
+			}
+			request := f.sealedRequest(ids[0])
+			if !slices.Contains(request.Options.Requires.Value, "deploy-kikd-prod") {
+				t.Fatalf("planning can escape to Cloud: requires=%v", request.Options.Requires.Value)
+			}
+			root, err := f.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(f.admin)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cloud, err := f.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, Authority: &root.Authority, RegistrationID: "service:planner", Subject: capability.Subject{Kind: capability.SubjectService, ID: "planner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			machine, _ := f.teamRunner(owner, "owned-runner")
+			body := githubClaimBody(capability.UnitPlan, ids[0], "")
+			var claim controllerwire.ClaimResponse
+			if code := f.call("POST", "/api/v1/launcher/claim", "Bearer "+cloud.Raw, body, &claim); code != http.StatusForbidden || claim.Claim != nil {
+				t.Fatalf("Cloud claimed owned planning: %d %+v", code, claim.Claim)
+			}
+			if code := f.call("POST", "/api/v1/runners/claim", machine, body, &claim); code != http.StatusForbidden || claim.Claim != nil {
+				t.Fatalf("unlabelled runner claimed planning: %d %+v", code, claim.Claim)
+			}
+			body.Labels = []string{"deploy-kikd-prod"}
+			if code := f.call("POST", "/api/v1/runners/claim", machine, body, &claim); code != http.StatusOK || claim.Claim == nil || claim.Claim.RunID != ids[0] {
+				t.Fatalf("owned runner could not claim planning: %d %+v", code, claim.Claim)
+			}
+		})
 	}
 }

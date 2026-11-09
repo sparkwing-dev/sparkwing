@@ -21,7 +21,8 @@ func main(){
  args:=os.Args[1:]
  if strings.Contains(filepath.Base(os.Args[0]),"node") && len(args)>0 && strings.HasSuffix(args[0],"npm-cli.js") { args=args[1:] }
  if strings.Contains(filepath.Base(os.Args[0]),"npm") || strings.Contains(filepath.Base(os.Args[0]),"node") {
-  if len(args)<1 || args[0]!="ci" { os.Exit(10) }
+  if len(args)==5 && args[0]=="ci" && args[1]=="--dry-run" && args[2]=="--ignore-scripts" && args[3]=="--no-audit" && args[4]=="--no-fund" { return }
+  if len(args)!=4 || args[0]!="install" || args[1]!="--no-save" || args[2]!="--no-audit" || args[3]!="--no-fund" { os.Exit(10) }
   dir:=filepath.Join("node_modules","@sparkwing","sdk")
   if os.MkdirAll(dir,0700)!=nil || os.WriteFile(filepath.Join(dir,"package.json"),[]byte("{\"version\":\"0.20.0\"}"),0600)!=nil { os.Exit(11) }
   return

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
@@ -120,5 +121,32 @@ func TestLocalTypeScriptSDKSelectsInstalledEngineWithoutNetwork(t *testing.T) {
 	}
 	if err := selected.verifyInstalledEngine(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReplacementEngineMismatchRemainsIntegrityFailure(t *testing.T) {
+	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	resolver, err := NewResolver(Config{CacheDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := resolver.Resolve(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: "v0.0.0", Replacement: ".."}, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, changed := range []string{"version", "bytes"} {
+		t.Run(changed, func(t *testing.T) {
+			accepted := selected.Identity
+			if changed == "version" {
+				accepted.Version += "-previous"
+			} else {
+				accepted.ManifestDigest = strings.Repeat("0", 64)
+			}
+			_, err := resolver.Ensure(t.Context(), accepted, target)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.IntegrityFailure || !strings.Contains(failure.Message, "installed engine differs from the accepted replacement-pin engine") {
+				t.Fatalf("changed installed engine must retain its integrity diagnosis: %v", err)
+			}
+		})
 	}
 }

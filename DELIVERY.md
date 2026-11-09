@@ -467,6 +467,12 @@ Production compares it with semantic version ordering, after the base release an
 next release, and refuses older images. A prerelease base uses Go's corresponding prerelease
 pseudo-version form. Release-tag builds keep their exact release version.
 
+`deploy` and `deploy-scan` declare `requires: [deploy-kikd-prod]` in the
+repository configuration so planning and jobs stay on owned hardware. Controller
+intake seals those requirements before a planner selects the replacement-pin
+engine. A detached scan inherits them. Cloud remains for the small smokes that
+exercise Cloud itself.
+
 `build-images` builds linux/amd64 and linux/arm64 binaries with `bin/build-release-target.sh` and
 publishes them through `publish-images`, reusing the image pair when its immutable version tags
 already exist and both revision labels match the candidate commit. A new build checks that both
@@ -692,6 +698,14 @@ sparkwing run deploy -- --dry-run --promote-proven        # preview promoting th
 ```
 
 #### Deploy toolchain
+
+Deploy CLI homes share only the runner's existing content-addressed pipeline
+binary cache. Each invocation keeps its profiles, credentials and store in its
+private job home. The cache key covers pipeline source and local dependencies,
+toolchain identity, GOOS/GOARCH and build flags. Changed inputs rebuild, and
+installation verifies the cached bytes before executing a private copy.
+If linking the cache fails, submission uses its private cache. Job cleanup
+removes the link, while existing cache limits and pruning own retained entries.
 
 Deploys run only on runners labelled `deploy-kikd-prod`. After installing the root-owned toolchain
 below, enroll one with `sparkwing runners add --profile prod --runner korey-desktop --session-stdin
