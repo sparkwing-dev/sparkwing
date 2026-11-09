@@ -30,6 +30,7 @@ func TestRunnerLabelsBoundsApplyToEnrollmentAdminAndPoll(t *testing.T) {
 			}
 		})
 	}
+	spec.AllowedLabels = nil
 	for i := range 32 {
 		spec.AllowedLabels = append(spec.AllowedLabels, fmt.Sprintf("gpu-%d", i))
 	}

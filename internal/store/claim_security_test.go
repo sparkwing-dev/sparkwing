@@ -69,7 +69,7 @@ func trustedHostRecordedAtClaim(t *testing.T, open func(*testing.T) *Store) {
 			s.testOnlyExec(t, `UPDATE triggers SET status='done',finished_at=1 WHERE id='run'`)
 			owner := referenceMember(t, s, "owner", RoleOwner)
 			subject := capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}
-			issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:desktop", Team: "a", Subject: subject, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Trust: tc.trust})
+			issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, AllowedLabels: []string{"team-4cpu"}, Authority: &owner.Authority, RegistrationID: "runner:a:desktop", Team: "a", Subject: subject, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Trust: tc.trust})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -357,7 +357,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 						if runner == "plain-machine" {
 							platform = ""
 						}
-						issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:" + runner, Team: "a", Subject: root.Subject, Grants: root.Grants, Binding: root.Binding, Repositories: []string{"github.com/acme/*"}, ReservedPools: root.ReservedPools, Trust: root.Trust, Platform: platform})
+						issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, AllowedLabels: []string{"team-4cpu", "single-use", "launcher"}, Authority: &owner.Authority, RegistrationID: "runner:a:" + runner, Team: "a", Subject: root.Subject, Grants: root.Grants, Binding: root.Binding, Repositories: []string{"github.com/acme/*"}, ReservedPools: root.ReservedPools, Trust: root.Trust, Platform: platform})
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -453,7 +453,7 @@ func freshPodWaitingExplanation(t *testing.T, open func(*testing.T) *Store) {
 					if mismatch == "repository" {
 						repos = []string{"github.com/other/*"}
 					}
-					issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:persistent", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "persistent"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: repos, Trust: capability.TrustAny, Platform: "kubernetes"})
+					issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, AllowedLabels: []string{"team-4cpu", "gpu"}, Authority: &owner.Authority, RegistrationID: "runner:a:persistent", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "persistent"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: repos, Trust: capability.TrustAny, Platform: "kubernetes"})
 					if err != nil {
 						t.Fatal(err)
 					}

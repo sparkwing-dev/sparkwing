@@ -2,6 +2,7 @@
   "run_id": "run-retry",
   "number": 16,
   "inputs": {
+    "proof_eligible": false,
     "pipeline": "hello",
     "requested_args": {},
     "args": {

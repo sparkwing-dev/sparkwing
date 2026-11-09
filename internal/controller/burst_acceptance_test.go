@@ -420,7 +420,7 @@ func burstAcceptancePersonalMachine(t *testing.T, s *serverFixture) string {
 	t.Helper()
 	digest := sha256.Sum256([]byte("private-account-session"))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := s.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:burst-desktop", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "burst-desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := s.store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:burst-desktop", AllowedLabels: []string{"worker"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "burst-desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatalf("enroll personal machine: %v", err)
 	}

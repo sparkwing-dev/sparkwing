@@ -18,7 +18,7 @@ func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 	s, demand := unitClaimFixture(t)
 	owner := authorityMember(t, s, "pool-admin", RoleOwner)
 	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-		Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:deploy-launcher", Team: "a",
+		Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:deploy-launcher", AllowedLabels: demand.Labels, Team: "a",
 		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "deploy-launcher"}, Grants: []capability.Grant{capability.ClaimsLaunch},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"deploy"}, Trust: capability.TrustVerifiedDefault,
 	})
@@ -359,7 +359,7 @@ func TestKubernetesRunnerNeedsAKubernetesEnrollment(t *testing.T) {
 			issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 				Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:pod", Team: "a",
 				Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pod"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim},
-				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Platform: platform,
+				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Platform: platform, AllowedLabels: demand.Labels,
 			})
 			if err != nil {
 				t.Fatal(err)
