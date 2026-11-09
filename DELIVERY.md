@@ -53,7 +53,9 @@ in profile order after both finish. A failed profile leaves the prior review
 record unchanged. Review logs time diff assembly, context gathering, each model
 invocation (including failed session resumes), settlement and record writing.
 Model time includes the reviewer's repository reads and any nested reviewers.
-Prompts and findings never appear in these timing logs.
+Prompts and findings never appear in these timing logs. Standards prompts keep
+the complete rule bodies and omit card routing metadata and terminal vault
+backlink lists.
 The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
