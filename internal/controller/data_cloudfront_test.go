@@ -236,7 +236,8 @@ func TestCloudFrontDownloadClientBinding(t *testing.T) {
 			var signed capability.SignedObject
 			var signErr error
 			var handler http.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-				signed, signErr = backend.Sign(dataDownloadContext(r), object)
+				ctx := dataDownloadContext(r)
+				signed, signErr = backend.Sign(ctx, object)
 			})
 			handler = ratelimit.TrustedProxies(handler, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})
 			if tc.listener {
