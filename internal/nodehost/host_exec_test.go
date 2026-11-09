@@ -25,8 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const hostExecSecret = "hostexec-secret-value"
-
 type hostExecObservation struct {
 	Stdout     string `json:"stdout"`
 	Stderr     string `json:"stderr"`

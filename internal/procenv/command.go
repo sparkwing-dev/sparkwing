@@ -69,11 +69,6 @@ func ControlCommandContext(ctx context.Context, environment []string, name strin
 	return cmd
 }
 
-// ConfigureWindowsBash carries a Bash program beyond Windows' command-line limit.
-func ConfigureWindowsBash(cmd *exec.Cmd, program string) {
-	cmd.Env = append(cmd.Environ(), "SPARKWING_BASH_PROGRAM="+program)
-}
-
 // HostCommand constructs a trusted control process with the host environment.
 // It preserves os/exec inheritance, including PWD after the caller selects Dir.
 // Pipeline processes use Command with their boundary-specific environment.
