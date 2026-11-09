@@ -54,6 +54,10 @@ COPY --from=golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee
 ENV PATH=/usr/local/go/bin:$PATH \
     GOCACHE=/tmp/.gocache \
     GOPATH=/tmp/.gopath
+# perf: runtime bases serve SDK versions absent from release seeds; Go validates these shared standard-library inputs.
+RUN CGO_ENABLED=0 GOTOOLCHAIN=local go build -p 2 -trimpath net/http && \
+    mkdir -p /usr/local/share/sparkwing && \
+    mv "$GOCACHE" /usr/local/share/sparkwing/go-stdlib
 # safety: TypeScript pipelines run on this Node.js, and the SDK needs 22.18 or later; only node and npm are taken.
 COPY --from=node:22.23.3-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 /usr/local/bin/node /usr/local/bin/node
 COPY --from=node:22.23.3-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm

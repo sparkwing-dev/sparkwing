@@ -185,6 +185,8 @@ func TestAcquirePreparedRestoresExecutableWithoutSourceOrInstaller(t *testing.T)
 
 func TestAcquirePreparationTimingsExcludeSourceAndDiagnostics(t *testing.T) {
 	f := newPreparedFixture(t, engineid.GoSDK)
+	var receipts []source.Timing
+	f.options.Timing = func(_ context.Context, timing source.Timing) { receipts = append(receipts, timing) }
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
@@ -207,6 +209,14 @@ func TestAcquirePreparationTimingsExcludeSourceAndDiagnostics(t *testing.T) {
 			t.Fatalf("missing %s timing: %s", stage, &logs)
 		}
 	}
+	if len(receipts) != 6 || receipts[5].Stage != "restore" || !receipts[5].Reused {
+		t.Fatalf("missing stage or reuse receipts: %+v", receipts)
+	}
+	for _, receipt := range receipts {
+		if receipt.StartedAt.IsZero() || receipt.DurationMS < 0 || !receipt.Success {
+			t.Fatalf("invalid timing: %+v", receipt)
+		}
+	}
 	if f.installs != 1 || !strings.Contains(logs.String(), `"reused":true`) || strings.Contains(logs.String(), f.spec.LocalCheckout) {
 		t.Fatalf("installs=%d logs=%s", f.installs, &logs)
 	}
@@ -220,6 +230,11 @@ func TestAcquirePreparationTimingsExcludeSourceAndDiagnostics(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "private-compiler-diagnostic") || !strings.Contains(logs.String(), `"success":false`) {
 		t.Fatalf("unsafe or missing failure timing: %s", &logs)
+	}
+	last := receipts[len(receipts)-1]
+	body, err := json.Marshal(receipts)
+	if err != nil || last.Stage != "sdk_install" || last.Success || bytes.Contains(body, []byte("private-compiler-diagnostic")) || bytes.Contains(body, []byte(f.spec.LocalCheckout)) {
+		t.Fatalf("unsafe or missing failure receipt: %s %v", body, err)
 	}
 }
 

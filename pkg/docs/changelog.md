@@ -22,6 +22,7 @@ unlock.
 
 ### Added
 
+- **runner:** Retain source fetch, SDK installation, publication and planning stage timings in run logs even when SDK discovery withholds output
 - **Template verification:** `template-verify -- --only NAME` checks one template during authoring and reports the selected scope
 ### Security
 
@@ -30,6 +31,7 @@ unlock.
 
 ### Changed
 
+- **runner:** Reuse image-seeded Go standard-library compilation across SDK versions during cold planning
 - **landing:** Default and security reviews run concurrently, retaining separate sessions, findings and blocking rules.
 
 - **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/_unreleased.md#bound-object-presence-requests).

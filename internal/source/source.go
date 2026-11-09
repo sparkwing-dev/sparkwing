@@ -4,6 +4,7 @@ package source
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -55,6 +56,8 @@ type EngineResolver interface {
 
 // Options supplies host-owned workspace and authority separately from sealed source data.
 type Options struct {
+	// Timing receives host-owned stage receipts independently of SDK output discovery.
+	Timing      func(context.Context, Timing)
 	Prepared    *Prepared
 	LocalBundle string
 	Workspace   string
@@ -80,6 +83,15 @@ type Options struct {
 	LookupHost sourceurl.Lookup
 	Base       procenv.Base
 	GitAccess  GitAccess
+}
+
+// Timing describes one host preparation stage without source or process diagnostics.
+type Timing struct {
+	Stage      string    `json:"stage"`
+	StartedAt  time.Time `json:"started_at"`
+	DurationMS int64     `json:"duration_ms"`
+	Success    bool      `json:"success"`
+	Reused     bool      `json:"reused,omitempty"`
 }
 
 // GitAccess selects whose credentials fetch remote source; hosts derive it from authenticated placement.
