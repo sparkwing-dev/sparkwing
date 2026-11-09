@@ -323,7 +323,6 @@ func runScheduleTickCommand(ctx context.Context, inv clisurface.Invocation, out 
 	if services.tick == nil {
 		return scheduleUnavailable("the controller-owned tick operation")
 	}
-	services.options.ScheduleTick = true
 	if _, err := ensureLocalController(ctx, services.options.Home, func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: services.lifecycle, options: services.options}, nil
 	}); err != nil {

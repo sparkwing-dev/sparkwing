@@ -17,15 +17,15 @@ var ErrNoOutput = fmt.Errorf("job has no committed output: %w", blob.ErrNotFound
 
 // ReadChildOutput selects the child's committed output under its creating job's live authority.
 func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error) {
-	return t.readOutput(ctx, supplied, true)
+	return t.readOutput(ctx, supplied, true, blob.KindOutput)
 }
 
 // ReadJobOutput selects a committed output under current membership or the declared read relation.
 func (t *Tenant) ReadJobOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error) {
-	return t.readOutput(ctx, supplied, false)
+	return t.readOutput(ctx, supplied, false, blob.KindOutput)
 }
 
-func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized, child bool) (blob.Blob, error) {
+func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized, child bool, kind blob.Kind) (blob.Blob, error) {
 	supplied.Target.Pipeline = ""
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
@@ -48,6 +48,9 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	if child {
 		path, run = "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", supplied.Target.ChildRunID
 	}
+	if kind == blob.KindManifest {
+		path = "/api/v1/runs/{run}/jobs/{job}/artifacts"
+	}
 	route, _ := capability.LookupRoute("GET", path)
 	auth, err := capability.AuthenticateSnapshot(snapshot, route, capability.RequestEvidence{Target: supplied.Target})
 	if err != nil {
@@ -64,11 +67,15 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	if row.Status != runstate.StatusDone || row.OutputRecord == nil {
+	keyPtr := row.OutputRecord
+	if kind == blob.KindManifest {
+		keyPtr = row.ManifestRecord
+	}
+	if row.Status != runstate.StatusDone || keyPtr == nil {
 		return blob.Blob{}, ErrNoOutput
 	}
-	key := *row.OutputRecord
-	if key.Team != string(t.team) || key.Kind != blob.KindOutput || runspec.NodeID(key.Scope.Job) != row.Ref.NodeID {
+	key := *keyPtr
+	if key.Team != string(t.team) || key.Kind != kind || runspec.NodeID(key.Scope.Job) != row.Ref.NodeID {
 		return blob.Blob{}, blob.ErrIntegrity
 	}
 	namespace, err := blob.RecordNamespace(key)
@@ -90,4 +97,21 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 		return blob.Blob{}, err
 	}
 	return blob.Blob{Team: string(t.team), Digest: record.Digest, Size: size}, nil
+}
+
+// ReadJobManifest selects a committed artifact manifest under live team membership.
+func (t *Tenant) ReadJobManifest(ctx context.Context, supplied capability.Authorized) (blob.Blob, error) {
+	return t.readOutput(ctx, supplied, false, blob.KindManifest)
+}
+
+// ChargeArtifactDownload rechecks membership before accounting for a signed artifact download.
+func (t *Tenant) ChargeArtifactDownload(ctx context.Context, a capability.Authorized, charge DownloadCharge) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		route, _ := capability.LookupRoute("GET", "/api/v1/runs/{run}/jobs/{job}/artifacts")
+		if _, _, err := t.reauthorizeTx(ctx, tx, a, route, true); err != nil {
+			return err
+		}
+		_, err := t.chargeDownloadTx(ctx, tx, charge)
+		return err
+	})
 }

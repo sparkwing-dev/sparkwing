@@ -24,7 +24,7 @@ import (
 func TestSpawnUnstartableHostNamesTheExecutable(t *testing.T) {
 	home := shortHome(t)
 	missing := filepath.Join(t.TempDir(), "sparkwign")
-	spawn := func(home, version string) error { return spawnDetached(missing, home, version, false) }
+	spawn := func(home, version string) error { return spawnDetached(missing, home, version) }
 	err := spawn(home, "")
 	if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), missing) {
 		t.Fatalf("spawn error = %v, want missing executable %s", err, missing)
@@ -55,7 +55,7 @@ func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fixture host: %v", err)
 	}
-	spawn := func(home, version string) error { return spawnDetached(bin, home, version, false) }
+	spawn := func(home, version string) error { return spawnDetached(bin, home, version) }
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -82,7 +82,7 @@ func TestSpawn_FailedStartLeavesNoEmptyDaemonLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("log path: %v", err)
 	}
-	if serr := spawnDetached(filepath.Join(t.TempDir(), "not-a-binary"), home, "", false); serr == nil {
+	if serr := spawnDetached(filepath.Join(t.TempDir(), "not-a-binary"), home, ""); serr == nil {
 		t.Fatal("spawning a nonexistent binary succeeded")
 	}
 	if _, err := os.Stat(logPath); err == nil {

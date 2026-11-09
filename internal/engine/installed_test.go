@@ -130,7 +130,7 @@ func TestReplacementEngineMismatchRemainsIntegrityFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected, err := resolver.Resolve(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: "v0.0.0", Replacement: ".."}, target)
+	selected, err := resolver.Resolve(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: "v0.0.0", Replacement: "/private/sdk-source", Manifest: "/private/go.mod"}, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +144,23 @@ func TestReplacementEngineMismatchRemainsIntegrityFailure(t *testing.T) {
 			}
 			_, err := resolver.Ensure(t.Context(), accepted, target)
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.IntegrityFailure || !strings.Contains(failure.Message, "installed engine differs from the accepted replacement-pin engine") {
+			if !errors.As(err, &failure) || failure.Code != apierr.IntegrityFailure {
 				t.Fatalf("changed installed engine must retain its integrity diagnosis: %v", err)
+			}
+			for _, want := range []string{
+				"planned on engine " + accepted.Version,
+				accepted.ManifestDigest,
+				"this host has " + selected.Identity.Version,
+				selected.Identity.ManifestDigest,
+				"route planning to the executing host (repository runner requirements)",
+				"or install " + accepted.Version,
+			} {
+				if !strings.Contains(failure.Message, want) {
+					t.Errorf("mismatch message %q omits %q", failure.Message, want)
+				}
+			}
+			if strings.Contains(failure.Message+failure.Hint, "/private/") {
+				t.Errorf("mismatch exposed SDK paths: %v", failure)
 			}
 		})
 	}

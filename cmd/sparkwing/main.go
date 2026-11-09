@@ -385,6 +385,8 @@ func runSparkwing(args []string) (result error) {
 		return runCacheWarm(inv)
 	case "sparkwing runs list":
 		return runRunsList(context.Background(), inv)
+	case "sparkwing runs artifacts":
+		return runRunsArtifacts(context.Background(), inv)
 	case "sparkwing runs status":
 		return runRunsStatus(context.Background(), inv)
 	case "sparkwing runs stats":
