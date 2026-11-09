@@ -21,6 +21,8 @@ Run `bash bin/sync-docs.sh` and commit each fragment with its matching mirror.
 Keep `[Unreleased]` in `CHANGELOG.md` empty and keep the migration placeholder.
 The release pipeline collects fragments in filename order, groups changelog
 categories, writes the released notes and consumes source and mirror fragments.
+The changelog gate accepts that release diff when it deletes fragments and adds
+a versioned section with entries. Later covered changes still need a fragment.
 Concurrent changes then add different files. Edits to the same note still need
 normal conflict resolution. Orientation table rows use union merge; review
 concurrent edits to the same rule for duplicate or contradictory rows.

@@ -24,7 +24,7 @@ if awk '
   echo "check-changelog: move [Unreleased] entries to docs/changes/<slug>.md" >&2
   exit 1
 fi
-if [[ -f docs/migrations/_unreleased.md ]] && rg -q '^## ' docs/migrations/_unreleased.md; then
+if [[ -f docs/migrations/_unreleased.md ]] && grep -q '^## ' docs/migrations/_unreleased.md; then
   echo "check-changelog: move migration sections to docs/migrations/unreleased/<slug>.md" >&2
   exit 1
 fi
@@ -79,6 +79,23 @@ is_covered() {
   return 1
 }
 
+has_collected_release() {
+  local consumed
+  consumed=$(
+    git diff --no-renames --name-only --diff-filter=D "$base"...HEAD -- 'docs/changes/*.md'
+    git diff --no-renames --name-only --diff-filter=D HEAD -- 'docs/changes/*.md'
+  )
+  [[ -n "$consumed" ]] || return 1
+  {
+    git diff "$base"...HEAD -- CHANGELOG.md
+    git diff HEAD -- CHANGELOG.md
+  } | awk '
+    /^\+## / { released = ($0 ~ /^\+## \[v[0-9]+\.[0-9]+\.[0-9]+[^]]*\] - /) }
+    released && /^\+- / { entry = 1 }
+    END { exit !entry }
+  '
+}
+
 covered_changes=()
 fragment_added=false
 for f in "${changed[@]}"; do
@@ -93,7 +110,7 @@ for f in "${changed[@]}"; do
         fi
       } | awk '/^\+[^+]/ && $0 !~ /^\+[[:space:]]*$/ { print }'
     )
-    if [[ -n "$added" ]] && rg -q '^- ' "$f"; then fragment_added=true; fi
+    if [[ -n "$added" ]] && grep -q '^- ' "$f"; then fragment_added=true; fi
   fi
   if is_covered "$f"; then
     covered_changes+=("$f")
@@ -104,7 +121,7 @@ if [[ ${#covered_changes[@]} -eq 0 ]]; then
   exit 0
 fi
 
-if [[ "$fragment_added" == "true" ]]; then
+if [[ "$fragment_added" == "true" ]] || has_collected_release; then
   exit 0
 fi
 

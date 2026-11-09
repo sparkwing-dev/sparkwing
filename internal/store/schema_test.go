@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 func TestSchemaDocumentationNamesBaseline(t *testing.T) {
@@ -22,7 +23,11 @@ func TestSchemaDocumentationNamesBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(changelog), fmt.Sprintf("schema baseline advances to version %d", want)) {
+	collected, err := docs.CollectChangelog(string(changelog), os.DirFS("../../docs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(collected, fmt.Sprintf("schema baseline advances to version %d", want)) {
 		t.Errorf("CHANGELOG.md omits baseline %d", want)
 	}
 	guides, err := filepath.Glob("../../docs/migrations/*.md")
@@ -30,7 +35,12 @@ func TestSchemaDocumentationNamesBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, guide := range guides {
-		raw, err := os.ReadFile(guide)
+		var raw []byte
+		if filepath.Base(guide) == "_unreleased.md" {
+			raw, err = docs.CollectMigration(os.DirFS(filepath.Dir(guide)))
+		} else {
+			raw, err = os.ReadFile(guide)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

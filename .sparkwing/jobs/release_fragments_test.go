@@ -34,6 +34,11 @@ func TestReleaseCollectsAndConsumesFragments(t *testing.T) {
 		}
 		writeReleaseFixture(t, filepath.Join(repo, dir, "change.md"), body)
 	}
+	gate, err := os.ReadFile(filepath.Join("..", "..", "bin", "check-changelog.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReleaseFixture(t, filepath.Join(repo, "bin", "check-changelog.sh"), string(gate))
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "--no-verify", "-m", "independent fragments")
 	before := gitRun(t, repo, "rev-parse", "HEAD")
@@ -71,11 +76,37 @@ func TestReleaseCollectsAndConsumesFragments(t *testing.T) {
 	if got := gitRun(t, repo, "diff", "--cached"); got != staged {
 		t.Fatal("retry changed the prepared release")
 	}
+	t.Setenv("BASE_REF", strings.TrimSpace(before))
+	for _, invalid := range []string{
+		"# Changelog\n\n## [Unreleased]\n\n" + old,
+		"# Changelog\n\n## [Unreleased]\n\n## [v0.9.0] - 2026-03-04\n\n" + old,
+	} {
+		if err := writeChangelogPair(repo, invalid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := captureCmd(t.Context(), repo, "bash", "bin/check-changelog.sh"); err == nil {
+			t.Fatal("consumed fragments exempted a release without versioned entries")
+		}
+	}
+	if err := writeChangelogPair(repo, body); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := captureCmd(t.Context(), repo, "bash", "bin/check-changelog.sh"); err != nil {
+		t.Fatalf("fragment gate refuses the staged release: %v\n%s", err, out)
+	}
 	if err := (&commitChangelogJob{RepoDir: repo, Version: version}).run(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if gitRun(t, repo, "status", "--porcelain") != "" {
 		t.Fatal("release left uncommitted fragments or notes")
+	}
+	if out, err := captureCmd(t.Context(), repo, "bash", "bin/check-changelog.sh"); err != nil {
+		t.Fatalf("fragment gate refuses the committed release: %v\n%s", err, out)
+	}
+	t.Setenv("BASE_REF", strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD")))
+	writeReleaseFixture(t, filepath.Join(repo, scaffoldFallbackRel), "package scaffold\nconst FallbackSDKVersion = \"v0.9.1\"\n")
+	if _, err := captureCmd(t.Context(), repo, "bash", "bin/check-changelog.sh"); err == nil {
+		t.Fatal("a previous release exempted a new covered change without a fragment")
 	}
 }
 
