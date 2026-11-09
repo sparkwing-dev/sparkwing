@@ -52,6 +52,7 @@ type reviewRecord struct {
 	Commit       string          `json:"commit"`
 	Base         string          `json:"base"`
 	Objective    reviewObjective `json:"objective"`
+	ObjectiveKey string          `json:"objective_key"`
 	Reviewer     reviewerRef     `json:"reviewer"`
 	Reviewers    []reviewerRef   `json:"reviewers,omitempty"`
 	Findings     []reviewFinding `json:"findings"`

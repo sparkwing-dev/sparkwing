@@ -3,6 +3,7 @@ package jobs
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -198,12 +199,16 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 		rec = *prior
 	}
 	rec.Notes = nil
-	sameTree := prior != nil && prior.Tree == tree
+	objective, notes := resolveObjective(ctx, d, p, in, base)
+	objectiveKey := fmt.Sprintf("%x", sha256.Sum256([]byte(objective.Source+"\x00"+objective.Ref+"\x00"+objective.text)))
+	sameTree := prior != nil && prior.Tree == tree && prior.ObjectiveKey == objectiveKey
+	rec.Objective, rec.ObjectiveKey = objective, objectiveKey
+	rec.Notes = append(rec.Notes, notes...)
 	rec.Tree, rec.Commit, rec.Base = tree, head, base
 	d.logf("review timing: phase=resolve elapsed=%s reused=%t", d.now().Sub(started), sameTree)
 
 	if sameTree {
-		rec.Notes = append(rec.Notes, "tree unchanged since the last review, so no reviewer ran; skips were reapplied")
+		rec.Notes = append(rec.Notes, "tree and objective unchanged since the last review, so no reviewer ran; skips were reapplied")
 	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree); err != nil {
 		return reviewRecord{}, "", err
 	}
@@ -230,9 +235,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	files := strings.Fields(names)
 	d.logf("review timing: phase=diff elapsed=%s bytes=%d files=%d", d.now().Sub(started), len(diff), len(files))
 	started = d.now()
-	objective, notes := resolveObjective(ctx, d, p, in, base)
-	rec.Objective = objective
-	rec.Notes = append(rec.Notes, notes...)
+	objective := rec.Objective
 	pass := reviewPass{Tree: tree, Commit: head, At: d.now().UTC()}
 
 	profiles := map[string][]string{defaultReviewer: files}

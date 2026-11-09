@@ -90,6 +90,15 @@ A docs, UI or process change runs its own tests (affected packages, frontend
 suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
+The brief is the explicit goal for this land: include the ticket key(s) and
+short intent, for example `-- --brief 'Fix Windows shell escaping; leave the
+other umbrella work for later'`. It wins over the branch ticket.
+Without a brief, review keeps its configured objective sources: branch ticket,
+commit ticket trailers or subjects, then commit messages. A cached verdict is
+reused only when both the tree and resolved objective match. Clarifying the
+brief or editing the resolved ticket text reruns review, even with the same
+tree; the current objective supersedes earlier objectives and blocks are
+reassessed against it.
 
 The `land` job reads the review JSON from the shared Git directory instead of
 resolving a review output blob. Its `verify` step requires the review record's tree to be HEAD's
