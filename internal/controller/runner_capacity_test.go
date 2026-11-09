@@ -50,7 +50,7 @@ func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"requires":{"set":true,"value":["deploy-kikd-prod"]}}`))
 	for _, kinds := range []string{`["node"]`, `["trigger"]`, `["plan"]`} {
 		response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":`+kinds+`,"labels":["team-4cpu","deploy-kikd-prod"]}`, 403)
-		for _, hint := range []string{"deploy-kikd-prod", "allowed labels", "admin runner-labels"} {
+		for _, hint := range []string{"deploy-kikd-prod", "allowed labels", "revoke this enrollment", "sparkwing runners add --runner capacity-machine --label LABEL --force", "Self-hosted operators", "admin runner-labels"} {
 			if !strings.Contains(response.Body.String(), hint) {
 				t.Fatalf("missing %q: %s", hint, response.Body)
 			}

@@ -426,7 +426,7 @@ func Registry() []Command {
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an independent account session from stdin without saving it. After fetching its CSRF proof, attempt logout on enrollment success or failure. Copy its cookie from a separate private browser window so logout does not invalidate your CLI login token."},
 			{Name: "repos", Argument: "PATTERN", Repeatable: true, CommaList: true},
-			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true, Meaning: "Configure and authorize this label at enrollment. Claims cannot add labels. An administrator changes the allowed set with sparkwing-controller admin runner-labels."},
+			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true, Meaning: "Configure and authorize this label at enrollment. Claims cannot add labels. A team administrator can revoke and re-enroll the runner to change the allowed set. Self-hosted operators can also use sparkwing-controller admin runner-labels."},
 			{Name: "max-concurrent", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "config", Argument: "PATH"},
 			{Name: "force"},

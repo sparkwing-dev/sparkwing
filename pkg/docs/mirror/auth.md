@@ -831,8 +831,15 @@ complete set the machine may advertise. Claims with extra free labels are refuse
 with an error naming the label and the admin command. A runner may advertise a
 subset. Fixed identity keys still come from the controller.
 
-In the controller pod, a team administrator can view and replace this set using
-the existing admin surface:
+To change the allowed set on Sparkwing Cloud, a team administrator revokes the
+existing enrollment and re-enrolls the runner with
+`sparkwing runners add --label LABEL --force`.
+Repeat `--label` for every allowed label and retain the runner's repository,
+trust and service settings. Shared runners use `--session-stdin`. Re-enrollment
+issues a new credential and writes the machine's config.
+
+Self-hosted operators with controller pod access can instead view and replace
+this set using the existing admin surface:
 
 ```sh
 sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team TEAM --runner NAME --reason "inspect placement"

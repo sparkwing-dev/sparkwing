@@ -30,7 +30,7 @@ func checkRunnerLabelsTx(ctx context.Context, tx *storeTx, chain []authorityNode
 	}
 	for _, label := range match.SelfAsserted(labels) {
 		if !slices.Contains(record.Origin.AllowedLabels, label) {
-			return authorityError(apierr.Forbidden, fmt.Sprintf("runner %q may not advertise label %q; ask a team administrator to update its allowed labels with sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team %s --runner %s --reason TEXT --label LABEL (repeat --label for the complete allowed set)", root.Capability.Subject.ID, label, root.Capability.Team, root.Capability.Subject.ID))
+			return authorityError(apierr.Forbidden, fmt.Sprintf("runner %q may not advertise label %q; ask a team administrator to revoke this enrollment and re-enroll with sparkwing runners add --runner %s --label LABEL --force (repeat --label for the complete allowed set and retain the other enrollment settings). Self-hosted operators can instead update allowed labels with sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team %s --runner %s --reason TEXT --label LABEL", root.Capability.Subject.ID, label, root.Capability.Subject.ID, root.Capability.Team, root.Capability.Subject.ID))
 		}
 	}
 	return nil
