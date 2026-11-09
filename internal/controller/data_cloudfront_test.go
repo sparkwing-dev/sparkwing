@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 func cloudFrontFixture(t *testing.T) (*blob.S3, *rsa.PrivateKey, string) {
@@ -93,7 +95,7 @@ func TestCloudFrontDataBackendSignedObjectProperty(t *testing.T) {
 			return false
 		}
 		statement := policy.Statements[0]
-		if statement.Resource != "https://cdn.example.test/deployment/nested-root/"+path || statement.Condition.DateLessThan.Unix() != object.ExpiresAt.Unix() || strings.ContainsAny(statement.Resource, "*?") {
+		if statement.Resource != "https://cdn.example.test/deployment/nested-root/"+path || statement.Condition.DateLessThan.Unix() != object.ExpiresAt.Unix() || statement.Condition.IPAddress == nil || statement.Condition.IPAddress.SourceIP != "192.0.2.1/32" || strings.ContainsAny(statement.Resource, "*?") {
 			return false
 		}
 		signature := cloudFrontDecode(t, u.Query().Get("Signature"))
@@ -197,5 +199,70 @@ func TestCloudFrontDataBackendConfigurationRefusals(t *testing.T) {
 	}
 	if _, err := cfg.Backend(nil); err == nil {
 		t.Fatal("missing backend accepted")
+	}
+}
+
+func TestCloudFrontDownloadClientBinding(t *testing.T) {
+	objects, _, encoded := cloudFrontFixture(t)
+	cfg, err := ParseCloudFrontDataConfig("cdn.example.test", "key-id", encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, err := cfg.Backend(objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte("payload")))
+	object := capability.ObjectToSign{Method: http.MethodGet, Key: "teams/tenant/cas/" + digest, SHA256: digest, Size: 7, ExpiresAt: time.Now().Add(45 * time.Second)}
+	for _, tc := range []struct {
+		name, peer, real, forwarded, want string
+		listener                          bool
+	}{
+		{name: "spoofed headers", peer: "192.0.2.8:123", real: "198.51.100.9", forwarded: "198.51.100.10", want: "192.0.2.8/32"},
+		{name: "trusted listener", peer: "10.0.0.1:123", real: "198.51.100.9", want: "198.51.100.9/32", listener: true},
+		{name: "trusted chain", peer: "10.0.0.1:123", forwarded: "192.0.2.99, 198.51.100.10", want: "198.51.100.10/32"},
+		{name: "mapped IPv4", peer: "[::ffff:192.0.2.8]:123", want: "192.0.2.8/32"},
+		{name: "IPv6", peer: "[2001:db8::1]:123"},
+		{name: "invalid address", peer: "invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/data/download", nil)
+			request.RemoteAddr = tc.peer
+			request.Header.Set("X-Forwarded-Host", "controller.test")
+			request.Header.Set("X-Real-IP", tc.real)
+			if tc.forwarded != "" {
+				request.Header.Set("X-Forwarded-For", tc.forwarded)
+			}
+			var signed capability.SignedObject
+			var signErr error
+			var handler http.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				signed, signErr = backend.Sign(dataDownloadContext(r), object)
+			})
+			handler = ratelimit.TrustedProxies(handler, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})
+			if tc.listener {
+				handler = ratelimit.TrustedListener(handler)
+			}
+			handler.ServeHTTP(httptest.NewRecorder(), request)
+			if tc.want == "" {
+				if signErr == nil || signed.URL != "" {
+					t.Fatal("unsupported address received a URL")
+				}
+				return
+			}
+			if signErr != nil {
+				t.Fatal(signErr)
+			}
+			parsed, err := url.Parse(signed.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var policy sign.Policy
+			if err := json.Unmarshal(cloudFrontDecode(t, parsed.Query().Get("Policy")), &policy); err != nil {
+				t.Fatal(err)
+			}
+			if len(policy.Statements) != 1 || policy.Statements[0].Condition.IPAddress == nil || policy.Statements[0].Condition.IPAddress.SourceIP != tc.want {
+				t.Fatalf("client policy = %+v", policy)
+			}
+		})
 	}
 }

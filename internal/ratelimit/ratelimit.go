@@ -175,9 +175,6 @@ func FromTrustedListener(r *http.Request) bool {
 
 // ClientIP returns the trusted forwarded client or TCP peer for logs and per-IP limits.
 func ClientIP(r *http.Request) string {
-	if client, ok := r.Context().Value(proxyClientKey{}).(string); ok {
-		return client
-	}
 	peer, ok := remoteIP(r.RemoteAddr)
 	if !ok {
 		return r.RemoteAddr
@@ -186,6 +183,9 @@ func ClientIP(r *http.Request) string {
 		if ip, err := netip.ParseAddr(strings.TrimSpace(forwarded[0])); err == nil && ip.Zone() == "" {
 			return ip.Unmap().String()
 		}
+	}
+	if client, ok := r.Context().Value(proxyClientKey{}).(string); ok {
+		return client
 	}
 	return peer.String()
 }
