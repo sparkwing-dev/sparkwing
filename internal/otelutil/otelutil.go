@@ -210,13 +210,6 @@ func WrapHandler(serviceName string, h http.Handler) http.Handler {
 	return otelhttp.NewHandler(h, serviceName)
 }
 
-func wrapTransport(base http.RoundTripper) http.RoundTripper {
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	return otelhttp.NewTransport(base)
-}
-
 type SpanAttrs struct {
 	RunID     string
 	NodeID    string
