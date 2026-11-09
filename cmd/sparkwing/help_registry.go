@@ -176,6 +176,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing login --force":                                  "Point an existing profile at a different controller.",
 	"sparkwing profiles add --profile":                         "Name for this saved connection; defaults to the controller host.",
 	"sparkwing profiles set --default":                         "Use this profile when an optional --profile is omitted. --default=false restores local selection if this is the default.",
+	"sparkwing pipeline plan --sw-dry-run":                     "Preview dry-run bodies as would_dry_run, safe steps as would_run, and steps without either as would_skip. SkipIf remains evaluated at run time.",
 	"sparkwing pipeline plan --start-at":                       "Preview the run as if it started at this step, marking steps that are neither this step nor downstream of it as skipped.",
 	"sparkwing pipeline plan --stop-at":                        "Preview the run as if it stopped after this step, marking steps that are neither this step nor upstream of it as skipped.",
 	"sparkwing pipeline sparks add --source":                   "Go module path of the spark library to add to the project's spark list.",
