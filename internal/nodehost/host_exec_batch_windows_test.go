@@ -51,6 +51,32 @@ func TestWindowsHostCommandBatchArguments(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
+func TestWindowsHostCommandCleanupBatchArguments(t *testing.T) {
+	for _, extension := range []string{".cmd", ".bat"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "npm"+extension), []byte("@echo off\r\necho CLEANUP-RAN\r\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, arg := range []string{"plain", "main&ver&rem", "%SW_BATCH_FIXTURE%"} {
+			t.Run(fmt.Sprintf("%s/%q", extension, arg), func(t *testing.T) {
+				cleanups := &ProcessCleanups{}
+				mustRegisterCleanup(t, cleanups, "npm", "safe", arg)
+				var log strings.Builder
+				env := cleanupProcessEnv(t, append(os.Environ(), "PATH="+dir, "SW_BATCH_FIXTURE=fixture-only")...)
+				err := cleanups.run(cleanupContext(t), CleanupScope{Dir: dir, Env: env, Log: &log})
+				if arg == "plain" {
+					if err != nil || !strings.Contains(log.String(), "CLEANUP-RAN") {
+						t.Fatalf("safe cleanup: %v, log=%q", err, log.String())
+					}
+				} else if err == nil || strings.Contains(log.String(), "CLEANUP-RAN") || strings.Contains(log.String(), arg) {
+					t.Fatalf("unsafe cleanup: %v, log=%q", err, log.String())
+				}
+			})
+		}
+	}
+}
+
 func TestWindowsHostCommandExecutableKeepsMetacharacters(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {

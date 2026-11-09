@@ -528,6 +528,7 @@ executable extensions. The working directory is searched only when named in
 `PATH` or the command path. Windows `.cmd`/`.bat` targets refuse arguments with
 cmd.exe metacharacters (`& | < > ^ % " ! ( )` and CR/LF). Use a non-batch tool,
 such as `node.exe` with its JavaScript entrypoint, when passing these values.
+Batch files that expand pipeline-set environment values without quoting are outside the host's control.
 Engine credentials and protocol settings
 are removed from child environments, including values supplied through `Env`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.

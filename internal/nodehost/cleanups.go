@@ -80,6 +80,7 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env procenv.Env, log
 	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
 	defer cancel()
 	cmd := procenv.Command(env, path, c.argv[1:]...)
+	procenv.RefuseUnsafeBatch(cmd)
 	cmd.Args[0] = name
 	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = log, log

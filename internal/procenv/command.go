@@ -30,7 +30,7 @@ func CommandContext(ctx context.Context, environment Env, name string, args ...s
 func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
 	cmd := exec.Command(name, args...)
 	cmd.Env = sdkCommandEnvironment(environment)
-	validateBatchCommand(cmd)
+	RefuseUnsafeBatch(cmd)
 	return cmd
 }
 
@@ -38,11 +38,12 @@ func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
 func SDKCommandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = sdkCommandEnvironment(environment)
-	validateBatchCommand(cmd)
+	RefuseUnsafeBatch(cmd)
 	return cmd
 }
 
-func validateBatchCommand(cmd *exec.Cmd) {
+// RefuseUnsafeBatch sets cmd.Err when Windows batch argv contains cmd.exe syntax.
+func RefuseUnsafeBatch(cmd *exec.Cmd) {
 	if runtime.GOOS != "windows" {
 		return
 	}
