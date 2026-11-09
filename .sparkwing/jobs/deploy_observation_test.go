@@ -3,12 +3,58 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestArgoWaitRequiresHealthySyncedRevisionBeforeRollout(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	if err := d.assumeRole(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	states := []string{
+		`{"sync":{"revision":"old","status":"Synced"},"health":{"status":"Healthy"}}`,
+		`{"sync":{"revision":"candidate","status":"OutOfSync"},"health":{"status":"Healthy"}}`,
+		`{"sync":{"revision":"candidate","status":"Synced"},"health":{"status":"Progressing"}}`,
+		`{"sync":{"revision":"candidate","status":"Synced"},"health":{"status":"Healthy"}}`,
+	}
+	reads, waits, rollouts := 0, 0, 0
+	d.tools.wait = func(_ context.Context, interval time.Duration) error {
+		waits++
+		if interval != time.Second {
+			return fmt.Errorf("Argo observation interval = %s, want 1s", interval)
+		}
+		return nil
+	}
+	run := d.tools.run
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		joined := strings.Join(c.Args, " ")
+		if filepath.Base(c.Name) == "kubectl" && strings.Contains(joined, "get application ") {
+			if reads >= len(states) {
+				return "", errors.New("Argo did not accept the healthy candidate")
+			}
+			state := states[reads]
+			reads++
+			return `{"status":` + state + `}`, nil
+		}
+		if strings.Contains(joined, "rollout status") {
+			if reads != len(states) {
+				return "", errors.New("rollout started before Argo accepted the candidate")
+			}
+			rollouts++
+		}
+		return run(ctx, c)
+	}
+	err := d.waitRollout(t.Context(), d.cfg.Staging, "candidate", deployPhases[0], f.old.Controller.Digest)
+	if err != nil || reads != 4 || waits != 3 || rollouts != 1 {
+		t.Fatalf("Argo wait = %v, reads=%d waits=%d rollouts=%d", err, reads, waits, rollouts)
+	}
+}
 
 func TestProductionSmokeInterruptsSamplingWaitAndTakesFinalSample(t *testing.T) {
 	for _, failure := range []string{"", "final sample", "failed run", "warning logs", "error logs", "extra claim"} {

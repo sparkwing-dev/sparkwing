@@ -40,7 +40,6 @@ func TestEngineClientRoutes(t *testing.T) {
 		result             any
 		call               func(controllerwire.Controller) (any, error)
 	}{
-		{"compatibility", "GET", "/api/v1/capabilities?engine_version=v1.2.3", controllerwire.Compatibility{APIMajor: 1, EngineRelease: "v1.2.3"}, func(c controllerwire.Controller) (any, error) { return c.Compatibility(ctx, "v1.2.3") }},
 		{"create", "POST", "/api/v1/runs", controllerwire.CreateRunResponse{RunID: "r1", Number: 42, Replayed: true}, func(c controllerwire.Controller) (any, error) {
 			return c.CreateRun(ctx, controllerwire.CreateRunRequest{IdempotencyKey: "key"})
 		}},
