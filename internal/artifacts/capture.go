@@ -96,14 +96,19 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 			}
 			return fmt.Errorf("artifact %q: %w", rel, nerr)
 		}
-		info, serr := root.Stat(name)
+		f, serr := root.OpenFile(name, os.O_RDONLY|artifactNonblock, 0)
+		if serr != nil {
+			return fmt.Errorf("artifact %q: %w", rel, serr)
+		}
+		defer func() { _ = f.Close() }()
+		info, serr := f.Stat()
 		if serr != nil {
 			return fmt.Errorf("artifact %q: %w", rel, serr)
 		}
 		if !info.Mode().IsRegular() {
-			return nil
+			return fmt.Errorf("artifact %q: not a regular file", rel)
 		}
-		digest, size, berr := storeArtifactFile(ctx, data, root, name)
+		digest, size, berr := storeArtifactFile(ctx, data, f)
 		if berr != nil {
 			return fmt.Errorf("artifact %q: %w", rel, berr)
 		}
@@ -183,12 +188,7 @@ func resolvesToDirectory(p string) bool {
 
 // safety: one descriptor serves the hash and the upload so a path replaced in
 // between cannot switch files; the upload verifies size and digest.
-func storeArtifactFile(ctx context.Context, data Data, root *os.Root, name string) (blob.Digest, int64, error) {
-	f, err := root.Open(name)
-	if err != nil {
-		return "", 0, err
-	}
-	defer func() { _ = f.Close() }()
+func storeArtifactFile(ctx context.Context, data Data, f *os.File) (blob.Digest, int64, error) {
 	h := sha256.New()
 	n, err := io.Copy(h, f)
 	if err != nil {
