@@ -1,6 +1,6 @@
 # Scheduling
 
-Runners advertise capacity and free labels. Jobs declare requirements and
+Runners advertise capacity and enrolled labels. Jobs declare requirements and
 preferences. The controller grants repository and reserved-pool access. One
 matcher decides eligibility for named, queued and self claims.
 
@@ -172,7 +172,7 @@ default-branch file cannot be read or parsed, that pipeline's run is refused
 with the reason, and the rest of the delivery proceeds. `sparkwing pipeline lint` prints the resolved list for
 every declared job. `sparkwing runs status` and the run page show each held
 job's tiers, the runners live in each, and when the next tier opens. A job
-with no available tier waits under the existing queue policy. On-demand
+with no available tier waits under the existing queue policy.
 A `github-actions` tier dispatches one approved workflow per job queue generation
 once earlier holds permit it. Its credential is bound to that job, workflow and
 GitHub-hosted image. Missing App permission shows an installation approval link.
@@ -189,6 +189,27 @@ sparkwing runners add --runner build-box --profile prod --label gpu --repos 'git
 sparkwing runners add --runner deploy-box --profile prod --repos 'github.com/acme/*' --reserved-for prod
 sparkwing runners list --profile prod -o json
 ```
+
+`--label` records the complete allowed label set at enrollment. Shared-runner
+labels require team administration. A member may enroll labels for a personal
+runner with `--personal --session-stdin`; that runner takes only the enrolling
+account's manual, asserted runs. Personal runners never take repository-proven
+work, including App deliveries, even if their labels match a repository tier.
+Browser approval accepts personal runners with an empty allowed label set.
+
+An enrolled runner may advertise a subset of its allowed labels. Extra labels
+refuse the claim, including when an administrator removed a label after a run
+started. Updating `runner.labels` alone cannot expand the allowed set. A
+controller administrator can inspect or replace it on the controller host:
+
+```bash
+sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team acme --runner build-box --reason 'inspect placement labels'
+sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team acme --runner build-box --reason 'add GPU placement' --label gpu --label tool:terraform
+```
+
+Repeated `--label` replaces the whole set. `--clear` removes every allowed label.
+Then update the machine's `runner.labels` to a subset and restart its service.
+Local runs use the local controller's machine labels without remote enrollment.
 
 The controller returns the granted runner identity, class, location and
 reservations separately from free labels and measured headroom. An absent
@@ -216,6 +237,15 @@ sparkwing queue list --profile prod -o json
 sparkwing queue list --profile prod --group deploy -o json
 sparkwing runs status --run RUN_ID --profile prod
 ```
+
+The controller computes placement status from committed state. For a job with
+repository tiers, run status and the run page show the sealed policy revision,
+required labels, live matching runners, tier deadlines and unavailable reasons.
+An offline or busy earlier tier does not delay an eligible later one. Dispatch
+history retains receipts and provider links after award and completion; see
+[Actions fallback](github-actions-runners.md#on-demand-fallback) for dispatch
+counts, lost races and uncertain sends. Queue estimates describe observed
+capacity and may be unavailable when measurements are missing.
 
 A waiting job's notice lists its required runner labels. For example, a job
 requiring `gpu-x` needs an online runner with that label. Ask a team

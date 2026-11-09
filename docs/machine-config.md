@@ -157,10 +157,10 @@ and certificate controls its origin. See the
 ## Runner labels
 
 `runner.labels` lists custom labels this machine reports for job placement,
-such as `host=desk` or `gpu`. They apply to everything the machine runs: work
-an enrolled runner claims from a controller, and the machine's own local
-`sparkwing run` work. A job with `Requires("host=desk")` runs locally on a
-machine whose configuration lists `host=desk`, and waits on any other machine
+such as `host=desk` or `gpu`. The local controller uses them for the machine's own
+`sparkwing run` work. An enrolled runner may advertise only labels in its
+controller-approved enrollment set. A job with `Requires("host=desk")` runs
+locally on a machine whose configuration lists `host=desk`, and waits on any other machine
 with a status detail naming the missing label.
 
 Labels are matching preferences the machine reports about itself. They never
@@ -176,7 +176,11 @@ platform the machine observes.
 The local controller reads `runner.labels` when it starts. After changing them,
 run `sparkwing daemon restart --force` so local runs report the new labels.
 `sparkwing runners list` shows the labels the running daemon read. An
-enrolled runner reads them when its service starts.
+enrolled runner reads them when its service starts. Changing this file does
+not change its enrollment: extra labels cause the controller to refuse claims.
+Ask a controller administrator to replace the allowed set with
+`sparkwing-controller admin runner-labels` before restarting the runner. See
+[enrolled labels](scheduling.md#how-runners-advertise-labels).
 
 ## Permissions and writes
 

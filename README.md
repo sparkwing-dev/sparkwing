@@ -22,6 +22,12 @@ dashboard, one run history, and one queue that its runners claim from.
 token you were given and writes the profile, and reaches any controller you
 can reach, including one your team runs.
 
+Repository [placement tiers](docs/scheduling.md#repository-placement) can prefer
+team runners, then allow Cloud or approved GitHub Actions fallback. Run status
+shows waiting tiers and dispatch history. Runner labels are bound to enrollment;
+personal runners serve only their owner's manual runs. See
+[runner enrollment](docs/scheduling.md#how-runners-advertise-labels).
+
 Hosting your own bucket, database, or controller is an
 [advanced deployment](docs/getting-started.md#advanced-deployments), not a
 step on either path.

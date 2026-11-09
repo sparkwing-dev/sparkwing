@@ -37,6 +37,37 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 | `args` | `map[string]string` | no | Args supplies per-arg default values. Higher priority than a field's `default` tag; lower than an explicit operator CLI flag. Keyed by the field's `flag` tag on pipeline Inputs or a job's WithArgs[T]. |
 | `profile` | `string` | no | Profile pins the pipeline to the controller profile it names: `sparkwing run` refuses it, and `sparkwing pipeline trigger` accepts only --profile with this name. Empty leaves the pipeline unpinned. |
 
+## Repository placement on a pipeline entry
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `placement` | `Placement` | no | Placement orders where repository-proven runs of this pipeline place their jobs. Only the verified default-branch copy takes effect. |
+| `jobs` | `map[string]JobOverride` | no | Jobs holds per-job overrides keyed by job ID. |
+
+See [repository placement](scheduling.md#repository-placement) for targets, holds, default-branch policy and per-job replacement rules.
+
+## `placement`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `prefer` | `[]PlacementTier` | **yes** |  |
+
+## `placement.prefer` list item
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | `string` | **yes** |  |
+| `labels` | `[]string` | no |  |
+| `hold` | `string` | no |  |
+| `workflow` | `string` | no |  |
+| `runner` | `string` | no |  |
+
+## `jobs.<job-id>`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `placement` | `Placement` | no |  |
+
 ## `guards`
 
 | Field | Type | Required | Description |

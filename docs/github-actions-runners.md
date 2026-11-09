@@ -168,6 +168,9 @@ runner can hold one owner and execute one job at a time.
 A repository `placement.prefer` list can end with a `github-actions` tier.
 The controller dispatches one workflow per job queue generation once earlier
 holds permit it. Team runners remain eligible while dispatch is outstanding.
+A team runner's custom labels must be allowed by its enrollment. Personal
+runners cannot satisfy repository placement, even with matching labels. See
+[runner enrollment](scheduling.md#how-runners-advertise-labels).
 GitHub bills the repository account for fallback startup and execution, including
 workflows that lose the claim race.
 
