@@ -109,6 +109,19 @@ func TestTypeScriptInstallWorkspaceConfiguration(t *testing.T) {
 						t.Fatalf("installer changed %s: %v", path, err)
 					}
 				}
+				if err := os.Mkdir(filepath.Join(dir, "extra"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				writeInput(t, dir, "extra/package.json", []byte(`{"name":"extra","version":"1.0.0"}`))
+				writeInput(t, dir, "package.json", []byte(`{"main":"main.mjs","workspaces":["packages/*"],"dependencies":{"@sparkwing/sdk":"file:./sdk","extra":"file:./extra"}}`))
+				var output, diagnostics bytes.Buffer
+				if err := Run(t.Context(), "v0.68.0-qa.16", bytes.NewReader(request), &output, &diagnostics); err == nil {
+					t.Fatal("SDK preparation accepted a dependency missing from the native lockfile")
+				}
+				preserved, err := os.Lstat(sdkPath)
+				if err != nil || !os.SameFile(installed, preserved) {
+					t.Fatalf("invalid lockfile disturbed the prepared SDK: %v", err)
+				}
 			})
 		}
 	}

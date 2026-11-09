@@ -64,7 +64,7 @@ function install() {
   fs.rmdirSync("npm-active");
   process.exit(result.status ?? 1);
 }
-if (["ci", "install"].includes(process.argv[2]) && fs.existsSync("install-gate")) {
+if (["ci", "install"].includes(process.argv[2]) && !process.argv.includes("--dry-run") && fs.existsSync("install-gate")) {
   if (process.argv[2] === "ci") fs.rmSync("node_modules", {recursive:true, force:true});
   const socket = net.connect(JSON.parse(fs.readFileSync("install-gate", "utf8")), "127.0.0.1");
   socket.once("data", () => { socket.destroy(); install(); });

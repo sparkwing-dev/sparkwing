@@ -247,6 +247,11 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 	if manifest.Main == "" {
 		return nil, errors.New("TypeScript package.json requires a main entry")
 	}
+	// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
+	body, err = installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")
+	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+		return nil, err
+	}
 	body, err = installTool(ctx, dir, environment, "npm", "install", "--no-save", "--no-audit", "--no-fund")
 	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
 		return nil, err
