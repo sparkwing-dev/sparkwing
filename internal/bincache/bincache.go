@@ -566,8 +566,7 @@ func unchangedDirectories(before map[string]string) (bool, error) {
 	return true, nil
 }
 
-// perf: hashing a few thousand files one at a time took most of a replace target's key; files hash in
-// parallel and their lines are written in walk order.
+// perf: parallel hashing reduces key latency while ordered results keep the digest deterministic.
 func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
 	var stats hashStats
 	memo := openDigestMemo(dir)
@@ -850,8 +849,7 @@ func buildEnvironmentKey(env []string) []byte {
 		value, _ := gotoolchain.LookupEnv(env, name)
 		fmt.Fprintf(&input, "%s=%s\x00", name, value)
 	}
-	// perf: the compilers PATH resolves to stand in for PATH itself, so activating a virtualenv or nvm no longer
-	// recompiles the pipeline, while upgrading Go behind the same PATH now does.
+	// perf: compiler identities detect tool upgrades without invalidating binaries for unrelated PATH changes.
 	tools := []string{"go", "gcc", "clang", "pkg-config"}
 	for _, name := range []string{"CC", "CXX"} {
 		if value, _ := gotoolchain.LookupEnv(env, name); len(strings.Fields(value)) > 0 {
