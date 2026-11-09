@@ -74,13 +74,6 @@ type Pipeline struct {
 	// accepts only --profile with this name. Empty leaves the pipeline
 	// unpinned.
 	Profile string `yaml:"profile,omitempty"`
-
-	// Requires are runner-label requirements all jobs in this
-	// pipeline must satisfy in addition to their own Job.Requires().
-	// Wholesale replaces defaults.requires when non-empty. The
-	// reserved label "local" keeps fleet helpers from claiming the
-	// node.
-	Requires []string `yaml:"requires,omitempty"`
 }
 
 // Guards is the pipeline-level dispatch gate. Both fields are lists

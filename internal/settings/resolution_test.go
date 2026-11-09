@@ -300,3 +300,39 @@ func TestRunnerLabelsNormalizeAcrossRunAndJobSources(t *testing.T) {
 		t.Fatalf("resolved runner labels = %+v", got)
 	}
 }
+
+func TestPlanningRequirementsUsePlanPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		request   runspec.Options
+		want      []string
+	}{
+		{name: "absent pipeline", raw: "defaults: {requires: [owned]}", want: []string{"owned"}},
+		{name: "pipeline override", raw: "defaults: {requires: [owned]}\npipelines: [{name: build, entrypoint: Build, requires: [other]}]", want: []string{"other"}},
+		{name: "empty override", raw: "defaults: {requires: [owned]}\npipelines: [{name: build, entrypoint: Build, requires: []}]", want: []string{}},
+		{name: "request override", raw: "defaults: {requires: [owned]}", request: runspec.Options{Requires: present([]string{"requested"})}, want: []string{"requested"}},
+		{name: "empty request", raw: "defaults: {requires: [owned]}", request: runspec.Options{Requires: present([]string{})}, want: []string{}},
+		{name: "missing file", want: []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := PlanningRequirements([]byte(tc.raw), ".sparkwing/sparkwing.yaml", "build", tc.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.Value, tc.want) {
+				t.Fatalf("planning requirements = %v, want %v", got.Value, tc.want)
+			}
+			d, err := ProjectCheckoutDeclarations([]byte(tc.raw), ".sparkwing/sparkwing.yaml", "build")
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := ResolvePlan(PlanInputs{Request: runspec.SealedRequest{Request: runspec.Request{Options: tc.request}}, Declarations: d})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.Value, accepted.Options.Requires.Value) {
+				t.Fatalf("planning %v differs from acceptance %v", got, accepted.Options.Requires)
+			}
+		})
+	}
+}
