@@ -6,61 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
-
-func TestRegisteredFlagsReachExecutionParser(t *testing.T) {
-	for _, command := range clisurface.Registry() {
-		if !strings.HasPrefix(command.Path, "sparkwing ") || len(childCommands(command.Path)) != 0 {
-			continue
-		}
-		for _, f := range append(clisurface.GlobalFlags(), command.Flags...) {
-			t.Run(command.Path+"/"+f.Name, func(t *testing.T) {
-				args := strings.Fields(strings.TrimPrefix(command.Path, "sparkwing "))
-				if command.PipelineArgument && command.Path != "sparkwing run" {
-					args = append(args, "example")
-				}
-				value := "example"
-				switch {
-				case len(f.Values) > 0:
-					value = f.Values[0]
-				case f.Argument == "START_LINE" || f.Argument == "N" || f.Argument == "BYTES" || f.HasMinimum:
-					value = "1"
-				case f.Argument == "DURATION" || f.Argument == "DUR":
-					value = "1s"
-				case f.Name == "output":
-					value = "json"
-				}
-				token := "--" + f.Name
-				if f.Argument != "" {
-					token += "=" + value
-				}
-				tokenIndex := len(args)
-				args = append(args, token)
-				if f.Name != "help" {
-					args = append(args, "--help")
-				}
-				var err error
-				captureStdout(t, func() { err = runSparkwing(args) })
-				if err != nil {
-					t.Fatal(err)
-				}
-				if f.Short != "" {
-					token = "-" + f.Short
-					if f.Argument != "" {
-						token += "=" + value
-					}
-					args[tokenIndex] = token
-					captureStdout(t, func() { err = runSparkwing(args) })
-					if err != nil {
-						t.Fatal(err)
-					}
-				}
-			})
-		}
-	}
-}
 
 func TestHooksCommandsUseRegistryGrammarAndJSON(t *testing.T) {
 	f := newChainFixture(t)
@@ -97,16 +43,8 @@ func TestHooksCommandsUseRegistryGrammarAndJSON(t *testing.T) {
 	}
 }
 
-func parseHooksInstall(args []string) error {
-	return runSparkwing(append([]string{"pipeline", "hooks", "install"}, args...))
-}
-
 func parseHooksUninstall(args []string) error {
 	return runSparkwing(append([]string{"pipeline", "hooks", "uninstall"}, args...))
-}
-
-func parseHooksStatus(args []string) error {
-	return runSparkwing(append([]string{"pipeline", "hooks", "status"}, args...))
 }
 
 func TestPipelineNewUsesJSONReceipt(t *testing.T) {

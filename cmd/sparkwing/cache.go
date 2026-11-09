@@ -49,9 +49,6 @@ func runCacheInfo(inv clisurface.Invocation) error {
 	output := inv.Output(color.IsInteractiveStdout())
 	all := inv.Bool("all-entries")
 	docsCache := inv.Bool("docs")
-	if err := validateCacheOutput(output); err != nil {
-		return err
-	}
 	if docsCache {
 		return docsCacheInfo(output)
 	}
@@ -139,9 +136,6 @@ func runCachePrune(inv clisurface.Invocation) error {
 		maxEntries, _ = strconv.Atoi(inv.Value("max-entries"))
 	}
 	all, docsCache := inv.Bool("all-entries"), inv.Bool("docs")
-	if err := validateCacheOutput(output); err != nil {
-		return err
-	}
 	if docsCache {
 		return docsCacheClear(output)
 	}
@@ -178,9 +172,6 @@ func runCachePrune(inv clisurface.Invocation) error {
 }
 
 func writeCacheOutput(output string, payload any, pretty func()) error {
-	if err := validateCacheOutput(output); err != nil {
-		return err
-	}
 	switch output {
 	case "json":
 		return json.NewEncoder(os.Stdout).Encode(payload)
@@ -199,11 +190,6 @@ func writeCacheOutput(output string, payload any, pretty func()) error {
 		pretty()
 	}
 	return nil
-}
-
-func validateCacheOutput(output string) error {
-	_, err := resolveOutputFormat(output, "cache")
-	return err
 }
 
 func limitLabel(n int64) string {
@@ -252,9 +238,6 @@ func runCacheExplain(inv clisurface.Invocation) error {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
 	output := inv.Output(color.IsInteractiveStdout())
-	if err := validateCacheOutput(output); err != nil {
-		return err
-	}
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)

@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -443,21 +442,6 @@ func runSparkwing(args []string) (result error) {
 		return runHooksStatus(inv)
 	}
 	return &clisurface.UsageError{Path: inv.Command.Path, Message: "command execution is unavailable"}
-}
-
-func resolveOutputFormat(outputFormat, cmdPath string) (string, error) {
-	return resolveTTYAwareOutput(outputFormat, cmdPath)
-}
-
-func resolveTTYAwareOutput(outputFormat, cmdPath string) (string, error) {
-	switch outputFormat {
-	case "pretty", "json", "plain":
-		return outputFormat, nil
-	case "":
-		return clisurface.OutputFormat(outputFormat, color.IsInteractiveStdout()), nil
-	default:
-		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outputFormat)
-	}
 }
 
 func isTerminalRunStatus(s string) bool {
