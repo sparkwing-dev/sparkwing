@@ -227,10 +227,11 @@ This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin,
 `--hidden` and `--short` flags as the Go shapes. Repeat the command with another
 pipeline name to add a pipeline to the TypeScript entry. Sparkwing installs
 the SDK dependencies when the pipeline runs. Commit `.sparkwing/package-lock.json` because
-the installer validates dependencies with `npm ci`. Node.js and npm must be on
+the installer validates dependencies with `npm ci`. Node.js 22.18 or later and npm must be on
 PATH. `pipeline plan` explains the resolved jobs and steps without running them.
 `pipeline lint` analyzes Go source only. Its successful exit does not validate
-TypeScript source.
+TypeScript source. See [TypeScript authoring](authoring-pipelines.md#typescript-authoring)
+for jobs, steps, outputs, runtime conditions and other authoring topics.
 
 Examples are for reading, not scaffolding: `--template` takes a shape,
 not an example name. See the

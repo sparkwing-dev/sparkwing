@@ -28,6 +28,9 @@ jobs. `pipeline lint` checks Go source only, and reports that TypeScript lint is
 `status: "unsupported"` and a `notice`. The notice exits zero and does not
 certify TypeScript source as linted. The TypeScript scaffold prints the npm
 lockfile setup command before the first run (`setup_command` in JSON).
+Local foreground runs, detached CLI runs and local schedules use the same
+TypeScript entry. See [TypeScript authoring](authoring-pipelines.md#typescript-authoring)
+for API patterns, validation differences and schedule proof/pinning limits.
 The Go API examples below describe the Go SDK.
 
 ## Pipeline registry
