@@ -75,7 +75,7 @@ func TestWindowsVerifyKeepsRaceFailuresAndRunsLaterChecksInOrder(t *testing.T) {
 func TestWindowsVerifySelectsNativeRegressionFixtures(t *testing.T) {
 	selection := regexp.MustCompile(windowsVerifyRuntimeTests)
 	for _, relative := range []string{
-		"sparkwing/exec_windows_test.go", "internal/pipelineentry/npm_test.go",
+		"internal/nodehost/host_exec_windows_test.go", "internal/pipelineentry/npm_test.go",
 		"internal/wingd/client/query_absent_windows_test.go", "internal/orchestrator/run_handle_test.go",
 	} {
 		source, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", filepath.FromSlash(relative)), nil, 0)
@@ -96,6 +96,26 @@ func TestWindowsVerifySelectsNativeRegressionFixtures(t *testing.T) {
 		if count == 0 {
 			t.Fatalf("%s contains no regression fixtures", relative)
 		}
+	}
+}
+
+func TestWindowsVerifyRunsHostCommandRegressionPackage(t *testing.T) {
+	bin := t.TempDir()
+	log := filepath.Join(t.TempDir(), "go-args")
+	writeDeliveryTool(t, filepath.Join(bin, "go"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > "+shellQuote(log)+"\n")
+	for _, tool := range []string{"node", "npm"} {
+		writeDeliveryTool(t, filepath.Join(bin, tool), "#!/bin/sh\nexit 0\n")
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := runWindowsVerifyRuntime(newTestContext(t)); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(strings.Fields(string(args)), "./internal/nodehost") {
+		t.Fatalf("Windows race command omits host regression package: %s", args)
 	}
 }
 

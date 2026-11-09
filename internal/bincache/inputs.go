@@ -170,7 +170,6 @@ func selectedBuildFiles(dir, flags string) (map[string]string, []string, error) 
 		for original, replacement := range overlay.Replace {
 			if replacement != "" {
 				replacement = absolute(replacement)
-				files = append(files, replacement)
 			}
 			replacements[absolute(original)] = replacement
 		}
