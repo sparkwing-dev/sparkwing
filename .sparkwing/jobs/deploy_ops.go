@@ -541,13 +541,17 @@ func (d *deployer) requireMainAncestor(ctx context.Context, commit string) error
 		}
 		args := []string{"fetch", "--no-tags", "--no-write-fetch-head"}
 		if strings.TrimSpace(shallow) == "true" {
-			args = append(args, "--unshallow")
+			args = append(args, "--depth=1")
 		}
 		args = append(args, "origin", "+refs/heads/main:refs/remotes/origin/main")
 		if _, err := d.sourceGit(ctx, args...); err != nil {
 			return err
 		}
-		if _, err := d.sourceGit(ctx, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"); err != nil {
+		tip, err := d.sourceGit(ctx, "rev-parse", "refs/remotes/origin/main")
+		if err != nil {
+			return err
+		}
+		if err := d.requireSourceAncestor(ctx, commit, strings.TrimSpace(tip)); err != nil {
 			return fmt.Errorf("candidate %s is not an ancestor of origin/main; refusing deployment: %w", commit, err)
 		}
 		return nil
@@ -725,11 +729,35 @@ func (d *deployer) requireNotOlder(ctx context.Context, env deployEnv, previous 
 		if revision == images.Commit && pin.Digest != phase.want(images).Digest {
 			return fmt.Errorf("production revision %s already matches the candidate with different image digests; use a newer source commit; production was not changed", revision)
 		}
-		if _, err := d.sourceGit(ctx, "merge-base", "--is-ancestor", revision, images.Commit); err != nil {
+		if err := d.requireSourceAncestor(ctx, revision, images.Commit); err != nil {
 			return fmt.Errorf("production revision %s is not an ancestor of candidate %s; production was not changed: %w", revision, images.Commit, err)
 		}
 	}
 	return nil
+}
+
+func (d *deployer) requireSourceAncestor(ctx context.Context, ancestor, commit string) error {
+	_, err := d.sourceGit(ctx, "merge-base", "--is-ancestor", ancestor, commit)
+	if err == nil {
+		return nil
+	}
+	// perf: recent deployment ancestry needs only a short span of commits, not every release's history.
+	for _, depth := range []string{"--deepen=64", "--unshallow"} {
+		shallow, depthErr := d.sourceGit(ctx, "rev-parse", "--is-shallow-repository")
+		if depthErr != nil {
+			return depthErr
+		}
+		if strings.TrimSpace(shallow) != "true" {
+			return err
+		}
+		if _, err := d.sourceGit(ctx, "fetch", "--no-tags", "--no-write-fetch-head", depth, "origin", commit); err != nil {
+			return err
+		}
+		if _, err = d.sourceGit(ctx, "merge-base", "--is-ancestor", ancestor, commit); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // safety: an image without an ordered version needs a manual first deploy

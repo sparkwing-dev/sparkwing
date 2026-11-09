@@ -598,9 +598,13 @@ queue serializes the whole deploy, including staging and production. At build ad
 `git ls-remote` checks main's tip. Superseded waiters stop before credentials, image work or
 Cloud smoke. Several stale rows can wait, but only the newest waiting commit can pass
 admission. Once admitted, a candidate keeps its slot and can finish even when more pushes land.
-Staging and production fetch main's history and require the candidate SHA to be an ancestor
-of `origin/main` or its tip. These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses
-as repository proof.
+Staging and production fetch main's tip at depth one in shallow checkouts and require the
+exact candidate SHA to be an ancestor of `origin/main` or its tip. Ancestry checks first use
+available history. A missing proof deepens the descendant's exact SHA by 64 commits, then
+fetches full history if the proof still fails. The same check proves that both deployed
+image revisions precede the production candidate. Build-time version resolution retains
+the release history needed for its stamp.
+These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses as repository proof.
 
 Production checks ancestry again immediately before each controller or launcher GitOps push.
 A candidate removed by a main history rewrite during deployment preparation is refused at
