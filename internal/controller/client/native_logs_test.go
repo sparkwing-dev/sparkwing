@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -315,4 +316,20 @@ func (b *logFailingBody) Close() error {
 		return b.failure
 	}
 	return nil
+}
+
+func TestNativeLogPutKeepsTheConfiguredHTTPDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		uploader := &nativeLogUploader{transport: testEngine(t, func(request *http.Request) (*http.Response, error) {
+			deadline, ok := request.Context().Deadline()
+			if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > time.Minute {
+				t.Fatalf("configured upload deadline missing: %v, %v", deadline, ok)
+			}
+			return engineResponse(http.StatusCreated, ""), nil
+		})}
+		uploader.transport.http.Timeout = time.Minute
+		if err := uploader.put(context.Background(), "https://storage.example/object", nil, time.Now().Add(time.Minute), []byte("hello")); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

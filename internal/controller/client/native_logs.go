@@ -90,6 +90,11 @@ func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[
 	if err := validateDataTransfer(controllerwire.DataSignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry}); err != nil {
 		return err
 	}
+	if timeout := u.transport.http.Timeout; timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	response, err := (blob.TransferClient{Transport: u.transport.http.Transport}).Transfer(ctx, blob.SignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry, Size: int64(len(body))}, bytes.NewReader(body))
 	if errors.Is(err, blob.ErrPreconditionFailed) {
 		return nil

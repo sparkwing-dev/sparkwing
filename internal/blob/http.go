@@ -64,8 +64,11 @@ var ErrPreconditionFailed = errors.New("signed blob transfer: HTTP 412")
 // Validate checks signed-object metadata without accepting reusable credentials.
 // Expiration and object identity belong to the caller's signing contract.
 func (t SignedTransfer) Validate() error {
+	if t.Size < 0 {
+		return ErrIntegrity
+	}
 	u, err := url.Parse(t.URL)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" || t.Size < 0 {
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" {
 		return errors.New("invalid signed object transfer")
 	}
 	for name, value := range t.Headers {
