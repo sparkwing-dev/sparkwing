@@ -22,7 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// sdkIndex requires signed mapping data even when the invoking host is a development build.
+// safety: development policy exemptions carry no signed SDK-to-engine authority.
 func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, error) {
 	if r.config.BuildVersion == "" || releaseBuild(r.config.BuildVersion) {
 		return r.Index(ctx, now)
