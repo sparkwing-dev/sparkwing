@@ -75,6 +75,8 @@ func TestWindowsVerifyKeepsRaceFailuresAndRunsLaterChecksInOrder(t *testing.T) {
 func TestWindowsVerifySelectsNativeRegressionFixtures(t *testing.T) {
 	selection := regexp.MustCompile(windowsVerifyRuntimeTests)
 	for _, relative := range []string{
+		"internal/gotoolchain/toolchain_test.go", "internal/sparks/toolchain_test.go",
+		"internal/bincache/toolchain_floor_test.go", "cmd/sparkwing/init_go_directive_test.go",
 		"internal/nodehost/host_exec_windows_test.go", "internal/pipelineentry/npm_test.go",
 		"internal/procenv/look_command_windows_test.go",
 		"internal/wingd/client/query_absent_windows_test.go", "internal/orchestrator/run_handle_test.go",
@@ -115,7 +117,7 @@ func TestWindowsVerifyRunsHostCommandRegressionPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, pkg := range []string{"./internal/nodehost", "./internal/procenv"} {
+	for _, pkg := range []string{"./internal/nodehost", "./internal/procenv", "./internal/gotoolchain", "./internal/sparks", "./internal/bincache", "./cmd/sparkwing"} {
 		if !slices.Contains(strings.Fields(string(args)), pkg) {
 			t.Errorf("Windows race command omits regression package %s: %s", pkg, args)
 		}

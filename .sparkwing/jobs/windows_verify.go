@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecError_|WindowsHostCommand|WindowsCapturedEnvironment|LookupCommandWindows|SDKCommandWindows|NPMCommand|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|QueryReportsNoDaemonForFreshWindowsHome)`
+const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecError_|WindowsHostCommand|WindowsCapturedEnvironment|LookupCommandWindows|SDKCommandWindows|NPMCommand|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|BuildEnv|OverlayFloor|LocalBlockedSources|ExplainDependencyMismatch|InvalidModule|CanceledProbe|FailedProbeLeavesEnvUnchanged|ExplicitSessionEnvironment|ResolveAndWrite|ResolverWithDir|CompilePipelineOverridesFixedPin|CompilePipelineExplainsLocalDependencyFloor|ResolveSparksToolchainFailure|PipelineScaffoldDoesNotRequireGoPatch|DiscoveryRefusesTheDefaultStateDirWhenTheHomeIsRedirected|QueryReportsNoDaemonForFreshWindowsHome)`
 
 const windowsVerifyTimeout = 20 * time.Minute
 
@@ -25,7 +25,7 @@ func (WindowsVerify) ShortHelp() string {
 
 func (WindowsVerify) Help() string {
 	return "Runs the native Windows process-lifetime, SDK Bash/Exec, npm invocation, daemon discovery, and run-handle Go tests with the race detector, " +
-		"checks template executable paths, locking, and disk space, " +
+		"checks Go toolchain fixtures, template executable paths, locking, and disk space, " +
 		"then bin/install-test.sh and bin/release-install-test.sh through Git Bash. " +
 		"Requires Windows, Go, a working native C compiler, Git Bash, Node, and npm on PATH. " +
 		"Reserves four cores and runs the checks sequentially. Every check reports its result even when an earlier check fails."
@@ -77,6 +77,7 @@ func runWindowsVerifyRuntime(ctx context.Context) error {
 	}
 	command := shellQuoteAll([]string{
 		"go", "test", "-race", "-p", "2", "-timeout", "5m", "-count=1", "-run", windowsVerifyRuntimeTests,
+		"./internal/gotoolchain", "./internal/sparks", "./internal/bincache", "./cmd/sparkwing",
 		"./sparkwing", "./internal/nodehost", "./internal/procenv", "./internal/pipelineentry", "./internal/wingd/client", "./internal/orchestrator",
 	})
 	return runPlatformIsolated(ctx, withPinned(command, []string{"CGO_ENABLED=1", "GOOS=windows", "GOARCH=" + shellQuote(runtime.GOARCH)}))

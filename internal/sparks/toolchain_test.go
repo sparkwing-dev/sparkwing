@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func resolveFloorFixture(t *testing.T, setting, floor, listBody, downloadBody string) (string, string) {
@@ -16,15 +17,14 @@ func resolveFloorFixture(t *testing.T, setting, floor, listBody, downloadBody st
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	script := "#!/bin/sh\n" +
-		"printf '%s|%s\\n' \"$1\" \"$GOTOOLCHAIN\" >> '" + log + "'\n" +
+		"printf '%s|%s\\n' \"$1\" \"$GOTOOLCHAIN\" >> '" + filepath.ToSlash(log) + "'\n" +
 		"case \"$1\" in\n" +
 		"env) printf '%s\\n' '" + setting + "' 'go1.26.6' 'off'; exit 0;;\n" +
 		"list) " + listBody + ";;\n" +
 		"mod) " + downloadBody + ";;\nesac\n"
-	for path, data := range map[string]string{"go": script, "go.mod": "module example.com/pipeline\ngo " + floor + "\n"} {
-		if err := os.WriteFile(filepath.Join(dir, path), []byte(data), 0o700); err != nil {
-			t.Fatal(err)
-		}
+	testshell.Install(t, filepath.Join(dir, "go"), script)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\ngo "+floor+"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GOTOOLCHAIN", setting)

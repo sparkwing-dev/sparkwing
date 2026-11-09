@@ -743,7 +743,7 @@ func linkTool(t *testing.T, dir, name string) {
 		}
 	}
 	if err != nil {
-		t.Fatalf("find %s: %v", name, err)
+		t.Skipf("Kubernetes script fixture requires %s: %v", name, err)
 	}
 	if err := os.Symlink(source, filepath.Join(dir, name)); err != nil {
 		t.Fatal(err)

@@ -423,7 +423,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 ## Test and gate workflow
 
 `windows-verify` races host command execution in `internal/nodehost` alongside
-the SDK and runtime packages. `.sparkwing/jobs/windows_verify_test.go` guards
+the SDK, runtime, and Go toolchain fixture packages. `.sparkwing/jobs/windows_verify_test.go` guards
 both the selected fixture names and the package passed to Go.
 
 The shared test sandbox and the pipeline module's TestMain scrub Git bindings

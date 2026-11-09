@@ -430,6 +430,7 @@ func TestHooksUninstallStopsAtAnUninspectableDirectory(t *testing.T) {
 func TestDiscoveryRefusesTheDefaultStateDirWhenTheHomeIsRedirected(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	stateDir := filepath.Join(home, ".sparkwing")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
