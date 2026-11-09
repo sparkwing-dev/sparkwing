@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authori
 		Kind: capability.ProvisionMachine, Authority: &owner.Authority, Team: "a",
 		RegistrationID: "runner:a:worker", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "worker"},
 		Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone},
-		Repositories: []string{"github.com/acme/*"}, ExpiresAt: &expiry,
+		Repositories: []string{"github.com/acme/*"}, AllowedLabels: slices.Clone(demand.Labels), ExpiresAt: &expiry,
 	})
 	if err != nil {
 		t.Fatal(err)

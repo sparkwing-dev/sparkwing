@@ -41,7 +41,7 @@ Without --session-stdin a personal runner can be approved in the browser: the co
 | `--personal` | Offer this machine only to your runs, including Cloud overflow. |
 | `--session-stdin` | Read an independent account session from stdin without saving it. After fetching its CSRF proof, attempt logout on enrollment success or failure. Copy its cookie from a separate private browser window so logout does not invalidate your CLI login token. |
 | `--repos PATTERN` | Repository patterns this runner takes jobs for; a job on a runner serving several repositories can claim the others' jobs and their secrets, so scope it to repositories that trust each other. Its passes count for CI, and every process running as the service's OS user can forge one, so scope a workstation only for people the team would let bypass the required gate check. Repeatable; comma-separated values are accepted. |
-| `--label LABEL` | Labels this runner advertises, matched against the labels jobs ask for or prefer. Repeatable; comma-separated values are accepted. |
+| `--label LABEL` | Configure and authorize this label at enrollment. Claims cannot add labels. An administrator changes the allowed set with sparkwing-controller admin runner-labels. Repeatable; comma-separated values are accepted. |
 | `--max-concurrent N` | Most jobs this runner works on at once, written to its config. A job waiting in `RunAndAwait` does not count until its child finishes, so a one-slot runner can run the child. Must be at least 1. |
 | `--config PATH` | Machine config file to write the runner section into, the standard Sparkwing config file by default. |
 | `--force` | Replace an existing object. |

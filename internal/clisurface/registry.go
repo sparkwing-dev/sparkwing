@@ -426,7 +426,7 @@ func Registry() []Command {
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an independent account session from stdin without saving it. After fetching its CSRF proof, attempt logout on enrollment success or failure. Copy its cookie from a separate private browser window so logout does not invalidate your CLI login token."},
 			{Name: "repos", Argument: "PATTERN", Repeatable: true, CommaList: true},
-			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
+			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true, Meaning: "Configure and authorize this label at enrollment. Claims cannot add labels. An administrator changes the allowed set with sparkwing-controller admin runner-labels."},
 			{Name: "max-concurrent", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "config", Argument: "PATH"},
 			{Name: "force"},
@@ -847,6 +847,14 @@ func Registry() []Command {
 			{Name: "warn-bucket-objects", Argument: "N", Meaning: "Objects at which health reports the bucket as warning; 0 disables the warning."},
 		}},
 		{Path: "sparkwing-controller admin", Flags: []Flag{}},
+		{Path: "sparkwing-controller admin runner-labels", Authority: inPodBreakGlass, Rules: []string{"Read an enrolled runner's allowed labels from the controller's recorded store. Repeated --label replaces the complete set; --clear removes it. Requires an existing team administrator. Changes are audited and apply to future claims. Also update runner.labels on the machine before it advertises the new set."}, Flags: []Flag{
+			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},
+			{Name: "team", Argument: "SLUG", Required: true},
+			{Name: "runner", Argument: "NAME", Required: true},
+			{Name: "reason", Argument: "TEXT", Required: true},
+			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
+			{Name: "clear"},
+		}},
 		{Path: "sparkwing-controller admin session", Authority: inPodBreakGlass, Rules: []string{"Print an independent account session for an existing team administrator. Output is pretty on a terminal and one JSON object when piped. Use --output plain when piping to sparkwing runners add --session-stdin. Requires access to the running controller's recorded store. The initial expiry is 15 minutes. Normal session renewal applies, including during enrollment. After fetching the session CSRF proof, enrollment attempts logout on success or failure. If fetching the proof or logout fails, the session remains live until expiry or revocation. A durable session.break_glass audit row records the account ID and team, excluding the session and free-text reason."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},

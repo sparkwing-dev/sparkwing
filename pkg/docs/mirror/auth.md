@@ -826,6 +826,26 @@ part of this model.
 ## Runner classes
 
 Runner identity, reserved pools, metering and capacity remain separate fields.
+Runner enrollment records the labels supplied with `runners add --label` as the
+complete set the machine may advertise. Claims with extra free labels are refused
+with an error naming the label and the admin command. A runner may advertise a
+subset. Fixed identity keys still come from the controller.
+
+In the controller pod, a team administrator can view and replace this set using
+the existing admin surface:
+
+```sh
+sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team TEAM --runner NAME --reason "inspect placement"
+sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team TEAM --runner NAME --reason "update placement" --label linux --label deploy
+```
+
+Repeated `--label` replaces the complete set. `--clear` empties it. Update the
+machine's `runner.labels` separately. Existing enrollments acquire their last
+stored advertised labels once when the controller starts the new build. This
+preserves runner credentials and configuration. A runner with no stored labels
+starts with an empty set and needs an admin update before advertising labels.
+New claims never enlarge the set, and credential rotation preserves it.
+
 The controller returns granted class and location alongside free labels,
 repository fences, active jobs and measured headroom. Missing headroom means
 there is no observation. It is not a zero-capacity sample.

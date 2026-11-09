@@ -605,7 +605,7 @@ func TestRunnersEnrollmentUsesRegistrationAndPreservesRepeatedSelectors(t *testi
 			t.Fatal(err)
 		}
 	})
-	if len(f.enrolled) != 1 || f.enrolled[0].Name != "desk" || !slices.Equal(f.enrolled[0].Repos, []string{"github.com/acme/*", "gitlab.example.com/acme/*"}) {
+	if len(f.enrolled) != 1 || f.enrolled[0].Name != "desk" || !slices.Equal(f.enrolled[0].AllowedLabels, []string{"os=linux", "arch=amd64", "gpu"}) || !slices.Equal(f.enrolled[0].Repos, []string{"github.com/acme/*", "gitlab.example.com/acme/*"}) {
 		t.Fatalf("enrollment: %+v", f.enrolled)
 	}
 	raw, err := loadEnrolledRunner(f.config)

@@ -17,6 +17,7 @@ import (
 )
 
 type runnerEnrollmentRequest struct {
+	AllowedLabels []string         `json:"allowed_labels,omitempty"`
 	Personal      bool             `json:"personal,omitempty"`
 	Platform      string           `json:"platform,omitempty"`
 	Name          string           `json:"name"`
@@ -83,7 +84,7 @@ func runnerEnrollmentSpec(request runnerEnrollmentRequest, authority capability.
 		RegistrationID: "runner:" + team + ":" + request.Name,
 		Subject:        capability.Subject{Kind: capability.SubjectMachine, ID: request.Name}, Team: team,
 		Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},
-		Repositories: allow.Patterns(), ReservedPools: request.ReservedPools, Trust: request.Trust, ExpiresAt: expires,
+		Repositories: allow.Patterns(), ReservedPools: request.ReservedPools, Trust: request.Trust, ExpiresAt: expires, AllowedLabels: request.AllowedLabels,
 	}, nil
 }
 

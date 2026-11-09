@@ -55,6 +55,9 @@ func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand)
 			return err
 		}
 		c := principal.Capability
+		if err := checkRunnerLabelsTx(ctx, tx, chain, observation.Labels); err != nil {
+			return err
+		}
 		if !facts.Observable && !here {
 			return authorityError(apierr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 		}

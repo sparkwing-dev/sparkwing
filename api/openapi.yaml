@@ -1749,6 +1749,12 @@ components:
     internal.controllerwire.EnrollRunnerRequest:
       additionalProperties: true
       properties:
+        allowed_labels:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         expires_at:
           anyOf:
             - format: date-time

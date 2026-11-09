@@ -26,6 +26,7 @@ type CapabilityRecord struct {
 
 // CapabilityOrigin retains the trusted provisioning kind and registration.
 type CapabilityOrigin struct {
+	AllowedLabels  []string                 `json:"allowed_labels"`
 	Personal       bool                     `json:"personal,omitempty"`
 	Requirement    *authorityRequirement    `json:"requirement,omitempty"`
 	Kind           capability.ProvisionKind `json:"kind"`
