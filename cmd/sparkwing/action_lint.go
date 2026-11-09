@@ -29,12 +29,8 @@ func pipelineLintOptions(inv clisurface.Invocation) pipelineLintArgs {
 
 func runPipelineLint(inv clisurface.Invocation) error {
 	parsed := pipelineLintOptions(inv)
-	format, err := resolveOutputFormat(parsed.output, cmdPipelineLint.Path)
-	if err != nil {
-		return err
-	}
 	if parsed.rules {
-		return printLintRules(format)
+		return printLintRules(parsed.output)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -62,10 +58,10 @@ func runPipelineLint(inv clisurface.Invocation) error {
 		findings = filterFindings(findings, parsed.pipeline, entrypoint)
 	}
 
-	if err := renderLintFindings(findings, format); err != nil {
+	if err := renderLintFindings(findings, parsed.output); err != nil {
 		return err
 	}
-	if format != "json" {
+	if parsed.output != "json" {
 		if err := printPlacementPreview(cfg, parsed.pipeline); err != nil {
 			return err
 		}

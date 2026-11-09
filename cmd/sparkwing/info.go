@@ -211,14 +211,9 @@ func runInfo(inv clisurface.Invocation) error {
 		return writeRenderedText(os.Stdout, "document", output, printFirstTimeCard)
 	}
 
-	format, err := resolveOutputFormat(output, cmdInfo.Path)
-	if err != nil {
-		return err
-	}
-
 	info := gatherInfo()
 
-	switch format {
+	switch output {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		return enc.Encode(info)

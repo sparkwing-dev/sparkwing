@@ -243,3 +243,28 @@ func TestRunInvocationCloudRouting(t *testing.T) {
 		}
 	}
 }
+
+func TestInvocationOutput(t *testing.T) {
+	for _, terminal := range []bool{false, true} {
+		for _, format := range []string{"", "pretty", "json", "plain"} {
+			args := []string{"info"}
+			if format != "" {
+				args = append(args, "-o", format)
+			}
+			inv, err := Parse("sparkwing", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := format
+			if want == "" {
+				want = "json"
+				if terminal {
+					want = "pretty"
+				}
+			}
+			if got := inv.Output(terminal); got != want {
+				t.Fatalf("format=%q terminal=%t: got %q, want %q", format, terminal, got, want)
+			}
+		}
+	}
+}

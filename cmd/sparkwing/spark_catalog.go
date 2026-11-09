@@ -45,13 +45,9 @@ func runSparksCatalog(inv clisurface.Invocation) error {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
 	library, pathFlag := inv.Value("library"), inv.Value("path")
-	outFmt := inv.Output(color.IsInteractiveStdout())
+	format := inv.Output(color.IsInteractiveStdout())
 	if pathFlag != "" && library != "" {
 		return errors.New("spark catalog: --path and --library both given (pass one)")
-	}
-	format, err := resolveOutputFormat(outFmt, "spark catalog")
-	if err != nil {
-		return err
 	}
 	// safety: a catalog read needs no project; without one it downloads into
 	// the temp directory and reads the latest release.
