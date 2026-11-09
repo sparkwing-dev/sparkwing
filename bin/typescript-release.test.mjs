@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 
 const previous = { language: "typescript", version: "v0.1.0", protocol: 2, source_digest: "a" };
 test("unchanged SDK keeps its version across engine releases and an unused version bump", () => {
-  for (const version of ["0.1.0", "0.2.0"]) {
+  for (const version of ["0.0.0", "0.1.0", "0.2.0"]) {
     assert.deepEqual(decideRelease(version, "a", [previous]), { publish: false, entry: previous });
   }
 });

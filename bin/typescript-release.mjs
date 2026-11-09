@@ -48,14 +48,14 @@ function compareVersions(a, b) {
 }
 
 export function decideRelease(version, digest, entries) {
+  const candidates = entries.filter(entry => entry.language === "typescript");
+  const latest = candidates.sort((a, b) => compareVersions(b.version, a.version))[0];
+  if (latest?.source_digest === digest && !latest.revoked) return { publish: false, entry: latest };
   if (!/^0\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/.test(version) || version === "0.0.0")
     throw new Error("package.json must select an independent SDK version in major 0");
-  const candidates = entries.filter(entry => entry.language === "typescript");
   const existing = candidates.find(entry => entry.version === `v${version}`);
   if (existing && existing.source_digest !== digest)
     throw new Error("SDK version already names different source; bump sdk/typescript/package.json");
-  const latest = candidates.sort((a, b) => compareVersions(b.version, a.version))[0];
-  if (latest?.source_digest === digest && !latest.revoked) return { publish: false, entry: latest };
   if (latest && compareVersions(`v${version}`, latest.version) <= 0)
     throw new Error("changed or revoked SDK requires a version newer than the latest SDK entry");
   return { publish: true, entry: { language: "typescript", version: `v${version}`, protocol: 2, source_digest: digest } };
