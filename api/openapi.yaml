@@ -6779,6 +6779,8 @@ components:
     internal.runspec.SourceLocation:
       additionalProperties: true
       properties:
+        installation:
+          type: string
         local_checkout:
           type: string
         pipeline_dir:
