@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -22,7 +20,7 @@ func dataDownloadContext(ctx context.Context, r *http.Request) context.Context {
 	_, forwardedFor := r.Header["X-Forwarded-For"]
 	_, forwardedHost := r.Header["X-Forwarded-Host"]
 	if ratelimit.FromTrustedListener(r) || forwardedFor || forwardedHost {
-		return context.WithValue(ctx, dataIngressKey{}, ratelimit.ClientIP(r))
+		return context.WithValue(ctx, dataIngressKey{}, true)
 	}
 	return ctx
 }
@@ -71,16 +69,12 @@ func (b *cloudFrontDataBackend) Sign(ctx context.Context, object capability.Obje
 		return capability.SignedObject{}, err
 	}
 	signed, err := b.S3.Sign(ctx, object)
-	client, ingress := ctx.Value(dataIngressKey{}).(string)
+	ingress, _ := ctx.Value(dataIngressKey{}).(bool)
 	if err != nil || object.Method != http.MethodGet || !ingress {
 		return signed, err
 	}
-	address, err := netip.ParseAddr(client)
-	if err != nil || !address.Unmap().Is4() {
-		return capability.SignedObject{}, &apierr.Error{Code: apierr.BadRequest, Message: "CloudFront downloads require an IPv4 connection to the controller; retry over IPv4"}
-	}
 	resource := (&url.URL{Scheme: "https", Host: b.domain, Path: "/" + b.PhysicalKey(object.Key)}).String()
-	policy := &sign.Policy{Statements: []sign.Statement{{Resource: resource, Condition: sign.Condition{IPAddress: &sign.IPAddress{SourceIP: address.Unmap().String() + "/32"}, DateLessThan: sign.NewAWSEpochTime(object.ExpiresAt)}}}}
+	policy := &sign.Policy{Statements: []sign.Statement{{Resource: resource, Condition: sign.Condition{DateLessThan: sign.NewAWSEpochTime(object.ExpiresAt)}}}}
 	signed.URL, err = b.signer.SignWithPolicy(resource, policy)
 	if err != nil {
 		return capability.SignedObject{}, err

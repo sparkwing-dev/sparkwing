@@ -170,7 +170,7 @@ func TestJobArtifactsPublishesListsAndDownloadsUnderCurrentMembership(t *testing
 		t.Fatalf("artifact URL: %+v, %v", result.Download, err)
 	}
 	policy := string(cloudFrontDecode(t, signedURL.Query().Get("Policy")))
-	if !strings.Contains(policy, `"AWS:SourceIp":"198.51.100.9/32"`) {
+	if strings.Contains(policy, `"AWS:SourceIp"`) || !strings.Contains(policy, `"DateLessThan"`) {
 		t.Fatalf("artifact policy: %s", policy)
 	}
 	server.dataController.Objects = objects

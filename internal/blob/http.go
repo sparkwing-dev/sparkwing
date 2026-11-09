@@ -52,7 +52,7 @@ func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, b
 			return nil, ErrPreconditionFailed
 		default:
 			if response.StatusCode == http.StatusForbidden && method == http.MethodGet {
-				return nil, errors.New("signed blob transfer: HTTP 403: download links are tied to the requester's address and may expire; re-run the command over IPv4 from the network that will download to get a fresh link")
+				return nil, errors.New("signed blob transfer: HTTP 403: download links may expire; re-run the command to request a fresh link")
 			}
 			return nil, fmt.Errorf("signed blob transfer: HTTP %d", response.StatusCode)
 		}

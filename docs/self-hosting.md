@@ -307,16 +307,8 @@ arguments, and logs. The distribution must serve the private data bucket through
 access control configuration.
 
 The controller returns a 60-second CloudFront URL for data and artifact requests
-arriving through the public ingress. Its custom policy binds the URL to the
-requester's IPv4 address, so another public IP cannot use it. The trusted proxy
-listener uses the ingress-overwritten `X-Real-IP`. Configured proxy CIDRs use the
-verified `X-Forwarded-For` chain. Untrusted forwarding headers cannot choose the
-bound address. Disable IPv6 on the download distribution and use an IPv4
-connection to the controller for these downloads. CloudFront IP conditions do
-not support IPv6. The controller refuses IPv6 signing requests with an error
-asking the client to retry over IPv4. A URL remains replayable behind the same
-public address, including clients sharing NAT. Request the URL and fetch its
-bytes from the same host and egress address. Requests through the in-cluster Service receive a
+arriving through the public ingress. Its policy restricts the URL to its expiry.
+Requests through the in-cluster Service receive a
 regional S3 URL instead, so runner pods in the bucket's region can use the S3
 gateway endpoint. Without an S3 bucket, the standalone controller opens filesystem storage in
 its home directory's `data` directory and mounts signed data and log transfers.
