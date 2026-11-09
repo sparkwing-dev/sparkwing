@@ -58,6 +58,9 @@ fi`,
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	host, plan, _ := prepareWork(t, &releaseCutChecksJob{})
+	if _, err := host.RunStep(t.Context(), plan, "job", "build"); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = unix.Flock(int(lock.Fd()), unix.LOCK_UN) })
 	done := make(chan error, 1)
 	go func() {
