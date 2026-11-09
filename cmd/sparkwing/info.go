@@ -236,18 +236,23 @@ const (
 )
 
 const agentBlockDurable = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are\n" +
-	"Go programs in `.sparkwing/`. Run `sparkwing info --for-agent` for the current\n" +
+	"Go or TypeScript programs in `.sparkwing/`. Run `sparkwing info --for-agent` for the current\n" +
 	"commands and this repo's state -- ask the binary rather than scraping the repo.\n"
 
 const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"\n" +
 	"- `sparkwing pipeline new --pipeline <n> --template <shape> [--on <event>]` --\n" +
-	"  scaffold. It compiles, lints, and explains as generated, so you edit from\n" +
-	"  something green. --template picks the DAG, --on picks what fires it:\n" +
+	"  scaffold. Go shapes compile, lint, and explain as generated.\n" +
+	"  --template picks the DAG, --on picks what fires it:\n" +
 	"    shapes: minimal (1 node) | build-test-deploy (3, linear) |\n" +
 	"            ci-pr-check (3, lint+test -> gate) | release (3, linear) |\n" +
 	"            scheduled-report (5, fan-out)\n" +
 	"    TypeScript: --template typescript creates a minimal TypeScript pipeline.\n" +
+	"    Requires Node 22.18+ and npm on PATH. Create and commit the npm lockfile\n" +
+	"    with the printed setup command before describe, plan or run.\n" +
+	"    Local foreground, detached CLI runs and schedules use the same pipeline.\n" +
+	"    See the authoring guide for TypeScript proof and pinning constraints.\n" +
+	"    TypeScript lint is unsupported; its zero exit does not validate source.\n" +
 	"    --on:   pull_request | push | schedule | manual (combine with a\n" +
 	"            comma: --on push,pull_request)\n" +
 	"    ci-pr-check defaults to pull_request and scheduled-report to schedule;\n" +
@@ -256,8 +261,9 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"- `sparkwing docs search --search <task>` -- bounded snippets of the sections that\n" +
 	"  answer it, plus any worked pipeline that already does it\n" +
 	"- `sparkwing docs read --guide authoring` -- the DAG model, the idioms the linter\n" +
-	"  enforces, how a pipeline fires, and the config schema, in one call\n" +
-	"- `sparkwing pipeline lint` then `sparkwing run <n>` -- check it without guessing\n"
+	"  enforces for Go, TypeScript differences, triggers and config, in one call\n" +
+	"- Go: `sparkwing pipeline lint` then `sparkwing run <n>`. TypeScript: describe,\n" +
+	"  plan and run; use your TypeScript checker for source validation.\n"
 
 const agentBlockBody = "- `sparkwing commands --search <task>` -- bounded command index; `--path <prefix>` to\n" +
 	"  narrow, `<path> --help` for one verb, `-o json` for structured metadata\n" +
@@ -299,7 +305,7 @@ func printAgentBlock(w io.Writer) {
 			info.Project.SparkwingDir, p.Total, p.Triggered, p.Manual)
 	}
 	if !info.Toolchain.Go.Found {
-		fmt.Fprintln(w, "- No Go toolchain on PATH. Pipelines are Go programs; authoring one needs it.")
+		fmt.Fprintln(w, "- No Go toolchain on PATH. Go pipelines need it; TypeScript pipelines need Node 22.18+ and npm.")
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		if note := goWorkNote(cwd); note != "" {

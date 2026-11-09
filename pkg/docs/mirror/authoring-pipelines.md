@@ -5,8 +5,11 @@ Plan inspection and execution must produce the same structure. Put I/O
 and host-dependent decisions in registered job or step callbacks, which
 execute after dispatch and may repeat on retry.
 
+The Go examples below use the Go SDK. [TypeScript authoring](#typescript-authoring)
+covers the same topics with its API and validation differences.
+
 `sparkwing pipeline lint` checks each `Plan` body and the `guards:` blocks in
-`.sparkwing/sparkwing.yaml`, reports each violation by rule name, and exits
+`.sparkwing/sparkwing.yaml` in Go projects, reports each violation by rule name, and exits
 non-zero so it can gate a push or a CI job. `sparkwing pipeline lint
 --rules` prints the live rule set.
 
@@ -410,3 +413,130 @@ sparkwing pipeline lint --rules          # print the rule charters
 Add `-o json` for machine-readable findings. Point `--dir` at a source tree
 other than the convention (`.sparkwing/jobs`). A non-zero exit on any
 finding makes the command a drop-in gate for a pre-push hook or a CI job.
+
+## TypeScript authoring
+
+TypeScript uses the same catalog, controller and job graph as Go. Start with
+`--template typescript` and the npm setup command in the
+[quick start](getting-started.md#quick-start). Node.js 22.18 or later and npm
+must be on PATH. Commit the exact SDK pin and native npm lockfile in
+`.sparkwing/`. Sparkwing installs dependencies with `npm ci` and runs the
+TypeScript entry through Node, rather than compiling a standalone executable.
+
+### Registration and dependencies
+
+`definePipeline` registers an implementation. Import its module from the
+package's `main` entry and call `await main()` there. The YAML `entrypoint`
+names that registration, while YAML `name` is the name passed to `sparkwing run`.
+`pipeline list` reads YAML. `pipeline describe` reads declarations and
+`pipeline plan` renders the resolved DAG without dispatching jobs.
+
+```ts
+import { definePipeline, main } from "@sparkwing/sdk";
+
+definePipeline({
+  name: "Deploy",
+  plan(plan) {
+    const build = plan.job("build", async (ctx) => {
+      await ctx.exec(["npm", "run", "build"]).run();
+      return { image: "app:checked" };
+    });
+    const test = plan.job("test", async (ctx) => {
+      await ctx.exec(["npm", "test"]).run();
+    }).needs(build);
+    plan.job("deploy", async (ctx) => {
+      const output = await ctx.output(build);
+      if (!output) throw new Error("build output is unavailable");
+      await ctx.exec(["./deploy.sh", output.image]).run();
+    }).needs(build, test);
+  },
+});
+
+await main();
+```
+
+`.needs(...)` supplies ordering. A job handle retains its output type, so
+`ctx.output(build)` replaces Go's `RefTo` and `Ref.Get`. Reading an output does
+not add a dependency. Declare the producer in `.needs(...)` as well. Keep and
+use handles whose results you need, rather than constructing unused references.
+
+### Steps and output returns
+
+TypeScript has no Go `Workable` method or `(*WorkStep, error)` return pair.
+Register steps with `job.step(id, callback)` during planning and connect them
+with `.needs(...)`. A job or step callback returns its JSON-serializable
+output, returns nothing for no output, and throws or rejects to fail.
+`ctx.stepOutput(step)` reads a predecessor step's output within the same attempt.
+A skipped predecessor has no output. Mark one step with `.result()` to make its returned value the job output,
+replacing Go's returned output step. A job with a body cannot also register
+steps. Use `plan.job(id)` without a body for a multi-step job.
+
+### Pure planning and runtime conditions
+
+Keep `plan` and step registration free of filesystem, network and process I/O.
+They reconstruct the DAG for inspection and execution. Put I/O in job, step,
+memo or other registered runtime callbacks. SDK side-effect helpers refuse
+planning calls. Direct Node APIs such as `node:fs` and `fetch` do not become
+safe merely because they bypass those helpers.
+
+Do not branch the graph on `process.env`, `process.platform` or the machine
+reading the plan. Declare the job and use `.skipIf(async (ctx) => ...)` for a
+runtime condition. A skipped job satisfies dependencies. Apply the condition
+to dependents too when they must skip together. Approval predicates run before
+requesting approval and hold no capacity. Put concurrency on the job after an
+approval, since approvals cannot declare concurrency groups.
+
+### Commands and placement
+
+Use `ctx.exec([program, ...args])` for dynamic arguments. Use `ctx.bash(script)`
+for pipes, redirects or other shell syntax, passing dynamic values through
+`.env(name, value)` instead of interpolating them. Bash requires Bash on the
+executing host. Both helpers run commands through the host and propagate
+command failures to the callback.
+
+`.requires(...)` and `.prefers(...)` declare runner labels. Avoid blank labels.
+The host trims whitespace, removes empty labels and keeps the first copy of
+each label. `.inline()` runs on the dispatcher's host, where runner selectors
+have no placement effect. These semantics match Go even though TypeScript
+source receives no `runner-label` lint findings.
+
+### Memoization, caches and generated jobs
+
+`.memo(...)` declares a host-evaluated result key. Give jobs doing different
+work distinct keys, including each matrix member's identity. Return `noMemo`
+to bypass reuse. Key callbacks can reject when inputs cannot be read.
+`.cache(...)` restores dependency directories before the body runs. Memoized
+results and dependency caches serve different purposes.
+
+Use `source.generate((generated, output, ctx) => { ... })` to declare jobs from
+a source job's recorded output. Apply `.requires(...)`, `.retry(...)`,
+`.memo(...)` and other modifiers to each job inside that callback. A dependent
+uses `.needsGenerated(generator)` to wait for the expansion barrier, including
+an empty expansion. The host validates the expansion before accepting it and
+limits each generator to 256 jobs. See [Generated jobs](sdk.md#generated-jobs).
+
+### Triggers, guards and validation
+
+The YAML trigger filters and run guards described above apply to both SDKs.
+Use satisfiable guard tokens and check branch semantics in
+[Triggers](hooks.md). Trigger filters do not implement dispatch filtering.
+TypeScript `pipeline lint` prints an unsupported notice and exits zero. JSON
+reports `status: "unsupported"`. It analyzes neither TypeScript source nor its
+guards, so it cannot serve as an authoring gate. Run your TypeScript checker,
+`pipeline describe`, `pipeline plan` and focused execution tests. The host
+validates declarations and graphs when they are submitted.
+
+### Local runs, schedules and child runs
+
+`sparkwing run <name>` runs TypeScript locally. `--sw-detached` submits a local
+run that can continue after the CLI exits. Local schedules use the same
+pipeline entry. Consult [Schedules](schedules.md) for installation, proof and
+pinning behavior. TypeScript's Node-plus-script entry cannot use the standalone
+executable proof/pinning path. Use `schedules install --no-prove` for a
+following-source local schedule. `--unpinned` alone still attempts proof.
+Validate the pipeline separately before installing without proof.
+
+Child-run declarations use `.startsChildren(...)` and `.startsChildrenIn(...)`.
+The TypeScript context supports awaited child runs, but exposes no detached
+child-submission API. This differs from detaching the CLI invocation. See
+[Detached child runs](sdk.md#detached-child-runs) for the Go API and its boundary.
