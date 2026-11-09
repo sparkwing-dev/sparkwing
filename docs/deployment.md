@@ -304,12 +304,32 @@ preparing fresh. Corrupt artifacts always fail. Records follow the publishing
 run's retention. A grandchild prepares fresh when its direct parent has no
 published record.
 
-Host logs report `source preparation` stages for restore, checkout, engine
-selection, SDK installation (including dependency resolution and compilation),
-and publication. Each record carries elapsed milliseconds and success, with
-reuse reported for restore. These records contain no source locations,
-environment values or compiler diagnostics, so discovery failure does not hide
-the timing boundaries.
+Planning owners retain `source preparation` records in their run logs as
+`event=preparation`. Read them with `sparkwing runs logs --run ID -o json`,
+including after the planning Pod exits. Each record carries `started_at`,
+`duration_ms`, `success`, and a `stage`:
+
+- `restore` checks and restores a prepared artifact, with `reused=true` on a hit.
+- `checkout` fetches and materializes the selected source.
+- `engine` selects the verified engine.
+- `sdk_install` resolves dependencies and compiles Go or installs TypeScript.
+- `publish` captures and uploads the prepared source and executable.
+- `describe` resolves checkout settings and discovers SDK declarations.
+- `plan` executes and validates the initial plan before acceptance.
+
+These host records contain no source locations, environment values or compiler
+diagnostics. SDK output discovery can withhold its own output without hiding
+stage timings. Absent stages are unknown or skipped, not zero. Node provisioning,
+image pull, runner bootstrap and the final plan-acceptance request fall outside
+these durations. Compare their timestamps with launcher and controller receipts
+instead of assigning unexplained time to compilation.
+
+Runner runtime images seed Go's standard-library compiler cache through
+`net/http`, using the pipeline compiler's default `CGO_ENABLED=0`. A cold
+planning Pod copies that seed when its SDK version has no release-specific
+build cache. Module caches still require the exact release version. Existing
+writable caches stay unchanged. Go's content keys reject compiler, architecture
+and build-setting mismatches, including an explicit pipeline cgo setting.
 
 Update the controller, launcher, runner image and generated admission policies
 together. The policies read the runner and Docker images from the ConfigMap

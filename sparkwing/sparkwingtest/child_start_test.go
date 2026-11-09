@@ -34,3 +34,19 @@ func TestStartChildPropagatesAdmissionFailure(t *testing.T) {
 		t.Fatal("started a child outside a pipeline")
 	}
 }
+
+func TestAwaitChildReturnsObservedFailureAndRefusesMissingServices(t *testing.T) {
+	host := sparkwingtest.New(sparkwingtest.Options{AwaitChild: func(_ context.Context, run string) (string, error) {
+		if run != "scan" {
+			t.Fatalf("awaited %q", run)
+		}
+		return "failed", nil
+	}})
+	defer host.Close()
+	if status, err := sparkwing.AwaitChild(host.Context(t.Context()), "scan"); err != nil || status != "failed" {
+		t.Fatalf("await = %q, %v", status, err)
+	}
+	if _, err := sparkwing.AwaitChild(t.Context(), "scan"); err == nil {
+		t.Fatal("missing host services accepted")
+	}
+}

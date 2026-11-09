@@ -22,3 +22,16 @@ func StartChild(ctx context.Context, pipeline string, args map[string]string) (s
 	}
 	return starter.StartChild(ctx, sdkserve.ChildRequest{Pipeline: pipeline, Args: args, Detached: true})
 }
+
+// AwaitChild waits for a child started by this job and returns its terminal status.
+// Waiting releases the runner's execution slot. Cancellation or an unavailable
+// observation returns an error. A failed child returns "failed" with no error.
+func AwaitChild(ctx context.Context, runID string) (string, error) {
+	awaiter, ok := sdkserve.ServicesFrom(ctx).(interface {
+		AwaitChild(context.Context, string) (string, error)
+	})
+	if !ok {
+		return "", errors.New("sparkwing: child await service unavailable")
+	}
+	return awaiter.AwaitChild(ctx, runID)
+}

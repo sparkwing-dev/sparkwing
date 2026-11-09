@@ -42,6 +42,7 @@ type Options struct {
     Latest      func(context.Context, string, string) (json.RawMessage, error)
     RunPipeline func(context.Context, string, map[string]string) (json.RawMessage, error)
     StartChild  func(context.Context, string, map[string]string) (string, error)
+    AwaitChild  func(context.Context, string) (string, error)
 }
 ```
 

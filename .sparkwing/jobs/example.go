@@ -38,8 +38,11 @@ type BuildOut struct {
 }
 
 func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.RunContext) error {
+	if in.PostDeploy && in.APIController != defaultDeployConfig().Production.ControllerURL && in.APIController != defaultDeployConfig().Staging.ControllerURL {
+		return fmt.Errorf("post-deploy example requires a configured deployment controller")
+	}
 	features := exampleIntegration(plan, in, rc)
-	configure := sparkwing.Job(plan, "configure", configureFn).
+	configure := exampleJob(plan, in, "configure", configureFn).
 		Inline().
 		BeforeRun(func(ctx context.Context) error {
 			sparkwing.Info(ctx, "BeforeRun: warming workspace")
@@ -55,25 +58,25 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs
 			return name, checkFn(name)
 		}).Needs(configure)
 
-	sparkwing.Job(plan, "audit-permissions", offshootFn("audit-permissions", 3)).Needs(configure).Inline()
-	sparkwing.Job(plan, "audit-licenses", offshootFn("audit-licenses", 3)).Needs(configure).Inline()
-	sparkwing.Job(plan, "docs-snapshot", offshootFn("docs-snapshot", 2)).Needs(configure).Inline()
-	repoStats := sparkwing.Job(plan, "repo-stats", offshootFn("repo-stats", 3)).Needs(configure)
-	sparkwing.Job(plan, "repo-stats-publish", offshootFn("repo-stats-publish", 2)).Needs(repoStats).Inline()
+	exampleJob(plan, in, "audit-permissions", offshootFn("audit-permissions", 3)).Needs(configure).Inline()
+	exampleJob(plan, in, "audit-licenses", offshootFn("audit-licenses", 3)).Needs(configure).Inline()
+	exampleJob(plan, in, "docs-snapshot", offshootFn("docs-snapshot", 2)).Needs(configure).Inline()
+	repoStats := exampleJob(plan, in, "repo-stats", offshootFn("repo-stats", 3)).Needs(configure)
+	exampleJob(plan, in, "repo-stats-publish", offshootFn("repo-stats-publish", 2)).Needs(repoStats).Inline()
 
-	benchBaseline := sparkwing.Job(plan, "bench-baseline", offshootFn("bench-baseline", 4)).Needs(configure)
-	benchRecord := sparkwing.Job(plan, "bench-record", offshootFn("bench-record", 3)).Needs(benchBaseline)
-	sparkwing.Job(plan, "bench-publish", offshootFn("bench-publish", 2)).Needs(benchRecord).Inline()
+	benchBaseline := exampleJob(plan, in, "bench-baseline", offshootFn("bench-baseline", 4)).Needs(configure)
+	benchRecord := exampleJob(plan, in, "bench-record", offshootFn("bench-record", 3)).Needs(benchBaseline)
+	exampleJob(plan, in, "bench-publish", offshootFn("bench-publish", 2)).Needs(benchRecord).Inline()
 
-	invCache := sparkwing.Job(plan, "inventory-cache", offshootFn("inventory-cache", 3)).Needs(configure)
-	invWarm := sparkwing.Job(plan, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
-	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm).Inline()
+	invCache := exampleJob(plan, in, "inventory-cache", offshootFn("inventory-cache", 3)).Needs(configure)
+	invWarm := exampleJob(plan, in, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
+	exampleJob(plan, in, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm).Inline()
 
-	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline().StartsChildren("weather-report").Timeout(5 * time.Minute)
+	exampleJob(plan, in, "weather-check", weatherCheck(in)).Needs(configure).Inline().StartsChildren("weather-report").Timeout(5 * time.Minute)
 
-	sparkwing.Job(plan, "error-canary", &ExampleErrorCanary{}).Needs(configure).Optional()
+	exampleJob(plan, in, "error-canary", &ExampleErrorCanary{}).Needs(configure).Optional()
 
-	build := sparkwing.Job(plan, "build", &ExampleBuild{}).
+	build := exampleJob(plan, in, "build", &ExampleBuild{}).
 		Needs(checks).
 		Retry(1, sparkwing.Backoff(200*time.Millisecond))
 	buildRef := sparkwing.RefTo[BuildOut](build)
@@ -90,16 +93,16 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs
 		OnTimeout: sparkwing.ApprovalApprove,
 	}).Needs(publishImages)
 
-	deploy := sparkwing.Job(plan, "deploy", &ExampleDeploy{Build: buildRef}).
+	deploy := exampleJob(plan, in, "deploy", &ExampleDeploy{Build: buildRef}).
 		Needs(approveDeploy).
 		Timeout(30 * time.Second)
-	deploy.OnFailure("deploy-rollback", rollbackFn)
+	exampleScanJobs(in, deploy.OnFailure("deploy-rollback", rollbackFn))
 
-	smokeTest := sparkwing.Job(plan, "smoke-test", smokeTestFn).Needs(deploy)
-	metricsCheck := sparkwing.Job(plan, "metrics-check", metricsCheckFn).Needs(deploy)
+	smokeTest := exampleJob(plan, in, "smoke-test", smokeTestFn).Needs(deploy)
+	metricsCheck := exampleJob(plan, in, "metrics-check", metricsCheckFn).Needs(deploy)
 	verify := sparkwing.GroupJobs(plan, "post-deploy-verify", smokeTest, metricsCheck)
 
-	notify := sparkwing.Job(plan, "notify", notifyFn).
+	notify := exampleJob(plan, in, "notify", notifyFn).
 		Needs(verify).
 		Inline().
 		SkipIf(func(ctx context.Context) bool {
@@ -109,10 +112,12 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs
 			sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "notify dispatched"})
 		})
 
-	reference := sparkwing.Job(plan, "reference-pipeline", exampleReference(in)).Needs(features, notify).Inline()
+	reference := exampleJob(plan, in, "reference-pipeline", exampleReference(in)).Needs(features, notify).Inline()
 	if in.SmokeProfile == "" {
 		reference.SkipIf(exampleSkip("no --smoke-profile configured for the separate sparkwing-ci-smoke run"))
 	}
+	exampleScanJobs(in, checks.Members()...)
+	exampleScanJobs(in, publishImages.Members()...)
 	return nil
 }
 
@@ -229,20 +234,24 @@ func canaryShard(label string, items, durMS int, fail string) func(ctx context.C
 	}
 }
 
-func weatherCheckFn(ctx context.Context) error {
-	sparkwing.Info(ctx, "calling weather-report pipeline via RunAndAwait")
-	out, err := sparkwing.RunAndAwait[WeatherOut, sparkwing.NoInputs](
-		ctx, "weather-report", "stamp",
-	)
-	if err != nil {
-		return fmt.Errorf("weather-report: %w", err)
+func weatherCheckFn(ctx context.Context) error { return weatherCheck(ExampleInputs{})(ctx) }
+
+func weatherCheck(in ExampleInputs) func(context.Context) error {
+	return func(ctx context.Context) error {
+		sparkwing.Info(ctx, "calling weather-report pipeline via RunAndAwait")
+		out, err := sparkwing.RunAndAwait[WeatherOut, sparkwing.NoInputs](
+			ctx, "weather-report", "stamp", sparkwing.WithFreshArgs(map[string]string{"post-deploy": fmt.Sprint(in.PostDeploy)}),
+		)
+		if err != nil {
+			return fmt.Errorf("weather-report: %w", err)
+		}
+		if out.Forecast == "" || out.TempF < 55 || out.TempF >= 90 || out.At.IsZero() {
+			return fmt.Errorf("weather-check: invalid output: %+v", out)
+		}
+		sparkwing.Info(ctx, "weather-report returned: %s, %d°F", out.Forecast, out.TempF)
+		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("weather: %s · %d°F (from weather-report pipeline)", out.Forecast, out.TempF)})
+		return nil
 	}
-	if out.Forecast == "" || out.TempF < 55 || out.TempF >= 90 || out.At.IsZero() {
-		return fmt.Errorf("weather-check: invalid output: %+v", out)
-	}
-	sparkwing.Info(ctx, "weather-report returned: %s, %d°F", out.Forecast, out.TempF)
-	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("weather: %s · %d°F (from weather-report pipeline)", out.Forecast, out.TempF)})
-	return nil
 }
 
 func offshootFn(id string, lines int) func(ctx context.Context) error {
@@ -531,4 +540,20 @@ func nap(ctx context.Context, ms int) error {
 
 func init() {
 	sparkwing.Register("Example", func() sparkwing.Pipeline[ExampleInputs] { return &Example{} })
+}
+
+func exampleJob(plan *sparkwing.Plan, in ExampleInputs, id string, body any) *sparkwing.JobNode {
+	node := sparkwing.Job(plan, id, body)
+	exampleScanJobs(in, node)
+	return node
+}
+
+func exampleScanJobs(in ExampleInputs, nodes ...*sparkwing.JobNode) {
+	if !in.PostDeploy {
+		return
+	}
+	group := sparkwing.NewConcurrencyGroup("sparkwing-post-deploy-work", sparkwing.ConcurrencyLimit{Capacity: 1})
+	for _, node := range nodes {
+		node.Requires("deploy-kikd-prod").Concurrency(group)
+	}
 }

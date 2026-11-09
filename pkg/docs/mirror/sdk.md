@@ -700,3 +700,8 @@ revision and verified provenance, and continues when the parent completes or is
 cancelled. It uses its own pipeline's concurrency groups. Ordinary `RunAndAwait`
 children remain attached and are cancelled when their creating job can no longer
 await them. TypeScript does not expose detached child submission.
+
+A job can observe a child it started with `status, err := sparkwing.AwaitChild(ctx, run)`.
+The native wait releases runner capacity and returns the terminal status, including `failed`
+or `cancelled`, without requiring a job output. A transport failure or cancelled wait returns
+an error. This observes only that job's own children. It does not attach to unrelated runs.
