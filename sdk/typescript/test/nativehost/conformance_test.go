@@ -1,7 +1,5 @@
 package nativehost_test
 
-import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
 import (
 	"bytes"
 	"encoding/json"
@@ -14,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type corpusStep struct {

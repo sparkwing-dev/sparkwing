@@ -10,9 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"golang.org/x/sys/unix"
 )
 
 func TestHostCommandCancellationJoinsEscapedChildren(t *testing.T) {

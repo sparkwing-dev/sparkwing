@@ -1,7 +1,5 @@
 package main
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"encoding/json"
@@ -9,9 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	goruntime "runtime"
 
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
+	goruntime "runtime"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -19,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 

@@ -1,7 +1,5 @@
 package controller
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"encoding/json"
@@ -13,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-
-	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
 func TestControllerEgressUsesAuthenticatedTenant(t *testing.T) {

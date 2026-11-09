@@ -1,7 +1,5 @@
 package client_test
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"encoding/json"
 	"net/http"
@@ -9,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )

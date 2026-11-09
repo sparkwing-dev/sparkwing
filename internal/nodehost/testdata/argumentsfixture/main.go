@@ -3,13 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"time"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
-
-	"os"
-	"time"
 
 	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )

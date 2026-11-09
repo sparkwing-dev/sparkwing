@@ -1,7 +1,5 @@
 package controller
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"context"
@@ -17,6 +15,7 @@ import (
 	"testing/quick"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/store"

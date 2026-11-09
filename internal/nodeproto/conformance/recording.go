@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"os"
 	"path/filepath"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type recordingScope interface {

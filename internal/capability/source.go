@@ -1,12 +1,12 @@
 package capability
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"crypto/rand"
 	"encoding/hex"
 	"slices"
 	"time"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // SourceExecutor comes from registration and award records, never advertised runner labels.

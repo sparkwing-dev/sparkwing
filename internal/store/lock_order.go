@@ -1,7 +1,5 @@
 package store
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"cmp"
 	"context"
@@ -12,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"

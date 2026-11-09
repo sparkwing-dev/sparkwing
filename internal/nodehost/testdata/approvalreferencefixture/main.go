@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
+	"os"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
-	"os"
 
 	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )

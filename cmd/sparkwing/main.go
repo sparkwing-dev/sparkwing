@@ -1,7 +1,5 @@
 package main
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"errors"
@@ -12,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -24,6 +23,7 @@ import (
 
 	// safety: a systemd or launchd job has no zoneinfo of its own on a slim
 	// host, and a schedule that declares tz: would fail to resolve its zone.
+
 	_ "time/tzdata"
 )
 

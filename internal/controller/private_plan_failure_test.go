@@ -1,7 +1,5 @@
 package controller
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"crypto/sha256"
 	"database/sql"
@@ -12,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"

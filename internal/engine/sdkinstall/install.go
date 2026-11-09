@@ -1,8 +1,6 @@
 // Package sdkinstall builds SDK entries inside their selected engine.
 package sdkinstall
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"context"
@@ -19,6 +17,7 @@ import (
 
 	"golang.org/x/mod/modfile"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"

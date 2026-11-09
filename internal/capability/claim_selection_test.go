@@ -1,9 +1,9 @@
 package capability
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"testing"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestClaimSelectionRequiresEveryKind(t *testing.T) {

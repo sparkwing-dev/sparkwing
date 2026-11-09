@@ -1,7 +1,5 @@
 package store
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"database/sql"
 	"errors"
@@ -9,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	modernsqlite "modernc.org/sqlite"
 

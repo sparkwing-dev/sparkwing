@@ -1,7 +1,5 @@
 package launcher
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"context"
@@ -14,11 +12,15 @@ import (
 	"testing/quick"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"

@@ -1,7 +1,5 @@
 package nativehost_test
 
-import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
 import (
 	"context"
 	"encoding/json"
@@ -14,7 +12,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+
 	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 

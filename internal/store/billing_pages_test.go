@@ -1,7 +1,5 @@
 package store
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"errors"
 	"fmt"
@@ -11,6 +9,7 @@ import (
 	"testing/quick"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"

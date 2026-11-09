@@ -1,8 +1,6 @@
 // Package lease keeps every claimed unit tied to the store's lease clock.
 package lease
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"encoding/json"
@@ -10,6 +8,7 @@ import (
 	"math"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 

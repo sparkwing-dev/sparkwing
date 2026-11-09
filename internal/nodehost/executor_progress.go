@@ -1,12 +1,12 @@
 package nodehost
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"errors"
 	"sync"
 	"time"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 var errExecutorNoProgress = errors.New("job made no progress")

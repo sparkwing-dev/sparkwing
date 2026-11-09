@@ -5,14 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
-	mathrand "math/rand/v2"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
+	mathrand "math/rand/v2"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"

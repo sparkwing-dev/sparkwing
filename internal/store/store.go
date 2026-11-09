@@ -8,10 +8,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,13 +22,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
+	_ "embed"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	_ "modernc.org/sqlite"
 )
 
 // DefaultBusyTimeoutMS is the SQLite busy_timeout Open applies, in

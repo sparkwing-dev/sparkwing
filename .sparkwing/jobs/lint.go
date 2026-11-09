@@ -33,7 +33,7 @@ func (p *Lint) run(ctx context.Context) error {
 	}
 	sparkwing.Info(ctx, "gofmt: all files formatted")
 
-	if _, err := sparkwing.Bash(ctx, "go vet ./...").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, "go vet ./...").Env("GOWORK", "auto").Run(); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "go vet: no issues")
@@ -52,7 +52,7 @@ func (p *Lint) run(ctx context.Context) error {
 	}
 	sparkwing.Info(ctx, "changelog style gate: clean")
 
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Env("GOWORK", "auto").Run(); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "api snapshot gate: ok")

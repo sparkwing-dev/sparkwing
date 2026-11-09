@@ -244,14 +244,14 @@ func checkPreReleaseInstallToGreen(ctx context.Context) error {
 func checkPreReleaseDocExamples(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
-	).Env("ROOT", sparkwing.WorkDir()).Run(); err != nil {
+	).Env("ROOT", sparkwing.WorkDir()).Env("GOWORK", "auto").Run(); err != nil {
 		return fmt.Errorf("doc-examples: %w", err)
 	}
 	return nil
 }
 
 func checkPreReleaseAPISnapshot(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Env("GOWORK", "auto").Run(); err != nil {
 		return errors.New("api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
 	}
 	return nil
@@ -259,7 +259,7 @@ func checkPreReleaseAPISnapshot(ctx context.Context) error {
 
 func preReleaseShell(command string) func(context.Context) error {
 	return func(ctx context.Context) error {
-		_, err := sparkwing.Bash(ctx, command).Run()
+		_, err := sparkwing.Bash(ctx, command).Env("GOWORK", "auto").Run()
 		return err
 	}
 }

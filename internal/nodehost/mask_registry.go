@@ -1,13 +1,13 @@
 package nodehost
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"errors"
 	"sync"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 

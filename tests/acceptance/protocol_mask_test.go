@@ -3,14 +3,13 @@ package acceptance_test
 import (
 	"context"
 	"encoding/json"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
 	"reflect"
 	"strings"
 	"testing"
 	"testing/synctest"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 	"github.com/sparkwing-dev/sparkwing/sparkwingtest"

@@ -1,7 +1,5 @@
 package main
 
-import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
 import (
 	"context"
 	"encoding/json"
@@ -11,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func main() {

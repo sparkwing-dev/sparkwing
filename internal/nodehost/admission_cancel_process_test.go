@@ -2,8 +2,6 @@
 
 package nodehost
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"errors"
@@ -11,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"

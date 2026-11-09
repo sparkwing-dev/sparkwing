@@ -1,7 +1,5 @@
 package acceptance_test
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"crypto/sha256"
@@ -12,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

@@ -1,7 +1,5 @@
 package engine
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"crypto/ed25519"
@@ -13,6 +11,9 @@ import (
 	"time"
 
 	"golang.org/x/mod/semver"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 	strictjson "sigs.k8s.io/json"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"

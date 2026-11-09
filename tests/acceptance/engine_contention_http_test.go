@@ -1,7 +1,5 @@
 package acceptance_test
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"encoding/hex"
 	"errors"
@@ -12,6 +10,8 @@ import (
 	"testing/quick"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestEngineTransactionContentionProperty(t *testing.T) {

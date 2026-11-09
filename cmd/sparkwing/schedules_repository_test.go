@@ -1,7 +1,5 @@
 package main
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"context"
@@ -12,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
-
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 const scheduleProject = `pipelines:

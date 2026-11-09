@@ -1,15 +1,13 @@
 package runspec
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"errors"
 	"maps"
 	"reflect"
 	"slices"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
-
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 

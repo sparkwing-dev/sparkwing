@@ -3,14 +3,13 @@ package nodehost
 import (
 	"bytes"
 	"encoding/json"
-
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )

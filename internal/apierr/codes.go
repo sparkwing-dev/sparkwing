@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	"io"
 	"math"
 	"strconv"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (

@@ -1,10 +1,10 @@
 package capability
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"testing"
 	"time"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestAuthenticationToleratesBackwardClockStep(t *testing.T) {

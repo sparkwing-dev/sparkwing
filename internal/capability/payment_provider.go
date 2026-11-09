@@ -1,7 +1,5 @@
 package capability
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"encoding/json"
@@ -9,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 

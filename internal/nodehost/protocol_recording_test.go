@@ -3,11 +3,12 @@ package nodehost
 import (
 	"encoding/json"
 	"errors"
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"

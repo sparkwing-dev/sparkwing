@@ -16,9 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"golang.org/x/sys/windows"
 )
 
 func windowsHostRequest(t *testing.T, mode string) nodewire.ExecRequest {

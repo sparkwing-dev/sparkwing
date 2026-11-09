@@ -1,7 +1,5 @@
 package launcher
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"context"
@@ -20,6 +18,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

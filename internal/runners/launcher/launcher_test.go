@@ -1,7 +1,5 @@
 package launcher
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"errors"
@@ -11,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 
 	authenticationv1 "k8s.io/api/authentication/v1"

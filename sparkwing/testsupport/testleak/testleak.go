@@ -9,13 +9,12 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 
 	"go.uber.org/goleak"
-
-	"os/exec"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )

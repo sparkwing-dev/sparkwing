@@ -1,7 +1,5 @@
 package capability
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 

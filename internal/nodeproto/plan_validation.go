@@ -1,12 +1,12 @@
 package nodeproto
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"

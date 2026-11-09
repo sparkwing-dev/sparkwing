@@ -1,7 +1,5 @@
 package nativehost_test
 
-import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
 import (
 	"bufio"
 	"bytes"
@@ -19,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeProtocol(t *testing.T) {

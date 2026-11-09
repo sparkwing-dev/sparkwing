@@ -1,11 +1,11 @@
 package nodehost
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"testing"
 	"time"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )

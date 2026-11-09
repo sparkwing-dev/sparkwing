@@ -1,7 +1,5 @@
 package controller
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
 	"crypto/ed25519"
@@ -15,6 +13,9 @@ import (
 	"testing"
 	"testing/quick"
 
+	"golang.org/x/crypto/ssh"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
@@ -24,8 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-
-	"golang.org/x/crypto/ssh"
 )
 
 func TestGitHubInstallationTokenStoredAndReleasedOverHTTP(t *testing.T) {

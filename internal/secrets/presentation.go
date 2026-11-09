@@ -1,10 +1,10 @@
 package secrets
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"encoding/json"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"

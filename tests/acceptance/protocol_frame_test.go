@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-
 	"io"
 	"strings"
 	"testing"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )

@@ -58,7 +58,6 @@ func main() {
 			}
 		}
 	}
-
 }
 
 func discoverPackagePaths(root string) ([]string, error) {

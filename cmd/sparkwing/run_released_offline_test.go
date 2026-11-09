@@ -19,9 +19,12 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/module"
+
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"golang.org/x/mod/module"
+
+	modzip "golang.org/x/mod/zip"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -29,7 +32,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	modzip "golang.org/x/mod/zip"
 )
 
 func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {

@@ -78,14 +78,14 @@ func checkChangelogRequired(ctx context.Context) error {
 }
 
 func checkAPISpec(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-spec.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-spec.sh").Env("GOWORK", "auto").Run(); err != nil {
 		return fmt.Errorf("api/openapi.yaml disagrees with the controller's route table; run `bash bin/gen-api-docs.sh`: %w", err)
 	}
 	return nil
 }
 
 func checkAPISnapshot(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Env("GOWORK", "auto").Run(); err != nil {
 		return fmt.Errorf("the public API surface drifted from .apidiff/; record the change in CHANGELOG.md, then run `bash bin/regen-api-snapshot.sh` and stage .apidiff/: %w", err)
 	}
 	return nil

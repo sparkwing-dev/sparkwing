@@ -1,8 +1,6 @@
 // Command apispec generates the controller policy inventory and shared JSON shapes.
 package main
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"fmt"
@@ -15,6 +13,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 

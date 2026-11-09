@@ -1,9 +1,9 @@
 package store
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"context"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // Unselected memberships need the same immutable fence as the active team.

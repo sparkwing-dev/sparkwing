@@ -1,13 +1,12 @@
 // Package apierrhttp writes apierr envelopes as HTTP responses for the controller and local servers.
 package apierrhttp
 
-import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 import (
 	"bytes"
 	"io"
 	"net/http"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 

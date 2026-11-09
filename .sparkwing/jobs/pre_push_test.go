@@ -241,3 +241,23 @@ func TestFastLintTimeoutOutlastsAColdCache(t *testing.T) {
 		t.Errorf("fast lint command = %q, want a five-minute timeout", got)
 	}
 }
+
+func TestSourceAPIChecksUseWorkspaceWhenCallerDisablesIt(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	t.Setenv("GOWORK", "off")
+	for name, check := range map[string]func(context.Context) error{
+		"api-spec":       checkAPISpec,
+		"api-snapshot":   checkAPISnapshot,
+		"release-source": preReleaseShell("go list -deps ./cmd/apidiff > /dev/null"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := check(newTestContext(t)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
