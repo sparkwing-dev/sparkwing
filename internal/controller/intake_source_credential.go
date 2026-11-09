@@ -127,7 +127,7 @@ func (s *Server) verifyIntakeSourceCredential(ctx context.Context, team store.Te
 		}
 	}
 	// safety: repository proof requires App-selected code and a GitHub reachability check.
-	git, selected, err := s.appSourceSelector(team)(ctx, request)
+	git, selected, err := s.appSourceSelector(team)(ctx, &request)
 	if err != nil {
 		return store.FetchedRepository{}, false, err
 	}

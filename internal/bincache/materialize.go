@@ -48,7 +48,19 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if err != nil {
 		return nil, false, err
 	}
-	lease, published, err := entry.AcquireOrMaterialize(ctx, func(path string) error { return CompilePipeline(ctx, dir, path, options) })
+	lease, published, err := entry.AcquireOrMaterialize(ctx, func(path string) error {
+		if err := CompilePipeline(ctx, dir, path, options); err != nil {
+			return err
+		}
+		compiledKey, _, err := explainCacheKey(ctx, dir, options.Environment, options.HashAllFiles)
+		if err != nil {
+			return err
+		}
+		if compiledKey != key {
+			return ErrUnstableInputs
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, false, err
 	}

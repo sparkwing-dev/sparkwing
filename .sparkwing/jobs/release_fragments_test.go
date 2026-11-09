@@ -19,7 +19,11 @@ func TestReleaseCollectsAndConsumesFragments(t *testing.T) {
 	for _, base := range []string{migrationsDirRel, mirrorMigrationsDirRel} {
 		writeReleaseFixture(t, filepath.Join(repo, base, unreleasedGuideName), freshUnreleasedGuide)
 	}
-	for _, dir := range releaseFragmentDirs {
+	fragmentDirs := []string{
+		"docs/changes", "pkg/docs/mirror/changes",
+		"docs/migrations/unreleased", "pkg/docs/mirror/migrations/unreleased",
+	}
+	for _, dir := range fragmentDirs {
 		body := notes
 		if strings.Contains(dir, "migrations") {
 			body = guide
@@ -43,7 +47,7 @@ func TestReleaseCollectsAndConsumesFragments(t *testing.T) {
 	if before != gitRun(t, repo, "rev-parse", "HEAD") {
 		t.Fatal("preparation committed before gates")
 	}
-	for _, dir := range releaseFragmentDirs {
+	for _, dir := range fragmentDirs {
 		if _, err := os.Stat(filepath.Join(repo, dir, "change.md")); !os.IsNotExist(err) {
 			t.Fatalf("fragment survived: %s, %v", dir, err)
 		}

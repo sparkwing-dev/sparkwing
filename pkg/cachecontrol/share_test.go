@@ -3,13 +3,14 @@ package cachecontrol
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
-func TestSharedHomesReuseOnlyMatchingInputs(t *testing.T) {
+func TestSharedHomesRefuseMismatchedInputsWithoutCompiler(t *testing.T) {
 	source := t.TempDir()
 	t.Setenv("SPARKWING_HOME", source)
 	dir := t.TempDir()
@@ -73,6 +74,66 @@ func TestSharedHomesReuseOnlyMatchingInputs(t *testing.T) {
 	}
 	if _, _, err := bincache.MaterializePipeline(t.Context(), dir, bincache.CompileOptions{Environment: env, Diagnostics: io.Discard}); err == nil {
 		t.Fatal("changed source reused a stale pipeline without a compiler")
+	}
+}
+
+func TestSharedHomesRebuildChangedInputs(t *testing.T) {
+	for _, change := range []string{"source", "build tags"} {
+		t.Run(change, func(t *testing.T) {
+			t.Setenv("GOWORK", "off")
+			t.Setenv("GOFLAGS", "-buildvcs=false -p=1")
+			t.Setenv("SPARKWING_HOME", t.TempDir())
+			dir := t.TempDir()
+			for name, body := range map[string]string{
+				"go.mod":   "module fixture\ngo 1.26\n",
+				"main.go":  "package main\nfunc main(){print(value)}\n",
+				"value.go": "//go:build !other\n\npackage main\nconst value = \"first\"\n",
+				"other.go": "//go:build other\n\npackage main\nconst value = \"changed\"\n",
+			} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			materialize := func(want string, wantBuilt bool) {
+				t.Helper()
+				lease, built, err := bincache.MaterializePipeline(t.Context(), dir, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: io.Discard})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := lease.Release(); err != nil {
+						t.Error(err)
+					}
+				}()
+				if built != wantBuilt {
+					t.Fatalf("built = %t, want %t", built, wantBuilt)
+				}
+				binary, err := lease.Install(filepath.Join(t.TempDir(), "pipeline"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				out, err := exec.CommandContext(t.Context(), binary.Path()).CombinedOutput()
+				if err != nil || string(out) != want {
+					t.Fatalf("pipeline output = %q, %v; want %q", out, err, want)
+				}
+			}
+			materialize("first", true)
+			home := t.TempDir()
+			if err := ShareWithHome(home); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SPARKWING_HOME", home)
+			materialize("first", false)
+			if change == "source" {
+				if err := os.WriteFile(filepath.Join(dir, "value.go"), []byte("package main\nconst value = \"changed\"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				t.Setenv("GOFLAGS", "-buildvcs=false -p=1 -tags=other")
+			}
+			materialize("changed", true)
+			materialize("changed", false)
+		})
 	}
 }
 

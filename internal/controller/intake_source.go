@@ -126,7 +126,7 @@ func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, reques
 // --runner here), names a commit no branch
 // head selects (GitHub may serve it from a fork) or a pull request ref, or
 // when selection disagrees with the request.
-func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Request, selectSource func(context.Context, runspec.Request) (runspec.Git, runspec.Source, error)) (store.FetchedRepository, error) {
+func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Request, selectSource func(context.Context, *runspec.Request) (runspec.Git, runspec.Source, error)) (store.FetchedRepository, error) {
 	here := request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere
 	if s.githubApp == nil || request.Lineage.ParentRunID != "" || !request.Source.FetchedFromRemote() || here {
 		return store.FetchedRepository{}, nil
@@ -145,7 +145,7 @@ func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Reque
 	}
 	probe := *request
 	probe.Git.SHA, probe.Source.Ref, probe.Source.RequestedRef = "", "", ""
-	git, selected, err := selectSource(ctx, probe)
+	git, selected, err := selectSource(ctx, &probe)
 	fetched := store.FetchedRepository{ID: id, Name: git.RepositoryName.Value}
 	// Decision 72: the head the App resolved is claimed when the code ran there.
 	if strings.EqualFold(selected.Ref, git.SHA) && (strings.HasPrefix(git.Ref, "refs/heads/") || strings.HasPrefix(git.Ref, "refs/tags/")) {
@@ -157,11 +157,13 @@ func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Reque
 		}
 		git.Ref = request.Git.Ref
 		request.Git, request.Source = git, selected
+		request.Options.Requires = probe.Options.Requires
 		return fetched, nil
 	}
 	if err != nil || !strings.EqualFold(git.SHA, request.Git.SHA) || request.Source.Ref != "" && !strings.EqualFold(selected.Ref, request.Source.Ref) {
 		return store.FetchedRepository{}, nil
 	}
+	request.Options.Requires = probe.Options.Requires
 	return fetched, nil
 }
 
@@ -190,8 +192,8 @@ func qualifyFetchedRef(ctx context.Context, git runspec.Git, resolve func(contex
 
 // appSourceSelector selects a remote run's source the way a schedule fire
 // does: refs resolve, and configuration is read, through the team's App.
-func (s *Server) appSourceSelector(team store.Team) func(context.Context, runspec.Request) (runspec.Git, runspec.Source, error) {
-	return func(ctx context.Context, request runspec.Request) (runspec.Git, runspec.Source, error) {
+func (s *Server) appSourceSelector(team store.Team) func(context.Context, *runspec.Request) (runspec.Git, runspec.Source, error) {
+	return func(ctx context.Context, request *runspec.Request) (runspec.Git, runspec.Source, error) {
 		access := &intakeRevisionAccess{server: s, team: team}
 		spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL}
 		installation, repository, err := access.githubAppRepository(ctx, spec)
@@ -202,7 +204,7 @@ func (s *Server) appSourceSelector(team store.Team) func(context.Context, runspe
 		read := func(ctx context.Context, sha, name string) ([]byte, bool, error) {
 			return s.githubApp.client.FileAtCommit(ctx, installation.InstallationID, repository.ID, repo.Owner, repo.Name, sha, name)
 		}
-		git, selected, err := s.selectIntakeSource(ctx, team, &request, read)
+		git, selected, err := s.selectIntakeSource(ctx, team, request, read)
 		if err != nil {
 			return git, selected, err
 		}

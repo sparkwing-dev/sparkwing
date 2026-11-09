@@ -106,7 +106,7 @@ for credentials, verification and the index-only recovery dispatch.
 
 A development build skips signed version-policy checks and logs once per
 resolver that the checks are off. This applies to run admission, run pages,
-compatibility queries, engine selection and runner updates. A development build
+engine selection and runner updates. A development build
 needs an explicit `--version` when upgrading a repository because it does not
 fetch the latest-version index. Released controller runners retain signed policy checks, regardless of the
 version reported by a runner or selected by a pipeline.

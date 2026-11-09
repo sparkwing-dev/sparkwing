@@ -2,30 +2,28 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
-	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 type engineVersionFake struct {
 	index         engine.IndexResult
-	policy        engine.VersionIndex
 	indexErr      error
 	evaluateErr   error
 	notices       []engineid.Notice
-	release       engineid.VersionInfo
 	evaluated     string
 	indexTime     time.Time
 	evaluatedTime time.Time
-	compatibility controllerwire.Compatibility
 }
 
 func (f *engineVersionFake) Index(_ context.Context, _ *engine.Resolver, now time.Time) (engine.IndexResult, error) {
@@ -33,82 +31,32 @@ func (f *engineVersionFake) Index(_ context.Context, _ *engine.Resolver, now tim
 	return f.index, f.indexErr
 }
 
-func (f *engineVersionFake) Policy(engine.VerifiedIndex) engine.VersionIndex { return f.policy }
-
 func (f *engineVersionFake) Evaluate(_ engine.VerifiedIndex, version string, now time.Time) ([]engineid.Notice, error) {
 	f.evaluated, f.evaluatedTime = version, now
 	return f.notices, f.evaluateErr
-}
-
-func (f *engineVersionFake) CompatibilityFor(release engineid.VersionInfo) controllerwire.Compatibility {
-	f.release = release
-	return f.compatibility
 }
 
 func engineVersionPolicy(f *engineVersionFake) *SignedEngineVersionPolicy {
 	return &SignedEngineVersionPolicy{Resolver: &engine.Resolver{}, contracts: f}
 }
 
-func TestEngineCompatibilityUsesExactVerifiedRelease(t *testing.T) {
-	published := time.Date(2024, time.February, 29, 12, 0, 0, 0, time.UTC)
-	release := engineid.VersionInfo{Version: "v1.2.3", PublishedAt: published, SupportUntil: published.AddDate(1, 0, 0)}
-	want := controllerwire.Compatibility{APIMajor: 1, EngineRelease: release.Version, ReleasedAt: published, GuaranteedUntil: release.SupportUntil}
-	fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engineid.VersionInfo{{Version: "v9.0.0"}, release}, Revoked: []engine.Restriction{{Version: release.Version}}}, compatibility: want}
-	server := EngineController{VersionPolicy: engineVersionPolicy(fake)}
-	got, err := server.compatibility(t.Context(), release.Version)
-	if err != nil || got != want || fake.release != release || fake.evaluated != "" || fake.indexTime.IsZero() {
-		t.Fatalf("compatibility=%+v release=%+v err=%v", got, fake.release, err)
-	}
-}
-
-func TestEngineCompatibilityCannotSubstituteAnotherRelease(t *testing.T) {
-	property := func(value string, known bool) bool {
-		target := "v1.2.3"
-		foreign := "foreign-" + value
-		fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engineid.VersionInfo{{Version: foreign}}}}
-		if known {
-			fake.policy.Versions = append(fake.policy.Versions, engineid.VersionInfo{Version: target, PublishedAt: time.Unix(1, 0)})
-			fake.compatibility = controllerwire.Compatibility{APIMajor: 1, EngineRelease: target}
-		}
-		got, err := (&EngineController{VersionPolicy: engineVersionPolicy(fake)}).compatibility(t.Context(), target)
-		if known {
-			return err == nil && got.EngineRelease == target && fake.release.Version == target
-		}
-		var failure *apierr.Error
-		return errors.As(err, &failure) && failure.Code == apierr.NotFound && got == (controllerwire.Compatibility{}) && fake.release.Version == ""
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestEngineVersionPolicyRefusesMissingOrFailedMetadata(t *testing.T) {
 	failed := errors.New("signed index unavailable")
-	for _, problem := range []string{"configuration", "resolver", "index", "version"} {
+	for _, problem := range []string{"resolver", "index", "version"} {
 		t.Run(problem, func(t *testing.T) {
-			fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engineid.VersionInfo{{Version: "v1.2.3"}}}}
+			fake := &engineVersionFake{}
 			policy := engineVersionPolicy(fake)
-			server := EngineController{VersionPolicy: policy}
 			version := "v1.2.3"
 			switch problem {
-			case "configuration":
-				server.VersionPolicy = nil
 			case "resolver":
 				policy.Resolver = nil
-				server.VersionPolicy = policy
 			case "index":
 				fake.indexErr = failed
 			case "version":
 				version = ""
 			}
-			got, err := server.compatibility(t.Context(), version)
-			if err == nil || got != (controllerwire.Compatibility{}) || fake.release.Version != "" {
-				t.Fatalf("compatibility=%+v release=%+v err=%v", got, fake.release, err)
-			}
-			if problem != "configuration" {
-				if notices, err := policy.notices(t.Context(), version); err == nil || notices != nil || fake.evaluated != "" {
-					t.Fatalf("unverified notices=%+v err=%v", notices, err)
-				}
+			if notices, err := policy.notices(t.Context(), version); err == nil || notices != nil || fake.evaluated != "" {
+				t.Fatalf("unverified notices=%+v err=%v", notices, err)
 			}
 		})
 	}
@@ -143,5 +91,20 @@ func TestEngineVersionNoticesKeepEnforcementVisibleOnStoredRuns(t *testing.T) {
 				t.Fatalf("policy failure notices=%+v err=%v", got, err)
 			}
 		})
+	}
+}
+
+func TestCapabilitiesAlwaysDescribeDeployment(t *testing.T) {
+	server := &Server{}
+	for _, path := range []string{"/api/v1/capabilities", "/api/v1/capabilities?engine_version=v0.1.0"} {
+		recorder := httptest.NewRecorder()
+		server.handleCapabilities(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		var response capabilitiesResp
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK || !response.Claims.AllowRepos || !response.Claims.Profile {
+			t.Fatalf("deployment capabilities at %s: %d %s", path, recorder.Code, recorder.Body.String())
+		}
 	}
 }
