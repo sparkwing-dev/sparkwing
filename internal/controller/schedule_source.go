@@ -163,7 +163,7 @@ var (
 	_ ConcurrencyStore   = (*store.Tenant)(nil)
 )
 
-func (s *Server) verifyPreparedSchedulePin(ctx context.Context, row store.CronSchedule, request runspec.Request) error {
+func (s *Server) verifyPreparedSchedulePin(ctx context.Context, row store.CronSchedule, request runspec.Request) (err error) {
 	identity, err := crons.PreparedPinIdentity(row.LockedBinary)
 	if err != nil || identity == "" {
 		return err
@@ -174,7 +174,7 @@ func (s *Server) verifyPreparedSchedulePin(ctx context.Context, row store.CronSc
 	}
 	proof, err := s.proveScheduleEntry(ctx, row.RepoPath, row.Pipeline, environment)
 	if proof.Release != nil {
-		defer func() { _ = proof.Release() }()
+		defer func() { err = errors.Join(err, proof.Release()) }()
 	}
 	if err != nil {
 		return err
