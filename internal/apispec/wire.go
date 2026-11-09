@@ -45,7 +45,6 @@ func wireOperations() map[string]wireOperation {
 		"PUT /api/v1/operator/limits":                          operation("Set deployment operational guards", wire.OperatorLimitsWrite{}, wire.OperatorLimits{}),
 		"GET /api/v1/operator/object-store/breaker":            operation("Read object-store request budgets", nil, wire.ObjectStoreBreaker{}),
 		"POST /api/v1/operator/object-store/reset-breaker":     operation("Reset object-store request budgets", nil, wire.ObjectStoreBreaker{}),
-		"GET /api/v1/capabilities":                             operation("Read engine compatibility", nil, wire.Compatibility{}, query("engine_version", "string")),
 		"POST /api/v1/runs":                                    operation("Create a run", wire.CreateRunRequest{}, wire.CreateRunResponse{}),
 		"GET /api/v1/runs":                                     operation("List runs", nil, wire.RunPage{}),
 		"GET /api/v1/runs/{run}":                               operation("Read public run detail", nil, wire.RunDetail{}),

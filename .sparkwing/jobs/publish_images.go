@@ -23,6 +23,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -114,15 +115,21 @@ func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...rem
 			}
 		}
 	}
-	var published []string
-	for _, c := range components {
-		ref, err := publishComponent(in, c.binary, c.base, sums, opts)
-		if err != nil {
-			return published, fmt.Errorf("%s: %w", c.binary, err)
-		}
-		published = append(published, ref)
+	group, publishCtx := errgroup.WithContext(ctx)
+	opts = append(opts, remote.WithContext(publishCtx))
+	published := make([]string, len(components))
+	for i, c := range components {
+		group.Go(func() error {
+			ref, err := publishComponent(in, c.binary, c.base, sums, opts)
+			if err != nil {
+				return fmt.Errorf("%s: %w", c.binary, err)
+			}
+			published[i] = ref
+			return nil
+		})
 	}
-	return published, nil
+	err = group.Wait()
+	return slices.DeleteFunc(published, func(ref string) bool { return ref == "" }), err
 }
 
 func publishComponent(in PublishImagesArgs, binary, base string, sums map[string]string, opts []remote.Option) (string, error) {

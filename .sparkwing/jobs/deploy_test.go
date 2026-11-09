@@ -1145,14 +1145,14 @@ func TestDeployRollbackOutlivesCancelTimeoutAndSession(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newFakeDeploy(t)
-			ctx := setup(f)
-			_, err := f.deployer(false).promote(ctx, f.candidate())
-			if err == nil || !strings.Contains(err.Error(), "rolled back") {
-				t.Fatalf("promote = %v, want a rollback", err)
-			}
-			if got := f.pinsOnMain("sparkwing"); got.Controller != f.old.Controller || got.Launcher != f.old.Runner {
-				t.Fatalf("production after rollback = %+v", got)
+			for _, schema := range []int{34, 35} {
+				t.Run(fmt.Sprintf("schema=%d", schema), func(t *testing.T) {
+					f := newFakeDeploy(t)
+					setDeployCandidateSchema(t, f, schema)
+					ctx := setup(f)
+					_, err := f.deployer(false).promote(ctx, f.candidate())
+					assertProductionRecovery(t, f, err, schema)
+				})
 			}
 		})
 	}
@@ -1233,22 +1233,55 @@ func TestDeployRollsBackFailedProductionSmoke(t *testing.T) {
 		"warning logs": func(f *fakeDeploy) { f.dirtyLogs = true },
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newFakeDeploy(t)
-			breakIt(f)
-			_, err := f.deployer(false).promote(t.Context(), f.candidate())
-			if err == nil || !strings.Contains(err.Error(), "rolled back") {
-				t.Fatalf("promote = %v, want a rollback", err)
-			}
-			if got := f.pinsOnMain("sparkwing"); got.Controller != f.old.Controller || got.Launcher != f.old.Runner || got.Job != f.old.Runner {
-				t.Fatalf("production after rollback = %+v", got)
-			}
-			subjects := f.subjects()
-			for i, want := range []string{`Revert "deploy(production): controller`, `Revert "deploy(production): launcher`, "deploy(production): launcher", "deploy(production): controller"} {
-				if !strings.HasPrefix(subjects[i], want) {
-					t.Fatalf("GitOps history = %q", subjects)
-				}
+			for _, schema := range []int{34, 35} {
+				t.Run(fmt.Sprintf("schema=%d", schema), func(t *testing.T) {
+					f := newFakeDeploy(t)
+					setDeployCandidateSchema(t, f, schema)
+					breakIt(f)
+					_, err := f.deployer(false).promote(t.Context(), f.candidate())
+					assertProductionRecovery(t, f, err, schema)
+				})
 			}
 		})
+	}
+}
+
+func setDeployCandidateSchema(t *testing.T, f *fakeDeploy, schema int) {
+	t.Helper()
+	if schema == 34 {
+		return
+	}
+	writeFile(t, filepath.Join(f.repo, "internal/store/store.go"), fmt.Sprintf("package store\nconst expectedSchemaVersion = %d\n", schema))
+	deployGitIn(t, f.repo, "add", "internal/store/store.go")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "candidate schema")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+}
+
+func assertProductionRecovery(t *testing.T, f *fakeDeploy, err error, schema int) {
+	t.Helper()
+	want := f.old
+	message := "rolled back"
+	subjects := []string{`Revert "deploy(production): controller`, `Revert "deploy(production): launcher`, "deploy(production): launcher", "deploy(production): controller", "seed"}
+	if schema > 34 {
+		want = f.candidate()
+		message = "candidate images retained, production requires roll forward"
+		subjects = subjects[2:]
+	}
+	if err == nil || !strings.Contains(err.Error(), message) {
+		t.Fatalf("promote with schema 34 -> %d = %v, want %q", schema, err, message)
+	}
+	if got := f.pinsOnMain("sparkwing"); got.Controller != want.Controller || got.Launcher != want.Runner || got.Job != want.Runner {
+		t.Fatalf("production with schema 34 -> %d = %+v, want %+v", schema, got, want)
+	}
+	got := f.subjects()
+	if len(got) != len(subjects) {
+		t.Fatalf("GitOps history = %q, want %q", got, subjects)
+	}
+	for i, prefix := range subjects {
+		if !strings.HasPrefix(got[i], prefix) {
+			t.Fatalf("GitOps history = %q, want %q", got, subjects)
+		}
 	}
 }
 

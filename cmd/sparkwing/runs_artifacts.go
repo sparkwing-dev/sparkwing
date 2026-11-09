@@ -94,7 +94,10 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 		if err := errors.Join(readErr, file.Close(), ctx.Err()); err != nil {
 			return err
 		}
-		if err := publishArtifactFile(file.Name(), dest, os.Link); err != nil {
+		if err := artifactDestinationAvailable(dest); err != nil {
+			return err
+		}
+		if err := os.Rename(file.Name(), dest); err != nil {
 			return err
 		}
 		return writeArtifact(out, artifactRecord{ManifestEntry: entry, RunID: run, JobID: job, SavedTo: dest}, inv.Output(color.IsInteractiveStdout()))
@@ -197,15 +200,6 @@ func writeArtifactPage(out io.Writer, page artifactListingPage, mode string) err
 		return err
 	}
 	return nil
-}
-
-func publishArtifactFile(source, dest string, link func(string, string) error) error {
-	// safety: linking a verified sibling file creates the destination atomically without replacing another writer.
-	err := link(source, dest)
-	if err != nil && !errors.Is(err, os.ErrExist) {
-		return fmt.Errorf("publish artifact: %w; the destination filesystem must support hard links; choose a --dest on a filesystem that does (NTFS, APFS, ext4 work; FAT/exFAT and some network shares do not)", err)
-	}
-	return err
 }
 
 func writeArtifact(out io.Writer, record artifactRecord, format string) error {

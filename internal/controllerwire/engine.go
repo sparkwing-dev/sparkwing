@@ -10,30 +10,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
-
-// Compatibility fixes the API boundary independently of an engine's matching node protocol.
-type Compatibility struct {
-	APIMajor        int       `json:"api_major"`
-	EngineRelease   string    `json:"engine_release"`
-	ReleasedAt      time.Time `json:"released_at"`
-	GuaranteedUntil time.Time `json:"guaranteed_until"`
-}
-
-const APIMajor = 1
-
-// CompatibilityFor derives the API guarantee using calendar months from the verified release date.
-func CompatibilityFor(release engineid.VersionInfo) Compatibility {
-	return Compatibility{
-		APIMajor: APIMajor, EngineRelease: release.Version,
-		ReleasedAt:      release.PublishedAt,
-		GuaranteedUntil: release.PublishedAt.AddDate(0, limits.ControllerCompatibilityMonths, 0),
-	}
-}
 
 // CreateRunRequest carries user input; authenticated authority and App facts are server-derived.
 type CreateRunRequest struct {
@@ -426,7 +406,6 @@ type ScheduleGenerator struct {
 
 // Controller is the authenticated fetched-engine API shared by every placement.
 type Controller interface {
-	Compatibility(context.Context, string) (Compatibility, error)
 	CreateRun(context.Context, CreateRunRequest) (CreateRunResponse, error)
 	ReadRun(context.Context, string) (RunDetail, error)
 	ReadSnapshot(context.Context, string) (ScheduleSnapshot, error)

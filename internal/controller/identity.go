@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
-	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -103,18 +102,8 @@ type capabilitiesClaims struct {
 	Profile    bool `json:"profile"`
 }
 
-// safety: public discovery exposes features and engine support without tenant data.
+// safety: public discovery exposes deployment features without tenant data.
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	if versions, present := r.URL.Query()["engine_version"]; present {
-		engine := s.engineController
-		result, err := engine.compatibility(r.Context(), versions[0])
-		if err != nil {
-			routepolicy.WritePolicyError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, result)
-		return
-	}
 	var resp capabilitiesResp
 	if d := s.dashboard; d != nil && d.Capabilities.Mode != "" {
 		storage := d.Capabilities.Storage
