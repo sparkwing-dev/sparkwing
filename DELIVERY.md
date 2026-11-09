@@ -50,8 +50,10 @@ comment changes included; the review job never skips by size or path. A diff
 whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any
 `*.md`, `CHANGELOG*`) runs the default review on the cheaper `docs` reviewer
 (Claude Haiku) instead of the default model; any other file keeps the default.
-The record's `reviewer.model` names the model that ran. The
-gate selects its checks from the change scope (decision 96): vet, build, lint,
+The record's `reviewer.model` names the model that ran. Independent default and
+security profiles run concurrently, and their findings and sessions are combined
+in profile order after both finish. A failed profile leaves the prior review
+record unchanged. The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
 `.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
@@ -513,6 +515,18 @@ source installation bound to its existing team. The optional `--smoke-profile` a
 the detached scan does not enable that probe. Missing prerequisites report that the scan
 could not run, rather than clearing prior Bitwing findings.
 
+Each target team must own a GitHub App installation covering
+`sparkwing-dev/sparkwing`, because the scan submits a repository-backed example.
+A token that can authenticate but belongs to an unrelated QA team cannot submit
+that source. An installation belongs to one team. Keep the source-owning team's
+installation bound there when repairing a fixture's access.
+
+Replace an ended scan credential in its existing target team, retaining
+`runs.read,logs.read,runs.write`, and save it under the same repository and
+`deploy` pipeline scope above. Create it from a signed-in account session. A token
+delegated from another token cannot outlive its parent. Record the replacement's
+expiry and verify authentication and repository access before the next scan.
+
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed
 production deploy or smoke reverts this run's GitOps commits, launcher first, only if the schema
@@ -525,10 +539,24 @@ downgrade or restore runs. Staging and production have separate database servers
 Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push runs
-through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
-through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
-retried old run cannot roll production back.
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. A capacity-one global
+queue serializes the whole deploy, including staging and production. At build admission,
+`git ls-remote` checks main's tip. Superseded waiters stop before credentials, image work or
+Cloud smoke. Several stale rows can wait, but only the newest waiting commit can pass
+admission. Once admitted, a candidate keeps its slot and can finish even when more pushes land.
+Staging and production fetch main's history and require the candidate SHA to be an ancestor
+of `origin/main` or its tip. These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses
+as repository proof.
+
+Production requires a staging-gate pass for the same image digests and checks both production
+image revision labels. Each changed digest must advance from its pinned revision to a newer
+source commit, with no version downgrade. Missing revision evidence, unrelated history or a
+new digest for the same SHA stops before GitOps pins change. A retry can finish a partial
+deployment when a matching digest already runs. An already deployed image pair leaves the
+pins unchanged.
+
+A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version`
+reach a real deploy through the entry's `args`.
 
 The deployment pipeline pins a published SDK without a local replacement, so
 Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
