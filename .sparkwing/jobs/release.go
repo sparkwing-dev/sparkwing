@@ -58,9 +58,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 type ReleaseCut struct{ Release }
 
 func (r *ReleaseCut) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
-	if in.Commit == "" {
-		return errors.New("release-cut: use sparkwing run release -- --commit SHA to select an isolated source")
-	}
 	if r.homeError != nil {
 		return fmt.Errorf("release: %w", r.homeError)
 	}
@@ -300,17 +297,18 @@ func (j *checkCleanTreeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error)
 }
 
 func (j *checkCleanTreeJob) run(ctx context.Context) error {
-	if j.Source != "" {
-		head, err := runGitIn(ctx, j.RepoDir, "rev-parse", "HEAD")
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(head) != j.Source {
-			return fmt.Errorf("release-cut: HEAD must be selected source %s (got %s)", j.Source, strings.TrimSpace(head))
-		}
-		if _, err := runGitIn(ctx, j.RepoDir, "symbolic-ref", "-q", "HEAD"); err == nil {
-			return errors.New("release-cut: source must be a detached worktree; use sparkwing run release")
-		}
+	if j.Source == "" {
+		return errors.New("release-cut: use sparkwing run release -- --commit SHA to select an isolated source")
+	}
+	head, err := runGitIn(ctx, j.RepoDir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(head) != j.Source {
+		return fmt.Errorf("release-cut: HEAD must be selected source %s (got %s)", j.Source, strings.TrimSpace(head))
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "symbolic-ref", "-q", "HEAD"); err == nil {
+		return errors.New("release-cut: source must be a detached worktree; use sparkwing run release")
 	}
 	out, err := runGitIn(ctx, j.RepoDir, "status", "--porcelain")
 	if err != nil {
@@ -367,10 +365,6 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 		return fmt.Errorf("release: %w", err)
 	}
 	staged := []string{"CHANGELOG.md", embeddedChangelogRel}
-	if err := prepareReleasePins(ctx, j.RepoDir, version); err != nil {
-		return err
-	}
-	staged = append(staged, sparkwingPinArtifacts[2:]...)
 	switch {
 	case roll.needed && roll.guideOnDisk:
 		body = roll.changelogBody
@@ -405,7 +399,7 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add"}, staged...)...); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
 	}
-	sparkwing.Info(ctx, "staged release notes and SDK pins for %s; commit waits for the schema and wire gates", version)
+	sparkwing.Info(ctx, "staged release notes for %s; commit waits for the schema and wire gates", version)
 	return nil
 }
 
@@ -431,6 +425,13 @@ func (j *commitChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 
 func (j *commitChangelogJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
+	// safety: changing the sealed SDK pin before this job starts prevents source acquisition.
+	if err := prepareReleasePins(ctx, j.RepoDir, version); err != nil {
+		return err
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add", "--"}, sparkwingPinArtifacts[2:]...)...); err != nil {
+		return err
+	}
 	pending, err := runGitIn(ctx, j.RepoDir, append([]string{"diff", "--cached", "--name-only", "--"}, releasePreparedPaths(version)...)...)
 	if err != nil {
 		return fmt.Errorf("release: read the staged set: %w", err)

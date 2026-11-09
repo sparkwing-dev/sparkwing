@@ -27,6 +27,11 @@ type sourcePosition struct {
 
 var approvedExternalBoundaries = []externalBoundary{
 	{
+		file: ".sparkwing/jobs/release_cli_e2e_test.go", function: "TestReleaseCLIWithConcurrentMainActor",
+		duration: "20 * time.Millisecond",
+		marker:   "// sleepcheck:external-boundary wait for the real Git publication subprocess",
+	},
+	{
 		file: "tests/acceptance/local_features_e2e_linux_test.go", function: "await",
 		duration: "25 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary real CLI processes and filesystem markers need a paced poll",

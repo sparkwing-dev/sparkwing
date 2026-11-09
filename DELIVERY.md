@@ -136,7 +136,9 @@ from that checkout's origin before reading its files. A failed fetch names the
 job checkout and the Git command to retry there. Changelog preparation reads
 and previews or stages files in the same captured checkout. `commit-changelog`
 waits for every gate, including the schema and wire gates that read the prepared
-notes. A gate failure after preparation leaves HEAD at the starting commit
+notes. The commit job updates and stages the SDK pins after those gates finish,
+so each source-backed job starts with the original sealed engine identity.
+A gate failure after preparation leaves HEAD at the starting commit
 and the prepared files staged for inspection. No commit needs undoing. Inspect those files and return
 the checkout to a clean tree before retrying the cut.
 

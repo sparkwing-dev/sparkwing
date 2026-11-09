@@ -45,6 +45,8 @@ unlock.
 
 ### Fixed
 
+- **releases:** Allow release-cut discovery with default arguments and keep the SDK pin stable until the final commit job starts.
+
 - **run status:** Retry receipts list only completed reuse, excluding successful source jobs that had to execute again because their results could not be reused.
 - **runner:** Child awaits pace controller reads with jittered backoff and reuse the authorized host request while waiting
 - **Local onboarding:** the welcome card calls out the initial commit, and the quick start explains run inspection, managed schedules and the daemon-owned dashboard.
