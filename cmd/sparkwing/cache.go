@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -98,7 +99,7 @@ func runCacheInfo(inv clisurface.Invocation) error {
 			return
 		}
 		fmt.Printf("  entries:  %d\n", report.Entries)
-		fmt.Printf("  total:    %s\n", humanBytes(report.TotalBytes))
+		fmt.Printf("  total:    %s\n", opsview.HumanBytes(report.TotalBytes))
 		if report.ActiveEntries > 0 || report.BusyEntries > 0 {
 			fmt.Printf("  in use:   %d active, %d busy\n", report.ActiveEntries, report.BusyEntries)
 		}
@@ -117,7 +118,7 @@ func runCacheInfo(inv clisurface.Invocation) error {
 			if !e.LastUsed.IsZero() {
 				last = humanAge(time.Since(e.LastUsed))
 			}
-			fmt.Printf("  %-20s %10s  %s\n", e.Key, humanBytes(e.Bytes), last)
+			fmt.Printf("  %-20s %10s  %s\n", e.Key, opsview.HumanBytes(e.Bytes), last)
 		}
 		if !all && len(entries) > len(shown) {
 			fmt.Printf("  %s\n", color.Dim(fmt.Sprintf("... and %d more (--all-entries to list)", len(entries)-len(shown))))
@@ -164,7 +165,7 @@ func runCachePrune(inv clisurface.Invocation) error {
 			fmt.Println("prune already in progress")
 			return
 		}
-		fmt.Printf("removed: %s across %d entries\n", humanBytes(result.LogicalRemovedBytes), result.ReclaimedEntries)
+		fmt.Printf("removed: %s across %d entries\n", opsview.HumanBytes(result.LogicalRemovedBytes), result.ReclaimedEntries)
 		fmt.Printf("examined: %d, active skipped: %d, busy skipped: %d\n",
 			result.ExaminedEntries, result.ActiveSkippedEntries, result.BusySkippedEntries)
 		fmt.Printf("goal satisfied: %t\n", result.GoalSatisfied)
@@ -196,7 +197,7 @@ func limitLabel(n int64) string {
 	if n <= 0 {
 		return "unlimited"
 	}
-	return humanBytes(n)
+	return opsview.HumanBytes(n)
 }
 
 func entryLimitLabel(n int) string {

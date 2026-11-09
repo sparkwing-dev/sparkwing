@@ -95,9 +95,6 @@ const (
 	StateComplete = "complete"
 	// StateIncomplete identifies a persisted seal reporting missing lines; unreadable bytes fail reads.
 	StateIncomplete = "incomplete"
-	// stateCutOff: the log stopped before its writer finished: the node
-	// was stopped, or the byte cap ended it.
-	stateCutOff = "cut_off"
 	// StateUnknown: the log store does not track completeness.
 	StateUnknown = "unknown"
 )

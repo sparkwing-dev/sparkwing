@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
@@ -29,7 +30,7 @@ func docsCacheInfo(output string) error {
 		fmt.Printf("  status:     %s\n", color.Dim("(not yet created -- no --web fetches have run)"))
 		return nil
 	}
-	fmt.Printf("  total:      %d files, %s\n", stats.TotalFiles, humanBytes(stats.TotalBytes))
+	fmt.Printf("  total:      %d files, %s\n", stats.TotalFiles, opsview.HumanBytes(stats.TotalBytes))
 	fmt.Printf("  docs:       %d files\n", stats.DocFiles)
 	fmt.Printf("  migrations: %d files\n", stats.MigrationFiles)
 	fmt.Printf("  indexes:    %d files\n", stats.IndexFiles)
@@ -61,22 +62,4 @@ func docsCacheClear(output string) error {
 	}
 	fmt.Printf("removed %d file(s) from %s\n", removed, color.Cyan(client.CacheDir))
 	return nil
-}
-
-func humanBytes(n int64) string {
-	const (
-		kib = 1 << 10
-		mib = 1 << 20
-		gib = 1 << 30
-	)
-	switch {
-	case n >= gib:
-		return fmt.Sprintf("%.1f GiB", float64(n)/float64(gib))
-	case n >= mib:
-		return fmt.Sprintf("%.1f MiB", float64(n)/float64(mib))
-	case n >= kib:
-		return fmt.Sprintf("%.1f KiB", float64(n)/float64(kib))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
 }
