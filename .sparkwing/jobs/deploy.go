@@ -36,8 +36,9 @@ func (Deploy) Help() string {
 		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs after both rollouts complete. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
 		"Take a manual snapshot before a risky migration. Each environment's deployed and previous digests are that job's output. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
-		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Every deploy job refuses a commit that is no longer the tip of origin/main, and " +
-		"production refuses a version below the one it runs, so retrying an old run cannot roll production back. After each successful environment smoke, deploy starts a detached deploy-scan child at the same revision and with the same verified lineage and links it in the job summary without awaiting it. Scans use their own concurrency group, leaving the deploy slot free when promotion finishes. Scan failures upsert a stable per-environment Bitwing finding; a clean scan resolves it. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. Bitwing resolves from the runner user's PATH and uses their existing ledger configuration; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
+		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. A capacity-one global queue serializes the whole deploy. At build admission, superseded commits stop before credentials, images or Cloud smoke. " +
+		"An admitted candidate can finish while main advances: staging and production require its SHA to be an ancestor of origin/main or its tip. Production checks source ancestry again immediately before each GitOps push and requires both image revisions to advance without lowering their versions. Identical digests allow retries to finish partial deployments or leave an already deployed candidate unchanged. " +
+		"After each successful environment smoke, deploy starts a detached deploy-scan child at the same revision and with the same verified lineage and links it in the job summary without awaiting it. Scans use their own concurrency group, leaving the deploy slot free when promotion finishes. Scan failures upsert a stable per-environment Bitwing finding; a clean scan resolves it. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. Bitwing resolves from the runner user's PATH and uses their existing ledger configuration; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
 }
 
 func (Deploy) Examples() []sparkwing.Example {
@@ -200,7 +201,7 @@ func (j *deployStagingJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) 
 }
 
 func (d *deployer) deployTo(ctx context.Context, env deployEnv, images deployImages) (envDeployment, map[string]string, error) {
-	if err := d.requireMainTip(ctx, images.Commit); err != nil {
+	if err := d.requireMainAncestor(ctx, images.Commit); err != nil {
 		return envDeployment{}, nil, err
 	}
 	if err := d.assumeRole(ctx); err != nil {
