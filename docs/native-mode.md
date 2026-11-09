@@ -1,7 +1,20 @@
 # Local dashboard
 
-The public dashboard commands use the local controller lifecycle. See the
-[dashboard reference](cli-dashboard.md) for their grammar and output formats.
+The local controller serves the dashboard whenever it runs.
+`sparkwing dashboard open` starts it when needed and prints a one-time sign-in
+link. Visit that link in your browser. `sparkwing daemon status` reports the
+controller and dashboard address; `sparkwing daemon stop` stops both.
+
+On Linux and macOS, install a login service with:
+
+```sh
+sparkwing daemon install
+```
+
+Linux uses systemd user services, so run this from a login session with a working
+`systemctl --user status`. macOS uses launchd. Windows starts the controller on
+demand and has no login-service installer. See the
+[dashboard reference](cli-dashboard.md) for command grammar and output formats.
 
 Dashboard commands report `unavailable`, naming the missing piece, when this
 platform cannot supply the local controller lifecycle, managed units or log
@@ -30,7 +43,8 @@ login-service installer.
 
 Managed schedule timers use one stable hidden entrypoint with the captured home.
 Machine updates refresh both timer and controller units. The controller runtime,
-service manager, timer and log bindings still need native integration evidence.
+service manager, timer and log bindings are described in
+[local execution](local-execution.md).
 
 The foreground contract has no fields for explicit budget, headroom or alternate
 state-db flags. The CLI reports `unavailable` for those explicit flags instead of

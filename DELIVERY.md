@@ -50,8 +50,10 @@ comment changes included; the review job never skips by size or path. A diff
 whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any
 `*.md`, `CHANGELOG*`) runs the default review on the cheaper `docs` reviewer
 (Claude Haiku) instead of the default model; any other file keeps the default.
-The record's `reviewer.model` names the model that ran. The
-gate selects its checks from the change scope (decision 96): vet, build, lint,
+The record's `reviewer.model` names the model that ran. Independent default and
+security profiles run concurrently, and their findings and sessions are combined
+in profile order after both finish. A failed profile leaves the prior review
+record unchanged. The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
 `.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
@@ -77,11 +79,9 @@ merges, gate run, review record path and result). The gate's `test` step reports
 
 When `origin/main` is not an ancestor of HEAD at push time, the `push` step
 merges it into the branch in the checkout (`git merge --no-ff`, the default
-git identity and signing; never a rebase). CHANGELOG.md merges with the union
-driver, so two branches that each open the same `###` heading under
-`[Unreleased]` merge into a repeated heading the changelog lint refuses; when
-the merge leaves one, the step runs `bash bin/check-changelog.sh --fix` and
-commits CHANGELOG.md and its mirror as a follow-up commit (never an amend). It
+git identity and signing; never a rebase). Independent changelog and migration
+fragments merge as separate files. Orientation table additions use union merge;
+changes to the same rule need review. The push step
 then runs `go build` in every module
 and the affected-test selection over the files that differ between the gated
 tree and the merged tree, then pushes the merge. The review is not run again:
@@ -98,7 +98,7 @@ landing record names both.
 ### Cutting a release
 
 A release is a tag push. The `release` pipeline resolves the version, renames
-`## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
+the collected `## [Unreleased]` section to the version, stages the release notes,
 checks the section covers any schema or wire change since the previous tag,
 aligns scaffold and pipeline SDK pins to the chosen version with local replacements,
 then commits and atomically pushes that commit to `main` with an annotated
@@ -504,9 +504,26 @@ requires the runner label and trust conditions documented below.
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
 Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
 repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
-is a token for its target fixture team with permission to start and observe the
-example and read its logs. Missing prerequisites report that the scan could not
-run, rather than clearing prior Bitwing findings.
+needs `runs.write`, `runs.read` and `logs.read` in the target deployment's team that owns
+the GitHub App installation covering `sparkwing-dev/sparkwing`. Production uses the existing
+source-owning team's `/kikd-prod/sparkwing/deploy/scan-submit-token`, also used by its smoke.
+A QA fixture token with no installation cannot submit this repository-backed scan. Keep the
+source installation bound to its existing team. The optional `--smoke-profile` and
+`--smoke-checkout` example probe also needs access to `sparkwing-dev/sparkwing-ci-smoke`;
+the detached scan does not enable that probe. Missing prerequisites report that the scan
+could not run, rather than clearing prior Bitwing findings.
+
+Each target team must own a GitHub App installation covering
+`sparkwing-dev/sparkwing`, because the scan submits a repository-backed example.
+A token that can authenticate but belongs to an unrelated QA team cannot submit
+that source. An installation belongs to one team. Keep the source-owning team's
+installation bound there when repairing a fixture's access.
+
+Replace an ended scan credential in its existing target team, retaining
+`runs.read,logs.read,runs.write`, and save it under the same repository and
+`deploy` pipeline scope above. Create it from a signed-in account session. A token
+delegated from another token cannot outlive its parent. Record the replacement's
+expiry and verify authentication and repository access before the next scan.
 
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed
@@ -520,10 +537,29 @@ downgrade or restore runs. Staging and production have separate database servers
 Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push runs
-through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
-through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
-retried old run cannot roll production back.
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. A capacity-one global
+queue serializes the whole deploy, including staging and production. At build admission,
+`git ls-remote` checks main's tip. Superseded waiters stop before credentials, image work or
+Cloud smoke. Several stale rows can wait, but only the newest waiting commit can pass
+admission. Once admitted, a candidate keeps its slot and can finish even when more pushes land.
+Staging and production fetch main's history and require the candidate SHA to be an ancestor
+of `origin/main` or its tip. These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses
+as repository proof.
+
+Production checks ancestry again immediately before each controller or launcher GitOps push.
+A candidate removed by a main history rewrite during deployment preparation is refused at
+that write. Source validation and the GitOps push use separate repositories, so this check
+does not make them atomic.
+
+Production requires a staging-gate pass for the same image digests and checks both production
+image revision labels. Each changed digest must advance from its pinned revision to a newer
+source commit, with no version downgrade. Missing revision evidence, unrelated history or a
+new digest for the same SHA stops before GitOps pins change. A retry can finish a partial
+deployment when a matching digest already runs. An already deployed image pair leaves the
+pins unchanged.
+
+A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version`
+reach a real deploy through the entry's `args`.
 
 The deployment pipeline pins a published SDK without a local replacement, so
 Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
@@ -540,6 +576,34 @@ schema with production before changing the controller pin, and wait for its
 rollout before updating the launcher and planning runner. Then observe a new
 push-triggered deploy through both environments.
 
+#### Delivery timing budgets
+
+The targets are five minutes to land on main, five minutes from main to staging
+proof, and five minutes from staging proof to production acceptance. Report
+staging rollout separately from staging proof. Proof includes the blocking
+smokes. Production acceptance includes its smoke, NodeClaim/log checks and scan
+submission, while the detached scan finishes separately.
+
+Every delivery comparison retains the full elapsed leg and a named **cold Cloud
+provisioning** segment. Measure that segment from NodeClaim creation to its
+successful Initialized transition, with the claim name and both timestamps.
+Record each claim once, including capacity used by child and successor jobs.
+Land on our own hardware records this segment as `not applicable`. A Cloud leg
+without those boundaries records `unknown`, with any observed capacity wait
+alongside it. Use zero only when evidence proves the leg required no new capacity.
+
+Include cold provisioning in the full elapsed leg when comparing it with the
+five-minute target. Keep image pull, source preparation, execution and observation
+tail separate because they have different causes. Component intervals can overlap, so only sum non-overlapping critical-path
+intervals. Run acceptance follows preparation and can follow provisioning, so a
+controller run-duration headline cannot substitute for the full delivery leg.
+Compare cold samples with cold samples and report any provisioning change before
+attributing a change to preparation or execution.
+
+Retain measured samples with their raw timing boundaries in the delivery evidence
+record. A sample is a baseline, not a timeout or guaranteed provisioning ceiling.
+Warm capacity is forbidden for our delivery work.
+
 #### Deploy cost estimate
 
 These are estimates from the code path, not observed deploy timings. The ranges assume a warm
@@ -553,6 +617,7 @@ exceed them. The watched staging deploy should record phase durations before set
 | Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
 | Publish and verify both multi-arch images | 30 seconds-3 minutes | One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
 | GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap) and rollout (5-minute cap). Argo's default poll alone can cost up to 3 minutes per push. |
+| Cold Cloud provisioning, per new claim | Measure per leg, no fixed estimate | Creation to Initialized. Included in smoke elapsed time when on its critical path. Report separately from image pull and preparation. |
 | Staging gate | 1-10 minutes with available capacity | Candidate CLI build plus two overlapping pipeline runs. Each run has a 45-minute limit. |
 | Production smoke | 1-5 minutes with available capacity | CLI build plus two concurrent fixture runs, NodeClaim sampling and log scan. Each run has a 20-minute limit. |
 | Production rollback, on failure | Similar to the two rollouts | Two reverse GitOps commits. Budget: 35 minutes. |
@@ -1712,18 +1777,13 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   `pkg/docs/mirror/`, and the vendored runner-bundle tarball) in one pass and
   is a no-op on a clean tree. Resolve a merge conflict in any of them by
   taking either side, running that script, and committing the result.
-  `CHANGELOG.md` and the mirror `pkg/docs` embeds resolve themselves instead:
-  `.gitattributes` marks both `merge=union`, so a merge of two branches that
-  each added `[Unreleased]` bullets keeps both sides with no conflict. Union
-  merge gets two cases wrong. Two branches that reword the same bullet produce
-  both wordings, and two branches that each rename `[Unreleased]` to their own
-  version stack both headings on adjacent lines -- `bin/check-changelog.sh`
-  fails on the stacked pair, and the reworded pair needs a reader. Where both
-  sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
-  collapses it into one block and re-syncs the mirror.
-- **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
-  follows `CHANGELOG-STYLE.md`. Mark breaking changes; until paid launch
-  they need no migration guide. Keep the embedded changelog mirror byte-identical.
+- **Changelog:** notable adopter-facing behavior belongs in a unique
+  `docs/changes/<slug>.md` with a `###` category and scope-prefixed bullets.
+  Breaking guides go in `docs/migrations/unreleased/<slug>.md`, starting with
+  an H2. Follow `CHANGELOG-STYLE.md` and run `bash bin/sync-docs.sh` to mirror
+  the fragments. Keep shared unreleased aggregates empty. Embedded docs,
+  weekly-release and release gates collect fragments; the release cut writes
+  the versioned notes, repoints guide links and deletes consumed fragment pairs.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. The local

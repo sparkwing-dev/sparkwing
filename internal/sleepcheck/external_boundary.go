@@ -32,6 +32,11 @@ var approvedExternalBoundaries = []externalBoundary{
 		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",
 	},
 	{
+		file: "tests/acceptance/local_features_e2e_linux_test.go", function: "await",
+		duration: "25 * time.Millisecond",
+		marker:   "// sleepcheck:external-boundary real CLI processes and filesystem markers need a paced poll",
+	},
+	{
 		file: "tests/acceptance/feature_e2e_test.go", function: "newFeatureController",
 		duration: "10 * time.Second",
 		marker:   "// sleepcheck:external-boundary a controller subprocess must exit before its private state is removed",

@@ -386,6 +386,12 @@ error object in its `error` member.
 | POST | `/node/v1/helpers` | `{operation, args, dir, env, step?}` | `{result, error?, code?}` |
 <!-- node-routes:end -->
 
+Child awaits keep the same authorized host request open until the child reaches
+a terminal state or `wait_ms` elapses. Controller observations use the retained
+parent credential, with jittered backoff capped at five seconds between reads.
+Cancellation interrupts the wait. An unfinished child returns its current
+status so the SDK can continue waiting.
+
 Service request fields cannot be null. SDK encoders send empty objects and
 arrays for required collections, including child `args: {}` and cleanup
 `argv: []`. Optional fields may be omitted. The host rejects null fields.

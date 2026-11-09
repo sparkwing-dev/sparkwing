@@ -17,7 +17,15 @@ import (
 var allDocs embed.FS
 
 //go:embed changelog.md
-var changelogMD string
+var releasedChangelogMD string
+
+var changelogMD, changelogErr = func() (string, error) {
+	sources, err := fs.Sub(allDocs, "mirror")
+	if err != nil {
+		return "", err
+	}
+	return CollectChangelog(releasedChangelogMD, sources)
+}()
 
 // ChangelogSlug is the synthetic topic under which the repo-root
 // CHANGELOG.md is surfaced by [Read], [List], [Search], and [All].
@@ -65,16 +73,16 @@ func listEntries() []Entry {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		if !strings.HasSuffix(p, ".md") {
+		if !strings.HasSuffix(p, ".md") || strings.HasPrefix(p, "mirror/changes/") || strings.HasPrefix(p, "mirror/migrations/unreleased/") {
 			return nil
 		}
-		body, rerr := fs.ReadFile(allDocs, p)
+		body, rerr := ReadRaw(strings.TrimSuffix(strings.TrimPrefix(p, "mirror/"), ".md"))
 		if rerr != nil {
 			return nil
 		}
 		rel := strings.TrimPrefix(p, "mirror/")
 		slug := strings.TrimSuffix(rel, ".md")
-		title, summary := extractTitleSummary(body)
+		title, summary := extractTitleSummary([]byte(body))
 		entries = append(entries, Entry{
 			Slug:    slug,
 			Title:   title,
@@ -116,7 +124,18 @@ func Read(slug string) (string, error) {
 func ReadRaw(slug string) (string, error) {
 	slug = strings.TrimSuffix(slug, ".md")
 	if slug == ChangelogSlug {
-		return changelogMD, nil
+		return changelogMD, changelogErr
+	}
+	if slug == "migrations/_unreleased" {
+		sources, err := fs.Sub(allDocs, "mirror/migrations")
+		if err != nil {
+			return "", err
+		}
+		body, err := CollectMigration(sources)
+		return string(body), err
+	}
+	if strings.HasPrefix(slug, "changes/") || strings.HasPrefix(slug, "migrations/unreleased/") {
+		return "", fmt.Errorf("docs: %q: %w", slug, ErrNotFound)
 	}
 	p := path.Join("mirror", slug+".md")
 	body, err := fs.ReadFile(allDocs, p)
@@ -220,7 +239,7 @@ func Search(query string) []Entry {
 	return out
 }
 
-// Changelog returns the raw embedded CHANGELOG.md body.
+// Changelog returns the embedded changelog with unreleased fragments collected.
 func Changelog() string { return changelogMD }
 
 // ChangelogSection returns the body of the `## [version]` section of

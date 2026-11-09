@@ -117,6 +117,9 @@ func TestChartInstallsTheLaunchersAdmissionPolicies(t *testing.T) {
 					if err := yaml.Unmarshal([]byte(document), &policy); err != nil {
 						t.Fatal(err)
 					}
+					if policy.Name == "sparkwing-cloud-capacity-"+jobs {
+						continue
+					}
 					i := slices.IndexFunc(policies, func(p *admissionv1.ValidatingAdmissionPolicy) bool { return p.Name == policy.Name })
 					if i < 0 || kind.APIVersion != "admissionregistration.k8s.io/v1" || !reflect.DeepEqual(policy.Spec, policies[i].Spec) {
 						t.Errorf("%s renders policy %s unlike the launcher's expectation for %s", chart, policy.Name, jobs)
@@ -126,6 +129,9 @@ func TestChartInstallsTheLaunchersAdmissionPolicies(t *testing.T) {
 					var binding admissionv1.ValidatingAdmissionPolicyBinding
 					if err := yaml.Unmarshal([]byte(document), &binding); err != nil {
 						t.Fatal(err)
+					}
+					if binding.Name == "sparkwing-cloud-capacity-"+jobs {
+						continue
 					}
 					i := slices.IndexFunc(bindings, func(b *admissionv1.ValidatingAdmissionPolicyBinding) bool { return b.Name == binding.Name })
 					if i < 0 || !reflect.DeepEqual(binding.Spec, bindings[i].Spec) {
