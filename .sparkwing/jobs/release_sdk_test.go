@@ -1,8 +1,11 @@
 package jobs
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -11,6 +14,7 @@ func sdkFixture(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "core.hooksPath", "/dev/null")
 	gitRun(t, repo, "remote", "add", "origin", repo)
 	for name, body := range map[string]string{
 		"sparkwing/go.mod":             "module github.com/sparkwing-dev/sparkwing/sparkwing\n\ngo 1.25.0\n",
@@ -146,5 +150,67 @@ func TestSDKReleasePreviewDoesNotPublish(t *testing.T) {
 	}
 	if tags := gitRun(t, repo, "tag", "--list"); tags != "" {
 		t.Fatalf("preview created tags: %s", tags)
+	}
+}
+
+func TestSDKReleasePublishesBeforeProxyResolutionAndReusesItsTag(t *testing.T) {
+	repo := sdkFixture(t)
+	sdkFixtureWrite(t, repo, "go.mod", "module fixture/host\n\ngo 1.26.0\nrequire "+sdkModulePath+" v0.1.0\n")
+	sdkFixtureWrite(t, repo, "go.sum", "")
+	for _, name := range []string{"internal/nodeproto/conformance", "sdk/typescript/test/nativehost"} {
+		sdkFixtureWrite(t, repo, name+"/conformance_test.go", "package conformance\nimport (\"testing\"; _ "+strconv.Quote(sdkModulePath)+")\nfunc TestNativeConformance(t *testing.T) {}\n")
+	}
+	sdkFixtureCommit(t, repo)
+	origin := t.TempDir()
+	gitRun(t, origin, "init", "--bare", "-b", "main")
+	gitRun(t, repo, "remote", "set-url", "origin", origin)
+	gitRun(t, repo, "push", "origin", "main")
+	source := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+	ctx := newTestContext(t)
+	digest, err := sdkSourceDigest(ctx, repo, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdkFixtureTag(t, repo, "v0.1.0", digest)
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("RELEASE_TEST_CALL", calls)
+	t.Setenv("RELEASE_TEST_ORIGIN", origin)
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeDeliveryTool(t, filepath.Join(tools, "npm"), "#!/bin/sh\nprintf 'checks\\n' >> \"$RELEASE_TEST_CALL\"\n")
+	writeDeliveryTool(t, filepath.Join(tools, "go"), fmt.Sprintf(`#!/bin/sh
+set -eu
+if [ "$1" = mod ] && [ "$2" = download ]; then
+ test "$GOPROXY" = https://proxy.golang.org
+ test "$GONOPROXY" = none
+ test -z "$(ls -A "$GOMODCACHE")"
+ git ls-remote --exit-code --tags "$RELEASE_TEST_ORIGIN" refs/tags/sparkwing/v0.1.0 >/dev/null
+ printf 'proxy\n' >> "$RELEASE_TEST_CALL"
+ exit 0
+fi
+exec %s "$@"
+`, "'"+strings.ReplaceAll(realGo, "'", "'\"'\"'")+"'"))
+	for range 2 {
+		version, err := (&releaseSDKJob{RepoDir: repo, Source: source}).run(ctx, false)
+		if err != nil || version != "v0.1.0" {
+			t.Fatalf("publication = %s, %v", version, err)
+		}
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "checks\nproxy\nproxy\n" {
+		t.Fatalf("publication calls = %q", body)
+	}
+	if tagged := strings.TrimSpace(gitRun(t, origin, "rev-parse", "sparkwing/v0.1.0^{commit}")); tagged != source {
+		t.Fatalf("SDK tag source = %s, want %s", tagged, source)
+	}
+	if tags := strings.TrimSpace(gitRun(t, origin, "tag", "--list")); tags != "sparkwing/v0.1.0" {
+		t.Fatalf("retry tags = %q", tags)
 	}
 }
