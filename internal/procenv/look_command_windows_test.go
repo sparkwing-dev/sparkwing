@@ -36,8 +36,7 @@ func TestLookupCommandWindowsEnvironment(t *testing.T) {
 		{"absent PATH", nil, dir, "tool", filepath.Join(bin, "tool.com")},
 		{"quoted PATH", []string{`PATH="` + bin + `"`, "PATHEXT=.exe"}, dir, "tool", filepath.Join(bin, "tool.exe")},
 		{"relative PATH", []string{"PATH=bin with spaces", "PATHEXT=.exe"}, dir, "tool", filepath.Join(bin, "tool.exe")},
-		{"empty PATH", []string{"PATH="}, bin, "tool", filepath.Join(bin, "tool.com")},
-		{"current directory", []string{"PATH=missing", "PATHEXT=.exe"}, bin, "tool", filepath.Join(bin, "tool.exe")},
+		{"explicit current directory in PATH", []string{"PATH=.", "PATHEXT=.exe"}, bin, "tool", filepath.Join(bin, "tool.exe")},
 		{"explicit relative path", []string{"PATH=missing", "PATHEXT=.exe"}, dir, `bin with spaces\direct`, filepath.Join(bin, "direct.exe")},
 		{"root relative path", []string{"PATH=missing", "PATHEXT=.exe"}, dir, filepath.Join(bin, "direct")[len(filepath.VolumeName(bin)):], filepath.Join(bin, "direct.exe")},
 		{"drive relative path", []string{"PATH=missing", "PATHEXT=.exe"}, bin, filepath.VolumeName(bin) + "direct", filepath.Join(bin, "direct.exe")},
@@ -54,6 +53,39 @@ func TestLookupCommandWindowsEnvironment(t *testing.T) {
 	for _, argv := range []string{"missing", `missing\tool`, "bin with spaces"} {
 		if _, err := LookupCommand(argv, []string{"PATH=" + bin}, dir); !errors.Is(err, exec.ErrNotFound) {
 			t.Fatalf("missing command %q: %v", argv, err)
+		}
+	}
+}
+
+func TestSDKCommandWindowsRefusesBatchArguments(t *testing.T) {
+	for _, contextBound := range []bool{false, true} {
+		cmd := SDKCommand(nil, filepath.Join(t.TempDir(), "tool.cmd"), "main&ver&rem")
+		if contextBound {
+			cmd = SDKCommandContext(t.Context(), nil, filepath.Join(t.TempDir(), "tool.BAT"), "%FIXTURE%")
+		}
+		if cmd.Err == nil {
+			t.Fatalf("context=%v: unsafe batch argument accepted", contextBound)
+		}
+	}
+}
+
+//sparkwing:critical
+func TestLookupCommandWindowsIgnoresImplicitWorkingDirectory(t *testing.T) {
+	dir, bin := t.TempDir(), t.TempDir()
+	for _, file := range []string{filepath.Join(dir, "go.bat"), filepath.Join(bin, "go.exe")} {
+		if err := os.WriteFile(file, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{bin, ";" + bin + ";;"} {
+		got, err := LookupCommand("go", []string{"PATH=" + path, "PATHEXT=.bat;.exe"}, dir)
+		if err != nil || got != filepath.Join(bin, "go.exe") {
+			t.Fatalf("PATH=%q: got %q, %v", path, got, err)
+		}
+	}
+	for _, path := range []string{"", "missing", ";missing;;"} {
+		if _, err := LookupCommand("go", []string{"PATH=" + path}, dir); !errors.Is(err, exec.ErrNotFound) {
+			t.Fatalf("PATH=%q: planted batch file resolved: %v", path, err)
 		}
 	}
 }

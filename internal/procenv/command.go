@@ -2,7 +2,10 @@ package procenv
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -27,6 +30,7 @@ func CommandContext(ctx context.Context, environment Env, name string, args ...s
 func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
 	cmd := exec.Command(name, args...)
 	cmd.Env = sdkCommandEnvironment(environment)
+	validateBatchCommand(cmd)
 	return cmd
 }
 
@@ -34,7 +38,25 @@ func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
 func SDKCommandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = sdkCommandEnvironment(environment)
+	validateBatchCommand(cmd)
 	return cmd
+}
+
+func validateBatchCommand(cmd *exec.Cmd) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	extension := filepath.Ext(strings.TrimRight(cmd.Path, " ."))
+	if !strings.EqualFold(extension, ".cmd") && !strings.EqualFold(extension, ".bat") {
+		return
+	}
+	// safety: cmd.exe reparses batch argv, including environment expansion inside quotes.
+	for i, arg := range cmd.Args {
+		if strings.ContainsAny(arg, "&|<>^%\"!()\r\n") {
+			cmd.Err = fmt.Errorf("Windows batch command refused: argv[%d] contains cmd.exe metacharacters; use a non-batch executable, such as node.exe with the tool's JavaScript entrypoint", i)
+			return
+		}
+	}
 }
 
 func sdkCommandEnvironment(environment []string) []string {

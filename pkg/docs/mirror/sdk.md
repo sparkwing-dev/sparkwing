@@ -522,8 +522,13 @@ of commands a step starts.
 `sw.Exec(ctx, program, args...)` runs argv directly. `sw.Bash(ctx, script)` runs a
 shell script for a step. Use Exec to run a command such as `go test ./...`.
 Both return a command builder with `Dir`, `Env` and `EnvMap`.
-Commands resolve executables using their `PATH` and working directory. On Windows,
-`PATHEXT` supplies executable extensions. Engine credentials and protocol settings
+Commands resolve executables using their `PATH` or an explicit path, with relative
+paths resolved against the working directory. On Windows, `PATHEXT` supplies
+executable extensions. The working directory is searched only when named in
+`PATH` or the command path. Windows `.cmd`/`.bat` targets refuse arguments with
+cmd.exe metacharacters (`& | < > ^ % " ! ( )` and CR/LF). Use a non-batch tool,
+such as `node.exe` with its JavaScript entrypoint, when passing these values.
+Engine credentials and protocol settings
 are removed from child environments, including values supplied through `Env`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
 Handle returned errors to fail the step. `ExecError` carries exit status and

@@ -335,10 +335,16 @@ environment plus command overrides. The host strips engine credentials and
 protocol variables. `dir` must be absolute. Both clients use the command's `PATH`,
 resolving relative and empty entries against `dir`. On Unix, an absent `PATH`
 searches `/bin:/usr/bin`, and executable text without
-`#!` runs through `/bin/sh`. Windows searches the requested working directory
-and `PATH`, using case-insensitive environment names and `PATHEXT` extension
+`#!` runs through `/bin/sh`. Windows searches only `PATH`, using
+case-insensitive environment names and `PATHEXT` extension
 order. An absent Windows `PATH` uses the host path. An empty or absent `PATHEXT`
-uses `.com;.exe;.bat;.cmd`. Explicit paths bypass `PATH`. Windows commands start
+uses `.com;.exe;.bat;.cmd`. Empty Windows `PATH` entries are skipped. Explicit
+paths bypass `PATH`. Windows batch targets (`.cmd` and `.bat`, case-insensitive)
+refuse arguments containing `&`, `|`, `<`, `>`, `^`, `%`, `"`, `!`, `(`, `)` or
+CR/LF because cmd.exe interprets them as syntax or environment expansion.
+The error names the `argv` position without repeating the value. Use a non-batch
+executable, such as `node.exe` with a package manager's JavaScript entrypoint.
+Windows commands start
 suspended in their own kill-on-close Job Objects before any tool code runs.
 Children a command leaves in the background survive its exit, and the host kills
 them when the SDK session ends. A lingering child cannot hold command pipes open

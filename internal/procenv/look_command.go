@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-// LookupCommand resolves argv through the requesting process's PATH and working directory.
+// LookupCommand resolves argv through the requesting process's PATH or an explicit path.
+// Relative paths use dir; Windows never adds an implicit working-directory search.
 func LookupCommand(name string, env []string, dir string) (string, error) {
 	windows := runtime.GOOS == "windows"
 	if !windows && strings.Contains(name, string(filepath.Separator)) {
@@ -48,11 +49,10 @@ func LookupCommand(name string, env []string, dir string) (string, error) {
 		}
 	}
 	entries := filepath.SplitList(path)
-	if path == "" {
+	if path == "" && !windows {
 		entries = []string{""}
 	}
 	if windows {
-		entries = append([]string{""}, entries...)
 		if strings.ContainsAny(name, `:\/`) {
 			entries = []string{""}
 		}
@@ -61,6 +61,9 @@ func LookupCommand(name string, env []string, dir string) (string, error) {
 		entries = []string{""}
 	}
 	for _, entry := range entries {
+		if windows && entry == "" && !strings.ContainsAny(name, `:\/`) {
+			continue
+		}
 		if entry == "" {
 			entry = "."
 		}
