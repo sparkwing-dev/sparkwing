@@ -671,8 +671,8 @@ exceed them. The watched staging deploy should record phase durations before set
 | Resolve version, role and existing images | 2-15 seconds | Git fetch and commit metadata, STS, ECR lookups. A matching published pair skips all builds. |
 | Dashboard | 30 seconds-3 minutes when rebuilt, seconds on validated reuse | `bin/build-web.sh --reuse` validates its existing input/output receipt before reusing the bundle. |
 | Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
-| Publish and verify both multi-arch images | 30 seconds-3 minutes | One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
-| GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap) and rollout (5-minute cap). Argo's default poll alone can cost up to 3 minutes per push. |
+| Publish and verify both multi-arch images | 30 seconds-3 minutes | Controller and runner publish concurrently after all binary hashes pass. One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
+| GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap, one-second observation interval) and rollout (5-minute cap). |
 | Cold Cloud provisioning, per new claim | Measure per leg, no fixed estimate | Creation to Initialized. Included in smoke elapsed time when on its critical path. Report separately from image pull and preparation. |
 | Staging gate | 1-10 minutes with available capacity | Candidate CLI build plus two overlapping pipeline runs. Each run has a 45-minute limit. |
 | Production smoke | 1-5 minutes with available capacity | CLI build plus two concurrent fixture runs, NodeClaim sampling and log scan. Each run has a 20-minute limit. |
@@ -686,8 +686,8 @@ does not automatically produce the same image digest.
 
 Parallel architecture builds are a follow-up. Untagged main builds no longer create a shared
 Git tag, so measure CPU and memory contention before running them concurrently. Release builds
-that create a temporary tag still need coordinated tag ownership. Parallel controller/runner publication
-can also overlap independent registry I/O. Persistent Go caches reduce cold builds, while ECR's
+that create a temporary tag still need coordinated tag ownership. Controller/runner publication
+overlaps independent registry I/O and joins both tasks before returning. Persistent Go caches reduce cold builds, while ECR's
 existing content-addressed base layers already avoid uploading unchanged runtime layers. An Argo
 GitHub webhook can replace polling with prompt sync without widening the deploy role's access.
 
