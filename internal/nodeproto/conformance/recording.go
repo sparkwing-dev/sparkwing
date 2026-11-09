@@ -6,10 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
+
+type recordingScope interface {
+	Helper()
+	Fatal(...any)
+	Cleanup(func())
+	Failed() bool
+}
 
 var recordProtocol = flag.Int("record-protocol", 0, "capture conformance traffic for this protocol version")
 
@@ -29,7 +35,7 @@ type Recording struct {
 }
 
 // NewRecording writes a fixture at test completion when -record-protocol is set.
-func NewRecording(t *testing.T, language, name string) *Recording {
+func NewRecording(t recordingScope, language, name string) *Recording {
 	t.Helper()
 	r := &Recording{Protocol: nodeproto.Version, Language: language}
 	if *recordProtocol == 0 {
@@ -62,14 +68,14 @@ func NewRecording(t *testing.T, language, name string) *Recording {
 		if len(frames) == 0 || json.Unmarshal(frames[len(frames)-1], &hello) != nil || !hello.OK {
 			return
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := json.MarshalIndent(r, "", "  ")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, append(raw, '\n'), 0644); err != nil {
+		if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -77,7 +83,7 @@ func NewRecording(t *testing.T, language, name string) *Recording {
 }
 
 // Request starts the next exchange.
-func (r *Recording) Request(t *testing.T, request nodeproto.Request) {
+func (r *Recording) Request(t recordingScope, request nodeproto.Request) {
 	t.Helper()
 	if *recordProtocol != 0 {
 		raw, err := json.Marshal(request)
@@ -89,7 +95,7 @@ func (r *Recording) Request(t *testing.T, request nodeproto.Request) {
 }
 
 // Frame copies SDK bytes before the transport reuses its read buffer.
-func (r *Recording) Frame(t *testing.T, raw []byte) {
+func (r *Recording) Frame(t recordingScope, raw []byte) {
 	t.Helper()
 	if *recordProtocol != 0 {
 		if len(r.Exchanges) == 0 {
