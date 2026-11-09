@@ -18,13 +18,13 @@ const releasedVersions = `[[{"tag_name":"v0.67.0","published_at":"2026-10-01T00:
  {"tag_name":"v0.68.1","draft":true}, {"tag_name":"v0.69.0-qa.1","prerelease":true}],
  [{"tag_name":"v0.66.5","published_at":"2026-09-01T00:00:00Z"}, {"tag_name":"v1.0.0"}]]`
 
-func TestPublicIndexBackfillsPublishedStableReleases(t *testing.T) {
+func TestPublicIndexAddsOnlyTheDeclaredRelease(t *testing.T) {
 	now := time.Date(2026, 10, 31, 2, 0, 0, 0, time.UTC)
 	index, err := nextReleaseIndex(engine.VersionIndex{}, []byte(releasedVersions), "v0.68.2", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if index.Latest != "v0.68.2" || len(index.Versions) != 3 {
+	if index.Latest != "v0.68.2" || len(index.Versions) != 1 {
 		t.Fatalf("index = %+v", index)
 	}
 	for _, v := range index.Versions {

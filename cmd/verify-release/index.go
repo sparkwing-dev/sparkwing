@@ -148,6 +148,9 @@ func nextReleaseIndex(index engine.VersionIndex, body []byte, required string, n
 			if release.Tag == required {
 				found = true
 			}
+			if !seen[release.Tag] && release.Tag != required {
+				continue
+			}
 			if !seen[release.Tag] {
 				index.Versions = append(index.Versions, engineid.VersionInfo{Version: release.Tag, PublishedAt: release.PublishedAt, SupportUntil: release.PublishedAt.AddDate(0, limits.ControllerCompatibilityMonths, 0)})
 				seen[release.Tag] = true

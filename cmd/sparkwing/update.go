@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
@@ -31,6 +32,7 @@ const (
 
 var (
 	updateFetchLatest     = fetchLatestReleaseContext
+	updateSDKVersion      = resolveSDKUpdateVersion
 	updateDownloadInstall = downloadAndInstall
 	updateBaseURL         = defaultUpdateAssetBase
 	updateVerifyKey       ed25519.PublicKey
@@ -278,7 +280,7 @@ func updateSDK(version string) (updateReceipt, error) {
 		return result, err
 	}
 	result.Before = before.Identity
-	resolved, err := resolveUpdateVersion(ctx, version, false)
+	resolved, err := updateSDKVersion(ctx, version)
 	if err != nil {
 		return result, err
 	}
@@ -308,4 +310,29 @@ func updateSDK(version string) (updateReceipt, error) {
 	result.Replacement = after.Replacement
 	result.Status = "updated"
 	return result, nil
+}
+
+func resolveSDKUpdateVersion(ctx context.Context, requested string) (string, error) {
+	resolver, err := engine.NewResolver(engine.Config{})
+	if err != nil {
+		return "", err
+	}
+	policy, err := resolver.Index(ctx, time.Now())
+	if err != nil {
+		return "", err
+	}
+	sdk, _, err := engine.SelectSDK(policy.Index, engineid.GoSDK, requested, time.Now())
+	if err != nil {
+		return "", err
+	}
+	if _, err := resolver.EngineVersion(ctx, engineid.Pin{SDK: engineid.GoSDK, Version: sdk.Version}); err != nil {
+		return "", err
+	}
+	return sdk.Version, nil
+}
+
+func fetchLatestSDK() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
+	defer cancel()
+	return updateSDKVersion(ctx, "")
 }

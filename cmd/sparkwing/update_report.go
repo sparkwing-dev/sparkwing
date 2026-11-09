@@ -422,7 +422,13 @@ func gatherUpdateCheckForIdentity(target, requested string, force, overrideHold 
 			report.Installed = updateReadInstalled()
 		}
 	}
-	version, err := resolveUpdateVersion(ctx, requested, true)
+	var version string
+	var err error
+	if target == "sdk" {
+		version, err = updateSDKVersion(ctx, requested)
+	} else {
+		version, err = resolveUpdateVersion(ctx, requested, true)
+	}
 	if err != nil {
 		report.Reason = err.Error()
 		return report
