@@ -18,18 +18,13 @@ Agents and the lead land every change with `sparkwing run land`, so each
 landing goes through Sparkwing itself. From a clean work branch:
 
 ```bash
-sparkwing run land --sw-dry-run                           # preview; nothing is pushed
-sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate and review, stop before the push
-sparkwing run land --sw-allow-risk destructive,prod                         # land on main
+sparkwing run land --sw-dry-run                     # preview; nothing is pushed
+sparkwing run land --sw-stop-at verify              # gate and review, stop before the push
+sparkwing run land --sw-allow-risk destructive,prod  # land on main
 ```
 
 Lands run on owned hardware. Policy, gate, review and push use that machine.
 The land queue invokes it with `--sw-route local`.
-
-The risk check covers the whole plan even when `--sw-stop-at verify` leaves
-the push out, so the stop-at form needs the risks too; the push step still
-skips. Without them the run fails as "pipeline discovery failed (details
-withheld)".
 
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
 itself, a CHANGELOG.md that repeats a `###` heading within a release, and a
@@ -130,26 +125,6 @@ in the detached source worktree. Weekly releases continue to wait for green CI.
 The schema changelog gate compares the neutral `internal/store/schema.sql`
 baseline with the previous tag. SQL changes at an unchanged schema version
 require a version bump and a matching `(Breaking)` changelog entry.
-
-Release jobs use the checkout captured by `sparkwing.WorkDir()` during planning.
-Version discovery lists origin's tags, which can include tags absent from a
-shallow job checkout. The schema and wire gates fetch a missing comparison tag
-from that checkout's origin before reading its files. A failed fetch names the
-job checkout and the Git command to retry there. Changelog preparation reads
-and previews or stages files in the same captured checkout. `commit-changelog`
-waits for every gate, including the schema and wire gates that read the prepared
-notes. The commit job updates and stages the SDK pins after those gates finish,
-so each source-backed job starts with the original sealed engine identity.
-A gate failure after preparation leaves HEAD at the starting commit
-and the prepared files staged for inspection. No commit needs undoing. Inspect those files and return
-the checkout to a clean tree before retrying the cut.
-
-`commit-changelog` returns the release commit SHA. `push-tag` runs on the
-dispatcher in the original checkout and uses that SHA for both the annotated
-tag and the update to `refs/heads/main`, regardless of a job snapshot's detached
-HEAD. One `git push --atomic` publishes both refs. A rejected push changes
-neither remote ref. The local commit and tag remain for inspection. Resolve
-the rejection and remove the unpublished local tag before retrying.
 
 Release lint prints that it is waiting for the box-wide golangci-lint lock,
 then uses `--allow-serial-runners` to wait and lint in sequence. The release
@@ -537,9 +512,9 @@ ticket, preserving the first report. A clean scan resolves unpromoted findings.
 Automatic promotion uses Bitwing's eligibility decision and normal `finding promote`;
 checks never force promotion.
 Finding list supplies IDs; finding show supplies fingerprints and linked tickets.
-If per-job status enrichment fails, the known scan failure still creates a ticket
-with its run links and the unavailable-details warning. Publication receives its
-full 30-second budget after optional enrichment finishes, including on timeout.
+If per-job status enrichment fails, the known scan failure still publishes a finding
+with its run links and the unavailable-details warning. Bitwing policy controls
+ticket promotion. Publication receives its full 30-second budget after optional enrichment finishes, including on timeout.
 Promoted tickets stay with their repair owner rather than closing automatically.
 Bitwing must be installed on that user's PATH. The scan also
 requires the runner label and trust conditions documented below.
@@ -617,12 +592,9 @@ pins unchanged.
 A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version`
 reach a real deploy through the entry's `args`.
 
-The deployment pipeline pins a published SDK without a local replacement, so
-Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
-selects the planning host's installed executable instead and requires every job
-host to retain those exact bytes. A main-built Cloud runner and a released desktop
-runner therefore cannot share that replacement engine identity. Keep SDK source
-development outside the committed deployment module's engine pin.
+The deployment module's local SDK replacement selects the planning host's
+installed executable. Deploy and scan use the owned runner described above;
+every job host in a run must retain those exact executable bytes.
 
 A local `pipeline plan` can pass while an older Cloud planning runner rejects the
 same source before any job starts. Deploy a wire-contract change to staging and
@@ -1788,8 +1760,8 @@ file. Other syntax and workflow checks remain active.
   `SPARKWING_INTEGRATION_DISABLE=1` into failures. That is not proof on
   its own, so both lanes that promise Postgres coverage run those suites
   verbosely and fail on any `--- SKIP` line: the hosted `Postgres
-  conformance` job in `.github/workflows/ci.yaml` on every pull request
-  and push to main, and `sparkwing run integration` against its
+  conformance` job in `.github/workflows/ci.yaml` on its nightly and manual
+  dispatch tier, and `sparkwing run integration` against its
   Dockerized Postgres and MinIO. The hosted job runs the three packages
   under `-short`, leaving the names its no-skip step selects to that step, because the canonical gate already runs them in full on
   SQLite and the full store suite overran Go's ten-minute package limit on
@@ -1860,15 +1832,14 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. Select an
   exact source with `sparkwing run release -- --commit SHA` (default `HEAD`).
-  The source must be an ancestor of freshly fetched `origin/main`, and its
-  latest push run of `ci.yaml` must have completed successfully at that exact
-  SHA. The release owns a detached worktree and compiles `release-cut` from
+  The source must be an ancestor of freshly fetched `origin/main`.
+  The release owns a detached worktree and compiles `release-cut` from
   the selected source, using a private `SPARKWING_HOME`. The source must
   contain the `release-cut` entrypoint. The invoking checkout stays untouched,
   including uncommitted work. Lands continue on main throughout the cut.
-  Exact-source CI replaces the broad build, lint and short-suite steps under
-  the pre-launch desktop-load waiver. Incremental push CI is not full-suite
-  evidence. Published module freshness, Go directive policy, coherent SDK
+  Verification follows the manual fallback and weekly CI policy described
+  above. Incremental push CI is not full-suite evidence. Published module
+  freshness, Go directive policy, coherent SDK
   pins, changelog links and docs sidebar checks still run. The cut prepares
   notes, migrations and SDK pins, then checks schema/wire coverage before
   committing those paths with `--no-verify`.
