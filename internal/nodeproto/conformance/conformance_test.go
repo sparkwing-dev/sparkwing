@@ -65,7 +65,7 @@ func TestGoSDKConformsV2(t *testing.T) {
 		t.Run(session.Name, func(t *testing.T) {
 			p := startFixture(t, bin)
 			p.recording = NewRecording(t, "go", session.Name)
-			protocol := nodeproto.Version
+			protocol := nodeproto.HelloProtocol
 			if session.Protocol != 0 {
 				protocol = session.Protocol
 			}
@@ -82,10 +82,10 @@ func TestGoSDKConformsV2(t *testing.T) {
 			}
 			p.send(t, hello)
 			frame := p.reply(t)
-			if protocol == nodeproto.Version && (!frame.OK || frame.Result == nil) {
+			if protocol == nodeproto.HelloProtocol && (!frame.OK || frame.Result == nil) {
 				t.Fatalf("hello: %+v", frame)
 			}
-			if protocol != nodeproto.Version && (frame.Error == nil || frame.Error.Code != apierr.ProtocolMismatch) {
+			if protocol != nodeproto.HelloProtocol && (frame.Error == nil || frame.Error.Code != apierr.ProtocolMismatch) {
 				t.Fatalf("mismatch: %+v", frame)
 			}
 			for i, step := range session.Requests {
