@@ -276,3 +276,43 @@ func TestNativeLogUploaderRefusesAnExistingObjectWithOtherBytes(t *testing.T) {
 		t.Fatalf("err=%v commits=%d; want the differing object refused", err, store.commits)
 	}
 }
+
+func TestNativeLogPutDiscardsCredentialURLsFromFailures(t *testing.T) {
+	const target = "https://storage.example/object?signature=private-token"
+	for _, stage := range []string{"request", "read", "close"} {
+		t.Run(stage, func(t *testing.T) {
+			failure := errors.New(target)
+			uploader := &nativeLogUploader{transport: testEngine(t, func(*http.Request) (*http.Response, error) {
+				if stage == "request" {
+					return nil, failure
+				}
+				body := &logFailingBody{Reader: strings.NewReader(""), failure: failure, stage: stage}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+			})}
+			err := uploader.put(t.Context(), target, nil, time.Now().Add(time.Minute), []byte("hello"))
+			if err == nil || strings.Contains(err.Error(), "private-token") || errors.Is(err, failure) {
+				t.Fatalf("upload retained credential error: %v", err)
+			}
+		})
+	}
+}
+
+type logFailingBody struct {
+	io.Reader
+	failure error
+	stage   string
+}
+
+func (b *logFailingBody) Read(p []byte) (int, error) {
+	if b.stage == "read" {
+		return 0, b.failure
+	}
+	return b.Reader.Read(p)
+}
+
+func (b *logFailingBody) Close() error {
+	if b.stage == "close" {
+		return b.failure
+	}
+	return nil
+}

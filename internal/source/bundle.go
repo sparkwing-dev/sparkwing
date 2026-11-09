@@ -6,14 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -24,31 +22,11 @@ func seedBundle(ctx context.Context, client *gitClient, checkout, digest, rawURL
 	if err != nil || len(expected) != sha256.Size {
 		return errors.New("source bundle digest must be SHA-256")
 	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil {
-		return errors.New("source bundle requires an authorized HTTP(S) URL")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
+	body, err := (blob.TransferClient{Transport: client.bundleTransport}).Transfer(ctx, blob.SignedTransfer{URL: rawURL}, nil)
 	if err != nil {
-		return errors.New("source bundle URL is invalid")
+		return err
 	}
-	httpClient := &http.Client{Transport: client.bundleTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	response, err := httpClient.Do(req)
-	if err != nil {
-		if ctx.Err() != nil {
-			return context.Cause(ctx)
-		}
-		return errors.New("source bundle download failed")
-	}
-	defer func() {
-		if response.Body.Close() != nil {
-			// safety: transport errors can contain the signed URL, including its credential.
-			err = errors.Join(err, errors.New("source bundle download close failed"))
-		}
-	}()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("source bundle download returned HTTP %d", response.StatusCode)
-	}
+	defer func() { err = errors.Join(err, body.Close()) }()
 	name := filepath.Join(client.workspace, "seed.bundle")
 	file, err := fssecure.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
 	if err != nil {
@@ -56,14 +34,7 @@ func seedBundle(ctx context.Context, client *gitClient, checkout, digest, rawURL
 	}
 	defer func() { err = errors.Join(err, os.Remove(name)) }()
 	hash := sha256.New()
-	_, copyErr := io.Copy(io.MultiWriter(file, hash), response.Body)
-	if copyErr != nil {
-		if ctx.Err() != nil {
-			copyErr = context.Cause(ctx)
-		} else {
-			copyErr = errors.New("source bundle transfer failed")
-		}
-	}
+	_, copyErr := io.Copy(io.MultiWriter(file, hash), body)
 	if err := errors.Join(copyErr, file.Close()); err != nil {
 		return err
 	}

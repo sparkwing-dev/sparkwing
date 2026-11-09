@@ -372,14 +372,12 @@ func dataDeadline(budget blob.Budget) *time.Time {
 }
 
 func validateDataTransfer(transfer wire.DataSignedTransfer) error {
-	u, err := url.Parse(transfer.URL)
-	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" || transfer.Size < 0 || transfer.ExpiresAt.IsZero() {
-		return dataProtocolError("invalid signed object transfer")
+	signed := blob.SignedTransfer{URL: transfer.URL, Headers: transfer.Headers, Size: transfer.Size}
+	if err := signed.Validate(); err != nil {
+		return dataProtocolError(err.Error())
 	}
-	for name, value := range transfer.Headers {
-		if strings.EqualFold(name, "Cookie") || strings.EqualFold(name, "Proxy-Authorization") || strings.EqualFold(name, "Authorization") && strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "bearer ") {
-			return dataProtocolError("signed object transfer contains reusable credentials")
-		}
+	if transfer.ExpiresAt.IsZero() {
+		return dataProtocolError("invalid signed object transfer")
 	}
 	return nil
 }

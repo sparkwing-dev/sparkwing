@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // TransferClient sends only the signed headers to the one-object URL. Its
@@ -14,12 +15,8 @@ import (
 type TransferClient struct{ Transport http.RoundTripper }
 
 func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, body io.Reader) (io.ReadCloser, error) {
-	if transfer.Size < 0 {
-		return nil, ErrIntegrity
-	}
-	u, err := url.Parse(transfer.URL)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" {
-		return nil, fmt.Errorf("invalid signed blob URL")
+	if err := transfer.Validate(); err != nil {
+		return nil, err
 	}
 	method := http.MethodGet
 	if body != nil {
@@ -44,13 +41,39 @@ func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, b
 		return nil, safeTransferError(err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_ = response.Body.Close()
-		if response.StatusCode == http.StatusNotFound {
-			return nil, ErrNotFound
+		_, readErr := io.Copy(io.Discard, privateTransferBody{response.Body})
+		if err := errors.Join(readErr, safeTransferError(response.Body.Close())); err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("signed blob transfer: HTTP %d", response.StatusCode)
+		switch response.StatusCode {
+		case http.StatusNotFound:
+			return nil, ErrNotFound
+		case http.StatusPreconditionFailed:
+			return nil, ErrPreconditionFailed
+		default:
+			return nil, fmt.Errorf("signed blob transfer: HTTP %d", response.StatusCode)
+		}
 	}
 	return privateTransferBody{response.Body}, nil
+}
+
+// ErrPreconditionFailed reports a create-only object that already exists.
+// Its caller must verify the stored bytes before accepting a replay.
+var ErrPreconditionFailed = errors.New("signed blob transfer: HTTP 412")
+
+// Validate checks signed-object metadata without accepting reusable credentials.
+// Expiration and object identity belong to the caller's signing contract.
+func (t SignedTransfer) Validate() error {
+	u, err := url.Parse(t.URL)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" || t.Size < 0 {
+		return errors.New("invalid signed object transfer")
+	}
+	for name, value := range t.Headers {
+		if strings.EqualFold(name, "Cookie") || strings.EqualFold(name, "Proxy-Authorization") || strings.EqualFold(name, "Authorization") && strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "bearer ") {
+			return errors.New("signed object transfer contains reusable credentials")
+		}
+	}
+	return nil
 }
 
 func safeTransferError(err error) error {
