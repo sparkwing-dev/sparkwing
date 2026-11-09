@@ -117,22 +117,25 @@ secrets, and sign-out. The controller reads this section when it starts, so run
 ### Tailscale Serve
 
 Keep the dashboard bound to loopback and add the machine's exact Tailscale DNS
-name to `dashboard.allowed_hosts`:
+name to `dashboard.allowed_hosts`. Replace `dashboard.example.com` below with
+that Tailscale DNS name:
 
 ```yaml
 dashboard:
   address: 127.0.0.1:4343
-  allowed_hosts: [workstation.example.ts.net]
+  allowed_hosts: ["workstation.<tailnet>.ts.net"]
 ```
 
-Entries are DNS names without a scheme, port, path, trailing dot or wildcard.
+Replace `workstation.<tailnet>.ts.net` with your machine's full Tailscale DNS name
+in both examples. Entries are DNS names without a scheme, port, path, trailing
+dot or wildcard.
 Loopback names and IP addresses are refused. Restart the controller, then run
 these commands on the machine serving the dashboard:
 
 ```bash
 sparkwing daemon restart --force
 tailscale serve --bg 4343
-sparkwing dashboard open --host workstation.example.ts.net
+sparkwing dashboard open --host "workstation.<tailnet>.ts.net"
 ```
 
 Open the printed HTTPS link from a device on the tailnet. Serve terminates TLS

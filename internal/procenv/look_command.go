@@ -39,7 +39,7 @@ func LookupCommand(name string, env []string, dir string) (string, error) {
 	if path == "" {
 		entries = []string{""}
 	}
-	if filepath.IsAbs(name) {
+	if filepath.IsAbs(name) || windows && strings.ContainsAny(name, `/\`) {
 		entries = []string{""}
 	}
 	for _, entry := range entries {

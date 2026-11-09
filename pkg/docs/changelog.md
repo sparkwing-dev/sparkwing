@@ -20,9 +20,53 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **Template verification:** `template-verify -- --only NAME` checks one template during authoring and reports the selected scope
+### Security
+
+- **Helm:** Confine launcher node updates and NodeClaim deletes to its Sparkwing capacity, allow only binding-label additions and reservation/quarantine taint changes, and disable API token automount on its ServiceAccount
+- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
+- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
+
+### Changed
+
+- **runner:** Trim Go's regression assets from the image and reuse pinned tool layers across package refreshes
+- **landing:** Default and security reviews run concurrently, retaining separate sessions, findings and blocking rules.
+
+- **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/_unreleased.md#bound-object-presence-requests).
+
+
+
+
+- **controller (Breaking):** Remove the ineffective `trust_local_builds` setting and its team API.
+  The schema baseline advances to version 37. Existing configured data upgrades
+  in place. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-37).
+  Execution trust continues to use sealed provenance and host facts.
+- **runs:** Select latest pipeline observations through one store owner. CLI
+  repository status and dashboard summaries use the same start-time, run-number
+  and run-ID order. Reference authorization and success-pin policy stay unchanged.
+
 ### Fixed
 
-- **local execution:** Replayable keyed run intake waits through controller restarts for up to 30 seconds, so a land starting during a desktop update can still be admitted
+- **deployment:** Skip superseded queued builds before credentials or Cloud smoke, and let staging-verified ancestors of main finish promotion while both production image revisions only advance. Recheck source ancestry immediately before each production GitOps push.
+- **run status:** Retry receipts list only completed reuse, excluding successful source jobs that had to execute again because their results could not be reused.
+- **runner:** Child awaits pace controller reads with jittered backoff and reuse the authorized host request while waiting
+- **Local onboarding:** the welcome card calls out the initial commit, and the quick start explains run inspection, managed schedules and the daemon-owned dashboard.
+- **cli:** Show one admission-wait progress stream with holder charges, held and free capacity, external load and expected clear time. Print updates only for material queue changes at increasing intervals.
+- **template verification:** Accept unused failure recovery after a successful deploy. Skipped dry-run bodies and steps still prevent reusable proof.
+
+- **schedules:** Timer-started Linux controllers leave the timer's cgroup when the systemd user manager is available
+- **scheduling:** Run status and the run page keep GitHub Actions dispatch receipts, provider links and lost-race counts after award, cancellation and completion.
+- **billing:** Refuse checkout and card setup sessions whose Stripe mode differs from the controller's payment mode
+- **Security CI:** Identify the updater's private staging files to avoid path traversal false positives.
+- **Cloud execution:** Exact-source child runs can reuse their direct parent's verified source and installed pipeline. Changed build inputs log the mismatch and prepare fresh. Corrupt artifacts fail, and host logs separate source preparation stages.
+- **deployment:** Smoke observation wakes when all runs finish and takes a final NodeClaim sample before checking claims and logs. Deploy status follows poll every second.
+
+- **controller:** Runner claims succeed when another run waits for the same plan concurrency slot
+- **local execution:** Command cancellation waits for cleanup of children in separate process groups before returning a result.
+
+- **Go SDK:** Windows commands honor their own `PATH` and `PATHEXT` and strip engine credentials from child environments. Pipeline tests no longer pull controller dependencies into the SDK module closure.
 
 ## [v0.71.0] - 2026-11-08
 ### Changed
@@ -37,12 +81,19 @@ unlock.
 
 ### Fixed
 
+- **Release downloads:** Installer, updater, engine and runner downloads fall back to GitHub’s asset API after a release-route server error or timeout, preserving signature and checksum verification.
+- **template verification:** Render local sparks-core template text and verification manifests when a checkout is discovered, and report the selected source.
+- **cli:** Reject step ranges that select no steps in a job instead of reporting success with every step skipped
+- **build-images:** Source-built controller and runner images record the clean full Git HEAD, version and source URL in OCI labels so deployment can verify their revision.
+
 - **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller’s configuration and index untouched.
 - **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
 - **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
 
 - **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
 - **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
+- **local execution:** Avoid rehashing unchanged engine digests across installed and retained paths. Reuse retained runner images without staging another executable, while checking every source and retained byte against the accepted engine digest.
+- **local execution:** Compute local Go replacement cache keys with two source listings on Unix when directories stay unchanged. Directory change times guard files created during enumeration; ignored files and embedded dot/underscore assets keep their existing rules.
 
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
@@ -108,6 +159,7 @@ unlock.
 
 - Jobs cancelled while queued for machine capacity report cancelled instead of an internal failure, without starting an attempt.
 
+- **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
 - **local runner:** Held jobs reconnect after controller restarts because cancelled admission polls return an unavailable response instead of an empty success.
@@ -117,6 +169,7 @@ unlock.
 
 - **CLI:** A foreground run keeps its confirmed terminal exit status when log observation loses its connection. The CLI warns with a command for reading retained logs. Permission, protocol and integrity refusals remain errors.
 - **scaffold:** Source-built CLIs pin fresh projects to the latest published SDK instead of an unavailable future release.
+- **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
 
 - **examples:** The failed-only retry probe supplies the required retry reason and recognizes the retried run through its reused source output. It runs on Cloud without a CLI inside the probe job.
 - **security scans:** document validated local-socket trust boundaries and record exact historical cache-identifier fingerprints, keeping scans strict for new findings.

@@ -47,6 +47,7 @@ func (c deployCommand) String() string {
 }
 
 type deployRegistry interface {
+	retain(ctx context.Context, password string, pin imagePin) error
 	digest(ctx context.Context, password, ref string) (string, error)
 	revision(ctx context.Context, password, ref string) (string, error)
 	publish(ctx context.Context, password string, in PublishImagesArgs) error
@@ -414,6 +415,9 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 	if err != nil {
 		return out, err
 	}
+	if err := d.requireMainTip(ctx, out.Commit); err != nil {
+		return out, err
+	}
 	if err := d.assumeRole(ctx); err != nil {
 		return out, err
 	}
@@ -507,9 +511,8 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 	return out, err
 }
 
-// safety: a retry keeps its original run's outputs and OIDC identity, so a
-// deploy job proves its commit is still main's tip before changing anything;
-// a retried or late run of older code stops here.
+// perf: stale queued runs stop before builds or Cloud smokes; an admitted run
+// keeps its slot through promotion so pushes cannot starve production.
 func (d *deployer) requireMainTip(ctx context.Context, commit string) error {
 	return d.act(ctx, "check that "+commit+" is still the tip of origin/main", func() error {
 		out, err := d.sourceGit(ctx, "ls-remote", "--exit-code", "origin", "refs/heads/main")
@@ -519,6 +522,28 @@ func (d *deployer) requireMainTip(ctx context.Context, commit string) error {
 		fields := strings.Fields(out)
 		if len(fields) == 0 || fields[0] != commit {
 			return fmt.Errorf("origin/main is at %q, not %s; only main's tip deploys, so a retried or superseded run stops", strings.Join(fields, " "), commit)
+		}
+		return nil
+	})
+}
+
+// safety: preserve FETCH_HEAD because Cloud smoke uses it as repository proof.
+func (d *deployer) requireMainAncestor(ctx context.Context, commit string) error {
+	return d.act(ctx, "check that "+commit+" belongs to origin/main", func() error {
+		shallow, err := d.sourceGit(ctx, "rev-parse", "--is-shallow-repository")
+		if err != nil {
+			return err
+		}
+		args := []string{"fetch", "--no-tags", "--no-write-fetch-head"}
+		if strings.TrimSpace(shallow) == "true" {
+			args = append(args, "--unshallow")
+		}
+		args = append(args, "origin", "+refs/heads/main:refs/remotes/origin/main")
+		if _, err := d.sourceGit(ctx, args...); err != nil {
+			return err
+		}
+		if _, err := d.sourceGit(ctx, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"); err != nil {
+			return fmt.Errorf("candidate %s is not an ancestor of origin/main; refusing deployment: %w", commit, err)
 		}
 		return nil
 	})
@@ -598,14 +623,24 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 	}); err != nil {
 		return rec, err
 	}
+	if err := d.act(ctx, "retain candidate and rollback image manifests outside ECR rolling pruning", func() error {
+		for _, pin := range []imagePin{images.Controller, images.Runner, rec.Previous.Controller, rec.Previous.Launcher, rec.Previous.Job} {
+			if err := d.tools.registry.retain(ctx, d.ecrPass, pin); err != nil {
+				return fmt.Errorf("retain %s: %w", pin.ref(), err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return rec, err
+	}
 	rec.WindowStart = d.tools.now().UTC().Format(time.RFC3339)
 	if !d.dry && rec.Previous.Controller.Digest == images.Controller.Digest && rec.Previous.Launcher.Digest == images.Runner.Digest {
 		d.tools.say(ctx, env.Name+" already runs controller "+images.Controller.Digest+" and runner "+images.Runner.Digest)
 		return rec, nil
 	}
 	if env.Name == d.cfg.Production.Name {
-		if err := d.act(ctx, "check that "+images.Version+" is not older than the production version", func() error {
-			return d.requireNotOlder(env, rec.Previous, images)
+		if err := d.act(ctx, "check that "+images.Commit+" and "+images.Version+" advance the production source without lowering its version", func() error {
+			return d.requireNotOlder(ctx, env, rec.Previous, images)
 		}); err != nil {
 			return rec, err
 		}
@@ -661,8 +696,9 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 	return rec, nil
 }
 
-func (d *deployer) requireNotOlder(env deployEnv, previous valuesPins, images deployImages) error {
-	for _, pin := range []imagePin{previous.Controller, previous.Launcher} {
+func (d *deployer) requireNotOlder(ctx context.Context, env deployEnv, previous valuesPins, images deployImages) error {
+	for _, phase := range deployPhases {
+		pin := phase.current(previous)
 		previous, err := deployVersionOrder(pin.Tag)
 		if err != nil {
 			return d.firstDeployError(env, pin, err.Error())
@@ -673,6 +709,19 @@ func (d *deployer) requireNotOlder(env deployEnv, previous valuesPins, images de
 		}
 		if semver.Compare(candidate, previous) < 0 {
 			return fmt.Errorf("%s runs %s, newer than the candidate %s; this pipeline never moves an environment back, so roll back by reverting the GitOps commit", env.Name, pin.Tag, images.Version)
+		}
+		revision, err := d.tools.registry.revision(ctx, d.ecrPass, pin.Repository+"@"+pin.Digest)
+		if err != nil {
+			return err
+		}
+		if !fullCommitRE.MatchString(revision) {
+			return errors.New("production revision is missing or invalid; production was not changed")
+		}
+		if revision == images.Commit && pin.Digest != phase.want(images).Digest {
+			return fmt.Errorf("production revision %s already matches the candidate with different image digests; use a newer source commit; production was not changed", revision)
+		}
+		if _, err := d.sourceGit(ctx, "merge-base", "--is-ancestor", revision, images.Commit); err != nil {
+			return fmt.Errorf("production revision %s is not an ancestor of candidate %s; production was not changed: %w", revision, images.Commit, err)
 		}
 	}
 	return nil
@@ -758,6 +807,11 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 			return err
 		}
 		commit = strings.TrimSpace(head)
+		if env.Name == d.cfg.Production.Name {
+			if err := d.requireMainAncestor(ctx, images.Commit); err != nil {
+				return fmt.Errorf("refusing production GitOps push for %s: %w", images.Commit, err)
+			}
+		}
 		_, err = d.git(ctx, gitEnv, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+d.cfg.GitopsBranch)
 		return err
 	}); err != nil {
@@ -974,7 +1028,7 @@ func (d *deployer) runTimeout(profile string) time.Duration {
 
 func (d *deployer) followRun(ctx context.Context, profile string, runID *string) error {
 	return d.act(ctx, "follow the run on "+profile+" until it succeeds", func() error {
-		_, err := d.sw(ctx, "", "runs", "status", "--run", *runID, "--profile", profile, "--follow", "--timeout", d.runTimeout(profile).String(), "-o", "json")
+		_, err := d.sw(ctx, "", "runs", "status", "--run", *runID, "--profile", profile, "--follow", "--poll", "1s", "--timeout", d.runTimeout(profile).String(), "-o", "json")
 		if err != nil {
 			return fmt.Errorf("run %s did not succeed: %w", *runID, err)
 		}
@@ -1038,6 +1092,8 @@ func (d *deployer) productionSmoke(ctx context.Context, images deployImages, sin
 	claims := make([]map[string]bool, len(runs))
 	err := d.act(ctx, "follow production smoke runs and record the NodeClaims each one uses", func() error {
 		done := make(chan struct{})
+		waitCtx, stopWaiting := context.WithCancel(ctx)
+		defer stopWaiting()
 		var wg sync.WaitGroup
 		errs := make([]error, len(runs))
 		for i, team := range d.cfg.SmokeProfiles {
@@ -1047,24 +1103,35 @@ func (d *deployer) productionSmoke(ctx context.Context, images deployImages, sin
 				errs[i] = d.followRun(ctx, team, &runs[i])
 			}()
 		}
-		go func() { wg.Wait(); close(done) }()
+		go func() {
+			wg.Wait()
+			close(done)
+			stopWaiting()
+		}()
 		for i := range claims {
 			claims[i] = map[string]bool{}
 		}
 		for {
+			finished := false
+			select {
+			case <-done:
+				finished = true
+			default:
+			}
 			observeErr := d.observeClaims(ctx, runs, claims)
 			if observeErr != nil && d.refreshRole(ctx) == nil {
 				observeErr = d.observeClaims(ctx, runs, claims)
 			}
-			select {
-			case <-done:
+			if finished {
 				return errors.Join(append(errs, observeErr)...)
-			default:
 			}
 			if observeErr != nil {
 				d.tools.say(ctx, "NodeClaim observation: "+observeErr.Error())
 			}
-			if err := d.tools.wait(ctx, d.cfg.PollInterval); err != nil {
+			if err := d.tools.wait(waitCtx, d.cfg.PollInterval); err != nil {
+				if ctx.Err() == nil && waitCtx.Err() != nil {
+					continue
+				}
 				<-done
 				return err
 			}

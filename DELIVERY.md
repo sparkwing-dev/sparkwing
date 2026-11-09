@@ -50,8 +50,10 @@ comment changes included; the review job never skips by size or path. A diff
 whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any
 `*.md`, `CHANGELOG*`) runs the default review on the cheaper `docs` reviewer
 (Claude Haiku) instead of the default model; any other file keeps the default.
-The record's `reviewer.model` names the model that ran. The
-gate selects its checks from the change scope (decision 96): vet, build, lint,
+The record's `reviewer.model` names the model that ran. Independent default and
+security profiles run concurrently, and their findings and sessions are combined
+in profile order after both finish. A failed profile leaves the prior review
+record unchanged. The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
 `.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
@@ -476,8 +478,11 @@ before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
 `deploy-smoke` once in the production team that owns the source repository installation, using
 the existing `/kikd-prod/sparkwing/deploy/scan-submit-token` (one NodeClaim, no controller or launcher
-WARN or ERROR after both controller and launcher rollouts complete). Recovered
-startup probe failures before readiness remain visible in pod logs but do not
+WARN or ERROR after both controller and launcher rollouts complete).
+Smoke status follows poll every second. NodeClaim sampling interrupts its wait
+when all followers finish, then takes a final sample before checking the claims
+and logs.
+Recovered startup probe failures before readiness remain visible in pod logs but do not
 fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Each environment's deployed and previous digests are its job output. Credentials come
 from the run's OIDC token through the `sparkwing-deploy` role in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
@@ -501,9 +506,26 @@ requires the runner label and trust conditions documented below.
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
 Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
 repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
-is a token for its target fixture team with permission to start and observe the
-example and read its logs. Missing prerequisites report that the scan could not
-run, rather than clearing prior Bitwing findings.
+needs `runs.write`, `runs.read` and `logs.read` in the target deployment's team that owns
+the GitHub App installation covering `sparkwing-dev/sparkwing`. Production uses the existing
+source-owning team's `/kikd-prod/sparkwing/deploy/scan-submit-token`, also used by its smoke.
+A QA fixture token with no installation cannot submit this repository-backed scan. Keep the
+source installation bound to its existing team. The optional `--smoke-profile` and
+`--smoke-checkout` example probe also needs access to `sparkwing-dev/sparkwing-ci-smoke`;
+the detached scan does not enable that probe. Missing prerequisites report that the scan
+could not run, rather than clearing prior Bitwing findings.
+
+Each target team must own a GitHub App installation covering
+`sparkwing-dev/sparkwing`, because the scan submits a repository-backed example.
+A token that can authenticate but belongs to an unrelated QA team cannot submit
+that source. An installation belongs to one team. Keep the source-owning team's
+installation bound there when repairing a fixture's access.
+
+Replace an ended scan credential in its existing target team, retaining
+`runs.read,logs.read,runs.write`, and save it under the same repository and
+`deploy` pipeline scope above. Create it from a signed-in account session. A token
+delegated from another token cannot outlive its parent. Record the replacement's
+expiry and verify authentication and repository access before the next scan.
 
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed
@@ -517,20 +539,72 @@ downgrade or restore runs. Staging and production have separate database servers
 Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push runs
-through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
-through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
-retried old run cannot roll production back.
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. A capacity-one global
+queue serializes the whole deploy, including staging and production. At build admission,
+`git ls-remote` checks main's tip. Superseded waiters stop before credentials, image work or
+Cloud smoke. Several stale rows can wait, but only the newest waiting commit can pass
+admission. Once admitted, a candidate keeps its slot and can finish even when more pushes land.
+Staging and production fetch main's history and require the candidate SHA to be an ancestor
+of `origin/main` or its tip. These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses
+as repository proof.
 
-An SDK replacement makes the controller plan the checkout's SDK with its installed
-engine. A local `pipeline plan` can therefore pass while the Cloud controller
-rejects the same source before any job starts. Deploy a wire-contract change to
-staging and production before later pipelines depend on it. If that ordering
-breaks, bootstrap the production controller with an exact image already proven
-by the staging smokes, compare its schema with production before changing the
-pin, and wait for its rollout before updating the launcher. Then observe a new
-push-triggered deploy through both environments. Rebuilding the desktop CLI or
-retrying unchanged source does not upgrade the Cloud planning engine.
+Production checks ancestry again immediately before each controller or launcher GitOps push.
+A candidate removed by a main history rewrite during deployment preparation is refused at
+that write. Source validation and the GitOps push use separate repositories, so this check
+does not make them atomic.
+
+Production requires a staging-gate pass for the same image digests and checks both production
+image revision labels. Each changed digest must advance from its pinned revision to a newer
+source commit, with no version downgrade. Missing revision evidence, unrelated history or a
+new digest for the same SHA stops before GitOps pins change. A retry can finish a partial
+deployment when a matching digest already runs. An already deployed image pair leaves the
+pins unchanged.
+
+A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version`
+reach a real deploy through the entry's `args`.
+
+The deployment pipeline pins a published SDK without a local replacement, so
+Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
+selects the planning host's installed executable instead and requires every job
+host to retain those exact bytes. A main-built Cloud runner and a released desktop
+runner therefore cannot share that replacement engine identity. Keep SDK source
+development outside the committed deployment module's engine pin.
+
+A local `pipeline plan` can pass while an older Cloud planning runner rejects the
+same source before any job starts. Deploy a wire-contract change to staging and
+production before later pipelines depend on it. If that ordering breaks,
+bootstrap with an exact image already proven by the staging smokes, compare its
+schema with production before changing the controller pin, and wait for its
+rollout before updating the launcher and planning runner. Then observe a new
+push-triggered deploy through both environments.
+
+#### Delivery timing budgets
+
+The targets are five minutes to land on main, five minutes from main to staging
+proof, and five minutes from staging proof to production acceptance. Report
+staging rollout separately from staging proof. Proof includes the blocking
+smokes. Production acceptance includes its smoke, NodeClaim/log checks and scan
+submission, while the detached scan finishes separately.
+
+Every delivery comparison retains the full elapsed leg and a named **cold Cloud
+provisioning** segment. Measure that segment from NodeClaim creation to its
+successful Initialized transition, with the claim name and both timestamps.
+Record each claim once, including capacity used by child and successor jobs.
+Land on our own hardware records this segment as `not applicable`. A Cloud leg
+without those boundaries records `unknown`, with any observed capacity wait
+alongside it. Use zero only when evidence proves the leg required no new capacity.
+
+Include cold provisioning in the full elapsed leg when comparing it with the
+five-minute target. Keep image pull, source preparation, execution and observation
+tail separate because they have different causes. Component intervals can overlap, so only sum non-overlapping critical-path
+intervals. Run acceptance follows preparation and can follow provisioning, so a
+controller run-duration headline cannot substitute for the full delivery leg.
+Compare cold samples with cold samples and report any provisioning change before
+attributing a change to preparation or execution.
+
+Retain measured samples with their raw timing boundaries in the delivery evidence
+record. A sample is a baseline, not a timeout or guaranteed provisioning ceiling.
+Warm capacity is forbidden for our delivery work.
 
 #### Deploy cost estimate
 
@@ -545,6 +619,7 @@ exceed them. The watched staging deploy should record phase durations before set
 | Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
 | Publish and verify both multi-arch images | 30 seconds-3 minutes | One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
 | GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap) and rollout (5-minute cap). Argo's default poll alone can cost up to 3 minutes per push. |
+| Cold Cloud provisioning, per new claim | Measure per leg, no fixed estimate | Creation to Initialized. Included in smoke elapsed time when on its critical path. Report separately from image pull and preparation. |
 | Staging gate | 1-10 minutes with available capacity | Candidate CLI build plus two overlapping pipeline runs. Each run has a 45-minute limit. |
 | Production smoke | 1-5 minutes with available capacity | CLI build plus two concurrent fixture runs, NodeClaim sampling and log scan. Each run has a 20-minute limit. |
 | Production rollback, on failure | Similar to the two rollouts | Two reverse GitOps commits. Budget: 35 minutes. |
@@ -661,6 +736,13 @@ wait are not established by this artifact. A missing handle produces an explicit
 unavailable record. Export/upload failures warn without changing the check verdict;
 an absent artifact is missing evidence, not a successful export.
 
+Failed canonical hosted jobs retain the full paged `runs logs` output in a
+`canonical-run-log-<lane>-<workflow-run>-<attempt>` artifact for 14 days. The
+console prints its last 500 lines. A failed log read retains partial output
+and its error in the artifact. Missing handles and failed uploads warn without
+changing the gate verdict. The artifact contains run output, not the runner's
+Sparkwing home, database or controller key.
+
 Pre-release records each check as a sequential WorkStep. A failed check does
 not suppress later checks; the parent reports the first failure, while the run
 logs and step states retain every individual failure. `--platform-cells` adds
@@ -711,6 +793,13 @@ file. Other syntax and workflow checks remain active.
   main runs `gate` and `race-touched` over the change since the push's previous
   commit (or the pull request base), and the full suite, `pre-release`, the
   store race lanes and Postgres conformance run nightly and on dispatch.
+  The full acceptance suite includes `TestFeatureE2E`, which exercises placement
+  deadlines, failed-only retries with outputs and artifacts, and child-run
+  cancellation against isolated local controller processes. Run just these with
+  `sparkwing run feature-e2e --sw-route local`. Its `--scenario` and `--repeat`
+  arguments select one scenario or repeat fresh environments. The
+  [acceptance runbook](tests/acceptance/README.md#feature-scenarios-against-a-local-controller)
+  names the real-time budgets, trust setting and runner-actor boundary.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` checks the active hook directory and compares
   each hook's presence, content, format version, and executability. Blocking
@@ -803,7 +892,9 @@ file. Other syntax and workflow checks remain active.
   class on touched packages. Local post-deploy scans pass `--full` to retain long race tests across
   every package except the deferred store.
   Affected race runs use the stable private test home and native Go test cache,
-  without `-count=1`. Full race runs keep the uncached shard path. The Go build
+  without `-count=1`. Each stable suite home is locked through setup, execution
+  and cleanup, so overlapping runs of the same step in one checkout wait for
+  each other. Full race runs keep the uncached shard path. The Go build
   cache already survives runs, and hosted jobs restore and save it through
   their existing cache steps. No successful policy or review check is skipped
   by a package cache hit. After
@@ -1456,7 +1547,14 @@ file. Other syntax and workflow checks remain active.
   API fixtures on OS-assigned local ports and does not replace that product
   exercise or exercise Kubernetes.
 - **Template verification proofs:** `template-verify` scaffolds, builds, lints,
-  and explains all 37 registry templates, and runs the runnable ones. A local
+  and explains all registry templates, and runs the runnable ones. The build-cli
+  job renders template text and verification manifests through the discovered
+  local sparks-core templates module (SPARKWING_SPARKS_CORE_DIR, go.work, or a
+  sibling checkout), or the pipeline module's published templates pin when no
+  checkout is found. Its annotation names the selected source. The selected
+  registry generates the verification jobs, so local additions and removals need
+  no pipeline module replacement.
+  A local
   run reuses a recorded proof for any template whose proof inputs are
   byte-identical to a previous pass. The digest covers, in one hash per
   template: the template's registry files (every file under its directory in
@@ -1492,8 +1590,8 @@ file. Other syntax and workflow checks remain active.
   Any skipped execution is partial verification, including a body skipped as
   `no_dry_run_defined`. It reports no completed run step and records no proof.
   Missing or unreadable execution evidence fails verification.
-  Reuse never changes the plan: every template keeps its node, and the decision
-  is made inside it, so a digest miss cannot be lost in
+  Reuse never changes the generated fan-out: every selected template keeps its
+  node, and the decision is made inside it, so a digest miss cannot be lost in
   plan shaping. Third-party module resolution is outside the digest either way,
   which is the standing reason the boundary stays exhaustive: the release
   pipeline passes `--exhaustive`, and so should any manual run being used as a

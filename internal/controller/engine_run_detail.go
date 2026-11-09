@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -158,10 +157,13 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 	}
 	detail.Inputs.Lineage = run.Lineage
 	if run.Retry != nil {
-		detail.Retry = &controllerwire.RetryDetail{Mode: run.Retry.Mode, Reused: slices.Sorted(maps.Keys(run.Retry.Results))}
-		if detail.Retry.Reused == nil {
-			detail.Retry.Reused = []string{}
+		detail.Retry = &controllerwire.RetryDetail{Mode: run.Retry.Mode, Reused: []string{}}
+		for id := range run.Retry.Results {
+			if row, ok := nodes[id]; ok && row.Status == runstate.StatusDone && row.Outcome == runstate.NodeSuccess && row.Attempt == 0 {
+				detail.Retry.Reused = append(detail.Retry.Reused, id)
+			}
 		}
+		slices.Sort(detail.Retry.Reused)
 	}
 	return detail, nil
 }

@@ -25,7 +25,7 @@ import (
 // safety: proofFormat sits in the digest so that widening or narrowing the
 // input set invalidates every recorded proof instead of silently reusing one
 // that a different set of inputs produced.
-const proofFormat = 1
+const proofFormat = 2
 
 type proofEnv struct {
 	Sparkwing  string `json:"sparkwing"`

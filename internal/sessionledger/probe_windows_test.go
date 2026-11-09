@@ -43,11 +43,13 @@ func TestPlatformProbeEndsAJobWhoseOwnerIsGone(t *testing.T) {
 	if len(out) != 1 || out[0].Verdict != verdictReaped {
 		t.Fatalf("outcomes = %+v", out)
 	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	waited := make(chan error, 1)
 	go func() { waited <- step.Wait() }()
 	select {
 	case <-waited:
-	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the step outlived the sweep")
 	}
 }

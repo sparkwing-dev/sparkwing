@@ -11,12 +11,29 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
+// GetLatestRun returns t's newest run for pipeline matching statuses within
+// maxAge. Runs need verified default-branch provenance unless fromAnyRun is true.
+// When readerRunID names a run of the same pipeline, only runs of the reader's
+// repository count. Optional repositories further restrict exact repository displays.
+// Returns ErrNotFound on miss.
+func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool, readerRunID string, repositories ...string) (*Run, error) {
+	if t.team == "" {
+		return nil, ErrNoTeam
+	}
+	// safety: repositories in one team can share a pipeline name, so a pipeline's
+	// own last run, such as the staging pass a promotion relies on, must be this repository's.
+	query := `SELECT team,id FROM runs WHERE team=? AND pipeline=? AND NOT EXISTS (SELECT 1 FROM runs reader WHERE reader.team=runs.team AND reader.id=? AND reader.pipeline=runs.pipeline AND reader.repo_key<>runs.repo_key)`
+	args := []any{t.team, pipeline, readerRunID}
+	query, args = restrictLatestRepositories(query, args, repositories)
+	return t.s.getLatestRun(ctx, query, args, pipeline, statuses, maxAge, fromAnyRun)
+}
+
 // GetLatestProvenRunAtCommit returns the newest run of pipeline at the reading
 // run's own sealed commit whose repository was proven, by GitHub or by the
 // controller's own fetch, as the reader's proven repository, that intake sealed
 // as proof eligible, whose every job that did not skip was claimed on a trusted
 // host, and whose job succeeded. Returns ErrNotFound when none qualifies.
-func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, job, readerRunID string, statuses []string, maxAge time.Duration) (*Run, error) {
+func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, job, readerRunID string, statuses []string, maxAge time.Duration, repositories ...string) (*Run, error) {
 	if t.team == "" {
 		return nil, ErrNoTeam
 	}
@@ -30,7 +47,8 @@ func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, job, 
 	}
 	// safety: a newer run that skipped the job holds no output, and must not hide an older run that has one.
 	query += ` AND EXISTS (SELECT 1 FROM nodes WHERE nodes.team=? AND nodes.run_id=runs.id AND nodes.node_id=? AND nodes.status='done' AND nodes.outcome IN ('success','memoized'))`
-	return t.s.getLatestRun(ctx, query, append(args, t.team, job), pipeline, statuses, maxAge, true)
+	query, args = restrictLatestRepositories(query, append(args, t.team, job), repositories)
+	return t.s.getLatestRun(ctx, query, args, pipeline, statuses, maxAge, true)
 }
 
 // safety: the output read after a proven lookup re-proves the run, so a run id
@@ -74,6 +92,72 @@ func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader 
 		[]any{team, string(repository), sha, pipeline, string(repository), sha, sha, team}, true
 }
 
+func restrictLatestRepositories(query string, args []any, repositories []string) (string, []any) {
+	if len(repositories) == 0 {
+		return query, args
+	}
+	query += " AND repo_display IN (" + strings.TrimSuffix(strings.Repeat("?,", len(repositories)), ",") + ")"
+	for _, repository := range repositories {
+		args = append(args, repository)
+	}
+	return query, args
+}
+
+type latestRunSelection uint8
+
+const (
+	latestRunObservation latestRunSelection = iota
+	latestPipelineObservations
+	latestReferencePin
+)
+
+// safety: authorization filters apply before ranking. Reference pins retain their
+// finish-time policy because replacing a pin changes existing blob access.
+func latestRunQuery(query string, selection latestRunSelection) string {
+	const order = "COALESCE(started_at,created_at) DESC,number DESC,id DESC"
+	switch selection {
+	case latestReferencePin:
+		return `WITH candidates AS (` + query + `) SELECT team,id FROM candidates ORDER BY finished_at DESC,current_pin DESC LIMIT 1`
+	case latestPipelineObservations:
+		return `SELECT team,id FROM (
+            SELECT team,id,pipeline,COALESCE(started_at,created_at) AS activity_at,
+                   ROW_NUMBER() OVER (PARTITION BY team,pipeline ORDER BY ` + order + `) AS latest_rank
+            FROM runs WHERE team=? AND (team,id) IN (` + query + `)
+        ) latest WHERE latest_rank=1 ORDER BY activity_at DESC,pipeline`
+	default:
+		return query + " ORDER BY " + order + " LIMIT 1"
+	}
+}
+
+func advanceLatestSuccessPinTx(ctx context.Context, tx *storeTx, team Team, row RunRow, finished time.Time) error {
+	if row.Request.Request.Mode == runspec.IntakePublish {
+		return nil
+	}
+	query := latestRunQuery(`SELECT CAST(? AS TEXT) AS team,CAST(? AS TEXT) AS id,CAST(? AS BIGINT) AS finished_at,0 AS current_pin
+        UNION ALL SELECT team,run_id AS id,finished_at,1 AS current_pin FROM pipeline_success_pins WHERE team=? AND pipeline=?`, latestReferencePin)
+	var selectedTeam Team
+	var selected string
+	if err := tx.QueryRowContext(ctx, query, team, row.ID, finished.UnixNano(), team, row.Pipeline).Scan(&selectedTeam, &selected); err != nil {
+		return err
+	}
+	if selected != row.ID {
+		return nil
+	}
+	_, err := tx.execContext(ctx, `INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES (?,?,?,?) ON CONFLICT(team,pipeline) DO UPDATE SET run_id=excluded.run_id,finished_at=excluded.finished_at WHERE pipeline_success_pins.finished_at<excluded.finished_at`, team, row.Pipeline, row.ID, finished.UnixNano())
+	return err
+}
+
+func latestSuccessPinTx(ctx context.Context, tx *storeTx, team Team, pipeline, run string) (bool, error) {
+	query := latestRunQuery(`SELECT team,run_id AS id,finished_at,1 AS current_pin FROM pipeline_success_pins WHERE team=? AND pipeline=?`, latestReferencePin)
+	var selectedTeam Team
+	var selected string
+	err := tx.QueryRowContext(ctx, query, team, pipeline).Scan(&selectedTeam, &selected)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return selected == run, err
+}
+
 func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool) (*Run, error) {
 	if pipeline == "" {
 		return nil, errors.New("GetLatestRun: pipeline is required")
@@ -101,7 +185,7 @@ func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipe
 	}
 	var team Team
 	var id string
-	err = tx.QueryRowContext(ctx, query+" ORDER BY COALESCE(started_at,created_at) DESC,number DESC,id DESC LIMIT 1", args...).Scan(&team, &id)
+	err = tx.QueryRowContext(ctx, latestRunQuery(query, latestRunObservation), args...).Scan(&team, &id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, notFound("pipeline run", pipeline)
 	}

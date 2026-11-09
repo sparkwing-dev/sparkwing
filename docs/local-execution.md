@@ -81,8 +81,13 @@ body or their `SafeWithoutDryRun` body. Other step bodies are skipped.
 
 `--sw-workers N` bounds simultaneous local foreground job executions. Jobs waiting
 for a worker remain available to the scheduler without consuming a local claim.
-`--sw-start-at` and `--sw-stop-at` bound steps inside jobs. Use `--sw-only` to
-select jobs and their dependencies.
+`--sw-start-at` keeps a step and its descendants; `--sw-stop-at` keeps a step
+and its ancestors. Together they select the dependency paths between the bounds,
+not an interval in declaration order. A job containing neither bound runs all
+its steps. A range selecting no steps in a job fails before work starts, even
+if another job has runnable steps. For parallel checks, omit both bounds to run
+the full gate, or use the same step for both bounds to run one check. Use
+`--sw-only` to select jobs and their dependencies.
 
 For an ordinary foreground local run, Ctrl-C requests cancellation and keeps
 observing until the run finishes and its logs drain. A second interrupt detaches
