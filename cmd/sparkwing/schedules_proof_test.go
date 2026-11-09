@@ -15,6 +15,7 @@ import (
 func TestScheduleProofUsesCommittedTypeScriptAndPreservesGoWorkingSource(t *testing.T) {
 	for _, tc := range []struct{ name, manifest, file, committed, want string }{
 		{"typescript", `{"dependencies":{"@sparkwing/sdk":"0.71.0"}}`, "index.ts", `console.log("committed");`, "committed"},
+		{"typescript-dirty-config", `{"dependencies":{"@sparkwing/sdk":"0.71.0"}}`, "index.ts", `console.log("committed");`, "committed"},
 		{"go", `{"dependencies":{}}`, "main.go", `package main; func main() { println("committed") }`, "dirty"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -25,6 +26,14 @@ func TestScheduleProofUsesCommittedTypeScriptAndPreservesGoWorkingSource(t *test
 			writeSnapshotFile(t, root, ".sparkwing/"+tc.file, tc.committed, 0o600)
 			runSnapshotGit(t, root, "add", ".")
 			runSnapshotGit(t, root, "commit", "-qm", "committed pipeline")
+			if tc.name == "typescript-dirty-config" {
+				old := strings.TrimSpace(runSnapshotGit(t, root, "rev-parse", "HEAD"))
+				writeSnapshotFile(t, root, ".sparkwing/"+tc.file, tc.committed+" // new HEAD", 0o600)
+				runSnapshotGit(t, root, "add", ".")
+				runSnapshotGit(t, root, "commit", "-qm", "advance pipeline")
+				writeSnapshotFile(t, root, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: ci\n    entrypoint: CI\n    source: "+old+"\n", 0o600)
+				tc.want = "new HEAD"
+			}
 			writeSnapshotFile(t, root, ".sparkwing/"+tc.file, strings.ReplaceAll(tc.committed, "committed", "dirty"), 0o600)
 			masker := secrets.NewMasker()
 			selected, err := selectLocalRunSource(t.Context(), home, directory, "ci", runFlags{}, os.Environ(), masker)
@@ -41,7 +50,7 @@ func TestScheduleProofUsesCommittedTypeScriptAndPreservesGoWorkingSource(t *test
 				t.Fatal(err)
 			}
 			options := source.Options{Workspace: filepath.Join(home, "workspaces"), GitAccess: source.GitAccessOwner, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}}
-			spec, err = localScheduleProofSource(t.Context(), spec, directory, options)
+			spec, err = localScheduleProofSource(t.Context(), spec, directory, "ci", options)
 			if err != nil {
 				t.Fatal(err)
 			}

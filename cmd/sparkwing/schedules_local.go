@@ -372,7 +372,7 @@ func proveLocalSchedule(ctx context.Context, home, root, pipeline string, enviro
 	if err != nil {
 		return crons.Proof{}, err
 	}
-	spec, err = localScheduleProofSource(ctx, spec, selected.execution.Directory, options)
+	spec, err = localScheduleProofSource(ctx, spec, selected.execution.Directory, pipeline, options)
 	if err != nil {
 		return crons.Proof{}, err
 	}
@@ -410,20 +410,18 @@ func proveLocalSchedule(ctx context.Context, home, root, pipeline string, enviro
 	return crons.Proof{Binary: entry.Command[0], Release: entry.Close}, nil
 }
 
-func localScheduleProofSource(ctx context.Context, spec source.Spec, directory string, options source.Options) (source.Spec, error) {
+func localScheduleProofSource(ctx context.Context, spec source.Spec, directory, pipeline string, options source.Options) (source.Spec, error) {
 	typescript, err := pipelineentry.IsTypeScript(directory)
 	if err != nil {
 		return source.Spec{}, err
 	}
 	// safety: scheduled intake acquires committed code, so its proof must use the same source.
-	if typescript && spec.PipelineSHA == "" {
-		spec.PipelineSHA = spec.SHA
-		if spec.PipelineSHA == "" {
-			spec.PipelineSHA, err = source.ResolveRef(ctx, spec, "HEAD", options)
-			if err != nil {
-				return source.Spec{}, err
-			}
+	if typescript {
+		git, code, _, err := source.Select(ctx, spec, pipeline, runspec.Git{SHA: spec.SHA}, runspec.Source{Location: runspec.SourceLocation{PipelineDir: spec.PipelineDir}}, "", options)
+		if err != nil {
+			return source.Spec{}, err
 		}
+		spec.SHA, spec.PipelineSHA = git.SHA, code.Ref
 	}
 	return spec, nil
 }

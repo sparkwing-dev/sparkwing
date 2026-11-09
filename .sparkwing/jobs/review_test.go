@@ -535,3 +535,45 @@ func TestCodexEvents(t *testing.T) {
 		t.Errorf("thread %q, last message %q", thread, last)
 	}
 }
+
+func TestReviewClarifiedObjectiveReassessesUnchangedTree(t *testing.T) {
+	fx := newReviewFixture(t)
+	p := testPolicy(t)
+	fx.def.replies = []string{
+		`{"findings":[{"id":"F1","severity":"P1","rule":"objective-not-met","summary":"umbrella incomplete"}]}`,
+		`{"findings":[{"id":"F1","severity":"P1","status":"fixed","summary":"scope clarified"}]}`,
+	}
+	in := reviewInputs{branch: "bw" + "-42-umbrella"}
+	first, _, err := runReview(context.Background(), fx.deps, p, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Result != resultBlock || first.Objective.Source != "ticket" {
+		t.Fatalf("first review: %+v", first)
+	}
+	in.brief = "Fix shell escaping only; the umbrella's other work lands separately."
+	rec, _, err := runReview(context.Background(), fx.deps, p, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fx.def.calls) != 2 || rec.Result != resultPass || rec.Objective.Source != "brief" || rec.Tree != first.Tree {
+		t.Fatalf("clarification did not replace block: calls=%d record=%+v", len(fx.def.calls), rec)
+	}
+	if !strings.Contains(fx.def.calls[1].prompt, in.brief) || !strings.Contains(fx.def.calls[1].prompt, "This objective replaces earlier objectives") {
+		t.Fatal("reviewer did not receive superseding objective")
+	}
+	in.brief = "Fix and document shell escaping only."
+	fx.def.replies = append(fx.def.replies, `{"findings":[]}`)
+	if _, _, err := runReview(context.Background(), fx.deps, p, in); err != nil {
+		t.Fatal(err)
+	}
+	if len(fx.def.calls) != 3 || !strings.Contains(fx.def.calls[2].prompt, in.brief) {
+		t.Fatal("changed brief did not rerun review")
+	}
+	if _, _, err := runReview(context.Background(), fx.deps, p, in); err != nil {
+		t.Fatal(err)
+	}
+	if len(fx.def.calls) != 3 {
+		t.Fatal("unchanged brief did not reuse saved verdict")
+	}
+}

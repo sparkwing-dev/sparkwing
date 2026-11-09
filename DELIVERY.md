@@ -26,19 +26,50 @@ sparkwing run land --sw-allow-risk destructive,prod  # land on main
 Lands run on owned hardware. Policy, gate, review and push use that machine.
 The land queue invokes it with `--sw-route local`.
 
-The focused queue can pass `-- --pre-push-review` with `--sw-only '*[wy]'`.
-This keeps policy and review selected and adds every unchanged `pre-push`
-step beside the review in the same inline job. The job fails fast, cancels
-in-flight siblings and joins them before reporting completion. Its CPU
-reservation includes the pre-push compilers. The reviewers have read-only
-access. They write their review record outside the checkout, while pre-push
-writes compiler and lint caches. Neither changes source.
+### Queue focused lands
 
-The queue captures HEAD after merging main, requires a clean checkout before
-checks, then requires the same HEAD and a clean checkout after both gates
-pass. Only that exact commit can push with `--no-verify`, because its normal
-pre-push checks already passed. A failed or cancelled check cannot push.
-The normal land path and human pushes keep their existing gates.
+Submit from each clean candidate worktree:
+
+```bash
+sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --queued --brief 'Describe the goal to review'
+sparkwing queue list
+sparkwing runs status --run <returned-run-id> --follow -o json
+```
+
+Each entry is a durable `land` run in the dashboard. Detached intake returns
+its run ID; keep that receipt to wait for the entry, inspect logs and failures,
+or cancel it with `sparkwing runs cancel --run <id>`. `runs status --follow`
+exits successfully only for a successful run or completed dry run; failures
+and cancellations exit 1. Successful run detail includes the landing record
+and pushed commit. The local controller and runner wait for new work when the
+queue is empty; no queue process or text file needs restarting.
+
+All lands share one capacity-one run concurrency group, including ordinary
+full-gate lands. Admission and operator priority determine ordering. A failed
+entry releases its slot and leaves later entries eligible. Queued lands
+require a non-empty explicit brief, such as `--brief 'Describe the goal to review'`.
+Missing or whitespace-only briefs fail during planning before submission; the
+review uses the supplied goal rather than inferring one from the branch name.
+Ordinary interactive lands keep their objective fallback. Queued lands refuse
+a changed submission or dirty checkout,
+merge fetched `origin/main` before capturing HEAD, then run source policy and
+the full pre-push tier alongside review against that merged checkout. They
+push only when the branch, HEAD and checkout still match. If main moves again,
+the push fails rather than merging an unchecked tree; enqueue again after
+inspecting the failure. A conflict aborts the merge and records its remedy in
+the failed run.
+
+This focused mode uses the queue's owned-hardware landing policy: it omits
+the broad desktop and Cloud gates. Run focused lane tests before submitting.
+Ordinary `land` retains its full gate. This is a repository pipeline feature;
+a different repository must define its own landing policy before using it.
+
+When moving from an external queue, let its active land finish, stop that
+worker, preserve any manual holds, and submit each remaining eligible worktree
+with its goal. Never operate the external worker and the pipeline queue at
+the same time: the external worker does not hold the pipeline's serial slot.
+
+### Ordinary land checks
 
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
 itself, a CHANGELOG.md that repeats a `###` heading within a release, and a
@@ -90,6 +121,15 @@ A docs, UI or process change runs its own tests (affected packages, frontend
 suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
+The brief is the explicit goal for this land: include the ticket key(s) and
+short intent, for example `-- --brief 'Fix Windows shell escaping; leave the
+other umbrella work for later'`. It wins over the branch ticket.
+Without a brief, review keeps its configured objective sources: branch ticket,
+commit ticket trailers or subjects, then commit messages. A cached verdict is
+reused only when both the tree and resolved objective match. Clarifying the
+brief or editing the resolved ticket text reruns review, even with the same
+tree; the current objective supersedes earlier objectives and blocks are
+reassessed against it.
 
 The `land` job reads the review JSON from the shared Git directory instead of
 resolving a review output blob. Its `verify` step requires the review record's tree to be HEAD's

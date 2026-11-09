@@ -20,6 +20,7 @@ type Land struct{ sparkwing.Base }
 
 // LandArgs supplies the local review inputs.
 type LandArgs struct {
+	Queued        bool `flag:"queued" desc:"Queue a focused owned-hardware land: merge main, policy, pre-push/review, then push the unchanged commit. Use --sw-detached; a non-empty --brief is required."`
 	PrePushReview bool `flag:"pre-push-review" desc:"Run the unchanged pre-push tier alongside review in one fail-fast job; intended for the focused queue."`
 	ReviewArgs
 }
@@ -30,6 +31,7 @@ func (Land) ShortHelp() string {
 
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
+		"All lands share one serial run slot. With --queued, require a non-empty --brief (for example, --brief 'Short intent'), merge origin/main before checks, run policy and pre-push/review against the merged checkout, and push only the unchanged checked commit. Submit with --sw-detached; track its run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip). " +
@@ -50,6 +52,7 @@ func (Land) Examples() []sparkwing.Example {
 		{Comment: "Preview the landing without pushing", Command: "sparkwing run land --sw-dry-run"},
 		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod"},
 		{Comment: "Land the branch on main", Command: "sparkwing run land --sw-allow-risk destructive,prod"},
+		{Comment: "Enqueue a focused owned-hardware landing", Command: "sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --queued --brief 'Describe the goal'"},
 	}
 }
 
@@ -67,25 +70,36 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 	if repoDir == "" {
 		return errors.New("land: no working directory; run this pipeline from a checkout with a .sparkwing directory")
 	}
-	branch := ""
+	if in.Queued && strings.TrimSpace(in.Brief) == "" {
+		return errors.New("land: --queued requires a non-empty --brief with the goal to review; for example: --brief 'BW" + "-1234: short intent'")
+	}
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("sparkwing-land", sparkwing.ConcurrencyLimit{Capacity: 1}))
+	branch, submitted := "", ""
 	if rc.Git != nil {
 		branch = rc.Git.Branch
+		submitted = rc.Git.SHA
 	}
-	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir}).Inline().Cores(lightJobCores)
+	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir, Queued: in.Queued, Submitted: submitted}).Inline().Cores(lightJobCores)
 
-	gate := gateJobs(plan, &Gate{}, "gate", false)
-	gate[0].Needs(pre)
-	needs := make([]sparkwing.Dep, 0, len(gate)+1)
-	for _, n := range gate {
-		needs = append(needs, n)
+	var needs []sparkwing.Dep
+	if in.Queued {
+		policy := sparkwing.Job(plan, policyJobID, &policyJob{}).Inline().Timeout(policyJobTimeout).Needs(pre)
+		review := reviewJobNode(plan, in.ReviewArgs, branch, true).Needs(pre)
+		needs = []sparkwing.Dep{policy, review}
+	} else {
+		gate := gateJobs(plan, &Gate{}, "gate", false)
+		gate[0].Needs(pre)
+		for _, n := range gate {
+			needs = append(needs, n)
+		}
+		review := reviewJobNode(plan, in.ReviewArgs, branch, in.PrePushReview).Needs(pre)
+		needs = append(needs, review)
 	}
-	// perf: review does not consume policy outputs, so its model call can overlap policy checks.
-	review := reviewJobNode(plan, in.ReviewArgs, branch, in.PrePushReview).Needs(pre)
-	needs = append(needs, review)
 
 	sparkwing.Job(plan, "land", &landJob{
 		RepoDir: repoDir,
 		RunID:   rc.RunID,
+		Queued:  in.Queued,
 		Head:    sparkwing.RefTo[landHead](pre),
 	}).Inline().Cores(lightJobCores).Needs(needs...)
 	return nil
@@ -115,12 +129,20 @@ type landHead struct {
 type landPreconditionsJob struct {
 	sparkwing.Base
 	sparkwing.Produces[landHead]
-	RepoDir string
+	RepoDir   string
+	Queued    bool
+	Submitted string
 }
 
 func (j *landPreconditionsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "check", func(ctx context.Context) (landHead, error) {
-		head, err := checkLandPreconditions(ctx, gitIn(j.RepoDir), j.RepoDir)
+		git := gitIn(j.RepoDir)
+		if j.Queued && !sparkwing.IsDryRun(ctx) {
+			if err := prepareQueuedLanding(ctx, git, j.RepoDir, j.Submitted); err != nil {
+				return landHead{}, err
+			}
+		}
+		head, err := checkLandPreconditions(ctx, git, j.RepoDir)
 		if err != nil {
 			return landHead{}, err
 		}
@@ -223,6 +245,7 @@ type landJob struct {
 	sparkwing.Produces[landingRecord]
 	RepoDir string
 	RunID   string
+	Queued  bool
 	Head    sparkwing.Ref[landHead]
 	// safety: the push step sets it to what it pushed, so the record names the
 	// pushed commit and tree rather than the gated ones.
@@ -242,7 +265,13 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		return verifyLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx), review)
 	}).SafeWithoutDryRun()
 	push := sparkwing.Step(w, "push", func(ctx context.Context) error {
-		landed, err := landOnto(ctx, j.RepoDir, j.Head.Get(ctx), recheckMergeDelta)
+		var landed landTarget
+		var err error
+		if j.Queued {
+			landed, err = pushQueuedLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx))
+		} else {
+			landed, err = landOnto(ctx, j.RepoDir, j.Head.Get(ctx), recheckMergeDelta)
+		}
 		if err != nil {
 			return err
 		}
@@ -338,6 +367,18 @@ func verifyLanding(ctx context.Context, git gitRunner, dir string, head landHead
 	if review.Tree != head.Tree {
 		return fmt.Errorf("land: the review judged tree %s but HEAD's tree is %s; rerun sparkwing run land", short(review.Tree), short(head.Tree))
 	}
+	if err := verifyLandingCheckout(ctx, git, dir, head); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "review %s on tree %s, HEAD still %s", review.Result, short(head.Tree), short(head.Commit))
+	return nil
+}
+
+func verifyLandingCheckout(ctx context.Context, git gitRunner, dir string, head landHead) error {
+	branch, err := git(ctx, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil || branch != head.Branch {
+		return fmt.Errorf("land: checkout branch changed from %s to %s during checks; rerun sparkwing run land", head.Branch, branch)
+	}
 	now, err := git(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		return fmt.Errorf("land: resolve HEAD: %w", err)
@@ -348,7 +389,6 @@ func verifyLanding(ctx context.Context, git gitRunner, dir string, head landHead
 	if err := requireClean(ctx, git, dir); err != nil {
 		return err
 	}
-	sparkwing.Info(ctx, "review %s on tree %s, HEAD still %s", review.Result, short(head.Tree), short(head.Commit))
 	return nil
 }
 
