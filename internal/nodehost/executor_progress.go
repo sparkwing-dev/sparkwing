@@ -22,21 +22,20 @@ func executorAttemptTimeout(ctx context.Context) error {
 	}
 }
 
-type awaitNotifyKey struct{}
+type awaitSlotKey struct{}
 
-// WithAwaitNotify reports when a job hosted under ctx starts and stops waiting on
-// child runs, so a runner can stop counting it against its job slots. Nested
-// waits report once. notify must not block.
-func WithAwaitNotify(ctx context.Context, notify func(awaiting bool)) context.Context {
-	return context.WithValue(ctx, awaitNotifyKey{}, notify)
+// WithAwaitSlot installs a slot suspension hook. Suspending releases capacity;
+// its returned resume function must reacquire it or wait for context cancellation.
+func WithAwaitSlot(ctx context.Context, suspend func() func(context.Context)) context.Context {
+	return context.WithValue(ctx, awaitSlotKey{}, suspend)
 }
 
-// AwaitNotify returns the hook WithAwaitNotify installed, or a no-op.
-func AwaitNotify(ctx context.Context) func(awaiting bool) {
-	if notify, ok := ctx.Value(awaitNotifyKey{}).(func(bool)); ok {
-		return notify
+// AwaitSlot returns the suspension hook installed by WithAwaitSlot, or a no-op.
+func AwaitSlot(ctx context.Context) func() func(context.Context) {
+	if suspend, ok := ctx.Value(awaitSlotKey{}).(func() func(context.Context)); ok {
+		return suspend
 	}
-	return func(bool) {}
+	return func() func(context.Context) { return func(context.Context) {} }
 }
 
 type outcomeNotifyKey struct{}
@@ -59,7 +58,8 @@ func OutcomeNotify(ctx context.Context) func(WorkOutcome) {
 }
 
 func executorProgressContext(parent context.Context, idle time.Duration) (context.Context, ExecutorActivity, func()) {
-	notify := AwaitNotify(parent)
+	suspend := AwaitSlot(parent)
+	var resume func(context.Context)
 	ctx, cancel := context.WithCancelCause(parent)
 	var mu sync.Mutex
 	var timer *time.Timer
@@ -97,7 +97,7 @@ func executorProgressContext(parent context.Context, idle time.Duration) (contex
 			mu.Lock()
 			paused++
 			if paused == 1 {
-				notify(true)
+				resume = suspend()
 			}
 			reset()
 			mu.Unlock()
@@ -107,8 +107,9 @@ func executorProgressContext(parent context.Context, idle time.Duration) (contex
 					mu.Lock()
 					defer mu.Unlock()
 					paused--
-					if paused == 0 {
-						notify(false)
+					if resume != nil {
+						resume(ctx)
+						resume = nil
 					}
 					reset()
 				})
@@ -116,11 +117,11 @@ func executorProgressContext(parent context.Context, idle time.Duration) (contex
 		},
 	}
 	stop := func() {
+		cancel(nil)
 		mu.Lock()
 		defer mu.Unlock()
 		stopped = true
 		reset()
-		cancel(nil)
 	}
 	return ctx, activity, stop
 }

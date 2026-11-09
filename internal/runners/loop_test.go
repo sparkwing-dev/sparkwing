@@ -146,9 +146,8 @@ func TestLoopAwaitingJobDoesNotOccupyItsChildsOnlySlot(t *testing.T) {
 							close(childFinished)
 							return nil
 						}
-						notify := nodehost.AwaitNotify(ctx)
-						notify(true)
-						defer notify(false)
+						resume := nodehost.AwaitSlot(ctx)()
+						defer resume(ctx)
 						select {
 						case <-childFinished:
 							parentFinished = true
@@ -1319,4 +1318,85 @@ func TestLoopReportsStoppedClaimsBeforeHeldHostJoins(t *testing.T) {
 			t.Fatalf("claim transport outcome: %v", err)
 		}
 	})
+}
+
+func TestLoopAwaitResumeWaitsForRunnerSlot(t *testing.T) {
+	for _, scenario := range []string{"working", "cancelled", "claim-pending"} {
+		cancelled := scenario == "cancelled"
+		t.Run(scenario, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				finishChild, releaseOther := make(chan struct{}), make(chan struct{})
+				resumed := make(chan struct{})
+				returnClaim, otherStarted := make(chan struct{}), make(chan struct{})
+				claims := 0
+				loop := &Loop{
+					Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, MaxClaims: 2, Kinds: []capability.UnitKind{capability.UnitNode}},
+					CheckVersion: func(context.Context, string) error { return nil },
+					Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+						claims++
+						if claims == 2 && scenario == "claim-pending" {
+							close(finishChild)
+							<-returnClaim
+						}
+						id := fmt.Sprint(claims)
+						return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: id, RunID: id, Capability: "private"}}, nil
+					}),
+					Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+						if unit.RunID == "2" {
+							if scenario != "claim-pending" {
+								close(finishChild)
+							}
+							close(otherStarted)
+							<-releaseOther
+							return nil
+						}
+						resume := nodehost.AwaitSlot(ctx)()
+						<-finishChild
+						resume(ctx)
+						close(resumed)
+						return ctx.Err()
+					}),
+				}
+				done := make(chan error, 1)
+				go func() { done <- loop.Run(ctx) }()
+				<-finishChild
+				synctest.Wait()
+				select {
+				case <-resumed:
+					t.Error("parent resumed while another job held the only slot")
+				default:
+				}
+				if scenario == "claim-pending" {
+					close(returnClaim)
+					<-otherStarted
+					synctest.Wait()
+					select {
+					case <-resumed:
+						t.Error("pending award lost its reserved slot to a resume")
+					default:
+					}
+				}
+				if cancelled {
+					cancel()
+					synctest.Wait()
+					select {
+					case <-resumed:
+					default:
+						t.Error("cancelled resume retained its slot wait")
+					}
+				}
+				close(releaseOther)
+				if err := <-done; (err != nil) != cancelled {
+					t.Fatal(err)
+				}
+				select {
+				case <-resumed:
+				default:
+					t.Fatal("parent failed to resume after capacity returned")
+				}
+			})
+		})
+	}
 }
