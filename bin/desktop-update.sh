@@ -65,6 +65,16 @@ inspect() {
     if ! jq -e '[.activity.runs, .activity.queued_triggers, .activity.held_leases] | all(. == 0)' \
       "$stage/status.json" >/dev/null; then
       echo "desktop-update: waiting for runs, triggers and leases at $home" >&2
+      printf 'desktop-update: inspect: SPARKWING_HOME=%q %q runs list --profile= --status pending,running --since 0 -o json\n' "$home" "$dest/sparkwing" >&2
+      if SPARKWING_HOME="$home" timeout 10s "$dest/sparkwing" runs list --profile= \
+        --status pending,running --since 0 --limit 5 -o json >"$stage/runs.json"; then
+        jq -sr 'map(select(.id != null))[:5][] | "desktop-update: blocking run \(.id) (\(.pipeline), \(.status))"' \
+          "$stage/runs.json" >&2 || echo "desktop-update: blocking run details unavailable at $home" >&2
+        total="$(jq -r '.activity.runs' "$stage/status.json")"
+        echo "desktop-update: $total active runs at $home (showing up to 5)" >&2
+      else
+        echo "desktop-update: blocking run details unavailable at $home" >&2
+      fi
       busy=1
     fi
   done

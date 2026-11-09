@@ -74,6 +74,14 @@ printf '[{"headSha":"selected","status":"completed","conclusion":"%s"}]\n' "$res
 `)
 			write(filepath.Join(dest, "sparkwing"), `#!/bin/bash
 set -eu
+if [ "$1 $2" = 'runs list' ]; then
+  [ "$*" = 'runs list --profile= --status pending,running --since 0 --limit 5 -o json' ]
+  for n in 1 2 3 4 5; do
+    printf '{"id":"run-blocker-%s","pipeline":"check","status":"pending"}\n' "$n"
+  done
+  echo '{"kind":"page","truncated":true,"next_cursor":"more"}'
+  exit
+fi
 [ "$1 $2" = 'daemon status' ]
 [ "$SPARKWING_HOME" = "$HOME/state" ] || [ "$SPARKWING_HOME" = "$HOME/delivery" ]
 echo status >> "$HOME/calls"
@@ -86,7 +94,7 @@ environment-error) FIXTURE_CONTROLLER_PID=2147483647 ;;
 esac
 runs=0; triggers=0; leases=0; state=running
 case "$MODE" in
-run) runs=1 ;;
+run) runs=7 ;;
 drain) [ -e "$HOME/drained" ] || runs=1 ;;
 trigger) triggers=1 ;;
 lease) leases=1 ;;
@@ -184,6 +192,16 @@ exec /bin/mv "$@"
 			}
 			if !success && !strings.Contains(string(out), "desktop-update:") {
 				t.Fatalf("failure lacks updater diagnostic: %s", out)
+			}
+			if mode == "run" {
+				for _, want := range []string{"blocking run run-blocker-1 (check, pending)", "blocking run run-blocker-5", "7 active runs", "showing up to 5", "runs list --profile= --status pending,running --since 0 -o json", "drain timed out"} {
+					if !strings.Contains(string(out), want) {
+						t.Fatalf("missing blocking-run diagnostic %q: %s", want, out)
+					}
+				}
+				if strings.Contains(string(out), "blocking run run-blocker-6") {
+					t.Fatalf("blocking-run diagnostic exceeded cap: %s", out)
+				}
 			}
 			if mode == "rename-error" && !strings.Contains(string(out), "previous binaries restored") {
 				t.Fatalf("CLI rename failure lacks recovery diagnostic: %s", out)
