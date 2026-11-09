@@ -65,13 +65,16 @@ func renewCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID 
 	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
 
 		superseded := ""
+		cancellation := " AND n.cancel_requested_at IS NULL"
 		if table == "concurrency_holders" {
 			superseded = " AND superseded=0"
+			// safety: cleanup still mutates shared state until the cancelled holder reports completion.
+			cancellation = ""
 		}
 		rows, err := tx.queryContext(ctx, `SELECT key,node_id,holder_id,lease_expires_at FROM `+table+` AS leased
 WHERE team=? AND run_id=? AND (?='' OR node_id=? OR node_id='') AND lease_expires_at>?`+superseded+`
 AND EXISTS (SELECT 1 FROM runs r WHERE r.team=leased.team AND r.id=leased.run_id AND r.finished_at IS NULL)
-AND (node_id='' OR EXISTS (SELECT 1 FROM nodes n WHERE n.team=leased.team AND n.run_id=leased.run_id AND n.node_id=leased.node_id AND n.status<>'done' AND n.cancel_requested_at IS NULL))`, team, runID, nodeID, nodeID, now.UnixNano())
+AND (node_id='' OR EXISTS (SELECT 1 FROM nodes n WHERE n.team=leased.team AND n.run_id=leased.run_id AND n.node_id=leased.node_id AND n.status<>'done'`+cancellation+`))`, team, runID, nodeID, nodeID, now.UnixNano())
 		if err != nil {
 			return err
 		}
