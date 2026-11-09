@@ -262,7 +262,7 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		for _, r := range qs.Runners {
 			mem := "-"
 			if r.MemoryBytes > 0 {
-				mem = humanBytes(r.MemoryBytes)
+				mem = HumanBytes(r.MemoryBytes)
 			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", r.Name, trimFloat(r.Cores), mem, r.QueueDepth)
 		}
@@ -439,7 +439,7 @@ func ContainerNote(c *wingwire.ContainerLimit) string {
 	}
 	if c.MemoryBytes > 0 && c.HostMemoryBytes > 0 {
 		parts = append(parts, fmt.Sprintf("%s memory (host %s)",
-			humanBytes(c.MemoryBytes), humanBytes(c.HostMemoryBytes)))
+			HumanBytes(c.MemoryBytes), HumanBytes(c.HostMemoryBytes)))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -460,7 +460,7 @@ func BudgetNote(b *wingwire.BudgetState) string {
 	}
 	if b.MachineMemoryBytes > 0 && b.MemoryBytes < b.MachineMemoryBytes {
 		parts = append(parts, fmt.Sprintf("%s memory (machine %s)",
-			humanBytes(b.MemoryBytes), humanBytes(b.MachineMemoryBytes)))
+			HumanBytes(b.MemoryBytes), HumanBytes(b.MachineMemoryBytes)))
 	}
 	if len(parts) == 0 && b.Source == "" {
 		return ""
@@ -838,7 +838,7 @@ func fmtETA(ms *int64) string {
 
 func fmtAmount(key string, v float64) string {
 	if key == "memory" {
-		return humanBytes(int64(v))
+		return HumanBytes(int64(v))
 	}
 	return trimFloat(v)
 }
@@ -846,7 +846,7 @@ func fmtAmount(key string, v float64) string {
 func fmtCost(r wingwire.HostResources) string {
 	out := trimFloat(r.Cores) + " cores"
 	if r.MemoryBytes > 0 {
-		out += ", " + humanBytes(r.MemoryBytes)
+		out += ", " + HumanBytes(r.MemoryBytes)
 	}
 	return out
 }
@@ -894,7 +894,8 @@ func stalledWord(h wingwire.Holder) string {
 	}
 }
 
-func humanBytes(n int64) string {
+// HumanBytes formats a byte count with binary units.
+func HumanBytes(n int64) string {
 	const (
 		kib = 1 << 10
 		mib = 1 << 20

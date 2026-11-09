@@ -13,6 +13,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+)
+
+var (
+	machineScopes = []string{"nodes.claim", "triggers.claim"}
+	memberScopes  = store.ScopesForRole(store.RoleEditor)
 )
 
 // TestDirectSourceRunnerRunsATriggeredRun drives a real team runner, started

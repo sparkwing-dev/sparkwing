@@ -353,12 +353,6 @@ func TestDocumentedMetricsMatchTheRegistry(t *testing.T) {
 	}
 }
 
-var (
-	expositionTypeRE   = regexp.MustCompile(`^# TYPE ([a-zA-Z_:][a-zA-Z0-9_:]*) (counter|gauge|histogram|summary|untyped)$`)
-	expositionSampleRE = regexp.MustCompile(
-		`^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*\})? (-?(?:[0-9]+\.?[0-9]*(?:[eE][+-]?[0-9]+)?|Inf|NaN)|\+Inf)( [0-9]+)?$`)
-)
-
 func TestSamplersFillTheOperationalSeries(t *testing.T) {
 	restoreGlobals(t)
 

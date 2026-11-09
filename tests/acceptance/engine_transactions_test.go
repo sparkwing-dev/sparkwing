@@ -154,6 +154,10 @@ func (f *engineTransactions) ReadRun(_ context.Context, run string) (store.RunRo
 	return f.run, f.runReadErr
 }
 
+func (f *engineTransactions) ResolveRunID(_ context.Context, run string) (string, error) {
+	return run, f.runReadErr
+}
+
 func (f *engineTransactions) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
 	return store.RunSnapshot{}, f.readErr
 }

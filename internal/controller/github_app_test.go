@@ -1067,12 +1067,6 @@ func TestGitHubAppUninstallUnbinds(t *testing.T) {
 	}
 }
 
-type claimedNode struct {
-	RunID      string `json:"run_id"`
-	NodeID     string `json:"node_id"`
-	ClaimToken string `json:"claim_token"`
-}
-
 func TestGitHubAppForkPullRequestIsNotRun(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")

@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
@@ -20,31 +19,15 @@ func (s *EngineController) resolveRunSelector(ctx context.Context, principal cap
 	if target.Team == "" || target.RunID == "" {
 		return target, engineLookupError(store.ErrNotFound)
 	}
-	number, err := strconv.ParseInt(target.RunID, 10, 64)
-	numeric := err == nil && number > 0 && strconv.FormatInt(number, 10) == target.RunID
-	if !numeric {
-		tenant, err := s.runTransactions(ctx, target.Team)
-		if err != nil {
-			return target, engineLookupError(err)
-		}
-		_, err = tenant.ReadRun(ctx, target.RunID)
-		return target, engineLookupError(err)
-	}
-	if s.ResolveTenant == nil {
-		return target, routepolicy.MissingEndpointPolicy()
-	}
-	tenant, err := s.tenantForTeam(ctx, store.Team(target.Team))
+	tenant, err := s.runTransactions(ctx, target.Team)
 	if err != nil {
 		return target, engineLookupError(err)
 	}
-	views, err := tenant.ListRunViews(ctx, number-1, number, 1)
+	id, err := tenant.ResolveRunID(ctx, target.RunID)
 	if err != nil {
 		return target, engineLookupError(err)
 	}
-	if len(views) != 1 || views[0].Snapshot.Run.Team != store.Team(target.Team) || views[0].Snapshot.Run.Number != number {
-		return target, engineLookupError(store.ErrNotFound)
-	}
-	target.RunID = views[0].Snapshot.Run.ID
+	target.RunID = id
 	return target, nil
 }
 

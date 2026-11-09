@@ -11,15 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func writeFile(t *testing.T, name, content string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-	return path
-}
-
 func credentialsDir(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()

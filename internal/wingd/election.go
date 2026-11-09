@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
-var errPeerClosed = errors.New("wingd: peer closed connection")
-
 func (d *Daemon) elect() (bool, error) {
 	f, err := acquireProcessLock(d.layout)
 	d.lockFile = f

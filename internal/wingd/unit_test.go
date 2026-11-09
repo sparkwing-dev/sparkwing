@@ -107,14 +107,6 @@ func TestSubmitErrorKey(t *testing.T) {
 	}
 }
 
-type fixedHostSampler struct {
-	stat HostStat
-}
-
-func (s fixedHostSampler) Sample() (HostStat, error) {
-	return s.stat, nil
-}
-
 type hostSamplerFunc func() (HostStat, error)
 
 func (f hostSamplerFunc) Sample() (HostStat, error) { return f() }
@@ -438,10 +430,6 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 
 func requestFromWire(runID, ownerRunID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
 	return requestFromWireWithMetadata(runID, ownerRunID, res, sems, costSource, priority, "", 0)
-}
-
-func (d *Daemon) shutdown() {
-	d.shutdownWithReason("requested")
 }
 
 func LockPath(home string) (string, error) {

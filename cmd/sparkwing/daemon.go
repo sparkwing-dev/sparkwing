@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 )
 
@@ -100,7 +101,7 @@ func explainEvent(r journal.Record) string {
 			parts = append(parts, fmt.Sprintf("%g cores", cores))
 		}
 		if memory > 0 {
-			parts = append(parts, humanBytes(int64(memory)))
+			parts = append(parts, opsview.HumanBytes(int64(memory)))
 		}
 		if r.Data["semaphores"] != nil {
 			parts = append(parts, "semaphore slots")
