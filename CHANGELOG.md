@@ -31,9 +31,6 @@ unlock.
 
 ### Changed
 
-- **cli (Breaking):** `sparkwing-controller admin session` defaults to JSON when piped and pretty output on a terminal
-  Enrollment pipes must request `--output plain` to pass the raw session to `sparkwing runners add --session-stdin`.
-  Internal `__complete` output also follows the stdout terminal default. Generated shell callers already request plain output.
 - **runner:** Trim Go's regression assets from the image and reuse pinned tool layers across package refreshes
 - **landing:** Default and security reviews run concurrently, retaining separate sessions, findings and blocking rules.
 

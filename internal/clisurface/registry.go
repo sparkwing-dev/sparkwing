@@ -838,12 +838,12 @@ func Registry() []Command {
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},
 		}},
-		{Path: "sparkwing-controller admin freeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass using controller database credentials; audit actor and reason. Not an admin-token console bypass."}, Flags: []Flag{
+		{Path: "sparkwing-controller admin freeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass using controller database credentials; audit actor and reason. Plain output prints the team slug. Not an admin-token console bypass."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},
 		}},
-		{Path: "sparkwing-controller admin unfreeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass; audit actor and reason. --hold selects one hold; omission releases operator holds only."}, Flags: []Flag{
+		{Path: "sparkwing-controller admin unfreeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass; audit actor and reason. --hold selects one hold; omission releases operator holds only. Plain output prints the team slug."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},

@@ -34,7 +34,10 @@ store configuration under SPARKWING_HOME and never creates a store.
 
 session prints an independent account session for an existing team administrator
 on a licensed team or Cloud controller.
-Output is pretty on a terminal and one JSON object when piped. Use --output plain
+All actions accept -o/--output pretty|json|plain and -h/--help.
+Output is pretty on a terminal and one JSON object when piped. Plain prints the
+team slug for freeze/unfreeze, the grant ID for grant, and the session for session.
+Help prints a JSON text record when piped. Use --output plain
 when piping to sparkwing runners add --session-stdin. Its initial expiry is 15 minutes.
 Normal renewal applies, including during enrollment. After fetching the session
 CSRF proof, enrollment attempts logout on success or failure. If fetching the
@@ -51,7 +54,7 @@ Use --reverses REF to take back credits from a mistaken free grant.
 --operator names your account ID. Each action commits the business event the
 console writes (team.frozen, team.unfrozen or credit.granted or credit.reversed) with that account
 as the actor, prints an audit line to stderr, and prints the team's holds, or the
-grant and the team's balance, as JSON. Audit rows exclude free-form reasons
+grant and the team's balance, in the selected format. Audit rows exclude free-form reasons
 and store grant keys as digests.`
 
 type adminFreezeJSON struct {
@@ -77,8 +80,8 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	verb := args[0]
 	fs := flag.NewFlagSet("admin "+verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprintln(stderr, adminUsage) }
-	output := fs.StringP("output", "o", "", "session only: pretty|json|plain (pretty on a terminal, JSON when piped)")
+	help := fs.BoolP("help", "h", false, "show help")
+	output := fs.StringP("output", "o", "", "pretty|json|plain (pretty on a terminal, JSON when piped)")
 	operator := fs.String("operator", "", "your operator account ID (required)")
 	team := fs.String("team", "", "the team's slug (required)")
 	reason := fs.String("reason", "", "why (required, up to 500 characters; excluded from audit rows)")
@@ -89,13 +92,20 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if fs.Changed("output") && verb != "session" {
-		return errors.New("--output belongs to session")
-	}
 	if fs.Changed("output") && *output != "pretty" && *output != "json" && *output != "plain" {
 		return errors.New("--output must be pretty, json or plain")
 	}
 	format := clisurface.OutputFormat(*output, color.IsInteractiveStdout())
+	if *help {
+		if format == "json" {
+			return json.NewEncoder(stdout).Encode(struct {
+				Kind string `json:"kind"`
+				Text string `json:"text"`
+			}{Kind: "help", Text: adminUsage})
+		}
+		_, err := fmt.Fprintln(stdout, adminUsage)
+		return err
+	}
 	if *operator == "" || strings.ContainsAny(*operator, "@\r\n\t ") {
 		return errors.New("admin " + verb + " needs --operator with your account ID")
 	}
@@ -211,7 +221,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if verb == "grant" {
-		return adminGrant(ctx, t, *operator, *cents, strings.TrimSpace(*key), strings.TrimSpace(*reverses), why, stdout, stderr)
+		return adminGrant(ctx, t, *operator, *cents, strings.TrimSpace(*key), strings.TrimSpace(*reverses), why, format, stdout, stderr)
 	}
 	var changed []string
 	switch {
@@ -243,10 +253,19 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		"command", "sparkwing-controller admin "+verb, "principal_kind", "break-glass", "principal_id", *operator,
 		"target_team", string(t.Team()), "holds_changed", changed, "frozen", freeze.Frozen)
 	holds := append([]string{}, freeze.Disputes...)
-	return json.NewEncoder(stdout).Encode(adminFreezeJSON{Team: string(t.Team()), Frozen: freeze.Frozen, Holds: holds})
+	result := adminFreezeJSON{Team: string(t.Team()), Frozen: freeze.Frozen, Holds: holds}
+	switch format {
+	case "json":
+		return json.NewEncoder(stdout).Encode(result)
+	case "plain":
+		_, err = fmt.Fprintln(stdout, result.Team)
+	default:
+		_, err = fmt.Fprintf(stdout, "Team: %s\nFrozen: %t\nHolds: %s\n", result.Team, result.Frozen, strings.Join(result.Holds, ", "))
+	}
+	return err
 }
 
-func adminGrant(ctx context.Context, t *store.Tenant, operator string, cents int64, key, reverses, reason string, stdout, stderr io.Writer) error {
+func adminGrant(ctx context.Context, t *store.Tenant, operator string, cents int64, key, reverses, reason, format string, stdout, stderr io.Writer) error {
 	if strings.TrimSpace(key) == "" {
 		return errors.New("admin grant requires --key for idempotency")
 	}
@@ -265,5 +284,14 @@ func adminGrant(ctx context.Context, t *store.Tenant, operator string, cents int
 	slog.New(controller.CredentialSafeLogHandler(slog.NewJSONHandler(stderr, nil))).Info("audit",
 		"command", "sparkwing-controller admin grant", "principal_kind", "break-glass", "principal_id", operator,
 		"target_team", string(t.Team()), "grant_id", result.Grant.ID, "amount_micro", result.Grant.AmountMicro, "created", result.Created)
-	return json.NewEncoder(stdout).Encode(adminGrantJSON{Team: string(t.Team()), GrantID: result.Grant.ID, AmountMicro: result.Grant.AmountMicro, Reference: result.Grant.Reference, Created: result.Created, BalanceMicro: balance})
+	view := adminGrantJSON{Team: string(t.Team()), GrantID: result.Grant.ID, AmountMicro: result.Grant.AmountMicro, Reference: result.Grant.Reference, Created: result.Created, BalanceMicro: balance}
+	switch format {
+	case "json":
+		return json.NewEncoder(stdout).Encode(view)
+	case "plain":
+		_, err = fmt.Fprintln(stdout, view.GrantID)
+	default:
+		_, err = fmt.Fprintf(stdout, "Team: %s\nGrant: %s\nAmount (microcredits): %d\nReference: %s\nCreated: %t\nBalance (microcredits): %d\n", view.Team, view.GrantID, view.AmountMicro, view.Reference, view.Created, view.BalanceMicro)
+	}
+	return err
 }
