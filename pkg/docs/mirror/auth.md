@@ -844,7 +844,9 @@ machine's `runner.labels` separately. Existing enrollments acquire their last
 stored advertised labels once when the controller starts the new build. This
 preserves runner credentials and configuration. A runner with no stored labels
 starts with an empty set and needs an admin update before advertising labels.
-New claims never enlarge the set, and credential rotation preserves it.
+New claims never enlarge the set, and credential rotation preserves it. Owner
+self-execution rechecks the set for each later job, including runs already owned
+when an administrator removes a label.
 
 The controller returns granted class and location alongside free labels,
 repository fences, active jobs and measured headroom. Missing headroom means
