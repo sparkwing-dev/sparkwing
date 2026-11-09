@@ -62,7 +62,7 @@ func TestFeatureE2E(t *testing.T) {
 	}
 	build := exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-ldflags", "-X=main.Version="+featureVersion, "-o", bin, "./cmd/sparkwing-controller")
 	build.Dir = root
-	build.Env = append(os.Environ(), "GOWORK=off", "GOMAXPROCS=2")
+	build.Env = append(os.Environ(), "GOWORK=auto", "GOMAXPROCS=2")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build controller: %v\n%s", err, output)
 	}
@@ -71,7 +71,7 @@ func TestFeatureE2E(t *testing.T) {
 		cli += ".exe"
 	}
 	build = exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-o", cli, "./cmd/sparkwing")
-	build.Dir, build.Env = root, append(os.Environ(), "GOWORK=off", "GOMAXPROCS=2")
+	build.Dir, build.Env = root, append(os.Environ(), "GOWORK=auto", "GOMAXPROCS=2")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
@@ -132,6 +132,10 @@ func newFeatureController(t *testing.T, bin, scenario string) *featureController
 	issuer := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: fmt.Sprintf("%x", sha256.Sum256([]byte("fixture-session:default:actor-one")))}
 	for name, dest := range map[string]*string{"fast": &f.fast, "slow": &f.slow} {
 		spec := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &issuer, Team: string(store.DefaultTeam), RegistrationID: "runner:default:" + name, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TriggersClaim, capability.NodesClaim}}
+		spec.AllowedLabels = []string{"lane=" + name, "mid-hold"}
+		if name == "slow" {
+			spec.AllowedLabels = append(spec.AllowedLabels, "lane=late", "keep-parent")
+		}
 		var issued capability.Issued
 		if reusable {
 			spec.Personal = false

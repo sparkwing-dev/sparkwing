@@ -100,6 +100,21 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 	for _, name := range []string{"settings", "nodehost", "store", "capability", "controllerwire", "runspec", "runstate", "engineid", "localhostwire", "routepolicy", "blob", "lease", "source", "engine", "nodeproto", "apierr", "apierrhttp", "controller", "protofd"} {
 		packages[name] = contractSymbols(t, root+"internal/"+name)
 	}
+	for owner, directories := range map[string][]string{
+		"nodeproto": {"internal/nodeproto", "sparkwing/protocol"},
+		"apierr":    {"internal/apierr", "sparkwing/protocol/apierr"},
+		"protofd":   {"sparkwing/protocol/protofd"},
+	} {
+		packages[owner] = map[string]string{}
+		for _, directory := range directories {
+			for symbol, source := range contractSymbols(t, root+directory) {
+				if packages[owner][symbol] != "" {
+					t.Fatalf("duplicate contract owner for %s.%s", owner, symbol)
+				}
+				packages[owner][symbol] = source
+			}
+		}
+	}
 	packages["client"] = contractSymbols(t, root+"internal/controller/client")
 	path := root + "design/rewrite/contracts/c4-surface-config.md"
 	data, err := os.ReadFile(path)
@@ -233,7 +248,7 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 	if !ok {
 		t.Fatal("missing fake-host inventory end")
 	}
-	packages["sparkwingtest"] = contractSymbols(t, root+"sparkwing/sparkwingtest")
+	packages["sparkwingtest"] = contractSymbols(t, root+"sparkwingtest")
 	checkContractInventory(t, fake, "sparkwingtest", packages)
 }
 

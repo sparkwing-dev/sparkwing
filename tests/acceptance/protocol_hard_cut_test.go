@@ -122,8 +122,8 @@ func testGoSDKCompileSurface(t *testing.T) {
 		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		command := exec.CommandContext(t.Context(), "go", "build", "-p", "4", "-o", filepath.Join(dir, "probe"), path)
-		command.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+		command := exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-o", filepath.Join(dir, "probe"), path)
+		command.Env = append(os.Environ(), "GOWORK=auto", "GOFLAGS=-trimpath -buildvcs=false")
 		output, err := command.CombinedOutput()
 		return string(output), err
 	}

@@ -120,16 +120,16 @@ func TestReplaceBanReadsEveryCommittedGoMod(t *testing.T) {
 	}
 }
 
-func TestReplaceBanAllowsTheDogfoodSelfReplace(t *testing.T) {
+func TestReplaceBanAllowsTheDogfoodHostAndSDKReplacements(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := newTestContext(t)
 
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"),
-		"module fixture-pipelines\n\ngo 1.25\n\nreplace github.com/sparkwing-dev/sparkwing => ..\n")
+		"module fixture-pipelines\n\ngo 1.25\n\nreplace github.com/sparkwing-dev/sparkwing => ..\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => ../sparkwing\n")
 	gitAddAll(t, root)
 
 	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
-		t.Fatalf("the dogfood self-replace must be allowed: %v", err)
+		t.Fatalf("the dogfood host and SDK replacements must be allowed: %v", err)
 	}
 }
 
@@ -207,5 +207,36 @@ func TestMacOSVerifyDeclaresPlacementOnAnyPlanningHost(t *testing.T) {
 	plan := inspectPipeline(t, "macos-verify", nil)
 	if len(plan.Jobs) != 1 || !slices.Equal(plan.Jobs[0].Requires, []string{"os=darwin"}) || plan.Jobs[0].Cores != 4 {
 		t.Fatalf("macOS placement = %+v", plan.Jobs)
+	}
+}
+
+func TestReplaceBanRejectsRootAndDifferentSDKReplacements(t *testing.T) {
+	for _, tc := range []struct{ name, path, replacement string }{
+		{"root SDK replacement", "go.mod", "github.com/sparkwing-dev/sparkwing/sparkwing => ./sparkwing"},
+		{"wrong SDK directory", ".sparkwing/go.mod", "github.com/sparkwing-dev/sparkwing/sparkwing => .."},
+		{"versioned SDK replacement", ".sparkwing/go.mod", "github.com/sparkwing-dev/sparkwing/sparkwing v0.1.0 => ../sparkwing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			writeGoFile(t, filepath.Join(root, tc.path), "module fixture\n\ngo 1.25\n\nreplace "+tc.replacement+"\n")
+			gitAddAll(t, root)
+			if err := checkNoReplaceDirectivesInCommittedGoMods(newTestContext(t)); err == nil {
+				t.Fatal("accepted disallowed replacement")
+			}
+		})
+	}
+}
+
+func TestWorkspaceCheckAllowsOnlyCommittedRootWorkspace(t *testing.T) {
+	for _, name := range []string{"go.work", "go.work.sum", "tools/go.work", "tools/go.work.sum"} {
+		t.Run(name, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			writeGoFile(t, filepath.Join(root, name), "go 1.26.0\nuse .\n")
+			gitAddAll(t, root)
+			err := checkCommittedWorkspaceFiles(newTestContext(t))
+			if (err == nil) != (name == "go.work") {
+				t.Fatalf("workspace check %s: %v", name, err)
+			}
+		})
 	}
 }
