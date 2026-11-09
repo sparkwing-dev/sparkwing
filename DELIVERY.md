@@ -546,6 +546,11 @@ Staging and production fetch main's history and require the candidate SHA to be 
 of `origin/main` or its tip. These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses
 as repository proof.
 
+Production checks ancestry again immediately before each controller or launcher GitOps push.
+A candidate removed by a main history rewrite during deployment preparation is refused at
+that write. Source validation and the GitOps push use separate repositories, so this check
+does not make them atomic.
+
 Production requires a staging-gate pass for the same image digests and checks both production
 image revision labels. Each changed digest must advance from its pinned revision to a newer
 source commit, with no version downgrade. Missing revision evidence, unrelated history or a
