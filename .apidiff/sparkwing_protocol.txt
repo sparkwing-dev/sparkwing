@@ -135,6 +135,7 @@ type Git struct {
 	Repo          string
 	RepoURL       string
 }
+const HelloProtocol = 2
 type HelloResult struct {
 	Protocol int
 	SDK      SDKIdentity

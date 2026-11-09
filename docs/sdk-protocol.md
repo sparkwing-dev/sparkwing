@@ -846,6 +846,10 @@ const ExecTailBytes = 64 << 10
 ```
 
 ```
+const HelloProtocol = 2
+```
+
+```
 const MaxLineBytes = int(protolimits.NodeOutputBytes + protolimits.ProtocolEnvelopeBytes)
 ```
 

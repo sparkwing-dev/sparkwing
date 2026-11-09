@@ -2,18 +2,20 @@
 
 set -euo pipefail
 
+export GOWORK=auto
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 bash bin/gen-cli-docs.sh
 bash bin/gen-config-docs.sh
-GOWORK=off go -C "$ROOT" generate ./internal/doccheck
-GOWORK=off go -C "$ROOT" generate ./internal/store
+go -C "$ROOT" generate ./internal/doccheck
+go -C "$ROOT" generate ./internal/store
 bash bin/gen-sdk-docs.sh
 bash bin/gen-api-docs.sh
 bash bin/regen-api-snapshot.sh
-GOWORK=off go test ./pkg/wingwire -run TestWireShapes -update >/dev/null
-GOWORK=off go test ./charts -run '^TestLauncherAdmissionTemplateIsGenerated$' -update >/dev/null
+go test ./pkg/wingwire -run TestWireShapes -update >/dev/null
+go test ./charts -run '^TestLauncherAdmissionTemplateIsGenerated$' -update >/dev/null
 
 # helm packs source file mtimes into the tarball, so re-vendoring a
 # chart that already matches its source rewrites bytes that carry no change.
