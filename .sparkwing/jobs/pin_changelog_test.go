@@ -1,62 +1,62 @@
 package jobs
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestInsertUnreleasedChangeWritesUnderTheChangedHeading(t *testing.T) {
-	body := "# Changelog\n\n## [Unreleased]\n\n### Changed\n\n- **cache:** an earlier entry.\n\n## [v1.2.3]\n\n### Changed\n\n- old.\n"
-	entry := "- **scaffold:** pins v9.9.9.\n"
-	got, err := insertUnreleasedChange(body, entry)
-	if err != nil {
-		t.Fatal(err)
+func TestPinBumpWritesOnlyItsFragment(t *testing.T) {
+	repo := t.TempDir()
+	writeReleaseFixture(t, filepath.Join(repo, "CHANGELOG.md"), fixtureChangelog)
+	writeReleaseFixture(t, filepath.Join(repo, "docs/changes/other.md"), "### Fixed\n\n- **other:** Keep\n")
+	for range 2 {
+		if err := recordPinBumpInChangelog(repo, "v0.19.0"); err != nil {
+			t.Fatal(err)
+		}
 	}
-	unreleased := got[strings.Index(got, "## [Unreleased]"):strings.Index(got, "## [v1.2.3]")]
-	if !strings.Contains(unreleased, entry) {
-		t.Fatalf("the entry did not land in the unreleased section:\n%s", unreleased)
+	body, err := readChangelog(repo)
+	// safety: this fixture has aggregate notes to prove the updater leaves them untouched.
+	if err == nil || !strings.Contains(err.Error(), "move CHANGELOG") {
+		t.Fatalf("aggregate validation = %s, %v", body, err)
 	}
-	if strings.Count(got, entry) != 1 {
-		t.Errorf("the entry appears %d times", strings.Count(got, entry))
+	raw, err := os.ReadFile(filepath.Join(repo, "CHANGELOG.md"))
+	if err != nil || string(raw) != fixtureChangelog {
+		t.Fatal("aggregate changed")
 	}
-	if !strings.Contains(unreleased, "- **cache:** an earlier entry.") {
-		t.Error("writing the entry dropped an entry already there")
+	fragment, err := os.ReadFile(filepath.Join(repo, pinBumpFragmentPaths("v0.19.0")[0]))
+	if err != nil || strings.Count(string(fragment), "pins v0.19.0") != 1 {
+		t.Fatalf("fragment = %s, %v", fragment, err)
 	}
-}
-
-func TestInsertUnreleasedChangeAddsTheHeadingWhenItIsAbsent(t *testing.T) {
-	body := "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- something.\n\n## [v1.2.3]\n"
-	entry := "- **scaffold:** pins v9.9.9.\n"
-	got, err := insertUnreleasedChange(body, entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	unreleased := got[strings.Index(got, "## [Unreleased]"):strings.Index(got, "## [v1.2.3]")]
-	if !strings.Contains(unreleased, "### Changed") {
-		t.Fatalf("no Changed heading was added:\n%s", unreleased)
-	}
-	if !strings.Contains(unreleased, entry) {
-		t.Fatalf("the entry did not land in the unreleased section:\n%s", unreleased)
-	}
-	if !strings.Contains(unreleased, "- something.") {
-		t.Error("writing the entry dropped the Fixed section's entry")
+	if err := recordPinBumpInChangelog(repo, "../bad"); err == nil {
+		t.Fatal("accepted unsafe version")
 	}
 }
 
-func TestInsertUnreleasedChangeIsIdempotent(t *testing.T) {
-	body := "# Changelog\n\n## [Unreleased]\n\n### Changed\n\n- **scaffold:** pins v9.9.9.\n\n## [v1.2.3]\n"
-	entry := "- **scaffold:** pins v9.9.9.\n"
-	got, err := insertUnreleasedChange(body, entry)
-	if err != nil {
+func TestPinBumpRollbackPreservesOtherFragments(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	writeReleaseFixture(t, filepath.Join(repo, "docs/changes/other.md"), "### Fixed\n\n- **other:** Keep\n")
+	if err := requireCleanSparkwingPinArtifacts(t.Context(), repo, "v0.2.0"); err != nil {
 		t.Fatal(err)
 	}
-	if got != body {
-		t.Errorf("a second bump to the same version rewrote the file:\n%s", got)
+	for _, path := range pinBumpFragmentPaths("v0.2.0") {
+		writeReleaseFixture(t, filepath.Join(repo, path), "owned")
 	}
-}
-
-func TestInsertUnreleasedChangeRefusesAChangelogWithNoUnreleasedSection(t *testing.T) {
-	if _, err := insertUnreleasedChange("# Changelog\n\n## [v1.2.3]\n", "- x.\n"); err == nil {
-		t.Fatal("a changelog with no unreleased section was accepted, so the entry would go nowhere")
+	gitRun(t, repo, "add", "--", pinBumpFragmentPaths("v0.2.0")[0])
+	if err := restoreSparkwingPinArtifacts(context.Background(), repo, "v0.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range pinBumpFragmentPaths("v0.2.0") {
+		if _, err := os.Stat(filepath.Join(repo, path)); !os.IsNotExist(err) {
+			t.Fatalf("owned fragment survived: %v", err)
+		}
+	}
+	if got := readRepoFile(t, repo, "docs/changes/other.md"); !strings.Contains(got, "**other:** Keep") {
+		t.Fatal("other fragment changed")
+	}
+	if staged := gitRun(t, repo, "diff", "--cached", "--name-only"); staged != "" {
+		t.Fatalf("rollback left staged paths: %s", staged)
 	}
 }
