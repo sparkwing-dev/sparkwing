@@ -80,7 +80,7 @@ func TestCloudFrontDataBackendSignedObjectProperty(t *testing.T) {
 		object := capability.ObjectToSign{Method: "GET", Key: path, Size: int64(size), SHA256: hash, ExpiresAt: time.Now().Add(45 * time.Second)}
 		request := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/data/download", nil)
 		request.Header.Set("X-Forwarded-Host", "controller.test")
-		signed, err := backend.Sign(dataDownloadContext(request), object)
+		signed, err := backend.Sign(dataDownloadContext(request.Context(), request), object)
 		if err != nil {
 			t.Log(err)
 			return false
@@ -236,7 +236,7 @@ func TestCloudFrontDownloadClientBinding(t *testing.T) {
 			var signed capability.SignedObject
 			var signErr error
 			var handler http.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-				ctx := dataDownloadContext(r)
+				ctx := dataDownloadContext(r.Context(), r)
 				signed, signErr = backend.Sign(ctx, object)
 			})
 			handler = ratelimit.TrustedProxies(handler, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})

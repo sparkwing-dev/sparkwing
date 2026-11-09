@@ -18,13 +18,13 @@ import (
 
 type dataIngressKey struct{}
 
-func dataDownloadContext(r *http.Request) context.Context {
+func dataDownloadContext(ctx context.Context, r *http.Request) context.Context {
 	_, forwardedFor := r.Header["X-Forwarded-For"]
 	_, forwardedHost := r.Header["X-Forwarded-Host"]
 	if ratelimit.FromTrustedListener(r) || forwardedFor || forwardedHost {
-		return context.WithValue(r.Context(), dataIngressKey{}, ratelimit.ClientIP(r))
+		return context.WithValue(ctx, dataIngressKey{}, ratelimit.ClientIP(r))
 	}
-	return r.Context()
+	return ctx
 }
 
 type cloudFrontDataBackend struct {
