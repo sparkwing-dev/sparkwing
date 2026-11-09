@@ -62,7 +62,7 @@ func runAffectedRaceModules(ctx context.Context, targets map[string][]string) er
 		for _, module := range mapKeys(targets) {
 			cmd := raceGoCommand(currentHost(), "-race -short -timeout "+raceTouchedPackageTimeout.String()+" "+quoteAll(targets[module]))
 			script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
-			if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+			if _, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run(); err != nil {
 				failures = append(failures, describeModuleFailure(module, err))
 			}
 		}
@@ -91,7 +91,7 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout "+raceTouchedPackageTimeout.String()+" "+strings.Join(pkgs, " "))
 		if len(pkgs) > 0 {
 			script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
-			if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
+			if _, runErr := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Env("TMPDIR", testRoot).Run(); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}
 		}

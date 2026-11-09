@@ -35,6 +35,8 @@ func TestTemporaryFiles(t *testing.T) {
  t.TempDir()
 }
 `)
+			writeGoFile(t, filepath.Join(root, "sparkwing", "go.mod"), "module fixture-sdk\n\ngo 1.25.0\n")
+			writeGoFile(t, filepath.Join(root, "sparkwing", "sdk_test.go"), "package sdk\nimport \"testing\"\nfunc TestSDK(t *testing.T) { t.TempDir() }\n")
 			gitAddAll(t, root)
 			for attempt := range 2 {
 				host := newTestHost(t, sparkwingtest.Options{})

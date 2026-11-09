@@ -19,3 +19,34 @@ SDK pin. Before the first SDK release, checkout verification uses a temporary
 modfile replacement rather than changing the publishable root manifest.
 
 Go SDK tags use `sparkwing/v0.x.y`. Engine tags remain `v0.x.y`.
+
+### OpenAPI schema names
+
+Generated OpenAPI component identifiers follow the moved Go types. JSON fields
+and protocol messages keep their shapes. Regenerate clients that use these
+component identifiers after upgrading the engine. The removed identifiers are:
+
+- `components.schemas.internal.apierr.Error`
+- `components.schemas.internal.nodeproto.Annotation`
+- `components.schemas.internal.nodeproto.AnnotationRequest`
+- `components.schemas.internal.nodeproto.ApprovalSpec`
+- `components.schemas.internal.nodeproto.ArgumentDescription`
+- `components.schemas.internal.nodeproto.ArtifactInput`
+- `components.schemas.internal.nodeproto.CacheSpec`
+- `components.schemas.internal.nodeproto.ChildPipeline`
+- `components.schemas.internal.nodeproto.ClosureSpec`
+- `components.schemas.internal.nodeproto.ConcurrencySpec`
+- `components.schemas.internal.nodeproto.EnvValue`
+- `components.schemas.internal.nodeproto.JobFailure`
+- `components.schemas.internal.nodeproto.JobSpec`
+- `components.schemas.internal.nodeproto.MaskRequest`
+- `components.schemas.internal.nodeproto.MemoInput`
+- `components.schemas.internal.nodeproto.MemoSpec`
+- `components.schemas.internal.nodeproto.PipelineReference`
+- `components.schemas.internal.nodeproto.RetrySpec`
+- `components.schemas.internal.nodeproto.RunnerIdentity`
+- `components.schemas.internal.nodeproto.ServiceAcknowledged`
+- `components.schemas.internal.nodeproto.SourceSpec`
+- `components.schemas.internal.nodeproto.StepSpec`
+- `components.schemas.internal.nodeproto.SummaryRequest`
+- `components.schemas.internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.internal.nodeproto.SourceSpec.`

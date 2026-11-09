@@ -195,7 +195,7 @@ func overTouchedPackages(ctx context.Context, step, verb, noun string, keep func
 	for _, module := range mapKeys(targets) {
 		pkgs := targets[module]
 		sparkwing.Info(ctx, "%s: %s: %s", step, module, strings.Join(pkgs, " "))
-		if _, runErr := sparkwing.Bash(ctx, command(module, pkgs)).Dir(module).Run(); runErr != nil {
+		if _, runErr := sparkwing.Bash(ctx, command(module, pkgs)).Dir(module).Env("GOWORK", "auto").Run(); runErr != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 		}
 	}

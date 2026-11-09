@@ -162,3 +162,19 @@ func TestGoTestTimingsLeaveOutTestsACachedPackageReplays(t *testing.T) {
 		t.Fatalf("ranked tests = %+v; want only the test that ran", tr.tests)
 	}
 }
+
+func TestSourceModuleCommandsUseWorkspaceWhenCallerDisablesIt(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOWORK", "off")
+	script := "env -C " + shellQuote(root) + " go list -deps ./cmd/sparkwing > /dev/null"
+	for name, timings := range map[string]*goTestTimings{"direct": nil, "timed": {}} {
+		t.Run(name, func(t *testing.T) {
+			if err := runModuleCommand(newTestContext(t), script, timings); err != nil {
+				t.Fatalf("source dependency graph with disabled caller workspace: %v", err)
+			}
+		})
+	}
+}

@@ -532,7 +532,7 @@ func formattersOverScope(ctx context.Context, scopeOf scopeFunc) error {
 	}
 	var diffs []string
 	for _, batch := range argBatches(files) {
-		_, runErr := sparkwing.Exec(ctx, "golangci-lint", append([]string{"fmt", "--diff", "--"}, batch...)...).Capture()
+		_, runErr := sparkwing.Exec(ctx, "golangci-lint", append([]string{"fmt", "--diff", "--"}, batch...)...).Env("GOWORK", "auto").Capture()
 		if runErr == nil {
 			continue
 		}
@@ -993,7 +993,7 @@ func failedTestSummaries(err error) []string {
 
 func modulePackageArgs(ctx context.Context, dir string, testOnly bool) ([]string, error) {
 	// safety: -e keeps broken product packages in the list for vet/build/test to reject.
-	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list -e -f '{{.ImportPath}} {{len .GoFiles}}' ./...`, dir)).String()
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list -e -f '{{.ImportPath}} {{len .GoFiles}}' ./...`, dir)).Env("GOWORK", "auto").String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
 	}
@@ -1017,7 +1017,7 @@ func modulePackageArgs(ctx context.Context, dir string, testOnly bool) ([]string
 }
 
 func moduleHasNoPackages(ctx context.Context, dir string) (bool, error) {
-	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list ./... 2>&1 || true`, dir)).String()
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list ./... 2>&1 || true`, dir)).Env("GOWORK", "auto").String()
 	if err != nil {
 		return false, err
 	}

@@ -17,7 +17,7 @@ Sparkwing is standalone. Do not assume any other local service or machine-specif
   SDK tag is published, use a scratch modfile with a local SDK replacement for
   that check. Keep the root manifest free of replacements so versioned
   `go install` works.
-- Lint the way the gate does: `GOWORK=off golangci-lint run --allow-serial-runners ./...` from each committed module, with `GOLANGCI_LINT_CACHE` pointing inside the worktree. `.golangci.yml` judges only code new since `origin/main`, so a checkout that cannot resolve that ref reports the whole tree. A run that exits 4 saying "Timeout exceeded" stopped at `run.timeout` with packages unjudged: raise the budget and run again rather than fixing what printed.
+- Lint the way the gate does: `GOWORK=auto golangci-lint run --allow-serial-runners ./...` from each committed module, with `GOLANGCI_LINT_CACHE` pointing inside the worktree. `.golangci.yml` judges only code new since `origin/main`, so a checkout that cannot resolve that ref reports the whole tree. A run that exits 4 saying "Timeout exceeded" stopped at `run.timeout` with packages unjudged: raise the budget and run again rather than fixing what printed.
 - For release notes, add a unique `docs/changes/<slug>.md` fragment and any breaking guide in `docs/migrations/unreleased/<slug>.md`; read `CHANGELOG-STYLE.md` for the formats. Run `bash bin/sync-docs.sh` and commit the matching fragment mirrors.
 - Update source documentation and its drift check when behavior changes.
 - Compile-check with `go build -o /dev/null ./cmd/...` or `go vet ./...`. Building one command on its own drops a binary in the repo root, and `go build ./cmd/sparkwing` refuses outright because the output name collides with the `sparkwing/` SDK directory.
