@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -14,35 +15,36 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if options.Environment == nil || options.Diagnostics == nil {
 		return nil, false, errors.New("pipeline materialization requires a captured environment and diagnostic writer")
 	}
-	if _, err := ConfiguredLimits(); err != nil {
+	if _, err := automaticLimits(filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)); err != nil {
 		return nil, false, fmt.Errorf("pipeline cache ceilings: %w", err)
 	}
-	key, _, err := explainCacheKey(dir, options.Environment, options.HashAllFiles)
-	if err != nil {
-		return nil, false, err
-	}
-	entry, err := PipelineEntry(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if lease, found, err := entry.Acquire(ctx); err != nil {
-		return nil, false, err
-	} else if found {
-		lease.markUsed()
-		if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
-			return nil, false, errors.Join(err, lease.Release())
+	key, _, err := explainCacheKey(ctx, dir, options.Environment, options.HashAllFiles)
+	if err == nil {
+		entry, err := PipelineEntry(key)
+		if err != nil {
+			return nil, false, err
 		}
-		return lease, false, nil
+		if lease, found, err := entry.Acquire(ctx); err != nil {
+			return nil, false, err
+		} else if found {
+			lease.markUsed()
+			if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
+				return nil, false, errors.Join(err, lease.Release())
+			}
+			return lease, false, nil
+		}
+	} else if ctx.Err() != nil {
+		return nil, false, ctx.Err()
 	}
 	started := time.Now()
 	if err := preparePipelineDependencies(ctx, dir, options); err != nil {
 		return nil, false, fmt.Errorf("prepare pipeline dependencies: %w", err)
 	}
-	key, _, err = explainCacheKey(dir, options.Environment, options.HashAllFiles)
+	key, _, err = explainCacheKey(ctx, dir, options.Environment, options.HashAllFiles)
 	if err != nil {
 		return nil, false, err
 	}
-	entry, err = PipelineEntry(key)
+	entry, err := PipelineEntry(key)
 	if err != nil {
 		return nil, false, err
 	}

@@ -44,14 +44,17 @@ func TestPipelineCacheKey_UnchangedWithoutOverlay(t *testing.T) {
 
 func TestPipelineCacheKey_InvalidatesOnOverlayChange(t *testing.T) {
 	dir := newPipelineDir(t)
+	lib := t.TempDir()
+	writeFile(t, filepath.Join(lib, "go.mod"), "module foo/sparks\ngo 1.26\n")
+	writeFile(t, filepath.Join(lib, "lib.go"), "package sparks\n")
 	overlay := filepath.Join(dir, ".resolved.mod")
 
-	if err := os.WriteFile(overlay, []byte("module overlay\n\nrequire foo/sparks v1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(overlay, []byte("module overlay\ngo 1.26\nrequire foo/sparks v1.0.0\nreplace foo/sparks => "+lib+"\n"), 0o644); err != nil {
 		t.Fatalf("write overlay A: %v", err)
 	}
 	keyA := mustKey(t, dir)
 
-	if err := os.WriteFile(overlay, []byte("module overlay\n\nrequire foo/sparks v1.1.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(overlay, []byte("module overlay\ngo 1.26\nrequire foo/sparks v1.1.0\nreplace foo/sparks => "+lib+"\n"), 0o644); err != nil {
 		t.Fatalf("write overlay B: %v", err)
 	}
 	keyB := mustKey(t, dir)
@@ -491,7 +494,11 @@ func TestPipelineCacheKey_IncludesWebPackage(t *testing.T) {
 	}
 }
 
-const fakeGoEnvProbe = "if [ \"$1\" = env ]; then printf 'auto\\ngo1.26.6\\noff\\n'; exit 0; fi\n"
+const fakeGoEnvProbe = `if [ "$1" = env ]; then
+  if [ "$2" = -json ]; then printf '{"GOVERSION":"go1.26.6"}\n'; else printf 'auto\ngo1.26.6\noff\n'; fi
+  exit 0
+fi
+`
 
 func TestExplainCacheKey_AgreesWithPipelineCacheKey(t *testing.T) {
 	dir := newPipelineDir(t)

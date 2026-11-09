@@ -47,20 +47,20 @@ func TestSDKInstallHashAllFilesIncludesIgnoredEmbeddedInputs(t *testing.T) {
 	assertBuildPolicyOutput(t, first, "first")
 	writeInput(t, dir, "payload", []byte("second"))
 	cached := runBuildPolicyInstall(t, dir, "")
-	if cached.CachedExecutable != first.CachedExecutable {
-		t.Fatal("fixture did not reuse the ignored-input cache entry")
+	if cached.CachedExecutable == first.CachedExecutable {
+		t.Fatal("ignored compiled input reused a stale executable")
 	}
-	assertBuildPolicyOutput(t, cached, "first")
+	assertBuildPolicyOutput(t, cached, "second")
 	all := runBuildPolicyInstall(t, dir, `"hash_all_files":true`)
 	assertBuildPolicyOutput(t, all, "second")
 	if all.CachedExecutable == first.CachedExecutable {
 		t.Fatal("hash-all-files reused a stale executable")
 	}
 	ordinary := runBuildPolicyInstall(t, dir, "")
-	if ordinary.CachedExecutable != first.CachedExecutable {
+	if ordinary.CachedExecutable != cached.CachedExecutable {
 		t.Fatal("hash-all-files changed another installation's policy")
 	}
-	assertBuildPolicyOutput(t, ordinary, "first")
+	assertBuildPolicyOutput(t, ordinary, "second")
 }
 
 func realBuildPolicyFixture(t *testing.T) string {

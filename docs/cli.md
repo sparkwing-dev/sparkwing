@@ -58,9 +58,10 @@ connection profile. Use `pipeline trigger --profile NAME` to submit to a remote
 controller. The pipeline name selects the deployment shape.
 
 For local execution, `--sw-no-bincache` compiles a fresh Go pipeline executable with debug information.
-`--sw-hash-all-files` includes Git-ignored files in binary-cache keys, including
-local replacement modules. Both options apply to initial inspection and retained
-execution, including detached runs and retries.
+`--sw-hash-all-files` also hashes Git-ignored files outside Go's selected build
+inputs, including local replacement modules. Compiled and embedded inputs are
+always hashed regardless of Git ignore rules. Both options apply to initial
+inspection and retained execution, including detached runs and retries.
 
 Local `--sw-priority front|back` resolves once against the controller's current
 machine queue before submission. The sealed request retains the numeric rank.

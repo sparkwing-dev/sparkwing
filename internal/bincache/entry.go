@@ -170,7 +170,7 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	}
 	// safety: read before the hit path too, so a broken ceiling fails every
 	// call rather than only the one that publishes.
-	limits, err := ConfiguredLimits()
+	limits, err := automaticLimits(e.root)
 	if err != nil {
 		return nil, false, fmt.Errorf("pipeline cache ceilings: %w", err)
 	}
