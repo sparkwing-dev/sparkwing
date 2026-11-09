@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -143,6 +146,35 @@ func TestJobArtifactsPublishesListsAndDownloadsUnderCurrentMembership(t *testing
 		t.Fatal("read a path outside the manifest")
 	}
 
+	s3Objects, _, encoded := cloudFrontFixture(t)
+	cfg, err := ParseCloudFrontDataConfig("cdn.example.test", "key-id", encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloudFront, err := cfg.Backend(s3Objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.dataController.Objects = artifactSigningBackend{ObjectBackend: objects, signer: cloudFront}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/jobs/job/artifacts?path=dist%2Ffile.txt", nil)
+	request.Header.Set("Authorization", "Bearer "+member)
+	request.Header.Set("X-Real-IP", "198.51.100.9")
+	response := httptest.NewRecorder()
+	ratelimit.TrustedListener(server.Handler()).ServeHTTP(response, request)
+	var result controllerwire.JobArtifacts
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &result) != nil || result.Download == nil {
+		t.Fatalf("artifact response: %d %s", response.Code, response.Body)
+	}
+	signedURL, err := url.Parse(result.Download.URL)
+	if err != nil || signedURL.Host != "cdn.example.test" || signedURL.Query().Get("Policy") == "" {
+		t.Fatalf("artifact URL: %+v, %v", result.Download, err)
+	}
+	policy := string(cloudFrontDecode(t, signedURL.Query().Get("Policy")))
+	if !strings.Contains(policy, `"AWS:SourceIp":"198.51.100.9/32"`) {
+		t.Fatalf("artifact policy: %s", policy)
+	}
+	server.dataController.Objects = objects
+
 	engineSQL(t, e.Store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('foreign-artifact-reader','foreign@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','foreign-artifact-reader','editor',1)`)
@@ -162,4 +194,13 @@ func TestJobArtifactsPublishesListsAndDownloadsUnderCurrentMembership(t *testing
 	if entries, err := reader.ReadArtifacts(t.Context(), "run", "job", 50, ""); err == nil || len(entries.Artifacts) != 0 {
 		t.Fatalf("revoked membership read files = %+v, %v", entries, err)
 	}
+}
+
+type artifactSigningBackend struct {
+	blob.ObjectBackend
+	signer blob.ObjectBackend
+}
+
+func (b artifactSigningBackend) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error) {
+	return b.signer.Sign(ctx, object)
 }

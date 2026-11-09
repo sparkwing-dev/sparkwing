@@ -58,7 +58,8 @@ func (s *Server) handleJobArtifacts(w http.ResponseWriter, r *http.Request, a ca
 			return dataRouteError(err)
 		}
 		object := capability.ObjectToSign{Method: http.MethodGet, Key: "teams/" + manifest.Team + "/cas/" + string(entry.Digest), SHA256: string(entry.Digest), Size: entry.Size, ExpiresAt: time.Now().UTC().Add(limits.DataDownloadURLTTL)}
-		signed, err := s.dataController.Objects.Sign(r.Context(), object)
+		ctx := dataDownloadContext(r.Context(), r)
+		signed, err := s.dataController.Objects.Sign(ctx, object)
 		if err != nil {
 			return dataRouteError(err)
 		}
