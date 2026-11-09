@@ -91,7 +91,7 @@ func TestReleaseCollectsAndConsumesFragments(t *testing.T) {
 	if out, err := captureCmd(t.Context(), repo, "bash", "bin/check-changelog.sh"); err != nil {
 		t.Fatalf("fragment gate refuses the staged release: %v\n%s", err, out)
 	}
-	if err := (&commitChangelogJob{RepoDir: repo, Version: version}).run(ctx); err != nil {
+	if err := (&commitChangelogJob{RepoDir: repo, Version: version, SDKVersion: version}).run(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if gitRun(t, repo, "status", "--porcelain") != "" {

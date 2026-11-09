@@ -31,15 +31,17 @@ func runReleaseStateCheck(t *testing.T, repo, name string) error {
 	}
 }
 
-func TestReleaseStateChecksRefuseStalePublishedVersions(t *testing.T) {
+func TestReleaseFreshnessDefersSDKPinToPublication(t *testing.T) {
 	repo := seedProxyPinnedRepo(t, false)
 	origin := t.TempDir()
 	gitRun(t, origin, "init", "--bare", "-b", "main")
 	gitRun(t, repo, "remote", "add", "origin", origin)
 	gitRun(t, repo, "push", "origin", "main", "--tags")
-	err := runReleaseStateCheck(t, repo, "version-freshness")
-	if err == nil || !strings.Contains(err.Error(), fixturePhantomVersion) {
-		t.Fatalf("stale published pin refusal = %v, want %s", err, fixturePhantomVersion)
+	if err := runReleaseStateCheck(t, repo, "version-freshness"); err != nil {
+		t.Fatalf("SDK publication must own the cut's SDK pin: %v", err)
+	}
+	if err := CheckVersionsFreshness(newTestContext(t), repo); err == nil || !strings.Contains(err.Error(), fixturePhantomVersion) {
+		t.Fatalf("development freshness lost its SDK check: %v", err)
 	}
 }
 

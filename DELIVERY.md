@@ -1947,14 +1947,38 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
 
 `weekly-release` runs Monday at 09:00 America/Denver. It selects freshly
 fetched `origin/main` by default, or `--commit SHA`, and uses the same detached
-worktree cut and exact-source CI check as `release`. It skips when the selected
+worktree cut and exact-source CI check as `release`. The inner cut pins its
+pipeline to the caller tooling commit with `--sw-pipeline-ref`, while jobs
+operate on the selected source checkout. SDK verification executes from that
+current pipeline code, so an older source cannot supply older release tooling. It skips when the selected
 source has no `[Unreleased]` entries. Its default minor bump stays on v0.x.
 Release cuts are pre-approved. The scheduled entrypoint supplies the cut's
 `--sw-allow-risk destructive,prod` authorization. Main keeps accepting lands
 while the cut runs. Publication merges the prepared metadata into fresh main
 and atomically pushes that merge with the tag on the separate release commit.
 
-That tag makes the Go SDK module available and starts the existing
+Go SDK releases use independent `sparkwing/v0.x.y` tags. Before preparing
+engine release metadata, the cut hashes sorted tracked SDK module paths and
+committed bytes, including go.mod, Go source, embeds, test fixtures and the
+inherited root license when the SDK has no license file. Root build/dist output directories, vendor/cache directories and root workspace
+files are excluded. Tracked fixture inputs remain source inputs. The annotated SDK
+tag records `SDK-Source-SHA256`; the cut verifies that record against the tag's
+source. An unchanged digest reuses that SDK version without creating a tag.
+The first SDK version is v0.1.0. Any source change advances the v0 minor and
+resets patch to zero, because pre-1.0 source changes may break the API. Engine
+version selection does not affect SDK version selection.
+
+A changed SDK runs its module tests and Go/TypeScript protocol conformance in the SDK publication job, then tags the selected tested source and publishes
+that SDK tag first. A fresh module cache and the public Go proxy must resolve
+the SDK before the cut prepares the engine requirement and SDK pins. A proxy
+failure stops the engine cut; retry reuses the immutable SDK tag only after
+comparing its recorded digest with its source. A conflicting tag fails rather
+than being moved. Dry runs compute and report the decision without publication.
+The engine metadata commit updates root go.mod/go.sum and SDK pin artifacts to
+the independently selected SDK version. The SDK source digest excludes that
+engine metadata.
+
+The engine tag starts the existing
 `.github/workflows/release.yaml` publication steps for signed CLI binaries,
 images and the TypeScript package. Before cutting, the weekly pipeline starts
 or resumes the Bitwing `sparkwing-release` workflow using the version as its

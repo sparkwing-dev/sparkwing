@@ -41,10 +41,10 @@ func TestScaffoldFallbackProblem(t *testing.T) {
 
 func TestScaffoldFallbackChecksPublicationWithoutTheLocalReleaseTag(t *testing.T) {
 	repo := seedReleaseRepo(t)
-	gitRun(t, repo, "tag", "v0.1.0")
-	gitRun(t, repo, "tag", "v0.2.0")
-	gitRun(t, repo, "push", "origin", "v0.2.0")
-	gitRun(t, repo, "tag", "--delete", "v0.2.0")
+	gitRun(t, repo, "tag", "sparkwing/v0.1.0")
+	gitRun(t, repo, "tag", "sparkwing/v0.2.0")
+	gitRun(t, repo, "push", "origin", "sparkwing/v0.2.0")
+	gitRun(t, repo, "tag", "--delete", "sparkwing/v0.2.0")
 	ctx := newTestContext(t)
 	for _, version := range []string{"v0.2.0", "v0.3.0"} {
 		if err := bumpFallbackSDKVersionFile(repo, version); err != nil {
@@ -330,8 +330,8 @@ func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
 	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldAPISnapshotRel)), "# pkg/scaffold\n\nconst FallbackSDKVersion = \""+ahead+"\"\n")
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "seed coherent ahead artifacts")
-	gitRun(t, repo, "tag", "v0.1.0")
-	gitRun(t, repo, "push", "origin", "v0.1.0")
+	gitRun(t, repo, "tag", "sparkwing/v0.1.0")
+	gitRun(t, repo, "push", "origin", "sparkwing/v0.1.0")
 	before := gitRun(t, repo, "rev-parse", "HEAD")
 
 	bumped, err := autoBumpSparkwingPinIfStale(newTestContext(t), repo)
@@ -351,7 +351,7 @@ func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
 
 func TestAutoBumpSparkwingPinIfStaleLeavesDetachedCheckoutUnchanged(t *testing.T) {
 	repo := seedReleaseRepo(t)
-	gitRun(t, repo, "tag", "v0.99.0")
+	gitRun(t, repo, "tag", "sparkwing/v0.99.0")
 	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n\n// past the tag\n")
 	gitRun(t, repo, "add", "doc.go")
 	gitRun(t, repo, "commit", "-m", "move past the tag")
@@ -399,7 +399,7 @@ func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *tes
 	}
 	mustGit("add", ".keep")
 	mustGit("commit", "-m", "init")
-	mustGit("tag", "v0.99.0")
+	mustGit("tag", "sparkwing/v0.99.0")
 
 	scaffoldDir := filepath.Join(dir, "pkg", "scaffold")
 	if err := os.MkdirAll(scaffoldDir, 0o755); err != nil {
@@ -461,7 +461,7 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 	}
 	mustGit("add", ".")
 	mustGit("commit", "-m", "seed")
-	mustGit("tag", "v0.99.0")
+	mustGit("tag", "sparkwing/v0.99.0")
 	unrelated := filepath.Join(dir, "unrelated.txt")
 	if err := os.WriteFile(unrelated, []byte("keep me staged\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -504,7 +504,7 @@ func TestAutoBumpSparkwingPinIfStaleRegeneratesAPISnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitRun(t, repo, "config", "core.hooksPath", hooks)
-	gitRun(t, repo, "tag", "v0.99.0")
+	gitRun(t, repo, "tag", "sparkwing/v0.99.0")
 	// safety: the pin catches up to a tag the trunk has moved past. A tag still
 	// pointing at HEAD is the release being verified, which nothing can pin.
 	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n\n// past the tag\n")
@@ -807,7 +807,7 @@ func seedProxyPinnedRepo(t *testing.T, retract bool) string {
 	gitRun(t, repo, "config", "core.hooksPath", t.TempDir())
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "seed")
-	gitRun(t, repo, "tag", fixturePinnedVersion)
+	gitRun(t, repo, "tag", "sparkwing/"+fixturePinnedVersion)
 
 	proxyPath := filepath.ToSlash(filepath.Join(base, "proxy"))
 	if filepath.VolumeName(proxyPath) != "" {

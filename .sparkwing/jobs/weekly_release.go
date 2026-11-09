@@ -49,6 +49,11 @@ func (j *weeklyReleaseJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) 
 }
 
 func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
+	tools, err := runGitIn(ctx, j.RepoDir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	tools = strings.TrimSpace(tools)
 	selected := strings.TrimSpace(j.Args.Commit)
 	if selected == "" {
 		selected = "HEAD"
@@ -142,7 +147,7 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 		}
 	}
 	// perf: reuse exact-source CI evidence to avoid a broad desktop suite; retain the release-specific guards.
-	args := []string{"run", "release-cut", "-C", checkout, "--sw-route", "local"}
+	args := []string{"run", "release-cut", "-C", checkout, "--sw-route", "local", "--sw-pipeline-ref", tools}
 	if ciErr == nil {
 		args = append(args, "--sw-start-at", "version-freshness")
 	}
