@@ -539,10 +539,24 @@ downgrade or restore runs. Staging and production have separate database servers
 Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push runs
-through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
-through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
-retried old run cannot roll production back.
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. A capacity-one global
+queue serializes the whole deploy, including staging and production. At build admission,
+`git ls-remote` checks main's tip. Superseded waiters stop before credentials, image work or
+Cloud smoke. Several stale rows can wait, but only the newest waiting commit can pass
+admission. Once admitted, a candidate keeps its slot and can finish even when more pushes land.
+Staging and production fetch main's history and require the candidate SHA to be an ancestor
+of `origin/main` or its tip. These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses
+as repository proof.
+
+Production requires a staging-gate pass for the same image digests and checks both production
+image revision labels. Each changed digest must advance from its pinned revision to a newer
+source commit, with no version downgrade. Missing revision evidence, unrelated history or a
+new digest for the same SHA stops before GitOps pins change. A retry can finish a partial
+deployment when a matching digest already runs. An already deployed image pair leaves the
+pins unchanged.
+
+A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version`
+reach a real deploy through the entry's `args`.
 
 The deployment pipeline pins a published SDK without a local replacement, so
 Cloud planning and self-hosted jobs resolve the same signed engine. A replacement

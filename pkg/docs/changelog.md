@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **Template verification:** `template-verify -- --only NAME` checks one template during authoring and reports the selected scope
 ### Security
 
 - **Helm:** Confine launcher node updates and NodeClaim deletes to its Sparkwing capacity, allow only binding-label additions and reservation/quarantine taint changes, and disable API token automount on its ServiceAccount
@@ -46,6 +49,7 @@ unlock.
 
 ### Fixed
 
+- **deployment:** Skip superseded queued builds before credentials or Cloud smoke, and let staging-verified ancestors of main finish promotion while both production image revisions only advance
 - **run status:** Retry receipts list only completed reuse, excluding successful source jobs that had to execute again because their results could not be reused.
 - **runner:** Child awaits pace controller reads with jittered backoff and reuse the authorized host request while waiting
 - **Local onboarding:** the welcome card calls out the initial commit, and the quick start explains run inspection, managed schedules and the daemon-owned dashboard.
