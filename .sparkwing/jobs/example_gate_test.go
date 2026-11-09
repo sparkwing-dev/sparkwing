@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -144,40 +145,49 @@ func TestExampleBuildCLISignsInBeforePublishingTheWrapper(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture toolchain is a POSIX executable")
 	}
-	t.Chdir(t.TempDir())
-	tools := t.TempDir()
-	record := filepath.Join(tools, "record")
-	fakeCLI := fmt.Sprintf("#!/bin/sh\\n{ echo \"home=$SPARKWING_HOME\"; echo \"args=$*\"; echo \"token=$(cat)\"; } > \"%s\"\\n", record)
-	fakeGo := fmt.Sprintf("#!/bin/sh\nwhile [ \"$1\" != -o ]; do shift; done\nprintf '%s' > \"$2\"\nchmod 0700 \"$2\"\n", fakeCLI)
-	if err := os.WriteFile(filepath.Join(tools, "go"), []byte(fakeGo), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
-	host := sparkwingtest.New(sparkwingtest.Options{Secrets: map[string]sparkwingtest.Secret{exampleProbeToken: {Value: "probe-token", Masked: true}}})
-	defer func() {
-		if err := host.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	rc := sparkwing.RunContext{RunID: "run-build-cli"}
-	in := ExampleInputs{CLI: filepath.Join(tools, "absent"), APIController: "https://staging.example"}
-	if err := exampleBuildCLI(in, rc)(host.Context(t.Context())); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	home := filepath.Join(exampleCLIDir(rc), "home")
-	want := "home=" + home + "\nargs=profiles add --profile " + exampleProbeProfile + " --controller https://staging.example --token-stdin\ntoken=probe-token\n"
-	if string(got) != want {
-		t.Fatalf("profile add saw\n%s\nwant\n%s", got, want)
-	}
-	if _, err := os.Stat(filepath.Join(home, "token")); !os.IsNotExist(err) {
-		t.Fatalf("token file left behind: %v", err)
-	}
-	if resolved, ok := exampleLifecycle(in, rc); !ok || resolved.APIProfile != exampleProbeProfile {
-		t.Fatalf("probes cannot resolve the built CLI: %+v", resolved)
+	for _, postDeploy := range []bool{false, true} {
+		t.Run(fmt.Sprint(postDeploy), func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			tools := t.TempDir()
+			record := filepath.Join(tools, "record")
+			fakeCLI := fmt.Sprintf("#!/bin/sh\\n{ echo \"home=$SPARKWING_HOME\"; echo \"args=$*\"; echo \"token=$(cat)\"; } > \"%s\"\\n", record)
+			fakeGo := fmt.Sprintf("#!/bin/sh\nwhile [ \"$1\" != -o ]; do shift; done\nprintf '%s' > \"$2\"\nchmod 0700 \"$2\"\n", fakeCLI)
+			if err := os.WriteFile(filepath.Join(tools, "go"), []byte(fakeGo), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+			host := sparkwingtest.New(sparkwingtest.Options{Secrets: map[string]sparkwingtest.Secret{exampleProbeToken: {Value: "probe-token", Masked: true}, "DEPLOY_SCAN_PRODUCTION_TOKEN": {Value: "scan-team-token", Masked: true}}})
+			defer func() {
+				if err := host.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			rc := sparkwing.RunContext{RunID: "run-build-cli"}
+			in := ExampleInputs{CLI: filepath.Join(tools, "absent"), APIController: "https://staging.example", PostDeploy: postDeploy}
+			token := "probe-token"
+			if postDeploy {
+				in.APIController = defaultDeployConfig().Production.ControllerURL
+				token = "scan-team-token"
+			}
+			if err := exampleBuildCLI(in, rc)(host.Context(t.Context())); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			home := filepath.Join(exampleCLIDir(rc), "home")
+			want := "home=" + home + "\nargs=profiles add --profile " + exampleProbeProfile + " --controller " + in.APIController + " --token-stdin\ntoken=" + token + "\n"
+			if string(got) != want {
+				t.Fatalf("profile add saw\n%s\nwant\n%s", got, want)
+			}
+			if _, err := os.Stat(filepath.Join(home, "token")); !os.IsNotExist(err) {
+				t.Fatalf("token file left behind: %v", err)
+			}
+			if resolved, ok := exampleLifecycle(in, rc); !ok || resolved.APIProfile != exampleProbeProfile {
+				t.Fatalf("probes cannot resolve the built CLI: %+v", resolved)
+			}
+		})
 	}
 }
 
@@ -214,6 +224,25 @@ func TestExampleFailOnceUsesReusedSourceIdentityWithoutCLI(t *testing.T) {
 			_, err = host.RunStep(t.Context(), plan, "probe", "run")
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Fatalf("probe error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestExampleOIDCClaimsUseInheritedDeployIdentity(t *testing.T) {
+	for _, postDeploy := range []bool{false, true} {
+		t.Run(fmt.Sprint(postDeploy), func(t *testing.T) {
+			pipeline := "example"
+			if postDeploy {
+				pipeline = "deploy"
+			}
+			payload := fmt.Sprintf(`{"iss":"https://issuer.example","sub":"team:example","aud":"sparkwing-example-gate","run_id":"run","pipeline":%q,"iat":1,"exp":%d}`, pipeline, time.Now().Add(time.Minute).Unix())
+			token := "header." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".signature"
+			host := newTestHost(t, sparkwingtest.Options{OIDCToken: func(context.Context, string) (string, error) { return token, nil }})
+			plan := sparkwing.NewPlan()
+			exampleIntegration(plan, ExampleInputs{PostDeploy: postDeploy}, sparkwing.RunContext{RunID: "run", Pipeline: "example"})
+			if _, err := host.RunStep(t.Context(), plan, "oidc-claims", "run"); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

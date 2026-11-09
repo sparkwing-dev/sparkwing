@@ -67,7 +67,9 @@ func productionRuntime(version string) clusterRuntime {
 				}
 				// perf: the copy overlaps the Docker sidecar's startup.
 				seeded := make(chan error, 1)
-				go func() { seeded <- seedGoCaches(goSeedRoot, version, options.ModuleCache, os.Getenv("GOCACHE")) }()
+				go func() {
+					seeded <- seedGoCaches(goSeedRoot, goStandardSeed, version, options.ModuleCache, os.Getenv("GOCACHE"))
+				}()
 				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup); err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}

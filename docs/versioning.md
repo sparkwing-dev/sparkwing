@@ -173,7 +173,17 @@ sparkwing pipeline upgrade --version v1.2.3
 `upgrade` stages concrete SDK pin and lockfile edits in a private checkout.
 The selected verified engine installs the staged SDK through `InstallSDK`.
 `cache warm` uses the same selected-engine installer. The hidden SDK-install
-command delegates to the engine package, which owns Go builds and `npm ci`.
+command delegates to the engine package, which owns Go builds and npm installation.
+TypeScript preparation serializes `npm install --no-save --no-audit --no-fund`
+on the selected `package-lock.json` or `npm-shrinkwrap.json`. Before installation,
+`npm ci --dry-run --ignore-scripts` checks that dependencies match that lockfile
+without deleting installed packages or running lifecycle scripts. npm reuses its
+installed tree and applies project, user and global configuration, including
+workspace selection. Concurrent jobs preserve unchanged SDK packages, and removing
+`node_modules` causes a fresh install. Preparation leaves the manifest and lockfile
+unchanged and validates the installed SDK against the exact native pin.
+Root lifecycle scripts run on each preparation. Other dependencies are reconciled
+only after npm's frozen-lockfile check passes.
 Each installation makes one helper attempt with a ten-minute deadline. Failure
 stops the install, reports the cause, and kills and reaps its helper process tree.
 Verification then compiles Go packages or type-checks TypeScript and runs list,

@@ -506,14 +506,26 @@ a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before
 migration. Checking that automated backups are on belongs to external verification through
 stormwing, not the deploy. The deploy role has no RDS permission.
 
-After a successful staging gate or production smoke, the deploy starts a detached child
+After a successful production smoke, the deploy starts a detached child
 `deploy-scan` at the deployed commit and digests using `sparkwing.StartChild`.
 The child inherits verified-default provenance from the deploy, so the existing
 runner trust policy and repository-scoped scan secrets apply; it is exempt from
-the parent-completion child sweep. No manual trigger token is needed. The scan runs the full `example`
-and records its result in the runner user's normal Bitwing ledger. Promotion does
-not wait for it, and its environment-specific concurrency group is separate from
-the deploy group. Bitwing must be installed on that user's PATH. The scan also
+the parent-completion child sweep. The scan starts the full `example` through the same native
+child route and awaits its run ID with `sparkwing.AwaitChild`, retaining the deploy proof and
+releasing runner capacity during the wait. The inline scan wrapper runs on the deploy owner.
+Example jobs, generated work and lifecycle probes require `deploy-kikd-prod`. Example jobs
+share the capacity-one `sparkwing-post-deploy-work` job group. A waiting example job retains
+that group while its weather child or serialized probe runs, so other scan jobs cannot fill
+the desktop's other slot. Probe children use a separate capacity-one job group to avoid
+waiting on their parent's group. The small staging and production smokes retain Cloud placement.
+Promotion does not wait for the full scan. All `deploy-scan` runs share the capacity-one
+`sparkwing-post-deploy` run group. Queued scans whose source is no longer main's tip stop
+before building or running fixtures, so the newest waiting revision wins. The target team's
+existing example history is the hourly receipt: an in-flight run suppresses another scan
+without waiting or changing findings. A result finished within the last hour is read once
+and reported again without starting another example, including failed results.
+Staging leaves the full scan for
+production. Bitwing must be installed on that user's PATH. The scan also
 requires the runner label and trust conditions documented below.
 
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
@@ -680,6 +692,14 @@ sparkwing run deploy -- --dry-run --promote-proven        # preview promoting th
 ```
 
 #### Deploy toolchain
+
+Deploy CLI homes share only the runner's existing content-addressed pipeline
+binary cache. Each invocation keeps its profiles, credentials and store in its
+private job home. The cache key covers pipeline source and local dependencies,
+toolchain identity, GOOS/GOARCH and build flags. Changed inputs rebuild, and
+installation verifies the cached bytes before executing a private copy.
+If linking the cache fails, submission uses its private cache. Job cleanup
+removes the link, while existing cache limits and pruning own retained entries.
 
 Deploys run only on runners labelled `deploy-kikd-prod`. After installing the root-owned toolchain
 below, enroll one with `sparkwing runners add --profile prod --runner korey-desktop --session-stdin

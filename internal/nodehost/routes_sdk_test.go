@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type routerSDK struct {
@@ -66,12 +67,25 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 	service.OIDC = func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {
 		return ProcessOIDCToken{Token: "minted-credential", ExpiresAt: time.Now().Add(time.Hour)}, nil
 	}
+	awaiting := false
+	awaits := 0
+	service.activity = &nativeProcessActivity{activity: ExecutorActivity{Await: func() func() {
+		awaiting = true
+		awaits++
+		return func() { awaiting = false }
+	}}}
 	children := 0
 	service.StartChild = func(context.Context, capability.Authorized, ChildRequest) (string, error) {
 		children++
 		return fmt.Sprintf("child-%d", children), nil
 	}
 	service.AwaitChild = func(_ context.Context, _ capability.Authorized, run, _ string, _ time.Duration) (ProcessChildResult, error) {
+		if !awaiting {
+			t.Error("SDK child wait retained its execution slot")
+		}
+		if run == "child-3" {
+			return ProcessChildResult{RunID: run, Status: "failed"}, nil
+		}
 		if run == "child-2" {
 			return ProcessChildResult{RunID: run, Status: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "dynamic-credential", Details: map[string]any{"why": "dynamic-credential"}}}, nil
 		}
@@ -128,6 +142,14 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 			if !errors.As(err, &failure) || failure.Code != apierr.SDKError || strings.Contains(failure.Error(), "dynamic-credential") {
 				return errors.New("SDK child failure did not preserve canonical masked error")
 			}
+			id, err := sparkwing.StartChild(ctx, "compile", nil)
+			if err != nil {
+				return err
+			}
+			status, err := sparkwing.AwaitChild(ctx, id)
+			if err != nil || status != "failed" {
+				return fmt.Errorf("SDK native child await = %q, %w", status, err)
+			}
 			return nil
 		}
 		err := check()
@@ -168,6 +190,9 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("SDK protocol did not join before deadline")
+	}
+	if awaiting || awaits != 3 {
+		t.Fatalf("child slot handoffs: awaiting=%v calls=%d", awaiting, awaits)
 	}
 	if len(records) != 2 || strings.Contains(strings.Join(records, " "), "dynamic-credential") {
 		t.Fatalf("records were not acknowledged and masked: %v %+v", records, records)
