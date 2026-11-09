@@ -745,7 +745,7 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return testRendered(c.Args[1], pins, "new-chart") + testClusterScoped, nil
+		return testRendered(c.Args[1], pins, "new-chart") + testClusterScoped + testClusterAdmission, nil
 	case name == "bash":
 		if strings.Contains(joined, "build-release-target") {
 			dist := filepath.Join(c.Dir, "dist")
@@ -798,6 +798,10 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 	joined := strings.Join(c.Args, " ")
 	envDir := map[string]string{"sparkwing-staging": "sparkwing-staging", "sparkwing": "sparkwing"}
 	switch {
+	case strings.HasPrefix(joined, "get ValidatingAdmissionPolicy "):
+		return testLiveAdmissionPolicy, nil
+	case strings.HasPrefix(joined, "get ValidatingAdmissionPolicyBinding "):
+		return testLiveAdmissionBinding, nil
 	case strings.Contains(joined, "annotate application"):
 		return "", nil
 	case strings.Contains(joined, "rollout status"):
@@ -946,10 +950,10 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	}
 	if final := deployGitIn(t, f.bare, "show", "main:sparkwing-staging/rendered.yaml"); !strings.Contains(final, "chart: new-chart") || strings.Contains(final, "@"+f.old.Runner.Digest) {
 		t.Fatalf("the launcher commit did not carry the rest of the chart:\n%s", final)
-	} else if strings.Contains(final, "kind: ClusterRole") || strings.Contains(final, "kind: Namespace") {
+	} else if strings.Contains(final, "kind: ClusterRole") || strings.Contains(final, "kind: Namespace") || strings.Contains(final, "kind: ValidatingAdmissionPolicy") {
 		t.Fatalf("the render kept cluster-scoped objects:\n%s", final)
 	}
-	if !slices.Contains(f.said, "left out of sparkwing-staging/rendered.yaml, applied through kikd-infra k8s/sparkwing-cluster/: Namespace/sparkwing-cloud-jobs, ClusterRole/sparkwing-runner-boundary") {
+	if !slices.Contains(f.said, "left out of sparkwing-staging/rendered.yaml, applied through kikd-infra k8s/sparkwing-cluster/: Namespace/sparkwing-cloud-jobs, ClusterRole/sparkwing-runner-boundary, ValidatingAdmissionPolicy/sparkwing-cloud-capacity, ValidatingAdmissionPolicyBinding/sparkwing-cloud-capacity") {
 		t.Fatalf("the deploy did not name the cluster-scoped objects it left out: %q", f.said)
 	}
 

@@ -698,7 +698,9 @@ or 4h55 for all four jobs if every ceiling is reached.
 The deploy writes no cluster-scoped object to GitOps: the AppProject `sparkwing` permits no
 cluster-scoped kinds, so a GitOps commit cannot grant cluster-wide access. The render drops the
 chart's namespaces, ClusterRole, ClusterRoleBinding, admission policies and similar, logs each one
-it left out, and fails on any other object without a namespace. kikd-infra keeps them in
+it left out, and fails on any other object without a namespace. Before either deployment phase
+pushes GitOps, it reads every rendered ValidatingAdmissionPolicy and binding from the cluster
+and fails if any is missing or its spec differs, including the launcher capacity policy. kikd-infra keeps them in
 `k8s/sparkwing-cluster/staging.yaml` and `production.yaml`, applied by the Argo application
 `sparkwing-cluster` in project `kikd`. An image-only release leaves them alone: the Cloud job
 admission policies read the runner and Docker images from the ConfigMap `sparkwing-cloud-admission`

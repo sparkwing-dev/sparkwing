@@ -775,6 +775,9 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 		if err != nil {
 			return err
 		}
+		if err := d.verifyClusterAdmission(ctx, out); err != nil {
+			return err
+		}
 		if phase.name == deployPhaseController {
 			previous, err := os.ReadFile(filepath.Join(dir, rendered))
 			if err != nil {
