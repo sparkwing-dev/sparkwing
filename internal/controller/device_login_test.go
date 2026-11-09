@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -260,52 +259,10 @@ func TestRunnerTrustRefusalNamesOnlyCurrentClasses(t *testing.T) {
 }
 
 //sparkwing:critical
-func TestDeviceApprovalShowsExactlyTheAllowedRunnerLabels(t *testing.T) {
-	boundary := []string{strings.Repeat("a", 128)}
-	for i := range 31 {
-		boundary = append(boundary, fmt.Sprintf("deploy-pool-%d", i))
-	}
-	for _, tc := range []struct {
-		name      string
-		requested []string
-		allowed   []string
-	}{
-		{name: "normalized", requested: []string{"deploy-kikd-prod", "tool:terraform", " os=linux ", "pool=ignored"}, allowed: []string{"deploy-kikd-prod", "tool:terraform", "os=linux"}},
-		{name: "none", requested: []string{}, allowed: []string{}},
-		{name: "complete boundary", requested: boundary, allowed: boundary},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s, raw, csrf := reviewAccount(t, "owner")
-			labelsJSON, err := json.Marshal(tc.requested)
-			if err != nil {
-				t.Fatal(err)
-			}
-			started := startDevice(t, s, `{"kind":"runner","runner":{"name":"label-consent","personal":true,"allowed_labels":`+string(labelsJSON)+`}}`)
-			response := reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/lookup", `{"user_code":"`+started.UserCode+`"}`, 200)
-			var lookup controllerwire.DeviceLoginLookup
-			if err := json.Unmarshal(response.Body.Bytes(), &lookup); err != nil {
-				t.Fatal(err)
-			}
-			if lookup.Runner == nil || lookup.Runner.AllowedLabels == nil || !slices.Equal(lookup.Runner.AllowedLabels, tc.allowed) {
-				t.Fatalf("approval hid allowed labels: %+v, want %v", lookup.Runner, tc.allowed)
-			}
-			reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+started.UserCode+`"}`, 204)
-			poll := pollDevice(t, s, started.DeviceCode, 200)
-			if poll.Credential == nil {
-				t.Fatal("approval issued no runner")
-			}
-			var body []byte
-			if err := teststore.SQL(t, s.store).QueryRow(`SELECT authority_json FROM capabilities WHERE prefix=?`, poll.Credential.Prefix).Scan(&body); err != nil {
-				t.Fatal(err)
-			}
-			var record struct {
-				Origin struct {
-					AllowedLabels []string `json:"allowed_labels"`
-				} `json:"origin"`
-			}
-			if err := json.Unmarshal(body, &record); err != nil || !slices.Equal(record.Origin.AllowedLabels, lookup.Runner.AllowedLabels) {
-				t.Fatalf("issued labels differ from consent: %s %v", body, err)
-			}
-		})
+func TestDeviceLoginRefusesAllowedRunnerLabels(t *testing.T) {
+	s, _, _ := reviewAccount(t, "owner")
+	response := devicePost(t, s.Handler(), "/api/v1/auth/device", `{"kind":"runner","runner":{"name":"label-consent","personal":true,"allowed_labels":["deploy-prod"]}}`, 400)
+	if !strings.Contains(response.Body.String(), "runner labels are set by admin enrollment") {
+		t.Fatalf("label refusal gave no remedy: %s", response.Body)
 	}
 }

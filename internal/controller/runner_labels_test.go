@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 //sparkwing:critical
@@ -40,7 +39,7 @@ func TestRunnerEnrollmentRefusesInvalidAllowedLabels(t *testing.T) {
 }
 
 //sparkwing:critical
-func TestRunnerEnrollmentSpecAndDeviceLoginValidateLabelBounds(t *testing.T) {
+func TestRunnerEnrollmentSpecValidatesLabelBounds(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		labels  []string
@@ -61,16 +60,12 @@ func TestRunnerEnrollmentSpecAndDeviceLoginValidateLabelBounds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			enrollment := runnerEnrollmentRequest{Name: "label-bounds", Personal: true, AllowedLabels: tc.labels}
 			spec, enrollmentErr := runnerEnrollmentSpec(enrollment, capability.AuthorityRef{}, "acme")
-			device := deviceLoginRequest{Kind: controllerwire.DeviceLoginRunner, Runner: &enrollment}
-			deviceErr := validateDeviceLoginRequest(&device)
-			for seam, err := range map[string]error{"runnerEnrollmentSpec": enrollmentErr, "validateDeviceLoginRequest": deviceErr} {
-				if tc.refusal == "" {
-					if err != nil {
-						t.Fatalf("%s refused valid labels: %v", seam, err)
-					}
-				} else if err == nil || !strings.Contains(err.Error(), tc.refusal) {
-					t.Fatalf("%s refusal = %v, want %q", seam, err, tc.refusal)
+			if tc.refusal == "" {
+				if enrollmentErr != nil {
+					t.Fatalf("enrollment refused valid labels: %v", enrollmentErr)
 				}
+			} else if enrollmentErr == nil || !strings.Contains(enrollmentErr.Error(), tc.refusal) {
+				t.Fatalf("enrollment refusal = %v, want %q", enrollmentErr, tc.refusal)
 			}
 			if tc.refusal == "" && !slices.Equal(spec.AllowedLabels, tc.labels) {
 				t.Fatalf("enrollment changed configured labels: %v, want %v", spec.AllowedLabels, tc.labels)

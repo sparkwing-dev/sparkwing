@@ -270,6 +270,9 @@ func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 		if request.Runner == nil || len(request.Grants) != 0 {
 			return invalidEngineBody("a runner device login carries its enrollment in runner and no member grants")
 		}
+		if len(request.Runner.AllowedLabels) != 0 {
+			return invalidEngineBody("browser approval does not accept allowed_labels; runner labels are set by admin enrollment")
+		}
 		// safety: a browser approval is phishable, so it never grants a credential that runs other members' work.
 		if runner := request.Runner; !runner.Personal || len(runner.ReservedPools) != 0 || runner.Trust != "" || runner.Platform != "" || runner.Grants != nil {
 			return invalidEngineBody("browser approval enrolls personal runners only; enroll shared runners, reserved pools, trust classes, platforms and launchers with --session-stdin")
