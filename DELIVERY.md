@@ -26,6 +26,20 @@ sparkwing run land --sw-allow-risk destructive,prod  # land on main
 Lands run on owned hardware. Policy, gate, review and push use that machine.
 The land queue invokes it with `--sw-route local`.
 
+The focused queue can pass `-- --pre-push-review` with `--sw-only '*[wy]'`.
+This keeps policy and review selected and adds every unchanged `pre-push`
+step beside the review in the same inline job. The job fails fast, cancels
+in-flight siblings and joins them before reporting completion. Its CPU
+reservation includes the pre-push compilers. The reviewers have read-only
+access. They write their review record outside the checkout, while pre-push
+writes compiler and lint caches. Neither changes source.
+
+The queue captures HEAD after merging main, requires a clean checkout before
+checks, then requires the same HEAD and a clean checkout after both gates
+pass. Only that exact commit can push with `--no-verify`, because its normal
+pre-push checks already passed. A failed or cancelled check cannot push.
+The normal land path and human pushes keep their existing gates.
+
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
 itself, a CHANGELOG.md that repeats a `###` heading within a release, and a
 branch whose merge with a freshly fetched `origin/main`
