@@ -758,6 +758,8 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		return f.kubectl(c)
 	case name == "sparkwing":
 		switch {
+		case strings.HasPrefix(joined, "runs list"):
+			return `{"kind":"page","truncated":false}`, nil
 		case strings.HasPrefix(joined, "profiles add"):
 			if c.Stdin == "" || c.Env["SPARKWING_HOME"] == "" {
 				return "", fmt.Errorf("profile added without a token file or isolated home")

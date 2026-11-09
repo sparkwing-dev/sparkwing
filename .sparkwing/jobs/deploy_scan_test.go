@@ -34,6 +34,10 @@ func TestDeployScanBindsRevisionAndReportsObservedOutcome(t *testing.T) {
 				var findingArgs []string
 				d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
 					joined := strings.Join(c.Args, " ")
+					if status == "failed" && filepath.Base(c.Name) == "sparkwing" && strings.HasPrefix(joined, "pipeline trigger") {
+						out, _ := f.run(ctx, c)
+						return out, errors.New("here scan failed")
+					}
 					if filepath.Base(c.Name) == "bitwing" {
 						findingArgs = slices.Clone(c.Args)
 						if index := slices.Index(c.Args, "--file"); index >= 0 {
@@ -203,7 +207,10 @@ func TestDeployScanCannotStartPreservesFindings(t *testing.T) {
 	f := newFakeDeploy(t)
 	d := f.deployer(false)
 	var args []string
-	d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		if filepath.Base(c.Name) == "git" {
+			return f.run(ctx, c)
+		}
 		if filepath.Base(c.Name) == "bitwing" {
 			args = c.Args
 		} else if filepath.Base(c.Name) != "go" {
@@ -259,8 +266,8 @@ func TestDeployScanPipelineSeparatesConcurrencyAndPinsSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(doc.Jobs) != 1 || doc.Jobs[0].ID != "scan" || !slices.Equal(doc.Jobs[0].Requires, []string{"deploy-kikd-prod"}) || len(doc.Concurrency) != 1 || doc.Concurrency[0].Group != "sparkwing-post-deploy-"+environment {
-			t.Fatalf("scan must use its own concurrency group: %+v", doc)
+		if len(doc.Jobs) != 1 || !slices.Equal(doc.Jobs[0].Requires, []string{"deploy-kikd-prod"}) || len(doc.Concurrency) != 1 || doc.Concurrency[0].Group != "sparkwing-post-deploy" || *doc.Concurrency[0].Capacity != 1 {
+			t.Fatalf("scans must share one slot across environments: %+v", doc)
 		}
 		rec.Images.Commit = strings.Repeat("a", 40)
 		body, err = json.Marshal(rec)
@@ -293,7 +300,7 @@ func TestDeploySubmitsScanWithoutAwaitingAndLinksItsReceipt(t *testing.T) {
 		if err := json.Unmarshal([]byte(args["record"]), &rec); err != nil {
 			t.Fatal(err)
 		}
-		if pipeline != "deploy-scan" || rec.DeployRun != d.runID || rec.Images.Commit != f.head || !rec.Images.sameDigests(f.candidate()) || args["environment"] != "staging" {
+		if pipeline != "deploy-scan" || rec.DeployRun != d.runID || rec.Images.Commit != f.head || !rec.Images.sameDigests(f.candidate()) || args["environment"] != "production" {
 			t.Fatalf("unbound submission: %s, %+v, %v", pipeline, rec, args)
 		}
 		return "run-detached-scan", nil
@@ -307,7 +314,7 @@ func TestDeploySubmitsScanWithoutAwaitingAndLinksItsReceipt(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "submit", func(ctx context.Context) error {
 		var err error
-		run, err = d.submitScan(ctx, d.cfg.Staging, f.candidate())
+		run, err = d.submitScan(ctx, d.cfg.Production, f.candidate())
 		return err
 	}).StartsChildren("deploy-scan")
 	_, err := host.RunStep(t.Context(), plan, "submit", "run")
@@ -378,5 +385,90 @@ func TestDeployScanFeedbackReportsMissingUserInstall(t *testing.T) {
 	}
 	if err := d.recordScanFinding(t.Context(), deployScanRecord{Environment: "staging"}, true, errors.New("scan failed")); err == nil || !strings.Contains(err.Error(), "runner user's PATH") {
 		t.Fatalf("missing installation was hidden: %v", err)
+	}
+}
+
+func TestDeployScanRunsExampleOnItsOwnHardware(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		if filepath.Base(c.Name) == "sparkwing" && len(c.Args) > 1 && c.Args[0] == "runs" && c.Args[1] == "status" {
+			return `{"id":"run-example-production-scan","status":"success"}`, nil
+		}
+		if filepath.Base(c.Name) == "sparkwing" && slices.Contains(c.Args, "trigger") {
+			if !slices.Contains(c.Args, "here") || slices.Contains(c.Args, "--detach") || slices.Contains(c.Args, "cloud") {
+				t.Fatalf("full scans must stay on our hardware: %s", c)
+			}
+		}
+		return f.run(ctx, c)
+	}
+	if _, err := d.postDeployScan(deployScanContext(t), d.cfg.Production, f.candidate(), "run-deploy"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeployScanReusesRunningAndRecentFailedExamples(t *testing.T) {
+	for _, status := range []string{"running", "failed", "success", "old"} {
+		t.Run(status, func(t *testing.T) {
+			f := newFakeDeploy(t)
+			d := f.deployer(false)
+			finished := d.tools.now().Add(-time.Minute)
+			if status == "running" {
+				finished = time.Time{}
+			} else if status == "old" {
+				finished = d.tools.now().Add(-2 * time.Hour)
+			}
+			d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+				if filepath.Base(c.Name) == "sparkwing" && len(c.Args) > 1 && c.Args[0] == "runs" {
+					if c.Args[1] == "list" {
+						if !strings.Contains(strings.Join(c.Args, " "), "--pipeline example --repo sparkwing-dev/sparkwing --sha "+f.head+" --limit 1") {
+							t.Fatalf("hourly receipt lost its repository or revision: %s", c)
+						}
+						return fmt.Sprintf(`{"id":"run-existing","status":%q,"finished_at":%q}`, status, finished.Format(time.RFC3339Nano)), nil
+					}
+					outcome := "success"
+					if status == "failed" {
+						outcome = "failed"
+					}
+					return fmt.Sprintf(`{"id":"%s","status":%q}`, c.Args[3], outcome), nil
+				}
+				if filepath.Base(c.Name) == "sparkwing" && slices.Contains(c.Args, "trigger") && status != "old" {
+					t.Fatal("repeated scan started another full example")
+				}
+				return f.run(ctx, c)
+			}
+			rec, err := d.postDeployScan(deployScanContext(t), d.cfg.Production, f.candidate(), "run-deploy")
+			if (err != nil) != (status == "failed") || (rec.ExampleRun == "run-existing") != (status != "old") {
+				t.Fatalf("reused example = %q, %v", rec.ExampleRun, err)
+			}
+		})
+	}
+}
+
+func TestDeployScanSupersededRevisionStopsBeforeBuild(t *testing.T) {
+	f := newFakeDeploy(t)
+	images := f.candidate()
+	deployGitIn(t, f.repo, "commit", "--quiet", "--allow-empty", "-m", "newer source")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+	d := f.deployer(false)
+	if _, err := d.postDeployScan(deployScanContext(t), d.cfg.Production, images, "run-deploy"); err == nil || !strings.Contains(err.Error(), "only main's tip") {
+		t.Fatalf("superseded scan = %v", err)
+	}
+	for _, call := range f.calls {
+		if strings.Contains(call, "pipeline trigger") || strings.HasPrefix(call, "go ") {
+			t.Fatalf("superseded scan did expensive work: %s", call)
+		}
+	}
+}
+
+func TestDeployStagingLeavesTheFullScanForProduction(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.tools.startChild = func(context.Context, string, map[string]string) (string, error) {
+		t.Fatal("staging submitted a second full scan")
+		return "", nil
+	}
+	if run, err := d.submitScan(t.Context(), d.cfg.Staging, f.candidate()); err != nil || run != "" {
+		t.Fatalf("staging scan = %q, %v", run, err)
 	}
 }

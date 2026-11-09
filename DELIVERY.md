@@ -493,14 +493,21 @@ a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before
 migration. Checking that automated backups are on belongs to external verification through
 stormwing, not the deploy. The deploy role has no RDS permission.
 
-After a successful staging gate or production smoke, the deploy starts a detached child
+After a successful production smoke, the deploy starts a detached child
 `deploy-scan` at the deployed commit and digests using `sparkwing.StartChild`.
 The child inherits verified-default provenance from the deploy, so the existing
 runner trust policy and repository-scoped scan secrets apply; it is exempt from
 the parent-completion child sweep. No manual trigger token is needed. The scan runs the full `example`
-and records its result in the runner user's normal Bitwing ledger. Promotion does
-not wait for it, and its environment-specific concurrency group is separate from
-the deploy group. Bitwing must be installed on that user's PATH. The scan also
+on the runner's own hardware with `--runner here` and records its result in the
+runner user's normal Bitwing ledger. The small staging and production smokes retain Cloud
+placement. Promotion does not wait for the full scan. All `deploy-scan` runs share the
+capacity-one `sparkwing-post-deploy` concurrency group, leaving the desktop runner's second
+slot for deploy jobs. Queued scans whose source is no longer main's tip stop before building
+or running fixtures, so the newest waiting revision wins. The target team's existing example
+run history is the hourly receipt: an in-flight run or one that finished within the last hour
+at the same revision is observed again without starting another full example, including after
+failure or an interrupted scan attempt. Staging leaves the full scan for
+production. Bitwing must be installed on that user's PATH. The scan also
 requires the runner label and trust conditions documented below.
 
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
