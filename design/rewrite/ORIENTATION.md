@@ -51,6 +51,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Run selectors resolve a stable ID or canonical positive team number through a tenant-scoped identity lookup, without decoding run contents | `internal/store/run_selector.go`: `ResolveRunID`; `internal/controller/run_selector.go`: `resolveRunSelector` | `internal/store/run_selector_test.go`: `TestResolveRunIDUsesOnlyTheSelectedTeamsIdentity`; `internal/controller/public_selectors_native_test.go`: `TestPublicNumericSelectorsReadAndCommitCanonicalRun` |
 | Human run followers report admission holders and accounting once at entry, then only material queue changes at increasing intervals; JSON keeps the stored events | `cmd/sparkwing/admission_progress.go`; `internal/opsview/admission_wait.go` | `TestAdmissionProgressMaterialChangesAndIntervals`, `TestAdmissionProgressUsesOneHumanStreamAndPreservesJSON`, `TestAdmissionWaitLine` |
 | Queued machine cancellation reports cancelled without starting an attempt | `internal/wingd/client/client.go`: `cancelledError`; `internal/nodehost/local_admission.go`: `localAdmissionFailure` | `internal/nodehost/admission_cancel_process_test.go`: `TestQueuedMachineCancellationReportsCancelledWithoutStarting` |
 | Engine clients accept controller responses up to 64 MiB, close every body and refuse larger responses without replay | `internal/controller/client/engine.go`: `readResponse` | `internal/controller/client/engine_response_limit_test.go`: `TestEngineClientResponseLimit` |

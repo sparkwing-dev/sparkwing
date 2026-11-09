@@ -29,6 +29,7 @@ type RunTransactions interface {
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
 	ReplayRun(context.Context, store.IntakeRequest) (store.AdmissionResult, bool, error)
 	ReadRun(context.Context, string) (store.RunRow, error)
+	ResolveRunID(context.Context, string) (string, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadOwnerSnapshot(context.Context, capability.AuthorityRef, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
