@@ -52,17 +52,20 @@ func testTypeScriptInstallKeepsRunningSDKImportsAvailable(t *testing.T, lockfile
 			t.Fatal(err)
 		}
 	}
+	writeInput(t, dir, ".npmrc", []byte("loglevel=verbose\n"))
 	// bug: pause npm after its destructive cleanup so an already prepared SDK imports in that window.
 	wrapper := fmt.Sprintf(`#!%s
 const fs = require("node:fs");
 const net = require("node:net");
 const {spawnSync} = require("node:child_process");
 function install() {
+  fs.mkdirSync("npm-active");
   const result = spawnSync(%q, process.argv.slice(2), {stdio:"inherit"});
+  fs.rmdirSync("npm-active");
   process.exit(result.status ?? 1);
 }
-if (process.argv[2] === "ci" && fs.existsSync("install-gate")) {
-  fs.rmSync("node_modules", {recursive:true, force:true});
+if (["ci", "install"].includes(process.argv[2]) && fs.existsSync("install-gate")) {
+  if (process.argv[2] === "ci") fs.rmSync("node_modules", {recursive:true, force:true});
   const socket = net.connect(JSON.parse(fs.readFileSync("install-gate", "utf8")), "127.0.0.1");
   socket.once("data", () => { socket.destroy(); install(); });
 } else install();
@@ -125,6 +128,16 @@ if (process.argv[2] === "ci" && fs.existsSync("install-gate")) {
 	}
 	if err := os.Remove(filepath.Join(dir, "install-gate")); err != nil {
 		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	for range 4 {
+		go func() { <-started; _, err := install(); done <- err }()
+	}
+	close(started)
+	for range 4 {
+		if err := <-done; err != nil {
+			t.Fatalf("concurrent SDK preparation: %v", err)
+		}
 	}
 	writeInput(t, dir, "package.json", []byte(`{"main":"main.mjs","dependencies":{"@sparkwing/sdk":"file:../sdk"},"scripts":{"postinstall":"node -e \"require('node:fs').writeFileSync('install-receipt', 'changed')\""}}`))
 	if _, err := install(); err != nil {
