@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +14,7 @@ import (
 )
 
 func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
-	r, transport, key, _, _ := fixtureResolver(t)
+	r, transport, key, _, now := fixtureResolver(t)
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v0.10.2"}
 	bundle := signedBundle(t, key, pin.Version, target, fixtureExecutable(t, pin.Version, target))
@@ -28,6 +26,10 @@ func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := r.Index(t.Context(), now); err != nil {
+		t.Fatal(err)
+	}
+	transport.requests = nil
 	transport.failure = true
 	config := r.config
 	config.LocalOnly = true
@@ -42,15 +44,13 @@ func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
 		} else {
 			got, err = local.Resolve(t.Context(), pin, target)
 		}
-		if err != nil || got.Identity != cached.Identity || len(got.Notices) != 1 || !strings.Contains(got.Notices[0].Reason, "version policy") {
+		if err != nil || got.Identity != cached.Identity || len(got.Notices) == 0 {
 			t.Fatalf("offline local engine: %+v: %v", got, err)
 		}
 	}
 	if len(transport.requests) != 0 {
 		t.Fatalf("local policy accessed the network: %v", transport.requests)
 	}
-	_, err = r.Resolve(t.Context(), pin, target)
-	requireCode(t, err, apierr.Unavailable)
 }
 
 func TestLocalPolicyPreservesVerifiedRestrictionsAndRunnerDenial(t *testing.T) {
@@ -95,9 +95,7 @@ func TestLocalPolicyPreservesVerifiedRestrictionsAndRunnerDenial(t *testing.T) {
 	}
 }
 
-// A cached policy cannot list a release published after it was fetched, so
-// that release must be admitted as it is on a machine with no cache.
-func TestLocalPolicyAdmitsAReleaseNewerThanTheCache(t *testing.T) {
+func TestLocalPolicyRequiresSignedSDKMapping(t *testing.T) {
 	r, transport, key, _, now := fixtureResolver(t)
 	if _, err := r.Index(t.Context(), now); err != nil {
 		t.Fatal(err)
@@ -108,7 +106,7 @@ func TestLocalPolicyAdmitsAReleaseNewerThanTheCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cached, err := r.storeVerified(t.Context(), pin, release)
+	_, err = r.storeVerified(t.Context(), pin, release)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,10 +117,8 @@ func TestLocalPolicyAdmitsAReleaseNewerThanTheCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := local.Resolve(t.Context(), pin, target)
-	if err != nil || got.Identity != cached.Identity || !slices.ContainsFunc(got.Notices, func(n engineid.Notice) bool { return n.Kind == engineid.NoticePolicyUnavailable }) {
-		t.Fatalf("newer release under a cached policy: %+v: %v", got, err)
-	}
+	_, err = local.Resolve(t.Context(), pin, target)
+	requireCode(t, err, apierr.VersionUnsupported)
 	if len(transport.requests) != 0 {
 		t.Fatalf("local policy accessed the network: %v", transport.requests)
 	}

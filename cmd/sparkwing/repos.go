@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
@@ -110,7 +111,7 @@ func runReposList(inv clisurface.Invocation) error {
 		return errors.New("repos list: --pipelines applies to --checkouts")
 	}
 
-	latest, _ := fetchLatestRelease()
+	latest, _ := fetchLatestSDK()
 	fleet, err := buildFleet(latest)
 	if err != nil {
 		return err
@@ -231,12 +232,11 @@ func runReposUpdateWith(inv clisurface.Invocation, readFleet func(string) ([]rep
 		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--all-repos requires --yes to apply changes; use --dry-run to preview"}
 	}
 	target := strings.TrimSpace(inv.Value("version"))
-	if target == "" {
-		latest, err := fetchLatestRelease()
-		if err != nil {
-			return fmt.Errorf("repos update: no --version given and could not fetch latest release: %w", err)
-		}
-		target = latest
+	lookupCtx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
+	defer cancel()
+	target, err := updateSDKVersion(lookupCtx, target)
+	if err != nil {
+		return fmt.Errorf("repos update: resolve permitted Go SDK: %w", err)
 	}
 
 	fleet, err := readFleet(target)
@@ -467,7 +467,7 @@ func (execOps) Restore(sparkwingDir string, raw []byte) error {
 }
 
 func (o execOps) Bump(sparkwingDir, version string) error {
-	target := "github.com/sparkwing-dev/sparkwing@" + version
+	target := engine.GoModule + "@" + version
 	ctx := gotoolchain.WithSession(o.context(), nil, nil)
 	if out, err := runGoModCmd(ctx, sparkwingDir, "get", target); err != nil {
 		return fmt.Errorf("go get %s: %w: %s", target, err, out)

@@ -95,7 +95,7 @@ func runBuildPolicyInstall(t *testing.T, dir, policy string) engine.SDKCommand {
 		body = append(body[:len(body)-1], []byte(","+policy+"}")...)
 	}
 	var stdout, stderr bytes.Buffer
-	if err := Run(t.Context(), "v0.20.0", bytes.NewReader(body), &stdout, &stderr); err != nil {
+	if err := Run(t.Context(), bytes.NewReader(body), &stdout, &stderr); err != nil {
 		t.Fatalf("install: %v: %s", err, &stderr)
 	}
 	var command engine.SDKCommand

@@ -1,0 +1,223 @@
+{
+  "protocol": 2,
+  "language": "go",
+  "exchanges": [
+    {
+      "wire_request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        },
+        "binding": {
+          "run_id": "r",
+          "job_id": "task",
+          "routes": {
+            "url": "http://127.0.0.1:1",
+            "bearer": "secret"
+          }
+        }
+      },
+      "expected": {
+        "reply": "hello",
+        "ok": true,
+        "result": {
+          "protocol": 2,
+          "sdk": {
+            "language": "go",
+            "version": "(devel)"
+          }
+        }
+      },
+      "request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        },
+        "binding": {
+          "run_id": "r",
+          "job_id": "task",
+          "routes": {
+            "url": "http://127.0.0.1:1",
+            "bearer": "secret"
+          }
+        }
+      },
+      "frames": [
+        {
+          "reply": "hello",
+          "ok": true,
+          "result": {
+            "protocol": 2,
+            "sdk": {
+              "language": "go",
+              "version": "(devel)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "1",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "fail-body"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "expected": {
+        "reply": "1",
+        "ok": true,
+        "result": {
+          "jobs": [
+            {
+              "id": "task",
+              "memo": {},
+              "closures": {
+                "skip_if": [
+                  "task/skip/0"
+                ],
+                "before_run": [
+                  "task/before/0"
+                ],
+                "verify": "task/verify/0",
+                "after_run": [
+                  "task/after/0"
+                ],
+                "memo_key": "task/memo/0",
+                "generate": [
+                  "task/generate/0"
+                ]
+              },
+              "steps": [
+                {
+                  "id": "run"
+                }
+              ],
+              "failure_policy": "fail_fast"
+            }
+          ]
+        }
+      },
+      "request": {
+        "id": "1",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "fail-body"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "frames": [
+        {
+          "ts": "2026-11-09T10:53:45.026156171-07:00",
+          "level": "info",
+          "msg": "planning fail-body"
+        },
+        {
+          "reply": "1",
+          "ok": true,
+          "result": {
+            "jobs": [
+              {
+                "id": "task",
+                "memo": {},
+                "closures": {
+                  "skip_if": [
+                    "task/skip/0"
+                  ],
+                  "before_run": [
+                    "task/before/0"
+                  ],
+                  "verify": "task/verify/0",
+                  "after_run": [
+                    "task/after/0"
+                  ],
+                  "memo_key": "task/memo/0",
+                  "generate": [
+                    "task/generate/0"
+                  ]
+                },
+                "steps": [
+                  {
+                    "id": "run"
+                  }
+                ],
+                "failure_policy": "fail_fast"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "2",
+        "op": "run_step",
+        "job": "task",
+        "step": "run",
+        "attempt": 1,
+        "settled": []
+      },
+      "expected": {
+        "reply": "2",
+        "ok": true,
+        "result": {
+          "outcome": "failed",
+          "error": {
+            "code": "sdk_error",
+            "message": "fixture body failed"
+          }
+        }
+      },
+      "request": {
+        "id": "2",
+        "op": "run_step",
+        "job": "task",
+        "step": "run",
+        "attempt": 1,
+        "settled": []
+      },
+      "frames": [
+        {
+          "ts": "2026-11-09T10:53:45.026760667-07:00",
+          "level": "info",
+          "step": "run",
+          "msg": "running fail-body"
+        },
+        {
+          "reply": "2",
+          "ok": true,
+          "result": {
+            "outcome": "failed",
+            "error": {
+              "code": "sdk_error",
+              "message": "fixture body failed"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

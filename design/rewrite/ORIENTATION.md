@@ -16,6 +16,14 @@ credential model in `docs/auth.md`, and the decision log
 
 SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol so policy changes do not require SDK releases.
 
+### SDK protocol compatibility
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| The SDK announces its protocol in hello. The engine records it and upgrades frames through a registry keyed by that version before current decoding and policy. Protocol 2 is identity | `internal/nodehost/protocol_adapter.go`, `protocol_session.go` | `TestRecordedSDKProtocols`, `TestProtocolAdapterRejectsUnknownVersion`, `TestProtocolAdapterUpgradesBeforeValidation` |
+| Optional fields and capability flags never bump the protocol. The engine defaults missing optional fields. Breaking shapes bump it and need an engine-side adapter. Delete an adapter as soon as the signed mapping lists no SDK using that protocol | `internal/nodehost/protocol_adapter.go`, `docs/sdk.md`: Protocol compatibility | `TestRecordedSDKProtocols` |
+| Versioned Go and TypeScript wire recordings survive SDK source changes and replay against the current engine with identical outcomes. Record a version with `bash bin/record-sdk-protocol.sh <protocol>` inside Xwing scratch | `internal/nodeproto/conformance/testdata/recordings/` | `TestRecordedSDKProtocols`, `TestGoSDKConformsV2`, `TestNativeConformance` |
+
 ### Store baseline
 
 | Rule | Owner | Guard test |

@@ -52,7 +52,7 @@ func TestRunTypeScriptLocalSDK(t *testing.T) {
 				t.Fatal(err)
 			}
 			var output, diagnostics bytes.Buffer
-			if err := Run(t.Context(), "v0.68.0-qa.16", bytes.NewReader(request), &output, &diagnostics); err != nil {
+			if err := Run(t.Context(), bytes.NewReader(request), &output, &diagnostics); err != nil {
 				t.Fatalf("install: %v: %s", err, &diagnostics)
 			}
 			var installed engine.SDKCommand

@@ -69,6 +69,11 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			mutated := resolved
+			mutated.Identity.Pin.Version = "v0.1.0"
+			if err := mutated.verifyInstalledEngine(t.Context()); err == nil {
+				t.Fatal("mutated SDK identity retained installation authority")
+			}
 			marker := filepath.Join(checkout, "installed")
 			request := SDKInstallRequest{Directory: checkout, PipelineDir: ".sparkwing", SDK: sdk, Environment: []string{"INSTALL_MARKER=" + marker, "SPARKWING_TOKEN=private-credential"}}
 			command, err := resolved.InstallSDK(t.Context(), request)

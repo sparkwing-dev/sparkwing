@@ -1,0 +1,521 @@
+{
+  "protocol": 2,
+  "language": "go",
+  "exchanges": [
+    {
+      "wire_request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        },
+        "binding": {
+          "run_id": "r",
+          "job_id": "task",
+          "routes": {
+            "url": "http://127.0.0.1:1",
+            "bearer": "secret"
+          }
+        }
+      },
+      "expected": {
+        "reply": "hello",
+        "ok": true,
+        "result": {
+          "protocol": 2,
+          "sdk": {
+            "language": "go",
+            "version": "(devel)"
+          }
+        }
+      },
+      "request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        },
+        "binding": {
+          "run_id": "r",
+          "job_id": "task",
+          "routes": {
+            "url": "http://127.0.0.1:1",
+            "bearer": "secret"
+          }
+        }
+      },
+      "frames": [
+        {
+          "reply": "hello",
+          "ok": true,
+          "result": {
+            "protocol": 2,
+            "sdk": {
+              "language": "go",
+              "version": "(devel)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "1",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "expected": {
+        "reply": "1",
+        "ok": true,
+        "result": {
+          "jobs": [
+            {
+              "id": "task",
+              "memo": {},
+              "closures": {
+                "skip_if": [
+                  "task/skip/0"
+                ],
+                "before_run": [
+                  "task/before/0"
+                ],
+                "verify": "task/verify/0",
+                "after_run": [
+                  "task/after/0"
+                ],
+                "memo_key": "task/memo/0",
+                "generate": [
+                  "task/generate/0"
+                ]
+              },
+              "steps": [
+                {
+                  "id": "run"
+                }
+              ],
+              "failure_policy": "fail_fast"
+            }
+          ]
+        }
+      },
+      "request": {
+        "id": "1",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "frames": [
+        {
+          "ts": "2026-11-09T10:53:45.019414717-07:00",
+          "level": "info",
+          "msg": "planning demo"
+        },
+        {
+          "reply": "1",
+          "ok": true,
+          "result": {
+            "jobs": [
+              {
+                "id": "task",
+                "memo": {},
+                "closures": {
+                  "skip_if": [
+                    "task/skip/0"
+                  ],
+                  "before_run": [
+                    "task/before/0"
+                  ],
+                  "verify": "task/verify/0",
+                  "after_run": [
+                    "task/after/0"
+                  ],
+                  "memo_key": "task/memo/0",
+                  "generate": [
+                    "task/generate/0"
+                  ]
+                },
+                "steps": [
+                  {
+                    "id": "run"
+                  }
+                ],
+                "failure_policy": "fail_fast"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "2",
+        "op": "run_step",
+        "job": "task",
+        "step": "run",
+        "attempt": 1,
+        "settled": []
+      },
+      "expected": {
+        "reply": "2",
+        "ok": true,
+        "result": {
+          "outcome": "success",
+          "output": null
+        }
+      },
+      "request": {
+        "id": "2",
+        "op": "run_step",
+        "job": "task",
+        "step": "run",
+        "attempt": 1,
+        "settled": []
+      },
+      "frames": [
+        {
+          "ts": "2026-11-09T10:53:45.020091112-07:00",
+          "level": "info",
+          "step": "run",
+          "msg": "running demo"
+        },
+        {
+          "reply": "2",
+          "ok": true,
+          "result": {
+            "outcome": "success",
+            "output": null
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "3",
+        "op": "eval",
+        "closure": "task/skip/0"
+      },
+      "expected": {
+        "reply": "3",
+        "ok": true,
+        "result": {
+          "value": false
+        }
+      },
+      "request": {
+        "id": "3",
+        "op": "eval",
+        "closure": "task/skip/0"
+      },
+      "frames": [
+        {
+          "reply": "3",
+          "ok": true,
+          "result": {
+            "value": false
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "4",
+        "op": "eval",
+        "closure": "task/memo/0"
+      },
+      "expected": {
+        "reply": "4",
+        "ok": true,
+        "result": {
+          "value": "fixture-key"
+        }
+      },
+      "request": {
+        "id": "4",
+        "op": "eval",
+        "closure": "task/memo/0"
+      },
+      "frames": [
+        {
+          "reply": "4",
+          "ok": true,
+          "result": {
+            "value": "fixture-key"
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "5",
+        "op": "eval",
+        "closure": "task/before/0"
+      },
+      "expected": {
+        "reply": "5",
+        "ok": true,
+        "result": {
+          "value": null
+        }
+      },
+      "request": {
+        "id": "5",
+        "op": "eval",
+        "closure": "task/before/0"
+      },
+      "frames": [
+        {
+          "reply": "5",
+          "ok": true,
+          "result": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "6",
+        "op": "eval",
+        "closure": "task/verify/0"
+      },
+      "expected": {
+        "reply": "6",
+        "ok": true,
+        "result": {
+          "value": null
+        }
+      },
+      "request": {
+        "id": "6",
+        "op": "eval",
+        "closure": "task/verify/0"
+      },
+      "frames": [
+        {
+          "reply": "6",
+          "ok": true,
+          "result": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "7",
+        "op": "eval",
+        "closure": "task/after/0",
+        "input": {
+          "outcome": "success"
+        }
+      },
+      "expected": {
+        "reply": "7",
+        "ok": true,
+        "result": {
+          "value": null
+        }
+      },
+      "request": {
+        "id": "7",
+        "op": "eval",
+        "closure": "task/after/0",
+        "input": {
+          "outcome": "success"
+        }
+      },
+      "frames": [
+        {
+          "reply": "7",
+          "ok": true,
+          "result": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "8",
+        "op": "eval",
+        "closure": "task/generate/0"
+      },
+      "expected": {
+        "reply": "8",
+        "ok": true,
+        "result": {
+          "declarations_known": true,
+          "value": {
+            "jobs": [
+              {
+                "id": "generated",
+                "deps": [
+                  "task"
+                ],
+                "groups": [
+                  "task/generate/0"
+                ],
+                "steps": [
+                  {
+                    "id": "run"
+                  }
+                ],
+                "failure_policy": "fail_fast"
+              }
+            ]
+          }
+        }
+      },
+      "request": {
+        "id": "8",
+        "op": "eval",
+        "closure": "task/generate/0"
+      },
+      "frames": [
+        {
+          "reply": "8",
+          "ok": true,
+          "result": {
+            "declarations_known": true,
+            "value": {
+              "jobs": [
+                {
+                  "id": "generated",
+                  "deps": [
+                    "task"
+                  ],
+                  "groups": [
+                    "task/generate/0"
+                  ],
+                  "steps": [
+                    {
+                      "id": "run"
+                    }
+                  ],
+                  "failure_policy": "fail_fast"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "9",
+        "op": "eval",
+        "closure": "task/generate/0"
+      },
+      "expected": {
+        "reply": "9",
+        "ok": true,
+        "result": {
+          "declarations_known": true,
+          "value": {
+            "jobs": [
+              {
+                "id": "generated",
+                "deps": [
+                  "task"
+                ],
+                "groups": [
+                  "task/generate/0"
+                ],
+                "steps": [
+                  {
+                    "id": "run"
+                  }
+                ],
+                "failure_policy": "fail_fast"
+              }
+            ]
+          }
+        }
+      },
+      "request": {
+        "id": "9",
+        "op": "eval",
+        "closure": "task/generate/0"
+      },
+      "frames": [
+        {
+          "reply": "9",
+          "ok": true,
+          "result": {
+            "declarations_known": true,
+            "value": {
+              "jobs": [
+                {
+                  "id": "generated",
+                  "deps": [
+                    "task"
+                  ],
+                  "groups": [
+                    "task/generate/0"
+                  ],
+                  "steps": [
+                    {
+                      "id": "run"
+                    }
+                  ],
+                  "failure_policy": "fail_fast"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "10",
+        "op": "cancel",
+        "job": "task",
+        "step": "run"
+      },
+      "expected": {
+        "reply": "10",
+        "ok": true,
+        "result": {}
+      },
+      "request": {
+        "id": "10",
+        "op": "cancel",
+        "job": "task",
+        "step": "run"
+      },
+      "frames": [
+        {
+          "reply": "10",
+          "ok": true,
+          "result": {}
+        }
+      ]
+    }
+  ]
+}

@@ -62,9 +62,9 @@ func testSigningKey(t *testing.T) ed25519.PrivateKey {
 
 func policyFixture() (VersionIndex, time.Time) {
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	return VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []engineid.VersionInfo{
-		{Version: "v0.10.2", PublishedAt: now.AddDate(-2, 0, 0), SupportUntil: now.AddDate(-1, 0, 0)},
-		{Version: "v0.20.0", PublishedAt: now.AddDate(0, -1, 0), SupportUntil: now.AddDate(0, 11, 0)},
+	return VersionIndex{Format: VersionIndexFormat, SDKs: []SDKRelease{{Language: engineid.GoSDK, Version: "v0.10.2", Protocol: 2, SourceDigest: strings.Repeat("a", 64)}, {Language: engineid.GoSDK, Version: "v0.20.0", Protocol: 3, SourceDigest: strings.Repeat("b", 64)}, {Language: engineid.TypeScriptSDK, Version: "v0.20.0", Protocol: 3, SourceDigest: strings.Repeat("c", 64)}}, PublishedAt: now, Latest: "v0.20.0", Versions: []engineid.VersionInfo{
+		{AcceptedSDKProtocols: []int{2}, Version: "v0.10.2", PublishedAt: now.AddDate(-2, 0, 0), SupportUntil: now.AddDate(-1, 0, 0)},
+		{AcceptedSDKProtocols: []int{3}, Version: "v0.20.0", PublishedAt: now.AddDate(0, -1, 0), SupportUntil: now.AddDate(0, 11, 0)},
 	}}, now
 }
 

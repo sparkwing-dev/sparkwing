@@ -162,6 +162,8 @@ type protocolSession struct {
 	mu                        sync.Mutex
 	pending                   map[string]protocolCall
 	helloSent, ready, planned bool
+	sdkProtocol               int
+	adapter                   protocolAdapter
 	failure                   error
 	done                      chan struct{}
 	joined                    chan struct{}
@@ -384,7 +386,7 @@ func (s *protocolSession) acceptProtocolRequest(request nodeproto.Request) error
 func (s *protocolSession) writeProtocolRequest(request nodeproto.Request) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	data, err := json.Marshal(request)
+	data, err := s.encodeProtocolRequest(request)
 	if err != nil {
 		return err
 	}
@@ -436,7 +438,12 @@ func (s *protocolSession) readProtocolFrames(file *os.File) {
 	defer file.Close()
 	scanner := protocolScanner(file)
 	for scanner.Scan() {
-		frame, err := s.cfg.ParseFrame(scanner.Bytes())
+		line, err := s.upgradeProtocolFrame(scanner.Bytes())
+		if err != nil {
+			s.failProtocol(err)
+			return
+		}
+		frame, err := s.cfg.ParseFrame(line)
 		if err != nil {
 			s.failProtocol(protocolSessionError(apierr.ProtocolError, "invalid SDK frame"))
 			return

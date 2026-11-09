@@ -148,13 +148,13 @@ func TestUpgradeVerifiedResult(t *testing.T) {
 
 func TestUpgradeAppliedPinWithFailingCodeNamesTheMigrationGuides(t *testing.T) {
 	root := upgradeFixture(t, engineid.GoSDK)
-	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Unverified: errors.New("undefined: runner.Main"), Plan: engine.UpgradePlan{Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.67.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}, Edits: []engine.PinEdit{{Path: ".sparkwing/go.mod"}, {Path: ".sparkwing/go.sum"}}}}}
+	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Unverified: errors.New("undefined: runner.Main"), Plan: engine.UpgradePlan{Engine: engineid.Identity{Version: "v0.80.0"}, Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.67.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}, Edits: []engine.PinEdit{{Path: ".sparkwing/go.mod"}, {Path: ".sparkwing/go.sum"}}}}}
 	var out bytes.Buffer
 	command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, verifier: &upgradeVerifier{}, out: &out}
 	err := command.runArgs(t.Context(), []string{"--checkout", root, "--output=pretty"})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || !strings.Contains(failure.Message, "moved to v0.68.0") || !strings.Contains(failure.Message, "undefined: runner.Main") ||
-		!strings.Contains(failure.Hint, "docs migrations --from v0.67.0 --to v0.68.0") {
+		!strings.Contains(failure.Hint, "/tree/v0.80.0/docs/migrations") {
 		t.Fatalf("error = %v", err)
 	}
 	if !strings.Contains(failure.Hint, "changed only .sparkwing/go.mod .sparkwing/go.sum") || strings.Contains(failure.Hint, "checkout -- .sparkwing`") {
@@ -177,7 +177,7 @@ func TestUpgradePlainReportsTargetVersion(t *testing.T) {
 			if err := writeUpgradeReport(&out, "plain", result); err != nil {
 				t.Fatal(err)
 			}
-			if out.String() != version+"\n" {
+			if out.String() != "sdk="+version+"\nengine=\n" {
 				t.Fatalf("plain result: %q, want version %q", out.String(), version)
 			}
 		}
@@ -436,4 +436,17 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestUpgradeReportKeepsIndependentEngineVersion(t *testing.T) {
+	result := engine.UpgradeResult{DryRun: true, Plan: engine.UpgradePlan{Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.1.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.2.0"}, Engine: engineid.Identity{Version: "v0.80.0"}}}
+	for _, format := range []string{"pretty", "plain", "json"} {
+		var out bytes.Buffer
+		if err := writeUpgradeReport(&out, format, result); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "v0.2.0") || !strings.Contains(out.String(), "v0.80.0") {
+			t.Fatalf("%s output lost SDK or engine identity: %s", format, &out)
+		}
+	}
 }

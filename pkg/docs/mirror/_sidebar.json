@@ -32,7 +32,8 @@
         "local-execution",
         "ci-embedded",
         "native-mode",
-        "node-protocol"
+        "node-protocol",
+        "engine-policy"
       ]
     },
     {
