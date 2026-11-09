@@ -12,7 +12,7 @@ type protocolAdapter struct {
 	frame   func([]byte) ([]byte, error)
 }
 
-// Older shapes are upgraded before the current codec and host policy see them.
+// safety: normalize old shapes before host policy so pinned SDKs keep the same semantics.
 // Remove an adapter when the signed mapping has no SDK using its version.
 var protocolAdapters = map[int]protocolAdapter{
 	nodeproto.Version: {},
