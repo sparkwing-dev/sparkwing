@@ -55,7 +55,7 @@ func TestGeneratedSettingsReachHostValidation(t *testing.T) {
 	p := sparkwing.NewPlan()
 	n := sparkwing.Job(p, "source", func(context.Context) error { return nil })
 	g := n.Generate(func(_ context.Context, p *sparkwing.Plan) error { p.Priority(0); return nil })
-	result, err := sdkserve.DefaultOperations.Eval(t.Context(), p, nodewire.Request{sparkwing.Job: n.ID(), Closure: g.ID()})
+	result, err := sdkserve.DefaultOperations.Eval(t.Context(), p, nodewire.Request{Job: n.ID(), Closure: g.ID()})
 	if err != nil || result.Error != nil {
 		t.Fatalf("generation=%+v error=%v", result, err)
 	}

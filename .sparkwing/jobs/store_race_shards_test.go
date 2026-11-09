@@ -89,7 +89,7 @@ func TestStoreRaceExecIsolatesProductStateAndGoWorkspace(t *testing.T) {
 	lines := strings.Split(result.Stdout, "\n")
 	for _, want := range []string{
 		"SPARKWING_HOME=" + home,
-		"GOWORK=off",
+		"GOWORK=auto",
 	} {
 		if !slices.Contains(lines, want) {
 			t.Errorf("suite environment lacks %q", want)

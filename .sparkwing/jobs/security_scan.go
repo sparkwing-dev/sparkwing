@@ -113,7 +113,7 @@ func gosecArgs(out string) []string {
 }
 
 func runGosec(ctx context.Context, dir, out string) ([]gosecIssue, error) {
-	if _, err := sparkwing.Exec(ctx, "go", gosecArgs(out)...).Dir(dir).Env("GOWORK", "off").Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, "go", gosecArgs(out)...).Dir(dir).Env("GOWORK", "auto").Run(); err != nil {
 		return nil, err
 	}
 	return readGosecReport(out)
@@ -136,7 +136,7 @@ func readGosecReport(out string) ([]gosecIssue, error) {
 }
 
 func (p *SecurityScan) govulncheck(ctx context.Context) error {
-	if _, err := sparkwing.Exec(ctx, "go", "run", govulncheckModule, "./...").Env("GOWORK", "off").Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, "go", "run", govulncheckModule, "./...").Env("GOWORK", "auto").Run(); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "govulncheck: no reachable vulnerabilities")

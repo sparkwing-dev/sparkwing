@@ -12,8 +12,9 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - [`sparkwing/docker`](sdk-docker.md)
 - [`sparkwing/git`](sdk-git.md)
 - [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs declares memo inputs for evaluation by the executing host.
+- [`sparkwing/protocol`](sdk-protocol.md) -- Package nodeproto defines protocol v2 requests, frames and strict declarations.
+- [`sparkwing/runtime`](sdk-runtime.md) -- Package sdkserve serves the SDK protocol without importing author or engine implementations.
 - [`sparkwing/services`](sdk-services.md) -- Package services manages host-owned sidecars for a callback.
-- [`sparkwing/sparkwingtest`](sdk-sparkwingtest.md) -- Package sparkwingtest supplies an in-process host for pipeline and helper-library tests.
 
 ## Functions
 
@@ -1163,5 +1164,5 @@ var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 ```
 
 ```
-var ErrSecretMissing = secrets.ErrSecretMissing
+var ErrSecretMissing = secretvalue.ErrSecretMissing
 ```

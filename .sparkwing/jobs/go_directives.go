@@ -65,7 +65,7 @@ func checkGoDirectives(ctx context.Context) error {
 		return err
 	}
 	return withProductTestHome(func(home string) error {
-		command := "GOWORK=off go test ./cmd/sparkwing -run '^TestPipelineScaffoldDoesNotRequireGoPatch$' -count=1"
+		command := "GOWORK=auto go test ./cmd/sparkwing -run '^TestPipelineScaffoldDoesNotRequireGoPatch$' -count=1"
 		_, err := sparkwing.Bash(ctx, productTestScript(command, home)).Run()
 		if err != nil {
 			return fmt.Errorf("go directive policy: check generated init and template modules: %w", err)

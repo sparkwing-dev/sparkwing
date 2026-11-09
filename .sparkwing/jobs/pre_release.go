@@ -71,7 +71,7 @@ func runReleaseBinaryVulnerabilityScan(jobContext context.Context) (resultErr er
 	for _, binary := range publicBinaries {
 		artifact := filepath.Join(scanDirectory, binary)
 		if _, err := sparkwing.Exec(jobContext, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
-			Env("GOWORK", "off").Run(); err != nil {
+			Env("GOWORK", "auto").Run(); err != nil {
 			return fmt.Errorf("build release vulnerability artifact %s: %w", binary, err)
 		}
 		if _, err := sparkwing.Exec(jobContext, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {

@@ -516,4 +516,11 @@ func TestBuildToolchainsUseFixedGoPatch(t *testing.T) {
 			t.Errorf("%s must select toolchain go%s", name, fixed)
 		}
 	}
+	file, err := modfile.Parse("sparkwing/go.mod", []byte(readHostedCIFile(t, "sparkwing/go.mod")), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Go == nil || file.Go.Version != "1.25.0" || file.Toolchain != nil {
+		t.Error("the SDK must support Go 1.25.0 without selecting a toolchain")
+	}
 }

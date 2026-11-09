@@ -591,7 +591,7 @@ func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manif
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return err
 	}
-	module := fmt.Sprintf("module sparkwing-pipelines\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing %s\n\nreplace github.com/sparkwing-dev/sparkwing => %q\n", scaffold.FallbackSDKVersion, sdkRoot)
+	module := fmt.Sprintf("module sparkwing-pipelines\n\ngo 1.25.0\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing %s\n\nreplace github.com/sparkwing-dev/sparkwing => %q\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %q\n", scaffold.FallbackSDKVersion, sdkRoot, filepath.Join(sdkRoot, "sparkwing"))
 	if err := os.WriteFile(filepath.Join(directory, "go.mod"), []byte(module), 0o644); err != nil {
 		return err
 	}

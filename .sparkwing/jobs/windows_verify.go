@@ -89,7 +89,7 @@ func runPlatformInstaller(ctx context.Context, script string) error {
 
 func runPlatformIsolated(ctx context.Context, command string) error {
 	return withProductTestHome(func(home string) error {
-		_, err := sparkwing.Bash(ctx, productTestScript(command, home)).Dir(sparkwing.WorkDir()).Env("GOWORK", "off").Env("GOMAXPROCS", "2").Run()
+		_, err := sparkwing.Bash(ctx, productTestScript(command, home)).Dir(sparkwing.WorkDir()).Env("GOWORK", "auto").Env("GOMAXPROCS", "2").Run()
 		return err
 	})
 }

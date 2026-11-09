@@ -44,7 +44,7 @@ func TestTemplateVerifierCompilesAndPlansFreshTemplate(t *testing.T) {
 	bin := templateVerifyCLIPath(t.TempDir(), runtime.GOOS)
 	build := exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-o", bin, "./cmd/sparkwing")
 	build.Dir = root
-	build.Env = append(os.Environ(), "GOWORK=off")
+	build.Env = append(os.Environ(), "GOWORK=auto")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build verifier CLI: %v\n%s", err, output)
 	}

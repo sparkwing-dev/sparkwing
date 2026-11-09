@@ -24,7 +24,6 @@ retract (
 )
 
 require (
-	github.com/sparkwing-dev/sparkwing/sparkwing v0.1.0
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.16
@@ -37,6 +36,7 @@ require (
 	github.com/johannesboyne/gofakes3 v0.0.0-20260208201424-4c385a1f6a73
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sparkwing-dev/sparks-core/templates v0.34.1
+	github.com/sparkwing-dev/sparkwing/sparkwing v0.1.0
 	github.com/spf13/pflag v1.0.10
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0

@@ -70,12 +70,12 @@ func burstSDKSourceFixture(t *testing.T, appended string) (string, string, *engi
 	repo, _ := sourcetest.Repository(t)
 	directory := filepath.Join(repo, ".sparkwing")
 	for _, name := range []string{"go.mod", "go.sum"} {
-		body, err := os.ReadFile(filepath.Join(root, name))
+		body, err := os.ReadFile(filepath.Join(root, "sparkwing", name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if name == "go.mod" {
-			body = []byte(strings.Replace(string(body), "module github.com/sparkwing-dev/sparkwing", "module burstfixture", 1) + fmt.Sprintf("\nrequire github.com/sparkwing-dev/sparkwing v0.0.0\nreplace github.com/sparkwing-dev/sparkwing => %q\n", root))
+			body = []byte(strings.Replace(string(body), "module github.com/sparkwing-dev/sparkwing/sparkwing", "module burstfixture", 1) + fmt.Sprintf("\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.0.0\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %q\n", filepath.Join(root, "sparkwing")))
 		}
 		sourcetest.Write(t, filepath.Join(directory, name), string(body))
 	}

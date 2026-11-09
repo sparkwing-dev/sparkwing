@@ -26,7 +26,7 @@ func (LocalControllerE2E) Plan(_ context.Context, plan *sparkwing.Plan, in Local
 			return fmt.Errorf("--binary must name an absolute built CLI path")
 		}
 		_, err := sparkwing.Exec(ctx, "go", "test", "-p", "2", "-count=1", "-timeout=20m", "-v", "-run", "^TestLocalControllerFeatureE2E$", "./tests/acceptance").
-			Dir(sparkwing.WorkDir()).Env("GOWORK", "off").Env("GOMAXPROCS", "2").Env("SPARKWING_LOCAL_E2E_BINARY", in.Binary).Run()
+			Dir(sparkwing.WorkDir()).Env("GOWORK", "auto").Env("GOMAXPROCS", "2").Env("SPARKWING_LOCAL_E2E_BINARY", in.Binary).Run()
 		return err
 	}).Cores(2)
 	return nil

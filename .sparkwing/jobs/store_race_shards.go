@@ -266,7 +266,7 @@ func raceExec(ctx context.Context, home, name string, args ...string) *sparkwing
 	for _, name := range productTestUnset {
 		envArgs = append(envArgs, "-u", name)
 	}
-	envArgs = append(envArgs, productTestHomeVar+"="+home, "GOWORK=off", name)
+	envArgs = append(envArgs, productTestHomeVar+"="+home, "GOWORK=auto", name)
 	envArgs = append(envArgs, args...)
 	return sparkwing.Exec(ctx, "env", envArgs...)
 }

@@ -163,7 +163,7 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 	}()
 	_, err = sparkwing.Exec(ctx, "sparkwing", args...).Dir(checkout).
 		Env("SPARKWING_HOME", state).Env("SPARKWING_SECRETS_KEY_FILE", filepath.Join(state, "secrets.key")).
-		Env("GOWORK", "off").Run()
+		Env("GOWORK", "auto").Run()
 	if err != nil {
 		return err
 	}
