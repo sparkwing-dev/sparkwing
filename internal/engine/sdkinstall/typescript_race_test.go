@@ -17,6 +17,12 @@ import (
 )
 
 func TestTypeScriptInstallKeepsRunningSDKImportsAvailable(t *testing.T) {
+	for _, lockfile := range []string{"package-lock.json", "npm-shrinkwrap.json"} {
+		t.Run(lockfile, func(t *testing.T) { testTypeScriptInstallKeepsRunningSDKImportsAvailable(t, lockfile) })
+	}
+}
+
+func testTypeScriptInstallKeepsRunningSDKImportsAvailable(t *testing.T, lockfile string) {
 	npm, err := exec.LookPath("npm")
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +47,11 @@ func TestTypeScriptInstallKeepsRunningSDKImportsAvailable(t *testing.T) {
 	if output, err := lock.CombinedOutput(); err != nil {
 		t.Fatalf("lock: %v: %s", err, output)
 	}
+	if lockfile != "package-lock.json" {
+		if err := os.Rename(filepath.Join(dir, "package-lock.json"), filepath.Join(dir, lockfile)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// bug: pause npm after its destructive cleanup so an already prepared SDK imports in that window.
 	wrapper := fmt.Sprintf(`#!%s
 const fs = require("node:fs");
@@ -50,7 +61,7 @@ function install() {
   const result = spawnSync(%q, process.argv.slice(2), {stdio:"inherit"});
   process.exit(result.status ?? 1);
 }
-if (fs.existsSync("install-gate")) {
+if (process.argv[2] === "ci" && fs.existsSync("install-gate")) {
   fs.rmSync("node_modules", {recursive:true, force:true});
   const socket = net.connect(JSON.parse(fs.readFileSync("install-gate", "utf8")), "127.0.0.1");
   socket.once("data", () => { socket.destroy(); install(); });
@@ -121,6 +132,23 @@ if (fs.existsSync("install-gate")) {
 	}
 	if receipt, err := os.ReadFile(filepath.Join(dir, "install-receipt")); err != nil || string(receipt) != "changed" {
 		t.Fatalf("changed manifest did not install: %s: %v", receipt, err)
+	}
+	if err := os.Remove(filepath.Join(dir, "install-receipt")); err != nil {
+		t.Fatal(err)
+	}
+	writeInput(t, dir, ".npmrc", []byte("ignore-scripts=true\n"))
+	if _, err := install(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "install-receipt")); !os.IsNotExist(err) {
+		t.Fatalf("npm ignored project configuration: %v", err)
+	}
+	writeInput(t, dir, ".npmrc", []byte("ignore-scripts=false\n"))
+	if _, err := install(); err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := os.ReadFile(filepath.Join(dir, "install-receipt")); err != nil || string(receipt) != "changed" {
+		t.Fatalf("changed npm configuration did not install: %s: %v", receipt, err)
 	}
 	if err := os.RemoveAll(filepath.Join(dir, "node_modules")); err != nil {
 		t.Fatal(err)

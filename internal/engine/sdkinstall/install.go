@@ -225,7 +225,7 @@ func selectionInputs(dir string, environment procenv.Env) ([]string, string) {
 func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (_ []string, result error) {
 	// bug: npm ci removes node_modules. Serialize helpers on the native lockfile and reuse
 	// completed installs so another job cannot remove packages beneath an SDK process.
-	lock, err := os.Open(filepath.Join(dir, "package-lock.json"))
+	lock, err := os.Open(filepath.Join(dir, pin.Lockfile))
 	if err != nil {
 		return nil, err
 	}
@@ -248,13 +248,17 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 	if manifest.Main == "" {
 		return nil, errors.New("TypeScript package.json requires a main entry")
 	}
-	lockfile, err := os.ReadFile(filepath.Join(dir, "package-lock.json"))
+	lockfile, err := os.ReadFile(filepath.Join(dir, pin.Lockfile))
+	if err != nil {
+		return nil, err
+	}
+	configuration, err := installTool(ctx, dir, environment, "npm", "config", "list", "--json")
 	if err != nil {
 		return nil, err
 	}
 	values := slices.Collect(environment.Values())
 	slices.Sort(values)
-	inputs, err := json.Marshal([]any{string(body), string(lockfile), values})
+	inputs, err := json.Marshal([]any{string(body), pin.Lockfile, string(lockfile), string(configuration), values})
 	if err != nil {
 		return nil, err
 	}
