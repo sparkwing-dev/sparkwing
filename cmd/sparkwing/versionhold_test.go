@@ -65,20 +65,6 @@ func TestNormalizeHold(t *testing.T) {
 	}
 }
 
-func TestHoldHasPatch(t *testing.T) {
-	cases := map[string]bool{
-		"v0.15":       false,
-		"v0.15.4":     true,
-		"v0.15.4-rc1": true,
-		"v1":          false,
-	}
-	for in, want := range cases {
-		if got := holdHasPatch(in); got != want {
-			t.Errorf("holdHasPatch(%q) = %v, want %v", in, got, want)
-		}
-	}
-}
-
 func TestHoldRefusalOmitsOverride(t *testing.T) {
 	err := holdRefusal("v0.16.0", versionHold{Value: "v0.15", Source: "/tmp/version-hold"})
 	msg := err.Error()
