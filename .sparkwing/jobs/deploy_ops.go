@@ -1088,9 +1088,6 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 // safety: nodes outlive a run only briefly, so NodeClaims are sampled while
 // the smoke runs rather than counted afterwards.
 func (d *deployer) productionSmoke(ctx context.Context, images deployImages, since string) error {
-	if err := d.productionCLI(ctx, images.Commit); err != nil {
-		return err
-	}
 	env := d.cfg.Production
 	runs := make([]string, len(d.cfg.SmokeProfiles))
 	for i, team := range d.cfg.SmokeProfiles {

@@ -34,7 +34,7 @@ func TestDeployScanBindsRevisionAndReportsObservedOutcome(t *testing.T) {
 				var findingArgs []string
 				d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
 					joined := strings.Join(c.Args, " ")
-					if filepath.Base(c.Name) == "bitwing" {
+					if filepath.Base(c.Name) == "bitwing" && len(c.Args) > 1 && c.Args[1] == "record" {
 						findingArgs = slices.Clone(c.Args)
 						if index := slices.Index(c.Args, "--file"); index >= 0 {
 							raw, err := os.ReadFile(c.Args[index+1])
@@ -82,7 +82,7 @@ func TestDeployScanBindsRevisionAndReportsObservedOutcome(t *testing.T) {
 						t.Fatalf("success must resolve the source: %v", report)
 					}
 				case "failed", "cancelled":
-					if len(report) != 1 || report[0]["fingerprint"] != "full-example" || !strings.Contains(report[0]["detail"], rec.ExampleRun) || !strings.Contains(report[0]["detail"], f.head) || !strings.Contains(report[0]["detail"], rec.Images.Controller.Digest) || !strings.Contains(report[0]["detail"], rec.Images.Runner.Digest) {
+					if len(report) != 1 || report[0]["fingerprint"] != "sparkwing-post-deploy-"+envName+"/full-example" || !strings.Contains(report[0]["detail"], rec.ExampleRun) || !strings.Contains(report[0]["detail"], f.head) || !strings.Contains(report[0]["detail"], rec.Images.Controller.Digest) || !strings.Contains(report[0]["detail"], rec.Images.Runner.Digest) {
 						t.Fatalf("failure lost fingerprint or evidence: %v", report)
 					}
 				default:
