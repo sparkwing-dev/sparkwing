@@ -1,5 +1,66 @@
 # Authoring idiomatic pipelines
 
+## A merge queue without pull requests
+
+Create a landing pipeline in a repository whose policy permits direct pushes
+to its default branch:
+
+```bash
+sparkwing pipeline new --pipeline land --template merge-queue
+# In a TypeScript pipeline project, use this instead:
+sparkwing pipeline new --pipeline land --template merge-queue-typescript
+```
+
+The TypeScript scaffold prints the npm lockfile setup command. Run it and
+commit the lockfile before planning or running the pipeline. Both templates
+use Bash and Git on the local machine. Add `bin/check.sh` with your repository's
+required checks, including review if your policy requires it. A missing script
+fails the entry. Commit the pipeline and check script before submitting.
+The template discovers `origin`'s default branch. Edit `remote=origin` in the
+generated job if your repository uses another remote.
+
+Submit each clean, committed work branch from its own retained worktree:
+
+```bash
+sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --brief 'Explain the change and its intended result'
+sparkwing queue list --group plan:global:merge-queue
+sparkwing runs status --run <returned-run-id> --follow -o json
+sparkwing runs cancel --run <returned-run-id>
+```
+
+Keep the worktree unchanged until the run finishes. The inline job edits that
+checkout, so it must remain available on the submitting machine. Configure Git
+authentication there with permission to push to the default branch. The remote's
+branch protection still applies. All submitters must use the same controller
+and concurrency group for serialization. A separate controller has a separate
+queue. Group names share a team namespace, so give unrelated repositories
+different group names and keep all landers for one repository on the same name.
+
+Each run requires a non-empty brief and records it with its arguments and logs.
+The capacity-one run group admits one entry at a time. The job refuses a dirty
+checkout or a changed submission, merges the fetched default branch, runs
+`bash bin/check.sh`, checks that branch, HEAD and checkout still match, and pushes
+the exact checked commit without force. Checks must leave tracked and untracked
+files clean. Configure generated output in `.gitignore` where appropriate.
+
+A conflict aborts the merge. A failed check or rejected push fails only that
+entry and releases its slot. Inspect the failed run, repair the worktree, and
+submit again with a brief. If another writer moves the default branch during
+checks, the push fails rather than checking a different merge implicitly.
+The successful log records the landed commit. `runs status --follow` exits zero
+for success and one for failure or cancellation. Runs and their logs also appear
+in the dashboard.
+
+Ordering follows concurrency admission, rather than a strict submission FIFO.
+`queue list --group plan:global:merge-queue` reports group waiters and their arrival positions.
+The dashboard queue page shows machine admission positions, which can differ
+from group positions. Use a distinct group such as `deploy-<environment>` for
+serialized deploys, release trains, migrations, and similar work. A concurrency
+limit bounds simultaneous work. External API request rates still need pacing
+in the job or the provider's own rate limiter.
+
+## Pipeline structure
+
 A pipeline's `Plan` method and each job's `Work` method build the DAG.
 Plan inspection and execution must produce the same structure. Put I/O
 and host-dependent decisions in registered job or step callbacks, which

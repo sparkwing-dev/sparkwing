@@ -78,6 +78,9 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 		short = "Run " + name
 	}
 	source := fmt.Sprintf("import { definePipeline } from \"@sparkwing/sdk\";\n\ndefinePipeline({\n  name: %s,\n  short: %s,\n  plan(p) {\n    p.job(%s, async (ctx) => { ctx.log.info(%s); });\n  },\n});\n", strconv.Quote(kebabToPascal(name)), strconv.Quote(short), strconv.Quote(name), strconv.Quote(short))
+	if inv.Value("template") == "merge-queue-typescript" {
+		source = renderBuiltinTemplate(name, short, mergeQueueTypeScriptTemplate)
+	}
 	// #nosec G703 -- the pipeline name is validated as kebab-case before scaffolding in the selected project
 	if err := os.WriteFile(file, []byte(source), 0o644); err != nil {
 		return err

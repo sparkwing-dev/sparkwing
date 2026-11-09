@@ -564,11 +564,15 @@ sparkwing pipeline new --pipeline deploy --template build-test-deploy
 ```
 
 `--template` takes a shape -- `minimal`, `build-test-deploy`,
-`ci-pr-check`, `release`, or `scheduled-report` -- and passing an
+`ci-pr-check`, `release`, `scheduled-report`, or `merge-queue` -- and passing an
 example name is an error, with the `sparkwing examples --example <name>
 --body` command to read it instead. To own and modify the catalog
 itself, inflate it (see
 [Inflating a spark library](#inflating-a-spark-library)).
+
+`merge-queue-typescript` scaffolds the same serial landing workflow for
+TypeScript projects. See [merge queues without pull requests](authoring-pipelines.md#a-merge-queue-without-pull-requests)
+for setup, submission and failure handling.
 
 ## Authoring a sparks library
 

@@ -39,7 +39,7 @@ func runPipelineNew(inv clisurface.Invocation) error {
 	if err != nil {
 		return err
 	}
-	if template == "typescript" {
+	if template == "typescript" || template == "merge-queue-typescript" {
 		return scaffoldTypeScriptPipeline(cwd, inv, mode)
 	}
 
@@ -70,7 +70,7 @@ func runPipelineNew(inv clisurface.Invocation) error {
 	if !ok {
 		return fmt.Errorf("new: unknown shape %q -- pipeline new takes a shape, one of: %s\n"+
 			"  a worked pipeline to read instead: sparkwing examples --example %s --body",
-			template, strings.Join(append(builtinShapeNames(), "typescript"), ", "), template)
+			template, strings.Join(append(builtinShapeNames(), "typescript", "merge-queue-typescript"), ", "), template)
 	}
 	trigger, err := resolveTrigger(shape, parseOnFlag(inv.Flags["on"]), inv.Has("on"))
 	if err != nil {
@@ -202,6 +202,7 @@ var builtinShapes = []builtinShape{
 	{"ci-pr-check", 3, "lint and test in parallel, converging on a gate", "pull_request", ciPRCheckTemplate},
 	{"release", 3, "version bump, changelog, publish", "", releaseTemplate},
 	{"scheduled-report", 5, "one collector fanning out to gatherers", "schedule", scheduledReportTemplate},
+	{"merge-queue", 1, "serial merge, checks and unchanged-HEAD push", "", mergeQueueTemplate},
 }
 
 var triggerBlocks = map[string]string{
@@ -312,6 +313,7 @@ func renderBuiltinTemplate(name, short, tmpl string) string {
 		short = "one-line description of " + name
 	}
 	return strings.NewReplacer(
+		"{{QUEUE_SCRIPT}}", strconv.Quote(mergeQueueScript),
 		"{{STRUCT}}", kebabToPascal(name),
 		"{{NAME}}", name,
 		"{{SHORTLIT}}", strconv.Quote(short),

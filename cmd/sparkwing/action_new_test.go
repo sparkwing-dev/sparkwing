@@ -30,6 +30,7 @@ func TestBuiltinTemplatesRenderLintClean(t *testing.T) {
 		{"ci-pr-check", ciPRCheckTemplate},
 		{"release", releaseTemplate},
 		{"scheduled-report", scheduledReportTemplate},
+		{"merge-queue", mergeQueueTemplate},
 	}
 	for _, tc := range cases {
 		t.Run(tc.template, func(t *testing.T) {

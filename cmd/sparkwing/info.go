@@ -246,8 +246,9 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"  --template picks the DAG, --on picks what fires it:\n" +
 	"    shapes: minimal (1 node) | build-test-deploy (3, linear) |\n" +
 	"            ci-pr-check (3, lint+test -> gate) | release (3, linear) |\n" +
-	"            scheduled-report (5, fan-out)\n" +
+	"            scheduled-report (5, fan-out) | merge-queue (1, serial landing)\n" +
 	"    TypeScript: --template typescript creates a minimal TypeScript pipeline.\n" +
+	"    --template merge-queue-typescript creates the serial landing pipeline.\n" +
 	"    Requires Node 22.18+ and npm on PATH. Create and commit the npm lockfile\n" +
 	"    with the printed setup command before describe, plan or run.\n" +
 	"    Local foreground, detached CLI runs and schedules use the same pipeline.\n" +

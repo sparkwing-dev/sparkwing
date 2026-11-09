@@ -167,7 +167,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing pipeline new --hidden":                          "Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given.",
 	"sparkwing pipeline new --on":                              "Trigger events to declare, comma separated, replacing the shape's default trigger; manual declares no trigger.",
 	"sparkwing pipeline new --short":                           "One-line description to write into the generated pipeline source instead of a placeholder.",
-	"sparkwing pipeline new --template":                        "Go shape to scaffold, minimal by default; typescript creates a minimal TypeScript pipeline and prints the npm lockfile setup command.",
+	"sparkwing pipeline new --template":                        "Go shape to scaffold, minimal by default; merge-queue creates a serial landing pipeline. typescript and merge-queue-typescript create TypeScript pipelines and print the npm lockfile setup command.",
 	"sparkwing login --controller":                             "Controller URL to sign in to; defaults to the URL saved in --profile.",
 	"sparkwing login --profile":                                "Profile to save the token in; defaults to the controller host.",
 	"sparkwing login --machine":                                "Name the approval page shows for this machine; defaults to the host name.",
