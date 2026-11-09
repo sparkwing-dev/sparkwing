@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -132,6 +133,7 @@ type deployer struct {
 	tmp       string
 	aws       map[string]string
 	resolved  map[string]string
+	gate      stagingGateRecord
 	awsExpiry time.Time
 	ecrPass   string
 }
@@ -1070,13 +1072,17 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	}
 	var err error
 	rec.ScanRun, err = d.submitScan(ctx, d.cfg.Staging, images)
+	if err == nil {
+		rec.CLIDigest = d.cacheCLI(ctx)
+		rec.CLIPlatform = runtime.GOOS + "/" + runtime.GOARCH
+	}
 	return rec, err
 }
 
 // safety: nodes outlive a run only briefly, so NodeClaims are sampled while
 // the smoke runs rather than counted afterwards.
 func (d *deployer) productionSmoke(ctx context.Context, images deployImages, since string) error {
-	if err := d.buildCLI(ctx); err != nil {
+	if err := d.productionCLI(ctx, images.Commit); err != nil {
 		return err
 	}
 	env := d.cfg.Production

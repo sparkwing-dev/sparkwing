@@ -259,12 +259,19 @@ func capturedValues(environment []string) (map[string]string, error) {
 	values := make(map[string]string, len(environment))
 	seen := make(map[string]bool, len(environment))
 	for _, entry := range environment {
-		name, value, ok := strings.Cut(entry, "=")
+		name, value, err := procenv.ParseEntry(entry)
+		if err != nil {
+			return nil, errors.New("captured environment contains an invalid assignment")
+		}
+		// bug: drive-directory metadata is not a user variable in the sealed environment.
+		if strings.HasPrefix(name, "=") {
+			continue
+		}
 		key := name
 		if runtime.GOOS == "windows" {
 			key = strings.ToUpper(key)
 		}
-		if !ok || name == "" || strings.ContainsRune(name, 0) || strings.ContainsRune(value, 0) || seen[key] {
+		if seen[key] {
 			return nil, errors.New("captured environment contains an invalid or duplicate assignment")
 		}
 		seen[key], values[name] = true, value
