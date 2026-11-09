@@ -20,6 +20,7 @@ type Land struct{ sparkwing.Base }
 
 // LandArgs supplies the local review inputs.
 type LandArgs struct {
+	PrePushReview bool `flag:"pre-push-review" desc:"Run the unchanged pre-push tier alongside review in one fail-fast job; intended for the focused queue."`
 	ReviewArgs
 }
 
@@ -79,7 +80,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 		needs = append(needs, n)
 	}
 	// perf: review does not consume policy outputs, so its model call can overlap policy checks.
-	review := reviewJobNode(plan, in.ReviewArgs, branch).Needs(pre)
+	review := reviewJobNode(plan, in.ReviewArgs, branch, in.PrePushReview).Needs(pre)
 	needs = append(needs, review)
 
 	sparkwing.Job(plan, "land", &landJob{
