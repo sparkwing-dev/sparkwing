@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -50,7 +52,7 @@ func TestFeatureE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
+	revision := testgit.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
 	if output, err := revision.Output(); err == nil {
 		t.Logf("controller/CLI source revision=%s", strings.TrimSpace(string(output)))
 	}

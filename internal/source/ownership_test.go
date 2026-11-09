@@ -6,19 +6,17 @@ import (
 	"go/token"
 	"io/fs"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestGitAcquisitionHasOneOwner(t *testing.T) {
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate repository")
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(here), "../.."))
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
