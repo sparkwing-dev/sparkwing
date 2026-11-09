@@ -21,7 +21,7 @@ func TestPreparedIdentityDetectsRuntimeSourceAndInstalledSDKChanges(t *testing.T
 		}
 	}
 	command := Command{node, entry}
-	original, err := command.Identity(directory)
+	original, err := command.Identity(directory, "v22.23.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestPreparedIdentityDetectsRuntimeSourceAndInstalledSDKChanges(t *testing.T
 		if err := os.WriteFile(path, []byte("changed"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		changed, err := command.Identity(directory)
+		changed, err := command.Identity(directory, "v22.23.1")
 		if err != nil || changed == original {
 			t.Fatalf("change to %s not detected: %s, %v", path, changed, err)
 		}
@@ -37,7 +37,11 @@ func TestPreparedIdentityDetectsRuntimeSourceAndInstalledSDKChanges(t *testing.T
 			t.Fatal(err)
 		}
 	}
-	again, err := command.Identity(directory)
+	changedVersion, err := command.Identity(directory, "v22.23.2")
+	if err != nil || changedVersion == original {
+		t.Fatalf("runtime version change not detected: %s, %v", changedVersion, err)
+	}
+	again, err := command.Identity(directory, "v22.23.1")
 	if err != nil || again != original {
 		t.Fatalf("identity did not recover: %s, %v", again, err)
 	}

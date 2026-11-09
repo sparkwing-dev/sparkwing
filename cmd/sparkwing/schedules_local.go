@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -386,7 +387,17 @@ func proveLocalSchedule(ctx context.Context, home, root, pipeline string, enviro
 		return crons.Proof{}, errors.Join(err, entry.Close())
 	}
 	if len(entry.Command) != 1 {
-		identity, err := pipelineentry.Command(entry.Command).Identity(entry.Directory)
+		environment, err := procenv.Build(procenv.Install, options.Base, procenv.Runtime{})
+		if err != nil {
+			return crons.Proof{}, errors.Join(err, entry.Close())
+		}
+		versionCommand := procenv.CommandContext(ctx, environment, entry.Command[0], "--version")
+		versionCommand.Dir = entry.Directory
+		version, err := versionCommand.Output()
+		if err != nil {
+			return crons.Proof{}, errors.Join(fmt.Errorf("identify Node runtime: %w", err), entry.Close())
+		}
+		identity, err := pipelineentry.Command(entry.Command).Identity(entry.Directory, string(version))
 		if err != nil {
 			return crons.Proof{}, errors.Join(err, entry.Close())
 		}

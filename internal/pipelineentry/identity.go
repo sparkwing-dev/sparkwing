@@ -12,11 +12,12 @@ import (
 )
 
 // Identity fingerprints the resolved runtime, entry and installed pipeline files.
-func (c Command) Identity(directory string) (string, error) {
+func (c Command) Identity(directory, runtimeVersion string) (string, error) {
 	if len(c) != 2 {
 		return "", errors.New("prepared entry needs a runtime and script")
 	}
 	sum := sha256.New()
+	fmt.Fprintf(sum, "%s\x00", runtimeVersion)
 	runtime, err := os.Open(c[0])
 	if err != nil {
 		return "", err
