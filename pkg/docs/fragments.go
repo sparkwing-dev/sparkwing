@@ -33,8 +33,8 @@ func CollectChangelog(body string, sources fs.FS) (string, error) {
 		category := ""
 		bullets := 0
 		for line := range strings.Lines(fragment) {
-			if strings.HasPrefix(line, "### ") {
-				category = strings.TrimSpace(strings.TrimPrefix(line, "### "))
+			if heading := categoryHeadingRE.FindStringSubmatch(strings.TrimRight(line, "\r\n")); heading != nil {
+				category = strings.TrimSpace(heading[1])
 				if !containsCategory(categories, category) {
 					return "", fmt.Errorf("unknown changelog category %q", category)
 				}

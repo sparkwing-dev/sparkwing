@@ -10,7 +10,7 @@ func TestChangelogParserSharesReleaseSpansWithCollection(t *testing.T) {
 	for _, heading := range []string{"## [Unreleased]", "## Unreleased", "##\t[Unreleased]"} {
 		for _, newline := range []string{"\n", "\r\n"} {
 			body := strings.Join([]string{"# Changelog", heading, "", "## [v0.1.0] - 2026-01-01", "### Historical", "- old", ""}, newline)
-			collected, err := CollectChangelog(body, fstest.MapFS{"changes/note.md": {Data: []byte("### Fixed\n\n- new\n  continuation\n")}})
+			collected, err := CollectChangelog(body, fstest.MapFS{"changes/note.md": {Data: []byte("###\tFixed\n\n- new\n  continuation\n")}})
 			if err != nil {
 				t.Fatal(err)
 			}
