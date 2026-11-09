@@ -22,8 +22,8 @@ type commandSession struct{ job *procgroup.Job }
 // safety: distinguish host termination from a natural nonzero exit racing cancellation.
 const commandCancellationExitCode uint32 = 0x53574341
 
-// configureHostCommand scopes the Bash workaround to host execution and assumes
-// Windows environment inheritance. Helpers and cleanups keep their original argv.
+// safety: host execution assumes Bash inherits Windows environment variables.
+// Shared SDK helpers and cleanups must keep their original argv.
 func configureHostCommand(cmd *exec.Cmd) {
 	if cmd.Err != nil || !strings.EqualFold(filepath.Base(cmd.Path), "bash.exe") {
 		return
