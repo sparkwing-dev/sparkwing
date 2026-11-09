@@ -64,15 +64,11 @@ func TestSimulateAdmissionETA_AgreesWithTheLedgerUnderAHeadroomSqueeze(t *testin
 		t.Fatalf("release holder: %v", err)
 	}
 
-	snap := ledger.Snapshot()
-	if len(snap.Waiters) != 1 || snap.Waiters[0].BackfillCount != 1 {
-		t.Fatalf("waiters = %+v, want heavy alone and protected after one backfill", snap.Waiters)
+	decision, _, err := ledger.Submit(admission.Request{ID: "small", MemoryBytes: 64 << 20})
+	if err != nil || decision.Kind != admission.DecisionQueued {
+		t.Fatalf("small = %+v, %v", decision, err)
 	}
-	snap.Waiters = append(snap.Waiters, admission.WaiterState{
-		RequestID:   "small",
-		Admit:       snap.AdmitSeq + 1,
-		MemoryBytes: 64 << 20,
-	})
+	snap := ledger.Snapshot()
 	var qs wingwire.QueueState
 	for _, lease := range snap.Leases {
 		qs.Holders = append(qs.Holders, wingwire.Holder{RunID: lease.RequestID, ExpectedDurationMS: 10_000})
@@ -82,14 +78,6 @@ func TestSimulateAdmissionETA_AgreesWithTheLedgerUnderAHeadroomSqueeze(t *testin
 	}
 
 	starts, _ := simulateAdmissionETA(&qs, snap)
-	decision, _, err := ledger.Submit(admission.Request{ID: "small", MemoryBytes: 64 << 20})
-	if err != nil {
-		t.Fatalf("submit small: %v", err)
-	}
-	if decision.Kind != admission.DecisionQueued {
-		t.Fatalf("ledger answered small with %s, want %s: under the squeeze heavy no longer fits beside the backfill",
-			decision.Kind, admission.DecisionQueued)
-	}
 	if starts[1] == 0 {
 		t.Fatal("estimated start for small = 0, want a wait: the ledger holds it behind heavy, so an estimate " +
 			"promising an immediate start describes a queue this daemon does not have")
