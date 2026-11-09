@@ -194,12 +194,13 @@ See [Warmup](sparks.md#warmup) for receipts and the process-policy integration.
 
 ### The key
 
-The key fingerprints the inputs sparkwing controls: the Go major/minor
-version, `GOOS`/`GOARCH`, the `go build` flags sparkwing passes, the
+The key fingerprints the inputs sparkwing controls: the effective Go version,
+including its patch, `GOOS`/`GOARCH`, the `go build` flags sparkwing passes, the
 contents of `.sparkwing/`, the contents of every local `replace` target,
 the directives of a covering `go.work`, and the resolved module overlays.
-Captured Go build settings, including `GOFLAGS`, `GOTOOLCHAIN`, `GOEXPERIMENT`,
-`CGO_ENABLED` and the module verification settings `GOSUMDB`, `GONOSUMDB`,
+Effective `go env` settings, including `GOAMD64`, `GOARM64`, `GOFLAGS`,
+`GOTOOLCHAIN`, `GOEXPERIMENT`, `CGO_ENABLED` and the module verification settings
+`GOSUMDB`, `GONOSUMDB`,
 `GOINSECURE`, `GOPRIVATE` and `GONOPROXY`, also contribute to the key, so a
 binary built with checksum verification relaxed is never reused by a run with it
 on. Different build settings produce
@@ -220,12 +221,11 @@ rather than by where they sit on disk. Two checkouts of the same commit
 therefore compute the same key from different directories and share one
 compiled binary, instead of each building their own.
 
-**Files Git ignores are excluded from the key.** Directories outside a
-Git repository hash every file. Stability snapshots use the same exclusion,
-so changes to ignored generated files between snapshots do not force an
-uncached rebuild. Pass `sparkwing run --sw-hash-all-files`
-when a build depends on ignored files, including generated assets embedded
-by Go.
+**Files Go compiles or embeds always contribute to the key**, including files
+ignored by repository or global Git rules. Sparkwing asks Go for the dependency
+file list and checks it twice for changes. The broader module-tree hash excludes
+ignored files unless `sparkwing run --sw-hash-all-files` is set. That flag also
+hashes ignored files outside the selected build inputs.
 
 Builds run with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`.
 Without cgo an uncached compile skips the C toolchain and the cgo variants
@@ -258,7 +258,8 @@ ceiling and an entry count.
 | `cache.max_entries` | `20` | Entry count ceiling. `0` disables. |
 
 `sparkwing cache prune --max-bytes` and `--max-entries` override them for
-one prune.
+one prune. Writers using a linked shared cache leave automatic pruning to
+the cache owner, so private caller settings cannot evict the owner's entries.
 
 Pruning scans a bounded set of entries and deletes the oldest candidates first.
 A kernel-backed lease spans lookup through process exit; prune skips active
@@ -286,7 +287,8 @@ workspace isolation, and module-file settings as a pipeline run:
 
 ```
 INPUTS
-  go toolchain      669365bbd24f  go1.26
+  effective Go environment  669365bbd24f  resolved toolchain and build settings
+  compiled inputs   a7e9d80dbf03  Go-selected source and embedded files
   platform          8828cb814901  darwin/arm64
   build flags       60dbf03edb4e  -trimpath -ldflags -s -w
   module tree       035b55fe2c64  36 files, 346.1 KiB
@@ -295,7 +297,9 @@ INPUTS
 
 Comparing two checkouts input by input shows exactly what differs -- if
 `module tree` matches and a replace target does not, the pipeline source
-is identical and a dependency is not. The ignored-file count helps identify edits excluded from the key.
+is identical and a dependency is not. The ignored-file count describes the broader
+tree hash. Compiled inputs remain
+covered by the separate `compiled inputs` digest.
 
 Save `cache explain` output before changing build inputs, then compare it
 with the next explanation to see which digests changed.

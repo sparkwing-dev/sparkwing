@@ -119,6 +119,23 @@ type Limits struct {
 	MaxEntries int
 }
 
+func automaticLimits(root string) (Limits, error) {
+	// safety: shared writers do not own retention policy or the owner's configuration.
+	root = filepath.Dir(root)
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Limits{}, err
+	}
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return Limits{}, err
+	}
+	if resolved != "" && resolved != absolute {
+		return Limits{}, nil
+	}
+	return ConfiguredLimits()
+}
+
 type cacheConfigFile struct {
 	MaxBytes   string `yaml:"max_bytes"`
 	MaxEntries *int   `yaml:"max_entries"`

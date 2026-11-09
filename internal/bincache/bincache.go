@@ -284,7 +284,7 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 }
 
 func pipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
-	parts, err := stableKeyParts(sparkwingDir, goos, goarch, os.Environ(), false)
+	parts, err := stableKeyParts(context.Background(), sparkwingDir, goos, goarch, os.Environ(), false)
 	if err != nil {
 		return "", err
 	}
@@ -314,22 +314,22 @@ func digestOf(b []byte) string {
 }
 
 func ExplainCacheKey(sparkwingDir string, env []string) (string, []KeyPart, error) {
-	return explainCacheKey(sparkwingDir, env, false)
+	return explainCacheKey(context.Background(), sparkwingDir, env, false)
 }
 
 const stableKeyAttempts = 3
 
-func explainCacheKey(sparkwingDir string, env []string, hashAllFiles bool) (string, []KeyPart, error) {
-	parts, err := stableKeyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH, env, hashAllFiles)
+func explainCacheKey(ctx context.Context, sparkwingDir string, env []string, hashAllFiles bool) (string, []KeyPart, error) {
+	parts, err := stableKeyParts(ctx, sparkwingDir, runtime.GOOS, runtime.GOARCH, env, hashAllFiles)
 	if err != nil {
 		return "", nil, err
 	}
 	return foldKey(parts), parts, nil
 }
 
-func stableKeyParts(sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
+func stableKeyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
 	for range stableKeyAttempts {
-		parts, err := keyParts(sparkwingDir, goos, goarch, env, hashAllFiles)
+		parts, err := keyParts(ctx, sparkwingDir, goos, goarch, env, hashAllFiles)
 		if !errors.Is(err, ErrUnstableInputs) {
 			return parts, err
 		}
@@ -337,7 +337,7 @@ func stableKeyParts(sparkwingDir, goos, goarch string, env []string, hashAllFile
 	return nil, ErrUnstableInputs
 }
 
-func keyParts(sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
+func keyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
 	var parts []KeyPart
 	add := func(label, detail string, material []byte) {
 		parts = append(parts, KeyPart{
@@ -346,12 +346,17 @@ func keyParts(sparkwingDir, goos, goarch string, env []string, hashAllFiles bool
 		})
 	}
 
-	add("go toolchain", goMajorMinor(), []byte(fmt.Sprintf("go:%s\n", goMajorMinor())))
 	add("platform", goos+"/"+goarch, []byte(fmt.Sprintf("arch:%s/%s\n", goos, goarch)))
 
 	flags := strings.Join(pipelineBuildFlags, " ")
 	add("build flags", flags, []byte("buildflags:"+flags+"\n"))
 	add("build environment", "captured Go build settings", buildEnvironmentKey(pipelineBuildEnvironment(env)))
+	settings, compiled, err := effectiveBuildInputs(ctx, sparkwingDir, env)
+	if err != nil {
+		return nil, err
+	}
+	add("effective Go environment", "resolved toolchain and build settings", settings)
+	add("compiled inputs", "Go-selected source and embedded files", compiled)
 
 	var moduleBuf bytes.Buffer
 	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles, hashAllFiles)
@@ -424,20 +429,6 @@ func keyParts(sparkwingDir, goos, goarch string, env []string, hashAllFiles bool
 type fileFilter func(name string) bool
 
 func allFiles(string) bool { return true }
-
-func goMajorMinor() string {
-	v := runtime.Version()
-	dots := 0
-	for i, c := range v {
-		if c == '.' {
-			dots++
-			if dots == 2 {
-				return v[:i]
-			}
-		}
-	}
-	return v
-}
 
 type hashStats struct {
 	Files   int
@@ -851,9 +842,11 @@ func EffectiveOverlay(dir string, env []string) string {
 	return overlayModfilePath(dir)
 }
 
+var buildEnvironmentNames = strings.Fields("GOVERSION GOOS GOARCH GO386 GOAMD64 GOARM GOARM64 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM GOEXPERIMENT GOFLAGS GOTOOLCHAIN GOROOT GOPATH GOSUMDB GONOSUMDB GOINSECURE GOPRIVATE GONOPROXY CGO_ENABLED CC CXX FC AR PKG_CONFIG CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_FFLAGS CGO_LDFLAGS")
+
 func buildEnvironmentKey(env []string) []byte {
 	var input bytes.Buffer
-	for _, name := range strings.Fields("GOOS GOARCH GO386 GOAMD64 GOARM GOARM64 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM GOEXPERIMENT GOFLAGS GOTOOLCHAIN GOROOT GOPATH GOENV GOSUMDB GONOSUMDB GOINSECURE GOPRIVATE GONOPROXY CGO_ENABLED CC CXX FC AR PKG_CONFIG CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_FFLAGS CGO_LDFLAGS") {
+	for _, name := range buildEnvironmentNames {
 		value, _ := gotoolchain.LookupEnv(env, name)
 		fmt.Fprintf(&input, "%s=%s\x00", name, value)
 	}
