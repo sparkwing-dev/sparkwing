@@ -21,7 +21,7 @@ func newTreeWitness(t *testing.T) (*InputWitness, string) {
 	t.Helper()
 	base := t.TempDir()
 	for _, name := range []string{"source", "external", "overlay", "links", "replacement"} {
-		if err := os.Mkdir(filepath.Join(base, name), 0700); err != nil {
+		if err := os.Mkdir(filepath.Join(base, name), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -361,11 +361,11 @@ func TestInputWitnessRejectsChainedSymlink(t *testing.T) {
 func TestInputWitnessRejectsRestoredExternalTargetAncestor(t *testing.T) {
 	w, path := newTreeWitness(t)
 	directory := filepath.Join(fixtureDirectory(path, "external"), "original")
-	if err := os.Mkdir(directory, 0700); err != nil {
+	if err := os.Mkdir(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(directory, "target.go")
-	if err := os.WriteFile(target, []byte("package main\n"), 0600); err != nil {
+	if err := os.WriteFile(target, []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(fixtureDirectory(path, "links"), "link")
