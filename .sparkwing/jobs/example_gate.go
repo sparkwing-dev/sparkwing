@@ -207,7 +207,11 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 		if err != nil {
 			return err
 		}
-		return exampleVerifyClaims(token, rc.RunID, rc.Pipeline)
+		pipeline := rc.Pipeline
+		if in.PostDeploy {
+			pipeline = "deploy"
+		}
+		return exampleVerifyClaims(token, rc.RunID, pipeline)
 	}).SkipIf(func(ctx context.Context) bool {
 		_, err := sparkwing.OIDCToken(ctx, "sparkwing-example-gate")
 		if errors.Is(err, sparkwing.ErrOIDCUnavailable) {

@@ -196,7 +196,7 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 	err = d.act(ctx, "observe full example scan on "+profile, func() error {
 		var status string
 		if priorFinished {
-			out, err := d.sw(ctx, "", "runs", "status", "--run", rec.ExampleRun, "--profile", profile, "-o", "json")
+			out, err := d.sw(ctx, "", "runs", "status", "--run", rec.ExampleRun, "--profile", profile, "--exit-zero", "-o", "json")
 			if err != nil {
 				return err
 			}

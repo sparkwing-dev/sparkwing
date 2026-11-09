@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -223,6 +224,25 @@ func TestExampleFailOnceUsesReusedSourceIdentityWithoutCLI(t *testing.T) {
 			_, err = host.RunStep(t.Context(), plan, "probe", "run")
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Fatalf("probe error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestExampleOIDCClaimsUseInheritedDeployIdentity(t *testing.T) {
+	for _, postDeploy := range []bool{false, true} {
+		t.Run(fmt.Sprint(postDeploy), func(t *testing.T) {
+			pipeline := "example"
+			if postDeploy {
+				pipeline = "deploy"
+			}
+			payload := fmt.Sprintf(`{"iss":"https://issuer.example","sub":"team:example","aud":"sparkwing-example-gate","run_id":"run","pipeline":%q,"iat":1,"exp":%d}`, pipeline, time.Now().Add(time.Minute).Unix())
+			token := "header." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".signature"
+			host := newTestHost(t, sparkwingtest.Options{OIDCToken: func(context.Context, string) (string, error) { return token, nil }})
+			plan := sparkwing.NewPlan()
+			exampleIntegration(plan, ExampleInputs{PostDeploy: postDeploy}, sparkwing.RunContext{RunID: "run", Pipeline: "example"})
+			if _, err := host.RunStep(t.Context(), plan, "oidc-claims", "run"); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

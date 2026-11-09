@@ -427,6 +427,9 @@ func TestDeployScanReusesRunningAndRecentFailedExamples(t *testing.T) {
 					if status == "failed" {
 						outcome = "failed"
 					}
+					if outcome == "failed" && !slices.Contains(c.Args, "--exit-zero") {
+						return "", errors.New("completed run failed")
+					}
 					return fmt.Sprintf(`{"id":"%s","status":%q}`, c.Args[3], outcome), nil
 				}
 				return f.run(ctx, c)
@@ -442,6 +445,9 @@ func TestDeployScanReusesRunningAndRecentFailedExamples(t *testing.T) {
 				}
 			}
 			rec, err := d.postDeployScan(deployScanContext(t), d.cfg.Production, f.candidate(), "run-deploy")
+			if status == "failed" && (err == nil || !strings.Contains(err.Error(), "ended failed")) {
+				t.Fatalf("lost completed failure outcome: %v", err)
+			}
 			if (err != nil) != (status == "failed") || (rec.ExampleRun == "run-existing") != (status != "old") {
 				t.Fatalf("reused example = %q, %v", rec.ExampleRun, err)
 			}
