@@ -15,31 +15,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// CheckGoDirectives enforces the SDK security floor and shipped template policy.
+// CheckGoDirectives rejects patch-level Go requirements in published modules and shipped templates.
 func CheckGoDirectives(repoRoot string) error {
 	name := filepath.Join(repoRoot, "go.mod")
 	data, err := os.ReadFile(name)
 	if err != nil {
 		return fmt.Errorf("go directive policy: %w", err)
 	}
-	if err := checkSDKGoDirective(data); err != nil {
+	if err := checkGoDirective("go.mod", data); err != nil {
 		return err
 	}
 	return checkTemplateGoDirectives(templates.FS)
-}
-
-func checkSDKGoDirective(data []byte) error {
-	mod, err := modfile.Parse("go.mod", data, nil)
-	if err != nil {
-		return fmt.Errorf("go directive policy: %w", err)
-	}
-	if mod.Go == nil {
-		return fmt.Errorf("go directive policy: go.mod has no go directive")
-	}
-	if version.Compare("go"+mod.Go.Version, "go1.26.10") < 0 {
-		return fmt.Errorf("go directive policy: go.mod requires go %s; use Go 1.26.10 or later for the patched standard library", mod.Go.Version)
-	}
-	return nil
 }
 
 func checkTemplateGoDirectives(registry fs.FS) error {
