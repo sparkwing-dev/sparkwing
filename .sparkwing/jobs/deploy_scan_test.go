@@ -36,7 +36,7 @@ func TestDeployScanBindsRevisionAndReportsObservedOutcome(t *testing.T) {
 					joined := strings.Join(c.Args, " ")
 					if status == "failed" && filepath.Base(c.Name) == "sparkwing" && strings.HasPrefix(joined, "pipeline trigger") {
 						out, _ := f.run(ctx, c)
-						return out, errors.New("here scan failed")
+						return out, errors.New("scan submission failed")
 					}
 					if filepath.Base(c.Name) == "bitwing" {
 						findingArgs = slices.Clone(c.Args)
@@ -396,7 +396,7 @@ func TestDeployScanRunsExampleOnItsOwnHardware(t *testing.T) {
 			return `{"id":"run-example-production-scan","status":"success"}`, nil
 		}
 		if filepath.Base(c.Name) == "sparkwing" && slices.Contains(c.Args, "trigger") {
-			if !slices.Contains(c.Args, "here") || slices.Contains(c.Args, "--detach") || slices.Contains(c.Args, "cloud") {
+			if !slices.Contains(c.Args, "label=deploy-kikd-prod") || !slices.Contains(c.Args, "--detach") || slices.Contains(c.Args, "--reason") || slices.Contains(c.Args, "here") || slices.Contains(c.Args, "cloud") {
 				t.Fatalf("full scans must stay on our hardware: %s", c)
 			}
 		}

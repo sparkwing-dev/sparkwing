@@ -496,9 +496,10 @@ After a successful production smoke, the deploy starts a detached child
 The child inherits verified-default provenance from the deploy, so the existing
 runner trust policy and repository-scoped scan secrets apply; it is exempt from
 the parent-completion child sweep. No manual trigger token is needed. The scan runs the full `example`
-on the runner's own hardware with `--runner here` and records its result in the
+on self-hosted runners with `--runner label=deploy-kikd-prod --detach` and records its result in the
 runner user's normal Bitwing ledger. The small staging and production smokes retain Cloud
-placement. Promotion does not wait for the full scan. All `deploy-scan` runs share the
+placement. The example and its weather-report children inherit that self-hosted route.
+Promotion does not wait for the full scan. All `deploy-scan` runs share the
 capacity-one `sparkwing-post-deploy` concurrency group, leaving the desktop runner's second
 slot for deploy jobs. Queued scans whose source is no longer main's tip stop before building
 or running fixtures, so the newest waiting revision wins. The target team's existing example

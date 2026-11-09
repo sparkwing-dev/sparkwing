@@ -27,7 +27,7 @@ func (DeployScan) ShortHelp() string {
 }
 
 func (DeployScan) Help() string {
-	return "Started as a detached child after production smoke, inheriting its verified repository and revision. All scans share one concurrency slot, leaving the desktop runner's other slot for deploys. An hourly revision receipt suppresses repeated scans even after failure. Superseded revisions stop before scanning. The full example runs here on the runner's hardware with the deploy-kikd-prod toolchain. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
+	return "Started as a detached child after production smoke, inheriting its verified repository and revision. All scans share one concurrency slot, leaving the desktop runner's other slot for deploys. An hourly revision receipt suppresses repeated scans even after failure. Superseded revisions stop before scanning. The full example and its children run on self-hosted runners labeled deploy-kikd-prod. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
 }
 
 type deployScanSecrets struct {
@@ -171,7 +171,7 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 		runCtx, cancel := context.WithTimeout(ctx, d.cfg.RunTimeout)
 		defer cancel()
 		out, runErr := d.sw(runCtx, "", "pipeline", "trigger", "example", "-C", d.repoDir, "--profile", profile,
-			"--runner", "here", "--reason", "post-deploy scan on our hardware", "-o", "json", "--ref", images.Commit,
+			"--runner", "label=deploy-kikd-prod", "--detach", "-o", "json", "--ref", images.Commit,
 			"--", "--api-controller", env.ControllerURL)
 		rec.ExampleRun = acceptedRunID(out)
 		if rec.ExampleRun == "" {
