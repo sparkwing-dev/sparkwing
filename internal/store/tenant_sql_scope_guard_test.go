@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).migrateRunnerLabelsTx":          "startup freezes pre-upgrade labels for all enrolled roots in the migration transaction; each read and update binds a globally unique capability prefix",
 	"(*Operator).NextActionsDispatch":            "the deployment sender expires leases and discovers work across teams; every approval, binding, installation, node and receipt joins on that work row team",
 	"(*Operator).PendingActionsCancellations":    "the deployment sender invalidates and enumerates receipts across teams; consent, runs and attempts correlate with each receipt team and exact job",
 	"(*Operator).FinishActionsDispatch":          "the deployment sender records one outcome by the globally unique receipt it took from the cross-team queue",

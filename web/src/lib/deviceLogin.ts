@@ -9,6 +9,7 @@ export const expiredCodeText =
   "That code is not valid or has expired. Run the command again in your terminal for a new code.";
 
 export interface DeviceRunner {
+  allowed_labels: string[];
   name: string;
   personal: boolean;
   repos: string[];
@@ -153,6 +154,12 @@ export async function lookupDeviceRequest(
     "Look up the code",
   );
   const body = (await res.json()) as Partial<DeviceRequest>;
+  if (body.kind === "runner" && (
+    !body.runner || !Array.isArray(body.runner.allowed_labels) ||
+    body.runner.allowed_labels.some((label) => typeof label !== "string")
+  )) {
+    throw new DeviceLoginError(502, "protocol_error", "The controller did not return the runner's allowed labels. Try the enrollment again before approving.");
+  }
   return {
     user_code: body.user_code ?? letters,
     kind: body.kind === "runner" ? "runner" : "member",
@@ -162,6 +169,7 @@ export async function lookupDeviceRequest(
     runner: body.runner
       ? {
           ...body.runner,
+          allowed_labels: body.runner.allowed_labels,
           repos: body.runner.repos ?? [],
           reserved_pools: body.runner.reserved_pools ?? [],
         }

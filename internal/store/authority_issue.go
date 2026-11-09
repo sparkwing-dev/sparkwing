@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // issue persists one capability within its intake, claim or exchange transaction.
@@ -697,6 +698,9 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 	var origin *CapabilityOrigin
 	if len(provision) > 0 && provision[0] != nil {
 		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID, Personal: provision[0].Personal, Platform: provision[0].Platform}
+		if origin.Kind == capability.ProvisionMachine {
+			origin.AllowedLabels = match.SelfAsserted(provision[0].AllowedLabels)
+		}
 		var err error
 		origin.Requirement, err = provisionRequirementTx(ctx, tx, *provision[0])
 		if err != nil {

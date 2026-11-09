@@ -43,6 +43,9 @@ func machineAdministrationTx(ctx context.Context, tx *storeTx, p capability.Prin
 func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	allowed := []capability.Grant{capability.ClaimsLaunch, capability.OperatorLimits, capability.OperatorObjectStore, capability.OperatorTokens}
 	if spec.Kind == capability.ProvisionMachine {
+		if err := ValidateRunnerLabels(spec.AllowedLabels); err != nil {
+			return err
+		}
 		if !ValidRunnerName(spec.Subject.ID) || spec.RegistrationID != "runner:"+spec.Team+":"+spec.Subject.ID || spec.Data != nil || !spec.Personal && len(spec.Repositories) == 0 || len(spec.Repositories) > 32 {
 			return bindingRefusal()
 		}

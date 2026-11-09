@@ -42,7 +42,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			}
 			authority := plan.Seal.Request.AuthorityRef
 			root, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-				Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()),
+				Kind: capability.ProvisionMachine, AllowedLabels: []string{label}, Authority: &authority, Team: string(tenant.Team()),
 				RegistrationID: "runner:planner:worker", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "worker"},
 				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim},
 			})
@@ -88,7 +88,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			digest := sha256.Sum256([]byte(raw))
 			foreignAuthority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 			foreignRoot, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-				Kind: capability.ProvisionMachine, Authority: &foreignAuthority, Team: string(foreign.Account.ActiveTeam),
+				Kind: capability.ProvisionMachine, AllowedLabels: []string{label}, Authority: &foreignAuthority, Team: string(foreign.Account.ActiveTeam),
 				RegistrationID: "runner:" + string(foreign.Account.ActiveTeam) + ":foreign", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "foreign"},
 				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim},
 			})

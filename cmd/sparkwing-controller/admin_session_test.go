@@ -122,7 +122,7 @@ func TestAdminSessionEnrollsSharedRunnerAndReservedLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, launcher := range []bool{false, true} {
-		request := controllerwire.EnrollRunnerRequest{Name: "build", Repos: []string{"github.com/acme/repo"}, Platform: "kubernetes"}
+		request := controllerwire.EnrollRunnerRequest{Name: "build", AllowedLabels: []string{"build"}, Repos: []string{"github.com/acme/repo"}, Platform: "kubernetes"}
 		if launcher {
 			request.Name = "deploy"
 			request.ReservedPools = []string{"deploy"}
@@ -131,6 +131,34 @@ func TestAdminSessionEnrollsSharedRunnerAndReservedLauncher(t *testing.T) {
 		issued, err := manager.EnrollRunner(t.Context(), request)
 		if err != nil || issued == nil || issued.Capability == "" {
 			t.Fatalf("launcher=%v enrollment: %v", launcher, err)
+		}
+		if !launcher {
+			if _, err := manager.RotateToken(t.Context(), issued.Prefix, controllerwire.TokenRotate{GraceSecs: 60}); err != nil {
+				t.Fatal(err)
+			}
+			for _, update := range [][]string{nil, {"--label", "build", "--label", "deploy"}, {"--clear"}} {
+				var output, audit bytes.Buffer
+				args := append([]string{"runner-labels", "--team", "default", "--runner", "build", "--reason", "update placement", "--output", "json"}, update...)
+				if err := runAdminFixture(args, &output, &audit); err != nil {
+					t.Fatal(err)
+				}
+				var result struct {
+					AllowedLabels []string `json:"allowed_labels"`
+				}
+				if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				want := []string{"build"}
+				if len(update) == 4 {
+					want = []string{"build", "deploy"}
+				}
+				if len(update) == 1 {
+					want = []string{}
+				}
+				if !slices.Equal(result.AllowedLabels, want) {
+					t.Fatalf("allowed labels: %v want %v", result.AllowedLabels, want)
+				}
+			}
 		}
 		if launcher && !slices.Equal(issued.Grants, []string{string(capability.ClaimsLaunch)}) {
 			t.Fatalf("launcher grants: %v", issued.Grants)

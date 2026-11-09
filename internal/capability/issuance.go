@@ -197,6 +197,7 @@ type ProvisionSpec struct {
 	ReservedPools  []string
 	Trust          Trust
 	Repositories   []string
+	AllowedLabels  []string
 	Data           *DataScope
 	Metered        bool
 	ExpiresAt      *time.Time

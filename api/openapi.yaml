@@ -1670,6 +1670,12 @@ components:
     internal.controllerwire.DeviceRunner:
       additionalProperties: true
       properties:
+        allowed_labels:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         launcher:
           type: boolean
         name:
@@ -1693,6 +1699,7 @@ components:
         trust:
           type: string
       required:
+        - allowed_labels
         - name
         - personal
         - repos
@@ -1729,6 +1736,12 @@ components:
     internal.controllerwire.EnrollRunnerRequest:
       additionalProperties: true
       properties:
+        allowed_labels:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         expires_at:
           anyOf:
             - format: date-time

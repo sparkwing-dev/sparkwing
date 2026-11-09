@@ -192,7 +192,7 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 }
 
 func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enrollment runnerEnrollment) error {
-	request := controllerwire.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal, Platform: enrollment.platform}
+	request := controllerwire.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal, Platform: enrollment.platform, AllowedLabels: enrollment.config.Labels}
 	if enrollment.launcher {
 		request.Grants = []string{string(capability.ClaimsLaunch)}
 	}
