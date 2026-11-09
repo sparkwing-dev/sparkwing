@@ -49,6 +49,7 @@ unlock.
 
 ### Fixed
 
+- **Helm:** Pull the Cloud example's pinned Docker sidecar from public ECR so Docker Hub's anonymous pull limit cannot block planning on fresh nodes
 - **deployment:** Skip superseded queued builds before credentials or Cloud smoke, and let staging-verified ancestors of main finish promotion while both production image revisions only advance. Recheck source ancestry immediately before each production GitOps push.
 - **run status:** Retry receipts list only completed reuse, excluding successful source jobs that had to execute again because their results could not be reused.
 - **runner:** Child awaits pace controller reads with jittered backoff and reuse the authorized host request while waiting
