@@ -867,7 +867,7 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 			if !d.tools.now().Before(deadline) {
 				return fmt.Errorf("still %s after %s", last, d.cfg.ArgoTimeout)
 			}
-			if err := d.tools.wait(ctx, d.cfg.PollInterval); err != nil {
+			if err := d.tools.wait(ctx, time.Second); err != nil {
 				return err
 			}
 		}

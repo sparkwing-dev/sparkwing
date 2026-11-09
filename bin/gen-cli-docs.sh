@@ -12,7 +12,14 @@ case "${1:-}" in
 esac
 
 generate() {
-  go -C "$REPO_ROOT" run ./cmd/sparkwing commands --format markdown --output plain --split-dir "$1" >/dev/null
+  go -C "$REPO_ROOT" run \
+    ./cmd/sparkwing/reference_generate.go \
+    ./cmd/sparkwing/commands.go \
+    ./cmd/sparkwing/help.go \
+    ./cmd/sparkwing/help_registry.go \
+    ./cmd/sparkwing/discovery_page.go \
+    ./cmd/sparkwing/output.go \
+    --format markdown --output plain --split-dir "$1" >/dev/null
 }
 
 if [ "${1:-}" = --check ]; then

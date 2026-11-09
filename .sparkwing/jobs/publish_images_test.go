@@ -1,16 +1,21 @@
 package jobs
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -156,6 +161,70 @@ func TestPublishImagesRefusesABaseWithoutArm64(t *testing.T) {
 	in, _ := publishFixture(t, "amd64")
 	if _, err := publishReleaseImages(t.Context(), in); err == nil || !strings.Contains(err.Error(), "no linux/arm64 image") {
 		t.Fatalf("published from an amd64-only base: %v", err)
+	}
+}
+
+func TestPublishImagesOverlapsIndependentComponents(t *testing.T) {
+	in, _ := publishFixture(t, "amd64", "arm64")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	controller, runner := make(chan struct{}), make(chan struct{})
+	var controllerOnce, runnerOnce sync.Once
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var other <-chan struct{}
+		if req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/bases/sparkwing-controller-base/manifests/") {
+			controllerOnce.Do(func() { close(controller) })
+			other = runner
+		}
+		if req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/bases/sparkwing-runner-base/manifests/") {
+			runnerOnce.Do(func() { close(runner) })
+			other = controller
+		}
+		if other != nil {
+			select {
+			case <-other:
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		}
+		return http.DefaultTransport.RoundTrip(req)
+	})
+	refs, err := publishReleaseImages(ctx, in, remote.WithTransport(transport))
+	if err != nil || len(refs) != 2 {
+		t.Fatalf("concurrent publication = %v, %v", refs, err)
+	}
+}
+
+func TestPublishImagesCancelsAndJoinsSiblingOnFailure(t *testing.T) {
+	in, _ := publishFixture(t, "amd64", "arm64")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	started, stopped := make(chan struct{}), make(chan struct{})
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/bases/sparkwing-controller-base/manifests/") {
+			close(started)
+			<-req.Context().Done()
+			close(stopped)
+			return nil, req.Context().Err()
+		}
+		if req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/bases/sparkwing-runner-base/manifests/") {
+			select {
+			case <-started:
+				return nil, errors.New("runner base unavailable")
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		}
+		return http.DefaultTransport.RoundTrip(req)
+	})
+	_, err := publishReleaseImages(ctx, in, remote.WithTransport(transport))
+	if err == nil || !strings.Contains(err.Error(), "runner base unavailable") {
+		t.Fatalf("publication failure = %v", err)
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("publication returned before its sibling stopped")
 	}
 }
 

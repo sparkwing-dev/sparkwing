@@ -202,6 +202,7 @@ surfaces ship with matching entries.
 
 - `github.com/fsnotify/fsnotify` lets registry tests observe staging-file creation because filesystem events avoid timing-based polling.
 - `k8s.io/utils` supplies fake clocks for chaos tests because advancing time makes settling and process-guard assertions deterministic.
+- `golang.org/x/sync` joins concurrent controller and runner image publication and cancels sibling registry work on failure (build tooling).
 
 ## Development candidates
 
