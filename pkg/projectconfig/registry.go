@@ -15,7 +15,7 @@ func (c *Config) Registry() *pipelines.Config {
 		return out
 	}
 	for _, p := range c.Pipelines {
-		entry := pipelines.Pipeline{Name: p.Name, Entrypoint: p.Entrypoint, Description: value(p.Description), Source: value(p.Source), Profile: value(p.Profile), Hidden: value(p.Hidden), Args: maps.Clone(p.Args), Requires: slices.Clone(p.Requires)}
+		entry := pipelines.Pipeline{Name: p.Name, Entrypoint: p.Entrypoint, Description: value(p.Description), Source: value(p.Source), Profile: value(p.Profile), Hidden: value(p.Hidden), Args: maps.Clone(p.Args)}
 		guards := p.Guards
 		if c.Defaults != nil {
 			entry.Args = maps.Clone(c.Defaults.Args)
@@ -23,9 +23,6 @@ func (c *Config) Registry() *pipelines.Config {
 				entry.Args = map[string]string{}
 			}
 			maps.Copy(entry.Args, p.Args)
-			if p.Requires == nil {
-				entry.Requires = slices.Clone(c.Defaults.Requires)
-			}
 			if guards == nil {
 				guards = c.Defaults.Guards
 			}

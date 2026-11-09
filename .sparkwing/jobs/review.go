@@ -156,6 +156,7 @@ const (
 var findingPrefix = map[string]string{defaultReviewer: "F", "security": "S"}
 
 func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInputs) (reviewRecord, string, error) {
+	started := d.now()
 	skips, err := parseSkips(in.skip)
 	if err != nil {
 		return reviewRecord{}, "", err
@@ -188,21 +189,25 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	rec.Notes = nil
 	sameTree := prior != nil && prior.Tree == tree
 	rec.Tree, rec.Commit, rec.Base = tree, head, base
+	d.logf("review timing: phase=resolve elapsed=%s reused=%t", d.now().Sub(started), sameTree)
 
 	if sameTree {
 		rec.Notes = append(rec.Notes, "tree unchanged since the last review, so no reviewer ran; skips were reapplied")
 	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree); err != nil {
 		return reviewRecord{}, "", err
 	}
+	started = d.now()
 	rec.Notes = append(rec.Notes, applySkips(p, rec.Findings, skips)...)
 	rec.settle(p)
 	if err := saveReviewRecord(file, rec); err != nil {
 		return reviewRecord{}, "", fmt.Errorf("review: write the record: %w", err)
 	}
+	d.logf("review timing: phase=record elapsed=%s", d.now().Sub(started))
 	return rec, file, nil
 }
 
 func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string) error {
+	started := d.now()
 	diff, err := d.git(ctx, "diff", "--no-color", "--no-ext-diff", base, head)
 	if err != nil {
 		return fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
@@ -212,6 +217,8 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 		return fmt.Errorf("review: list changed files: %w", err)
 	}
 	files := strings.Fields(names)
+	d.logf("review timing: phase=diff elapsed=%s bytes=%d files=%d", d.now().Sub(started), len(diff), len(files))
+	started = d.now()
 	objective, notes := resolveObjective(ctx, d, p, in, base)
 	rec.Objective = objective
 	rec.Notes = append(rec.Notes, notes...)
@@ -245,6 +252,8 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 			standards = ""
 		}
 	}
+	d.logf("review timing: phase=context elapsed=%s standards_bytes=%d", d.now().Sub(started), len(standards))
+	started = d.now()
 	order := make([]string, 0, len(profiles))
 	for profile := range profiles {
 		order = append(order, profile)
@@ -277,6 +286,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 			Reviewers: slices.Clone(rec.Reviewers),
 		}
 	}
+	d.logf("review timing: phase=prompts elapsed=%s profiles=%d", d.now().Sub(started), len(order))
 	var wg sync.WaitGroup
 	for i, profile := range order {
 		wg.Add(1)
@@ -291,6 +301,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 		}()
 	}
 	wg.Wait()
+	started = d.now()
 	var errs []error
 	for _, result := range results {
 		errs = append(errs, result.err)
@@ -308,6 +319,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	}
 
 	rec.Passes = append(rec.Passes, pass)
+	d.logf("review timing: phase=settle elapsed=%s", d.now().Sub(started))
 	return nil
 }
 
@@ -331,10 +343,16 @@ func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRe
 	prev := rec.session(profile)
 	prompt.prior = findingsBy(rec.Findings, profile)
 	resume := p.Rereview.SameReviewer && prev.Session != "" && prev.Model == model
+	call := func(session, text, mode string) (reviewAnswer, error) {
+		started := d.now()
+		answer, err := rv.review(ctx, d.root, session, text)
+		d.logf("review timing: phase=model profile=%s model=%s mode=%s elapsed=%s prompt_bytes=%d failed=%t", profile, model, mode, d.now().Sub(started), len(text), err != nil)
+		return answer, err
+	}
 	var ans reviewAnswer
 	if resume {
 		d.logf("review: resuming the %s reviewer (%s) session %s", profile, model, prev.Session)
-		ans, err = rv.review(ctx, d.root, prev.Session, prompt.rereview())
+		ans, err = call(prev.Session, prompt.rereview(), "resume")
 		if err != nil {
 			rec.Notes = append(rec.Notes, fmt.Sprintf("resume of %s session %s failed, so a new session re-checked its findings: %v", profile, prev.Session, err))
 			resume = false
@@ -342,7 +360,7 @@ func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRe
 	}
 	if !resume {
 		d.logf("review: starting the %s reviewer (%s)", profile, model)
-		if ans, err = rv.review(ctx, d.root, "", prompt.fresh()); err != nil {
+		if ans, err = call("", prompt.fresh(), "fresh"); err != nil {
 			return false, fmt.Errorf("review: %s reviewer (%s): %w", profile, model, err)
 		}
 	}

@@ -50,7 +50,7 @@ func TestArgoWaitRequiresHealthySyncedRevisionBeforeRollout(t *testing.T) {
 		}
 		return run(ctx, c)
 	}
-	err := d.waitRollout(t.Context(), d.cfg.Staging, "candidate", deployPhases[0], f.old.Controller.Digest)
+	err := d.waitRollout(t.Context(), d.cfg.Staging, "candidate", deployPhases[0], f.old.Controller.Digest, nil)
 	if err != nil || reads != 4 || waits != 3 || rollouts != 1 {
 		t.Fatalf("Argo wait = %v, reads=%d waits=%d rollouts=%d", err, reads, waits, rollouts)
 	}

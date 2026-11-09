@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
+	"path"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -14,9 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // resolveChildRevisions keeps a same-repository child at its parent's revision,
@@ -77,11 +79,13 @@ func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, reques
 		options.ResolveRef = access.resolveGitHubAppRef(spec)
 	}
 	git, code, config, err := source.Select(ctx, spec, request.Pipeline, request.Git, request.Source, "", options)
-	// safety: planning must satisfy repository requirements before it selects the run's engine.
-	if err == nil && !request.Options.Requires.Set {
-		if entry := config.Registry().Find(request.Pipeline); entry != nil && entry.Requires != nil {
-			request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: slices.Clone(entry.Requires)}, Origin: runspec.SettingOrigin{Layer: runspec.LayerSealed, Key: "pipeline.requires"}}
+
+	if err == nil && config != nil {
+		directory := request.Source.Location.PipelineDir
+		if directory == "" {
+			directory = ".sparkwing"
 		}
+		request.Options.Requires, err = settings.PlanningRequirements(config.Raw, path.Join(directory, projectconfig.Filename), request.Pipeline, request.Options)
 	}
 	return git, code, err
 }

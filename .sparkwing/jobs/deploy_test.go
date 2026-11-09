@@ -261,15 +261,14 @@ func TestDeployPlanShape(t *testing.T) {
 	}
 	full := deps(nil)
 	want := map[string][]string{
-		"build-images":   nil,
-		"staging-deploy": {"build-images"},
-		"staging-gate":   {"build-images", "staging-deploy"},
-		"production":     {"build-images", "staging-gate"},
+		"build-images": nil,
+		"staging-gate": {"build-images"},
+		"production":   {"build-images", "staging-gate"},
 	}
 	if fmt.Sprint(full) != fmt.Sprint(want) {
 		t.Fatalf("full plan = %v, want %v", full, want)
 	}
-	if got := deps(map[string]string{"stop-after": "staging"}); len(got) != 3 || got["production"] != nil {
+	if got := deps(map[string]string{"stop-after": "staging"}); len(got) != 2 || got["production"] != nil {
 		t.Fatalf("stop-after staging plan = %v", got)
 	}
 	proven := deps(map[string]string{"promote-proven": "true"})
@@ -287,8 +286,8 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 		args map[string]string
 		jobs int
 	}{
-		{"full", nil, 4},
-		{"staging", map[string]string{"stop-after": "staging"}, 3},
+		{"full", nil, 3},
+		{"staging", map[string]string{"stop-after": "staging"}, 2},
 		{"promote-proven", map[string]string{"promote-proven": "true"}, 3},
 	} {
 		for _, mode := range []string{"real", "dry-run", "sw-dry-run"} {
@@ -306,16 +305,8 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 					t.Fatal(err)
 				}
 				doc := decodePipeline(t, plan)
-				if mode == "real" {
-					if len(plan.Concurrency) != 1 {
-						t.Fatalf("deploy must serialize the whole run: %+v", plan.Concurrency)
-					}
-					group := plan.Concurrency[0]
-					if group.Group != "sparkwing-cloud-deploy" || group.Capacity == nil || *group.Capacity != 1 || (group.OnLimit != nil && *group.OnLimit != "queue") || (group.Scope != nil && *group.Scope != "global") {
-						t.Fatalf("deploy must use one global Queue slot: %+v", group)
-					}
-				} else if len(plan.Concurrency) != 0 {
-					t.Fatalf("dry-run holds a deploy slot: %+v", plan.Concurrency)
+				if len(plan.Concurrency) != 0 {
+					t.Fatalf("deploy holds a whole-run slot: %+v", plan.Concurrency)
 				}
 				if len(doc.Jobs) != shape.jobs {
 					t.Fatalf("got %d jobs, want %d", len(doc.Jobs), shape.jobs)
@@ -331,6 +322,18 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 					}
 					if !slices.Equal(job.Requires, want) {
 						t.Errorf("job %s requires %v, want %v", job.ID, job.Requires, want)
+					}
+					if mode == "real" && !inline {
+						if len(job.Concurrency) != 1 {
+							t.Fatalf("job %s needs one stage queue: %+v", job.ID, job.Concurrency)
+						}
+						group := job.Concurrency[0]
+						name := map[string]string{"build-images": "build", "staging-gate": "staging", "production": "production"}[job.ID]
+						if group.Group != "sparkwing-cloud-"+name || group.Capacity != 1 || (group.OnLimit != "" && group.OnLimit != sparkwing.Queue) || (group.Scope != "" && group.Scope != sparkwing.ScopeGlobal) {
+							t.Fatalf("job %s must use its own global Queue slot: %+v", job.ID, group)
+						}
+					} else if len(job.Concurrency) != 0 {
+						t.Fatalf("job %s holds a deploy stage slot: %+v", job.ID, job.Concurrency)
 					}
 				}
 			})

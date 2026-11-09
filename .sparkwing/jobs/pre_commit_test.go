@@ -261,3 +261,20 @@ func TestFormattersJudgeAChangeTooLargeForOneCommandLine(t *testing.T) {
 		t.Fatalf("formatters over a large change = %.300v, want them to name only zz_unformatted.go", err)
 	}
 }
+
+func TestWholeTreeFormattersHandleLiteralFileNames(t *testing.T) {
+	for name, check := range map[string]func(context.Context) error{
+		"lint":        (&Lint{}).run,
+		"pre-release": checkPreReleaseGofmt,
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			file := filepath.Join(root, "-file with spaces.go")
+			writeGoFile(t, file, "package main\nfunc  Bad( )  int { return 3 }\n")
+			err := check(newTestContext(t))
+			if err == nil || !strings.Contains(err.Error(), "-file with spaces.go") || !strings.Contains(err.Error(), "files need formatting") {
+				t.Fatalf("formatter = %v, want literal unformatted filename", err)
+			}
+		})
+	}
+}

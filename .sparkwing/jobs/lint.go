@@ -28,8 +28,7 @@ func (p *Lint) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInput
 }
 
 func (p *Lint) run(ctx context.Context) error {
-	if err := sparkwing.Bash(ctx, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
-		MustBeEmpty("gofmt reported unformatted files"); err != nil {
+	if err := runGofmt(ctx); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "gofmt: all files formatted")

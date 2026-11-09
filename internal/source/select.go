@@ -20,8 +20,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
+// SelectedConfig retains the execution commit's configuration for located settings resolution.
+type SelectedConfig struct {
+	*projectconfig.Config
+	Raw []byte
+}
+
+// Project returns the parsed project, including when its file was absent.
+func (c *SelectedConfig) Project() *projectconfig.Config {
+	if c == nil {
+		return nil
+	}
+	return c.Config
+}
+
 // Select resolves the execution commit, reads its configuration for the pipeline's code pin and resolves the code commit.
-func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, code runspec.Source, override string, options Options) (runspec.Git, runspec.Source, *projectconfig.Config, error) {
+func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, code runspec.Source, override string, options Options) (runspec.Git, runspec.Source, *SelectedConfig, error) {
 	lookup := func(ref string) (string, error) {
 		var sha string
 		var err error
@@ -79,7 +93,10 @@ func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, co
 		}
 	}
 	git, code, err = ResolveRevisions(ctx, git, code, override, lookup)
-	return git, code, cfg, err
+	if cfg == nil {
+		return git, code, nil, err
+	}
+	return git, code, &SelectedConfig{Config: cfg, Raw: raw}, err
 }
 
 func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Options) (_ []byte, _ bool, err error) {
