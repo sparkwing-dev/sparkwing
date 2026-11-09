@@ -143,8 +143,6 @@ func (s *Server) memberRole(ctx context.Context, team store.Team, accountID stri
 	return role, nil
 }
 
-var errAccountSessionsDisabled = errors.New("sign-in is not enabled on this controller")
-
 func randomURLToken() (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {

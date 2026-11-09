@@ -28,10 +28,7 @@ import (
 
 const ghAudience = "https://ci.example.com"
 
-var (
-	widgetsJob = githuboidctest.Job{Repository: "Acme/Widgets", RepositoryID: 42, RepositoryOwnerID: 7, RunID: "555"}
-	gadgetsJob = githuboidctest.Job{Repository: "acme/gadgets", RepositoryID: 43, RepositoryOwnerID: 7}
-)
+var widgetsJob = githuboidctest.Job{Repository: "Acme/Widgets", RepositoryID: 42, RepositoryOwnerID: 7, RunID: "555"}
 
 type ghFixture struct {
 	*identityFixture

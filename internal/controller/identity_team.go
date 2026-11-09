@@ -14,8 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-const runnerPrincipalPrefix = "agent:"
-
 type renameTeamReq struct {
 	DisplayName string `json:"display_name"`
 }
