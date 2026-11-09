@@ -199,7 +199,7 @@ including its patch, `GOOS`/`GOARCH`, the `go build` flags sparkwing passes, the
 contents of `.sparkwing/`, the contents of every local `replace` target,
 the directives of a covering `go.work`, and the resolved module overlays.
 Effective `go env` settings, including `GOAMD64`, `GOARM64`, `GOFLAGS`,
-`GOTOOLCHAIN`, `GOEXPERIMENT`, `CGO_ENABLED` and the module verification settings
+`GOTOOLCHAIN`, `GOEXPERIMENT`, `GOFIPS140`, `CGO_ENABLED` and the module verification settings
 `GOSUMDB`, `GONOSUMDB`,
 `GOINSECURE`, `GOPRIVATE` and `GONOPROXY`, also contribute to the key, so a
 binary built with checksum verification relaxed is never reused by a run with it
@@ -226,6 +226,9 @@ ignored by repository or global Git rules. Sparkwing asks Go for the dependency
 file list and checks it twice for changes. The broader module-tree hash excludes
 ignored files unless `sparkwing run --sw-hash-all-files` is set. That flag also
 hashes ignored files outside the selected build inputs.
+Go file overlays contribute their map and replacement contents, including files
+that exist only in the overlay. Automatic `default.pgo` profiles and profiles
+selected by `-pgo` contribute their contents even when ignored or outside the checkout.
 
 Builds run with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`.
 Without cgo an uncached compile skips the C toolchain and the cgo variants
@@ -260,6 +263,7 @@ ceiling and an entry count.
 `sparkwing cache prune --max-bytes` and `--max-entries` override them for
 one prune. Writers using a linked shared cache leave automatic pruning to
 the cache owner, so private caller settings cannot evict the owner's entries.
+A symlink to the state home itself keeps the owner's configured limits.
 
 Pruning scans a bounded set of entries and deletes the oldest candidates first.
 A kernel-backed lease spans lookup through process exit; prune skips active

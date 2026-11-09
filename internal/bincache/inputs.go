@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -64,11 +65,11 @@ func effectiveBuildInputs(ctx context.Context, dir string, env []string) ([]byte
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, ".")
-	compiled, err := compiledInputDigest(func() ([]byte, error) { return output(args...) })
+	compiled, err := compiledInputDigest(func() ([]byte, error) { return output(args...) }, dir, effective["GOFLAGS"])
 	return buildEnvironmentKey(resolved), compiled, err
 }
 
-func compiledInputDigest(list func() ([]byte, error)) ([]byte, error) {
+func compiledInputDigest(list func() ([]byte, error), dir, flags string) ([]byte, error) {
 	var previous []byte
 	for range 2 {
 		raw, err := list()
@@ -76,6 +77,13 @@ func compiledInputDigest(list func() ([]byte, error)) ([]byte, error) {
 			return nil, err
 		}
 		var digest bytes.Buffer
+		replacements, selected, err := selectedBuildFiles(dir, flags)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := hashFilesInto(&digest, dir, selected); err != nil {
+			return nil, err
+		}
 		decoder := json.NewDecoder(bytes.NewReader(raw))
 		for {
 			var pkg struct {
@@ -93,7 +101,13 @@ func compiledInputDigest(list func() ([]byte, error)) ([]byte, error) {
 			var files []string
 			for _, group := range [][]string{pkg.GoFiles, pkg.CgoFiles, pkg.CFiles, pkg.CXXFiles, pkg.MFiles, pkg.HFiles, pkg.FFiles, pkg.SFiles, pkg.SwigFiles, pkg.SwigCXXFiles, pkg.SysoFiles, pkg.EmbedFiles} {
 				for _, name := range group {
-					files = append(files, filepath.Join(pkg.Dir, name))
+					path := filepath.Join(pkg.Dir, name)
+					if replacement, ok := replacements[path]; ok {
+						path = replacement
+					}
+					if path != "" {
+						files = append(files, path)
+					}
 				}
 			}
 			sort.Strings(files)
@@ -107,4 +121,72 @@ func compiledInputDigest(list func() ([]byte, error)) ([]byte, error) {
 		previous = append([]byte{}, digest.Bytes()...)
 	}
 	return previous, nil
+}
+
+func selectedBuildFiles(dir, flags string) (map[string]string, []string, error) {
+	values := map[string]string{"pgo": "auto"}
+	// safety: GOFLAGS quotes entire words and does not unescape their contents.
+	for flags != "" {
+		flags = strings.TrimLeft(flags, " \t\r\n")
+		if flags == "" {
+			break
+		}
+		var word string
+		if flags[0] == '\'' || flags[0] == '"' {
+			end := strings.IndexByte(flags[1:], flags[0])
+			if end < 0 {
+				return nil, nil, errors.New("unterminated GOFLAGS quote")
+			}
+			word, flags = flags[1:end+1], flags[end+2:]
+		} else {
+			end := strings.IndexAny(flags, " \t\r\n")
+			if end < 0 {
+				end = len(flags)
+			}
+			word, flags = flags[:end], flags[end:]
+		}
+		name, value, _ := strings.Cut(strings.TrimLeft(word, "-"), "=")
+		values[name] = value
+	}
+	absolute := func(path string) string {
+		if filepath.IsAbs(path) {
+			return filepath.Clean(path)
+		}
+		return filepath.Join(dir, path)
+	}
+	var files []string
+	replacements := map[string]string{}
+	if path := values["overlay"]; path != "" {
+		path = absolute(path)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		var overlay struct{ Replace map[string]string }
+		if err := json.Unmarshal(body, &overlay); err != nil {
+			return nil, nil, err
+		}
+		files = append(files, path)
+		for original, replacement := range overlay.Replace {
+			if replacement != "" {
+				replacement = absolute(replacement)
+				files = append(files, replacement)
+			}
+			replacements[absolute(original)] = replacement
+		}
+	}
+	profile := values["pgo"]
+	if profile == "auto" {
+		profile = filepath.Join(dir, "default.pgo")
+		if _, err := os.Stat(profile); errors.Is(err, os.ErrNotExist) {
+			profile = "off"
+		} else if err != nil {
+			return nil, nil, err
+		}
+	}
+	if profile != "off" {
+		files = append(files, absolute(profile))
+	}
+	sort.Strings(files)
+	return replacements, files, nil
 }

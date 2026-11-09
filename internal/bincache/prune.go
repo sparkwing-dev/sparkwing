@@ -126,11 +126,15 @@ func automaticLimits(root string) (Limits, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return Limits{}, err
 	}
-	absolute, err := filepath.Abs(root)
+	home, err := filepath.EvalSymlinks(SparkwingHome())
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Limits{}, err
+	}
+	relative, err := filepath.Rel(SparkwingHome(), root)
 	if err != nil {
 		return Limits{}, err
 	}
-	if resolved != "" && resolved != absolute {
+	if resolved != "" && resolved != filepath.Join(home, relative) {
 		return Limits{}, nil
 	}
 	return ConfiguredLimits()
