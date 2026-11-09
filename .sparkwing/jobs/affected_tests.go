@@ -616,10 +616,8 @@ func addRepoPackages(byDir map[string]string, module string, packages []modulePa
 	}
 }
 
-// perf: decision 96 lands docs, process and UI changes on their own tests, so
-// the module-wide Go steps answer only to a change that reaches compiled code,
-// embedded assets, module requirements or the lint configuration. Markdown
-// inside a package still runs that package's tests through the test step.
+// perf: module-wide Go checks add no coverage to documentation-only changes.
+// Package-local Markdown still selects its package tests.
 func goChange(files []string, byDir map[string]string) string {
 	for _, f := range files {
 		switch {
