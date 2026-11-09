@@ -561,6 +561,10 @@ Operational deployment credentials carry `operator.limits`,
 `operator.object_store` or `operator.tokens` for their selected operations.
 Trust changes, grants, freezes and account deletion require an
 operator-console session. Those powers do not follow from a deployment token.
+Use the dashboard's `/operator` page for trust, free-credit grants, holds and
+the signup waitlist. The retired `sparkwing-ops teams trust`, `credits grant`,
+`credits freeze`, `signups waitlist` and `signups approve` commands have no
+compatibility aliases. Refunds use the Stripe dashboard.
 
 ## Claim ownership
 
