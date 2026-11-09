@@ -38,8 +38,7 @@ type policyStep struct {
 	run func(context.Context) error
 }
 
-// safety: the pre-commit tier's checks plus the changelog, API and CLI
-// reference drift checks. A step added here is one no heavy job starts without.
+// safety: every heavy job waits for these cheap checks.
 var policySteps = []policyStep{
 	{"gofmt", runGofmt},
 	{"formatters", runFormatters},
@@ -56,6 +55,9 @@ var policySteps = []policyStep{
 	{"api-spec", checkAPISpec},
 	{"api-snapshot", checkAPISnapshot},
 	{"cli-docs", checkCLIDocs},
+	{"markdownlint", runMarkdownlint},
+	{"config-reference", preReleaseShell("bash bin/gen-config-docs.sh --check")},
+	{"wire-cut-coverage", preReleaseShell("go -C .sparkwing test -p 2 ./jobs -run ^TestRepositoryUnreleasedSectionDeclaresEveryWireCut$ -count=1")},
 }
 
 func checkCLIDocs(ctx context.Context) error {

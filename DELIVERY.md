@@ -48,8 +48,18 @@ merges cleanly goes ahead. The gate's `policy` job runs next, alongside review: 
 the formatters, em dashes, tracker IDs, comments, test sleeps, tracked
 binaries, home resolution, the docs mirror, changelog lint and links, the
 required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
-generated CLI reference (`bin/gen-cli-docs.sh --check`). Each answers in
-seconds with a warm build cache. Once it passes, the rest of
+generated CLI reference (`bin/gen-cli-docs.sh --check`), Markdown lint, config-reference
+drift and wire-cut coverage. Each answers in
+seconds with a warm build cache. Warm-tree wall times measured on 2026-11-09
+with `GOWORK=off GOFLAGS=-trimpath GOMAXPROCS=2` after one warm-up run:
+
+| Policy check | Command | Wall time |
+| --- | --- | --- |
+| Markdown lint | `npx --yes markdownlint-cli2@0.23.2` | 2.90 s |
+| Config reference | `bash bin/gen-config-docs.sh --check` | 0.27 s |
+| Wire-cut coverage | `go -C .sparkwing test -p 2 ./jobs -run ^TestRepositoryUnreleasedSectionDeclaresEveryWireCut$ -count=1` | 1.49 s |
+
+The policy job keeps its ten-minute cold-build deadline. Once it passes, the rest of
 the gate (the same jobs as `sparkwing run gate`) starts while review continues.
 Review is the same job as `sparkwing run review`, under `.review.yaml`. A focused
 policy/review run selects both with `--sw-only '*[wy]'` (the job names ending in
