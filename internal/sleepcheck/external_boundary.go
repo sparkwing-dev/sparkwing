@@ -27,6 +27,21 @@ type sourcePosition struct {
 
 var approvedExternalBoundaries = []externalBoundary{
 	{
+		file: "bin/desktop_update_e2e_test.go", function: "TestDesktopUpdaterRealIntakeRaceAndRollback",
+		duration: "25 * time.Millisecond",
+		marker:   "// sleepcheck:external-boundary coordinate updater and CLI subprocess markers",
+	},
+	{
+		file: "bin/desktop_update_e2e_test.go", function: "TestDesktopUpdaterRealIntakeRaceAndRollback",
+		duration: "15 * time.Second",
+		marker:   "// sleepcheck:external-boundary join the private controller before replacing it",
+	},
+	{
+		file: "bin/desktop_update_e2e_test.go", function: "TestDesktopUpdaterRealIntakeRaceAndRollback",
+		duration: "20 * time.Second",
+		marker:   "// sleepcheck:external-boundary a real controller outage must outlast the old 700ms intake budget",
+	},
+	{
 		file: "internal/nodehost/host_exec_stdin_unix_test.go", function: "TestHostCommandKeepsBufferedOutputPastASlowSink",
 		duration: "2 * commandDrainGrace",
 		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",
