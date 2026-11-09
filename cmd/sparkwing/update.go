@@ -313,19 +313,15 @@ func updateSDK(version string) (updateReceipt, error) {
 }
 
 func resolveSDKUpdateVersion(ctx context.Context, requested string) (string, error) {
-	resolver, err := engine.NewResolver(engine.Config{})
+	policy, err := engine.ReadIndex(ctx, time.Now())
 	if err != nil {
 		return "", err
 	}
-	policy, err := resolver.Index(ctx, time.Now())
+	sdk, _, err := engine.SelectSDK(policy, engineid.GoSDK, requested, time.Now())
 	if err != nil {
 		return "", err
 	}
-	sdk, _, err := engine.SelectSDK(policy.Index, engineid.GoSDK, requested, time.Now())
-	if err != nil {
-		return "", err
-	}
-	if _, err := resolver.EngineVersion(ctx, engineid.Pin{SDK: engineid.GoSDK, Version: sdk.Version}); err != nil {
+	if _, err := engine.SelectEngine(policy, sdk, time.Now()); err != nil {
 		return "", err
 	}
 	return sdk.Version, nil

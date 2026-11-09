@@ -26,11 +26,7 @@ var (
 var (
 	readEnginePin    = engine.ReadPin
 	enginePinVersion = func(pin engineid.Pin) (string, error) {
-		resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), LocalOnly: true})
-		if err != nil {
-			return "", err
-		}
-		return resolver.EngineVersion(context.Background(), pin)
+		return engine.CachedEngineVersion(context.Background(), pin)
 	}
 )
 

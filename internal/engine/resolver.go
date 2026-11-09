@@ -104,7 +104,7 @@ func (r *Resolver) EngineVersion(ctx context.Context, pin engineid.Pin) (string,
 	if err != nil {
 		return "", err
 	}
-	return selectEngine(policy.Index, sdk, time.Now())
+	return SelectEngine(policy.Index, sdk, time.Now())
 }
 
 // Ensure binds another machine's executable to the accepted portable identity.

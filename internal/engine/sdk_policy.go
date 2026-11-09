@@ -56,7 +56,8 @@ func sdkRestrictionError(sdk SDKRelease) error {
 	return api
 }
 
-func selectEngine(index VerifiedIndex, sdk SDKRelease, now time.Time) (string, error) {
+// SelectEngine chooses the newest permitted engine accepting the SDK entry's protocol.
+func SelectEngine(index VerifiedIndex, sdk SDKRelease, now time.Time) (string, error) {
 	version := ""
 	var prohibited error
 	for _, engine := range index.index.Versions {

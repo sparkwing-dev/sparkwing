@@ -38,6 +38,10 @@ func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, er
 
 // Index refreshes signed policy and retains verified fallback without an age cutoff.
 func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error) {
+	return r.indexPolicy(ctx, now, true)
+}
+
+func (r *Resolver) indexPolicy(ctx context.Context, now time.Time, persist bool) (IndexResult, error) {
 	if err := ctx.Err(); err != nil {
 		return IndexResult{}, err
 	}
@@ -67,7 +71,7 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	if err == nil {
 		err = checkPolicyAdvance(r.index, candidate)
 	}
-	if err == nil {
+	if err == nil && persist {
 		err = r.saveIndex(candidate)
 	}
 	if err == nil {
