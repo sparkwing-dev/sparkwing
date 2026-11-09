@@ -57,6 +57,35 @@ func TestGoFileOverlayChangesRebuildPipeline(t *testing.T) {
 	}
 }
 
+func TestGoFileOverlayIgnoresUnselectedReplacement(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	dir := newPipelineDir(t)
+	manifest := filepath.Join(t.TempDir(), "overlay.json")
+	replacement := filepath.Join(t.TempDir(), "unread.go")
+	for _, state := range []string{"missing", "unreadable"} {
+		t.Run(state, func(t *testing.T) {
+			if state == "unreadable" {
+				if err := os.WriteFile(replacement, []byte("unused"), 0); err != nil {
+					t.Fatal(err)
+				}
+			}
+			body, err := json.Marshal(map[string]any{"Replace": map[string]string{filepath.Join(t.TempDir(), "unselected.go"): replacement}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, manifest, string(body))
+			t.Setenv("GOFLAGS", "-buildvcs=false -p=1 -overlay="+manifest)
+			if _, built := materializeFixture(t, dir); !built {
+				t.Fatal("new overlay manifest reused the previous key")
+			}
+			if _, built := materializeFixture(t, dir); built {
+				t.Fatal("unselected overlay destination prevented cache reuse")
+			}
+		})
+	}
+}
+
 func TestGoPGOChangesRebuildPipeline(t *testing.T) {
 	root, err := procenv.ControlCommandContext(t.Context(), os.Environ(), "go", "env", "GOROOT").Output()
 	if err != nil {
