@@ -11,7 +11,7 @@ import (
 )
 
 func TestWeeklyReleaseUsesFreshMainAndTheExistingCut(t *testing.T) {
-	for _, mode := range []string{"release", "dry-run", "empty", "red", "pending", "missing", "chosen", "unlanded"} {
+	for _, mode := range []string{"release", "dry-run", "empty", "red", "pending", "missing", "chosen", "unlanded", "manual-red", "manual-pending", "manual-missing", "manual-unavailable", "manual-malformed", "manual-wrong-sha"} {
 		t.Run(mode, func(t *testing.T) {
 			body := fixtureChangelog
 			if mode == "empty" {
@@ -44,18 +44,27 @@ func TestWeeklyReleaseUsesFreshMainAndTheExistingCut(t *testing.T) {
 			t.Setenv("TMPDIR", t.TempDir())
 			t.Setenv("RELEASE_TEST_CALL", call)
 			status, conclusion := "completed", "success"
-			if mode == "red" {
+			if mode == "red" || mode == "manual-red" {
 				conclusion = "failure"
 			}
-			if mode == "pending" {
+			if mode == "pending" || mode == "manual-pending" {
 				status, conclusion = "in_progress", ""
 			}
 			ci, _ := json.Marshal([]mainCIRun{{HeadSHA: head, Status: status, Conclusion: conclusion}})
-			if mode == "missing" {
+			if mode == "missing" || mode == "manual-missing" {
 				ci = []byte("[]")
+			}
+			if mode == "manual-malformed" {
+				ci = []byte("not JSON")
+			}
+			if mode == "manual-wrong-sha" {
+				ci = []byte(`[{"headSha":"other","status":"completed","conclusion":"success"}]`)
 			}
 			t.Setenv("RELEASE_TEST_CI", string(ci))
 			writeDeliveryTool(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' \"$RELEASE_TEST_CI\"\n")
+			if mode == "manual-unavailable" {
+				writeDeliveryTool(t, filepath.Join(bin, "gh"), "#!/bin/sh\nexit 1\n")
+			}
 			writeDeliveryTool(t, filepath.Join(bin, "bitwing"), `#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> "$RELEASE_TEST_CALL.workflow"
@@ -76,7 +85,7 @@ case "$*" in *--sw-dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 `)
 			ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
 			args := ReleaseArgs{Bump: "patch"}
-			weekly := mode != "chosen" && mode != "unlanded"
+			weekly := mode != "chosen" && mode != "unlanded" && !strings.HasPrefix(mode, "manual-")
 			if !weekly {
 				args.Commit = head
 			}
@@ -95,15 +104,18 @@ case "$*" in *--sw-dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 					t.Fatal(readErr)
 				}
 				text := string(got)
-				for _, want := range []string{"run\nrelease-cut\n-C\n", "--version\nv0.1.0\n", "--sw-start-at\nversion-freshness\n", "--commit\n" + head} {
+				for _, want := range []string{"run\nrelease-cut\n-C\n", "--version\nv0.1.0\n", "--commit\n" + head} {
 					if !strings.Contains(text, want) {
 						t.Fatalf("cut call lacks %q: %s", want, text)
 					}
 				}
+				if got, want := strings.Contains(text, "--sw-start-at\nversion-freshness\n"), !strings.HasPrefix(mode, "manual-"); got != want {
+					t.Fatalf("CI reuse = %v, want %v: %s", got, want, text)
+				}
 				if strings.Contains(text, "--sw-dry-run") != (mode == "dry-run") {
 					t.Fatalf("dry-run propagation: %s", text)
 				}
-				if strings.Contains(text, "--sw-allow-risk") != (mode == "release" || mode == "chosen") {
+				if strings.Contains(text, "--sw-allow-risk") != (mode != "dry-run") {
 					t.Fatalf("risk propagation: %s", text)
 				}
 				workflow, workflowErr := os.ReadFile(call + ".workflow")

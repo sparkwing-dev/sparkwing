@@ -125,6 +125,10 @@ read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links, docs sidebar) and previews the changelog and guide roll; build, lint and the short
 tests run only in the real cut.
 
+Manual releases reuse a successful exact-source CI receipt when available. Missing,
+pending, failed or unreadable receipts run the local build, lint and short suite
+in the detached source worktree. Weekly releases continue to wait for green CI.
+
 The schema changelog gate compares the neutral `internal/store/schema.sql`
 baseline with the previous tag. SQL changes at an unchanged schema version
 require a version bump and a matching `(Breaking)` changelog entry.

@@ -108,8 +108,12 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 		sparkwing.Info(ctx, "main has no unreleased notes; skipping release")
 		return nil
 	}
-	if err = requireGreenMain(ctx, checkout, head); err != nil {
-		return err
+	ciErr := requireGreenMain(ctx, checkout, head)
+	if ciErr != nil {
+		if j.Weekly {
+			return ciErr
+		}
+		sparkwing.Info(ctx, "exact-source CI unavailable; running local release checks: %v", ciErr)
 	}
 	version, err := (&resolveVersionJob{Explicit: j.Args.Version, Bump: j.Args.Bump, RepoDir: checkout}).run(ctx)
 	if err != nil {
@@ -138,7 +142,10 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 		}
 	}
 	// perf: reuse exact-source CI evidence to avoid a broad desktop suite; retain the release-specific guards.
-	args := []string{"run", "release-cut", "-C", checkout, "--sw-route", "local", "--sw-start-at", "version-freshness"}
+	args := []string{"run", "release-cut", "-C", checkout, "--sw-route", "local"}
+	if ciErr == nil {
+		args = append(args, "--sw-start-at", "version-freshness")
+	}
 	if dry {
 		args = append(args, "--sw-dry-run")
 	} else {

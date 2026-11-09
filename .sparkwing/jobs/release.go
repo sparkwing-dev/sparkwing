@@ -18,7 +18,7 @@ import (
 )
 
 type ReleaseArgs struct {
-	Commit  string `flag:"commit" desc:"Source commit, default HEAD (origin/main for weekly-release). Must be on origin/main with successful push CI at that exact SHA."`
+	Commit  string `flag:"commit" desc:"Source commit, default HEAD (origin/main for weekly-release). Must be on origin/main. Successful exact-SHA push CI reuses verification; otherwise manual releases run local checks."`
 	Version string `flag:"version" desc:"Explicit release version (e.g. v0.24.0); sparkwing is locked to v0.x, so v1.0.0+ is refused. When empty, derived from latest origin tag + --bump."`
 	Bump    string `flag:"bump" desc:"Auto-bump kind when --version is empty: patch|minor|major. Default: minor"`
 }
@@ -34,7 +34,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "For an isolated preview, run HOME=\"$(mktemp -d)\" SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run. Select --commit SHA (default HEAD), require it on origin/main with successful push CI at that exact SHA, and create a detached worktree. The selected source compiles and runs release-cut with a private SPARKWING_HOME. Exact-source CI replaces the broad build/lint/short suite under the pre-launch desktop-load waiver. Published-version freshness, Go directives, coherent SDK pins, changelog links, docs sidebar, changelog/migration preparation and schema/wire checks still run. After those gates pass, commit only the prepared release notes and pins, and tag that release commit. Merge the metadata into fresh main in a separate detached worktree, preserving newer unreleased notes, then atomically push the merge and immutable tag. Retry only publication when main advances. Neither the caller checkout nor the tag incorporates newer main code. A failed cut retains its worktree for inspection. The tag workflow builds, signs and publishes artifacts. Once a tag is published, fixes require a later patch tag. This pipeline requires an isolated SPARKWING_HOME rather than ~/.sparkwing."
+	return "For an isolated preview, run HOME=\"$(mktemp -d)\" SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run. Select --commit SHA (default HEAD), require it on origin/main, and create a detached worktree. The selected source compiles and runs release-cut with a private SPARKWING_HOME. Successful exact-source CI replaces the broad build/lint/short suite under the pre-launch desktop-load waiver. Without that receipt, the manual cut runs those checks locally before publication. Published-version freshness, Go directives, coherent SDK pins, changelog links, docs sidebar, changelog/migration preparation and schema/wire checks still run. After those gates pass, commit only the prepared release notes and pins, and tag that release commit. Merge the metadata into fresh main in a separate detached worktree, preserving newer unreleased notes, then atomically push the merge and immutable tag. Retry only publication when main advances. Neither the caller checkout nor the tag incorporates newer main code. A failed cut retains its worktree for inspection. The tag workflow builds, signs and publishes artifacts. Once a tag is published, fixes require a later patch tag. This pipeline requires an isolated SPARKWING_HOME rather than ~/.sparkwing."
 }
 
 func (Release) Examples() []sparkwing.Example {
