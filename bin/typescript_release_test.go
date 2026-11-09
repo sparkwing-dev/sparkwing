@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := workflow.Jobs["typescript-native"]
-	if job.If != "${{ !inputs.index_only }}" || job.Allow || !hasSDKDependency(job, "validate-tag") {
+	if job.If != "${{ !inputs.index_only && (inputs.verify_only || needs.typescript-decision.outputs.publish == 'true') }}" || job.Allow || !hasSDKDependency(job, "validate-tag") {
 		t.Fatal("native verification must be required after tag resolution")
 	}
 	want := map[string]string{"x64": "windows-2025", "arm64": "windows-11-arm"}
@@ -66,7 +67,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 	checkSDKAction(t, job, "actions/upload-artifact@", "path", "sdk/typescript/native/win32-${{ matrix.arch }}")
 	checkSDKAction(t, job, "actions/upload-artifact@", "if-no-files-found", "error")
 	assembly := workflow.Jobs["typescript-package"]
-	if assembly.If != "${{ !inputs.verify_only && !inputs.index_only }}" || assembly.Allow || !hasSDKDependency(assembly, "typescript-native") || !hasSDKDependency(assembly, "validate-tag") {
+	if assembly.If != "${{ !inputs.verify_only && !inputs.index_only && needs.typescript-decision.outputs.publish == 'true' }}" || assembly.Allow || !hasSDKDependency(assembly, "typescript-native") || !hasSDKDependency(assembly, "validate-tag") {
 		t.Fatal("package assembly must depend on successful native work and the resolved source")
 	}
 	checkSDKAction(t, assembly, "actions/checkout@", "ref", "${{ needs.validate-tag.outputs.source_sha }}")
@@ -94,7 +95,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 			t.Fatal("npm must support OIDC before publishing")
 		}
 	}
-	for _, name := range []string{"dashboard", "typescript-package", "release"} {
+	for _, name := range []string{"dashboard"} {
 		if workflow.Jobs[name].If != "${{ !inputs.verify_only && !inputs.index_only }}" {
 			t.Errorf("verification-only dispatch must skip %s", name)
 		}
@@ -106,7 +107,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 		t.Fatal("publication does not depend on TypeScript package assembly")
 	}
 	checkSDKAction(t, publication, "actions/download-artifact@", "name", "release-typescript")
-	checkSDKStep(t, publication, "Publish TypeScript package", "$RELEASE_TOOLS/bin/publish-typescript.mjs", "typescript-dist/", "${TAG#v}")
+	checkSDKStep(t, publication, "Publish TypeScript package", "$RELEASE_TOOLS/bin/publish-typescript.mjs", "typescript-dist/", "$TAG")
 	for i, step := range publication.Steps {
 		if step.Name == "Publish complete immutable release" {
 			for _, earlier := range publication.Steps[:i] {
@@ -138,7 +139,7 @@ func checkSDKStep(t *testing.T, job sdkReleaseJob, name string, fragments ...str
 		if step.Name != name {
 			continue
 		}
-		if step.If != "" || step.Allow {
+		if (step.If != "" && !(name == "Publish TypeScript package" && step.If == "needs.typescript-decision.outputs.publish == 'true'")) || step.Allow {
 			t.Fatalf("required step %q can be skipped or ignored", name)
 		}
 		for _, fragment := range fragments {
@@ -154,9 +155,16 @@ func checkSDKStep(t *testing.T, job sdkReleaseJob, name string, fragments ...str
 func checkSDKAction(t *testing.T, job sdkReleaseJob, prefix, key, value string) {
 	t.Helper()
 	for _, step := range job.Steps {
-		if strings.HasPrefix(step.Uses, prefix) && step.With[key] == value && step.If == "" && !step.Allow {
+		if strings.HasPrefix(step.Uses, prefix) && step.With[key] == value && (step.If == "" || (value == "release-typescript" && step.If == "needs.typescript-decision.outputs.publish == 'true'")) && !step.Allow {
 			return
 		}
 	}
 	t.Fatalf("missing required %s action with %s=%q", prefix, key, value)
+}
+
+func TestTypeScriptReleaseDecision(t *testing.T) {
+	command := exec.Command("node", "--test", "typescript-release.test.mjs")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, output)
+	}
 }

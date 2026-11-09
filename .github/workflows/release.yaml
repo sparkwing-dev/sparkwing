@@ -194,9 +194,45 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  typescript-native:
+  typescript-decision:
     if: ${{ !inputs.index_only }}
     needs: [validate-tag]
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.select.outputs.publish }}
+      version: ${{ steps.select.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+      - name: Select TypeScript SDK release
+        id: select
+        run: |
+          set -euo pipefail
+          previous="$RUNNER_TEMP/typescript-policy"
+          mkdir -p "$previous" typescript-entry
+          curl --fail --silent --show-error https://sparkwing.dev/versions.json -o "$previous/versions.json"
+          curl --fail --silent --show-error https://sparkwing.dev/versions.json.sig -o "$previous/versions.json.sig"
+          GOWORK=off GOFLAGS=-trimpath go run ./cmd/verify-release --index-out "$previous" --verify
+          node bin/typescript-release.mjs "$GITHUB_WORKSPACE" "$previous/versions.json" typescript-entry/sdk-entry-typescript.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-typescript-entry
+          path: typescript-entry/sdk-entry-typescript.json
+          retention-days: 1
+          if-no-files-found: error
+
+  typescript-native:
+    if: ${{ !inputs.index_only && (inputs.verify_only || needs.typescript-decision.outputs.publish == 'true') }}
+    needs: [validate-tag, typescript-decision]
     strategy:
       fail-fast: false
       matrix:
@@ -208,7 +244,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       NODE_VERSION: 22.18.0
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ needs.typescript-decision.outputs.version }}
       TARGET_ARCH: ${{ matrix.arch }}
     defaults:
       run:
@@ -267,8 +303,8 @@ jobs:
           if-no-files-found: error
 
   typescript-package:
-    if: ${{ !inputs.verify_only && !inputs.index_only }}
-    needs: [validate-tag, typescript-native]
+    if: ${{ !inputs.verify_only && !inputs.index_only && needs.typescript-decision.outputs.publish == 'true' }}
+    needs: [validate-tag, typescript-decision, typescript-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -291,7 +327,7 @@ jobs:
       - name: Assemble TypeScript package
         working-directory: sdk/typescript
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.typescript-decision.outputs.version }}
         run: |
           set -euo pipefail
           npm ci --ignore-scripts
@@ -305,8 +341,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: ${{ !inputs.verify_only && !inputs.index_only }}
-    needs: [validate-tag, build, typescript-package]
+    if: ${{ always() && !cancelled() && !failure() && !inputs.verify_only && !inputs.index_only && needs.build.result == 'success' && needs.typescript-decision.result == 'success' && (needs.typescript-package.result == 'success' || needs.typescript-decision.outputs.publish == 'false') }}
+    needs: [validate-tag, build, typescript-decision, typescript-package]
     runs-on: ubuntu-latest
     concurrency:
       group: release-publication
@@ -354,9 +390,14 @@ jobs:
           npm install -g npm@11.6.2
           npm --version
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.typescript-decision.outputs.publish == 'true'
         with:
           name: release-typescript
           path: typescript-dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-typescript-entry
+          path: dist
       - name: Ad-hoc-sign macOS binaries (rcodesign)
         working-directory: dist
         run: |
@@ -485,17 +526,16 @@ jobs:
           cat release-notes.md
 
       - name: Publish TypeScript package
+        if: needs.typescript-decision.outputs.publish == 'true'
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
-          LATEST: ${{ steps.latest.outputs.eligible }}
+          TAG: ${{ needs.typescript-decision.outputs.version }}
         run: |
           set -euo pipefail
           packages=(typescript-dist/*.tgz)
           test "${#packages[@]}" -eq 1
-          npm_tag="release-${TAG#v}"
-          if [ "$LATEST" = true ]; then npm_tag=latest; fi
+          npm_tag=latest
           if [[ "$TAG" = *-* ]]; then npm_tag=next; fi
-          node "$RELEASE_TOOLS/bin/publish-typescript.mjs" "${packages[0]}" "${TAG#v}" "$npm_tag"
+          node "$RELEASE_TOOLS/bin/publish-typescript.mjs" "${packages[0]}" "$TAG" "$npm_tag"
 
       - name: Publish complete immutable release
         env:

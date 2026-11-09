@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 
 const [archive, version, tag] = process.argv.slice(2);
 if (process.argv.length !== 5 || !archive || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/.test(version) || !tag) {
-  throw new Error("usage: publish-typescript.mjs <archive> <engine-version> <npm-tag>");
+  throw new Error("usage: publish-typescript.mjs <archive> <sdk-version> <npm-tag>");
 }
 if (!version.startsWith("0.")) throw new Error("SDK publication is restricted to major version 0");
 const manifest = spawnSync("tar", ["-xOzf", archive, "package/package.json"], { encoding: "utf8" });
@@ -17,7 +17,7 @@ if (packed.name !== "@sparkwing/sdk") throw new Error("packed package name must 
 if (packed.repository?.url !== "git+https://github.com/sparkwing-dev/sparkwing.git") {
   throw new Error("packed package repository must be git+https://github.com/sparkwing-dev/sparkwing.git");
 }
-if (packed.version !== version) throw new Error("packed package version must equal the release tag without v");
+if (packed.version !== version) throw new Error("packed package version must equal the selected SDK version");
 if (version.includes("-") && tag !== "next") throw new Error("prereleases must use the next npm tag");
 
 function npmView(args) {

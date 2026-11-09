@@ -120,20 +120,20 @@ Build and verify each bridge in its matching native Windows MSVC environment,
 with Node and Go running on that architecture:
 
 ```sh
-npm run release:native -- --version <engine-version> --headers <node-headers/include/node> --node-lib <node.lib> --arch x64
+npm run release:native -- --version <sdk-version> --headers <node-headers/include/node> --node-lib <node.lib> --arch x64
 ```
 
 Repeat with `--arch arm64` on native Windows arm64. The command stamps both npm
 manifests, builds the bridge and runs `TestNativeProtocol` and
 `TestNativeConformance`. Missing, skipped or failed native tests stop the build.
 Each output directory contains `protocol.node` and a `verification.json` record
-bound to the engine version, bridge bytes and SDK sources.
+bound to the independent SDK version, bridge bytes and SDK sources.
 
 Build both architectures from the same source and version. Transfer their output
 directories to the package checkout, then assemble the package:
 
 ```sh
-npm run release:pack -- --version <engine-version> --destination <output-directory>
+npm run release:pack -- --version <sdk-version> --destination <output-directory>
 ```
 
 The release package must contain `native/win32-x64/protocol.node` and
@@ -150,7 +150,7 @@ On Linux or macOS, build a local package without Windows bridges:
 
 ```sh
 npm ci
-npm run pack:local -- --version <engine-version> --destination <output-directory>
+npm run pack:local -- --version <sdk-version> --destination <output-directory>
 ```
 
 This command builds the SDK and stamps a temporary package with the exact engine
@@ -160,7 +160,7 @@ Use `release:pack` with verified Windows bridges for published packages.
 Local packages support Linux and macOS. They cannot run on Windows.
 
 In the pipeline's package manifest, pin the tarball with
-`"@sparkwing/sdk": "file:vendor/sparkwing-sdk-<engine-version>.tgz"` and run
+`"@sparkwing/sdk": "file:vendor/sparkwing-sdk-<sdk-version>.tgz"` and run
 `npm install` to record it in the lockfile. The tarball's package version selects
 the exact engine, including any prerelease suffix. Commit the tarball inside the
 repository if fetched checkouts need it. An editable SDK directory can use
