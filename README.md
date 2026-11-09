@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/sparkwing-dev/sparkwing/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/sparkwing-dev/sparkwing/actions/workflows/ci.yaml)
 
-Pipelines as Go code. The public CLI + SDK for sparkwing.
+Pipelines as Go or TypeScript code. The public CLI + SDK for sparkwing.
 
 > **Status:** pre-release. Tester binaries are available; APIs may change.
 
@@ -69,6 +69,10 @@ sparkwing run hello
 # Sign in to the local dashboard on 127.0.0.1:4343
 sparkwing dashboard open    # one-time browser sign-in link
 ```
+
+For TypeScript, use `--template typescript`, generate and commit the npm
+lockfile, then inspect and run the pipeline. See the
+[TypeScript quick start](docs/getting-started.md#quick-start).
 
 When a team should see the same runs, connect the machine to a
 controller:

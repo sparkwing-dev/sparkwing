@@ -215,6 +215,12 @@ For a TypeScript project, scaffold a minimal pipeline with:
 
 ```bash
 sparkwing pipeline new --pipeline hello --template typescript
+npm --prefix .sparkwing install --package-lock-only --ignore-scripts --no-audit --no-fund
+git add .sparkwing
+git commit -m "Add TypeScript pipeline"
+sparkwing pipeline list
+sparkwing pipeline describe --pipeline hello
+sparkwing pipeline plan --pipeline hello
 sparkwing run hello
 ```
 
@@ -222,7 +228,11 @@ This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin,
 `index.ts`, `jobs/hello.ts` and `sparkwing.yaml`. It uses the same `--on`,
 `--hidden` and `--short` flags as the Go shapes. Repeat the command with another
 pipeline name to add a pipeline to the TypeScript entry. Sparkwing installs
-the SDK dependencies when the pipeline runs.
+the SDK dependencies when the pipeline runs. Commit `package-lock.json` because
+the installer validates dependencies with `npm ci`. Node.js and npm must be on
+PATH. `pipeline plan` explains the resolved jobs and steps without running them.
+`pipeline lint` analyzes Go source only. Its successful exit does not validate
+TypeScript source.
 
 Examples are for reading, not scaffolding: `--template` takes a shape,
 not an example name. See the
