@@ -150,6 +150,11 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 }
 
 func readLocalCommitFile(ctx context.Context, spec Spec, sha, name string, options Options) (_ []byte, _ bool, err error) {
+	if options.Workspace != "" {
+		if err := fssecure.EnsureDir(options.Workspace); err != nil {
+			return nil, false, err
+		}
+	}
 	workspace, err := os.MkdirTemp(options.Workspace, "selection-")
 	if err != nil {
 		return nil, false, err

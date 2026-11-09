@@ -80,3 +80,40 @@ func TestPreparedIdentityFollowsLinkedDependencies(t *testing.T) {
 		t.Fatalf("dependency cycle: %v", err)
 	}
 }
+
+func TestPreparedIdentityBindsRepeatedLinkTargetsAcrossRelocation(t *testing.T) {
+	identity := func(root string, retarget bool) string {
+		t.Helper()
+		directory := filepath.Join(root, "pipeline")
+		for _, name := range []string{"pipeline", "A", "B"} {
+			if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for name, body := range map[string]string{"node": "runtime", "pipeline/index.ts": "entry", "A/index.js": "A", "B/index.js": "B"} {
+			if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for name, target := range map[string]string{"a": "A", "b": "B", "c": "A"} {
+			if name == "c" && retarget {
+				target = "B"
+			}
+			if err := os.Symlink(filepath.Join(root, target), filepath.Join(directory, name)); err != nil {
+				t.Skipf("directory symlink unavailable: %v", err)
+			}
+		}
+		got, err := (Command{filepath.Join(root, "node"), filepath.Join(directory, "index.ts")}).Identity(directory, "v22")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	original := identity(t.TempDir(), false)
+	if moved := identity(t.TempDir(), false); moved != original {
+		t.Fatal("relocating an identical checkout changed its identity")
+	}
+	if changed := identity(t.TempDir(), true); changed == original {
+		t.Fatal("retargeting the third alias did not change its identity")
+	}
+}

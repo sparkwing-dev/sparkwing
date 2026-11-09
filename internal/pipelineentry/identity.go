@@ -71,7 +71,15 @@ func (c Command) Identity(directory, runtimeVersion string) (string, error) {
 				return err
 			}
 			if info.IsDir() {
-				fmt.Fprintf(sum, "directory:%s\x00", filepath.ToSlash(relative))
+				target, err := filepath.EvalSymlinks(path)
+				if err != nil {
+					return err
+				}
+				binding, err := filepath.Rel(filepath.Dir(path), target)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(sum, "directory:%s\x00%s\x00", filepath.ToSlash(relative), filepath.ToSlash(binding))
 				return walk(path, relative)
 			}
 			body, err := os.ReadFile(path)

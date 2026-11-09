@@ -304,6 +304,10 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	if out, err := testgit.CommandContext(t.Context(), "git", "-C", checkout, "update-ref", "refs/remotes/origin/main", "HEAD").CombinedOutput(); err != nil {
 		t.Fatalf("origin/main: %s %v", out, err)
 	}
+	// safety: registration and firing must select committed source even when local YAML overrides it.
+	if err := os.WriteFile(filepath.Join(checkout, ".sparkwing", projectconfig.Filename), []byte(strings.ReplaceAll(string(config), "source: origin/main", "source: "+strings.Repeat("a", 40))), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	project, err := projectconfig.Parse(config)
 	if err != nil {
 		t.Fatal(err)
