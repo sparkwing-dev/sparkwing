@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 const deadDocLinkCategory = "dead-docs-link"
@@ -69,7 +71,7 @@ func LintChangelogDocLinks(body string, repo fs.FS) []ChangelogIssue {
 
 func anchorInHeadings(anchor string, headings []string) bool {
 	for _, h := range headings {
-		if slugifyHeading(h) == anchor {
+		if docs.MigrationAnchor(h) == anchor {
 			return true
 		}
 	}
