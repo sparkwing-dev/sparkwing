@@ -10,4 +10,4 @@ fi
 export GOWORK=off GOFLAGS=-trimpath
 npm --prefix "$root/sdk/typescript" ci --ignore-scripts
 go -C "$root" test -p 2 ./internal/nodeproto/conformance ./sdk/typescript/test/nativehost \
-  -run 'TestGoSDKConformsV2|TestNativeConformance' -count=1 -args -record-protocol="$version"
+  -run 'TestGoSDKConformsV[0-9]+|TestNativeConformance' -count=1 -args -record-protocol="$version"
