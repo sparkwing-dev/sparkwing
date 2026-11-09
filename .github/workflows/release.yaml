@@ -229,6 +229,8 @@ jobs:
           node-version: "22.18.0"
       - name: Select TypeScript SDK release
         id: select
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           previous="$RUNNER_TEMP/typescript-policy"
@@ -236,7 +238,7 @@ jobs:
           curl --fail --silent --show-error https://sparkwing.dev/versions.json -o "$previous/versions.json"
           curl --fail --silent --show-error https://sparkwing.dev/versions.json.sig -o "$previous/versions.json.sig"
           GOWORK=off GOFLAGS=-trimpath go -C "$RELEASE_TOOLS" run ./cmd/verify-release --index-out "$previous" --verify
-          node "$RELEASE_TOOLS/bin/typescript-release.mjs" "$GITHUB_WORKSPACE" "$previous/versions.json" typescript-entry/sdk-entry-typescript.json "$RELEASE_TOOLS"
+          node "$RELEASE_TOOLS/bin/typescript-release.mjs" "$GITHUB_WORKSPACE" "$previous/versions.json" typescript-entry/sdk-entry-typescript.json "$RELEASE_TOOLS" "$TAG"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-typescript-entry

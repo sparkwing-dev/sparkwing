@@ -72,3 +72,13 @@ test("reverted source and revoked SDK require a fresh version", () => {
   assert.equal(decideRelease("0.3.0", "a", [previous, latest]).publish, true);
   assert.throws(() => decideRelease("0.1.0", "a", [{ ...previous, revoked: { reason: "unsafe" } }]), /newer/);
 });
+
+test("recovery retains the exact signed SDK while a new source reversion needs a new version", () => {
+  const latest = { ...previous, version: "v0.2.0", source_digest: "b" };
+  assert.deepEqual(decideRelease("0.1.0", "a", [previous, latest], { recovery: true }), { publish: false, entry: previous });
+  assert.throws(() => decideRelease("0.1.0", "a", [previous, latest]), /newer/);
+});
+test("an engine prerelease requires an already mapped SDK", () => {
+  assert.throws(() => decideRelease("0.2.0", "b", [previous], { engineVersion: "v0.90.0-rc.1" }), /stable engine release/);
+  assert.equal(decideRelease("0.1.0", "a", [previous], { engineVersion: "v0.90.0-rc.1" }).publish, false);
+});

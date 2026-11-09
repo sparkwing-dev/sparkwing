@@ -47,26 +47,29 @@ function compareVersions(a, b) {
   return 0;
 }
 
-export function decideRelease(version, digest, entries) {
+export function decideRelease(version, digest, entries, { recovery = false, engineVersion = "" } = {}) {
   const candidates = entries.filter(entry => entry.language === "typescript");
   const latest = candidates.sort((a, b) => compareVersions(b.version, a.version))[0];
   if (latest?.source_digest === digest && !latest.revoked) return { publish: false, entry: latest };
+  const existing = candidates.find(entry => entry.version === `v${version}`);
+  if (recovery && existing?.source_digest === digest && !existing.revoked) return { publish: false, entry: existing };
   if (!/^0\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/.test(version) || version === "0.0.0")
     throw new Error("package.json must select an independent SDK version in major 0");
-  const existing = candidates.find(entry => entry.version === `v${version}`);
   if (existing && existing.source_digest !== digest)
     throw new Error("SDK version already names different source; bump sdk/typescript/package.json");
   if (latest && compareVersions(`v${version}`, latest.version) <= 0)
     throw new Error("changed or revoked SDK requires a version newer than the latest SDK entry");
+  if (engineVersion.includes("-"))
+    throw new Error("changed SDK source must publish with a stable engine release before an engine prerelease can use it");
   return { publish: true, entry: { language: "typescript", version: `v${version}`, protocol: 2, source_digest: digest } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [root, policy, output, tools = root] = process.argv.slice(2);
-  if (!root || !policy || !output) throw new Error("usage: typescript-release.mjs <source-root> <verified-policy.json> <entry.json> [publication-tools-root]");
+  const [root, policy, output, tools = root, engineVersion = ""] = process.argv.slice(2);
+  if (!root || !policy || !output) throw new Error("usage: typescript-release.mjs <source-root> <verified-policy.json> <entry.json> [publication-tools-root] [engine-version]");
   const manifest = JSON.parse(readFileSync(resolve(root, "sdk/typescript/package.json")));
   const index = JSON.parse(readFileSync(policy));
-  const decision = decideRelease(manifest.version, sdkDigest(root, tools), index.sdks ?? []);
+  const decision = decideRelease(manifest.version, sdkDigest(root, tools), index.sdks ?? [], { recovery: process.env.GITHUB_EVENT_NAME === "workflow_dispatch", engineVersion });
   writeFileSync(output, JSON.stringify([decision.entry]) + "\n");
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT,
     `publish=${decision.publish}\nversion=${decision.entry.version.slice(1)}\n`);

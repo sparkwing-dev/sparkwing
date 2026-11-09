@@ -310,7 +310,12 @@ The first independent SDK version is `0.72.0`.
 The decision emits `sdk-entry-typescript.json` for the signed language-neutral policy.
 The immutable engine release retains that entry, including the existing version
 when source is unchanged. A changed SDK publishes before the engine release
-becomes public. Native verification can still be requested without publication.
+becomes public. Native verification can still be requested without publication. Engine
+prereleases require an SDK entry already present in the signed mapping. Cut a
+stable engine release to publish changed SDK source before an engine prerelease
+uses it, because prerelease engines do not enter the signed index. A recovery
+of an older tag retains its exact signed SDK entry when the source digest
+matches, even when a newer SDK has since published.
 
 TypeScript SDK publication also requires native Windows x64 and arm64 jobs.
 Each uses matching Node, Go and MSVC tools, builds its protocol bridge, runs
