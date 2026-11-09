@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -174,7 +175,7 @@ func (j *releaseSDKJob) run(ctx context.Context, dry bool) (string, error) {
 		return decision.Version, nil
 	}
 	if decision.Changed {
-		if _, err := sparkwing.Exec(ctx, "bash", "bin/check-sdk-release.sh").Dir(j.RepoDir).Env("GOFLAGS", "-trimpath").Run(); err != nil {
+		if err := checkSDKReleaseSource(ctx, j.RepoDir); err != nil {
 			return "", err
 		}
 		digest, err := sdkSourceDigest(ctx, j.RepoDir, j.Source)
@@ -237,4 +238,44 @@ func (j *releaseSDKJob) run(ctx context.Context, dry bool) (string, error) {
 		return "", fmt.Errorf("SDK %s published but proxy unavailable; retry the cut without moving its tag: %w", decision.Version, err)
 	}
 	return decision.Version, nil
+}
+
+func checkSDKReleaseSource(ctx context.Context, repo string) error {
+	run := func(flags, command string, args ...string) error {
+		_, err := sparkwing.Exec(ctx, command, args...).Dir(repo).Env("GOWORK", "off").Env("GOFLAGS", flags).Run()
+		return err
+	}
+	if err := run("-trimpath", "go", "-C", filepath.Join(repo, "sparkwing"), "test", "-p", "1", "./..."); err != nil {
+		return err
+	}
+	if err := run("-trimpath", "npm", "--prefix", filepath.Join(repo, "sdk/typescript"), "ci", "--ignore-scripts", "--no-audit", "--no-fund"); err != nil {
+		return err
+	}
+	scratch, err := os.MkdirTemp("", "sparkwing-sdk-conformance-")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := os.RemoveAll(scratch); err != nil {
+			sparkwing.Warn(ctx, "remove SDK conformance modfile %s: %v", scratch, err)
+		}
+	}()
+	for _, name := range []string{"go.mod", "go.sum"} {
+		body, err := os.ReadFile(filepath.Join(repo, name))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(scratch, name), body, 0o600); err != nil {
+			return err
+		}
+	}
+	modfile := filepath.Join(scratch, "go.mod")
+	// safety: conformance must compile the tested SDK source rather than its last published version.
+	if err := run("-trimpath", "go", "mod", "edit", "-modfile", modfile, "-replace", sdkModulePath+"="+filepath.Join(repo, "sparkwing")); err != nil {
+		return err
+	}
+	if err := run("-trimpath -modfile="+modfile, "go", "test", "-p", "1", "./internal/nodeproto/conformance"); err != nil {
+		return err
+	}
+	return run("-trimpath -modfile="+modfile, "go", "test", "-p", "1", "./sdk/typescript/test/nativehost", "-run", "TestNativeConformance")
 }

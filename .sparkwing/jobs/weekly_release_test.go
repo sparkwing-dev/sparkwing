@@ -88,6 +88,7 @@ git -C "$4" rev-parse HEAD >> "$RELEASE_TEST_CALL"
 if git -C "$4" symbolic-ref -q HEAD; then exit 90; fi
 case "$*" in *--sw-dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 `)
+			toolsHead := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
 			ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
 			args := ReleaseArgs{Bump: "patch"}
 			weekly := mode != "chosen" && mode != "unlanded" && !strings.HasPrefix(mode, "manual-")
@@ -109,7 +110,7 @@ case "$*" in *--sw-dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 					t.Fatal(readErr)
 				}
 				text := string(got)
-				for _, want := range []string{"run\nrelease-cut\n-C\n", "--version\nv0.1.0\n", "--commit\n" + head} {
+				for _, want := range []string{"run\nrelease-cut\n-C\n", "--version\nv0.1.0\n", "--commit\n" + head, "--sw-pipeline-ref\n" + toolsHead + "\n"} {
 					if !strings.Contains(text, want) {
 						t.Fatalf("cut call lacks %q: %s", want, text)
 					}

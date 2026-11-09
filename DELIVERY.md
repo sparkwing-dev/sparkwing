@@ -1929,7 +1929,10 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
 
 `weekly-release` runs Monday at 09:00 America/Denver. It selects freshly
 fetched `origin/main` by default, or `--commit SHA`, and uses the same detached
-worktree cut and exact-source CI check as `release`. It skips when the selected
+worktree cut and exact-source CI check as `release`. The inner cut pins its
+pipeline to the caller tooling commit with `--sw-pipeline-ref`, while jobs
+operate on the selected source checkout. SDK verification executes from that
+current pipeline code, so an older source cannot supply older release tooling. It skips when the selected
 source has no `[Unreleased]` entries. Its default minor bump stays on v0.x.
 Release cuts are pre-approved. The scheduled entrypoint supplies the cut's
 `--sw-allow-risk destructive,prod` authorization. Main keeps accepting lands
@@ -1947,8 +1950,7 @@ The first SDK version is v0.1.0. Any source change advances the v0 minor and
 resets patch to zero, because pre-1.0 source changes may break the API. Engine
 version selection does not affect SDK version selection.
 
-A changed SDK runs its module tests and Go/TypeScript protocol conformance via
-`bin/check-sdk-release.sh`, then tags the selected tested source and publishes
+A changed SDK runs its module tests and Go/TypeScript protocol conformance in the SDK publication job, then tags the selected tested source and publishes
 that SDK tag first. A fresh module cache and the public Go proxy must resolve
 the SDK before the cut prepares the engine requirement and SDK pins. A proxy
 failure stops the engine cut; retry reuses the immutable SDK tag only after
