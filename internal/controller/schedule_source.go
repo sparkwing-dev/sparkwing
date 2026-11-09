@@ -165,8 +165,11 @@ var (
 
 func (s *Server) verifyPreparedSchedulePin(ctx context.Context, row store.CronSchedule, request runspec.Request) (err error) {
 	identity, err := crons.PreparedPinIdentity(row.LockedBinary)
-	if err != nil || identity == "" {
-		return err
+	if err != nil {
+		return &apierr.Error{Code: apierr.PlanFailed, Message: "cannot read the pinned TypeScript entry: " + err.Error() + "; re-run `sparkwing schedules install` to pin it again"}
+	}
+	if identity == "" {
+		return nil
 	}
 	environment, err := s.localScheduleEnvironments.Load(ctx, request.Env)
 	if err != nil {

@@ -310,6 +310,7 @@ func (s *Service) pin(id, head string, proof Proof) (store.CronLock, error) {
 	}
 	dest := filepath.Join(dir, pinnedBinaryName)
 	if proof.Identity != "" {
+		dest = filepath.Join(dir, preparedPinName)
 		staged, err := os.CreateTemp(dir, "entry-*")
 		if err != nil {
 			return store.CronLock{}, err

@@ -410,7 +410,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 
 func TestPreparedSchedulePinRejectsChangedEntry(t *testing.T) {
 	home := t.TempDir()
-	pin := filepath.Join(home, "pin")
+	pin := filepath.Join(home, "prepared-entry")
 	identity := strings.Repeat("a", 64)
 	if err := os.WriteFile(pin, []byte("sparkwing-prepared-entry-v1\n"+identity), 0o600); err != nil {
 		t.Fatal(err)
