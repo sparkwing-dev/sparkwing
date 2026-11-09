@@ -8,13 +8,14 @@ import (
 
 func TestLatestReleasedTagIgnoresATagOffThisLine(t *testing.T) {
 	repo := seedReleaseRepo(t)
-	gitRun(t, repo, "tag", "v0.2.0")
+	gitRun(t, repo, "tag", "v0.99.0")
+	gitRun(t, repo, "tag", "sparkwing/v0.2.0")
 
 	gitRun(t, repo, "checkout", "-q", "-b", "side")
 	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n\n// a side branch\n")
 	gitRun(t, repo, "add", "doc.go")
 	gitRun(t, repo, "commit", "-m", "a release cut somewhere that never landed")
-	gitRun(t, repo, "tag", "v9.9.9")
+	gitRun(t, repo, "tag", "sparkwing/v9.9.9")
 	gitRun(t, repo, "checkout", "-q", "main")
 
 	latest, err := latestReleasedTag(context.Background(), repo, -1)
@@ -28,11 +29,12 @@ func TestLatestReleasedTagIgnoresATagOffThisLine(t *testing.T) {
 
 func TestLatestReleasedTagStillReadsATagThisLineCarries(t *testing.T) {
 	repo := seedReleaseRepo(t)
-	gitRun(t, repo, "tag", "v0.2.0")
+	gitRun(t, repo, "tag", "v0.99.0")
+	gitRun(t, repo, "tag", "sparkwing/v0.2.0")
 	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n\n// later\n")
 	gitRun(t, repo, "add", "doc.go")
 	gitRun(t, repo, "commit", "-m", "later")
-	gitRun(t, repo, "tag", "v0.3.0")
+	gitRun(t, repo, "tag", "sparkwing/v0.3.0")
 
 	latest, err := latestReleasedTag(context.Background(), repo, -1)
 	if err != nil {

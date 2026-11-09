@@ -11,12 +11,15 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const independentSDKModule = "github.com/sparkwing-dev/sparkwing/sparkwing"
-const sdkDigestMarker = "SDK-Source-SHA256: "
+const (
+	independentSDKModule = "github.com/sparkwing-dev/sparkwing/sparkwing"
+	sdkDigestMarker      = "SDK-Source-SHA256: "
+)
 
 type sdkReleaseDecision struct {
 	Version string
@@ -26,21 +29,25 @@ type sdkReleaseDecision struct {
 
 // safety: hash committed bytes, including embeds and fixtures, so checkout state cannot change a tag's identity.
 func sdkSourceDigest(ctx context.Context, repo, ref string) (string, error) {
-	listed, err := runGitIn(ctx, repo, "ls-tree", "-rz", "--full-tree", ref, "--", "sparkwing/")
+	listed, err := runGitIn(ctx, repo, "ls-tree", "-rz", "--full-tree", ref, "--", "sparkwing/", "LICENSE")
 	if err != nil {
 		return "", err
 	}
+	hasSDKLicense := strings.Contains(listed, "\tsparkwing/LICENSE\x00")
 	entries := strings.Split(strings.TrimSuffix(listed, "\x00"), "\x00")
 	sort.Slice(entries, func(i, j int) bool {
 		_, a, _ := strings.Cut(entries[i], "\t")
 		_, b, _ := strings.Cut(entries[j], "\t")
-		return a < b
+		return strings.TrimPrefix(a, "sparkwing/") < strings.TrimPrefix(b, "sparkwing/")
 	})
 	h := sha256.New()
 	hasModule := false
 	for _, entry := range entries {
 		metadata, name, ok := strings.Cut(entry, "\t")
 		if !ok {
+			continue
+		}
+		if name == "LICENSE" && hasSDKLicense {
 			continue
 		}
 		relative := strings.TrimPrefix(name, "sparkwing/")
@@ -220,7 +227,11 @@ func (j *releaseSDKJob) run(ctx context.Context, dry bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(proxyCache)
+	defer func() {
+		if err := os.RemoveAll(proxyCache); err != nil {
+			sparkwing.Warn(ctx, "remove SDK proxy cache %s: %v", proxyCache, err)
+		}
+	}()
 	// safety: the engine must never require a module the public Go proxy cannot serve.
 	if _, err := sparkwing.Exec(ctx, "go", "mod", "download", independentSDKModule+"@"+decision.Version).Dir(j.RepoDir).
 		Env("GOMODCACHE", proxyCache).Env("GOWORK", "off").Env("GOPROXY", "https://proxy.golang.org").Env("GONOPROXY", "none").Env("GOPRIVATE", "").Run(); err != nil {

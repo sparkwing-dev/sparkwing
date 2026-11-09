@@ -17,6 +17,7 @@ func sdkFixture(t *testing.T) string {
 		"sparkwing/sdk.go":             "package sparkwing\n",
 		"sparkwing/assets/message.txt": "embedded\x00data\n",
 		"sparkwing/testdata/case.json": "{}\n",
+		"LICENSE":                      "license\n",
 		"go.mod":                       "module engine\n",
 	} {
 		sdkFixtureWrite(t, repo, name, body)
@@ -67,7 +68,7 @@ func TestSDKReleaseSelection(t *testing.T) {
 	if unchanged.Changed || unchanged.Version != first.Version || unchanged.Digest != first.Digest {
 		t.Fatalf("engine-only = %+v", unchanged)
 	}
-	for _, name := range []string{"sparkwing/sdk.go", "sparkwing/assets/message.txt", "sparkwing/testdata/case.json", "sparkwing/go.mod"} {
+	for _, name := range []string{"sparkwing/sdk.go", "sparkwing/assets/message.txt", "sparkwing/testdata/case.json", "sparkwing/go.mod", "LICENSE"} {
 		t.Run(name, func(t *testing.T) {
 			sdkFixtureWrite(t, repo, name, "changed "+name)
 			sdkFixtureCommit(t, repo)

@@ -1938,11 +1938,12 @@ and atomically pushes that merge with the tag on the separate release commit.
 
 Go SDK releases use independent `sparkwing/v0.x.y` tags. Before preparing
 engine release metadata, the cut hashes sorted tracked SDK module paths and
-committed bytes, including go.mod, Go source, embeds and test fixtures. Build
+committed bytes, including go.mod, Go source, embeds, test fixtures and the
+inherited root license when the SDK has no license file. Build
 output, vendor directories and workspace state are excluded. The annotated SDK
 tag records `SDK-Source-SHA256`; the cut verifies that record against the tag's
 source. An unchanged digest reuses that SDK version without creating a tag.
-The first SDK version is v0.1.0; any source change advances the v0 minor and
+The first SDK version is v0.1.0. Any source change advances the v0 minor and
 resets patch to zero, because pre-1.0 source changes may break the API. Engine
 version selection does not affect SDK version selection.
 

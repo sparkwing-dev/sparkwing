@@ -124,12 +124,15 @@ func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
 	if err != nil {
 		return fmt.Sprintf("scaffold fallback pin: cannot resolve latest %s release (%v)", sdkModulePath, err)
 	}
+	if latest == "" {
+		return ""
+	}
 	pinned, err := readFallbackSDKVersionFile(repoRoot)
 	if err != nil {
 		return fmt.Sprintf("scaffold fallback pin: %v", err)
 	}
 	if semver.Compare(pinned, latest) > 0 {
-		published, err := tagExistsOnRemote(ctx, repoRoot, pinned)
+		published, err := tagExistsOnRemote(ctx, repoRoot, "sparkwing/"+pinned)
 		if err != nil {
 			return fmt.Sprintf("scaffold fallback pin: cannot verify publication of %s (%v)", pinned, err)
 		}
@@ -145,13 +148,13 @@ func latestReleasedTag(ctx context.Context, repoRoot string, cap int) (string, e
 	// branch that never landed outranks this line by version while being
 	// unreachable from it, and reading it as the latest release blocks every
 	// release the line can make.
-	out, err := captureGit(ctx, repoRoot, "tag", "--merged", "HEAD", "--list", "v*")
+	out, err := captureGit(ctx, repoRoot, "tag", "--merged", "HEAD", "--list", "sparkwing/v*")
 	if err != nil {
 		return "", fmt.Errorf("git tag: %w", err)
 	}
 	var stable []string
 	for _, line := range strings.Split(out, "\n") {
-		v := strings.TrimSpace(line)
+		v := strings.TrimPrefix(strings.TrimSpace(line), "sparkwing/")
 		if !semver.IsValid(v) || semver.Prerelease(v) != "" {
 			continue
 		}
@@ -163,7 +166,7 @@ func latestReleasedTag(ctx context.Context, repoRoot string, cap int) (string, e
 		stable = append(stable, v)
 	}
 	if len(stable) == 0 {
-		return "", fmt.Errorf("no stable release tags in %s within cap", repoRoot)
+		return "", nil
 	}
 	semver.Sort(stable)
 	return stable[len(stable)-1], nil
@@ -180,7 +183,10 @@ func tagAtHead(ctx context.Context, repoRoot string) (string, error) {
 	}
 	var newest string
 	for _, line := range strings.Split(out, "\n") {
-		v := strings.TrimSpace(line)
+		v, ok := strings.CutPrefix(strings.TrimSpace(line), "sparkwing/")
+		if !ok {
+			continue
+		}
 		if !semver.IsValid(v) || semver.Prerelease(v) != "" {
 			continue
 		}
@@ -534,6 +540,9 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	latest, err := latestReleasedTag(ctx, repoRoot, majorCapFor(sdkModulePath))
 	if err != nil {
 		return "", fmt.Errorf("resolve latest sparkwing release: %w", err)
+	}
+	if latest == "" {
+		return "", nil
 	}
 	pinned, aligned, err := coherentReleaseVersionArtifacts(repoRoot)
 	if err != nil {
