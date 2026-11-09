@@ -104,8 +104,6 @@ func TestCompilePipeline_BuildFlagsAreNamedInTheCacheKey(t *testing.T) {
 	t.Fatalf("no cache-key input names the build flags %q; inputs were %s", want, strings.Join(labels, ", "))
 }
 
-// A key that does not fold the flags into its hash serves the binary the old
-// flags produced, whatever the parts list displays.
 func TestPipelineCacheKey_ChangesWithBuildFlags(t *testing.T) {
 	dir := newCheckout(t, t.TempDir())
 	before := mustKey(t, dir)
@@ -119,8 +117,7 @@ func TestPipelineCacheKey_ChangesWithBuildFlags(t *testing.T) {
 	}
 }
 
-// compiledFlags returns the flags CompilePipeline passed to `go build`, minus
-// -modfile, whose target the .resolved.mod input already hashes by content.
+// safety: .resolved.mod already accounts for the modfile's content, so its temporary path is excluded.
 func compiledFlags(t *testing.T, argv []string) []string {
 	t.Helper()
 	var flags []string

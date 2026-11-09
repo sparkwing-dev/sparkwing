@@ -13,9 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: the whole local release: the tag recipe plus the release cut's own
-// safety: check class. The heavier suites run in hosted CI against the tagged
-// safety: source, so a node outside this list is work the release does not need.
+// safety: the isolated cut must finish source verification before preparing release metadata.
 var releaseRecipe = []string{
 	"check-clean-tree",
 	"commit-changelog",
@@ -242,8 +240,6 @@ func TestPreviousReleaseTagIsNotTheReleaseBeingCut(t *testing.T) {
 	}
 }
 
-// `sparkwing run` refuses `--sw-allow`; the risk flag is `--sw-allow-risk`, so a
-// release recipe that names the old spelling stops before push-tag can run.
 func TestReleaseRecipesNameTheRiskFlagRunAccepts(t *testing.T) {
 	removed := regexp.MustCompile(`--sw-allow(\s|=)`)
 	for _, ex := range (Release{}).Examples() {
@@ -264,8 +260,6 @@ func TestReleaseRecipesNameTheRiskFlagRunAccepts(t *testing.T) {
 	}
 }
 
-// `sparkwing run` refuses a pipeline flag before `--`, so an example that
-// puts one there fails for whoever copies it.
 func TestPipelineExamplesPassPipelineFlagsAfterTheSeparator(t *testing.T) {
 	runFlags := map[string]bool{"-o": true, "--output": true, "-C": true, "--checkout": true, "-h": true, "--help": true, "--help-all": true, "--publish": true, "-v": true}
 	command := regexp.MustCompile(`Command:\s*"((?:[^"\\]|\\.)*)"`)

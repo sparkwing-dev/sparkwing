@@ -124,7 +124,8 @@ type unitResult struct {
 	err error
 }
 
-// Run checks signed runner policy before claims and drains held work on denial.
+// Run claims work and joins held hosts before returning.
+// CheckVersion, when supplied, may stop claims and drain hosts on a policy denial.
 func (l *Loop) Run(ctx context.Context) error {
 	policyErr, runErr := l.run(ctx)
 	return errors.Join(policyErr, runErr)

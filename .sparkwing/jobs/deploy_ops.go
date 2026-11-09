@@ -125,8 +125,7 @@ func shellJoin(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// safety: every external effect goes through act, so --dry-run prints the
-// same sequence a real run performs and performs none of it.
+// safety: mutating deploy actions require act so dry runs can preview them without changing external state.
 type deployer struct {
 	tools     deployTools
 	cfg       deployConfig
