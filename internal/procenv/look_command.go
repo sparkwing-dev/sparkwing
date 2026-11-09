@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-// LookupCommand resolves argv through the requesting process's PATH and working directory.
+// LookupCommand resolves name using env and dir. An unset PATH uses /bin:/usr/bin
+// on Unix and the host PATH on Windows. Windows also searches dir and applies PATHEXT.
 func LookupCommand(name string, env []string, dir string) (string, error) {
 	windows := runtime.GOOS == "windows"
 	if !windows && strings.Contains(name, string(filepath.Separator)) {

@@ -64,11 +64,11 @@ func validName(name string) bool { return name != "" && !strings.ContainsAny(nam
 // Build applies the process policy before execution. Local input comes only from Captured;
 // remote input comes from Ambient and the explicit allow list. Masker must be supplied when
 // accepted remote values or embedded proxy credentials require registration.
-// Build excludes credential-class values from both local snapshots and remote inputs at every boundary.
-// This includes tool-owned credentials in a local snapshot. Plan never receives job Startup;
+// Build excludes inherited credential values except the CLI's secrets-key file selector.
+// Plan never receives job Startup;
 // Attempt and Eval receive it before process start. The SDK adds Body only after plan succeeds.
-// Cleanup and StepTool use AttemptEnv exactly. Remote allow-list values of at least twelve characters
-// are masked before any subprocess starts. Build drops envredact.CredentialName matches before
+// Cleanup and StepTool validate and clone AttemptEnv. Maskable remote allow-list values of at least
+// twelve characters are registered before execution. Build drops envredact.CredentialName matches before
 // applying allow lists, even when Lookup classifies an unknown name as user-owned.
 // Git also drops inherited GIT_* except GIT_SSL_CAINFO and GIT_SSL_CAPATH, plus
 // SSH_ASKPASS and SSH_AUTH_SOCK. Source acquisition selects private credential/config files through argv.
@@ -238,7 +238,7 @@ func composeRuntime(env map[string]string, k Kind, rt Runtime) {
 
 func registerMasks(masker *secrets.Masker, name, value string, maskValue bool) error {
 	values := []string{}
-	// Plain config remains usable even when it cannot be a masking pattern.
+	// safety: unmaskable public configuration remains usable because it carries no credential.
 	if maskValue && secrets.Maskable(value) {
 		values = append(values, value)
 	}
