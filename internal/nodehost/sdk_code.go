@@ -123,7 +123,7 @@ func (h *sdkCode) hello(ctx context.Context, session *executorSession, input Nod
 
 func sdkHello(ctx context.Context, session *executorSession, identity engineid.Identity, runner nodewire.RunnerIdentity, binding *nodewire.ProcessBinding) error {
 	var hello nodewire.HelloResult
-	err := session.call(ctx, nodewire.Request{Op: nodewire.OpHello, Protocol: nodewire.Version, Engine: &nodewire.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello, "")
+	err := session.call(ctx, nodewire.Request{Op: nodewire.OpHello, Protocol: nodewire.HelloProtocol, Engine: &nodewire.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello, "")
 	if err != nil {
 		return err
 	}

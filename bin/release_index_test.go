@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,7 +63,17 @@ set -euo pipefail
 name="${0##*/}"
 printf '%s %s\n' "$name" "$*" >>"$FIXTURE/log"
 case "$name" in
+ gh)
+  [[ "$1 $2 $3" == 'release download v0.68.2' ]]
+  while [[ "$1" != --dir ]]; do shift; done
+  printf '[{"language":"go","version":"v0.1.0","protocol":2,"source_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]' >"$2/sdk-entry-go.json"
+  printf '[{"language":"typescript","version":"v0.2.0","protocol":2,"source_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]' >"$2/sdk-entry-typescript.json"
+  ;;
  go)
+  args=("$@")
+  while [[ "$1" != --sdk-entries ]]; do shift; done
+  cp "$2" "$FIXTURE/sdk-entries.json"
+  set -- "${args[@]}"
   [[ "${FAIL_GENERATE:-false}" != true ]] || exit 19
   while [[ "$1" != --index-out ]]; do shift; done
   cp "$FIXTURE/generated" "$2/versions.json"
@@ -124,7 +135,7 @@ func TestReleaseIndexPublicationWritesOnlyVerifiedPairAndInvalidatesBoth(t *test
 					t.Fatal(err)
 				}
 			}
-			for _, tool := range []string{"aws", "go", "curl"} {
+			for _, tool := range []string{"aws", "go", "curl", "gh"} {
 				if err := os.WriteFile(filepath.Join(dir, "tools", tool), []byte(releaseIndexToolStub), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -176,6 +187,20 @@ func TestReleaseIndexPublicationWritesOnlyVerifiedPairAndInvalidatesBoth(t *test
 					t.Fatalf("failed preflight wrote production: %s", calls)
 				}
 				return
+			}
+			entriesBody, err := os.ReadFile(filepath.Join(dir, "sdk-entries.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var entries []struct {
+				Language string
+				Version  string
+			}
+			if err := json.Unmarshal(entriesBody, &entries); err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 2 || entries[0].Language != "go" || entries[0].Version != "v0.1.0" || entries[1].Language != "typescript" || entries[1].Version != "v0.2.0" {
+				t.Fatalf("lost independent SDK assets: %s", entriesBody)
 			}
 			if strings.Count(calls, "s3api put-object") != 2 || !strings.Contains(calls, "--paths /versions.json /versions.json.sig") || !strings.Contains(calls, "cloudfront wait invalidation-completed") {
 				t.Fatalf("incomplete pair publication: %s", calls)

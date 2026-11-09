@@ -45,7 +45,7 @@ func TestReadTypeScriptPinRejectsConflictAndRangeWithoutLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	version, err := VersionForPin(pin)
+	version, err := SDKVersionForPin(pin)
 	if err != nil || version != "v0.10.2" {
 		t.Fatalf("%s %v", version, err)
 	}

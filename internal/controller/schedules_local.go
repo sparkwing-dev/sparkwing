@@ -56,7 +56,7 @@ func (s *Server) handleRegisterLocalSchedules(w http.ResponseWriter, r *http.Req
 		return err
 	}
 	report, err := service.RegisterLocal(r.Context(), input, func(ctx context.Context, root, pipeline string) (crons.Proof, error) {
-		return s.localScheduleProver(ctx, root, pipeline, input.Environment)
+		return s.proveScheduleEntry(ctx, root, pipeline, input.Environment)
 	}, s.localScheduleEnvironments.Capture, func(ctx context.Context, rows []store.CronSchedule, registration crons.LocalRegistration, replace bool) (crons.ArmReport, error) {
 		return s.commitLocalSchedules(ctx, a, input.RepoPath, rows, registration, replace)
 	})
@@ -101,7 +101,7 @@ func (s *Server) handlePinLocalSchedule(w http.ResponseWriter, r *http.Request, 
 				return readErr
 			}
 			_, err = service.Lock(r.Context(), row.ID, func(ctx context.Context, root, pipeline string) (crons.Proof, error) {
-				return s.localScheduleProver(ctx, root, pipeline, environment)
+				return s.proveScheduleEntry(ctx, root, pipeline, environment)
 			})
 		}
 		if err != nil {
@@ -136,4 +136,12 @@ func (s *Server) handleTickLocalSchedules(w http.ResponseWriter, r *http.Request
 		Tick controllerwire.TickView `json:"tick"`
 	}{controllerwire.TickView{At: crons.RFC3339(report.At), Host: service.Host, Version: service.Version, Error: strings.Join(report.Errors, "; ")}})
 	return nil
+}
+
+func (s *Server) proveScheduleEntry(ctx context.Context, root, pipeline string, environment []string) (crons.Proof, error) {
+	proof, err := s.localScheduleProver(ctx, root, pipeline, environment)
+	if err != nil {
+		return proof, &apierr.Error{Code: apierr.PlanFailed, Message: "cannot prepare schedule pipeline " + pipeline + ": " + err.Error() + "; repair the pipeline and re-run `sparkwing schedules install`, or use `--no-prove` to register following source without preparation"}
+	}
+	return proof, nil
 }

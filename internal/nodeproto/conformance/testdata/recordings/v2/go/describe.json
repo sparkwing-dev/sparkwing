@@ -1,0 +1,113 @@
+{
+  "protocol": 2,
+  "language": "go",
+  "exchanges": [
+    {
+      "wire_request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        }
+      },
+      "expected": {
+        "reply": "hello",
+        "ok": true,
+        "result": {
+          "protocol": 2,
+          "sdk": {
+            "language": "go",
+            "version": "(devel)"
+          }
+        }
+      },
+      "request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        }
+      },
+      "frames": [
+        {
+          "reply": "hello",
+          "ok": true,
+          "result": {
+            "protocol": 2,
+            "sdk": {
+              "language": "go",
+              "version": "(devel)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "1",
+        "op": "describe"
+      },
+      "expected": {
+        "reply": "1",
+        "ok": true,
+        "result": {
+          "pipelines": [
+            {
+              "name": "conformance",
+              "short": "Node protocol v2 conformance",
+              "args": [
+                {
+                  "name": "name",
+                  "type": "string",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "request": {
+        "id": "1",
+        "op": "describe"
+      },
+      "frames": [
+        {
+          "ts": "2026-11-09T10:53:45.010615476-07:00",
+          "level": "info",
+          "msg": "planning "
+        },
+        {
+          "reply": "1",
+          "ok": true,
+          "result": {
+            "pipelines": [
+              {
+                "name": "conformance",
+                "short": "Node protocol v2 conformance",
+                "args": [
+                  {
+                    "name": "name",
+                    "type": "string",
+                    "required": true
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

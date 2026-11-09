@@ -166,7 +166,7 @@ func TestBreakingUpgradeMovesThePinAndReportsTheCodeThatFails(t *testing.T) {
 	if err != nil || pin.Version != "v0.20.0" {
 		t.Fatalf("pin = %+v, %v; want v0.20.0", pin, err)
 	}
-	if guides := MigrationGuides("v0.10.2", "v0.20.0"); !strings.Contains(guides, "docs migrations --from v0.10.2 --to v0.20.0") || !strings.Contains(guides, "/tree/v0.20.0/docs/migrations") {
+	if guides := MigrationGuides("v0.20.0"); !strings.Contains(guides, "docs migrations") || !strings.Contains(guides, "/tree/v0.20.0/docs/migrations") {
 		t.Fatalf("migration guides = %q", guides)
 	}
 }

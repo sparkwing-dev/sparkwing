@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -343,25 +344,24 @@ func TestWindowsHostCommandRejectsWSLBash(t *testing.T) {
 }
 
 //sparkwing:critical
-func TestWindowsHostCommandBashRequiresProgram(t *testing.T) {
+func TestWindowsHostCommandBashEmptyProgram(t *testing.T) {
 	shell := windowsGitBash(t)
-	for _, empty := range []bool{false, true} {
-		cmd := procenv.SDKCommand(os.Environ(), t.TempDir(), shell, "-c", "printf unexpected")
+	for _, missing := range []bool{false, true} {
+		cmd := procenv.SDKCommand(os.Environ(), t.TempDir(), shell, "-c", "")
 		configureHostCommand(cmd)
-		filtered := cmd.Env[:0]
-		for _, entry := range cmd.Env {
-			key, _, _ := strings.Cut(entry, "=")
-			if !strings.EqualFold(key, "SPARKWING_BASH_PROGRAM") {
-				filtered = append(filtered, entry)
-			}
-		}
-		cmd.Env = filtered
-		if empty {
-			cmd.Env = append(cmd.Env, "SPARKWING_BASH_PROGRAM=")
+		if missing {
+			cmd.Env = slices.DeleteFunc(cmd.Env, func(entry string) bool {
+				key, _, _ := strings.Cut(entry, "=")
+				return strings.EqualFold(key, "SPARKWING_BASH_PROGRAM")
+			})
 		}
 		output, err := cmd.CombinedOutput()
-		if err == nil || !strings.Contains(string(output), "host Bash program is empty; supply a Bash program or use : for a no-op") || strings.Contains(string(output), "unexpected") {
-			t.Fatalf("empty=%v: missing Bash program succeeded: %v, output=%q", empty, err, output)
+		if missing {
+			if err == nil || !strings.Contains(string(output), "host Bash program is missing") {
+				t.Fatalf("missing Bash program succeeded: %v, output=%q", err, output)
+			}
+		} else if err != nil || len(output) != 0 {
+			t.Fatalf("empty Bash program failed: %v, output=%q", err, output)
 		}
 	}
 }

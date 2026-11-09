@@ -113,7 +113,7 @@ func TestSDKPinInspectionRejectsUnsafeInputsProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, input.sdk, engine.ReadPin, engine.VersionForPin)
+		report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, input.sdk, engine.ReadPin, func(engineid.Pin) (string, error) { return "v0.80.0", nil })
 		return report.Runs == "" && strings.Contains(report.Refusal, "regular file")
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {

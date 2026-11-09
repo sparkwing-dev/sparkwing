@@ -20,7 +20,14 @@ case "$signature_count" in
   0) [[ "${BOOTSTRAP_INDEX:-false}" == true ]] || { echo 'Current index has no signature; use the documented one-time bootstrap' >&2; exit 1; } ;;
   *) echo 'Unexpected signature inventory' >&2; exit 1 ;;
 esac
-args=(--index-out "$out" --previous-index "$work/previous" --require-version "$TAG")
+mkdir -p "$work/sdk-entries"
+gh release download "$TAG" --repo sparkwing-dev/sparkwing --dir "$work/sdk-entries" \
+  --pattern sdk-entry-go.json --pattern sdk-entry-typescript.json
+for language in go typescript; do
+  test -s "$work/sdk-entries/sdk-entry-$language.json"
+done
+jq -s 'add' "$work/sdk-entries/sdk-entry-go.json" "$work/sdk-entries/sdk-entry-typescript.json" > "$work/sdk-entries.json"
+args=(--sdk-entries "$work/sdk-entries.json" --index-out "$out" --previous-index "$work/previous" --require-version "$TAG")
 if [[ "${BOOTSTRAP_INDEX:-false}" == true ]]; then args+=(--bootstrap-index); fi
 GOWORK=off go -C "$root" run ./cmd/verify-release "${args[@]}"
 for object in versions.json versions.json.sig; do

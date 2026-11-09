@@ -307,7 +307,7 @@ func TestCacheExplainFindsInstalledSDKBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output, diagnostics bytes.Buffer
-	if err := sdkinstall.Run(t.Context(), "development", bytes.NewReader(request), &output, &diagnostics); err != nil {
+	if err := sdkinstall.Run(t.Context(), bytes.NewReader(request), &output, &diagnostics); err != nil {
 		t.Fatalf("install: %v: %s", err, &diagnostics)
 	}
 	var installed engine.SDKCommand

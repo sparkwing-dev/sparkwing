@@ -44,7 +44,7 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		if len(os.Args) != 2 {
 			err = errors.New("SDK install accepts no arguments")
 		} else {
-			err = sdkinstall.Run(ctx, version, os.Stdin, os.Stdout, os.Stderr)
+			err = sdkinstall.Run(ctx, os.Stdin, os.Stdout, os.Stderr)
 		}
 	case "start", "warm":
 		err = runtime.Runner.Run(ctx, os.Args[1], os.Args[2:], version)

@@ -80,7 +80,7 @@ if (["ci", "install"].includes(process.argv[2]) && !process.argv.includes("--dry
 	}
 	install := func() (engine.SDKCommand, error) {
 		var output, diagnostics bytes.Buffer
-		err := Run(t.Context(), "v0.68.0-qa.16", bytes.NewReader(request), &output, &diagnostics)
+		err := Run(t.Context(), bytes.NewReader(request), &output, &diagnostics)
 		var command engine.SDKCommand
 		if err == nil {
 			err = json.Unmarshal(output.Bytes(), &command)

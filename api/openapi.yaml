@@ -4761,6 +4761,8 @@ components:
           type: string
         reason:
           type: string
+        sdk:
+          type: string
         support_until:
           anyOf:
             - format: date-time

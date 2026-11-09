@@ -25,6 +25,7 @@ func isolateUpdateTests(t *testing.T) {
 	t.Helper()
 	fetch, release, revision, installed, download, api := updateFetchLatest, updateLookupRelease, updateLookupRevision, updateReadInstalled, updateDownloadInstall, updateReleaseAPI
 	invoking, destination := updateReadInvoking, updateDestination
+	sdkVersion := updateSDKVersion
 	t.Cleanup(func() {
 		updateFetchLatest = fetch
 		updateLookupRelease = release
@@ -34,6 +35,7 @@ func isolateUpdateTests(t *testing.T) {
 		updateReleaseAPI = api
 		updateReadInvoking = invoking
 		updateDestination = destination
+		updateSDKVersion = sdkVersion
 	})
 	home := t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "installed"), []byte("fixture before"), 0o700); err != nil {
@@ -43,6 +45,12 @@ func isolateUpdateTests(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("SPARKWING_HOME", filepath.Join(home, "state"))
 	updateFetchLatest = func(context.Context) (string, error) { return "v0.49.0", nil }
+	updateSDKVersion = func(_ context.Context, requested string) (string, error) {
+		if requested != "" {
+			return requested, nil
+		}
+		return "v0.49.0", nil
+	}
 	updateLookupRelease = lookupUpdateRelease
 	updateLookupRevision = lookupUpdateRevision
 	updateReadInvoking = func() updateIdentity { return updateReadInstalled() }
@@ -98,7 +106,12 @@ func checkUpdate(t *testing.T, args ...string) (updateCheckReport, int) {
 }
 
 func readPinSummary(dir string) *InfoSDKPin {
-	return gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, engineid.GoSDK, engine.ReadPin, engine.VersionForPin)
+	return gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, engineid.GoSDK, engine.ReadPin, func(pin engineid.Pin) (string, error) {
+		if pin.Replacement != "" {
+			return "(devel)", nil
+		}
+		return "v0.80.0", nil
+	})
 }
 
 func TestUnifiedUpdateCheckReleaseStatesAndProvenance(t *testing.T) {
@@ -269,7 +282,7 @@ func TestUnifiedSDKCheckReadsPinWithoutGoOrModuleWrites(t *testing.T) {
 	testshell.Install(t, filepath.Join(bin, "go"), "#!/bin/sh\nprintf called > "+shellSingleQuote(filepath.ToSlash(spy))+"\nexit 99\n")
 	t.Setenv("PATH", bin)
 	report := readPinSummary(dir)
-	if report.Pin != "v0.48.0" || report.Runs != "v0.48.0" || report.Refusal != "" {
+	if report.Pin != "v0.48.0" || report.Runs != "v0.80.0" || report.Refusal != "" {
 		t.Fatalf("SDK summary: %+v", report)
 	}
 	after, err := os.ReadFile(filepath.Join(dir, "go.mod"))
@@ -624,6 +637,7 @@ func TestVersionCardUsesSharedComparisonWithoutRepeatingLookups(t *testing.T) {
 
 func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	isolateUpdateTests(t)
+	updateFetchLatest = func(context.Context) (string, error) { t.Fatal("SDK mutation queried engine releases"); return "", nil }
 	updateMetadataFixture(t)
 	dir := sdkUpdateFixture(t, "")
 	bin := t.TempDir()
@@ -697,5 +711,17 @@ func TestUnifiedSDKPartialFailureHasNoSuccessReceipt(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil || !strings.Contains(string(data), "v0.49.0") {
 		t.Fatal("fixture did not exercise a partial module update")
+	}
+}
+
+func TestVersionReportKeepsSDKLatestSeparateFromEngineLatest(t *testing.T) {
+	isolateUpdateTests(t)
+	updateMetadataFixture(t)
+	sdkUpdateFixture(t, "")
+	updateFetchLatest = func(context.Context) (string, error) { return "v0.80.0", nil }
+	updateSDKVersion = func(context.Context, string) (string, error) { return "v0.48.0", nil }
+	report := gatherVersionReport(false)
+	if report.Project == nil || report.Project.SDKPin != "v0.48.0" || report.Project.SDKLatest != "v0.48.0" || report.Project.SDKBehind {
+		t.Fatalf("engine release contaminated SDK comparison: %+v", report.Project)
 	}
 }

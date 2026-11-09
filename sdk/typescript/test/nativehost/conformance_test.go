@@ -76,9 +76,10 @@ func TestNativeConformance(t *testing.T) {
 	for _, session := range corpus.Sessions {
 		t.Run(session.Name, func(t *testing.T) {
 			h := startSDKAt(t, node, root, "conformance.mjs")
+			h.recording = conformance.NewRecording(t, "typescript", session.Name)
 			protocol := session.Protocol
 			if protocol == 0 {
-				protocol = nodewire.Version
+				protocol = nodewire.HelloProtocol
 			}
 			hello := nodewire.Request{ID: "hello", Op: nodewire.OpHello, Protocol: protocol, Engine: &nodewire.EngineIdentity{Version: "fixture"}, Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}
 			if session.Binding {
@@ -90,7 +91,7 @@ func TestNativeConformance(t *testing.T) {
 			}
 			h.send(hello)
 			got := nextReply(t, h)
-			if protocol != nodewire.Version {
+			if protocol != nodewire.HelloProtocol {
 				if got.Error == nil || got.Error.Code != "protocol_mismatch" {
 					t.Fatalf("mismatch: %+v", got)
 				}

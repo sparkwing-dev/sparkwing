@@ -17,6 +17,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -370,6 +372,10 @@ func proveLocalSchedule(ctx context.Context, home, root, pipeline string, enviro
 	if err != nil {
 		return crons.Proof{}, err
 	}
+	spec, err = localScheduleProofSource(ctx, spec, selected.execution.Directory, options)
+	if err != nil {
+		return crons.Proof{}, err
+	}
 	options.SDK = ""
 	entry, err := source.Acquire(ctx, spec, options)
 	if err != nil {
@@ -381,11 +387,43 @@ func proveLocalSchedule(ctx context.Context, home, root, pipeline string, enviro
 	if entry == nil {
 		return crons.Proof{}, errors.New("schedule source acquisition returned no entry")
 	}
-	if len(entry.Command) != 1 {
-		return crons.Proof{}, errors.Join(fmt.Errorf("%s: schedule pinning requires a standalone pipeline executable", pipeline), entry.Close())
-	}
 	if err := writeEngineNotices(os.Stderr, entry.Engine.Notices); err != nil {
 		return crons.Proof{}, errors.Join(err, entry.Close())
 	}
+	if len(entry.Command) != 1 {
+		environment, err := procenv.Build(procenv.Install, options.Base, procenv.Runtime{})
+		if err != nil {
+			return crons.Proof{}, errors.Join(err, entry.Close())
+		}
+		versionCommand := procenv.CommandContext(ctx, environment, entry.Command[0], "--version")
+		versionCommand.Dir = entry.Directory
+		version, err := versionCommand.Output()
+		if err != nil {
+			return crons.Proof{}, errors.Join(fmt.Errorf("identify Node runtime: %w", err), entry.Close())
+		}
+		identity, err := pipelineentry.Command(entry.Command).Identity(entry.Directory, string(version))
+		if err != nil {
+			return crons.Proof{}, errors.Join(err, entry.Close())
+		}
+		return crons.Proof{Identity: identity, Release: entry.Close}, nil
+	}
 	return crons.Proof{Binary: entry.Command[0], Release: entry.Close}, nil
+}
+
+func localScheduleProofSource(ctx context.Context, spec source.Spec, directory string, options source.Options) (source.Spec, error) {
+	typescript, err := pipelineentry.IsTypeScript(directory)
+	if err != nil {
+		return source.Spec{}, err
+	}
+	// safety: scheduled intake acquires committed code, so its proof must use the same source.
+	if typescript && spec.PipelineSHA == "" {
+		spec.PipelineSHA = spec.SHA
+		if spec.PipelineSHA == "" {
+			spec.PipelineSHA, err = source.ResolveRef(ctx, spec, "HEAD", options)
+			if err != nil {
+				return source.Spec{}, err
+			}
+		}
+	}
+	return spec, nil
 }

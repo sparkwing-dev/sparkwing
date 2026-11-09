@@ -38,7 +38,7 @@ func TestReplacementPinWarnsAndKeepsInstalledCLI(t *testing.T) {
 	}
 	var diagnostics bytes.Buffer
 	command := pipelineEngineSwitcher{
-		readPin: engine.ReadPin, versionFor: engine.VersionForPin, current: current,
+		readPin: engine.ReadPin, current: current,
 		target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, diagnostics: &diagnostics,
 		resolve: func(ctx context.Context, pin engineid.Pin, target releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
 			return r.Resolve(ctx, pin, target)
@@ -71,8 +71,7 @@ func engineSwitchFixture(t testing.TB, sdk engineid.SDKKind) (pipelineEngineSwit
 	calls := 0
 	command := pipelineEngineSwitcher{
 		current: current, target: result.Target, diagnostics: &output,
-		readPin:    func(string, engineid.SDKKind) (engineid.Pin, error) { return pin, nil },
-		versionFor: func(engineid.Pin) (string, error) { return "v1.2.3", nil },
+		readPin: func(string, engineid.SDKKind) (engineid.Pin, error) { return pin, nil },
 		resolve: func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error) {
 			return result, nil
 		},
@@ -154,7 +153,7 @@ func TestPipelineEnginePinComesFromPipelineDirectoryProperty(t *testing.T) {
 					writeRepoFile(t, parent, "malformed parent manifest")
 				}
 				command, selected, _, calls := engineSwitchFixture(t, sdk)
-				command.readPin, command.versionFor = engine.ReadPin, engine.VersionForPin
+				command.readPin = engine.ReadPin
 				selected.Identity.Pin = pin
 				command.resolve = func(_ context.Context, got engineid.Pin, _ releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
 					if got != pin {
@@ -162,7 +161,7 @@ func TestPipelineEnginePinComesFromPipelineDirectoryProperty(t *testing.T) {
 					}
 					return selected, nil
 				}
-				report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: pipeline}}, sdk, engine.ReadPin, engine.VersionForPin)
+				report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: pipeline}}, sdk, engine.ReadPin, func(engineid.Pin) (string, error) { return "v1.2.3", nil })
 				return command.run(t.Context(), pipeline, sdk, "auto", nil, nil) == nil && *calls == 1 && report.Refusal == "" && report.Pin == pin.Version && report.Runs == "v1.2.3"
 			}
 			if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
@@ -185,7 +184,7 @@ func TestSDKPinInspectionRetainsManifestAndLockfileSizes(t *testing.T) {
 				body := `{"dependencies":{"@sparkwing/sdk":"1.2.3"},"description":"` + strings.Repeat("x", maxMetadataBytes+1) + `"}`
 				writeRepoFile(t, filepath.Join(dir, "package.json"), body)
 			}
-			report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, sdk, engine.ReadPin, engine.VersionForPin)
+			report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, sdk, engine.ReadPin, func(engineid.Pin) (string, error) { return "v1.2.3", nil })
 			if report.Runs != "v1.2.3" || report.Refusal != "" {
 				t.Fatalf("valid SDK inputs refused: %+v", report)
 			}
@@ -245,7 +244,7 @@ func TestPipelineEngineSwitchDisplaysSupportNoticesAndContinues(t *testing.T) {
 }
 
 func TestPipelineEngineSwitchCancellationAtEachBoundaryStopsExecution(t *testing.T) {
-	for _, boundary := range []string{"pin", "version", "resolve"} {
+	for _, boundary := range []string{"pin", "resolve"} {
 		t.Run(boundary, func(t *testing.T) {
 			command, selected, output, calls := engineSwitchFixture(t, engineid.GoSDK)
 			ctx, cancel := context.WithCancel(t.Context())
@@ -261,7 +260,6 @@ func TestPipelineEngineSwitchCancellationAtEachBoundaryStopsExecution(t *testing
 				}
 			}
 			command.readPin = func(string, engineid.SDKKind) (engineid.Pin, error) { visit("pin"); return selected.Identity.Pin, nil }
-			command.versionFor = func(engineid.Pin) (string, error) { visit("version"); return selected.Identity.Version, nil }
 			command.resolve = func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error) {
 				visit("resolve")
 				return selected, nil
@@ -275,7 +273,7 @@ func TestPipelineEngineSwitchCancellationAtEachBoundaryStopsExecution(t *testing
 
 func TestPipelineEngineSwitchRejectsIncompleteOrDifferentSelection(t *testing.T) {
 	for name, mutate := range map[string]func(*engine.Resolved){
-		"release":  func(r *engine.Resolved) { r.Identity.Version = "v1.2.2" },
+		"release":  func(r *engine.Resolved) { r.Identity.Version = "" },
 		"pin":      func(r *engine.Resolved) { r.Identity.Pin.InputsDigest = "other-inputs" },
 		"sdk":      func(r *engine.Resolved) { r.Identity.Pin.SDK = engineid.TypeScriptSDK },
 		"manifest": func(r *engine.Resolved) { r.Identity.ManifestDigest = "" },
@@ -299,7 +297,7 @@ func TestPipelineEngineSwitchRejectsIncompleteOrDifferentSelection(t *testing.T)
 }
 
 func TestPipelineEngineSwitchFailureStopsBeforeExecution(t *testing.T) {
-	for _, boundary := range []string{"mode", "pin", "version", "resolve", "notice", "context", "current", "selected"} {
+	for _, boundary := range []string{"mode", "pin", "resolve", "notice", "context", "current", "selected"} {
 		t.Run(boundary, func(t *testing.T) {
 			command, selected, _, calls := engineSwitchFixture(t, engineid.GoSDK)
 			ctx, cancel := context.WithCancel(t.Context())
@@ -311,8 +309,6 @@ func TestPipelineEngineSwitchFailureStopsBeforeExecution(t *testing.T) {
 				mode = "unknown"
 			case "pin":
 				command.readPin = func(string, engineid.SDKKind) (engineid.Pin, error) { return engineid.Pin{}, failure }
-			case "version":
-				command.versionFor = func(engineid.Pin) (string, error) { return "", failure }
 			case "resolve":
 				command.resolve = func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error) {
 					return engine.Resolved{}, failure
@@ -388,5 +384,16 @@ func TestSDKPinSummaryPreservesReadAndVersionErrors(t *testing.T) {
 		if summary == nil || summary.Runs != "" || summary.Switches || sdkPinLine(summary) != failure.Error() {
 			t.Fatalf("failed pin appeared runnable: %+v", summary)
 		}
+	}
+}
+
+func TestPipelineEngineSwitchAcceptsIndependentVersions(t *testing.T) {
+	command, selected, _, calls := engineSwitchFixture(t, engineid.GoSDK)
+	selected.Identity.Version = "v0.80.0"
+	command.resolve = func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error) {
+		return selected, nil
+	}
+	if err := command.run(t.Context(), "/checkout/.sparkwing", engineid.GoSDK, "auto", nil, nil); err != nil || *calls != 1 {
+		t.Fatalf("independent engine: %v calls=%d", err, *calls)
 	}
 }

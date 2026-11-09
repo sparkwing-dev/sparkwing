@@ -537,10 +537,15 @@ paths resolved against the working directory. On Windows, `PATHEXT` supplies
 executable extensions. The working directory is searched only when named in
 `PATH` or the command path. Hosts resolve the executable to an absolute path before
 constructing and validating argv. Registered cleanups use the same lookup and
-report the argument position and remedy when refused. Windows `.cmd`/`.bat` targets refuse arguments with
-cmd.exe metacharacters (`& | < > ^ % " ! ( )` and CR/LF). Use a non-batch tool,
-such as `node.exe` with its JavaScript entrypoint, when passing these values.
-Batch files that expand pipeline-set environment values without quoting are outside the host's control.
+report the argument position and remedy when refused. Windows `.cmd`/`.bat` targets run through the
+system `cmd.exe` with arguments escaped as Rust's standard library escapes them, so
+`& | < > ^ ( ) !` and `%VAR%` arrive literally and `"` arrives as `""`, which
+`node.exe` and other Microsoft C runtime programs read as one quote. Arguments
+containing CR, LF or NUL, and batch paths containing `"`, `^` or `%`, are refused;
+use a non-batch tool, such as `node.exe` with its JavaScript entrypoint, for those.
+Batch files that enable delayed expansion or expand arguments or pipeline-set
+environment values without quoting are outside the host's control.
+An empty `Bash` script succeeds.
 On Windows, `Exec` refuses the System32 WSL `bash.exe` launcher; install Git Bash or call `wsl` explicitly.
 Engine credentials and protocol settings
 are removed from child environments, including values supplied through `Env`.
@@ -724,3 +729,53 @@ A job can observe a child it started with `status, err := sparkwing.AwaitChild(c
 The native wait releases runner capacity and returns the terminal status, including `failed`
 or `cancelled`, without requiring a job output. A transport failure or cancelled wait returns
 an error. This observes only that job's own children. It does not attach to unrelated runs.
+
+## Protocol compatibility
+
+The SDK announces its protocol version in the `hello` reply. The engine records
+that version for the process and selects its engine-side adapter from
+`internal/nodehost/protocol_adapter.go`. Protocol 2 uses the identity adapter.
+The engine's hello request always uses bootstrap protocol 2, including when
+its current message protocol changes. Published SDKs require that request
+version and may consume even a refused hello. SDK replies announce their own
+message protocol independently, so the engine can select the right adapter.
+Keep the hello envelope stable across message protocol versions.
+The adapter upgrades incoming frames before the current codec and host policy
+see them. It also translates outgoing requests when an older SDK needs a
+different request shape. SDK and engine release versions remain separate from
+the protocol version.
+
+Additive changes never bump the protocol version. Add optional fields or
+capability flags, and let the engine supply defaults when fields are absent.
+A breaking wire change bumps the protocol version and adds an engine-side
+adapter from the old shape to the current shape. Keep engines as backwards
+compatible as possible with the SDK protocols listed in the signed mapping.
+Delete an adapter as soon as that mapping no longer lists any SDK version using
+its protocol. Unknown protocols fail with `protocol_mismatch`.
+
+Go and TypeScript conformance traffic is retained under
+`internal/nodeproto/conformance/testdata/recordings/v<protocol>/<language>/`.
+Each accepted session records engine requests, raw SDK frames and expected
+replies separately, including
+successes, body and hook failures, generated jobs and protocol refusals.
+`TestRecordedSDKProtocols` replays every recorded version through the current
+engine's adapter, frame codec, session rules and result validation. It checks outgoing request translation and compares
+reply outcomes with the recording. Log frames pass through the engine codec.
+The corpus does not exercise host command execution. The replay needs no historical SDK binary.
+New adapters must preserve those outcomes. Retain published recordings when an
+adapter is removed, and update the replay to assert the explicit refusal for
+that retired protocol.
+
+Record a new version from the SDK source being published with one command from
+an Xwing worktree (the TypeScript compiler dependencies are installed by the
+command refuses to overwrite an existing protocol directory):
+
+```bash
+xwing env exec --session <environment> --repo <worktree> --scratch -- bash bin/record-sdk-protocol.sh 2
+```
+
+Replace `2` with the SDK's announced protocol version. Review and commit the new
+version directory with the protocol change. Keep published version fixtures
+unchanged. Run `go test -p 2 ./internal/nodehost -run TestRecordedSDKProtocols`
+to replay the fixtures. Full Go and TypeScript conformance runs also check the
+live SDKs against the shared corpus and schemas.

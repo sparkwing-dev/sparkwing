@@ -41,6 +41,7 @@ func run(args []string) error {
 	flags := flag.NewFlagSet("qaindex", flag.ContinueOnError)
 	version := flags.String("version", "", "QA pre-release version, vX.Y.Z-qa.N")
 	previous := flags.String("previous", "", "directory holding the published versions.json and versions.json.sig; empty for the first QA release")
+	sdkEntries := flags.String("sdk-entries", "", "JSON array of published SDK entries")
 	out := flags.String("out", "", "directory to write versions.json and versions.json.sig")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -68,6 +69,15 @@ func run(args []string) error {
 	}
 	if index, err = nextIndex(index, *version, now); err != nil {
 		return err
+	}
+	if *sdkEntries != "" {
+		body, err := os.ReadFile(*sdkEntries)
+		if err != nil {
+			return err
+		}
+		if index, err = engine.MergeSDKEntries(index, body); err != nil {
+			return err
+		}
 	}
 	body, err := json.MarshalIndent(index, "", "  ")
 	if err != nil {
@@ -112,6 +122,6 @@ func nextIndex(index engine.VersionIndex, version string, now time.Time) (engine
 	if index.Latest == "" || semver.Compare(version, index.Latest) > 0 {
 		index.Latest = version
 	}
-	index.Versions = append(index.Versions, engineid.VersionInfo{Version: version, PublishedAt: now, SupportUntil: now.AddDate(0, limits.ControllerCompatibilityMonths, 0)})
+	index.Versions = append(index.Versions, engineid.VersionInfo{AcceptedSDKProtocols: []int{2}, Version: version, PublishedAt: now, SupportUntil: now.AddDate(0, limits.ControllerCompatibilityMonths, 0)})
 	return index, nil
 }

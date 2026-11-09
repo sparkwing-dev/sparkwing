@@ -30,9 +30,10 @@ type Identity struct {
 
 // VersionInfo retains every published release, including releases beyond their support window.
 type VersionInfo struct {
-	Version      string    `json:"version"`
-	PublishedAt  time.Time `json:"published_at"`
-	SupportUntil time.Time `json:"support_until"`
+	AcceptedSDKProtocols []int     `json:"accepted_sdk_protocols"`
+	Version              string    `json:"version"`
+	PublishedAt          time.Time `json:"published_at"`
+	SupportUntil         time.Time `json:"support_until"`
 }
 
 // NoticeKind is stable presentation data shared by run output and controller API/dashboard readers.
@@ -40,6 +41,7 @@ type NoticeKind string
 
 // Notice carries actionable policy text without turning a warning into an implicit revocation.
 type Notice struct {
+	SDK          SDKKind    `json:"sdk,omitempty"`
 	Kind         NoticeKind `json:"kind"`
 	Version      string     `json:"version,omitempty"`
 	Reason       string     `json:"reason"`

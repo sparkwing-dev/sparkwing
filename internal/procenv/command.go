@@ -2,9 +2,7 @@ package procenv
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -41,30 +39,26 @@ func SDKCommandContext(ctx context.Context, environment []string, dir, name stri
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env, cmd.Dir = environment, dir
-	refuseUnsafeBatch(cmd)
+	runBatchThroughCmd(cmd)
 	return cmd
 }
 
-func refuseUnsafeBatch(cmd *exec.Cmd) {
+// safety: cmd.exe reparses a batch file's command line, including %VAR% inside quotes,
+// so Go's argv quoting is replaced with a line cmd.exe reads back literally.
+func runBatchThroughCmd(cmd *exec.Cmd) {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	extension := filepath.Ext(strings.TrimRight(cmd.Path, " ."))
-	if !strings.EqualFold(extension, ".cmd") && !strings.EqualFold(extension, ".bat") {
+	script, ok := batchScript(cmd.Path)
+	if !ok {
 		return
 	}
-	// safety: cmd.exe reparses batch argv, including environment expansion inside quotes.
-	for i, arg := range cmd.Args {
-		metacharacters := "&|<>^%\"!()\r\n"
-		if i == 0 && strings.ContainsAny(arg, " \t") {
-			// safety: Go quotes a spaced program path, keeping install-directory parentheses literal.
-			metacharacters = "&|<>^%\"!\r\n"
-		}
-		if strings.ContainsAny(arg, metacharacters) {
-			cmd.Err = fmt.Errorf("windows batch command refused: argv[%d] contains cmd.exe metacharacters; use a non-batch executable, such as node.exe with the tool's JavaScript entrypoint", i)
-			return
-		}
+	line, err := batchCommandLine(script, cmd.Args[1:])
+	if err != nil {
+		cmd.Err = err
+		return
 	}
+	setCommandLine(cmd, line)
 }
 
 func sdkCommandEnvironment(environment []string) []string {

@@ -334,7 +334,7 @@ Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repos
 
 Upgrade repository SDK pins
 
-Bump the current repository's Go or TypeScript SDK pin to the signed latest permitted release, or --version. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the exact verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services.
+Bump the current repository's Go or TypeScript SDK pin to the latest permitted SDK entry in the signed policy, or the SDK selected by --version. Select the newest permitted engine that accepts that SDK's declared protocol. SDK and engine versions are independent. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services.
 
 ### Flags
 

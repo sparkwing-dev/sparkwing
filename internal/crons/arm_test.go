@@ -890,3 +890,23 @@ func TestTickLeavesTheOtherSidesSchedulesAlone(t *testing.T) {
 		t.Errorf("the local tick moved a controller row: %+v", pushed)
 	}
 }
+
+func TestArmPinsPreparedEntryIdentity(t *testing.T) {
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	root := gitRepo(t, "prepared", twoSidedRepo)
+	identity := strings.Repeat("a", 64)
+	report, err := h.svc.Arm(t.Context(), root, ArmOptions{Prove: func(context.Context, string, string) (Proof, error) { return Proof{Identity: identity}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range report.Schedules {
+		got, err := PreparedPinIdentity(row.LockedBinary)
+		if err != nil || got != identity {
+			t.Fatalf("pin = %q, %v", got, err)
+		}
+		digest, err := fileDigest(row.LockedBinary)
+		if err != nil || digest != row.LockedDigest {
+			t.Fatalf("receipt digest = %q, %v", digest, err)
+		}
+	}
+}

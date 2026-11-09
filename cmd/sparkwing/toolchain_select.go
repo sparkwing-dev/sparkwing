@@ -25,12 +25,13 @@ var (
 
 var (
 	readEnginePin    = engine.ReadPin
-	enginePinVersion = engine.VersionForPin
+	enginePinVersion = func(pin engineid.Pin) (string, error) {
+		return engine.CachedEngineVersion(context.Background(), pin)
+	}
 )
 
 type pipelineEngineSwitcher struct {
 	readPin     func(string, engineid.SDKKind) (engineid.Pin, error)
-	versionFor  func(engineid.Pin) (string, error)
 	resolve     func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error)
 	execute     func(string, []string, []string) error
 	current     string
@@ -54,7 +55,7 @@ func switchToolchain(dir string, beforeExec func()) error {
 		return err
 	}
 	command := pipelineEngineSwitcher{
-		readPin: readEnginePin, versionFor: enginePinVersion,
+		readPin: readEnginePin,
 		current: current, target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		execute: func(binary string, args, environment []string) error {
 			if beforeExec != nil {
@@ -99,15 +100,11 @@ func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk enginei
 	if err := errors.Join(err, ctx.Err()); err != nil {
 		return err
 	}
-	version, err := c.versionFor(pin)
-	if err := errors.Join(err, ctx.Err()); err != nil {
-		return err
-	}
 	selected, err := c.resolve(ctx, pin, c.target, mode)
 	if err := errors.Join(err, ctx.Err()); err != nil {
 		return err
 	}
-	if pin.SDK != sdk || selected.Identity.Pin != pin || selected.Identity.Version != version ||
+	if pin.SDK != sdk || selected.Identity.Pin != pin || selected.Identity.Version == "" ||
 		selected.Identity.ManifestDigest == "" || selected.AssetDigest == "" ||
 		selected.Target != c.target || !filepath.IsAbs(selected.Executable) {
 		return &apierr.Error{Code: apierr.ProtocolMismatch, Message: "engine resolver returned a different pin or incomplete verified executable"}

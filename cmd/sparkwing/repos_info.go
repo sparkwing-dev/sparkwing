@@ -63,7 +63,7 @@ func runReposInfo(inv clisurface.Invocation) error {
 		return err
 	}
 
-	latest, _ := fetchLatestRelease()
+	latest, _ := fetchLatestSDK()
 	fleet, err := buildFleet(latest)
 	if err != nil {
 		return err
