@@ -279,7 +279,7 @@ func run(args []string) error {
 		"let a cloud deployment start from a development build, which skips signed version policy for every run's engine. "+
 			"Only for a development cluster; deploy a release or a main build stamped vX.Y.Z-N-gSHA instead")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "usage: sparkwing-controller [flags]\n       sparkwing-controller admin freeze|unfreeze|grant|session [flags]\n       sparkwing-controller restore prepare|acknowledge [flags]\n\nController flags:")
+		fmt.Fprintln(fs.Output(), "usage: sparkwing-controller [flags]\n       sparkwing-controller admin freeze|unfreeze|grant|session|runner-labels [flags]\n       sparkwing-controller restore prepare|acknowledge [flags]\n\nController flags:")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

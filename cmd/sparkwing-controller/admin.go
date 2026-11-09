@@ -24,6 +24,7 @@ import (
 const adminUsage = `usage: sparkwing-controller admin freeze --operator ACCOUNT_ID --team SLUG --reason TEXT
        sparkwing-controller admin unfreeze --operator ACCOUNT_ID --team SLUG --reason TEXT [--hold ID]
        sparkwing-controller admin session --operator ACCOUNT_ID --team SLUG --reason TEXT [--output pretty|json|plain]
+       sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team SLUG --runner NAME --reason TEXT [--label LABEL ... | --clear]
        sparkwing-controller admin grant --operator ACCOUNT_ID --team SLUG --cents N --reason TEXT --key KEY [--reverses REF]
 
 Break-glass for the operator console. When console sign-in is down, run it in
@@ -34,6 +35,9 @@ store configuration under SPARKWING_HOME and never creates a store.
 
 session prints an independent account session for an existing team administrator
 on a licensed team or Cloud controller.
+runner-labels shows the enrolled allowed labels. Repeated --label replaces the
+complete set; --clear removes every allowed label. Only a team administrator
+may read or change it. This does not change the machine config.
 All actions accept -o/--output pretty|json|plain and -h/--help.
 Output is pretty on a terminal and one JSON object when piped. Plain prints the
 team slug for freeze/unfreeze, the grant ID for grant, and the session for session.
@@ -73,9 +77,9 @@ type adminGrantJSON struct {
 }
 
 func runAdmin(args []string, stdout, stderr io.Writer) error {
-	if len(args) == 0 || (args[0] != "freeze" && args[0] != "unfreeze" && args[0] != "grant" && args[0] != "session") {
+	if len(args) == 0 || (args[0] != "freeze" && args[0] != "unfreeze" && args[0] != "grant" && args[0] != "session" && args[0] != "runner-labels") {
 		fmt.Fprintln(stderr, adminUsage)
-		return errors.New("admin needs freeze, unfreeze, grant or session")
+		return errors.New("admin needs freeze, unfreeze, grant, session or runner-labels")
 	}
 	verb := args[0]
 	fs := flag.NewFlagSet("admin "+verb, flag.ContinueOnError)
@@ -89,6 +93,9 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	cents := fs.Int64("cents", 0, "grant only: the free credits to grant, in cents (required)")
 	key := fs.String("key", "", "grant only: required idempotency key")
 	reverses := fs.String("reverses", "", "grant only: reference of a free grant to correct")
+	runner := fs.String("runner", "", "runner-labels only: enrolled machine name")
+	labels := fs.StringSlice("label", nil, "runner-labels only: replace allowed labels (repeat for complete set)")
+	clearLabels := fs.Bool("clear", false, "runner-labels only: clear allowed labels")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -146,6 +153,12 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 			return errors.New("--hold names no hold; give the hold's id, or leave --hold out")
 		}
 	}
+	if verb != "runner-labels" && (fs.Changed("runner") || fs.Changed("label") || fs.Changed("clear")) {
+		return errors.New("--runner, --label and --clear belong to runner-labels")
+	}
+	if verb == "runner-labels" && (*runner == "" || fs.Changed("label") && *clearLabels) {
+		return errors.New("runner-labels requires --runner and accepts either --label or --clear")
+	}
 	ctx := context.Background()
 	p, err := paths.DefaultPaths()
 	if err != nil {
@@ -198,6 +211,25 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	}
 	t, err := st.ForTeam(ctx, store.Team(*team))
 	if err != nil {
+		return err
+	}
+	if verb == "runner-labels" {
+		var replacement *[]string
+		if fs.Changed("label") || *clearLabels {
+			replacement = labels
+		}
+		allowed, err := st.AsOperator().ConfigureRunnerLabels(ctx, t.Team(), *runner, *operator, replacement)
+		if err != nil {
+			return err
+		}
+		slog.New(controller.CredentialSafeLogHandler(slog.NewJSONHandler(stderr, nil))).Info("audit", "command", "sparkwing-controller admin runner-labels", "principal_kind", "break-glass", "principal_id", *operator, "target_team", *team, "runner", *runner, "changed", replacement != nil)
+		if format == "json" {
+			return json.NewEncoder(stdout).Encode(struct {
+				Runner        string   `json:"runner"`
+				AllowedLabels []string `json:"allowed_labels"`
+			}{*runner, allowed})
+		}
+		_, err = fmt.Fprintln(stdout, strings.Join(allowed, "\n"))
 		return err
 	}
 	if verb == "session" {

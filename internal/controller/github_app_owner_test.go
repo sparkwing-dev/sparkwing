@@ -237,7 +237,7 @@ func TestGitHubAppRunsAnywhereUnlessTheRepositoryPinsCloud(t *testing.T) {
 	var laptop struct {
 		Capability string `json:"capability"`
 	}
-	if code := f.call("POST", "/api/v1/runners", olga.auth, map[string]any{"name": "olga-laptop", "repos": []string{"github.com/*/*"}, "personal": true}, &laptop); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/runners", olga.auth, map[string]any{"name": "olga-laptop", "allowed_labels": githubClaimBody(capability.UnitPlan, "", "").Labels, "repos": []string{"github.com/*/*"}, "personal": true}, &laptop); code != http.StatusCreated {
 		t.Fatalf("enroll personal machine: %d", code)
 	}
 	var claimed controllerwire.ClaimResponse
@@ -322,7 +322,7 @@ func TestDeployPlanningRequiresTheOwnedRunner(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			machine, _ := f.teamRunner(owner, "owned-runner")
+			machine, _ := f.enrollRunnerWithLabels(owner, "owned-runner", false, []string{controller.GitHubActionsLabel, "deploy-kikd-prod"})
 			body := githubClaimBody(capability.UnitPlan, ids[0], "")
 			var claim controllerwire.ClaimResponse
 			if code := f.call("POST", "/api/v1/launcher/claim", "Bearer "+cloud.Raw, body, &claim); code != http.StatusForbidden || claim.Claim != nil {

@@ -19,6 +19,7 @@ func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capab
 	case capability.ProvisionBootstrap:
 		spec = bootstrapSpec([32]byte{1})
 	case capability.ProvisionMachine:
+		spec.AllowedLabels = []string{"team-4cpu"}
 		owner := authorityMember(t, s, "owner", RoleOwner)
 		spec.Authority = &owner.Authority
 		spec.RegistrationID = "runner:a:machine"

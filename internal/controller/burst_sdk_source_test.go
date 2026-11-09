@@ -66,8 +66,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 // burstSDKSourceFixture commits the burst SDK pipeline, followed by appended source when it is not empty.
 func burstSDKSourceFixture(t *testing.T, appended string) (string, string, *engine.Resolver, engine.Resolved) {
 	t.Helper()
-	_, file, _, _ := runtime.Caller(0)
-	root := burstSDKModule(t, filepath.Clean(filepath.Join(filepath.Dir(file), "../..")))
+	root := burstSDKModule(t, filepath.Clean(filepath.Join(filepath.Dir(serverGoPath(t)), "../..")))
 	repo, _ := sourcetest.Repository(t)
 	directory := filepath.Join(repo, ".sparkwing")
 	for _, name := range []string{"go.mod", "go.sum"} {

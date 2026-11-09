@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
@@ -173,7 +174,8 @@ func (s *Server) handleLookupDeviceLogin(w http.ResponseWriter, r *http.Request,
 	}
 	if runner := request.Runner; runner != nil {
 		out.Runner = &controllerwire.DeviceRunner{
-			Name: runner.Name, Personal: runner.Personal, Repos: append([]string{}, runner.Repos...), ReservedPools: append([]string{}, runner.ReservedPools...),
+			AllowedLabels: match.SelfAsserted(runner.AllowedLabels),
+			Name:          runner.Name, Personal: runner.Personal, Repos: append([]string{}, runner.Repos...), ReservedPools: append([]string{}, runner.ReservedPools...),
 			Trust: string(runner.Trust), Platform: runner.Platform, Launcher: slices.Contains(grants, capability.ClaimsLaunch),
 		}
 	}
@@ -267,6 +269,9 @@ func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 	case controllerwire.DeviceLoginRunner:
 		if request.Runner == nil || len(request.Grants) != 0 {
 			return invalidEngineBody("a runner device login carries its enrollment in runner and no member grants")
+		}
+		if len(request.Runner.AllowedLabels) != 0 {
+			return invalidEngineBody("browser approval does not accept allowed_labels; runner labels are set by admin enrollment")
 		}
 		// safety: a browser approval is phishable, so it never grants a credential that runs other members' work.
 		if runner := request.Runner; !runner.Personal || len(runner.ReservedPools) != 0 || runner.Trust != "" || runner.Platform != "" || runner.Grants != nil {
