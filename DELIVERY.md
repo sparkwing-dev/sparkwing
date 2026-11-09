@@ -154,7 +154,9 @@ tests run only in the real cut.
 
 Manual releases reuse a successful exact-source CI receipt when available. Missing,
 pending, failed or unreadable receipts run the local build, lint and short suite
-in the detached source worktree. Weekly releases continue to wait for green CI.
+in the detached source worktree. Local release build, lint, short tests and
+published-version checks run in sequence to bound temporary build storage.
+Weekly releases continue to wait for green CI.
 
 The schema changelog gate compares the neutral `internal/store/schema.sql`
 baseline with the previous tag. SQL changes at an unchanged schema version

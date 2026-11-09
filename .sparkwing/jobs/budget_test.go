@@ -227,12 +227,16 @@ func TestReleaseCutRunsStateChecksAndTheFastBuildClass(t *testing.T) {
 		if s.ID == budgetStepID {
 			continue
 		}
-		wantDeps := []string(nil)
+		wantDeps := map[string][]string{
+			"lint":              {"build"},
+			"test":              {"lint"},
+			"version-freshness": {"test"},
+		}[s.ID]
 		if slices.Contains([]string{"go-directives", "sdk-pins", "changelog-links", "docs-sidebar"}, s.ID) {
 			wantDeps = []string{"version-freshness"}
 		}
 		if deps := s.Needs; !slices.Equal(deps, wantDeps) {
-			t.Errorf("step %q waits on %v; want only policy guards under the selected freshness root", s.ID, deps)
+			t.Errorf("step %q waits on %v; want sequential Go checks followed by policy guards", s.ID, deps)
 		}
 	}
 }

@@ -143,16 +143,16 @@ const releaseLintLockAllowance = 30 * time.Minute
 func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.FailurePolicy(sparkwing.FailFast)
 	budget := newTierBudget("release cut", releaseCutBudget+releaseLintLockAllowance)
-	budget.step(w, "build", runBuild)
-	budget.step(w, "lint", func(ctx context.Context) error {
+	build := budget.step(w, "build", runBuild)
+	lint := budget.step(w, "lint", func(ctx context.Context) error {
 		return runGolangciLintWithin(ctx, releaseCutBudget+releaseLintLockAllowance)
-	})
-	budget.step(w, "test", runShortTest)
+	}).Needs(build)
+	tests := budget.step(w, "test", runShortTest).Needs(lint)
 	// safety: these checks only read, so a dry run reports what the cut would refuse.
 	// perf: a shared policy root keeps every release guard selected when desktop cuts reuse CI evidence.
 	freshness := budget.step(w, "version-freshness", func(ctx context.Context) error {
 		return checkPublishedVersionsFreshness(ctx, sparkwing.WorkDir())
-	}).SafeWithoutDryRun()
+	}).Needs(tests).SafeWithoutDryRun()
 	budget.step(w, "go-directives", checkGoDirectives).Needs(freshness).SafeWithoutDryRun()
 	budget.step(w, "sdk-pins", func(context.Context) error {
 		return checkReleasePins(sparkwing.WorkDir())
