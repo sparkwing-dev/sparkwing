@@ -1950,8 +1950,8 @@ fetched `origin/main` by default, or `--commit SHA`, and uses the same detached
 worktree cut and exact-source CI check as `release`. The inner cut pins its
 pipeline to the caller tooling commit with `--sw-pipeline-ref`, while jobs
 operate on the selected source checkout. SDK verification executes from that
-current pipeline code, so an older source cannot supply older release tooling. It skips when the selected
-source has no `[Unreleased]` entries. Its default minor bump stays on v0.x.
+current pipeline code, so an older source cannot supply older release tooling.
+The weekly run skips when the selected source has no `[Unreleased]` entries. Its default minor bump stays on v0.x.
 Release cuts are pre-approved. The scheduled entrypoint supplies the cut's
 `--sw-allow-risk destructive,prod` authorization. Main keeps accepting lands
 while the cut runs. Publication merges the prepared metadata into fresh main
@@ -1960,15 +1960,16 @@ and atomically pushes that merge with the tag on the separate release commit.
 Go SDK releases use independent `sparkwing/v0.x.y` tags. Before preparing
 engine release metadata, the cut hashes sorted tracked SDK module paths and
 committed bytes, including go.mod, Go source, embeds, test fixtures and the
-inherited root license when the SDK has no license file. Root build/dist output directories, vendor/cache directories and root workspace
-files are excluded. Tracked fixture inputs remain source inputs. The annotated SDK
+inherited root license when the SDK has no license file. Root build/dist output
+directories, vendor/cache directories and root workspace files are excluded. Tracked fixture inputs remain source inputs. The annotated SDK
 tag records `SDK-Source-SHA256`; the cut verifies that record against the tag's
 source. An unchanged digest reuses that SDK version without creating a tag.
 The first SDK version is v0.1.0. Any source change advances the v0 minor and
 resets patch to zero, because pre-1.0 source changes may break the API. Engine
 version selection does not affect SDK version selection.
 
-A changed SDK runs its module tests and Go/TypeScript protocol conformance in the SDK publication job, then tags the selected tested source and publishes
+A changed SDK runs its module tests and Go/TypeScript protocol conformance in
+the SDK publication job, then tags the selected tested source and publishes
 that SDK tag first. A fresh module cache and the public Go proxy must resolve
 the SDK before the cut prepares the engine requirement and SDK pins. A proxy
 failure stops the engine cut; retry reuses the immutable SDK tag only after
@@ -1977,6 +1978,13 @@ than being moved. Dry runs compute and report the decision without publication.
 The engine metadata commit updates root go.mod/go.sum and SDK pin artifacts to
 the independently selected SDK version. The SDK source digest excludes that
 engine metadata.
+
+Hosted publication runs `bin/go-sdk-release-entry.mjs` from its selected
+publication tools. It reads the engine source's SDK requirement and that SDK
+tag's recorded digest and protocol, then uploads `sdk-entry-go.json` with the
+engine artifacts. The signed policy publisher retains that SDK entry across
+engine releases. Older-tag recovery uses current publication tools while the
+SDK identity still comes from the selected source and published SDK tag.
 
 The engine tag starts the existing
 `.github/workflows/release.yaml` publication steps for signed CLI binaries,
