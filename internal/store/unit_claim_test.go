@@ -184,8 +184,9 @@ func TestClaimUnitRejectsForeignAndMissingRequirements(t *testing.T) {
 }
 
 type claimProfileFake struct {
-	profile match.Profile
-	before  func()
+	profile   match.Profile
+	available match.Resources
+	before    func()
 }
 
 func (f claimProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
