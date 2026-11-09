@@ -133,7 +133,7 @@ func (o *Operator) ConfigureRunnerLabels(ctx context.Context, team Team, name, o
 }
 
 // safety: freeze only labels recorded before upgrade, never a new claimant's first request.
-func migrateRunnerLabelsTx(ctx context.Context, tx *storeTx) error {
+func (o *Operator) migrateRunnerLabelsTx(ctx context.Context, tx *storeTx) error {
 	rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE subject_kind='machine' AND parent_id IS NULL AND bind_kind='none'`)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func migrateRunnerLabelsTx(ctx context.Context, tx *storeTx) error {
 		return err
 	}
 	for _, prefix := range prefixes {
-		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
+		record, err := o.loadCapabilityRecordTx(ctx, tx, prefix)
 		if err != nil {
 			return err
 		}

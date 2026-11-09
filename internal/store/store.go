@@ -1333,7 +1333,7 @@ func (s *Store) createBaseline(ctx context.Context, path string) error {
 		if err := verifySchemaBaseline(ctx, tx, path); err != nil {
 			return err
 		}
-		if err := migrateRunnerLabelsTx(ctx, tx); err != nil {
+		if err := tx.operator.migrateRunnerLabelsTx(ctx, tx); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -1353,7 +1353,7 @@ func (s *Store) createBaseline(ctx context.Context, path string) error {
 		if err := upgradeSchemaTx(ctx, tx, version, path); err != nil {
 			return err
 		}
-		if err := migrateRunnerLabelsTx(ctx, tx); err != nil {
+		if err := tx.operator.migrateRunnerLabelsTx(ctx, tx); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil { //nolint:contextcheck // Commit uses the context captured by beginTx.
