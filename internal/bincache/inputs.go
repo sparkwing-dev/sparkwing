@@ -113,6 +113,12 @@ func compiledInputDigest(list func() ([]byte, error), dir, flags, workspace stri
 					path = pkg.Module.Replace.GoMod
 				}
 				if path != "" {
+					if !filepath.IsAbs(path) {
+						path, err = filepath.Abs(filepath.Join(dir, path))
+						if err != nil {
+							return nil, err
+						}
+					}
 					metadata = append(metadata, path)
 				}
 			}

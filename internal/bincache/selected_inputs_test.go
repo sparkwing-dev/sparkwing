@@ -120,6 +120,25 @@ func TestGoFileOverlayMetadataChangesRebuildPipeline(t *testing.T) {
 	}
 }
 
+func TestRelativeModfileMetadataUsesBuildDirectory(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("GOFLAGS", "-buildvcs=false -p=1 -modfile=go.mod")
+	dir := newPipelineDir(t)
+	writeFile(t, filepath.Join(dir, "main.go"), "package main\nimport \"example.com/pipeline/jobs\"\nfunc main(){print(jobs.Value)}\n")
+	writeFile(t, filepath.Join(dir, "jobs", "value.go"), "package jobs\nconst Value=\"first\"\n")
+	if out, built := materializeFixture(t, dir); out != "first" || !built {
+		t.Fatalf("first relative-modfile build = %q, %t", out, built)
+	}
+	if out, built := materializeFixture(t, dir); out != "first" || built {
+		t.Fatalf("unchanged relative-modfile build = %q, %t; want cache hit", out, built)
+	}
+	writeFile(t, filepath.Join(dir, "jobs", "value.go"), "package jobs\nconst Value=\"second\"\n")
+	if out, built := materializeFixture(t, dir); out != "second" || !built {
+		t.Fatalf("changed jobs build = %q, %t; want second and rebuild", out, built)
+	}
+}
+
 func TestGoPGOChangesRebuildPipeline(t *testing.T) {
 	root, err := procenv.ControlCommandContext(t.Context(), os.Environ(), "go", "env", "GOROOT").Output()
 	if err != nil {
