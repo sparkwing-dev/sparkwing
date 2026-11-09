@@ -23,6 +23,7 @@ var routes = []RoutePolicy{
 	route("GET", "/api/v1/runs/{run}/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", OwnerRun, RetryNever, claim(NodesClaim, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs", OwnerTeam, RetryIdempotencyKey, intake(), claim(ChildrenStart, BindBodyNamesRun, LiveSensitive)),
+	route("GET", "/api/status", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/runs", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/runs/grep", OwnerTeam, RetrySafe, member(LogsRead)),
 	route("GET", "/api/v1/runs/{run}", OwnerRun, RetrySafe, member(RunsRead), claim(SourceRead, BindRun, LiveSensitive), claim(TriggerHost, BindRun, LiveSensitive)),

@@ -15,6 +15,7 @@ import (
 func (s *Server) reportingEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
 	endpoints := []controllerwire.Endpoint{
+		{Method: "GET", Pattern: "/api/status", Decode: authorityTarget, Handle: s.handleWingStatus},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/metrics", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleGetJobMetrics},
 		{Method: "GET", Pattern: "/api/v1/runs", Decode: authorityTarget, Handle: s.handleListRuns},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/receipt", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleGetRunReceipt},

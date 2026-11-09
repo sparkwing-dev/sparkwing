@@ -4703,6 +4703,55 @@ components:
         - p95_seconds
       type: object
       x-sparkwing-go-type: controllerwire.WarmStartPercentiles
+    internal.controllerwire.WingStatus:
+      additionalProperties: true
+      properties:
+        items:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.WingStatusItem'
+              type: array
+            - type: "null"
+        source:
+          type: string
+        state:
+          type: string
+        summary:
+          type: string
+        updatedAt:
+          type: string
+        url:
+          type: string
+      required:
+        - source
+        - state
+        - summary
+        - url
+        - updatedAt
+        - items
+      type: object
+      x-sparkwing-go-type: controllerwire.WingStatus
+    internal.controllerwire.WingStatusItem:
+      additionalProperties: true
+      properties:
+        detail:
+          type: string
+        name:
+          type: string
+        state:
+          type: string
+        updatedAt:
+          type: string
+        url:
+          type: string
+      required:
+        - name
+        - state
+        - detail
+        - url
+        - updatedAt
+      type: object
+      x-sparkwing-go-type: controllerwire.WingStatusItem
     internal.cronspec.Override:
       additionalProperties: true
       properties:
@@ -7881,6 +7930,35 @@ paths:
         access: []
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/status:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.WingStatus'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Read team pipeline and operational health in the Wing status shape
+      x-sparkwing-policy:
+        method: GET
+        path: /api/status
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/approvals:
     get:
       parameters:

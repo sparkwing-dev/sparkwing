@@ -32,6 +32,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/runs/{run}/snapshot` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/reconcile` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `nodes.claim` / `runOfTrigger` / `sensitive` |
 | `POST` | `/api/v1/runs` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `runs.write` / `bodyNamesRun` / `credential`<br>`awarded_or_delegated_claim` / `children.start` / `bodyNamesRun` / `sensitive` |
+| `GET` | `/api/status` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/runs` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/runs/grep` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `logs.read` / `none` / `credential` |
 | `GET` | `/api/v1/runs/{run}` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |

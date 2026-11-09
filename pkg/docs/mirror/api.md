@@ -403,3 +403,64 @@ Latest pipeline observations use start time, creation time for unstarted runs,
 run number and run ID, in descending order. Repeated `repo` query parameters on
 `GET /api/v1/pipelines/{name}/latest` restrict exact repository display names.
 These filters only narrow the caller's existing authorized candidate set.
+
+## Wing status endpoint
+
+`GET /api/status` returns the Wing status document for the authenticated team.
+Use a member capability with `runs.read` in `Authorization: Bearer <token>`.
+Hosted browser sessions and verified local peers use the same authorization as
+other run reads. The local TCP dashboard requires its own dashboard session
+bearer from `sparkwing dashboard open`. That session expires within 30 days and
+is revoked on controller restart. A hosted member capability cannot bypass the
+local dashboard login gate. Anonymous requests receive an authentication error. The public
+`GET /api/v1/health` route remains a minimal liveness check.
+
+```json
+{
+  "source": "sparkwing",
+  "state": "fail",
+  "summary": "1 failing, 0 warning, 3 ok checks",
+  "url": "http://localhost:8080",
+  "updatedAt": "2026-11-09T12:00:00Z",
+  "items": [
+    {
+      "name": "acme/widgets / deploy",
+      "state": "fail",
+      "detail": "failed",
+      "url": "http://localhost:8080/runs?run=example",
+      "updatedAt": "2026-11-09T11:59:00Z"
+    }
+  ]
+}
+```
+
+Both state fields use `ok`, `warn`, `fail`, or `unknown`. The document timestamp
+is the evaluation time. Pipeline timestamps are completion times, or an empty
+string for unfinished runs. Nonempty timestamps use RFC3339 in UTC. URLs use
+the configured dashboard URL, or the request origin when none is configured.
+
+Each repository/pipeline item represents its latest root run on the recorded
+default branch. When no default branch is recorded, the branch is `main`.
+Feature branches and child runs do not replace that result. A failed run is
+`fail`, a successful retry is `warn`, and another success is `ok`. Cancelled
+runs warn. Unfinished runs are `unknown` until they have waited or run for more
+than 30 minutes, when they warn. Other outcomes are `unknown`.
+
+Operational items report the reachable controller, the local admission daemon
+when configured, the team's root runs waiting to start, and online team runners.
+A nonempty queue warns. No online runners is `unknown`, or `warn` when work is
+waiting. An absent daemon is `unknown`, and a daemon read failure is `fail`.
+No active checks or external jobs are started. Raw errors and run inputs are
+omitted. Responses use `Cache-Control: no-store`.
+
+Items sort by name. At most 94 repository/pipeline results are returned, ordered
+by repository key and pipeline before truncation. A coverage warning reports
+truncation, keeping the entire document below 100 items. Empty history produces
+an unknown pipelines item. Aggregate precedence is `fail`, `warn`, `unknown`,
+then `ok`. The summary counts failing, warning and ok items.
+
+Configure a Wing status consumer with `kind: wing-status` and target
+`http://<dashboard-host>:<dashboard-port>/api/status`. Supply the bearer header
+through the consumer's private credentials. A remote consumer needs a reachable
+listener and dashboard URL. Consumers must preserve the run URL query to open
+the selected run.
