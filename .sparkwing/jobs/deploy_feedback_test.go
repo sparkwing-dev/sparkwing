@@ -34,7 +34,7 @@ func TestDeployScanCreatesAndUpdatesFailureTickets(t *testing.T) {
 		case "list":
 			var out strings.Builder
 			for i := range report {
-				fmt.Fprintf(&out, "{\"id\":%d,\"severity\":\"high\",\"status\":\"active\",\"kind\":\"defect\",\"title\":\"scan failed\",\"promotable\":false}\n", i+1)
+				fmt.Fprintf(&out, "{\"id\":%d,\"severity\":\"high\",\"status\":\"active\",\"kind\":\"defect\",\"title\":\"scan failed\",\"promotable\":true}\n", i+1)
 			}
 			return out.String() + `{"kind":"summary","truncated":false}`, nil
 		case "show":
@@ -50,8 +50,8 @@ func TestDeployScanCreatesAndUpdatesFailureTickets(t *testing.T) {
 			t.Fatalf("unexpected finding detail: %s", c)
 			return "", nil
 		case "promote":
-			if !slices.Contains(c.Args, "--force") {
-				t.Fatal("production failure waited for repeated breaches")
+			if slices.Contains(c.Args, "--force") {
+				t.Fatal("automatic promotion bypassed Bitwing policy")
 			}
 			promotions++
 			return `{}`, nil
@@ -100,7 +100,7 @@ func TestDeployFlagsFailedProductionScanBeforeRollout(t *testing.T) {
 		}
 		if filepath.Base(c.Name) == "bitwing" {
 			if c.Args[1] == "list" {
-				return `{"id":1,"severity":"high","promotable":false}` + "\n" + `{"kind":"summary"}`, nil
+				return `{"id":1,"severity":"high","promotable":true}` + "\n" + `{"kind":"summary"}`, nil
 			}
 			if c.Args[1] == "show" {
 				return `{"id":1,"fingerprint":"sparkwing-post-deploy-production-execution/scan/integrity_failure"}`, nil
@@ -123,6 +123,18 @@ func TestDeployFlagsFailedProductionScanBeforeRollout(t *testing.T) {
 }
 
 func TestDeployScanPlanningFailureCreatesTicket(t *testing.T) {
+	body, err := os.ReadFile("testdata/production_scan_planning_failure.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observed deployScanObservation
+	if err := json.Unmarshal(body, &observed); err != nil {
+		t.Fatal(err)
+	}
+	if observed.Inputs.RequestedArgs.Environment != "***" {
+		t.Fatal("fixture did not exercise real request redaction")
+	}
+
 	f := newFakeDeploy(t)
 	d := f.deployer(false)
 	var report []map[string]string
@@ -133,7 +145,7 @@ func TestDeployScanPlanningFailureCreatesTicket(t *testing.T) {
 				return `{"id":"planning-scan"}` + "\n" + `{"kind":"page"}`, nil
 			}
 			if c.Args[1] == "status" {
-				return `{"id":"planning-scan","status":"failed","reason":"planning_failed","failure":"invalid plan","inputs":{"requested_args":{"environment":"production","record":"deployed image identity"}},"jobs":[]}`, nil
+				return string(body), nil
 			}
 		}
 		if filepath.Base(c.Name) == "bitwing" {
@@ -147,7 +159,7 @@ func TestDeployScanPlanningFailureCreatesTicket(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "list":
-				return `{"id":1,"severity":"high","promotable":false}`, nil
+				return `{"id":1,"severity":"high","promotable":true}`, nil
 			case "show":
 				return fmt.Sprintf(`{"id":1,"fingerprint":%q}`, report[0]["fingerprint"]), nil
 			case "promote":
@@ -163,7 +175,7 @@ func TestDeployScanPlanningFailureCreatesTicket(t *testing.T) {
 	if err := d.flagProductionScan(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(report) != 1 || !promoted || !strings.Contains(report[0]["detail"], "invalid plan") || !strings.Contains(report[0]["detail"], "deployed image identity") || !slices.ContainsFunc(f.said, func(msg string) bool {
+	if len(report) != 1 || !promoted || !strings.Contains(report[0]["detail"], "invalid plan") || !strings.Contains(report[0]["detail"], "parent-deploy") || !slices.ContainsFunc(f.said, func(msg string) bool {
 		return strings.Contains(msg, "WARNING:") && strings.Contains(msg, "planning-scan")
 	}) {
 		t.Fatalf("planning failure disappeared: report=%v promoted=%v messages=%v", report, promoted, f.said)
@@ -194,7 +206,7 @@ func TestDeployScanKeepsFailureWhenEnrichmentUnavailable(t *testing.T) {
 						t.Fatal(err)
 					}
 				case "list":
-					return `{"id":1,"severity":"high","promotable":false}`, nil
+					return `{"id":1,"severity":"high","promotable":true}`, nil
 				case "show":
 					return `{"id":1,"fingerprint":"sparkwing-post-deploy-production/full-example"}`, nil
 				case "promote":
@@ -261,5 +273,75 @@ func TestDeployScanFeedbackPagesPastStaging(t *testing.T) {
 	}
 	if err := d.flagProductionScan(t.Context()); err != nil || !readProduction {
 		t.Fatalf("latest production scan: read=%v error=%v", readProduction, err)
+	}
+}
+
+func TestDeployScanRespectsFindingPromotionPolicy(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	observation, promotions, comments := 0, 0, 0
+	report := []map[string]string{{"fingerprint": "failure", "detail": "scan evidence"}}
+	d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
+		switch c.Args[1] {
+		case "list":
+			return fmt.Sprintf(`{"id":1,"promotable":%t}`, observation >= 3), nil
+		case "show":
+			ticket := ""
+			if promotions > 0 {
+				ticket = "fixture-ticket"
+			}
+			return fmt.Sprintf(`{"id":1,"fingerprint":"failure","ticket":%q}`, ticket), nil
+		case "promote":
+			if observation < 3 || slices.Contains(c.Args, "--force") {
+				t.Fatal("automatic check bypassed Bitwing sustain policy")
+			}
+			promotions++
+		case "comment":
+			comments++
+		}
+		return `{}`, nil
+	}
+	for observation = 1; observation <= 4; observation++ {
+		if err := d.scanTickets(t.Context(), "bitwing", "source", report); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if promotions != 1 || comments != 1 {
+		t.Fatalf("promotions=%d comments=%d", promotions, comments)
+	}
+}
+
+func TestDeployScanKeepsPublicationBudgetAfterEnrichment(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	var enrichment context.Context
+	recorded := false
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		if filepath.Base(c.Name) == "sparkwing" {
+			enrichment = ctx
+			return "", context.DeadlineExceeded
+		}
+		if c.Args[1] == "record" {
+			if enrichment == nil || enrichment.Err() == nil {
+				t.Fatal("optional enrichment still owns publication lifetime")
+			}
+			if ctx.Err() != nil {
+				t.Fatalf("enrichment deadline consumed publication budget: %v", ctx.Err())
+			}
+			early, _ := enrichment.Deadline()
+			later, _ := ctx.Deadline()
+			if !later.After(early) {
+				t.Fatal("publication did not receive its own deadline")
+			}
+			recorded = true
+		}
+		return `{}`, nil
+	}
+	rec := deployScanRecord{Environment: "production", ExampleRun: "example-1"}
+	if err := d.recordScanFinding(t.Context(), rec, true, errors.New("known failure")); err != nil {
+		t.Fatal(err)
+	}
+	if !recorded {
+		t.Fatal("known failure was not recorded")
 	}
 }

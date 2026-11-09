@@ -28,7 +28,7 @@ func (DeployScan) ShortHelp() string {
 }
 
 func (DeployScan) Help() string {
-	return "Started as a detached child after production smoke, inheriting its verified repository and revision. All scans share one concurrency slot, leaving the desktop runner's other slot for deploys. An hourly revision receipt suppresses repeated scans even after failure. Superseded revisions stop before scanning. The full example and its children run on self-hosted runners labeled deploy-kikd-prod. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Each failed example job upserts a finding and immediately promotes it to a ticket, then appends later run links to that ticket. Clean observations resolve unpromoted findings. Unavailable observations preserve earlier findings."
+	return "Started as a detached child after production smoke, inheriting its verified repository and revision. All scans share one concurrency slot, leaving the desktop runner's other slot for deploys. An hourly revision receipt suppresses repeated scans even after failure. Superseded revisions stop before scanning. The full example and its children run on self-hosted runners labeled deploy-kikd-prod. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Each failed example job upserts a finding. Bitwing promotes sustained findings to tickets, and later failures append run links to the linked ticket. Clean observations resolve unpromoted findings. Unavailable observations preserve earlier findings."
 }
 
 type deployScanSecrets struct {
@@ -234,9 +234,6 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 
 func (d *deployer) recordScanFinding(ctx context.Context, rec deployScanRecord, completed bool, scanErr error) error {
 	return d.act(ctx, "record "+rec.Environment+" post-deploy scan result in Bitwing", func() error {
-		// safety: cancellation must not discard the scan's failure feedback.
-		feedback, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
 		source := "sparkwing-post-deploy-" + rec.Environment
 		args := []string{"finding", "record", "--source", source, "-o", "json"}
 		findings := []map[string]string{}
@@ -252,7 +249,9 @@ func (d *deployer) recordScanFinding(ctx context.Context, rec deployScanRecord, 
 				"detail":      string(detail) + "\n" + scanErr.Error() + scanRunLinks(rec),
 			}
 			if completed && rec.ExampleRun != "" {
-				out, err := d.sw(feedback, "", "runs", "status", "--run", rec.ExampleRun, "--profile", rec.Environment+"-scan", "--exit-zero", "-o", "json")
+				enrichment, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+				out, err := d.sw(enrichment, "", "runs", "status", "--run", rec.ExampleRun, "--profile", rec.Environment+"-scan", "--exit-zero", "-o", "json")
+				cancel()
 				var observation deployScanObservation
 				if err == nil {
 					err = json.Unmarshal([]byte(out), &observation)
@@ -262,7 +261,7 @@ func (d *deployer) recordScanFinding(ctx context.Context, rec deployScanRecord, 
 				}
 				if err != nil {
 					finding["detail"] += "\nJob details unavailable: " + err.Error()
-					d.tools.say(feedback, "WARNING: failed example job details unavailable; recording the scan failure: "+err.Error())
+					d.tools.say(ctx, "WARNING: failed example job details unavailable; recording the scan failure: "+err.Error())
 				} else {
 					for _, job := range observation.Jobs {
 						if job.Outcome == "failed" {
@@ -288,6 +287,9 @@ func (d *deployer) recordScanFinding(ctx context.Context, rec deployScanRecord, 
 			}
 			args = append(args, "--file", file)
 		}
+		// safety: optional enrichment and caller cancellation cannot consume the publication budget.
+		feedback, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		path, err := d.tools.lookPath("bitwing")
 		if err != nil {
 			return fmt.Errorf("scan feedback failed; bitwing must be on the runner user's PATH: %w", err)
@@ -324,7 +326,8 @@ func (d *deployer) scanTickets(ctx context.Context, path, source string, report 
 	decoder := json.NewDecoder(strings.NewReader(out))
 	for {
 		var row struct {
-			ID int64 `json:"id"`
+			ID         int64 `json:"id"`
+			Promotable bool  `json:"promotable"`
 		}
 		if err := decoder.Decode(&row); errors.Is(err, io.EOF) {
 			return nil
@@ -353,8 +356,10 @@ func (d *deployer) scanTickets(ctx context.Context, path, source string, report 
 			if finding.ID == 0 || finding.Fingerprint != current["fingerprint"] {
 				continue
 			}
-			// hack: the approved delivery contract requires repair tickets on the first deployment failure.
-			args := []string{"finding", "promote", "--id", fmt.Sprint(finding.ID), "--force", "--repo", "sparkwing", "-o", "json"}
+			if finding.Ticket == "" && !row.Promotable {
+				continue
+			}
+			args := []string{"finding", "promote", "--id", fmt.Sprint(finding.ID), "--repo", "sparkwing", "-o", "json"}
 			if finding.Ticket != "" {
 				file := filepath.Join(d.tmp, "scan-ticket-comment.txt")
 				if err := os.WriteFile(file, []byte(current["detail"]), 0o600); err != nil {

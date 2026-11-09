@@ -20,6 +20,11 @@ type deployScanObservation struct {
 	Inputs  struct {
 		Args          DeployScanArgs `json:"args"`
 		RequestedArgs DeployScanArgs `json:"requested_args"`
+		Lineage       struct {
+			ParentRunID   string `json:"parent_run_id"`
+			ParentJobID   string `json:"parent_job_id"`
+			RepoInherited bool   `json:"repo_inherited"`
+		} `json:"lineage"`
 	} `json:"inputs"`
 	Jobs []struct {
 		ID      string `json:"id"`
@@ -76,10 +81,18 @@ func (d *deployer) flagProductionScan(ctx context.Context) error {
 			if args.Environment == "" {
 				args = scan.Inputs.RequestedArgs
 			}
+			lineage := scan.Inputs.Lineage
+			// safety: pre-planning arguments are redacted; the production job alone submits these inherited scans.
+			if (args.Environment == "" || args.Environment == "***") && lineage.RepoInherited && lineage.ParentJobID == "production" && lineage.ParentRunID != "" {
+				args.Environment = "production"
+			}
 			if args.Environment != "production" {
 				continue
 			}
 			message := "Previous production post-deploy scan " + scan.ID + " is " + scan.Status + ": https://console.sparkwing.dev/runs?run=" + scan.ID
+			if lineage.ParentRunID != "" {
+				message += "\nDeploy: https://console.sparkwing.dev/runs?run=" + lineage.ParentRunID
+			}
 			if scan.Status != "success" {
 				message = "WARNING: " + message + ". Repair deploy continues."
 			}
