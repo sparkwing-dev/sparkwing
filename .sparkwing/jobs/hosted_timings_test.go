@@ -10,6 +10,11 @@ import (
 )
 
 func TestHostedTimingExportPreservesOutcomesWithoutPrivateFields(t *testing.T) {
+	for _, tool := range []string{"bash", "jq"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("hosted timing export requires %s: %v", tool, err)
+		}
+	}
 	for _, outcome := range []string{"success", "failed", "cancelled", "running"} {
 		t.Run(outcome, func(t *testing.T) {
 			dir := t.TempDir()
@@ -67,6 +72,11 @@ func TestHostedTimingExportPreservesOutcomesWithoutPrivateFields(t *testing.T) {
 }
 
 func TestHostedTimingExportReportsMissingRun(t *testing.T) {
+	for _, tool := range []string{"bash", "jq"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("hosted timing export requires %s: %v", tool, err)
+		}
+	}
 	dir := t.TempDir()
 	output := filepath.Join(dir, "timings.json")
 	cmd := exec.Command("bash", "../../bin/export-hosted-run-timings.sh", filepath.Join(dir, "missing"), "/unused", output)
@@ -90,6 +100,11 @@ func TestHostedTimingExportReportsMissingRun(t *testing.T) {
 }
 
 func TestHostedTimingExportRejectsWrongRun(t *testing.T) {
+	for _, tool := range []string{"bash", "jq"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("hosted timing export requires %s: %v", tool, err)
+		}
+	}
 	dir := t.TempDir()
 	handle := filepath.Join(dir, "handle.json")
 	binary := filepath.Join(dir, "sparkwing")

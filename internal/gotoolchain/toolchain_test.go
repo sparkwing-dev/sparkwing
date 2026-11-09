@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func fixture(t *testing.T, setting, current, floor string, environment bool) (string, []string, string) {
@@ -21,11 +22,11 @@ func fixture(t *testing.T, setting, current, floor string, environment bool) (st
 	script := "#!/bin/sh\n" +
 		"if [ -f go.mod ]; then exit 42; fi\n" +
 		"if [ \"$GOWORK\" != off ]; then exit 43; fi\n" +
-		"printf 'probe\\n' >> '" + calls + "'\n" +
+		"printf 'probe\\n' >> '" + filepath.ToSlash(calls) + "'\n" +
 		"printf 'go: downloading selected toolchain\\n' >&2\n" +
 		"printf '%s\\n' '" + setting + "' '" + current + "' '" + goenv + "'\n"
-	write(t, filepath.Join(dir, "go"), script, 0o700)
-	env := []string{"PATH=" + dir, "GOWORK=" + filepath.Join(dir, "go.work"), "USER_PIN=unchanged"}
+	testshell.Install(t, filepath.Join(dir, "go"), script)
+	env := append(shellFixtureEnv(), "PATH="+dir, "GOWORK="+filepath.Join(dir, "go.work"), "USER_PIN=unchanged")
 	if environment {
 		env = append(env, "GOTOOLCHAIN="+setting)
 	}
@@ -185,8 +186,8 @@ func TestFailedProbeLeavesEnvUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "go.mod"), "module example.com/pipeline\n\ngo 1.26.8\n", 0o600)
 	bin := t.TempDir()
-	write(t, filepath.Join(bin, "go"), "#!/bin/sh\nexit 3\n", 0o700)
-	env, err := gotoolchain.BuildEnv(context.Background(), dir, []string{"PATH=" + bin, "GOTOOLCHAIN=go1.26.6"}, "")
+	testshell.Install(t, filepath.Join(bin, "go"), "#!/bin/sh\nexit 3\n")
+	env, err := gotoolchain.BuildEnv(context.Background(), dir, append(shellFixtureEnv(), "PATH="+bin, "GOTOOLCHAIN=go1.26.6"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,4 +209,14 @@ func TestExplicitSessionEnvironmentReplacesPreviousSnapshot(t *testing.T) {
 	if value(built, "SIGNING_MATERIAL") != "" {
 		t.Fatal("an inherited session restored a withheld secret")
 	}
+}
+
+func shellFixtureEnv() []string {
+	var env []string
+	for _, key := range []string{"SPARKWING_TEST_SHELL_EXE", "SPARKWING_TEST_SHELL_BASH", "SystemRoot"} {
+		if v, ok := os.LookupEnv(key); ok {
+			env = append(env, key+"="+v)
+		}
+	}
+	return env
 }

@@ -74,3 +74,20 @@ func runLeakProbe(t *testing.T, env []string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+func TestHostMarkerRecognizesOnlyTheShellFixtureExecutable(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(hostEnv, "another-host")
+	t.Setenv("SPARKWING_TEST_SHELL_EXE", executable)
+	if !markHost() {
+		t.Fatal("shell fixture would initialize another sandbox")
+	}
+	t.Setenv(hostEnv, "another-host")
+	t.Setenv("SPARKWING_TEST_SHELL_EXE", executable+"-other")
+	if markHost() {
+		t.Fatal("another shell fixture bypassed this suite's sandbox")
+	}
+}

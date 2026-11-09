@@ -23,15 +23,15 @@ func TestToolResolutionPinsTheRealAsdfAndMiseLocations(t *testing.T) {
 	pkg := filepath.Join(repo, "charts")
 	writeFile(t, filepath.Join(home, ".asdf", "shims", "helm"), "")
 	writeFile(t, filepath.Join(home, ".asdfrc"), "")
-	writeFile(t, filepath.Join(home, ".tool-versions"), "golang 1.26.9\nhelm 4.2.4 4.1.0 # pinned\nnodejs-lts 26.8.1\n")
-	writeFile(t, filepath.Join(repo, ".tool-versions"), "helm 4.3.0\n")
+	writeFile(t, filepath.Join(home, ".fixture-tool-versions"), "golang 1.26.9\nhelm 4.2.4 4.1.0 # pinned\nnodejs-lts 26.8.1\n")
+	writeFile(t, filepath.Join(repo, ".fixture-tool-versions"), "helm 4.3.0\n")
 	if err := os.MkdirAll(pkg, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(home, ".config", "mise", "config.toml"), "")
 	writeFile(t, filepath.Join(home, ".local", "share", "mise", "installs", ".keep"), "")
 
-	set := map[string]string{"ASDF_NODEJS_LTS_VERSION": "already"}
+	set := map[string]string{"ASDF_NODEJS_LTS_VERSION": "already", "ASDF_DEFAULT_TOOL_VERSIONS_FILENAME": ".fixture-tool-versions"}
 	env := toolResolutionEnv(home, pkg, func(k string) string { return set[k] })
 	want := map[string]string{
 		"ASDF_DATA_DIR":       filepath.Join(home, ".asdf"),

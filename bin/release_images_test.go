@@ -53,6 +53,11 @@ else: sys.exit('unexpected docker invocation')
 
 func releaseFixture(t *testing.T) (string, string) {
 	t.Helper()
+	for _, tool := range []string{"bash", "jq", "python3"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("release image fixture requires %s: %v", tool, err)
+		}
+	}
 	dir := t.TempDir()
 	root, err := filepath.Abs(".")
 	if err != nil {

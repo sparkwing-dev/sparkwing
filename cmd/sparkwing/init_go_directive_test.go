@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
+
 	"golang.org/x/mod/modfile"
 )
 
@@ -12,9 +14,7 @@ func TestPipelineScaffoldDoesNotRequireGoPatch(t *testing.T) {
 	repo := enterScaffoldTestRepo(t)
 	tools := t.TempDir()
 	script := "#!/bin/sh\ncase \"$*\" in\n'env GOVERSION') printf 'go1.26.8\\n';;\n'env GOTOOLCHAIN GOVERSION GOENV') printf 'auto\\ngo1.26.8\\noff\\n';;\nesac\n"
-	if err := os.WriteFile(filepath.Join(tools, "go"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testshell.Install(t, filepath.Join(tools, "go"), script)
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if err := parsePipelineNew([]string{"--pipeline", "sample", "--template", "minimal"}); err != nil {
 		t.Fatal(err)

@@ -105,7 +105,11 @@ func installerNativePath(t *testing.T, path string) string {
 	if runtime.GOOS != "windows" {
 		return path
 	}
-	out, err := exec.Command("cygpath", "-w", "--", path).Output()
+	converter, err := exec.LookPath("cygpath")
+	if err != nil {
+		t.Skipf("Windows installer fixture requires cygpath: %v", err)
+	}
+	out, err := exec.Command(converter, "-w", "--", path).Output()
 	if err != nil {
 		t.Fatalf("convert shell path %q: %v", path, err)
 	}

@@ -8,11 +8,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
+	"golang.org/x/mod/modfile"
+
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func TestResolveSparksToolchainFailureHasFixWithoutNoUpdateHint(t *testing.T) {
@@ -23,9 +27,7 @@ if [ "$1" = env ]; then printf 'local\ngo1.26.6\noff\n'; exit 0; fi
 printf 'go: example.com/lib requires go >= 1.26.8 (running go 1.26.6; GOTOOLCHAIN=local)\n' >&2
 exit 1
 `
-	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testshell.Install(t, bin, script)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GOTOOLCHAIN", "local")
 	err := resolveSparks(context.Background(), dir, false)
@@ -44,6 +46,9 @@ exit 1
 }
 
 func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture pipeline uses POSIX file descriptors 3 and 4")
+	}
 	if testing.Short() {
 		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
 	}
@@ -80,7 +85,11 @@ func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			writeFile(t, filepath.Join(dir, "go.mod"), strings.Replace(string(module), "go 1.26.0\n", "go 1.26.8\n", 1))
+			parsed, err := modfile.Parse("go.mod", module, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected := "go" + parsed.Go.Version
 			runSnapshotGit(t, root, "add", ".")
 			runSnapshotGit(t, root, "commit", "-qm", "fixture")
 
@@ -116,9 +125,7 @@ PIPELINE
 done
 exit 1
 `
-			if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
+			testshell.Install(t, filepath.Join(bin, "go"), strings.ReplaceAll(script, "go1.26.8", selected))
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
 			t.Setenv("GOTOOLCHAIN", "go1.26.6")
@@ -143,10 +150,10 @@ exit 1
 				if !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("uncached preparation = %q, %v", prepared, err)
 				}
-			} else if lines := strings.Fields(string(prepared)); err != nil || len(lines) == 0 || slices.ContainsFunc(lines, func(line string) bool { return line != "go1.26.8" }) {
+			} else if lines := strings.Fields(string(prepared)); err != nil || len(lines) == 0 || slices.ContainsFunc(lines, func(line string) bool { return line != selected }) {
 				t.Fatalf("cached preparation = %q, %v", prepared, err)
 			}
-			for path, want := range map[string]string{buildLog: "go1.26.8", probeLog: "probe"} {
+			for path, want := range map[string]string{buildLog: selected, probeLog: "probe"} {
 				data, err := os.ReadFile(path)
 				if err != nil {
 					t.Fatal(err)
