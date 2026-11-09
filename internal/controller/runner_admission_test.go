@@ -50,16 +50,12 @@ func TestRunnerPolicyBuildKinds(t *testing.T) {
 				if development && err != nil || !development && (err == nil || !strings.Contains(err.Error(), "HTTP 403")) {
 					t.Fatalf("build %q run-page policy result: %v", version, err)
 				}
-				compatibility, err := (&SignedEngineVersionPolicy{Resolver: resolver}).compatibility(t.Context(), "v1.2.3")
-				if development && (err != nil || compatibility.EngineRelease != "v1.2.3") || !development && (err == nil || !strings.Contains(err.Error(), "HTTP 403")) {
-					t.Fatalf("build %q compatibility policy result: %+v: %v", version, compatibility, err)
-				}
 			}
 			if development {
 				if requests != 0 || strings.Count(output.String(), "policy checks are off for a development build") != 1 {
 					t.Fatalf("development policy: requests=%d log=%q", requests, output.String())
 				}
-			} else if requests != 6 || output.Len() != 0 {
+			} else if requests != 4 || output.Len() != 0 {
 				t.Fatalf("release policy: requests=%d log=%q", requests, output.String())
 			}
 		})

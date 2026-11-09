@@ -1018,26 +1018,6 @@ components:
         - lease_expires_at
       type: object
       x-sparkwing-go-type: controllerwire.ClaimedUnit
-    internal.controllerwire.Compatibility:
-      additionalProperties: true
-      properties:
-        api_major:
-          type: integer
-        engine_release:
-          type: string
-        guaranteed_until:
-          format: date-time
-          type: string
-        released_at:
-          format: date-time
-          type: string
-      required:
-        - api_major
-        - engine_release
-        - released_at
-        - guaranteed_until
-      type: object
-      x-sparkwing-go-type: controllerwire.Compatibility
     internal.controllerwire.CreateRunRequest:
       additionalProperties: true
       properties:
@@ -8196,25 +8176,15 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/capabilities:
     get:
-      parameters:
-        - in: query
-          name: engine_version
-          schema:
-            type: string
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.Compatibility'
-          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Read engine compatibility
+      summary: GET /api/v1/capabilities
       x-sparkwing-policy:
         method: GET
         path: /api/v1/capabilities
@@ -8223,6 +8193,7 @@ paths:
         authentication: public
         access: []
         retry: safe
+      x-sparkwing-wire: undocumented
   /api/v1/claims/{claim}/heartbeat:
     post:
       parameters:
