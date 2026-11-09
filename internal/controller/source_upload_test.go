@@ -51,6 +51,7 @@ func sourceUploadFixtureWith(t *testing.T, objects blob.ObjectBackend, objectSto
 		t.Fatal(err)
 	}
 	s, session := credentialSessionServerWith(t, func(s *Server) { s.WithSecretsCipher(cipher).WithDataObjects(objects) }, opts...)
+	s.cipher = cipher
 	h := s.Handler()
 	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.write","runs.read","runs.control"]}`, false)
 	var credential credentialResponse

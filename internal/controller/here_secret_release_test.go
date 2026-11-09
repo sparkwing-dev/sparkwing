@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -25,6 +25,7 @@ const (
 	hereSharedValue   = "here-shared-team-value"
 	herePipelineValue = "here-pipeline-only-value"
 	hereReservedValue = "here-reserved-pool-value"
+	hereUndeclared    = "here-undeclared-shared-value"
 )
 
 type hereSecretRun struct {
@@ -41,18 +42,14 @@ func hereSecretFixture(t *testing.T, declared, optional []string) (hereSecretRun
 	s.WithEngineController(NewEngineController(s.store, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })}))
 	options.HTTP = &http.Client{Transport: inventoryRoundTrip{s.Handler()}}
 	repo := string(input.Git.Repository.Key)
-	// hack: sourceUploadFixture keeps its cipher private, so seal with the same zero key.
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, row := range []store.Secret{
 		{Name: "TOKEN", Value: hereSharedValue, Masked: true, Shared: true, Principal: "admin"},
 		{Name: "TOKEN", Value: herePipelineValue, Repo: repo, Pipeline: input.Pipeline, Masked: true, Principal: "admin"},
 		{Name: "PIPELINE_ONLY", Value: herePipelineValue, Repo: repo, Pipeline: input.Pipeline, Masked: true, Principal: "admin"},
 		{Name: "RESERVED", Value: hereReservedValue, Masked: true, Shared: true, Principal: "admin"},
+		{Name: "UNDECLARED", Value: hereUndeclared, Masked: true, Shared: true, Principal: "admin"},
 	} {
-		sealed, err := store.SealSecret(cipher, "a", row)
+		sealed, err := store.SealSecret(s.cipher, "a", row)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,16 +113,31 @@ func (h hereSecretRun) release(bearer, name, run string) (int, string) {
 	return reply.Code, reply.Body.String()
 }
 
-func refusedWithoutValue(t *testing.T, what string, code int, body string) {
+func (h hereSecretRun) releaseAudits(t *testing.T) int {
 	t.Helper()
+	var audits int
+	if err := teststore.SQL(t, h.s.store).QueryRow(`SELECT COUNT(*) FROM audit_events WHERE team='a' AND run_id=? AND kind='secret.released'`, h.runID).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	return audits
+}
+
+func (h hereSecretRun) refuse(t *testing.T, what, bearer, name string) string {
+	t.Helper()
+	before := h.releaseAudits(t)
+	code, body := h.release(bearer, name, h.runID)
 	if code == http.StatusOK {
 		t.Fatalf("%s: released HTTP %d %s", what, code, body)
 	}
-	for _, value := range []string{hereSharedValue, herePipelineValue, hereReservedValue} {
+	for _, value := range []string{hereSharedValue, herePipelineValue, hereReservedValue, hereUndeclared} {
 		if strings.Contains(body, value) {
 			t.Fatalf("%s: refusal exposed a secret value", what)
 		}
 	}
+	if after := h.releaseAudits(t); after != before {
+		t.Fatalf("%s: refusal recorded a release audit (%d -> %d)", what, before, after)
+	}
+	return body
 }
 
 func secondMember(t *testing.T, h hereSecretRun) string {
@@ -145,11 +157,7 @@ func secondMember(t *testing.T, h hereSecretRun) string {
 	return credential.Capability
 }
 
-// A break-glass here run reads controller secrets only through its own live
-// trigger claim, receives only team-wide shared values, records its reason and
-// a release audit, and gives no other member, run or stale claim a path to them.
-// TOKEN exists both shared and for the run's own pipeline, PIPELINE_ONLY only for
-// that pipeline, and RESERVED is shared but restricted to pool prod.
+// A here run's shared secrets reach only its own live claim; nobody else gets a path to them.
 func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 	t.Run("own claim reads the shared value, never the pipeline copy", func(t *testing.T) {
 		h, err := hereSecretFixture(t, []string{"TOKEN"}, []string{"PIPELINE_ONLY"})
@@ -161,18 +169,16 @@ func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 		if code != http.StatusOK || json.Unmarshal([]byte(body), &secret) != nil || secret.Value != hereSharedValue || !secret.Masked {
 			t.Fatalf("own release: HTTP %d", code)
 		}
-		code, body = h.release(h.award, "PIPELINE_ONLY", h.runID)
-		refusedWithoutValue(t, "pipeline-only secret", code, body)
+		h.refuse(t, "pipeline-only secret", h.award, "PIPELINE_ONLY")
 		if storedIntake(t, h.s.store, h.runID).Request.Reason != h.input.Reason {
 			t.Fatal("the here run did not record its reason")
 		}
-		var audits int
-		if err := teststore.SQL(t, h.s.store).QueryRow(`SELECT COUNT(*) FROM audit_events WHERE team='a' AND run_id=? AND kind='secret.released'`, h.runID).Scan(&audits); err != nil || audits != 1 {
-			t.Fatalf("release audits=%d: %v", audits, err)
+		if audits := h.releaseAudits(t); audits != 1 {
+			t.Fatalf("release audits=%d", audits)
 		}
 	})
 	t.Run("reserved-pool secret refused at plan acceptance", func(t *testing.T) {
-		if _, err := hereSecretFixture(t, []string{"RESERVED"}, nil); err == nil || strings.Contains(err.Error(), hereReservedValue) {
+		if _, err := hereSecretFixture(t, []string{"RESERVED"}, nil); err == nil || !strings.Contains(err.Error(), "restricted secret requires an authorized pool") || strings.Contains(err.Error(), hereReservedValue) {
 			t.Fatalf("here plan declaring a reserved-pool secret: %v", err)
 		}
 	})
@@ -181,8 +187,9 @@ func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		code, body := h.release(h.award, "RESERVED", h.runID)
-		refusedWithoutValue(t, "undeclared reserved secret", code, body)
+		if body := h.refuse(t, "undeclared shared secret", h.award, "UNDECLARED"); !strings.Contains(body, string(apierr.ReasonSecretUndeclared)) {
+			t.Fatalf("undeclared refusal did not name the missing declaration: %s", body)
+		}
 	})
 	t.Run("submitting member's own credential is not a claim", func(t *testing.T) {
 		h, err := hereSecretFixture(t, []string{"TOKEN"}, nil)
@@ -193,8 +200,7 @@ func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		code, body := h.release(member, "TOKEN", h.runID)
-		refusedWithoutValue(t, "member credential", code, body)
+		h.refuse(t, "member credential", member, "TOKEN")
 	})
 	t.Run("another member", func(t *testing.T) {
 		h, err := hereSecretFixture(t, []string{"TOKEN"}, nil)
@@ -202,8 +208,7 @@ func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 			t.Fatal(err)
 		}
 		intruder := secondMember(t, h)
-		code, body := h.release(intruder, "TOKEN", h.runID)
-		refusedWithoutValue(t, "other member credential", code, body)
+		h.refuse(t, "other member credential", intruder, "TOKEN")
 		if award := hereClaim(t, h.options, intruder, h.runID); award != "" {
 			t.Fatal("another member claimed the here run's trigger")
 		}
@@ -224,8 +229,7 @@ func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 		if otherAward == "" {
 			t.Fatal("the other member's here run could not claim itself")
 		}
-		code, body = h.release(otherAward, "TOKEN", h.runID)
-		refusedWithoutValue(t, "other run's award", code, body)
+		h.refuse(t, "other run's award", otherAward, "TOKEN")
 	})
 	for _, attack := range []struct {
 		name  string
@@ -244,8 +248,7 @@ func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 				t.Fatal(err)
 			}
 			engineSQL(t, h.s.store, attack.apply, h.runID)
-			code, body := h.release(h.award, "TOKEN", h.runID)
-			refusedWithoutValue(t, attack.name, code, body)
+			h.refuse(t, attack.name, h.award, "TOKEN")
 		})
 	}
 }

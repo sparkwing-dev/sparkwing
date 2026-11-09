@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -11,6 +12,7 @@ type serverFixture struct {
 	*Server
 	store  *store.Store
 	engine *engineFixture
+	cipher *secrets.Cipher
 }
 
 func (f *serverFixture) option(cfg deployment.Config, configure func(*Server)) store.Option {
