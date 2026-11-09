@@ -95,7 +95,7 @@ func (r *ReleaseCut) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArg
 	// before prepare-changelog writes, so no lint or suite reads a checkout
 	// that changes under it.
 	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{}).
-		Timeout(releaseCutBudget + releaseLintLockAllowance)
+		Timeout(time.Hour)
 
 	sdk := sparkwing.Job(plan, "release-sdk", &releaseSDKJob{RepoDir: repoDir, Source: in.Commit}).Inline().Timeout(30 * time.Minute)
 	sdk.Needs(clean, validate, cutChecks)
@@ -147,7 +147,9 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 	lint := budget.step(w, "lint", func(ctx context.Context) error {
 		return runGolangciLintWithin(ctx, releaseCutBudget+releaseLintLockAllowance)
 	}).Needs(build)
-	tests := budget.step(w, "test", runShortTest).Needs(lint)
+	frontend := budget.step(w, "frontend-deps", runFrontendDeps).Needs(lint)
+	sdk := budget.step(w, "sdk-typescript", runTypeScriptSDK).Needs(frontend)
+	tests := budget.step(w, "test", runShortTest).Needs(sdk)
 	// safety: these checks only read, so a dry run reports what the cut would refuse.
 	// perf: a shared policy root keeps every release guard selected when desktop cuts reuse CI evidence.
 	freshness := budget.step(w, "version-freshness", func(ctx context.Context) error {

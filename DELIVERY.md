@@ -154,8 +154,10 @@ tests run only in the real cut.
 
 Manual releases reuse a successful exact-source CI receipt when available. Missing,
 pending, failed or unreadable receipts run the local build, lint and short suite
-in the detached source worktree. Local release build, lint, short tests and
-published-version checks run in sequence to bound temporary build storage.
+in the detached source worktree. Local release build, lint, frozen frontend
+dependency installation, the TypeScript SDK suite, short tests and published-version
+checks run in sequence to bound temporary build storage. The dependency installs
+supply dashboard and SDK acceptance tests in the detached checkout.
 Weekly releases continue to wait for green CI.
 
 The schema changelog gate compares the neutral `internal/store/schema.sql`
@@ -164,9 +166,11 @@ require a version bump and a matching `(Breaking)` changelog entry.
 
 Release lint prints that it is waiting for the box-wide golangci-lint lock,
 then uses `--allow-serial-runners` to wait and lint in sequence. The release
-job and lint deadline allow 40 minutes total: the ten-minute check allowance
-plus 30 minutes for contention. The tier measures that combined wall time,
-including waiting. Other lint callers keep their five-minute deadline.
+job allows one hour for serial preparation and checks. Its lint deadline and
+budget warning remain 40 minutes: the ten-minute check allowance plus 30 minutes
+for contention. The tier measures combined wall time, including waiting. A serial
+cut took 38m31s before the missing SDK suite was prepared; that suite took another
+102s in focused verification. Other lint callers keep their five-minute deadline.
 
 golangci-lint keeps one cache per worktree under that worktree's git
 directory (`<git-dir>/sparkwing-cache/golangci-lint`), outside the tree the
@@ -922,8 +926,10 @@ file. Other syntax and workflow checks remain active.
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
   before it tags, 40 minutes including 30 minutes of lint-lock allowance
   and ten minutes for build, full lint, the short test suite,
-  published-version, Go-directive and SDK-pin checks, and changelog-link and docs-sidebar checks
-  in parallel.
+  published-version, Go-directive and SDK-pin checks, and changelog-link and docs-sidebar checks.
+  Build, lint, dependency preparation, the SDK suite and short tests run in sequence.
+  The job allows one hour to finish those serial checks while retaining the
+  40-minute budget warning.
   Each of those jobs times its own steps and warns when its slowest step's
   own run time overruns the class, naming the step and its cost, so a class
   cannot regrow unnoticed. A tier whose checks all passed still passes: when

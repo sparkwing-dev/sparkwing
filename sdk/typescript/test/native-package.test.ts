@@ -51,7 +51,7 @@ test("package preflight rejects missing, truncated and mislabeled Windows bridge
   }
 });
 
-test("package preflight requires npm's engine version stamp in both manifests", () => {
+test("package preflight requires npm's SDK version stamp in both manifests", () => {
   const root = mkdtempSync(join(tmpdir(), "sdk-version-"));
   const native = join(root, "native");
   mkdirSync(native);
@@ -75,7 +75,7 @@ test("package preflight requires npm's engine version stamp in both manifests", 
       write(versions[0]!, versions[1], versions[2]);
       const result = run();
       assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /engine.*version|version.*engine/);
+      assert.match(result.stderr, /SDK.*version|version.*SDK/);
     }
     write("0.0.0");
     const npm = spawnSync("npm", ["version", "0.71.0", "--no-git-tag-version", "--ignore-scripts", "--offline"], {

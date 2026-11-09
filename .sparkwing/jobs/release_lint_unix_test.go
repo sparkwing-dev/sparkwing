@@ -93,7 +93,7 @@ fi`,
 	if !strings.Contains(logs.String(), "waiting for the box-wide lock") || !strings.Contains(logs.String(), "deadline 40m0s") {
 		t.Fatalf("release lint lost its waiting message or long deadline:\n%s", logs.String())
 	}
-	if got := mustNode(t, releasePlan(t), "release-cut-checks").TimeoutMS; got < (40 * time.Minute).Milliseconds() {
-		t.Fatalf("release job timeout %dms cannot cover the lock wait and checks", got)
+	if got := mustNode(t, releasePlan(t), "release-cut-checks").TimeoutMS; got < time.Hour.Milliseconds() {
+		t.Fatalf("release job timeout %dms cannot cover serial checks and the lock wait", got)
 	}
 }

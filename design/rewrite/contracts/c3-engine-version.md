@@ -88,7 +88,7 @@ checksums before computing the cache key. It no longer
 downloads every module archive in the graph. An unavailable unused archive
 cannot block a pipeline whose build dependencies are already available.
 
-Local dispatch consumes ReadPin, VersionForPin and Resolve for both SDKs. It
+Local dispatch consumes ReadPin, SDKVersionForPin and Resolve for both SDKs. It
 rechecks policy on every invocation and stops re-executing only when the current
 and resolved executables are the same file. Info reads pin metadata without
 fetching or guessing cache paths. Source/host composition and native execution
@@ -108,8 +108,9 @@ at seal point two. C3 hosts consume it on every execution placement.
 
 Decision 111 permits Go SDK replacements. `ReadPin` records the applicable
 replacement module selector in `Pin.Replacement` and retains the declared SDK
-requirement. `VersionForPin` selects the installed executable's embedded version
-for that pin. `Resolve` returns that executable with `engine_pin_disabled` notice
+requirement. `SDKVersionForPin` normalizes the SDK version without selecting
+an engine. For a replacement, `Resolve` selects the installed executable's
+embedded version and returns it with an `engine_pin_disabled` notice
 and its SHA256 as both asset and manifest identity, without fetching a release.
 `Ensure` and installation require the same installed executable and identity.
 SDK hello still checks protocol and language; the replacement's self-reported
@@ -331,7 +332,7 @@ release resolver and need an explicit development workflow during implementation
 | [`engineid.SDKKind`](../../../internal/engineid/identity.go) | distinguishes the two pin formats without selecting a different engine. |
 | [`engineid.Pin`](../../../internal/engineid/identity.go) | records the SDK requirement, applicable replacement and source files. |
 | [`ReadPin`](../../../internal/engine/pin.go) | resolves a Go requirement or a TypeScript lockfile entry without running pipeline code. |
-| [`VersionForPin`](../../../internal/engine/pin.go) | maps release pins to their exact engine and Go SDK replacements to the installed engine. |
+| [`SDKVersionForPin`](../../../internal/engine/pin.go) | normalizes SDK versions without selecting an engine. |
 | [`engineid.Identity`](../../../internal/engineid/identity.go) | binds the selected engine to SDK inputs in the accepted run seal. |
 | [`Resolved`](../../../internal/engine/engine.go) | includes the selected executable for this machine's platform. |
 | [`ReleaseBundle`](../../../internal/engine/engine.go) | is untrusted until VerifyRelease checks it against the keys its caller supplies; the resolver supplies the production roots. |
