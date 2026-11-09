@@ -67,7 +67,12 @@ func (w *InputWitness) capture(path string, info os.FileInfo) bool {
 			w.Disabled = true
 			return false
 		}
-		state = "link:" + resolved
+		identity := symlinkIdentity(info, w.clock())
+		if identity == "" {
+			w.Disabled = true
+			return false
+		}
+		state = "link:" + resolved + "\x00" + identity
 	} else if info.IsDir() {
 		state = directoryIdentity(info)
 	} else if value, stable := fileIdentity(info, w.clock()); stable {
@@ -134,48 +139,6 @@ func (w *InputWitness) tree(path string) {
 	}
 }
 
-func (w *InputWitness) sourceTree(path string, hashAllFiles bool) {
-	if w == nil || w.Disabled {
-		return
-	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		w.Disabled = true
-		return
-	}
-	resolved, err := filepath.EvalSymlinks(absolute)
-	if err != nil || resolved != absolute {
-		w.Disabled = true
-		return
-	}
-	directories := map[string]string{}
-	files, _, err := hashable(absolute, allFiles, hashAllFiles, directories)
-	if err != nil || len(directories) == 0 {
-		w.Disabled = true
-		return
-	}
-	for _, path := range files {
-		info, err := os.Lstat(path)
-		if err != nil || !w.capture(path, info) {
-			w.Disabled = true
-			return
-		}
-	}
-	for path, before := range directories {
-		info, err := os.Lstat(path)
-		if err != nil || before == "" || directoryIdentity(info) != before {
-			w.Disabled = true
-			return
-		}
-		if !w.capture(path, info) {
-			return
-		}
-	}
-}
-
-// Unchanged checks collected source and tool identities without querying Go settings.
-func (w *InputWitness) Unchanged(ctx context.Context) bool { return w.unchanged(ctx) }
-
 func (w *InputWitness) file(path string) {
 	if w == nil || w.Disabled || path == "" {
 		return
@@ -235,7 +198,8 @@ func (w *InputWitness) unchanged(ctx context.Context) bool {
 				return false
 			}
 			resolved, err := filepath.EvalSymlinks(path)
-			if err != nil || "link:"+resolved != previous {
+			identity := symlinkIdentity(info, w.clock())
+			if err != nil || identity == "" || "link:"+resolved+"\x00"+identity != previous {
 				return false
 			}
 			continue

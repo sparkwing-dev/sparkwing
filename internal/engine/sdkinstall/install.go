@@ -80,7 +80,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	}
 	result := engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable}
 	if inputs != nil {
-		result.Handoff = writeHandoff(ctx, version, dir, pin, request, environment, result, inputs)
+		result.Handoff = writeHandoff(version, dir, pin, request, environment, result, inputs)
 	}
 	return json.NewEncoder(output).Encode(result)
 }

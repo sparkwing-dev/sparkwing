@@ -339,19 +339,8 @@ func stableKeyParts(ctx context.Context, sparkwingDir, goos, goarch string, env 
 
 func keyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
 	witness := inputWitness(ctx)
-	witness.sourceTree(sparkwingDir, hashAllFiles)
-	if witness != nil && !witness.Disabled {
-		targets, err := localReplaceTargets(filepath.Join(sparkwingDir, "go.mod"))
-		if err != nil {
-			witness.Disabled = true
-		}
-		workTargets, _, err := localWorkspaceTargets(sparkwingDir, env)
-		if err != nil {
-			witness.Disabled = true
-		}
-		for _, target := range append(targets, workTargets...) {
-			witness.sourceTree(target.Dir, hashAllFiles)
-		}
+	for _, name := range []string{"go.mod", "go.sum", ".resolved.mod", ".resolved.sum"} {
+		witness.file(filepath.Join(sparkwingDir, name))
 	}
 	var parts []KeyPart
 	add := func(label, detail string, material []byte) {
@@ -374,7 +363,7 @@ func keyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []stri
 	add("compiled inputs", "Go-selected source and embedded files", compiled)
 
 	var moduleBuf bytes.Buffer
-	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles, hashAllFiles)
+	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles, hashAllFiles, witness)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +398,7 @@ func keyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []stri
 		var buf bytes.Buffer
 
 		fmt.Fprintf(&buf, "replace:%s\n", t.Label)
-		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles, hashAllFiles)
+		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles, hashAllFiles, witness)
 		if err != nil {
 			return nil, err
 		}
@@ -501,7 +490,11 @@ func hashable(dir string, keep fileFilter, hashAllFiles bool, directories map[st
 	return kept, pruned, nil
 }
 
-func snapshotHashable(files []string) (map[string]fileState, error) {
+func snapshotHashable(files []string, witnesses ...*InputWitness) (map[string]fileState, error) {
+	var witness *InputWitness
+	if len(witnesses) != 0 {
+		witness = witnesses[0]
+	}
 	out := make(map[string]fileState, len(files))
 	for _, path := range files {
 		info, err := os.Lstat(path)
@@ -511,17 +504,30 @@ func snapshotHashable(files []string) (map[string]fileState, error) {
 		if err != nil {
 			return nil, err
 		}
+		witness.capture(path, info)
 		out[path] = fileState{size: info.Size(), modTime: info.ModTime().UnixNano()}
 	}
 	return out, nil
 }
 
-func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
+func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool, witnesses ...*InputWitness) (hashStats, error) {
+	var witness *InputWitness
+	if len(witnesses) != 0 {
+		witness = witnesses[0]
+	}
+	if witness != nil && !witness.Disabled {
+		absolute, err := filepath.Abs(dir)
+		if err != nil {
+			witness.Disabled = true
+		} else if resolved, err := filepath.EvalSymlinks(absolute); err != nil || resolved != absolute {
+			witness.Disabled = true
+		}
+	}
 	files, ignored, err := hashable(dir, keep, hashAllFiles, nil)
 	if err != nil {
 		return hashStats{}, err
 	}
-	before, err := snapshotHashable(files)
+	before, err := snapshotHashable(files, witness)
 	if err != nil {
 		return hashStats{}, err
 	}
@@ -544,7 +550,7 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 		if err != nil {
 			return stats, err
 		}
-		after, err := snapshotHashable(files)
+		after, err := snapshotHashable(files, witness)
 		if err != nil {
 			return stats, err
 		}
@@ -556,6 +562,15 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 			return stats, err
 		}
 		if runtime.GOOS == "windows" || unchanged {
+			if witness != nil && !witness.Disabled {
+				for path, before := range directories {
+					info, statErr := os.Lstat(path)
+					if statErr != nil || before == "" || directoryIdentity(info) != before || !witness.capture(path, info) {
+						witness.Disabled = true
+						break
+					}
+				}
+			}
 			_, err = h.Write(digest.Bytes())
 			return stats, err
 		}

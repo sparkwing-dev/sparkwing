@@ -32,3 +32,15 @@ func directoryIdentity(info os.FileInfo) string {
 	}
 	return fmt.Sprintf("%d:%d:%d:%d:%d", stat.Dev, stat.Ino, info.Size(), info.ModTime().UnixNano(), changeTime(stat).UnixNano())
 }
+
+func symlinkIdentity(info os.FileInfo, now time.Time) string {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || info.Mode()&os.ModeSymlink == 0 {
+		return ""
+	}
+	changed := changeTime(stat)
+	if now.Sub(changed) < stableAfter || now.Sub(info.ModTime()) < stableAfter {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d:%d:%d:%d", stat.Dev, stat.Ino, info.Size(), info.ModTime().UnixNano(), changed.UnixNano())
+}

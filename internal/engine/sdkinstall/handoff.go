@@ -54,8 +54,8 @@ func executableDigest(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func writeHandoff(ctx context.Context, version, dir string, pin engineid.Pin, request engine.SDKInstallRequest, environment procenv.Env, command engine.SDKCommand, inputs *bincache.InputWitness) string {
-	if command.CachedExecutable == "" || len(command.Command) != 1 || !inputs.Unchanged(ctx) {
+func writeHandoff(version, dir string, pin engineid.Pin, request engine.SDKInstallRequest, environment procenv.Env, command engine.SDKCommand, inputs *bincache.InputWitness) string {
+	if command.CachedExecutable == "" || len(command.Command) != 1 || inputs == nil || inputs.Disabled || len(inputs.States) == 0 || inputs.Tool == "" || len(inputs.Settings) == 0 {
 		return ""
 	}
 	digest, err := executableDigest(command.Command[0])

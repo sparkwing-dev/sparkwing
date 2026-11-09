@@ -5,6 +5,7 @@ package bincache
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -255,7 +256,9 @@ func TestInputWitnessCoversIgnoredEmbedDirectory(t *testing.T) {
 	}
 	w.States = map[string]string{}
 	w.fullTrees = nil
-	w.sourceTree(root, false)
+	if _, err := hashDirIntoCounted(io.Discard, root, allFiles, false, w); err != nil {
+		t.Fatal(err)
+	}
 	listing, err := json.Marshal(map[string]any{"Dir": root, "ImportPath": "test", "GoFiles": []string{filepath.Base(source)}, "EmbedFiles": []string{"assets/first.txt"}})
 	if err != nil {
 		t.Fatal(err)
@@ -271,5 +274,32 @@ func TestInputWitnessCoversIgnoredEmbedDirectory(t *testing.T) {
 	}
 	if w.Valid(t.Context()) {
 		t.Fatal("new file in ignored embed directory accepted")
+	}
+}
+
+func TestInputWitnessRejectsRestoredSymlinkBindingBetweenSnapshots(t *testing.T) {
+	w, path := newTreeWitness(t)
+	link := filepath.Join(t.TempDir(), "linked.go")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	w.States = map[string]string{}
+	if _, err := snapshotHashable([]string{link}, w); err != nil {
+		t.Fatal(err)
+	}
+	if !w.Valid(t.Context()) {
+		t.Fatal("unchanged symlink snapshot rejected")
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshotHashable([]string{link}, w); err != nil {
+		t.Fatal(err)
+	}
+	if w.Valid(t.Context()) {
+		t.Fatal("recreated symlink accepted under earlier snapshot")
 	}
 }

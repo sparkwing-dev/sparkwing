@@ -46,7 +46,7 @@ func TestInstallationHandoffCopiesVerifiedBytesAndRejectsMismatches(t *testing.T
 	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v0.20.0"}
 	request := engine.SDKInstallRequest{Directory: dir, SDK: engineid.GoSDK, ExecutableDirectory: t.TempDir()}
 	command := engine.SDKCommand{Directory: dir, Command: []string{original.Path()}, CachedExecutable: lease.CachedPath()}
-	request.Handoff = writeHandoff(t.Context(), "v0.20.0", dir, pin, request, environment, command, inputs)
+	request.Handoff = writeHandoff("v0.20.0", dir, pin, request, environment, command, inputs)
 	if request.Handoff == "" {
 		t.Fatal("unchanged verified installation produced no handoff")
 	}
