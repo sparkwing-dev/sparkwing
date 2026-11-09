@@ -79,11 +79,9 @@ merges, gate run, review record path and result). The gate's `test` step reports
 
 When `origin/main` is not an ancestor of HEAD at push time, the `push` step
 merges it into the branch in the checkout (`git merge --no-ff`, the default
-git identity and signing; never a rebase). CHANGELOG.md merges with the union
-driver, so two branches that each open the same `###` heading under
-`[Unreleased]` merge into a repeated heading the changelog lint refuses; when
-the merge leaves one, the step runs `bash bin/check-changelog.sh --fix` and
-commits CHANGELOG.md and its mirror as a follow-up commit (never an amend). It
+git identity and signing; never a rebase). Independent changelog and migration
+fragments merge as separate files. Orientation table additions use union merge;
+changes to the same rule need review. The push step
 then runs `go build` in every module
 and the affected-test selection over the files that differ between the gated
 tree and the merged tree, then pushes the merge. The review is not run again:
@@ -100,7 +98,7 @@ landing record names both.
 ### Cutting a release
 
 A release is a tag push. The `release` pipeline resolves the version, renames
-`## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
+the collected `## [Unreleased]` section to the version, stages the release notes,
 checks the section covers any schema or wire change since the previous tag,
 aligns scaffold and pipeline SDK pins to the chosen version with local replacements,
 then commits and atomically pushes that commit to `main` with an annotated
@@ -545,10 +543,29 @@ downgrade or restore runs. Staging and production have separate database servers
 Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push runs
-through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
-through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
-retried old run cannot roll production back.
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. A capacity-one global
+queue serializes the whole deploy, including staging and production. At build admission,
+`git ls-remote` checks main's tip. Superseded waiters stop before credentials, image work or
+Cloud smoke. Several stale rows can wait, but only the newest waiting commit can pass
+admission. Once admitted, a candidate keeps its slot and can finish even when more pushes land.
+Staging and production fetch main's history and require the candidate SHA to be an ancestor
+of `origin/main` or its tip. These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses
+as repository proof.
+
+Production checks ancestry again immediately before each controller or launcher GitOps push.
+A candidate removed by a main history rewrite during deployment preparation is refused at
+that write. Source validation and the GitOps push use separate repositories, so this check
+does not make them atomic.
+
+Production requires a staging-gate pass for the same image digests and checks both production
+image revision labels. Each changed digest must advance from its pinned revision to a newer
+source commit, with no version downgrade. Missing revision evidence, unrelated history or a
+new digest for the same SHA stops before GitOps pins change. A retry can finish a partial
+deployment when a matching digest already runs. An already deployed image pair leaves the
+pins unchanged.
+
+A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version`
+reach a real deploy through the entry's `args`.
 
 The deployment pipeline pins a published SDK without a local replacement, so
 Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
@@ -1672,6 +1689,22 @@ file. Other syntax and workflow checks remain active.
   isolation. `sparkwing run integration` runs them through its full `./...`
   suite against the local PostgreSQL fixture.
 
+- **Native Windows CLI smoke:** `TestWindowsLocalRunStartsControllerAndFinishes`
+  (`cmd/sparkwing`) builds the CLI and runs a Go pipeline through standalone
+  and shared controllers in private homes. Both modes require a successful
+  `run_finish` receipt and a zero process exit status. Run it on Windows with
+  `go test -p 1 ./cmd/sparkwing -run TestWindowsLocalRunStartsControllerAndFinishes`.
+  `TestWindowsLocalHTTPKeepsRequestAliveAcrossReuse` in `internal/wingd`
+  guards the named-pipe deadline contract beneath startup and runner claims.
+
+- **Standalone client shutdown:**
+  `TestStandaloneRunClosesUnusedClientDialBeforeControllerDrain` (`cmd/sparkwing`,
+  Unix) cancels a request while its dial completes, then shuts down the real
+  standalone runtime. It requires the CLI to close the unused connection before
+  controller draining, without changing the API drain deadline. Native Windows
+  verification repeats standalone pipeline runs and requires both successful
+  `run_finish` receipts and zero process exits.
+
 - **Local controller smoke:** `TestLocalControllerSmoke` (`cmd/sparkwing`,
   part of the full suite) builds the CLI and drives every local controller
   command against a fresh local controller in a private home. It fails when
@@ -1750,18 +1783,13 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   `pkg/docs/mirror/`, and the vendored runner-bundle tarball) in one pass and
   is a no-op on a clean tree. Resolve a merge conflict in any of them by
   taking either side, running that script, and committing the result.
-  `CHANGELOG.md` and the mirror `pkg/docs` embeds resolve themselves instead:
-  `.gitattributes` marks both `merge=union`, so a merge of two branches that
-  each added `[Unreleased]` bullets keeps both sides with no conflict. Union
-  merge gets two cases wrong. Two branches that reword the same bullet produce
-  both wordings, and two branches that each rename `[Unreleased]` to their own
-  version stack both headings on adjacent lines -- `bin/check-changelog.sh`
-  fails on the stacked pair, and the reworded pair needs a reader. Where both
-  sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
-  collapses it into one block and re-syncs the mirror.
-- **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
-  follows `CHANGELOG-STYLE.md`. Mark breaking changes; until paid launch
-  they need no migration guide. Keep the embedded changelog mirror byte-identical.
+- **Changelog:** notable adopter-facing behavior belongs in a unique
+  `docs/changes/<slug>.md` with a `###` category and scope-prefixed bullets.
+  Breaking guides go in `docs/migrations/unreleased/<slug>.md`, starting with
+  an H2. Follow `CHANGELOG-STYLE.md` and run `bash bin/sync-docs.sh` to mirror
+  the fragments. Keep shared unreleased aggregates empty. Embedded docs,
+  weekly-release and release gates collect fragments; the release cut writes
+  the versioned notes, repoints guide links and deletes consumed fragment pairs.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. Select an

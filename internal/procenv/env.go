@@ -41,7 +41,7 @@ func (e Env) GoTool(settings ...string) (Env, error) {
 	result := e
 	result.values = slices.Clone(e.values)
 	for _, setting := range settings {
-		name, value, err := parseEntry(setting)
+		name, value, err := ParseEntry(setting)
 		if err != nil {
 			return Env{}, err
 		}

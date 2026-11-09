@@ -32,6 +32,11 @@ var approvedExternalBoundaries = []externalBoundary{
 		marker:   "// sleepcheck:external-boundary wait for the real Git publication subprocess",
 	},
 	{
+		file: "internal/nodehost/host_exec_windows_test.go", function: "TestWindowsHostCommandKeepsBufferedOutputPastSlowSink",
+		duration: "2 * commandDrainGrace",
+		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",
+	},
+	{
 		file: "tests/acceptance/local_features_e2e_linux_test.go", function: "await",
 		duration: "25 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary real CLI processes and filesystem markers need a paced poll",

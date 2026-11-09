@@ -514,6 +514,12 @@ proves it compiles, lints, and explains; templates tagged runnable also
 execute end-to-end against a synthesized fixture -- so unlike prose they
 cannot quietly stop being true.
 
+While editing a template in the Sparkwing repository, run
+`sparkwing run template-verify -- --only NAME` to verify that template.
+This author check reports the selected name and count. A full registry check
+still runs without `--only`. Add `--exhaustive` to ignore recorded proofs
+for the selected templates.
+
 They are reference, not a starting point. `sparkwing pipeline new
 --template <shape>` begins a pipeline from one of five structural
 shapes; an example shows how a finished one is built. Reaching for an

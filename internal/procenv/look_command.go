@@ -16,13 +16,14 @@ func LookupCommand(name string, env []string, dir string) (string, error) {
 	}
 	path, set := "", false
 	extensions := []string{""}
+	pathExt := ""
 	for _, entry := range env {
 		key, value, _ := strings.Cut(entry, "=")
 		if key == "PATH" || windows && strings.EqualFold(key, "PATH") {
 			path, set = value, true
 		}
-		if windows && strings.EqualFold(key, "PATHEXT") && filepath.Ext(name) == "" {
-			extensions = append(extensions, strings.Split(value, ";")...)
+		if windows && strings.EqualFold(key, "PATHEXT") {
+			pathExt = value
 		}
 	}
 	if !set {
@@ -32,14 +33,31 @@ func LookupCommand(name string, env []string, dir string) (string, error) {
 			path = defaultSearchPath
 		}
 	}
-	if windows && len(extensions) == 1 && filepath.Ext(name) == "" {
-		extensions = append(extensions, ".com", ".exe", ".bat", ".cmd")
+	if windows && filepath.Ext(name) == "" {
+		if pathExt == "" {
+			pathExt = ".com;.exe;.bat;.cmd"
+		}
+		extensions = nil
+		for _, extension := range strings.Split(pathExt, ";") {
+			if extension != "" {
+				if extension[0] != '.' {
+					extension = "." + extension
+				}
+				extensions = append(extensions, extension)
+			}
+		}
 	}
 	entries := filepath.SplitList(path)
 	if path == "" {
 		entries = []string{""}
 	}
-	if filepath.IsAbs(name) || windows && strings.ContainsAny(name, `/\`) {
+	if windows {
+		entries = append([]string{""}, entries...)
+		if strings.ContainsAny(name, `:\/`) {
+			entries = []string{""}
+		}
+	}
+	if filepath.IsAbs(name) {
 		entries = []string{""}
 	}
 	for _, entry := range entries {
@@ -47,8 +65,23 @@ func LookupCommand(name string, env []string, dir string) (string, error) {
 			entry = "."
 		}
 		candidate := filepath.Join(entry, name)
-		if filepath.IsAbs(name) {
+		if filepath.IsAbs(name) || windows && strings.ContainsAny(name, `:\/`) {
 			candidate = name
+		}
+		if windows && !filepath.IsAbs(candidate) {
+			volume := filepath.VolumeName(candidate)
+			switch {
+			case volume != "" && strings.EqualFold(volume, filepath.VolumeName(dir)):
+				candidate = filepath.Join(dir, candidate[len(volume):])
+			case volume != "":
+				absolute, err := filepath.Abs(candidate)
+				if err != nil {
+					continue
+				}
+				candidate = absolute
+			case strings.HasPrefix(candidate, `\`) || strings.HasPrefix(candidate, "/"):
+				candidate = filepath.VolumeName(dir) + candidate
+			}
 		}
 		if !filepath.IsAbs(candidate) {
 			candidate = filepath.Join(dir, candidate)

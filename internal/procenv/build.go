@@ -97,7 +97,7 @@ func build(k Kind, b Base, rt Runtime) ([]string, error) {
 		input = b.Captured
 	}
 	for _, entry := range input {
-		name, value, err := parseEntry(entry)
+		name, value, err := ParseEntry(entry)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +133,7 @@ func build(k Kind, b Base, rt Runtime) ([]string, error) {
 	}
 	result := make([]string, 0, len(env))
 	for _, entry := range env {
-		if _, _, err := parseEntry(entry); err != nil {
+		if _, _, err := ParseEntry(entry); err != nil {
 			return nil, err
 		}
 		result = append(result, entry)
@@ -142,7 +142,14 @@ func build(k Kind, b Base, rt Runtime) ([]string, error) {
 	return result, nil
 }
 
-func parseEntry(entry string) (string, string, error) {
+// ParseEntry splits a native assignment, including Windows drive-directory entries.
+func ParseEntry(entry string) (string, string, error) {
+	// bug: Windows shells include hidden drive-directory assignments in the native environment.
+	if runtime.GOOS == "windows" && len(entry) >= 4 && entry[0] == '=' && entry[2:4] == ":=" &&
+		(entry[1] >= 'A' && entry[1] <= 'Z' || entry[1] >= 'a' && entry[1] <= 'z') && !strings.ContainsRune(entry, 0) {
+		return entry[:3], entry[4:], nil
+	}
+
 	name, value, ok := strings.Cut(entry, "=")
 	if !ok || !validName(name) || strings.ContainsRune(value, 0) {
 		return "", "", errors.New("invalid environment assignment")
@@ -256,7 +263,7 @@ func registerMasks(masker *secrets.Masker, name, value string, maskValue bool) e
 
 func inheritAttempt(env []string, masker *secrets.Masker) ([]string, error) {
 	for _, entry := range env {
-		name, value, err := parseEntry(entry)
+		name, value, err := ParseEntry(entry)
 		if err != nil {
 			return nil, err
 		}

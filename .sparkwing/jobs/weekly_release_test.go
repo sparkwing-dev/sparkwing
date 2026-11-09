@@ -11,13 +11,18 @@ import (
 )
 
 func TestWeeklyReleaseUsesFreshMainAndTheExistingCut(t *testing.T) {
-	for _, mode := range []string{"release", "dry-run", "empty", "red", "pending", "missing", "chosen", "unlanded", "manual-red", "manual-pending", "manual-missing", "manual-unavailable", "manual-malformed", "manual-wrong-sha"} {
+	for _, mode := range []string{"release", "dry-run", "fragments", "empty", "red", "pending", "missing", "chosen", "unlanded", "manual-red", "manual-pending", "manual-missing", "manual-unavailable", "manual-malformed", "manual-wrong-sha"} {
 		t.Run(mode, func(t *testing.T) {
 			body := fixtureChangelog
-			if mode == "empty" {
+			if mode == "empty" || mode == "fragments" {
 				body = "# Changelog\n\n## [Unreleased]\n\n## [v0.1.0] - 2026-01-01\n\n- Old release.\n"
 			}
 			repo := atomicReleaseRepo(t, body)
+			if mode == "fragments" {
+				writeReleaseFixture(t, filepath.Join(repo, "docs/changes/weekly.md"), "### Fixed\n\n- **weekly:** Release collected notes\n")
+				gitRun(t, repo, "add", "docs/changes/weekly.md")
+				gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--no-verify", "-m", "pending fragment")
+			}
 			origin := t.TempDir()
 			gitRun(t, origin, "init", "--bare", "-b", "main")
 			gitRun(t, repo, "remote", "add", "origin", origin)

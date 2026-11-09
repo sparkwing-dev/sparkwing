@@ -35,7 +35,7 @@ func (Land) Help() string {
 		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
 		"with no force, adding --no-verify when the pushed tree is the tree the gate and review judged, since the gate covers every check the pre-push hook makes; " +
 		"a merged tree pushes through the hook. When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
-		"into the branch (a merge commit under the default git identity, never a rebase), runs `bash bin/check-changelog.sh --fix` and commits the result when the union merge repeated a CHANGELOG.md heading, builds the affected package closure and runs the affected tests over the files " +
+		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure and runs the affected tests over the files " +
 		"that differ between the gated tree and the merged tree, then pushes the merge; the review is not run again. It merges at most 3 times; a conflict fails " +
 		"and names the merge to run by hand. The push step carries the destructive and prod risks, " +
 		"so a real landing needs --sw-allow-risk destructive,prod. The land job's output is the landing record: branch, the commit and tree pushed, " +
@@ -396,10 +396,6 @@ func landOnto(ctx context.Context, dir string, head landHead, recheck mergeReche
 			if err != nil {
 				return target, err
 			}
-			target, err = mergeChangelogHeadings(ctx, git, dir, target)
-			if err != nil {
-				return target, err
-			}
 			files, err := changedBetween(ctx, dir, head.Tree, target.Tree)
 			if err != nil {
 				return target, err
@@ -454,45 +450,8 @@ func mergeLandBase(ctx context.Context, git gitRunner, dir, branch string, onto 
 	return landTarget{Commit: commit, Tree: tree, Base: base, Merges: onto.Merges + 1}, nil
 }
 
-// safety: CHANGELOG.md and its mirror merge with the union driver, so two
-// branches that each open a ### heading under [Unreleased] merge cleanly into
-// a changelog the gate's lint refuses. The fix is a follow-up commit, never an
-// amend, and goes through the merge's re-check with the rest of its delta.
-func mergeChangelogHeadings(ctx context.Context, git gitRunner, dir string, target landTarget) (landTarget, error) {
-	issues, err := changelogRepeatedHeadings(dir)
-	if err != nil || issues == "" {
-		return target, err
-	}
-	sparkwing.Info(ctx, "the merge repeated CHANGELOG.md headings; merging them with bin/check-changelog.sh --fix:\n%s", issues)
-	if res, err := sparkwing.Exec(ctx, "bash", filepath.Join(dir, "bin", "check-changelog.sh"), "--fix").Dir(dir).Run(); err != nil {
-		return target, fmt.Errorf("land: merge the repeated CHANGELOG.md headings: %w\n%s", err, strings.TrimSpace(res.Stderr))
-	}
-	if issues, err := changelogRepeatedHeadings(dir); err != nil {
-		return target, err
-	} else if issues != "" {
-		return target, fmt.Errorf("land: the merge left CHANGELOG.md headings bin/check-changelog.sh --fix cannot merge; fix them on the branch and rerun sparkwing run land:\n%s", issues)
-	}
-	paths := []string{"CHANGELOG.md", "pkg/docs/changelog.md"}
-	if _, err := git(ctx, append([]string{"commit", "--quiet", "-m", "chore(changelog): merge headings after main merge", "--"}, paths...)...); err != nil {
-		return target, fmt.Errorf("land: commit the merged CHANGELOG.md headings: %w", err)
-	}
-	if err := requireClean(ctx, git, dir); err != nil {
-		return target, err
-	}
-	commit, err := git(ctx, "rev-parse", "HEAD")
-	if err != nil {
-		return target, fmt.Errorf("land: resolve the changelog commit: %w", err)
-	}
-	tree, err := git(ctx, "rev-parse", "HEAD^{tree}")
-	if err != nil {
-		return target, fmt.Errorf("land: resolve the changelog commit's tree: %w", err)
-	}
-	target.Commit, target.Tree = commit, tree
-	return target, nil
-}
-
 func changelogRepeatedHeadings(dir string) (string, error) {
-	body, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	body, err := readChangelog(dir)
 	if os.IsNotExist(err) {
 		return "", nil
 	}

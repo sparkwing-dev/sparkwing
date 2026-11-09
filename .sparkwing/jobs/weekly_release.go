@@ -96,7 +96,7 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 	if _, err = runGitIn(ctx, j.RepoDir, "worktree", "add", "--detach", checkout, head); err != nil {
 		return err
 	}
-	body, err := os.ReadFile(filepath.Join(checkout, "CHANGELOG.md"))
+	body, err := readChangelog(checkout)
 	if err != nil {
 		return err
 	}
