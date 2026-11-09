@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -232,8 +231,8 @@ func (c *Cmd) EnvMap(env map[string]string) *Cmd {
 
 // Run executes the command, forwarding stdout/stderr bytes to
 // the logger installed in ctx. The host masks and splits them into lines. Returns an ExecResult on success, or
-// an *ExecError on non-zero exit / failure to start. When the host runs the
-// command itself, the result keeps only the last 64 KiB of each stream; use
+// an *ExecError on non-zero exit / failure to start. The result keeps only
+// the last 64 KiB of each masked stream; use
 // Capture for the whole output.
 func (c *Cmd) Run() (ExecResult, error) {
 	return c.execute(false)
@@ -375,22 +374,4 @@ func renderCommand(name string, args []string) string {
 	}
 	parts := append([]string{name}, args...)
 	return strings.Join(parts, " ")
-}
-
-func formatEnvDiff(env map[string]string) string {
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var b strings.Builder
-	for i, k := range keys {
-		if i > 0 {
-			b.WriteByte(' ')
-		}
-		b.WriteString(k)
-		b.WriteByte('=')
-		b.WriteString(env[k])
-	}
-	return b.String()
 }

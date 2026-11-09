@@ -76,6 +76,7 @@ func TestReleaseCollectsAndConsumesFragments(t *testing.T) {
 	if got := gitRun(t, repo, "diff", "--cached"); got != staged {
 		t.Fatal("retry changed the prepared release")
 	}
+	writeReleaseFixture(t, filepath.Join(repo, scaffoldFallbackRel), "package scaffold\nconst FallbackSDKVersion = \"v0.9.0\"\n")
 	t.Setenv("BASE_REF", strings.TrimSpace(before))
 	for _, invalid := range []string{
 		"# Changelog\n\n## [Unreleased]\n\n" + old,

@@ -34,6 +34,7 @@ type ApprovalConfig struct {
 const ApprovalDeny ApprovalTimeoutPolicy = "deny"
 const ApprovalFail ApprovalTimeoutPolicy = "fail"
 type ApprovalTimeoutPolicy string
+func AwaitChild(ctx context.Context, runID string) (string, error)
 type AwaitOption func(*awaitConfig)
 func Backoff(d time.Duration) RetryOption
 type Base struct{}

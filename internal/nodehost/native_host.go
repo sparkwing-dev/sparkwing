@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -58,6 +59,23 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	config.Source.Base.Masker = config.Masks.masker
 	config.Source.BuildEnvironment = config.Masks.environment(config.Source.BuildEnvironment)
+	claimedSource := config.Source
+	observe := config.Source.Timing
+	config.Source.Timing = func(ctx context.Context, timing source.Timing) {
+		if observe != nil {
+			observe(ctx, timing)
+		}
+		attrs, err := json.Marshal(timing)
+		if err == nil {
+			err = config.PlanningLog(ctx, config.Masks.masker.Log(nodeproto.FrameLog{
+				TS:    timing.StartedAt.Add(time.Duration(timing.DurationMS) * time.Millisecond).Format(time.RFC3339Nano),
+				Level: "info", Event: "preparation", Message: "source preparation", Attrs: attrs,
+			}))
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "preparation timing could not be recorded", "stage", timing.Stage)
+		}
+	}
 	processes := config.Processes
 	processes.Masks = config.Masks
 	processes.Session.Environments.Masks = config.Masks
@@ -125,7 +143,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		}
 	}
 	claimed := &ClaimedNodeHost{
-		Store: config.Store, Lease: config.Lease, Source: config.Source, Snapshots: config.Snapshots,
+		Store: config.Store, Lease: config.Lease, Source: claimedSource, Snapshots: config.Snapshots,
 		Executor: executor, Masker: config.Masks.masker, Masks: config.Masks, Admission: config.Admission,
 	}
 	if err := RegisterProcessServices(config.Router, processes.Authorities.Resolve); err != nil {
