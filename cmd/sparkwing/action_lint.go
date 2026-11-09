@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
@@ -40,6 +42,25 @@ func runPipelineLint(inv clisurface.Invocation) error {
 	if err != nil {
 		return err
 	}
+	typescript, err := pipelineentry.IsTypeScript(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	if typescript {
+		if parsed.pipeline != "" && cfg.Registry().EntrypointsByName()[parsed.pipeline] == "" {
+			return fmt.Errorf("lint: no pipeline named %q in %s", parsed.pipeline, filepath.Base(path))
+		}
+		const notice = "TypeScript pipelines aren't linted yet."
+		if parsed.output == "json" {
+			return json.NewEncoder(os.Stdout).Encode(struct {
+				Status string `json:"status"`
+				Notice string `json:"notice"`
+			}{Status: "unsupported", Notice: notice})
+		}
+		fmt.Println(notice)
+		return nil
+	}
+
 	sourceDir, err := resolveLintSourceDir(parsed.dir, path)
 	if err != nil {
 		return err

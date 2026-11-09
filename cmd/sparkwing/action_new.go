@@ -356,14 +356,22 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger,
 			return err
 		}
 	}
+	setupCommand := ""
+	if typescript {
+		setupCommand = "npm --prefix " + shellSingleQuote(sparkwingDir) + " install --package-lock-only --ignore-scripts --no-audit --no-fund"
+	}
 	if mode == "json" {
 		return json.NewEncoder(os.Stdout).Encode(struct {
-			Pipeline string `json:"pipeline"`
-			Path     string `json:"path"`
-		}{name, file})
+			Pipeline     string `json:"pipeline"`
+			Path         string `json:"path"`
+			SetupCommand string `json:"setup_command,omitempty"`
+		}{name, file, setupCommand})
 	}
 	if mode == "plain" {
 		_, err := fmt.Fprintln(os.Stdout, name)
+		if err == nil && setupCommand != "" {
+			_, err = fmt.Fprintln(os.Stdout, setupCommand)
+		}
 		return err
 	}
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
@@ -399,6 +407,10 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger,
 	tips := []InfoNextStep{
 		{Command: "sparkwing run " + name, Purpose: "run it"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
+	}
+
+	if setupCommand != "" {
+		tips = append([]InfoNextStep{{Command: setupCommand, Purpose: "create package-lock.json before the first run"}}, tips...)
 	}
 
 	if len(triggerEvents(trigger)) == 0 {

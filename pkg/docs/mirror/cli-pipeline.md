@@ -12,7 +12,7 @@ This repo's pipelines
 
 - `describe` -- Print one pipeline's full metadata
 - `hooks` -- Install / uninstall git pre-commit + pre-push + post-commit hooks
-- `lint` -- Check pipeline source for idiomatic anti-patterns (enforced gate)
+- `lint` -- Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as unsupported
 - `list` -- Enumerate every pipeline with metadata
 - `new` -- Scaffold a new Go or TypeScript pipeline
 - `plan` -- Render the runtime-resolved DAG without dispatching any jobs
@@ -104,7 +104,7 @@ Remove sparkwing-managed git hooks
 
 ## `sparkwing pipeline lint`
 
-Check pipeline source for idiomatic anti-patterns (enforced gate)
+Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as unsupported
 
 ### Flags
 
@@ -146,7 +146,7 @@ Scaffold a new Go or TypeScript pipeline
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
-| `--template SHAPE` | Go shape to scaffold, minimal by default; typescript creates a minimal TypeScript pipeline. |
+| `--template SHAPE` | Go shape to scaffold, minimal by default; typescript creates a minimal TypeScript pipeline and prints the npm lockfile setup command. |
 | `--on EVENT` | Trigger events to declare, comma separated, replacing the shape's default trigger; manual declares no trigger. |
 | `--hidden` | Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given. |
 | `--short TEXT` | One-line description to write into the generated pipeline source instead of a placeholder. |
