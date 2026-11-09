@@ -21,6 +21,7 @@ import (
 )
 
 type ExampleInputs struct {
+	PostDeploy    bool   `flag:"post-deploy" help:"Serialize scan jobs on the deploy runner"`
 	SecretName    string `flag:"secret-name" default:"EXAMPLE_GATE_SECRET" enum:"EXAMPLE_GATE_SECRET" help:"Optional declared secret to resolve without logging its value"`
 	FailOnce      bool   `flag:"fail-once" help:"Exercise failed-only retry with a deterministic first-attempt failure"`
 	CLI           string `flag:"cli" default:"sparkwing" help:"CLI built from the same source as the running engine"`
@@ -33,8 +34,10 @@ type ExampleInputs struct {
 }
 
 type exampleSecrets struct {
-	Value string `sw:"EXAMPLE_GATE_SECRET,optional"`
-	Probe string `sw:"EXAMPLE_PROBE_TOKEN,optional"`
+	Value      string `sw:"EXAMPLE_GATE_SECRET,optional"`
+	Probe      string `sw:"EXAMPLE_PROBE_TOKEN,optional"`
+	Staging    string `sw:"DEPLOY_SCAN_STAGING_TOKEN,optional"`
+	Production string `sw:"DEPLOY_SCAN_PRODUCTION_TOKEN,optional"`
 }
 
 const (
@@ -66,8 +69,10 @@ func exampleCLIDir(rc sparkwing.RunContext) string {
 
 // safety: resolved at job time because lifecycle-cli writes its wrapper after planning.
 func exampleLifecycle(in ExampleInputs, rc sparkwing.RunContext) (ExampleInputs, bool) {
-	if _, err := exec.LookPath(in.CLI); err == nil {
-		return in, true
+	if !in.PostDeploy {
+		if _, err := exec.LookPath(in.CLI); err == nil {
+			return in, true
+		}
 	}
 	wrapper := filepath.Join(exampleCLIDir(rc), "sparkwing")
 	if _, err := os.Stat(wrapper); err != nil {
@@ -81,7 +86,7 @@ func exampleLifecycle(in ExampleInputs, rc sparkwing.RunContext) (ExampleInputs,
 // candidate source and keep its profile in a private home, reaching the controller like a user.
 func exampleBuildCLI(in ExampleInputs, rc sparkwing.RunContext) func(context.Context) error {
 	return func(ctx context.Context) error {
-		token, err := sparkwing.Secret(ctx, exampleProbeToken)
+		token, err := sparkwing.Secret(ctx, exampleProbeCredential(in))
 		if err != nil {
 			return err
 		}
@@ -119,10 +124,10 @@ func exampleBuildCLI(in ExampleInputs, rc sparkwing.RunContext) func(context.Con
 
 func exampleProbe(plan *sparkwing.Plan, id string, in ExampleInputs, rc sparkwing.RunContext, cli *sparkwing.JobNode, check func(ExampleInputs, sparkwing.RunContext) func(context.Context) error) *sparkwing.JobNode {
 	// perf: a Cloud probe run schedules its own pods, so the local 90s budget is too tight there.
-	return sparkwing.Job(plan, id, func(ctx context.Context) error {
+	return exampleJob(plan, in, id, func(ctx context.Context) error {
 		resolved, _ := exampleLifecycle(in, rc)
 		return check(resolved, rc)(ctx)
-	}).Needs(cli).Inline().Timeout(5 * time.Minute)
+	}).Needs(cli).Inline().StartsChildren("example-probe").Timeout(5 * time.Minute)
 }
 
 func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.RunContext) *sparkwing.JobGroup {
@@ -131,11 +136,11 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	for _, osName := range []string{"linux", "darwin"} {
 		for _, arch := range []string{"amd64", "arm64"} {
 			value := osName + "/" + arch
-			node := sparkwing.Job(plan, "matrix-"+osName+"-"+arch, &exampleValue{Value: value})
+			node := exampleJob(plan, in, "matrix-"+osName+"-"+arch, &exampleValue{Value: value})
 			matrix = append(matrix, node)
 		}
 	}
-	matrixAssert := sparkwing.Job(plan, "matrix-assert", func(ctx context.Context) error {
+	matrixAssert := exampleJob(plan, in, "matrix-assert", func(ctx context.Context) error {
 		for i, node := range matrix {
 			want := []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64"}[i]
 			if got := sparkwing.RefTo[string](node).Get(ctx); got != want {
@@ -145,12 +150,12 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 		return nil
 	}).Needs(sparkwing.GroupJobs(plan, "matrix", matrix...))
 	all = append(all, matrixAssert)
-	source := sparkwing.Job(plan, "output-source", &exampleValue{Value: "example-output-v1"})
-	outputs := sparkwing.Job(plan, "outputs-assert", &exampleOutputJob{Source: sparkwing.RefTo[string](source)}).Needs(source)
+	source := exampleJob(plan, in, "output-source", &exampleValue{Value: "example-output-v1"})
+	outputs := exampleJob(plan, in, "outputs-assert", &exampleOutputJob{Source: sparkwing.RefTo[string](source)}).Needs(source)
 	all = append(all, outputs)
 	generator := source.Generate(func(ctx context.Context, generated *sparkwing.Plan) error {
 		value := sparkwing.RefTo[string](source).Get(ctx)
-		sparkwing.Job(generated, "generated-assert", func(context.Context) error {
+		exampleJob(generated, in, "generated-assert", func(context.Context) error {
 			if value != "example-output-v1" {
 				return fmt.Errorf("generated source output: %q", value)
 			}
@@ -158,9 +163,9 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 		})
 		return nil
 	})
-	all = append(all, sparkwing.Job(plan, "dynamic-child", func(ctx context.Context) error {
+	all = append(all, exampleJob(plan, in, "dynamic-child", func(ctx context.Context) error {
 		pipeline := strings.Join([]string{"weather", "report"}, "-")
-		var opts []sparkwing.AwaitOption
+		opts := []sparkwing.AwaitOption{sparkwing.WithFreshArgs(map[string]string{"post-deploy": fmt.Sprint(in.PostDeploy)})}
 		if in.ChildBranch != "" {
 			if rc.Git == nil || rc.Git.Repo == "" {
 				return fmt.Errorf("dynamic-child: --child-branch needs repository provenance")
@@ -176,7 +181,7 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 		}
 		return nil
 	}).NeedsGenerated(generator).StartsChildren("weather-report").Inline().Timeout(5*time.Minute))
-	secret := sparkwing.Job(plan, "scoped-secrets", func(ctx context.Context) error {
+	secret := exampleJob(plan, in, "scoped-secrets", func(ctx context.Context) error {
 		value, err := sparkwing.Secret(ctx, in.SecretName)
 		if err != nil {
 			return err
@@ -197,7 +202,7 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 		return false
 	})
 	all = append(all, secret)
-	all = append(all, sparkwing.Job(plan, "oidc-claims", func(ctx context.Context) error {
+	all = append(all, exampleJob(plan, in, "oidc-claims", func(ctx context.Context) error {
 		token, err := sparkwing.OIDCToken(ctx, "sparkwing-example-gate")
 		if err != nil {
 			return err
@@ -212,28 +217,30 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	}))
 	cachePath := filepath.Join(".sparkwing/cache/example-deps", rc.RunID)
 	cache := sparkwing.Dir(cachePath, sparkwing.KeyFromFile(".sparkwing/go.sum"))
-	reset := sparkwing.Job(plan, "dependency-cache-reset", func(context.Context) error { return os.RemoveAll(filepath.Join(sparkwing.WorkDir(), cachePath)) }).Inline()
-	seed := sparkwing.Job(plan, "dependency-cache-seed", func(context.Context) error {
+	reset := exampleJob(plan, in, "dependency-cache-reset", func(context.Context) error { return os.RemoveAll(filepath.Join(sparkwing.WorkDir(), cachePath)) }).Inline()
+	seed := exampleJob(plan, in, "dependency-cache-seed", func(context.Context) error {
 		return exampleWriteFile(filepath.Join(cachePath, "proof"), rc.RunID)
 	}).Needs(reset).Cache(cache)
-	clearCache := sparkwing.Job(plan, "dependency-cache-clear", func(context.Context) error { return os.RemoveAll(filepath.Join(sparkwing.WorkDir(), cachePath)) }).Needs(seed).Inline()
-	all = append(all, sparkwing.Job(plan, "dependency-cache-assert", func(context.Context) error {
+	clearCache := exampleJob(plan, in, "dependency-cache-clear", func(context.Context) error { return os.RemoveAll(filepath.Join(sparkwing.WorkDir(), cachePath)) }).Needs(seed).Inline()
+	all = append(all, exampleJob(plan, in, "dependency-cache-assert", func(context.Context) error {
 		return exampleFileEquals(filepath.Join(cachePath, "proof"), rc.RunID)
 	}).Needs(clearCache).Cache(cache))
 	artifactPath := ".sparkwing/cache/example-artifact/proof"
-	producer := sparkwing.Job(plan, "artifact-producer", func(context.Context) error { return exampleWriteFile(artifactPath, rc.RunID) }).Artifacts(artifactPath)
-	all = append(all, sparkwing.Job(plan, "artifacts-assert", func(context.Context) error {
+	producer := exampleJob(plan, in, "artifact-producer", func(context.Context) error { return exampleWriteFile(artifactPath, rc.RunID) }).Artifacts(artifactPath)
+	all = append(all, exampleJob(plan, in, "artifacts-assert", func(context.Context) error {
 		return exampleFileEquals(filepath.Join(".sparkwing/cache/example-consumed", artifactPath), rc.RunID)
 	}).Consumes(producer, sparkwing.Into(".sparkwing/cache/example-consumed")))
-	cli := sparkwing.Job(plan, "lifecycle-cli", exampleBuildCLI(in, rc)).Inline().Timeout(10 * time.Minute).SkipIf(func(ctx context.Context) bool {
-		if _, err := exec.LookPath(in.CLI); err == nil {
-			return exampleSkip(fmt.Sprintf("probes use CLI %q from this host", in.CLI))(ctx)
+	cli := exampleJob(plan, in, "lifecycle-cli", exampleBuildCLI(in, rc)).Inline().Timeout(10 * time.Minute).SkipIf(func(ctx context.Context) bool {
+		if !in.PostDeploy {
+			if _, err := exec.LookPath(in.CLI); err == nil {
+				return exampleSkip(fmt.Sprintf("probes use CLI %q from this host", in.CLI))(ctx)
+			}
 		}
 		if in.APIController == "" {
 			return exampleSkip("no --api-controller configured for an in-job CLI")(ctx)
 		}
-		if _, err := sparkwing.Secret(ctx, exampleProbeToken); errors.Is(err, sparkwing.ErrSecretMissing) {
-			return exampleSkip(exampleProbeToken + " is not stored")(ctx)
+		if _, err := sparkwing.Secret(ctx, exampleProbeCredential(in)); errors.Is(err, sparkwing.ErrSecretMissing) {
+			return exampleSkip(exampleProbeCredential(in) + " is not stored")(ctx)
 		}
 		return false
 	})
@@ -247,7 +254,7 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	all = append(all, retry)
 	all = append(all, exampleProbe(plan, "cancellation", in, rc, cli, exampleCancelCheck).SkipIf(exampleNeedsCLI(in, rc)))
 	all = append(all, exampleProbe(plan, "logs-history", in, rc, cli, exampleLogsHistory).SkipIf(exampleNeedsCLI(in, rc)))
-	all = append(all, sparkwing.Job(plan, "docker-assert", func(ctx context.Context) error {
+	all = append(all, exampleJob(plan, in, "docker-assert", func(ctx context.Context) error {
 		var out bytes.Buffer
 		if err := docker.Run(ctx, docker.RunOptions{Image: "alpine:3.22", Cmd: []string{"printf", "example-docker-ok"}, Stdout: &out}); err != nil {
 			return err
@@ -382,7 +389,12 @@ type exampleProbeRun struct {
 }
 
 func (r exampleProbeRun) await(ctx context.Context, in ExampleInputs) (exampleRunDetail, error) {
-	detail, err := exampleStatus(ctx, in, r.id, true)
+	if in.PostDeploy {
+		if _, err := sparkwing.AwaitChild(ctx, r.id); err != nil {
+			return exampleRunDetail{}, err
+		}
+	}
+	detail, err := exampleStatus(ctx, in, r.id, !in.PostDeploy)
 	if err == nil && (detail.Status == "success" || detail.Status == "failed" || detail.Status == "cancelled") {
 		r.release()
 	}
@@ -390,6 +402,17 @@ func (r exampleProbeRun) await(ctx context.Context, in ExampleInputs) (exampleRu
 }
 
 func exampleStart(ctx context.Context, in ExampleInputs, token string, extra ...string) (exampleProbeRun, error) {
+	if in.PostDeploy {
+		args := map[string]string{"token": token, "post-deploy": "true", "cli": in.CLI, "api-profile": in.APIProfile}
+		for _, arg := range extra {
+			args[strings.TrimPrefix(arg, "--")] = "true"
+		}
+		id, err := sparkwing.StartChild(ctx, "example-probe", args)
+		if err != nil {
+			return exampleProbeRun{}, err
+		}
+		return exampleTrackRun(ctx, in, id)
+	}
 	args := []string{"-C", sparkwing.WorkDir()}
 	if in.APIProfile == "" {
 		args = append(args, "run", "example-probe", "--sw-detached", "-o", "plain")
@@ -657,6 +680,7 @@ func exampleReference(in ExampleInputs) func(context.Context) error {
 }
 
 type ExampleProbeInputs struct {
+	PostDeploy bool   `flag:"post-deploy"`
 	Token      string `flag:"token" required:"true"`
 	FailOnce   bool   `flag:"fail-once"`
 	Long       bool   `flag:"long"`
@@ -669,7 +693,7 @@ type ExampleProbe struct{ sparkwing.Base }
 func (ExampleProbe) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleProbeInputs, rc sparkwing.RunContext) error {
 	source := sparkwing.Job(plan, "source", &exampleValue{Value: rc.RunID, Log: "example-probe-output-ok"})
 	memo := sparkwing.Job(plan, "memo", &exampleValue{Value: in.Token}).Memo(inputs.Const(in.Token))
-	sparkwing.Job(plan, "probe", func(ctx context.Context) error {
+	probe := sparkwing.Job(plan, "probe", func(ctx context.Context) error {
 		origin := sparkwing.RefTo[string](source).Get(ctx)
 		if origin == "" || sparkwing.RefTo[string](memo).Get(ctx) != in.Token {
 			return fmt.Errorf("probe: predecessor output was lost")
@@ -694,9 +718,25 @@ func (ExampleProbe) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleProb
 	if !in.Long {
 		long.SkipIf(exampleSkip("long probe not requested"))
 	}
+	if in.PostDeploy {
+		group := sparkwing.NewConcurrencyGroup("sparkwing-post-deploy-probes", sparkwing.ConcurrencyLimit{Capacity: 1})
+		for _, node := range []*sparkwing.JobNode{source, memo, probe, long} {
+			node.Requires("deploy-kikd-prod").Concurrency(group)
+		}
+	}
 	return nil
 }
 
 func init() {
 	sparkwing.Register("ExampleProbe", func() sparkwing.Pipeline[ExampleProbeInputs] { return &ExampleProbe{} })
+}
+
+func exampleProbeCredential(in ExampleInputs) string {
+	if !in.PostDeploy {
+		return exampleProbeToken
+	}
+	if in.APIController == defaultDeployConfig().Production.ControllerURL {
+		return "DEPLOY_SCAN_PRODUCTION_TOKEN"
+	}
+	return "DEPLOY_SCAN_STAGING_TOKEN"
 }

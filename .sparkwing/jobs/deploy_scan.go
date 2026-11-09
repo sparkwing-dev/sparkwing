@@ -60,7 +60,7 @@ func (DeployScan) Plan(_ context.Context, plan *sparkwing.Plan, in DeployScanArg
 	sparkwing.Job(plan, "scan", &deployScanJob{
 		Job:         deployJob{Cfg: cfg, Dry: dry, RunID: rc.RunID, Name: "scan"},
 		Environment: env, Record: in.Record, SourceCommit: sourceCommit,
-	}).Requires(labels...).Timeout(cfg.RunTimeout + 15*time.Minute)
+	}).Inline().Requires(labels...).StartsChildren("example").Timeout(cfg.RunTimeout + 15*time.Minute)
 	return nil
 }
 
@@ -120,7 +120,11 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 	rec = deployScanRecord{Environment: env.Name, DeployRun: deployRun, ScanRun: d.runID, Images: images}
 	started := d.tools.now()
 	completed := false
+	coalesced := false
 	defer func() {
+		if coalesced {
+			return
+		}
 		err = errors.Join(err, d.recordScanFinding(ctx, rec, completed, err))
 		if !d.dry {
 			sparkwing.Summary(ctx, fmt.Sprintf("%s post-deploy scan\n\nDeploy `%s`, commit `%s`, example `%s`\n\nController `%s`, runner `%s`\n\nElapsed: %s. Result: %v",
@@ -147,7 +151,7 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 	}); err != nil {
 		return rec, err
 	}
-	var hostErr error
+	var priorFinished bool
 	if err = d.act(ctx, "run full example scan on our hardware", func() error {
 		out, err := d.sw(ctx, "", "runs", "list", "--profile", profile, "--pipeline", "example", "--repo", "sparkwing-dev/sparkwing", "--sha", images.Commit, "--limit", "1", "-o", "json")
 		if err != nil {
@@ -166,18 +170,17 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 		}
 		if prior.ID != "" && (prior.FinishedAt.IsZero() || prior.FinishedAt.After(d.tools.now().Add(-time.Hour))) {
 			rec.ExampleRun = prior.ID
+			coalesced = prior.FinishedAt.IsZero()
+			priorFinished = !coalesced
 			return nil
 		}
-		runCtx, cancel := context.WithTimeout(ctx, d.cfg.RunTimeout)
-		defer cancel()
-		out, runErr := d.sw(runCtx, "", "pipeline", "trigger", "example", "-C", d.repoDir, "--profile", profile,
-			"--runner", "label=deploy-kikd-prod", "--detach", "-o", "json", "--ref", images.Commit,
-			"--", "--api-controller", env.ControllerURL)
-		rec.ExampleRun = acceptedRunID(out)
-		if rec.ExampleRun == "" {
-			return errors.Join(runErr, errors.New("example scan returned no run ID"))
+		rec.ExampleRun, err = d.tools.startChild(ctx, "example", map[string]string{"api-controller": env.ControllerURL, "post-deploy": "true"})
+		if err != nil {
+			return err
 		}
-		hostErr = runErr
+		if rec.ExampleRun == "" {
+			return errors.New("example scan returned no run ID")
+		}
 		return nil
 	}); err != nil {
 		return rec, err
@@ -186,29 +189,45 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 		sparkwing.Summary(ctx, fmt.Sprintf("%s full example scan `%s` for deploy `%s`, commit `%s`, controller `%s`, runner `%s`. Promotion does not wait for this scan.",
 			env.Name, rec.ExampleRun, rec.DeployRun, images.Commit, images.Controller.Digest, images.Runner.Digest))
 	}
-	err = errors.Join(hostErr, d.act(ctx, "observe full example scan on "+profile, func() error {
-		out, followErr := d.sw(ctx, "", "runs", "status", "--run", rec.ExampleRun, "--profile", profile, "--follow", "--exit-zero", "--timeout", d.cfg.RunTimeout.String(), "-o", "json")
-		if followErr != nil {
-			return followErr
+	if coalesced {
+		d.tools.say(ctx, "coalesced into in-flight example "+rec.ExampleRun+"; findings await its observation")
+		return rec, nil
+	}
+	err = d.act(ctx, "observe full example scan on "+profile, func() error {
+		var status string
+		if priorFinished {
+			out, err := d.sw(ctx, "", "runs", "status", "--run", rec.ExampleRun, "--profile", profile, "-o", "json")
+			if err != nil {
+				return err
+			}
+			detail, err := exampleDecodeStatus(out)
+			if err != nil {
+				return err
+			}
+			if detail.ID != rec.ExampleRun {
+				return fmt.Errorf("scan returned run %s, want %s", detail.ID, rec.ExampleRun)
+			}
+			status = detail.Status
+		} else {
+			runCtx, cancel := context.WithTimeout(ctx, d.cfg.RunTimeout)
+			defer cancel()
+			var err error
+			status, err = d.tools.awaitChild(runCtx, rec.ExampleRun)
+			if err != nil {
+				return err
+			}
 		}
-		detail, decodeErr := exampleDecodeStatus(out)
-		if decodeErr != nil {
-			return decodeErr
-		}
-		if detail.ID != rec.ExampleRun {
-			return fmt.Errorf("scan returned run %s, want %s", detail.ID, rec.ExampleRun)
-		}
-		switch detail.Status {
+		switch status {
 		case "success":
 			completed = true
 			return nil
-		case "failed", "cancelled":
+		case "failed", "cancelled", "skipped", "superseded":
 			completed = true
-			return fmt.Errorf("example run %s ended %s", rec.ExampleRun, detail.Status)
+			return fmt.Errorf("example run %s ended %s", rec.ExampleRun, status)
 		default:
-			return fmt.Errorf("example run %s is still %s", rec.ExampleRun, detail.Status)
+			return fmt.Errorf("example run %s is still %s", rec.ExampleRun, status)
 		}
-	}))
+	})
 	return rec, err
 }
 

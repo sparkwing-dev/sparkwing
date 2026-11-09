@@ -34,10 +34,6 @@ func TestDeployScanBindsRevisionAndReportsObservedOutcome(t *testing.T) {
 				var findingArgs []string
 				d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
 					joined := strings.Join(c.Args, " ")
-					if status == "failed" && filepath.Base(c.Name) == "sparkwing" && strings.HasPrefix(joined, "pipeline trigger") {
-						out, _ := f.run(ctx, c)
-						return out, errors.New("scan submission failed")
-					}
 					if filepath.Base(c.Name) == "bitwing" {
 						findingArgs = slices.Clone(c.Args)
 						if index := slices.Index(c.Args, "--file"); index >= 0 {
@@ -55,12 +51,15 @@ func TestDeployScanBindsRevisionAndReportsObservedOutcome(t *testing.T) {
 						if status == "unreachable" {
 							return "", errors.New("controller unavailable")
 						}
-						if !strings.Contains(joined, "--exit-zero") {
-							t.Fatal("scan must distinguish an observed failure from failed observation")
-						}
 						return fmt.Sprintf(`{"id":"run-example-%s-scan","status":%q}`, envName, status), nil
 					}
 					return f.run(ctx, c)
+				}
+				d.tools.awaitChild = func(context.Context, string) (string, error) {
+					if status == "unreachable" {
+						return "", errors.New("controller unavailable")
+					}
+					return status, nil
 				}
 				rec, err := d.postDeployScan(deployScanContext(t), env, f.candidate(), "run-original-deploy")
 				if (err == nil) != (status == "success") {
@@ -70,7 +69,7 @@ func TestDeployScanBindsRevisionAndReportsObservedOutcome(t *testing.T) {
 					t.Fatalf("scan lost deployment identity: %+v", rec)
 				}
 				if !slices.ContainsFunc(f.calls, func(call string) bool {
-					return strings.Contains(call, "pipeline trigger example") && strings.Contains(call, "--ref "+f.head) && strings.HasSuffix(call, "-- --api-controller "+env.ControllerURL)
+					return strings.HasPrefix(call, "child start example ") && strings.Contains(call, env.ControllerURL) && strings.Contains(call, `"post-deploy":"true"`)
 				}) {
 					t.Fatalf("scan is not revision-bound: %v", f.calls)
 				}
@@ -103,11 +102,12 @@ func TestDeployScanFeedbackFailureFailsTheJob(t *testing.T) {
 		if filepath.Base(c.Name) == "bitwing" {
 			return "", errors.New("ledger unavailable")
 		}
-		if filepath.Base(c.Name) == "sparkwing" && len(c.Args) > 1 && c.Args[0] == "runs" {
+		if filepath.Base(c.Name) == "sparkwing" && len(c.Args) > 1 && c.Args[0] == "runs" && c.Args[1] == "status" {
 			return `{"id":"run-example-staging-scan","status":"failed"}`, nil
 		}
 		return f.run(ctx, c)
 	}
+	d.tools.awaitChild = func(context.Context, string) (string, error) { return "failed", nil }
 	_, err := d.postDeployScan(deployScanContext(t), d.cfg.Staging, f.candidate(), "run-original-deploy")
 	if err == nil || !strings.Contains(err.Error(), "ended failed") || !strings.Contains(err.Error(), "ledger unavailable") {
 		t.Fatalf("scan or feedback failure was lost: %v", err)
@@ -266,7 +266,7 @@ func TestDeployScanPipelineSeparatesConcurrencyAndPinsSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(doc.Jobs) != 1 || !slices.Equal(doc.Jobs[0].Requires, []string{"deploy-kikd-prod"}) || len(doc.Concurrency) != 1 || doc.Concurrency[0].Group != "sparkwing-post-deploy" || *doc.Concurrency[0].Capacity != 1 {
+		if len(doc.Jobs) != 1 || !doc.Jobs[0].Inline || !slices.Equal(doc.Jobs[0].Requires, []string{"deploy-kikd-prod"}) || len(doc.Concurrency) != 1 || doc.Concurrency[0].Group != "sparkwing-post-deploy" || *doc.Concurrency[0].Capacity != 1 {
 			t.Fatalf("scans must share one slot across environments: %+v", doc)
 		}
 		rec.Images.Commit = strings.Repeat("a", 40)
@@ -389,21 +389,18 @@ func TestDeployScanFeedbackReportsMissingUserInstall(t *testing.T) {
 }
 
 func TestDeployScanRunsExampleOnItsOwnHardware(t *testing.T) {
-	f := newFakeDeploy(t)
-	d := f.deployer(false)
-	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
-		if filepath.Base(c.Name) == "sparkwing" && len(c.Args) > 1 && c.Args[0] == "runs" && c.Args[1] == "status" {
-			return `{"id":"run-example-production-scan","status":"success"}`, nil
-		}
-		if filepath.Base(c.Name) == "sparkwing" && slices.Contains(c.Args, "trigger") {
-			if !slices.Contains(c.Args, "label=deploy-kikd-prod") || !slices.Contains(c.Args, "--detach") || slices.Contains(c.Args, "--reason") || slices.Contains(c.Args, "here") || slices.Contains(c.Args, "cloud") {
-				t.Fatalf("full scans must stay on our hardware: %s", c)
-			}
-		}
-		return f.run(ctx, c)
-	}
-	if _, err := d.postDeployScan(deployScanContext(t), d.cfg.Production, f.candidate(), "run-deploy"); err != nil {
+	host := newTestHost(t, sparkwingtest.Options{})
+	doc, err := host.Plan(t.Context(), "Example", map[string]string{"post-deploy": "true", "api-controller": defaultDeployConfig().Production.ControllerURL})
+	if err != nil {
 		t.Fatal(err)
+	}
+	for _, job := range doc.Jobs {
+		if job.Approval != nil {
+			continue
+		}
+		if !slices.Equal(job.Requires, []string{"deploy-kikd-prod"}) || len(job.Concurrency) != 1 || job.Concurrency[0].Group != "sparkwing-post-deploy-work" || *job.Concurrency[0].Capacity != 1 {
+			t.Errorf("scan job %s can consume a second slot or leave our hardware: %+v", job.ID, job)
+		}
 	}
 }
 
@@ -432,10 +429,17 @@ func TestDeployScanReusesRunningAndRecentFailedExamples(t *testing.T) {
 					}
 					return fmt.Sprintf(`{"id":"%s","status":%q}`, c.Args[3], outcome), nil
 				}
-				if filepath.Base(c.Name) == "sparkwing" && slices.Contains(c.Args, "trigger") && status != "old" {
-					t.Fatal("repeated scan started another full example")
-				}
 				return f.run(ctx, c)
+			}
+			if status != "old" {
+				d.tools.startChild = func(context.Context, string, map[string]string) (string, error) {
+					t.Fatal("repeated scan started another full example")
+					return "", nil
+				}
+				d.tools.awaitChild = func(context.Context, string) (string, error) {
+					t.Fatal("coalesced scan waited with another slot")
+					return "", nil
+				}
 			}
 			rec, err := d.postDeployScan(deployScanContext(t), d.cfg.Production, f.candidate(), "run-deploy")
 			if (err != nil) != (status == "failed") || (rec.ExampleRun == "run-existing") != (status != "old") {
@@ -470,5 +474,116 @@ func TestDeployStagingLeavesTheFullScanForProduction(t *testing.T) {
 	}
 	if run, err := d.submitScan(t.Context(), d.cfg.Staging, f.candidate()); err != nil || run != "" {
 		t.Fatalf("staging scan = %q, %v", run, err)
+	}
+}
+
+func TestDeployScanUsesNativeChildSubmissionAndAwait(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	started, awaited := false, false
+	host := newTestHost(t, sparkwingtest.Options{
+		Secrets: map[string]sparkwingtest.Secret{"DEPLOY_SCAN_PRODUCTION_TOKEN": {Value: "fixture-token", Masked: true}},
+		StartChild: func(_ context.Context, pipeline string, args map[string]string) (string, error) {
+			started = true
+			if pipeline != "example" || args["post-deploy"] != "true" || args["api-controller"] != d.cfg.Production.ControllerURL {
+				t.Fatalf("scan child request = %s %v", pipeline, args)
+			}
+			return "native-example", nil
+		},
+		AwaitChild: func(_ context.Context, run string) (string, error) {
+			awaited = true
+			if !started || run != "native-example" {
+				t.Fatalf("await = %q, started = %v", run, started)
+			}
+			return "success", nil
+		},
+	})
+	d.tools.startChild, d.tools.awaitChild = sparkwing.StartChild, sparkwing.AwaitChild
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, "scan", func(ctx context.Context) error {
+		rec, err := d.postDeployScan(ctx, d.cfg.Production, f.candidate(), "deploy")
+		if err == nil && rec.ExampleRun != "native-example" {
+			t.Errorf("scan run = %q", rec.ExampleRun)
+		}
+		return err
+	}).StartsChildren("example")
+	_, err := host.RunStep(t.Context(), plan, "scan", "run")
+	if err != nil || !started || !awaited {
+		t.Fatalf("native scan: started=%v awaited=%v error=%v", started, awaited, err)
+	}
+}
+
+func TestDeployScanDeclaresNativeExampleChild(t *testing.T) {
+	f := newFakeDeploy(t)
+	rec, err := json.Marshal(deployScanRecord{Environment: "production", DeployRun: "deploy", Images: f.candidate()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := newTestHost(t, sparkwingtest.Options{})
+	doc, err := host.Plan(t.Context(), "DeployScan", map[string]string{"environment": "production", "record": string(rec)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Jobs[0].Children) != 1 || doc.Jobs[0].Children[0].Pipeline != "example" {
+		t.Fatalf("scan must declare its native child: %+v", doc.Jobs[0])
+	}
+}
+
+func TestDeployScanSerializesGeneratedWorkAndOwnedProbeJobs(t *testing.T) {
+	host := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"output-source": []byte(`"example-output-v1"`)}})
+	plan := sparkwing.NewPlan()
+	if err := (&Example{}).Plan(t.Context(), plan, ExampleInputs{PostDeploy: true, APIController: defaultDeployConfig().Production.ControllerURL}, sparkwing.RunContext{}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := host.Plan(t.Context(), "Example", map[string]string{"post-deploy": "true", "api-controller": defaultDeployConfig().Production.ControllerURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range doc.Jobs {
+		if job.ID != "output-source" {
+			continue
+		}
+		raw, err := host.Eval(t.Context(), plan, job.ID, job.Closures.Generate[0], []byte(`"example-output-v1"`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var expanded struct{ Jobs []jobDocument }
+		if err := json.Unmarshal(raw, &expanded); err != nil {
+			t.Fatal(err)
+		}
+		if len(expanded.Jobs) != 1 || len(expanded.Jobs[0].Concurrency) != 1 || expanded.Jobs[0].Concurrency[0].Group != "sparkwing-post-deploy-work" || !slices.Equal(expanded.Jobs[0].Requires, []string{"deploy-kikd-prod"}) {
+			t.Fatalf("generated scan escaped admission: %s", raw)
+		}
+	}
+	probe, err := host.Plan(t.Context(), "ExampleProbe", map[string]string{"token": "scan", "post-deploy": "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range probe.Jobs {
+		if !slices.Equal(job.Requires, []string{"deploy-kikd-prod"}) || len(job.Concurrency) != 1 || job.Concurrency[0].Group != "sparkwing-post-deploy-probes" || *job.Concurrency[0].Capacity != 1 {
+			t.Errorf("probe job escaped scan capacity: %+v", job)
+		}
+	}
+	weather, err := host.Plan(t.Context(), "WeatherReport", map[string]string{"post-deploy": "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(weather.Jobs[0].Requires, []string{"deploy-kikd-prod"}) || len(weather.Jobs[0].Concurrency) != 0 {
+		t.Fatalf("weather child must use owned hardware without taking its parent's group: %+v", weather.Jobs[0])
+	}
+}
+
+func TestDeployScanLifecycleProbeUsesNativeSubmissionBeforeCleanup(t *testing.T) {
+	calls := 0
+	host := newTestHost(t, sparkwingtest.Options{StartChild: func(_ context.Context, pipeline string, args map[string]string) (string, error) {
+		calls++
+		if pipeline != "example-probe" || args["post-deploy"] != "true" || args["token"] != "probe" || args["long"] != "true" {
+			t.Fatalf("probe child = %s %v", pipeline, args)
+		}
+		return "native-probe", nil
+	}})
+	_, err := exampleStart(host.Context(t.Context()), ExampleInputs{PostDeploy: true, CLI: "true", APIProfile: "scan"}, "probe", "--long")
+	if calls != 1 || err == nil || !strings.Contains(err.Error(), "fake host does not execute cleanups") {
+		t.Fatalf("native probe calls=%d error=%v", calls, err)
 	}
 }

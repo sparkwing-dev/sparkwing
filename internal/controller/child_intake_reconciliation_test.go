@@ -274,3 +274,29 @@ func TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority(t
 		t.Fatal(err)
 	}
 }
+
+func TestNativeScanChildKeepsVerifiedDefaultProvenance(t *testing.T) {
+	e, h, claim := childIntakeFixtureWith(t, func(e *engineFixture) { declareChildren(t, e, "example") })
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := appProvenance(t, runspec.AppFacts{Repository: "acme/repo", RepositoryID: 1, Event: "push", DeliveryKey: "scan-delivery", VerifiedAt: time.Now(), Ref: "refs/heads/main", SHA: parent.Request.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, "deploy")
+	engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, sealWith(t, parent.Request, proof))
+	response := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "example", parent.Request.Request.Git), 201)
+	var created controllerwire.CreateRunResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	child, err := tenant.ReadRun(t.Context(), created.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Request.Provenance != proof || child.Request.Provenance.Trust() != runspec.TrustVerifiedDefault || child.Request.Request.Git.SHA != parent.Request.Request.Git.SHA {
+		t.Fatalf("native scan lost its deploy proof or revision: %+v", child.Request)
+	}
+}

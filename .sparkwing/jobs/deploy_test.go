@@ -635,10 +635,18 @@ func (f *fakeDeploy) deployer(dry bool) *deployer {
 			f.mu.Lock()
 			f.calls = append(f.calls, "child start "+pipeline+" "+string(raw))
 			f.mu.Unlock()
+			if pipeline == "example" {
+				env := "staging"
+				if args["api-controller"] == defaultDeployConfig().Production.ControllerURL {
+					env = "production"
+				}
+				return "run-example-" + env + "-scan", nil
+			}
 			return "run-" + pipeline + "-" + args["environment"], nil
 		},
-		run:      f.run,
-		registry: f.registry,
+		awaitChild: func(context.Context, string) (string, error) { return "success", nil },
+		run:        f.run,
+		registry:   f.registry,
 		oidc: func(context.Context, string) (string, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
