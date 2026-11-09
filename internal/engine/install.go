@@ -37,7 +37,7 @@ type SDKInstallRequest struct {
 	NoBincache          bool              `json:"no_bincache,omitempty"`
 	HashAllFiles        bool              `json:"hash_all_files,omitempty"`
 	ExportHandoff       bool              `json:"export_handoff,omitempty"`
-	Handoff             string            `json:"handoff,omitempty"`
+	Handoff             string            `json:"-"`
 	Environment         []string          `json:"-"`
 	Masker              *secrets.Masker   `json:"-"`
 }
@@ -88,9 +88,6 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 	if pin != r.Identity.Pin {
 		return SDKCommand{}, integrity(errors.New("checkout SDK pin changed after engine selection"))
 	}
-	if err := r.verifyInstalledEngine(); err != nil {
-		return SDKCommand{}, err
-	}
 	masker := request.Masker
 	if masker == nil {
 		masker = secrets.NewMasker()
@@ -113,6 +110,13 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 		}()
 	}
 	request.Engine = r.Identity
+	if restored, reused := restoreSDKHandoff(ctx, dir, request, environment); reused {
+		restored.ownedDirectory = ownedDirectory
+		return restored, nil
+	}
+	if err := r.verifyInstalledEngine(); err != nil {
+		return SDKCommand{}, err
+	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return SDKCommand{}, err

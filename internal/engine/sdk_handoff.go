@@ -1,4 +1,4 @@
-package sdkinstall
+package engine
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -21,8 +21,6 @@ import (
 
 type installationHandoff struct {
 	Engine           engineid.Identity
-	Version          string
-	Pin              engineid.Pin
 	Directory        string
 	Environment      string
 	HashAllFiles     bool
@@ -41,7 +39,7 @@ func handoffEnvironment(environment procenv.Env) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func executableDigest(path string) (string, error) {
+func sdkExecutableDigest(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -54,15 +52,16 @@ func executableDigest(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func writeHandoff(version, dir string, pin engineid.Pin, request engine.SDKInstallRequest, environment procenv.Env, command engine.SDKCommand, inputs *bincache.InputWitness) string {
+// WriteSDKHandoff records a verified invocation for reuse by a local owner.
+func WriteSDKHandoff(dir string, request SDKInstallRequest, environment procenv.Env, command SDKCommand, inputs *bincache.InputWitness) string {
 	if command.CachedExecutable == "" || len(command.Command) != 1 || inputs == nil || inputs.Disabled || len(inputs.States) == 0 || inputs.Tool == "" || len(inputs.Settings) == 0 {
 		return ""
 	}
-	digest, err := executableDigest(command.Command[0])
+	digest, err := sdkExecutableDigest(command.Command[0])
 	if err != nil {
 		return ""
 	}
-	receipt := installationHandoff{Engine: request.Engine, Version: version, Pin: pin, Directory: dir, Environment: handoffEnvironment(environment), HashAllFiles: request.HashAllFiles, Key: filepath.Base(filepath.Dir(command.CachedExecutable)), CachedExecutable: command.CachedExecutable, Digest: digest, Inputs: inputs}
+	receipt := installationHandoff{Engine: request.Engine, Directory: dir, Environment: handoffEnvironment(environment), HashAllFiles: request.HashAllFiles, Key: filepath.Base(filepath.Dir(command.CachedExecutable)), CachedExecutable: command.CachedExecutable, Digest: digest, Inputs: inputs}
 	body, err := json.Marshal(receipt)
 	if err != nil {
 		return ""
@@ -74,27 +73,27 @@ func writeHandoff(version, dir string, pin engineid.Pin, request engine.SDKInsta
 	return path
 }
 
-func restoreHandoff(ctx context.Context, version, dir string, pin engineid.Pin, request engine.SDKInstallRequest, environment procenv.Env) (engine.SDKCommand, bool) {
+func restoreSDKHandoff(ctx context.Context, dir string, request SDKInstallRequest, environment procenv.Env) (SDKCommand, bool) {
 	if request.Handoff == "" || request.NoBincache || request.SDK != engineid.GoSDK || !filepath.IsAbs(request.Handoff) {
-		return engine.SDKCommand{}, false
+		return SDKCommand{}, false
 	}
 	f, err := fssecure.OpenPrivateConfig(request.Handoff)
 	if err != nil {
-		return engine.SDKCommand{}, false
+		return SDKCommand{}, false
 	}
 	var receipt installationHandoff
 	err = json.NewDecoder(io.LimitReader(f, 16<<20)).Decode(&receipt)
 	closeErr := f.Close()
-	if err != nil || closeErr != nil || receipt.Engine != request.Engine || receipt.Version != version || receipt.Pin != pin || receipt.Directory != dir || receipt.Environment != handoffEnvironment(environment) || receipt.HashAllFiles != request.HashAllFiles || receipt.Inputs == nil {
-		return engine.SDKCommand{}, false
+	if err != nil || closeErr != nil || receipt.Engine != request.Engine || receipt.Directory != dir || receipt.Environment != handoffEnvironment(environment) || receipt.HashAllFiles != request.HashAllFiles || receipt.Inputs == nil {
+		return SDKCommand{}, false
 	}
 	entry, err := bincache.PipelineEntry(receipt.Key)
 	if err != nil {
-		return engine.SDKCommand{}, false
+		return SDKCommand{}, false
 	}
 	lease, found, err := entry.Acquire(ctx)
 	if err != nil || !found {
-		return engine.SDKCommand{}, false
+		return SDKCommand{}, false
 	}
 	defer func() {
 		if err := lease.Release(); err != nil {
@@ -102,19 +101,23 @@ func restoreHandoff(ctx context.Context, version, dir string, pin engineid.Pin, 
 		}
 	}()
 	if lease.CachedPath() != receipt.CachedExecutable {
-		return engine.SDKCommand{}, false
+		return SDKCommand{}, false
 	}
-	path := filepath.Join(request.ExecutableDirectory, "pipeline")
+	name := "pipeline"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(request.ExecutableDirectory, name)
 	binary, err := lease.Install(path)
 	if err != nil {
-		return engine.SDKCommand{}, false
+		return SDKCommand{}, false
 	}
-	digest, err := executableDigest(binary.Path())
+	digest, err := sdkExecutableDigest(binary.Path())
 	if err != nil || digest != receipt.Digest || !receipt.Inputs.Valid(ctx) {
 		if err := os.Remove(path); err != nil {
 			slog.WarnContext(ctx, "remove rejected local SDK handoff", "error", err)
 		}
-		return engine.SDKCommand{}, false
+		return SDKCommand{}, false
 	}
-	return engine.SDKCommand{Directory: dir, Command: []string{binary.Path()}, CachedExecutable: lease.CachedPath(), Reused: true}, true
+	return SDKCommand{Directory: dir, Command: []string{binary.Path()}, CachedExecutable: lease.CachedPath(), Reused: true}, true
 }

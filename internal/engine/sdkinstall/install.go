@@ -60,10 +60,6 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	if err != nil {
 		return err
 	}
-	if command, reused := restoreHandoff(ctx, version, dir, pin, request, environment); reused {
-		fmt.Fprintln(diagnostics, "Cache hit: verified local SDK handoff")
-		return json.NewEncoder(output).Encode(command)
-	}
 	var inputs *bincache.InputWitness
 	if request.ExportHandoff && request.SDK == engineid.GoSDK && !request.NoBincache {
 		ctx, inputs = bincache.WithInputWitness(ctx)
@@ -80,7 +76,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	}
 	result := engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable}
 	if inputs != nil {
-		result.Handoff = writeHandoff(version, dir, pin, request, environment, result, inputs)
+		result.Handoff = engine.WriteSDKHandoff(dir, request, environment, result, inputs)
 	}
 	return json.NewEncoder(output).Encode(result)
 }
