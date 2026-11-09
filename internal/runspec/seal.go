@@ -53,7 +53,7 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 	if request.Mode == IntakeExecute && (!IsCommitID(request.Git.SHA) || !IsCommitID(request.Source.Ref)) {
 		return SealedRequest{}, &apierr.Error{Code: apierr.InvalidArgs, Message: "executable intake requires resolved execution and code commits"}
 	}
-	if request.Source.WorkingTree && request.Source.Location.LocalCheckout == "" {
+	if request.Mode == IntakeExecute && request.Source.WorkingTree && request.Source.Location.LocalCheckout == "" {
 		return SealedRequest{}, &apierr.Error{Code: apierr.InvalidArgs, Message: "working-tree source requires a local checkout; for remote execution use sparkwing pipeline trigger --working-tree to upload a committed snapshot"}
 	}
 	for _, ref := range []string{request.Source.RequestedRef, request.Source.Ref, request.Source.Location.RemoteURL} {

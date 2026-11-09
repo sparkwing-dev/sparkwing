@@ -806,6 +806,9 @@ reserved, then is cancelled with the reason `monthly overflow allowance
 reached`.
 Deleting run history keeps its usage in the monthly total.
 
+Published working-tree history retains its source classification without sending
+the local checkout path. The controller imports history without executing it.
+
 Local publication has a 45-second request deadline. During publication, a second
 Ctrl-C abandons the upload and reports that the run stayed local-only. Publication
 failure preserves the local execution verdict. Published history never replaces

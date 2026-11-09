@@ -137,6 +137,7 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(home, "secrets.key"))
 	t.Setenv("TOKEN", burstIntakeSecret)
 	repo := burstIntakeRepository(t)
 	endpoint := "http://" + listener.Addr().String()

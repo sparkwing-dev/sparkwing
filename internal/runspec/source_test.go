@@ -22,6 +22,25 @@ func TestSourceSealPreservesLocalWorkingTreesAndRemoteSnapshots(t *testing.T) {
 	}
 }
 
+func TestWorkingTreePublicationNeedsNoLocalCheckout(t *testing.T) {
+	for _, mode := range []IntakeMode{IntakeExecute, IntakePublish} {
+		t.Run(string(mode), func(t *testing.T) {
+			sha := strings.Repeat("a", 40)
+			request := Request{Version: 1, Team: "team", Pipeline: "build", Mode: mode, Dispatch: DispatchHost, Git: Git{Repository: Repository{Key: "gh:1"}, SHA: sha}, Source: Source{WorkingTree: true, Ref: sha}}
+			sealed, err := SealRequest(request, IntakeFacts{RunID: "run"})
+			if mode == IntakeExecute {
+				if err == nil {
+					t.Fatal("executable working tree accepted without a checkout")
+				}
+				return
+			}
+			if err != nil || !sealed.Request.Source.WorkingTree || sealed.Request.Source.Location.LocalCheckout != "" {
+				t.Fatalf("working-tree history refused or changed: %+v %v", sealed, err)
+			}
+		})
+	}
+}
+
 func TestExecutableSealRequiresBothResolvedCommits(t *testing.T) {
 	property := func(execution, code string) bool {
 		request := Request{Version: 1, Team: "team", Pipeline: "build", Mode: IntakeExecute, Dispatch: DispatchHost, Git: Git{Repository: Repository{Key: "gh:1"}, SHA: execution}, Source: Source{Ref: code}}
