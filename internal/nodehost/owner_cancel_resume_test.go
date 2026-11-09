@@ -95,8 +95,13 @@ func TestOwnerSettlesCancellationRacingFinalJobReports(t *testing.T) {
 				id      string
 				outcome runstate.NodeState
 			}{
-				{"preconditions", runstate.NodeSuccess}, {"policy", ""}, {"review", runstate.NodeFailed},
-				{"gate", runstate.NodeSkipped}, {"race-touched", runstate.NodeSkipped}, {"record-tree", runstate.NodeSkipped}, {"land", runstate.NodeSkipped},
+				{"preconditions", runstate.NodeSuccess},
+				{"policy", ""},
+				{"review", runstate.NodeFailed},
+				{"gate", runstate.NodeSkipped},
+				{"race-touched", runstate.NodeSkipped},
+				{"record-tree", runstate.NodeSkipped},
+				{"land", runstate.NodeSkipped},
 			} {
 				status := runstate.StatusDone
 				if job.outcome == "" {
