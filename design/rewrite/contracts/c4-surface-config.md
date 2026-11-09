@@ -753,7 +753,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`Load`](../../../pkg/projectconfig/projectconfig.go#L35) | Load returns nil when the project file is absent. |
 | [`Discover`](../../../pkg/projectconfig/projectconfig.go#L51) | Discover searches upward for checkout declarations without reading machine settings. |
 | [`Validate`](../../../pkg/projectconfig/validate.go#L20) | Validate validates typed checkout declarations for seal-point consumers. |
-| [`Config.Registry`](../../../pkg/projectconfig/registry.go) | Projects validated declarations into dispatch metadata with explicit empty guards and requirements preserved. |
+| [`Config.Registry`](../../../pkg/projectconfig/registry.go) | Projects validated declarations into dispatch metadata with explicit empty guards preserved. Runner requirements stay in `Config` for settings resolution. |
 
 ### internal/userconfig
 
