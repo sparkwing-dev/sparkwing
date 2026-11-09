@@ -5,9 +5,11 @@ package nodehost
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -17,26 +19,64 @@ import (
 
 // A sink slower than the drain grace must still receive every byte the exited command wrote.
 func TestHostCommandKeepsBufferedOutputPastASlowSink(t *testing.T) {
-	req := nodeproto.ExecRequest{ID: "1", Argv: []string{"sh", "-c", "for i in 1 2 3; do head -c 4096 /dev/zero; sleep 0.05; done"}, Dir: t.TempDir(), Env: []string{"PATH=" + os.Getenv("PATH")}}
-	var got int
-	sink := func(_ string, chunk []byte, _ bool) error {
-		if len(chunk) > 0 {
-			got += len(chunk)
-			select {
-			case <-t.Context().Done():
-				return t.Context().Err()
-			// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex
-			case <-time.After(2 * commandDrainGrace):
-			}
+	for _, cancelWait := range []bool{false, true} {
+		name := "complete"
+		if cancelWait {
+			name = "cancel"
 		}
-		return nil
-	}
-	done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), sink, nil)
-	if err := endCommandSessions([]*commandSession{session}); err != nil {
-		t.Fatal(err)
-	}
-	if done.ExitCode != 0 || got != 12288 {
-		t.Fatalf("captured %d of 12288 bytes, exit %d", got, done.ExitCode)
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			req := nodeproto.ExecRequest{ID: "1", Argv: []string{"head", "-c", "12288", "/dev/zero"}, Dir: t.TempDir(), Env: []string{"PATH=" + os.Getenv("PATH")}}
+			entered := make(chan struct{})
+			var once sync.Once
+			var got int
+			var sinkErr error
+			sink := func(_ string, chunk []byte, _ bool) error {
+				if len(chunk) > 0 {
+					got += len(chunk)
+					once.Do(func() { close(entered) })
+					select {
+					case <-ctx.Done():
+						sinkErr = ctx.Err()
+						return sinkErr
+					// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex
+					case <-time.After(2 * commandDrainGrace):
+					}
+				}
+				return nil
+			}
+			finished := make(chan nodeproto.ExecDone, 1)
+			go func() {
+				done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), sink, nil)
+				if err := endCommandSessions([]*commandSession{session}); err != nil {
+					t.Error(err)
+				}
+				finished <- done
+			}()
+			bound, stop := context.WithTimeout(t.Context(), 5*time.Second)
+			defer stop()
+			select {
+			case <-entered:
+			case <-bound.Done():
+				t.Fatal("command output never reached the sink")
+			}
+			if cancelWait {
+				cancel()
+			}
+			select {
+			case done := <-finished:
+				if cancelWait {
+					if !errors.Is(sinkErr, context.Canceled) {
+						t.Fatalf("sink wait returned %v after cancellation", sinkErr)
+					}
+				} else if done.ExitCode != 0 || got != 12288 {
+					t.Fatalf("captured %d of 12288 bytes, exit %d", got, done.ExitCode)
+				}
+			case <-bound.Done():
+				t.Fatal("command did not finish after the sink wait")
+			}
+		})
 	}
 }
 
