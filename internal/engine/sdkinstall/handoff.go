@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,7 +96,11 @@ func restoreHandoff(ctx context.Context, version, dir string, pin engineid.Pin, 
 	if err != nil || !found {
 		return engine.SDKCommand{}, false
 	}
-	defer lease.Release()
+	defer func() {
+		if err := lease.Release(); err != nil {
+			slog.WarnContext(ctx, "release local SDK handoff lease", "error", err)
+		}
+	}()
 	if lease.CachedPath() != receipt.CachedExecutable {
 		return engine.SDKCommand{}, false
 	}
@@ -106,7 +111,9 @@ func restoreHandoff(ctx context.Context, version, dir string, pin engineid.Pin, 
 	}
 	digest, err := executableDigest(binary.Path())
 	if err != nil || digest != receipt.Digest || !receipt.Inputs.Valid(ctx) {
-		_ = os.Remove(path)
+		if err := os.Remove(path); err != nil {
+			slog.WarnContext(ctx, "remove rejected local SDK handoff", "error", err)
+		}
 		return engine.SDKCommand{}, false
 	}
 	return engine.SDKCommand{Directory: dir, Command: []string{binary.Path()}, CachedExecutable: lease.CachedPath(), Reused: true}, true

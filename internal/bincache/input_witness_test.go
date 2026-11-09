@@ -19,7 +19,7 @@ func newTreeWitness(t *testing.T) (*InputWitness, string) {
 	t.Helper()
 	root := t.TempDir()
 	path := filepath.Join(root, "main.go")
-	if err := os.WriteFile(path, []byte("package main\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, w := WithInputWitness(t.Context())
@@ -70,19 +70,19 @@ func TestInputWitnessRejectsSourceChanges(t *testing.T) {
 			}
 			switch name {
 			case "restored mtime":
-				if err := os.WriteFile(path, []byte("package mint\n"), 0600); err != nil {
+				if err := os.WriteFile(path, []byte("package mint\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				err = os.Chtimes(path, info.ModTime(), info.ModTime())
 			case "new source":
-				err = os.WriteFile(filepath.Join(filepath.Dir(path), "extra.go"), []byte("package main\n"), 0600)
+				err = os.WriteFile(filepath.Join(filepath.Dir(path), "extra.go"), []byte("package main\n"), 0o600)
 			case "new embed":
-				err = os.WriteFile(filepath.Join(filepath.Dir(path), "asset.txt"), []byte("new embedded content"), 0600)
+				err = os.WriteFile(filepath.Join(filepath.Dir(path), "asset.txt"), []byte("new embedded content"), 0o600)
 			case "deleted":
 				err = os.Remove(path)
 			case "replaced inode":
 				replacement := filepath.Join(t.TempDir(), "replacement")
-				if err := os.WriteFile(replacement, []byte("package main\n"), 0600); err != nil {
+				if err := os.WriteFile(replacement, []byte("package main\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Chtimes(replacement, info.ModTime(), info.ModTime()); err != nil {
@@ -114,7 +114,7 @@ func TestInputWitnessRejectsSymlinkAndCancellation(t *testing.T) {
 func TestInputWitnessIncludesExternalOverlaySource(t *testing.T) {
 	w, path := newTreeWitness(t)
 	external := filepath.Join(t.TempDir(), "replacement.go")
-	if err := os.WriteFile(external, []byte("package main\n"), 0600); err != nil {
+	if err := os.WriteFile(external, []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{path: external}})
@@ -122,7 +122,7 @@ func TestInputWitnessIncludesExternalOverlaySource(t *testing.T) {
 		t.Fatal(err)
 	}
 	overlayPath := filepath.Join(t.TempDir(), "overlay.json")
-	if err := os.WriteFile(overlayPath, overlay, 0600); err != nil {
+	if err := os.WriteFile(overlayPath, overlay, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	listing, err := json.Marshal(map[string]any{"Dir": filepath.Dir(path), "ImportPath": "test", "GoFiles": []string{filepath.Base(path)}})
@@ -135,7 +135,7 @@ func TestInputWitnessIncludesExternalOverlaySource(t *testing.T) {
 	if !w.Valid(t.Context()) {
 		t.Fatal("unchanged overlay inputs rejected")
 	}
-	if err := os.WriteFile(external, []byte("package mint\n"), 0600); err != nil {
+	if err := os.WriteFile(external, []byte("package mint\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if w.Valid(t.Context()) {
@@ -173,7 +173,7 @@ func TestInputWitnessFileSymlink(t *testing.T) {
 		t.Run(mutation, func(t *testing.T) {
 			w, path := newTreeWitness(t)
 			target := filepath.Join(t.TempDir(), "target.go")
-			if err := os.WriteFile(target, []byte("package main\n"), 0600); err != nil {
+			if err := os.WriteFile(target, []byte("package main\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			link := filepath.Join(filepath.Dir(path), "linked.go")
@@ -203,7 +203,7 @@ func TestInputWitnessFileSymlink(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				if err := os.WriteFile(target, []byte("package mint\n"), 0600); err != nil {
+				if err := os.WriteFile(target, []byte("package mint\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -246,10 +246,10 @@ func TestInputWitnessCoversIgnoredEmbedDirectory(t *testing.T) {
 
 	for name, body := range map[string]string{".gitignore": "assets/\n", "assets/first.txt": "embedded"} {
 		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -266,7 +266,7 @@ func TestInputWitnessCoversIgnoredEmbedDirectory(t *testing.T) {
 	if !w.Valid(t.Context()) {
 		t.Fatal("unchanged ignored embed source rejected")
 	}
-	if err := os.WriteFile(filepath.Join(root, "assets", "second.txt"), []byte("added embed"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "assets", "second.txt"), []byte("added embed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if w.Valid(t.Context()) {
