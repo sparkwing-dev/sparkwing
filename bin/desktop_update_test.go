@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestDesktopUpdateWaitsForWorkAndRefusesUnverifiedIdle(t *testing.T) {
@@ -75,11 +80,16 @@ printf '[{"headSha":"selected","status":"completed","conclusion":"%s"}]\n' "$res
 			write(filepath.Join(dest, "sparkwing"), `#!/bin/bash
 set -eu
 if [ "$1 $2" = 'runs list' ]; then
-  [ "$*" = 'runs list --profile= --status pending,running --since 0 --limit 5 -o json' ]
-  for n in 1 2 3 4 5; do
-    printf '{"id":"run-blocker-%s","pipeline":"check","status":"pending"}\n' "$n"
+  if [ -n "${UPDATER_REAL_CLI:-}" ]; then SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/key" exec "$UPDATER_REAL_CLI" "$@"; fi
+  case "$*" in
+    'runs list --profile= --status pending --since 0 --limit 5 -o json') ids='4 3 2 1'; status=pending ;;
+    'runs list --profile= --status running --since 0 --limit 5 -o json') ids='7 6 5'; status=running ;;
+    *) exit 1 ;;
+  esac
+  for n in $ids; do
+    printf '{"id":"run-blocker-%s","pipeline":"check","status":"%s"}\n' "$n" "$status"
   done
-  echo '{"kind":"page","truncated":true,"next_cursor":"more"}'
+  echo '{"kind":"page","truncated":false}'
   exit
 fi
 [ "$1 $2" = 'daemon status' ]
@@ -146,6 +156,44 @@ exec /bin/mv "$@"
 			}
 			environment := append(os.Environ(), "HOME="+home, "SPARKWING_HOME="+filepath.Join(home, "state"), "MODE="+mode,
 				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FIXTURE_INSTALLER="+filepath.Join(dir, "install.sh"), "FIXTURE_CANDIDATE="+filepath.Join(dir, "candidate"))
+			if cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY"); cli != "" && mode == "run" {
+				for _, state := range []string{filepath.Join(home, "state"), filepath.Join(home, "delivery")} {
+					if err := os.MkdirAll(state, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					db, err := teststore.Open(t, filepath.Join(state, "state.db"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					for n := 1; n <= 8; n++ {
+						status := "pending"
+						if n > 4 {
+							status = "running"
+						}
+						if n == 8 {
+							status = "failed"
+						}
+						if err := teststore.SeedRun(db, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-blocker-" + strconv.Itoa(n), Pipeline: "check", Status: status, DeclaredRepo: "acme/widgets"}}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := db.Close(); err != nil {
+						t.Fatal(err)
+					}
+					realEnv := append(environment, "SPARKWING_SECRETS_KEY_FILE="+filepath.Join(state, "key"), "SPARKWING_HOME="+state, "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"), "XDG_CONFIG_HOME="+filepath.Join(home, "config"))
+					if out, err := procenv.ControlCommandContext(t.Context(), realEnv, cli, "daemon", "restart", "--force", "-o", "json").CombinedOutput(); err != nil {
+						t.Fatalf("start real controller: %v: %s", err, out)
+					}
+					t.Cleanup(func() {
+						ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+						defer cancel()
+						if out, err := procenv.ControlCommandContext(ctx, realEnv, cli, "daemon", "stop", "-o", "json").CombinedOutput(); err != nil {
+							t.Errorf("stop real controller: %v: %s", err, out)
+						}
+					})
+				}
+				environment = append(environment, "UPDATER_REAL_CLI="+cli, "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"), "XDG_CONFIG_HOME="+filepath.Join(home, "config"))
+			}
 			controller := procenv.ControlCommand(environment, "/bin/sleep", "300")
 			if err := controller.Start(); err != nil {
 				t.Fatal(err)
@@ -194,9 +242,19 @@ exec /bin/mv "$@"
 				t.Fatalf("failure lacks updater diagnostic: %s", out)
 			}
 			if mode == "run" {
-				for _, want := range []string{"blocking run run-blocker-1 (check, pending)", "blocking run run-blocker-5", "7 active runs", "showing up to 5", "runs list --profile= --status pending,running --since 0 -o json", "drain timed out"} {
+				for _, want := range []string{"blocking run run-blocker-1 (check, pending)", "blocking run run-blocker-7 (check, running)", "7 active runs", "showing up to 5", `runs list --profile= --status "$status" --since 0 -o json`, "drain timed out"} {
 					if !strings.Contains(string(out), want) {
 						t.Fatalf("missing blocking-run diagnostic %q: %s", want, out)
+					}
+				}
+				if os.Getenv("SPARKWING_LOCAL_E2E_BINARY") != "" {
+					for _, line := range strings.Split(string(out), "\n") {
+						if command, ok := strings.CutPrefix(line, "desktop-update: inspect: "); ok {
+							details, err := procenv.ControlCommandContext(t.Context(), environment, "bash", "-c", command).CombinedOutput()
+							if err != nil || !strings.Contains(string(details), "run-blocker-6") || strings.Contains(string(details), "run-blocker-8") {
+								t.Fatalf("inspection command did not list all active runs: %v: %s", err, details)
+							}
+						}
 					}
 				}
 				if strings.Contains(string(out), "blocking run run-blocker-6") {
