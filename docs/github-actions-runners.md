@@ -200,6 +200,11 @@ and binds GitHub's reported workflow SHA to that commit before granting hosted
 runner trust. The approved branch supplies the workflow revision, while the
 original event supplies the workload revision.
 
+The fallback workflow must stay self-contained. Do not use `uses: ./...` local
+actions, relative reusable workflows, or check out the repository and then run
+its scripts. Those dependencies can change behavior on the fallback branch
+without changing the workflow bytes that the controller verifies.
+
 The approved ref must be a dedicated branch such as
 `refs/heads/sparkwing-fallback`. GitHub signs the fallback job's OIDC token
 with the dispatched ref, and that job runs pull-request and branch code, so
