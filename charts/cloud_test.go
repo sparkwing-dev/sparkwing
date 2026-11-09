@@ -56,6 +56,9 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 			t.Errorf("launcher lacks pinned %s: %v", prefix, c.Args)
 		}
 	}
+	if arg, _ := hasFlag(c.Args, "--docker-image="); !strings.HasPrefix(arg, "--docker-image=public.ecr.aws/docker/library/docker:") {
+		t.Errorf("Cloud Docker image must avoid Docker Hub's anonymous pull limit: %s", arg)
+	}
 	for _, want := range []string{"--namespace=sparkwing-cloud-jobs", "--controller=https://api.sparkwing.dev", "--credentials-dir=/etc/sparkwing/credentials", "--cpu-ceiling=2", "--memory-ceiling=8Gi"} {
 		if !containsArg(c.Args, want) {
 			t.Errorf("launcher lacks %q", want)

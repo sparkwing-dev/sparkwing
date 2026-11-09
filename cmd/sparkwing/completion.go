@@ -59,7 +59,7 @@ func runInternalComplete(inv clisurface.Invocation) error {
 			return err
 		}
 	}
-	return writeText(os.Stdout, "completion", out.String(), inv.Output(false))
+	return writeText(os.Stdout, "completion", out.String(), inv.Output(color.IsInteractiveStdout()))
 }
 
 func runInternalCompleteProfiles(w io.Writer, _ []string) error {

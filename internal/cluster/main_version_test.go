@@ -42,6 +42,10 @@ func TestRunnerVersionReportsStampedOfflineIdentity(t *testing.T) {
 }
 
 func TestRunnerVersionOutputModes(t *testing.T) {
+	var piped bytes.Buffer
+	if err := runRunnerVersion(&piped, nil, "v1.2.3"); err != nil || !json.Valid(piped.Bytes()) || bytes.Count(piped.Bytes(), []byte("\n")) != 1 {
+		t.Fatalf("default runner version must be one JSON record: %v", err)
+	}
 	for _, test := range []struct {
 		args []string
 		want string
@@ -81,6 +85,10 @@ func TestRunnerVersionHelpAndTopLevelUsage(t *testing.T) {
 		}
 	}
 
+	stdout.Reset()
+	if err := runRunnerVersionIO(&stdout, &diagnostics, []string{"--help"}, "v1.2.3"); err != nil || !json.Valid(stdout.Bytes()) {
+		t.Fatalf("default runner help must be JSON: %v", err)
+	}
 	stdout.Reset()
 	if err := runRunnerVersionIO(&stdout, &diagnostics, []string{"--help", "-o", "json"}, "v1.2.3"); err != nil {
 		t.Fatal(err)

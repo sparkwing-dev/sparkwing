@@ -458,7 +458,7 @@ func TestRepositoryUnreleasedSectionRollsForTheNextRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(root, "CHANGELOG.md"))
+	body, err := readChangelog(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func TestRepositoryUnreleasedSectionDeclaresEveryWireCut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(root, "CHANGELOG.md"))
+	body, err := readChangelog(root)
 	if err != nil {
 		t.Fatal(err)
 	}

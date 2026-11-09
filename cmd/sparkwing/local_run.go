@@ -97,7 +97,8 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 			return err
 		},
 		close: func() error {
-			defer cleanup()
+			// bug: unused client dials must close before the standalone API drains.
+			cleanup()
 			if standalone != nil {
 				return standalone.Stop(context.WithoutCancel(ctx))
 			}

@@ -28,8 +28,6 @@ const kubernetesE2EPipelineModuleRel = "testdata/k8s-e2e/repo/.sparkwing"
 var scaffoldFallbackVersionRe = regexp.MustCompile(`FallbackSDKVersion = "(v[^"]*)"`)
 
 var sparkwingPinArtifacts = []string{
-	"CHANGELOG.md",
-	"pkg/docs/changelog.md",
 	scaffoldFallbackRel,
 	".sparkwing/go.mod",
 	".sparkwing/go.sum",
@@ -540,12 +538,12 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	if headTag, tagErr := tagAtHead(ctx, repoRoot); tagErr == nil && headTag == latest {
 		return "", nil
 	}
-	if err := requireCleanSparkwingPinArtifacts(ctx, repoRoot); err != nil {
+	if err := requireCleanSparkwingPinArtifacts(ctx, repoRoot, latest); err != nil {
 		return "", err
 	}
 	defer func() {
 		if retErr != nil {
-			if err := restoreSparkwingPinArtifacts(context.WithoutCancel(ctx), repoRoot); err != nil {
+			if err := restoreSparkwingPinArtifacts(context.WithoutCancel(ctx), repoRoot, latest); err != nil {
 				retErr = errors.Join(retErr, fmt.Errorf("restore sparkwing pin artifacts: %w", err))
 			}
 		}
@@ -652,28 +650,53 @@ func regenerateScaffoldAPISnapshot(ctx context.Context, repoRoot string) error {
 	return nil
 }
 
-func requireCleanSparkwingPinArtifacts(ctx context.Context, repoRoot string) error {
+func pinBumpFragmentPaths(version string) []string {
+	name := "scaffold-pin-" + version + ".md"
+	return []string{"docs/changes/" + name, "pkg/docs/mirror/changes/" + name}
+}
+
+func pinBumpArtifacts(version string) []string {
+	return append(append([]string{}, sparkwingPinArtifacts...), pinBumpFragmentPaths(version)...)
+}
+
+func requireCleanSparkwingPinArtifacts(ctx context.Context, repoRoot, version string) error {
 	for _, path := range sparkwingPinArtifacts {
 		if err := exec.CommandContext(ctx, "git", "-C", repoRoot, "ls-files", "--error-unmatch", "--", path).Run(); err != nil {
 			return fmt.Errorf("sparkwing pin artifact %s is not tracked", path)
 		}
 	}
-	checks := [][]string{
-		append([]string{"-C", repoRoot, "diff", "--quiet", "--"}, sparkwingPinArtifacts...),
-		{"-C", repoRoot, "diff", "--cached", "--quiet", "--"},
+	args := append([]string{"status", "--porcelain", "--"}, pinBumpArtifacts(version)...)
+	out, err := captureGit(ctx, repoRoot, args...)
+	if err != nil {
+		return err
 	}
-	for _, args := range checks {
-		if err := exec.CommandContext(ctx, "git", args...).Run(); err != nil {
-			return fmt.Errorf("sparkwing pin artifacts have uncommitted changes")
-		}
+	if strings.TrimSpace(out) != "" {
+		return fmt.Errorf("sparkwing pin artifacts have uncommitted changes")
+	}
+	out, err = captureGit(ctx, repoRoot, "diff", "--cached", "--name-only")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) != "" {
+		return fmt.Errorf("sparkwing pin artifacts have uncommitted changes")
 	}
 	return nil
 }
 
-func restoreSparkwingPinArtifacts(ctx context.Context, repoRoot string) error {
-	args := append([]string{"-C", repoRoot, "restore", "--source=HEAD", "--staged", "--worktree", "--"}, sparkwingPinArtifacts...)
-	if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("git restore: %w\n%s", err, bytes.TrimSpace(out))
+func restoreSparkwingPinArtifacts(ctx context.Context, repoRoot, version string) error {
+	for _, path := range pinBumpArtifacts(version) {
+		if _, err := captureGit(ctx, repoRoot, "cat-file", "-e", "HEAD:"+path); err != nil {
+			if _, err := captureGit(ctx, repoRoot, "rm", "--cached", "--ignore-unmatch", "--", path); err != nil {
+				return err
+			}
+			if err := os.Remove(filepath.Join(repoRoot, path)); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			continue
+		}
+		if _, err := captureGit(ctx, repoRoot, "restore", "--source=HEAD", "--staged", "--worktree", "--", path); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -713,43 +736,16 @@ func readScaffoldVersionArtifact(repoRoot, rel string) (string, error) {
 // changelog gate covers, so a bump that writes no entry reds the trunk for every
 // contributor until one is written by hand.
 func recordPinBumpInChangelog(repoRoot, version string) error {
-	path := filepath.Join(repoRoot, "CHANGELOG.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if !releaseTagGrammar.MatchString(version) {
+		return fmt.Errorf("invalid pin version %q", version)
+	}
+	path := filepath.Join(repoRoot, pinBumpFragmentPaths(version)[0])
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	body := string(data)
-	entry := "- **scaffold:** `const FallbackSDKVersion` pins " + version +
+	entry := "### Changed\n\n- **scaffold:** `const FallbackSDKVersion` pins " + version +
 		", so a fresh scaffold compiles against that release.\n"
-	updated, err := insertUnreleasedChange(body, entry)
-	if err != nil {
-		return err
-	}
-	if updated == body {
-		return nil
-	}
-	// #nosec G703 -- a pipeline job writing under the repository it runs in
-	return os.WriteFile(path, []byte(updated), 0o644)
-}
-
-func insertUnreleasedChange(body, entry string) (string, error) {
-	const unreleased = "## [Unreleased]"
-	at := strings.Index(body, unreleased)
-	if at < 0 {
-		return "", fmt.Errorf("CHANGELOG.md carries no %s section", unreleased)
-	}
-	if strings.Contains(body, strings.TrimSuffix(entry, "\n")) {
-		return body, nil
-	}
-	rest := body[at+len(unreleased):]
-	const changed = "\n### Changed\n"
-	nextHeading := strings.Index(rest, "\n## ")
-	if head := strings.Index(rest, changed); head >= 0 && (nextHeading < 0 || head < nextHeading) {
-		cut := at + len(unreleased) + head + len(changed)
-		return body[:cut] + "\n" + entry + body[cut:], nil
-	}
-	cut := at + len(unreleased)
-	return body[:cut] + "\n" + changed + "\n" + entry + body[cut:], nil
+	return os.WriteFile(path, []byte(entry), 0o644)
 }
 
 func syncDocsMirror(ctx context.Context, repoRoot string) error {
@@ -790,13 +786,14 @@ func commitSparkwingPinBump(ctx context.Context, repoRoot, version string) error
 	addArgs := []string{
 		"-C", repoRoot, "add", "--",
 	}
-	addArgs = append(addArgs, sparkwingPinArtifacts...)
+	addArgs = append(addArgs, pinBumpArtifacts(version)...)
 	if out, err := exec.CommandContext(ctx, "git", addArgs...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git add: %w\n%s", err, bytes.TrimSpace(out))
 	}
 	commitArgs := []string{"-C", repoRoot}
 	commitArgs = append(commitArgs, pinBumpIdentityArgs(configuredGitIdentity(ctx, repoRoot))...)
-	commitArgs = append(commitArgs, "commit", "-m", "chore: bump sparkwing pin to "+version)
+	commitArgs = append(commitArgs, "commit", "-m", "chore: bump sparkwing pin to "+version, "--")
+	commitArgs = append(commitArgs, pinBumpArtifacts(version)...)
 	if out, err := exec.CommandContext(ctx, "git", commitArgs...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit: %w\n%s", err, bytes.TrimSpace(out))
 	}

@@ -288,6 +288,8 @@ for exact KEDA manifests, the reader role and Secret, and shared-pool labels.
   `kernel.dmesg_restrict=1` and `kernel.perf_event_paranoid=3` on those nodes,
   and bound node age (`expireAfter`, AMI drift) so kernel fixes reach them.
 - `launcher.dockerImage` is a digest-pinned `docker:<version>-dind` image. The
+  Cloud example uses the public ECR mirror because fresh nodes can exhaust
+  Docker Hub's anonymous pull allowance. The
   sidecar runs as root of the Pod's user namespace with namespaced `SYS_ADMIN`,
   `NET_ADMIN` and `SYS_PTRACE`, never privileged.
 - Jobs run in `<release namespace>-cloud-jobs` (`launcher.jobNamespace`), which

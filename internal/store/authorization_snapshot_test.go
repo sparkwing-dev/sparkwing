@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -145,5 +146,35 @@ func TestAuthorizationSnapshotReadsWithoutLocksAndMutationLocksAncestry(t *testi
 	}
 	if recording.options.ReadOnly || !reflect.DeepEqual(recording.locks, want) {
 		t.Fatalf("mutation locks: options=%+v got=%+v want=%+v", recording.options, recording.locks, want)
+	}
+}
+
+func TestAuthorizationSnapshotReadsEachAncestorOnce(t *testing.T) {
+	s, recording := singleCursorStore(t)
+	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)")
+	root := authorityRoot("root", "a")
+	authorityPersist(t, s, root)
+	child := authorityRoot("child", "a")
+	child.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
+	authorityPersist(t, s, child)
+	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
+		t.Run(fmt.Sprint(dialect), func(t *testing.T) {
+			s.dialect = dialect
+			reads := 0
+			recording.beforeQuery = func(query string) error {
+				if strings.Contains(query, "SELECT digest,authority_json,") {
+					reads++
+				}
+				return nil
+			}
+			defer func() { recording.beforeQuery = nil }()
+			principal := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}}
+			if err := s.AsOperator().CheckBinding(t.Context(), principal, capability.BindNone, capability.Target{Team: "a"}); err != nil {
+				t.Fatal(err)
+			}
+			if reads != 2 {
+				t.Fatalf("snapshot read ancestry %d times, want one read per ancestor (2)", reads)
+			}
+		})
 	}
 }

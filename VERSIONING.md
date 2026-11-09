@@ -49,14 +49,14 @@ vulnerabilities privately through the process in [SECURITY.md](./SECURITY.md).
 
 ## Release process
 
-- Every user-visible change requires a `CHANGELOG.md` entry under the current `[Unreleased]` section.
+- Every user-visible change requires a unique `docs/changes/<slug>.md` fragment. The CLI and checks collect fragments into `[Unreleased]`.
 - Sections follow [Keep a Changelog](https://keepachangelog.com/): `Added`, `Changed`, `Fixed`, `Removed`, `Security`, `Docs`. (`Deprecated` is omitted -- sparkwing is pre-1.0 and follows hard-cut semantics; removals go straight into `Removed` with a `(Breaking)` marker.)
 - Entry format: bold scope prefix, `(Breaking)` inline for breaks, link to migration guide. See [CHANGELOG-STYLE.md](./CHANGELOG-STYLE.md) for the rubric the pre-release manicuring agent applies.
 - Every breaking change in a release gets a corresponding H2 in `docs/migrations/v<X.Y.Z>.md`; releases with no breaking changes have no guide file.
-- CI requires a `CHANGELOG.md` entry for changes to `pkg/`, `sparkwing/`, or any `cmd/<binary>/*.go`. It also covers chart `values.yaml`, `values.schema.json`, templates, `Chart.yaml`, `Chart.lock`, vendored `.tgz` dependencies, and `internal/runners/k8s/k8s.go`, which owns the Kubernetes runner image-pull defaults. Tests and testdata are exempt. Other internal files, chart documentation, `docs/`, `examples/`, `web/`, `install/`, and `build/` remain exempt from this file-based check. User-visible changes outside these paths still require an entry under the policy above. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
+- CI requires a changelog fragment for changes to `pkg/`, `sparkwing/`, or any `cmd/<binary>/*.go`. It also covers chart `values.yaml`, `values.schema.json`, templates, `Chart.yaml`, `Chart.lock`, vendored `.tgz` dependencies, and `internal/runners/k8s/k8s.go`, which owns the Kubernetes runner image-pull defaults. Tests and testdata are exempt. Other internal files, chart documentation, `docs/`, `examples/`, `web/`, `install/`, and `build/` remain exempt from this file-based check. User-visible changes outside these paths still require an entry under the policy above. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
 - The chart source/archive check (`go test ./charts -run TestVendoredRunnerBundleMatchesItsSource`) compares runner-bundle values and templates with the vendored archive and checks its filename and lock version against the source version. After a chart change, update the chart version and dependency pin as needed, then run `helm dependency update ./charts/sparkwing-full` and commit the archive and lock together.
-- `pkg/docs/changelog.md` is a byte-identical copy of `CHANGELOG.md`, written by `bin/sync-docs.sh` and checked by `bin/sync-docs.sh --check`. It is committed because `go:embed` reads only the package's own directory, so a fresh clone and the module proxy both need the file present to build. Both files carry `merge=union` in `.gitattributes`, which resolves the changelog conflict every parallel landing would otherwise raise; the same inputs on both sides keep the pair byte-identical through the merge.
-- The release pipeline (`sparkwing run release -- --version vX.Y.Z`) renames `[Unreleased]` to `[vX.Y.Z] - YYYY-MM-DD` and commits before tagging. The GH-Actions release workflow extracts that section verbatim as the GitHub Release body via `bin/extract-changelog-section.sh`. A tag whose source carries no such section still releases: the body falls back to the annotated tag message, then to a line pointing at CHANGELOG.md. The CI/CD group is reintroducing the changelog-section requirement deliberately, along with the rest of the release-side checks.
+- `pkg/docs/changelog.md` is a byte-identical copy of `CHANGELOG.md`, written by `bin/sync-docs.sh` and checked by `bin/sync-docs.sh --check`. It is committed because `go:embed` reads only the package's own directory, so a fresh clone and the module proxy both need the file present to build. Fragment mirrors live under `pkg/docs/mirror/changes/` and `pkg/docs/mirror/migrations/unreleased/`. Normal authoring adds separate files and keeps the shared aggregates empty.
+- The release pipeline (`sparkwing run release -- --version vX.Y.Z`) collects the changelog and migration fragments, writes `[vX.Y.Z] - YYYY-MM-DD`, repoints migration links, and stages deletion of consumed source and mirror fragments. It commits after the release gates pass, before tagging. The publication workflow extracts that versioned section as the GitHub Release body, with the annotated tag message and then a changelog pointer as fallbacks.
 
 ## Wire protocol
 
@@ -112,7 +112,7 @@ Workflow when you change a covered API:
 2. Run `bash bin/regen-api-snapshot.sh`.
 3. Review the resulting `.apidiff/` diff -- that's the surface change
    reviewers will see.
-4. Add a `CHANGELOG.md` entry under `[Unreleased]` (Added / Changed /
+4. Add a unique `docs/changes/<slug>.md` fragment (Added / Changed /
    Removed).
 5. Commit both the source and the snapshot in the same PR.
 

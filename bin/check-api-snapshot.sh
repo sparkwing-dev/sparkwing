@@ -25,8 +25,8 @@ echo "" >&2
 echo "How to fix:" >&2
 echo "" >&2
 echo "  If this is an intentional API change:" >&2
-echo "    1. Update CHANGELOG.md under [Unreleased]" >&2
-echo "       (Added / Changed / Removed / Deprecated -- see VERSIONING.md)" >&2
+echo "    1. Add docs/changes/<slug>.md" >&2
+echo "       (Added / Changed / Removed -- see VERSIONING.md)" >&2
 echo "    2. Regenerate the snapshot:  bash bin/regen-api-snapshot.sh" >&2
 echo "    3. git add .apidiff/" >&2
 echo "" >&2

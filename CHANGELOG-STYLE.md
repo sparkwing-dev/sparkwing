@@ -9,6 +9,24 @@ Pairs with [VERSIONING.md](VERSIONING.md) (the stability policy)
 and the release pipeline in `.sparkwing/jobs/release.go` (which
 auto-renames `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD` on tag).
 
+## Authoring fragments
+
+Add a unique `docs/changes/<slug>.md` for each change. Start with a category
+heading and use the bullet shape below. A fragment may contain several categories.
+Add breaking-change prose as `docs/migrations/unreleased/<slug>.md`, starting
+with an H2. Link to `docs/migrations/_unreleased.md#<anchor>` because the CLI
+and release checks compose the fragments into that topic.
+
+Run `bash bin/sync-docs.sh` and commit each fragment with its matching mirror.
+Keep `[Unreleased]` in `CHANGELOG.md` empty and keep the migration placeholder.
+The release pipeline collects fragments in filename order, groups changelog
+categories, writes the released notes and consumes source and mirror fragments.
+The changelog gate accepts that release diff when it deletes fragments and adds
+a versioned section with entries. Later covered changes still need a fragment.
+Concurrent changes then add different files. Edits to the same note still need
+normal conflict resolution. Orientation table rows use union merge; review
+concurrent edits to the same rule for duplicate or contradictory rows.
+
 ## CHANGELOG.md structure
 
 One `## [Unreleased]` heading at the top, then released versions
@@ -74,7 +92,7 @@ one that requires a migration guide to exist.
 
 Until paid launch nothing is carried forward for existing users, so a
 `(Breaking)` entry needs no migration guide. A link it does carry must
-resolve: write that section in `docs/migrations/_unreleased.md` and link
+resolve: write that section in `docs/migrations/unreleased/<slug>.md` and link
 the entry to its anchor there; the release pipeline rolls the file to
 `vX.Y.Z.md` and repoints the link.
 
@@ -85,17 +103,10 @@ One file per release that contains a breaking change:
 the filename; the "from" version is always the prior release. Adopters
 jumping multiple versions read the files in chronological order.
 
-`docs/migrations/_unreleased.md` holds the sections the next release
-owes. `sparkwing run release` renames it to `v<X.Y.Z>.md`, retitles it
-`# Migrating to v<X.Y.Z>`, leaves a fresh `_unreleased.md` behind it, and
-commits that with the changelog rename, so each `(Breaking)` entry's link
-resolves and `https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` is
-stable for the releases that need it. A release with no breaking changes
-has no guide file.
-
-Retitling rewrites the `#` line and nothing else, so the paragraph under it
-is yours: write the release's opening summary into `_unreleased.md` as the
-sections land, not at cut time.
+`docs/migrations/unreleased/*.md` holds the sections the next release owes.
+The release pipeline collects them, retitles the guide, writes `v<X.Y.Z>.md`,
+resets the placeholder and adds the index row with the changelog commit.
+A release with no breaking changes has no guide file.
 
 ### File shape
 
@@ -153,7 +164,7 @@ Two layers, with deliberately separate concerns:
 - **The pre-release manicuring agent** does the judgment work: tightening
   prose, choosing scope prefixes, deciding which entries to merge,
   writing the migration-guide bodies into
-  `docs/migrations/_unreleased.md`, pulling internal-cleanup entries
+  `docs/migrations/unreleased/<slug>.md`, pulling internal-cleanup entries
   that don't belong in adopter-facing notes. The linter surfaces
   *what's wrong*; the agent decides *how to fix it*; the release
   pipeline does the mechanical rename, index row and link repointing.
@@ -200,10 +211,9 @@ and index without writing anything. The workflow's `release-verify`
 stage judges the same on the tagged source, so a tag pushed by hand is
 held to it too.
 
-## What goes in `[Unreleased]` between releases
+## Unreleased links
 
-Same shape as a released section, just under the `[Unreleased]`
-heading. A breaking entry that has a guide links
-`docs/migrations/_unreleased.md#<anchor>`, which the linter accepts
-inside `[Unreleased]` and which the release repoints to the rolled
-guide. Until paid launch a breaking entry may carry no link at all.
+Fragments use the same entry shape as a released section. A breaking entry
+links to `docs/migrations/_unreleased.md#<anchor>`. The linter resolves anchors
+against the collected migration fragments and the release repoints each link
+to the rolled guide. Until paid launch a breaking entry may carry no link.

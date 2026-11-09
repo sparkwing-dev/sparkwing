@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -185,5 +186,53 @@ func TestDeployRejectsCommitOutsideMain(t *testing.T) {
 	}
 	if deployGitIn(t, f.bare, "rev-parse", "main") != before {
 		t.Fatal("a commit outside main reached GitOps")
+	}
+}
+
+func TestDeployRejectsMainRewriteBeforeProductionWrite(t *testing.T) {
+	for _, phase := range []int{1, 2} {
+		t.Run(deployPhases[phase-1].name, func(t *testing.T) {
+			f := newFakeDeploy(t)
+			images := f.candidate()
+			d := f.deployer(false)
+			if _, _, err := d.deployTo(t.Context(), d.cfg.Staging, images); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.stagingGate(t.Context(), images); err != nil {
+				t.Fatal(err)
+			}
+			run := d.tools.run
+			prepared := 0
+			rewritten := false
+			d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+				out, err := run(ctx, c)
+				if err == nil && filepath.Base(c.Name) == "git" && slices.Equal(c.Args, []string{"rev-parse", "HEAD"}) && strings.Contains(c.Dir, "gitops-production") {
+					prepared++
+					if prepared == phase {
+						deployGitIn(t, filepath.Join(filepath.Dir(f.repo), "source.git"), "update-ref", "refs/heads/main", f.old.Commit)
+						rewritten = true
+					}
+				}
+				return out, err
+			}
+			_, err := d.promote(t.Context(), images)
+			if !rewritten {
+				t.Fatal("did not rewrite main between the initial ancestry read and the production write")
+			}
+			if err == nil || !strings.Contains(err.Error(), "refusing production GitOps push") || !strings.Contains(err.Error(), "not an ancestor of origin/main") {
+				t.Fatalf("force-removed candidate was not refused at the write: %v", err)
+			}
+			if pins := f.pinsOnMain("sparkwing"); pins.Controller != f.old.Controller || pins.Launcher != f.old.Runner {
+				t.Fatalf("force-removed candidate remained in production: %+v", pins)
+			}
+			for _, subject := range f.subjects() {
+				if strings.HasPrefix(subject, "deploy(production): "+deployPhases[phase-1].name+" ") {
+					t.Fatalf("the refused production phase reached GitOps: %s", subject)
+				}
+			}
+			if len(f.triggered("deploy-smoke")) != 1 {
+				t.Fatal("the refused promotion reached production Cloud smoke")
+			}
+		})
 	}
 }
