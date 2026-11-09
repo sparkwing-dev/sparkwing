@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -281,6 +282,23 @@ func TestLandOverlapsPolicyAndReviewBeforeTheGateAndPush(t *testing.T) {
 		}
 	}
 	t.Fatal("land job has no push step")
+}
+
+func TestLandFocusedPolicyReviewSelector(t *testing.T) {
+	var selected []string
+	for id := range landPlan(t) {
+		match, err := path.Match("*[wy]", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if match {
+			selected = append(selected, id)
+		}
+	}
+	slices.Sort(selected)
+	if !slices.Equal(selected, []string{"policy", "review"}) {
+		t.Fatalf("focused land selects %v, want policy and review", selected)
+	}
 }
 
 func TestLandReviewIsNeverSkipped(t *testing.T) {

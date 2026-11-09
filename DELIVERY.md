@@ -38,7 +38,8 @@ generated CLI reference (`bin/gen-cli-docs.sh --check`). Each answers in
 seconds with a warm build cache. Once it passes, the rest of
 the gate (the same jobs as `sparkwing run gate`) starts while review continues.
 Review is the same job as `sparkwing run review`, under `.review.yaml`. A focused
-policy/review run selects both with `--sw-only policy,review`. Selecting review
+policy/review run selects both with `--sw-only '*[wy]'` (the job names ending in
+`w` or `y`). Selecting review
 alone includes preconditions but skips policy. The policy
 job collects every finding before it fails; the heavy `gate` job likewise lets
 every heavy step report. Every change is reviewed, docs and
