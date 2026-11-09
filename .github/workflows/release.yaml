@@ -230,7 +230,7 @@ jobs:
       - name: Select TypeScript SDK release
         id: select
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ !inputs.verify_only && (inputs.tag || github.ref_name) || '' }}
         run: |
           set -euo pipefail
           previous="$RUNNER_TEMP/typescript-policy"
