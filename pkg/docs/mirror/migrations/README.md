@@ -1,11 +1,13 @@
 # Migration guides
 
 One guide per release that contains a breaking change; releases with
-no breaking changes have no guide. Write each section in
-[_unreleased.md](_unreleased.md) as the breaking change lands, and link
-the changelog entry to its anchor there. `sparkwing run release` rolls
-that file to `vX.Y.Z.md` when it cuts the tag, writes a fresh
-`_unreleased.md`, and adds the row below. Guides marked Before are historical
+no breaking changes have no guide. Write each section in a unique
+`docs/migrations/unreleased/<slug>.md` starting with an H2, and link the
+changelog fragment to its anchor in [_unreleased.md](_unreleased.md).
+The CLI composes that topic from the fragments. Run `bash bin/sync-docs.sh`
+and commit the matching mirror files. `sparkwing run release` collects the
+fragments into `vX.Y.Z.md`, consumes them, resets the placeholder and adds
+the row below. Guides marked Before are historical
 snapshots. Start with the latest guide and the unreleased changes for the
 current CLI.
 

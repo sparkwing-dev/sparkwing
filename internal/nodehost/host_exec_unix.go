@@ -138,3 +138,14 @@ func recordCommandSession(leader procgroup.SessionIdentity, env []string) func()
 	}
 	return release
 }
+
+func commandPipe() (*os.File, *os.File, error) { return os.Pipe() }
+
+func startHostCommand(cmd *exec.Cmd, env []string) (*commandSession, error) {
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return trackHostCommand(cmd, env), nil
+}
+
+func (*commandSession) signaled(cmd *exec.Cmd) bool { return !cmd.ProcessState.Exited() }

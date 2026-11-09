@@ -18,6 +18,7 @@ import (
 )
 
 type ReleaseArgs struct {
+	Commit  string `flag:"commit" desc:"Source commit, default HEAD (origin/main for weekly-release). Must be on origin/main. Successful exact-SHA push CI reuses verification; otherwise manual releases run local checks."`
 	Version string `flag:"version" desc:"Explicit release version (e.g. v0.24.0); sparkwing is locked to v0.x, so v1.0.0+ is refused. When empty, derived from latest origin tag + --bump."`
 	Bump    string `flag:"bump" desc:"Auto-bump kind when --version is empty: patch|minor|major. Default: minor"`
 }
@@ -33,18 +34,30 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "For an isolated preview, run HOME=\"$(mktemp -d)\" SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run. Cuts a release from the commit in the working tree: refuses to start unless SPARKWING_HOME names a directory other than ~/.sparkwing, resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, stages all of that, checks schema and wire change coverage, commits after every gate passes, then atomically pushes the changelog commit to main and an annotated vX.Y.Z tag. The push uses the recorded commit SHA from the original checkout, so a detached job snapshot cannot change what is released. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before changing the changelog, the release cut checks published module-version freshness, Go directive policy, SDK pin coherence and changelog links alongside build, full lint and the short test suite, under a forty-minute wall budget that includes thirty minutes of lint-lock allowance and the ten-minute check allowance. Lint prints that it is waiting for the box-wide lock before running. Local replacement checkouts are not required to match origin/main. Rolled changelog, migration-guide, schema and wire checks run before the changelog commit. A gate failure after preparation leaves HEAD unchanged with the prepared release files staged for inspection. Every refusal precedes push-tag. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
+	return "For an isolated preview, run HOME=\"$(mktemp -d)\" SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run. Select --commit SHA (default HEAD), require it on origin/main, and create a detached worktree. The selected source compiles and runs release-cut with a private SPARKWING_HOME. Successful exact-source CI replaces the broad build/lint/short suite under the pre-launch desktop-load waiver. Without that receipt, the manual cut runs those checks locally before publication. Published-version freshness, Go directives, coherent SDK pins, changelog links, docs sidebar, changelog/migration fragment collection and schema/wire checks still run. Prepared notes consume their source and mirror fragments. After those gates pass, commit only the prepared release notes and pins, and tag that release commit. Merge the metadata into fresh main in a separate detached worktree, preserving newer unreleased notes, then atomically push the merge and immutable tag. Retry only publication when main advances. Neither the caller checkout nor the tag incorporates newer main code. A failed cut retains its worktree for inspection. The tag workflow builds, signs and publishes artifacts. Once a tag is published, fixes require a later patch tag. This pipeline requires an isolated SPARKWING_HOME rather than ~/.sparkwing."
 }
 
 func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod"},
-		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod -- --version v0.24.0"},
+		{Comment: "Release an exact green commit", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod -- --version v0.24.0 --commit SHA"},
 		{Comment: "Preview without pushing", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run"},
 	}
 }
 
 func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
+	if r.homeError != nil {
+		return fmt.Errorf("release: %w", r.homeError)
+	}
+	plan.Concurrency(weeklyReleaseRuns)
+	sparkwing.Job(plan, "release-commit", &weeklyReleaseJob{RepoDir: sparkwing.WorkDir(), Args: in}).
+		Inline().Cores(lightJobCores).Timeout(90 * time.Minute)
+	return nil
+}
+
+type ReleaseCut struct{ Release }
+
+func (r *ReleaseCut) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
 	if r.homeError != nil {
 		return fmt.Errorf("release: %w", r.homeError)
 	}
@@ -73,6 +86,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 
 	clean := sparkwing.Job(plan, "check-clean-tree", &checkCleanTreeJob{
 		RepoDir: repoDir,
+		Source:  in.Commit,
 	})
 
 	// safety: the class judges the tree the tag will carry, and it judges it
@@ -108,6 +122,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
 		Commit:  sparkwing.RefTo[string](commit),
+		Source:  in.Commit,
 		RepoDir: repoDir,
 	}).Inline()
 	pushTag.Needs(commit)
@@ -271,6 +286,7 @@ func requireAheadOfNewestTag(version, newest string) error {
 }
 
 type checkCleanTreeJob struct {
+	Source string
 	sparkwing.Base
 	RepoDir string
 }
@@ -281,6 +297,19 @@ func (j *checkCleanTreeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error)
 }
 
 func (j *checkCleanTreeJob) run(ctx context.Context) error {
+	if j.Source == "" {
+		return errors.New("release-cut: use sparkwing run release -- --commit SHA to select an isolated source")
+	}
+	head, err := runGitIn(ctx, j.RepoDir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(head) != j.Source {
+		return fmt.Errorf("release-cut: HEAD must be selected source %s (got %s)", j.Source, strings.TrimSpace(head))
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "symbolic-ref", "-q", "HEAD"); err == nil {
+		return errors.New("release-cut: source must be a detached worktree; use sparkwing run release")
+	}
 	out, err := runGitIn(ctx, j.RepoDir, "status", "--porcelain")
 	if err != nil {
 		return fmt.Errorf("release: git status: %w", err)
@@ -335,11 +364,16 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	staged := []string{"CHANGELOG.md", embeddedChangelogRel}
-	if err := prepareReleasePins(ctx, j.RepoDir, version); err != nil {
-		return err
+	if !roll.needed {
+		pending, err := filepath.Glob(filepath.Join(j.RepoDir, migrationsDirRel, "unreleased", "*.md"))
+		if err != nil {
+			return err
+		}
+		if len(pending) > 0 {
+			return errors.New("release: migration fragments need a (Breaking) changelog entry before they can be collected")
+		}
 	}
-	staged = append(staged, sparkwingPinArtifacts[2:]...)
+	staged := []string{"CHANGELOG.md", embeddedChangelogRel}
 	switch {
 	case roll.needed && roll.guideOnDisk:
 		body = roll.changelogBody
@@ -371,10 +405,15 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if err := checkMigrationGuide(ctx, j.RepoDir, version); err != nil {
 		return fmt.Errorf("release migration-guide: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add"}, staged...)...); err != nil {
+	consumed, err := consumeReleaseFragments(j.RepoDir)
+	if err != nil {
+		return err
+	}
+	staged = append(staged, consumed...)
+	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add", "--"}, staged...)...); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
 	}
-	sparkwing.Info(ctx, "staged release notes and SDK pins for %s; commit waits for the schema and wire gates", version)
+	sparkwing.Info(ctx, "staged release notes for %s; commit waits for the schema and wire gates", version)
 	return nil
 }
 
@@ -400,7 +439,14 @@ func (j *commitChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 
 func (j *commitChangelogJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	pending, err := runGitIn(ctx, j.RepoDir, append([]string{"diff", "--cached", "--name-only", "--"}, releasePreparedPaths(version)...)...)
+	// safety: changing the sealed SDK pin before this job starts prevents source acquisition.
+	if err := prepareReleasePins(ctx, j.RepoDir, version); err != nil {
+		return err
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add", "--"}, sparkwingPinArtifacts...)...); err != nil {
+		return err
+	}
+	pending, err := runGitIn(ctx, j.RepoDir, append([]string{"diff", "--cached", "--no-renames", "--name-only", "--"}, releasePreparedPaths(version)...)...)
 	if err != nil {
 		return fmt.Errorf("release: read the staged set: %w", err)
 	}
@@ -417,7 +463,8 @@ func (j *commitChangelogJob) run(ctx context.Context) error {
 }
 
 func releasePreparedPaths(version string) []string {
-	paths := slices.Clone(sparkwingPinArtifacts)
+	paths := append([]string{"CHANGELOG.md", embeddedChangelogRel}, sparkwingPinArtifacts...)
+	paths = append(paths, releaseFragmentDirs...)
 	for _, name := range []string{version + ".md", unreleasedGuideName, migrationIndexName} {
 		paths = append(paths, migrationFileRels(name)...)
 	}
@@ -453,7 +500,7 @@ func releaseDateFor(body, version string) string {
 }
 
 func (j *prepareChangelogJob) planned(version string) (string, changelogRewrite, error) {
-	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	body, err := readChangelog(j.RepoDir)
 	if err != nil {
 		return "", changelogRewrite{}, fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
@@ -627,6 +674,7 @@ func unreleasedEntries(body string) (int, error) {
 }
 
 type pushTagJob struct {
+	Source string
 	sparkwing.Base
 	Version sparkwing.Ref[string]
 	Commit  sparkwing.Ref[string]
@@ -649,6 +697,9 @@ func (j *pushTagJob) run(ctx context.Context) error {
 	if exists {
 		return fmt.Errorf("release: tag %s appeared on origin between validate and push (race); abort", version)
 	}
+	if j.Source == "" {
+		return errors.New("release: missing selected source commit; use sparkwing run release -- --commit SHA")
+	}
 	commit := strings.TrimSpace(j.Commit.Get(ctx))
 	if commit == "" {
 		return errors.New("release: missing changelog commit; run commit-changelog before push-tag")
@@ -656,16 +707,12 @@ func (j *pushTagJob) run(ctx context.Context) error {
 	if _, err := runGitIn(ctx, j.RepoDir, "tag", "-a", version, commit, "-m", "Release "+version); err != nil {
 		return fmt.Errorf("release: create tag: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "push", "--atomic", "origin", commit+":refs/heads/main", "refs/tags/"+version); err != nil {
-		return fmt.Errorf("release: atomic push of main and tag: %w", err)
-	}
-	sparkwing.Info(ctx, "atomically pushed %s + main at %s to origin (GH-Actions release.yaml will take over)", version, commit)
-	return nil
+	return publishRelease(ctx, j.RepoDir, j.Source, commit, version)
 }
 
 func (j *pushTagJob) dryRun(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	sparkwing.Info(ctx, "dry-run: would tag the changelog commit as %s and atomically push main + tag to origin", version)
+	sparkwing.Info(ctx, "dry-run: would tag the detached changelog commit as %s, merge its metadata into fresh main, and atomically push main + tag", version)
 	return nil
 }
 
@@ -915,7 +962,7 @@ func checkSchemaBreak(ctx context.Context, repoDir, version string) error {
 		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d); gate passes", prevTag, curSchema)
 		return nil
 	}
-	body, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
+	body, err := readChangelog(repoDir)
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
@@ -964,7 +1011,7 @@ func checkWireBreak(ctx context.Context, repoDir, version string) error {
 		sparkwing.Info(ctx, "wire surface added to or unchanged since %s; gate passes", prevTag)
 		return nil
 	}
-	body, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
+	body, err := readChangelog(repoDir)
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
@@ -1026,6 +1073,9 @@ func fileAtTag(ctx context.Context, repoDir, tag, path string) (body string, pre
 }
 
 func init() {
+	sparkwing.Register[ReleaseArgs]("ReleaseCut", func() sparkwing.Pipeline[ReleaseArgs] {
+		return &ReleaseCut{Release: Release{homeError: requireReleaseHome(os.Getenv, os.UserHomeDir)}}
+	})
 	sparkwing.Register[ReleaseArgs]("Release", func() sparkwing.Pipeline[ReleaseArgs] {
 		// safety: discovery precedes intake, so a refusal cannot open or migrate the runs store.
 		return &Release{homeError: requireReleaseHome(os.Getenv, os.UserHomeDir)}

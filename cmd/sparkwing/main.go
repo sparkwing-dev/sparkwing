@@ -454,10 +454,7 @@ func resolveTTYAwareOutput(outputFormat, cmdPath string) (string, error) {
 	case "pretty", "json", "plain":
 		return outputFormat, nil
 	case "":
-		if color.IsInteractiveStdout() {
-			return "pretty", nil
-		}
-		return "json", nil
+		return clisurface.OutputFormat(outputFormat, color.IsInteractiveStdout()), nil
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outputFormat)
 	}

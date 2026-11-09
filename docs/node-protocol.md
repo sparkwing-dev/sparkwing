@@ -56,7 +56,7 @@ Hello occurs exactly once. A major mismatch returns `protocol_mismatch` with
 Documents and HTTP requests carry their own data without another version stamp.
 The current SDK and host use the same protocol contract. Hello carries identities
 and the process binding. Core requests and host services are sent directly.
-Linux and macOS run SDK commands in the host. Windows runs commands in the SDK.
+Linux, macOS and Windows run SDK commands in the host.
 
 ## Framing
 
@@ -329,14 +329,20 @@ has stopped. That operation also receives its own reply.
 
 ### Host-run commands
 
-On Linux and macOS, SDKs send commands as frames and the host owns execution,
+SDKs send commands as frames and the host owns execution,
 masking, cancellation and crash cleanup. `env` is the complete SDK process
 environment plus command overrides. The host strips engine credentials and
 protocol variables. `dir` must be absolute. Both clients use the command's `PATH`,
-resolving relative and empty entries against `dir`. An absent `PATH` searches
-`/bin:/usr/bin`. Executable text without `#!` runs through `/bin/sh`.
-Children a command leaves running in the background survive its exit. The host
-kills them when the SDK session ends.
+resolving relative and empty entries against `dir`. On Unix, an absent `PATH`
+searches `/bin:/usr/bin`, and executable text without
+`#!` runs through `/bin/sh`. Windows searches the requested working directory
+and `PATH`, using case-insensitive environment names and `PATHEXT` extension
+order. An absent Windows `PATH` uses the host path. An empty or absent `PATHEXT`
+uses `.com;.exe;.bat;.cmd`. Explicit paths bypass `PATH`. Windows commands start
+suspended in their own kill-on-close Job Objects before any tool code runs.
+Children a command leaves in the background survive its exit, and the host kills
+them when the SDK session ends. A lingering child cannot hold command pipes open
+past the drain grace. Bytes already buffered still drain, even through a slow sink.
 
 ```text
 <- {"exec":"4","step":"compile","argv":["go","build","./..."],"dir":"/repo","env":["PATH=/usr/bin:/bin","LANG=C.UTF-8"]}
@@ -379,6 +385,12 @@ error object in its `error` member.
 | POST | `/node/v1/summary` | `{markdown, step?}` | `{}` |
 | POST | `/node/v1/helpers` | `{operation, args, dir, env, step?}` | `{result, error?, code?}` |
 <!-- node-routes:end -->
+
+Child awaits keep the same authorized host request open until the child reaches
+a terminal state or `wait_ms` elapses. Controller observations use the retained
+parent credential, with jittered backoff capped at five seconds between reads.
+Cancellation interrupts the wait. An unfinished child returns its current
+status so the SDK can continue waiting.
 
 Service request fields cannot be null. SDK encoders send empty objects and
 arrays for required collections, including child `args: {}` and cleanup

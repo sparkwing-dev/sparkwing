@@ -50,8 +50,10 @@ comment changes included; the review job never skips by size or path. A diff
 whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any
 `*.md`, `CHANGELOG*`) runs the default review on the cheaper `docs` reviewer
 (Claude Haiku) instead of the default model; any other file keeps the default.
-The record's `reviewer.model` names the model that ran. The
-gate selects its checks from the change scope (decision 96): vet, build, lint,
+The record's `reviewer.model` names the model that ran. Independent default and
+security profiles run concurrently, and their findings and sessions are combined
+in profile order after both finish. A failed profile leaves the prior review
+record unchanged. The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
 `.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
@@ -77,11 +79,9 @@ merges, gate run, review record path and result). The gate's `test` step reports
 
 When `origin/main` is not an ancestor of HEAD at push time, the `push` step
 merges it into the branch in the checkout (`git merge --no-ff`, the default
-git identity and signing; never a rebase). CHANGELOG.md merges with the union
-driver, so two branches that each open the same `###` heading under
-`[Unreleased]` merge into a repeated heading the changelog lint refuses; when
-the merge leaves one, the step runs `bash bin/check-changelog.sh --fix` and
-commits CHANGELOG.md and its mirror as a follow-up commit (never an amend). It
+git identity and signing; never a rebase). Independent changelog and migration
+fragments merge as separate files. Orientation table additions use union merge;
+changes to the same rule need review. The push step
 then runs `go build` in every module
 and the affected-test selection over the files that differ between the gated
 tree and the merged tree, then pushes the merge. The review is not run again:
@@ -98,7 +98,7 @@ landing record names both.
 ### Cutting a release
 
 A release is a tag push. The `release` pipeline resolves the version, renames
-`## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
+the collected `## [Unreleased]` section to the version, stages the release notes,
 checks the section covers any schema or wire change since the previous tag,
 aligns scaffold and pipeline SDK pins to the chosen version with local replacements,
 then commits and atomically pushes that commit to `main` with an annotated
@@ -123,6 +123,10 @@ read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links, docs sidebar) and previews the changelog and guide roll; build, lint and the short
 tests run only in the real cut.
 
+Manual releases reuse a successful exact-source CI receipt when available. Missing,
+pending, failed or unreadable receipts run the local build, lint and short suite
+in the detached source worktree. Weekly releases continue to wait for green CI.
+
 The schema changelog gate compares the neutral `internal/store/schema.sql`
 baseline with the previous tag. SQL changes at an unchanged schema version
 require a version bump and a matching `(Breaking)` changelog entry.
@@ -134,7 +138,9 @@ from that checkout's origin before reading its files. A failed fetch names the
 job checkout and the Git command to retry there. Changelog preparation reads
 and previews or stages files in the same captured checkout. `commit-changelog`
 waits for every gate, including the schema and wire gates that read the prepared
-notes. A gate failure after preparation leaves HEAD at the starting commit
+notes. The commit job updates and stages the SDK pins after those gates finish,
+so each source-backed job starts with the original sealed engine identity.
+A gate failure after preparation leaves HEAD at the starting commit
 and the prepared files staged for inspection. No commit needs undoing. Inspect those files and return
 the checkout to a clean tree before retrying the cut.
 
@@ -471,6 +477,15 @@ digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
 same for the launcher with every other chart change. Each GitOps push requests a hard
 Argo refresh before waiting, requiring patch permission on the named Application.
+
+The successful staging gate records the candidate CLI's SHA-256 and native platform.
+It retains only those executable bytes in a content-addressed temporary directory,
+using the deploy scratch expiry. Production copies them into its own private job
+directory after checking the gate's source SHA, platform and binary digest.
+Missing or mismatched bytes rebuild from the production job's candidate checkout.
+A runner without the staging runner's temporary filesystem rebuilds too.
+CLI profiles, credentials and stores stay private to each job.
+
 `staging-gate` starts `deploy-smoke` and the `sparkwing-ci-smoke` reference pipeline
 before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
@@ -513,6 +528,18 @@ source installation bound to its existing team. The optional `--smoke-profile` a
 the detached scan does not enable that probe. Missing prerequisites report that the scan
 could not run, rather than clearing prior Bitwing findings.
 
+Each target team must own a GitHub App installation covering
+`sparkwing-dev/sparkwing`, because the scan submits a repository-backed example.
+A token that can authenticate but belongs to an unrelated QA team cannot submit
+that source. An installation belongs to one team. Keep the source-owning team's
+installation bound there when repairing a fixture's access.
+
+Replace an ended scan credential in its existing target team, retaining
+`runs.read,logs.read,runs.write`, and save it under the same repository and
+`deploy` pipeline scope above. Create it from a signed-in account session. A token
+delegated from another token cannot outlive its parent. Record the replacement's
+expiry and verify authentication and repository access before the next scan.
+
 Before changing production, deploy compares the candidate source's controller schema version with
 the previous image's source revision. Missing evidence stops before changing image pins. A failed
 production deploy or smoke reverts this run's GitOps commits, launcher first, only if the schema
@@ -525,10 +552,29 @@ downgrade or restore runs. Staging and production have separate database servers
 Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push runs
-through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
-through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
-retried old run cannot roll production back.
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. A capacity-one global
+queue serializes the whole deploy, including staging and production. At build admission,
+`git ls-remote` checks main's tip. Superseded waiters stop before credentials, image work or
+Cloud smoke. Several stale rows can wait, but only the newest waiting commit can pass
+admission. Once admitted, a candidate keeps its slot and can finish even when more pushes land.
+Staging and production fetch main's history and require the candidate SHA to be an ancestor
+of `origin/main` or its tip. These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses
+as repository proof.
+
+Production checks ancestry again immediately before each controller or launcher GitOps push.
+A candidate removed by a main history rewrite during deployment preparation is refused at
+that write. Source validation and the GitOps push use separate repositories, so this check
+does not make them atomic.
+
+Production requires a staging-gate pass for the same image digests and checks both production
+image revision labels. Each changed digest must advance from its pinned revision to a newer
+source commit, with no version downgrade. Missing revision evidence, unrelated history or a
+new digest for the same SHA stops before GitOps pins change. A retry can finish a partial
+deployment when a matching digest already runs. An already deployed image pair leaves the
+pins unchanged.
+
+A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version`
+reach a real deploy through the entry's `args`.
 
 The deployment pipeline pins a published SDK without a local replacement, so
 Cloud planning and self-hosted jobs resolve the same signed engine. A replacement
@@ -545,6 +591,34 @@ schema with production before changing the controller pin, and wait for its
 rollout before updating the launcher and planning runner. Then observe a new
 push-triggered deploy through both environments.
 
+#### Delivery timing budgets
+
+The targets are five minutes to land on main, five minutes from main to staging
+proof, and five minutes from staging proof to production acceptance. Report
+staging rollout separately from staging proof. Proof includes the blocking
+smokes. Production acceptance includes its smoke, NodeClaim/log checks and scan
+submission, while the detached scan finishes separately.
+
+Every delivery comparison retains the full elapsed leg and a named **cold Cloud
+provisioning** segment. Measure that segment from NodeClaim creation to its
+successful Initialized transition, with the claim name and both timestamps.
+Record each claim once, including capacity used by child and successor jobs.
+Land on our own hardware records this segment as `not applicable`. A Cloud leg
+without those boundaries records `unknown`, with any observed capacity wait
+alongside it. Use zero only when evidence proves the leg required no new capacity.
+
+Include cold provisioning in the full elapsed leg when comparing it with the
+five-minute target. Keep image pull, source preparation, execution and observation
+tail separate because they have different causes. Component intervals can overlap, so only sum non-overlapping critical-path
+intervals. Run acceptance follows preparation and can follow provisioning, so a
+controller run-duration headline cannot substitute for the full delivery leg.
+Compare cold samples with cold samples and report any provisioning change before
+attributing a change to preparation or execution.
+
+Retain measured samples with their raw timing boundaries in the delivery evidence
+record. A sample is a baseline, not a timeout or guaranteed provisioning ceiling.
+Warm capacity is forbidden for our delivery work.
+
 #### Deploy cost estimate
 
 These are estimates from the code path, not observed deploy timings. The ranges assume a warm
@@ -558,6 +632,7 @@ exceed them. The watched staging deploy should record phase durations before set
 | Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
 | Publish and verify both multi-arch images | 30 seconds-3 minutes | One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
 | GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap) and rollout (5-minute cap). Argo's default poll alone can cost up to 3 minutes per push. |
+| Cold Cloud provisioning, per new claim | Measure per leg, no fixed estimate | Creation to Initialized. Included in smoke elapsed time when on its critical path. Report separately from image pull and preparation. |
 | Staging gate | 1-10 minutes with available capacity | Candidate CLI build plus two overlapping pipeline runs. Each run has a 45-minute limit. |
 | Production smoke | 1-5 minutes with available capacity | CLI build plus two concurrent fixture runs, NodeClaim sampling and log scan. Each run has a 20-minute limit. |
 | Production rollback, on failure | Similar to the two rollouts | Two reverse GitOps commits. Budget: 35 minutes. |
@@ -1623,6 +1698,22 @@ file. Other syntax and workflow checks remain active.
   isolation. `sparkwing run integration` runs them through its full `./...`
   suite against the local PostgreSQL fixture.
 
+- **Native Windows CLI smoke:** `TestWindowsLocalRunStartsControllerAndFinishes`
+  (`cmd/sparkwing`) builds the CLI and runs a Go pipeline through standalone
+  and shared controllers in private homes. Both modes require a successful
+  `run_finish` receipt and a zero process exit status. Run it on Windows with
+  `go test -p 1 ./cmd/sparkwing -run TestWindowsLocalRunStartsControllerAndFinishes`.
+  `TestWindowsLocalHTTPKeepsRequestAliveAcrossReuse` in `internal/wingd`
+  guards the named-pipe deadline contract beneath startup and runner claims.
+
+- **Standalone client shutdown:**
+  `TestStandaloneRunClosesUnusedClientDialBeforeControllerDrain` (`cmd/sparkwing`,
+  Unix) cancels a request while its dial completes, then shuts down the real
+  standalone runtime. It requires the CLI to close the unused connection before
+  controller draining, without changing the API drain deadline. Native Windows
+  verification repeats standalone pipeline runs and requires both successful
+  `run_finish` receipts and zero process exits.
+
 - **Local controller smoke:** `TestLocalControllerSmoke` (`cmd/sparkwing`,
   part of the full suite) builds the CLI and drives every local controller
   command against a fresh local controller in a private home. It fails when
@@ -1701,42 +1792,48 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   `pkg/docs/mirror/`, and the vendored runner-bundle tarball) in one pass and
   is a no-op on a clean tree. Resolve a merge conflict in any of them by
   taking either side, running that script, and committing the result.
-  `CHANGELOG.md` and the mirror `pkg/docs` embeds resolve themselves instead:
-  `.gitattributes` marks both `merge=union`, so a merge of two branches that
-  each added `[Unreleased]` bullets keeps both sides with no conflict. Union
-  merge gets two cases wrong. Two branches that reword the same bullet produce
-  both wordings, and two branches that each rename `[Unreleased]` to their own
-  version stack both headings on adjacent lines -- `bin/check-changelog.sh`
-  fails on the stacked pair, and the reworded pair needs a reader. Where both
-  sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
-  collapses it into one block and re-syncs the mirror.
-- **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
-  follows `CHANGELOG-STYLE.md`. Mark breaking changes; until paid launch
-  they need no migration guide. Keep the embedded changelog mirror byte-identical.
+- **Changelog:** notable adopter-facing behavior belongs in a unique
+  `docs/changes/<slug>.md` with a `###` category and scope-prefixed bullets.
+  Breaking guides go in `docs/migrations/unreleased/<slug>.md`, starting with
+  an H2. Follow `CHANGELOG-STYLE.md` and run `bash bin/sync-docs.sh` to mirror
+  the fragments. Keep shared unreleased aggregates empty. Embedded docs,
+  weekly-release and release gates collect fragments; the release cut writes
+  the versioned notes, repoints guide links and deletes consumed fragment pairs.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
-- **Release:** merging is not a release; a release is a tag push. The local
-  `release` pipeline checks the chosen version against origin tags, checks the
-  clean tree, and verifies published module freshness, Go directive policy,
-  coherent SDK pins and changelog links in the build/lint/short-test class, with
-  a forty-minute wall budget including 30 minutes of lint-lock allowance. It then
-  renames `[Unreleased]`, rolls the migration guide, validates the resulting
-  section and guide, and checks schema/wire change coverage before committing.
-  All refusals precede push-tag. Freshness checks published versions, not the
-  position of local replacements against origin/main, so a cut may use an older
-  commit. Preview with
-  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`, then
-  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk
-  destructive,prod`; the isolated home keeps prerelease state out of the
-  operational runs store, which the release runner refuses to touch. From the
-  tag push on, `.github/workflows/release.yaml` owns the release, and it checks
-  nothing: it resolves the tag to a commit, builds the binaries and images,
-  signs and publishes them, and creates the GitHub release. `git tag vX.Y.Z &&
-  git push origin vX.Y.Z` from any commit therefore publishes a release. The
-  notes come from that tag's changelog section, and fall back to the annotated
-  tag message and then to a pointer at CHANGELOG.md when the tagged source has
-  no section. State-dependent source checks belong in the local cut, before
-  the tag exists. Handle refusals and failed builds through the
+- **Release:** merging is not a release; a release is a tag push. Select an
+  exact source with `sparkwing run release -- --commit SHA` (default `HEAD`).
+  The source must be an ancestor of freshly fetched `origin/main`, and its
+  latest push run of `ci.yaml` must have completed successfully at that exact
+  SHA. The release owns a detached worktree and compiles `release-cut` from
+  the selected source, using a private `SPARKWING_HOME`. The source must
+  contain the `release-cut` entrypoint. The invoking checkout stays untouched,
+  including uncommitted work. Lands continue on main throughout the cut.
+  Exact-source CI replaces the broad build, lint and short-suite steps under
+  the pre-launch desktop-load waiver. Incremental push CI is not full-suite
+  evidence. Published module freshness, Go directive policy, coherent SDK
+  pins, changelog links and docs sidebar checks still run. The cut prepares
+  notes, migrations and SDK pins, then checks schema/wire coverage before
+  committing those paths with `--no-verify`.
+  The annotated tag points to that prepared release commit, whose source
+  parent remains the selected SHA. A separate detached worktree merges that
+  commit into freshly fetched main. It removes only unchanged selected entries
+  from main's `[Unreleased]` section, keeps newer or edited notes there, and
+  copies the release section unchanged. The merge preserves main's newer code.
+  Publication atomically pushes the merge to main and the tag to origin. If
+  main moves during the push, only the metadata merge and push are retried,
+  with the same release commit and tag. A conflict or repeated contention
+  stops publication for manual recovery; it does not require freezing main.
+  Failed cuts retain their worktrees at the paths printed in the logs.
+  Preview with
+  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run -- --commit SHA`,
+  then use `--sw-allow-risk destructive,prod` for publication. Within one controller, manual and weekly
+  releases share a release concurrency group. Release owners serialize cuts
+  across isolated homes; lands use their own path.
+  From the tag push on, `.github/workflows/release.yaml` resolves the tag,
+  builds, signs and publishes artifacts, and creates the GitHub release.
+  Notes come from the tag's changelog section, with the annotated tag message
+  and a pointer to CHANGELOG.md as fallbacks. Handle failures through the
   [release failure policy](#release-failure-policy).
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
@@ -1751,22 +1848,15 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
 
 ## Weekly SDK and CLI delivery
 
-`weekly-release` runs Monday at 09:00 America/Denver. It clones origin/main,
-skips when `[Unreleased]` has no entries, and requires the latest push run of
-`ci.yaml` at the selected commit to have completed successfully. It then runs
-the existing `release` pipeline in that private checkout with its own
-`SPARKWING_HOME`. The exact-source green CI receipt supplies verification evidence. Under the
-pre-launch desktop-load waiver, the scheduled cut starts at `version-freshness`
-and keeps the release-specific guards; it skips the broader release build,
-lint and short-suite steps. Incremental push CI is not full-suite evidence. Its default minor bump stays on v0.x. Release cuts are
-pre-approved. The scheduled entrypoint supplies the cut's
-`--sw-allow-risk destructive,prod` authorization.
+`weekly-release` runs Monday at 09:00 America/Denver. It selects freshly
+fetched `origin/main` by default, or `--commit SHA`, and uses the same detached
+worktree cut and exact-source CI check as `release`. It skips when the selected
+source has no `[Unreleased]` entries. Its default minor bump stays on v0.x.
+Release cuts are pre-approved. The scheduled entrypoint supplies the cut's
+`--sw-allow-risk destructive,prod` authorization. Main keeps accepting lands
+while the cut runs. Publication merges the prepared metadata into fresh main
+and atomically pushes that merge with the tag on the separate release commit.
 
-The cut retains its changelog, migration-guide, schema, wire and release-cut
-checks. It prepares the scaffold fallback, API snapshot and both pipeline module pins
-for the chosen version using their local SDK replacements. It commits only the
-prepared notes and pin paths with `--no-verify` after the gates pass, then
-atomically pushes main and the tag.
 That tag makes the Go SDK module available and starts the existing
 `.github/workflows/release.yaml` publication steps for signed CLI binaries,
 images and the TypeScript package. Before cutting, the weekly pipeline starts
@@ -1776,7 +1866,7 @@ idempotency key. It records the cut's immutable tag and commit in a blocked
 to confirm hosted publication, publish matching sparkwing-product docs, verify
 production through kikd-infra, and reconcile downstream pins. The checklist
 stays open until every required step has evidence. A failed cut retains the
-private checkout at the path printed in its job log.
+detached worktree at the path printed in its job log.
 
 Run the same path sooner, or preview the cut:
 

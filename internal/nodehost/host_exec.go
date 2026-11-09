@@ -139,12 +139,12 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 		done.StartError, done.NotFound = err.Error(), errors.Is(err, exec.ErrNotFound)
 		return done, nil
 	}
-	outR, outW, err := os.Pipe()
+	outR, outW, err := commandPipe()
 	if err != nil {
 		done.StartError = err.Error()
 		return done, nil
 	}
-	errR, errW, err := os.Pipe()
+	errR, errW, err := commandPipe()
 	if err != nil {
 		closeFiles(outR, outW)
 		done.StartError = err.Error()
@@ -173,11 +173,11 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 		return done, nil
 	default:
 	}
-	err = cmd.Start()
+	session, err := startHostCommand(cmd, req.Env)
 	if err != nil && execFormatError(err) {
 		// hack: execvp runs executable text without #! through /bin/sh for both SDKs.
 		cmd = command("/bin/sh", "/bin/sh", append([]string{path}, req.Argv[1:]...))
-		err = cmd.Start()
+		session, err = startHostCommand(cmd, req.Env)
 	}
 	if err != nil {
 		closeFiles(outR, outW, errR, errW)
@@ -186,7 +186,6 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 	}
 	// safety: the child owns the write ends now; dropping ours lets the readers see EOF.
 	closeFiles(outW, errW)
-	session := trackHostCommand(cmd, req.Env)
 	stopMeasure := func() bool { return false }
 	if pid, birth, ok := session.leader(); ok && measure != nil {
 		stopMeasure = time.AfterFunc(commandMeasureDelay, func() { measure(pid, birth) }).Stop
@@ -285,7 +284,10 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 		return done, session
 	}
 	done.ExitCode = cmd.ProcessState.ExitCode()
-	done.Signaled = !cmd.ProcessState.Exited()
+	done.Signaled = session.signaled(cmd)
+	if done.Signaled {
+		done.ExitCode = -1
+	}
 	done.Stdout, done.Stderr = tails[0].bytes(), tails[1].bytes()
 	return done, session
 }

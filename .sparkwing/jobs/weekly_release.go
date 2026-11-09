@@ -22,12 +22,12 @@ func (WeeklyRelease) ShortHelp() string {
 }
 
 func (WeeklyRelease) Help() string {
-	return "Clone origin/main into a private checkout, skip an empty [Unreleased] section, require the latest push CI run at that exact SHA to pass, then invoke the existing release pipeline. Defaults to a v0 minor bump. Pass --bump patch or --version for an earlier release. The tag workflow publishes the CLI, Go module and TypeScript package. A per-version Bitwing sparkwing-release workflow records the cut handoff for publication, docs, production verification and downstream pins. Dry runs preview the same release cut without committing or pushing. A failed cut retains its checkout for inspection."
+	return "Pin origin/main (or --commit) in a detached worktree, skip an empty [Unreleased] section, require successful push CI at that exact SHA, then run release-cut from the selected source. Defaults to a v0 minor bump. Main can keep accepting lands. A per-version Bitwing sparkwing-release workflow records publication, docs, production verification and downstream pins. Dry runs preview without committing or pushing. A failed cut retains its worktree for inspection."
 }
 
 func (*WeeklyRelease) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
 	plan.Concurrency(weeklyReleaseRuns)
-	sparkwing.Job(plan, "release-main", &weeklyReleaseJob{RepoDir: sparkwing.WorkDir(), Args: in}).
+	sparkwing.Job(plan, "release-main", &weeklyReleaseJob{RepoDir: sparkwing.WorkDir(), Args: in, Weekly: true}).
 		Inline().Cores(lightJobCores).Timeout(90 * time.Minute)
 	return nil
 }
@@ -36,18 +36,44 @@ type weeklyReleaseJob struct {
 	sparkwing.Base
 	RepoDir string
 	Args    ReleaseArgs
+	Weekly  bool
 }
 
 func (j *weeklyReleaseJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "cut", func(ctx context.Context) error { return j.run(ctx, false) }).
+	step := sparkwing.Step(w, "cut", func(ctx context.Context) error { return j.run(ctx, false) }).
 		DryRun(func(ctx context.Context) error { return j.run(ctx, true) })
+	if !j.Weekly {
+		step.Risk("destructive", "prod")
+	}
 	return nil, nil
 }
 
 func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
-	origin, err := runGitIn(ctx, j.RepoDir, "remote", "get-url", "origin")
+	selected := strings.TrimSpace(j.Args.Commit)
+	if selected == "" {
+		selected = "HEAD"
+		if j.Weekly {
+			selected = "refs/remotes/origin/main"
+		}
+	}
+	// safety: HEAD is captured before fetching so the caller's moving branch cannot change the selection.
+	if selected != "refs/remotes/origin/main" {
+		selected, err = runGitIn(ctx, j.RepoDir, "rev-parse", "--verify", "--end-of-options", selected+"^{commit}")
+		if err != nil {
+			return err
+		}
+		selected = strings.TrimSpace(selected)
+	}
+	if err = fetchLandBase(ctx, gitIn(j.RepoDir), j.RepoDir); err != nil {
+		return err
+	}
+	head, err := runGitIn(ctx, j.RepoDir, "rev-parse", "--verify", selected+"^{commit}")
 	if err != nil {
 		return err
+	}
+	head = strings.TrimSpace(head)
+	if _, err = runGitIn(ctx, j.RepoDir, "merge-base", "--is-ancestor", head, landBaseRef); err != nil {
+		return fmt.Errorf("release: selected commit %s must be on origin/main: %w", head, err)
 	}
 	dir, err := os.MkdirTemp("", "sparkwing-release-")
 	if err != nil {
@@ -55,6 +81,10 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 	}
 	defer func() {
 		if err == nil {
+			if _, cleanupErr := runGitIn(context.WithoutCancel(ctx), j.RepoDir, "worktree", "remove", filepath.Join(dir, "source")); cleanupErr != nil {
+				sparkwing.Warn(ctx, "remove release worktree %s: %v", dir, cleanupErr)
+				return
+			}
 			if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
 				sparkwing.Warn(ctx, "remove release checkout %s: %v", dir, cleanupErr)
 			}
@@ -63,10 +93,10 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 		}
 	}()
 	checkout := filepath.Join(dir, "source")
-	if _, err = runGitIn(ctx, j.RepoDir, "clone", "--branch", "main", "--single-branch", "--", strings.TrimSpace(origin), checkout); err != nil {
+	if _, err = runGitIn(ctx, j.RepoDir, "worktree", "add", "--detach", checkout, head); err != nil {
 		return err
 	}
-	body, err := os.ReadFile(filepath.Join(checkout, "CHANGELOG.md"))
+	body, err := readChangelog(checkout)
 	if err != nil {
 		return err
 	}
@@ -74,17 +104,16 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 	if err != nil {
 		return err
 	}
-	if entries == 0 {
+	if entries == 0 && j.Weekly {
 		sparkwing.Info(ctx, "main has no unreleased notes; skipping release")
 		return nil
 	}
-	head, err := runGitIn(ctx, checkout, "rev-parse", "HEAD")
-	if err != nil {
-		return err
-	}
-	head = strings.TrimSpace(head)
-	if err = requireGreenMain(ctx, checkout, head); err != nil {
-		return err
+	ciErr := requireGreenMain(ctx, checkout, head)
+	if ciErr != nil {
+		if j.Weekly {
+			return ciErr
+		}
+		sparkwing.Info(ctx, "exact-source CI unavailable; running local release checks: %v", ciErr)
 	}
 	version, err := (&resolveVersionJob{Explicit: j.Args.Version, Bump: j.Args.Bump, RepoDir: checkout}).run(ctx)
 	if err != nil {
@@ -113,13 +142,16 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 		}
 	}
 	// perf: reuse exact-source CI evidence to avoid a broad desktop suite; retain the release-specific guards.
-	args := []string{"run", "release", "-C", checkout, "--sw-route", "local", "--sw-start-at", "version-freshness"}
+	args := []string{"run", "release-cut", "-C", checkout, "--sw-route", "local"}
+	if ciErr == nil {
+		args = append(args, "--sw-start-at", "version-freshness")
+	}
 	if dry {
 		args = append(args, "--sw-dry-run")
 	} else {
 		args = append(args, "--sw-allow-risk", "destructive,prod")
 	}
-	args = append(args, "--", "--version", version)
+	args = append(args, "--", "--version", version, "--commit", head)
 	sparkwing.Info(ctx, "release source main@%s (%d unreleased entries)", head, entries)
 	state := filepath.Join(dir, "state")
 	defer func() {

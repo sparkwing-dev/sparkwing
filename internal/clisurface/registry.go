@@ -595,6 +595,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing runs retry", Rules: []string{
 			"Select --failed to reuse successful jobs or --all-jobs to execute the sealed plan again. Retry preserves the source request, plan, source trust and actor. The controller records the retrier separately.",
+			"Reuse requires readable source results in the retry's data scope. Missing, expired or host-confined results can make a successful job run again. Run status lists a job in `retry.reused` only after its source result has been materialized without an execution attempt.",
 			"Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.",
 			"--reason records why the retry should pass on the new run, shown by runs list and runs status. It is required when an agent retries: the CLI detects Claude Code, Codex and Gemini CLI, or reads --agent or SPARKWING_AGENT, and the controller refuses an agent's retry without a reason. --agent none opts out.",
 		}, Flags: []Flag{
@@ -843,17 +844,17 @@ func Registry() []Command {
 			{Name: "warn-bucket-objects", Argument: "N", Meaning: "Objects at which health reports the bucket as warning; 0 disables the warning."},
 		}},
 		{Path: "sparkwing-controller admin", Flags: []Flag{}},
-		{Path: "sparkwing-controller admin session", Authority: inPodBreakGlass, Rules: []string{"Print an independent account session for an existing team administrator as plain text by default, ready to pipe to sparkwing runners add --session-stdin. Use --output json for a JSON object containing the session. Requires access to the running controller's recorded store. The initial expiry is 15 minutes. Normal session renewal applies, including during enrollment. After fetching the session CSRF proof, enrollment attempts logout on success or failure. If fetching the proof or logout fails, the session remains live until expiry or revocation. A durable session.break_glass audit row records the account ID and team, excluding the session and free-text reason."}, Flags: []Flag{
+		{Path: "sparkwing-controller admin session", Authority: inPodBreakGlass, Rules: []string{"Print an independent account session for an existing team administrator. Output is pretty on a terminal and one JSON object when piped. Use --output plain when piping to sparkwing runners add --session-stdin. Requires access to the running controller's recorded store. The initial expiry is 15 minutes. Normal session renewal applies, including during enrollment. After fetching the session CSRF proof, enrollment attempts logout on success or failure. If fetching the proof or logout fails, the session remains live until expiry or revocation. A durable session.break_glass audit row records the account ID and team, excluding the session and free-text reason."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},
 		}},
-		{Path: "sparkwing-controller admin freeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass using controller database credentials; audit actor and reason. Not an admin-token console bypass."}, Flags: []Flag{
+		{Path: "sparkwing-controller admin freeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass using controller database credentials; audit actor and reason. Plain output prints the team slug. Not an admin-token console bypass."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},
 		}},
-		{Path: "sparkwing-controller admin unfreeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass; audit actor and reason. --hold selects one hold; omission releases operator holds only."}, Flags: []Flag{
+		{Path: "sparkwing-controller admin unfreeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass; audit actor and reason. --hold selects one hold; omission releases operator holds only. Plain output prints the team slug."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},

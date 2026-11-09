@@ -747,7 +747,7 @@ enroll their own workstation with
 both are approved in the browser (see [device sign-in](#device-sign-in)).
 Shared runners take an existing team administrator's session instead:
 `sparkwing runners add --session-stdin --profile work --runner build-box --repos 'github.com/acme/*'`,
-fed by the in-pod `sparkwing-controller admin session` command when headless. See
+fed by the in-pod `sparkwing-controller admin session --output plain` command when headless. See
 [workstation capacity](self-hosting.md#add-workstation-capacity) for the full pipe.
 
 `profiles add` probes `/api/v1/health` and authenticates through

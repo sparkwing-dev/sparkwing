@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing/fstest"
 	"unicode"
+
+	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 const (
@@ -267,7 +269,13 @@ func nextNonSpace(runes []rune, from int) int {
 }
 
 func readMigrationFile(repoDir, name string) (string, error) {
-	body, err := os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(migrationsDirRel), name))
+	var body []byte
+	var err error
+	if name == unreleasedGuideName {
+		body, err = docs.CollectMigration(os.DirFS(filepath.Join(repoDir, migrationsDirRel)))
+	} else {
+		body, err = os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(migrationsDirRel), name))
+	}
 	if err != nil {
 		return "", fmt.Errorf("read %s/%s: %w", migrationsDirRel, name, err)
 	}

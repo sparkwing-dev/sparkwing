@@ -316,8 +316,6 @@
   ],
   "retry": {
     "mode": "failed",
-    "reused": [
-      "lint"
-    ]
+    "reused": []
   }
 }

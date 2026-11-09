@@ -417,3 +417,18 @@ test("exec errors cap a long command in the message and keep the field whole", (
     "command failed (exit 2): go test ./...",
   );
 });
+
+
+test("commands require the host command service", async (t) => {
+  const root = await project(t);
+  const { ctx } = context();
+  registerCommandContext(ctx, () => {});
+  await runScope({ phase: "execute", root }, async () => {
+    await assert.rejects(node(ctx, "process.exit(0)").capture(), (error: unknown) => {
+      assert.ok(error instanceof ExecError);
+      assert.equal(error.exitCode, exitNotStarted);
+      assert.match(error.message, /host command service unavailable/);
+      return true;
+    });
+  });
+});

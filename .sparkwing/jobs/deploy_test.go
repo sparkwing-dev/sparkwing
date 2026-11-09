@@ -306,6 +306,17 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 					t.Fatal(err)
 				}
 				doc := decodePipeline(t, plan)
+				if mode == "real" {
+					if len(plan.Concurrency) != 1 {
+						t.Fatalf("deploy must serialize the whole run: %+v", plan.Concurrency)
+					}
+					group := plan.Concurrency[0]
+					if group.Group != "sparkwing-cloud-deploy" || group.Capacity == nil || *group.Capacity != 1 || (group.OnLimit != nil && *group.OnLimit != "queue") || (group.Scope != nil && *group.Scope != "global") {
+						t.Fatalf("deploy must use one global Queue slot: %+v", group)
+					}
+				} else if len(plan.Concurrency) != 0 {
+					t.Fatalf("dry-run holds a deploy slot: %+v", plan.Concurrency)
+				}
 				if len(doc.Jobs) != shape.jobs {
 					t.Fatalf("got %d jobs, want %d", len(doc.Jobs), shape.jobs)
 				}
@@ -535,6 +546,7 @@ func deployGitIn(t *testing.T, dir string, args ...string) string {
 func newFakeDeploy(t *testing.T) *fakeDeploy {
 	t.Helper()
 	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
 	f := &fakeDeploy{
 		t: t, bare: filepath.Join(root, "gitops.git"), repo: filepath.Join(root, "sparkwing"), claimsPerRun: 1,
 		failRuns: map[string]bool{}, clock: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
@@ -563,6 +575,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	}
 	f.registry = &fakeDeployRegistry{digests: map[string]string{}, revisions: map[string]string{
 		f.old.Controller.Repository + "@" + f.old.Controller.Digest: f.head,
+		f.old.Runner.Repository + "@" + f.old.Runner.Digest:         f.head,
 	}}
 	for _, ref := range []string{f.config().ControllerBase, f.config().RunnerBase} {
 		f.registry.digests[ref] = testDigest(ref)
@@ -588,6 +601,9 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	deployGitIn(t, work, "add", "-A")
 	deployGitIn(t, work, "commit", "--quiet", "-m", "seed")
 	deployGitIn(t, root, "clone", "--quiet", "--bare", work, f.bare)
+	deployGitIn(t, f.repo, "commit", "--quiet", "--allow-empty", "-m", "candidate")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
 	return f
 }
 
@@ -738,7 +754,7 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 	case name == "bitwing":
 		return "", nil
 	case name == "go":
-		return "", nil
+		return "", os.WriteFile(arg("-o"), []byte("candidate CLI"), 0o700)
 	case name == "kubectl":
 		return f.kubectl(c)
 	case name == "sparkwing":
@@ -940,9 +956,20 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 		t.Fatalf("smoke was not triggered at the candidate commit with its child check: %q", f.calls)
 	}
 
-	prod, err := f.deployer(false).promote(t.Context(), images)
+	production := f.deployer(false)
+	production.gate = gate
+	prod, err := production.promote(t.Context(), images)
 	if err != nil {
 		t.Fatal(err)
+	}
+	builds := 0
+	for _, call := range f.calls {
+		if strings.Contains(call, "go build -o") {
+			builds++
+		}
+	}
+	if builds != 1 || gate.CLIDigest == "" {
+		t.Fatalf("staging and production built CLI %d times, gate digest %q", builds, gate.CLIDigest)
 	}
 	if got := f.pinsOnMain("sparkwing"); got.Controller != images.Controller || got.Launcher != images.Runner {
 		t.Fatalf("production pins = %+v", got)
@@ -1009,7 +1036,7 @@ func TestDeployRefusesMissingToolchain(t *testing.T) {
 	}
 }
 
-func TestDeployRefusesSupersededCommit(t *testing.T) {
+func TestDeployRefusesSupersededBuild(t *testing.T) {
 	f := newFakeDeploy(t)
 	images := f.candidate()
 	if err := os.WriteFile(filepath.Join(f.repo, "NEXT"), []byte("x"), 0o644); err != nil {
@@ -1019,10 +1046,9 @@ func TestDeployRefusesSupersededCommit(t *testing.T) {
 	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "next")
 	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
 	before := deployGitIn(t, f.bare, "rev-parse", "main")
-	for _, env := range []deployEnv{f.config().Staging, f.config().Production} {
-		if _, _, err := f.deployer(false).deployTo(t.Context(), env, images); err == nil || !strings.Contains(err.Error(), "only main's tip deploys") {
-			t.Fatalf("%s deploy of a superseded commit: %v", env.Name, err)
-		}
+	deployGitIn(t, f.repo, "checkout", "--quiet", "--detach", images.Commit)
+	if _, err := f.deployer(false).buildCandidate(t.Context(), images.Version); err == nil || !strings.Contains(err.Error(), "only main's tip deploys") {
+		t.Fatalf("build of a superseded commit: %v", err)
 	}
 	if deployGitIn(t, f.bare, "rev-parse", "main") != before {
 		t.Fatal("a superseded commit reached GitOps")
@@ -1261,12 +1287,12 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"resolve the candidate commit", "assume arn:aws:iam::633280902600:role/sparkwing-deploy", "build linux/amd64", "build linux/arm64", "publish both images",
+		"resolve the candidate commit", "is still the tip of origin/main", "assume arn:aws:iam::633280902600:role/sparkwing-deploy", "build linux/amd64", "build linux/arm64", "publish both images",
 		"clone " + f.bare, "pin the staging controller", "render sparkwing-staging/rendered.yaml",
 		"commit \"deploy(staging): controller", "wait for Argo application sparkwing-staging", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-full-controller",
 		"pin the staging launcher", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-runner-bundle-launcher",
 		"build the candidate CLI", "add CLI profile staging", "trigger deploy-smoke", "trigger hello",
-		"is still the tip of origin/main", "is not older than the production version",
+		"belongs to origin/main", "advance the production source without lowering its version",
 		"pin the production controller", "wait for Argo application sparkwing to be", "pin the production launcher",
 		"add CLI profile production-smoke ", "trigger deploy-smoke", "follow production smoke runs", "check each smoke run used one NodeClaim",
 		"on a failed production deploy or smoke, would renew the role session and revert",
@@ -1301,6 +1327,7 @@ func TestDeployBuildsUntaggedMainWithoutARelease(t *testing.T) {
 	deployGitIn(t, f.repo, "tag", "v0.68.3")
 	deployGitIn(t, f.repo, "commit", "--quiet", "--allow-empty", "-m", "main change")
 	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
 	d := f.deployer(false)
 	images, err := d.buildCandidate(t.Context(), "")
 	if err != nil {
@@ -1500,6 +1527,7 @@ func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
 	origin := deployGitIn(t, f.repo, "remote", "get-url", "origin")
 	shallow := filepath.Join(t.TempDir(), "shallow")
 	deployGitIn(t, f.repo, "clone", "--quiet", "--depth", "1", "file://"+origin, shallow)
+	newest := advanceDeployMain(t, f)
 	f.repo = shallow
 	deployGitIn(t, f.repo, "fetch", "--quiet", "origin", f.head)
 	before, err := os.ReadFile(filepath.Join(f.repo, ".git", "FETCH_HEAD"))
@@ -1515,5 +1543,11 @@ func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
 	}
 	if string(after) != string(before) {
 		t.Fatalf("schema lookup overwrote candidate fetch proof: before %q, after %q", before, after)
+	}
+	if got := deployGitIn(t, f.repo, "rev-parse", "refs/remotes/origin/main"); got != newest {
+		t.Fatalf("promotion did not fetch main's newer tip: %s, want %s", got, newest)
+	}
+	if got := deployGitIn(t, f.repo, "rev-parse", "--is-shallow-repository"); got != "false" {
+		t.Fatal("promotion did not fetch the history needed to prove ancestry")
 	}
 }

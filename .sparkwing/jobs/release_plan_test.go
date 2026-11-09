@@ -34,9 +34,20 @@ func releasePlan(t *testing.T) pipelineDocument {
 	t.Chdir(dir)
 
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Release{}).Plan(context.Background(), plan, ReleaseArgs{Version: "v0.99.0"}, sparkwing.RunContext{})
+		return (&ReleaseCut{}).Plan(context.Background(), plan, ReleaseArgs{Version: "v0.99.0", Commit: "selected"}, sparkwing.RunContext{})
 	})
 	return plan
+}
+
+func TestReleaseCutDiscoveryAllowsDefaultsAndExecutionRequiresSource(t *testing.T) {
+	t.Chdir(t.TempDir())
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (&ReleaseCut{}).Plan(t.Context(), plan, ReleaseArgs{}, sparkwing.RunContext{})
+	})
+	mustNode(t, plan, "check-clean-tree")
+	if err := (&checkCleanTreeJob{}).run(t.Context()); err == nil || !strings.Contains(err.Error(), "--commit SHA") {
+		t.Fatalf("missing source execution refusal: %v", err)
+	}
 }
 
 func mustNode(t *testing.T, plan pipelineDocument, id string) *jobDocument {
