@@ -62,7 +62,7 @@ func TestNodeMetricsCapAndPages(t *testing.T) {
 	}
 	insert := storetest.Rebind(f.s, `INSERT INTO node_metrics (team, run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
 SELECT team, id, ?, ?, ?, 1, 0 FROM runs WHERE team = ? AND id = ?`)
-	for i := range store.MaxNodeMetricSamples - 1 {
+	for i := range store.MaxNodeMetricSamples - 128 {
 		if _, err := tx.ExecContext(ctx, insert, f.ref.NodeID, base.Add(time.Duration(i)*time.Second).UnixNano(), i, f.tenant.Team(), f.ref.RunID); err != nil {
 			t.Fatal(err)
 		}
@@ -73,8 +73,10 @@ SELECT team, id, ?, ?, ?, 1, 0 FROM runs WHERE team = ? AND id = ?`)
 	next := func(i int) store.MetricSample {
 		return store.MetricSample{TS: base.Add(time.Duration(i) * time.Second), CPUMillicores: int64(i), MemoryBytes: 1}
 	}
-	if err := f.tenant.WriteMetric(ctx, a, next(store.MaxNodeMetricSamples-1)); err != nil {
-		t.Fatalf("the last sample under the cap: %v", err)
+	for i := store.MaxNodeMetricSamples - 128; i < store.MaxNodeMetricSamples; i++ {
+		if err := f.tenant.WriteMetric(ctx, a, next(i)); err != nil {
+			t.Fatalf("sample %d under the cap: %v", i, err)
+		}
 	}
 	if err := f.tenant.WriteMetric(ctx, a, next(store.MaxNodeMetricSamples-1)); err != nil {
 		t.Fatalf("identical retry at the cap: %v", err)
@@ -111,5 +113,44 @@ SELECT team, id, ?, ?, ?, 1, 0 FROM runs WHERE team = ? AND id = ?`)
 	all, err := f.tenant.ListNodeMetrics(ctx, string(f.ref.RunID), string(f.ref.NodeID))
 	if err != nil || len(all) != store.MaxNodeMetricSamples+8 {
 		t.Fatalf("every sample = %d, %v", len(all), err)
+	}
+}
+
+func TestNodeMetricsCachedHeadroomBoundsExternalWrites(t *testing.T) {
+	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
+	a := metricAuthorization(t, f, "metrics")
+	ctx := t.Context()
+	next := func(i int) store.MetricSample {
+		return store.MetricSample{Kind: store.MetricInterval, TS: time.Unix(0, int64(i)), MemoryBytes: 1}
+	}
+	if err := f.tenant.WriteMetric(ctx, a, next(0)); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.s.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	insert := storetest.Rebind(f.s, `INSERT INTO node_metrics (team,run_id,node_id,ts,cpu_millicores,memory_bytes)
+ VALUES (?,?,?,?,0,1)`)
+	for i := 1; i < store.MaxNodeMetricSamples; i++ {
+		if _, err := tx.ExecContext(ctx, insert, f.tenant.Team(), f.ref.RunID, f.ref.NodeID, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 63 {
+		if err := f.tenant.WriteMetric(ctx, a, next(store.MaxNodeMetricSamples+i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.tenant.WriteMetric(ctx, a, next(store.MaxNodeMetricSamples+63)); !errors.Is(err, store.ErrNodeMetricLimit) {
+		t.Fatalf("write after cached headroom = %v, want limit refusal", err)
+	}
+	samples, err := f.tenant.ListNodeMetrics(ctx, string(f.ref.RunID), string(f.ref.NodeID))
+	if err != nil || len(samples) != store.MaxNodeMetricSamples+63 {
+		t.Fatalf("samples = %d, %v", len(samples), err)
 	}
 }

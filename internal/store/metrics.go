@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -12,7 +13,8 @@ import (
 )
 
 // MaxNodeMetricSamples bounds one node's stored resource samples: at the
-// sampler's two-second tick, about five and a half hours of a node.
+// sampler's two-second tick, about five and a half hours of a node. Overlapping
+// Store instances may each admit up to 63 additional samples from cached headroom.
 const MaxNodeMetricSamples = limits.MaxMetricSamples
 
 // maxNodeMetricMarkers is how many marker samples a node may hold past
@@ -66,6 +68,42 @@ func (sample MetricSample) ValidateResourceValues() error {
 	return nil
 }
 
+// perf: reuse at most 64 observed free slots to keep metric writes off the full index scan.
+// Other store instances can consume that headroom too, so each cached writer may overshoot by 63 samples.
+const metricCapBatch = 64
+
+type metricCapKey struct {
+	team Team
+	ref  runspec.NodeRef
+}
+
+type metricCapAllowance struct {
+	mu        sync.Mutex
+	remaining map[metricCapKey]int
+}
+
+func (a *metricCapAllowance) take(team Team, ref runspec.NodeRef) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := metricCapKey{team, ref}
+	if a.remaining[key] == 0 {
+		return false
+	}
+	a.remaining[key]--
+	return true
+}
+
+func (a *metricCapAllowance) reset(team Team, ref runspec.NodeRef, held int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := metricCapKey{team, ref}
+	// perf: eviction only makes the next write recount; keep finished nodes from growing the cache.
+	if a.remaining == nil || len(a.remaining) >= 256 {
+		a.remaining = make(map[metricCapKey]int)
+	}
+	a.remaining[key] = min(metricCapBatch-1, max(0, MaxNodeMetricSamples-held))
+}
+
 func insertMetricTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, sample MetricSample) error {
 	runID, nodeID := ref.RunID, ref.NodeID
 	result, err := tx.execContext(ctx, `
@@ -94,11 +132,12 @@ SELECT cpu_millicores, memory_bytes, cpu_time_nanos, kind
 			return fmt.Errorf("conflicting node metric for %s/%s at %s", runID, nodeID, sample.TS.Format(time.RFC3339Nano))
 		}
 	}
-	if inserted == 1 {
+	if inserted == 1 && !tx.store.metricCap.take(team, ref) {
 		var held int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_metrics WHERE team=? AND run_id=? AND node_id=?`, team, runID, nodeID).Scan(&held); err != nil {
 			return err
 		}
+		tx.store.metricCap.reset(team, ref, held)
 		if held > MaxNodeMetricSamples && (!sample.Marker() || held > MaxNodeMetricSamples+maxNodeMetricMarkers) {
 			cap := MaxNodeMetricSamples
 			if sample.Marker() {
