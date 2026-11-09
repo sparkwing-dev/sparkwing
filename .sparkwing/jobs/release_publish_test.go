@@ -19,7 +19,7 @@ func TestReleaseChangelogKeepsLaterAndEditedNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, pending, err := changelogSectionBounds(body, "Unreleased")
-	if err != nil || len(pending.entries) != 2 {
+	if err != nil || len(pending.Entries) != 2 {
 		t.Fatalf("pending notes = %+v, %v", pending, err)
 	}
 	for _, want := range []string{"Further explanation.", "Later change.", "Older with a corrected description."} {

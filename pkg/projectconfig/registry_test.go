@@ -48,7 +48,7 @@ pipelines:
 	if build == nil || build.Description != "Build it" || !build.Hidden || build.Source != "origin/main" || build.Profile != "prod" || build.Args["mode"] != "pipeline" {
 		t.Fatalf("lost pipeline declarations: %#v", build)
 	}
-	if build.Requires == nil || len(build.Requires) != 0 || !build.Guards.IsEmpty() {
+	if !build.Guards.IsEmpty() {
 		t.Fatalf("explicit empty replaced by defaults: %#v", build)
 	}
 	if build.On.Push == nil || build.On.PullRequest == nil || build.On.PreHook == nil || build.On.PostHook == nil || build.On.PostCommitHook == nil {
@@ -58,7 +58,7 @@ pipelines:
 		t.Fatalf("schedule = %#v", build.On.Schedule)
 	}
 	check := registry.Find("check")
-	if !reflect.DeepEqual(check.Requires, []string{"linux"}) || check.Args["mode"] != "default" {
+	if check.Args["mode"] != "default" {
 		t.Fatalf("lost defaults: %#v", check)
 	}
 	if err := check.Guards.Evaluate("check", pipelines.GuardContext{ProfileIsLocal: true}); err == nil {

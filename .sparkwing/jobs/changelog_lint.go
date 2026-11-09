@@ -26,7 +26,7 @@ func (i ChangelogIssue) Format() string {
 
 func LintChangelog(body string, migrations fs.FS) []ChangelogIssue {
 	var issues []ChangelogIssue
-	sections := parseChangelogSections(body)
+	sections := docs.ParseChangelog(body)
 	for _, s := range sections {
 		issues = append(issues, lintSectionHeadingsDedupe(s)...)
 		issues = append(issues, lintSectionBreakingEntries(s, migrations)...)
@@ -69,17 +69,17 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int) []Changelo
 	if prevSchema == curSchema {
 		return nil
 	}
-	sections := parseChangelogSections(body)
-	var versionSec, unreleasedSec *changelogSection
+	sections := docs.ParseChangelog(body)
+	var versionSec, unreleasedSec *docs.ReleaseSection
 	for i := range sections {
 		switch {
-		case strings.EqualFold(sections[i].version, version):
+		case strings.EqualFold(sections[i].Version, version):
 			versionSec = &sections[i]
-		case strings.EqualFold(sections[i].version, "Unreleased"):
+		case strings.EqualFold(sections[i].Version, "Unreleased"):
 			unreleasedSec = &sections[i]
 		}
 	}
-	for _, s := range []*changelogSection{versionSec, unreleasedSec} {
+	for _, s := range []*docs.ReleaseSection{versionSec, unreleasedSec} {
 		if s != nil && sectionHasSchemaBreakEntry(*s) {
 			return nil
 		}
@@ -88,11 +88,11 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int) []Changelo
 	label := version
 	switch {
 	case versionSec != nil:
-		line = versionSec.startLine
-		label = versionSec.version
+		line = versionSec.StartLine
+		label = versionSec.Version
 	case unreleasedSec != nil:
-		line = unreleasedSec.startLine
-		label = unreleasedSec.version
+		line = unreleasedSec.StartLine
+		label = unreleasedSec.Version
 	}
 	return []ChangelogIssue{{
 		Line:     line,
@@ -200,19 +200,19 @@ func LintWireBreak(body, version string, cuts []wireCut, migrations fs.FS) []Cha
 				describeWireCuts(cuts), version),
 		}}
 	}
-	isUnreleased := strings.EqualFold(section.version, "Unreleased")
-	var declarations []changelogEntry
-	for _, e := range section.entries {
-		if scope := breakingScopeRe.FindStringSubmatch(e.body); scope != nil && wireScopeRe.MatchString(scope[1]) {
+	isUnreleased := strings.EqualFold(section.Version, "Unreleased")
+	var declarations []docs.ReleaseEntry
+	for _, e := range section.Entries {
+		if scope := breakingScopeRe.FindStringSubmatch(e.Body); scope != nil && wireScopeRe.MatchString(scope[1]) {
 			declarations = append(declarations, e)
 		}
 	}
 	if len(declarations) == 0 {
 		return []ChangelogIssue{{
-			Line:     section.startLine,
+			Line:     section.StartLine,
 			Category: wireBreakCategory,
 			Message: fmt.Sprintf("%s, but [%s] has no `(Breaking)` entry under a wire scope (%s); mark the cut and link a section in docs/migrations/%s",
-				describeWireCuts(cuts), section.version, strings.Join(wireScopes, ", "), expectedMigrationPath(section.version, isUnreleased)),
+				describeWireCuts(cuts), section.Version, strings.Join(wireScopes, ", "), expectedMigrationPath(section.Version, isUnreleased)),
 		}}
 	}
 	// safety: only an entry that names a cut is treated as the declaration, so a
@@ -221,22 +221,22 @@ func LintWireBreak(body, version string, cuts []wireCut, migrations fs.FS) []Cha
 	declaring := declaringEntries(*section, declarations, cuts, migrations, isUnreleased)
 	if len(declaring) == 0 {
 		return []ChangelogIssue{{
-			Line:     section.startLine,
+			Line:     section.StartLine,
 			Category: wireCoverageCategory,
 			Message: fmt.Sprintf("%s, and no `(Breaking)` entry in [%s] names any of it; name each cut in the entry or in the migration section it links, or name the route, operation, or message type it sits under",
-				describeWireCuts(cuts), section.version),
+				describeWireCuts(cuts), section.Version),
 		}}
 	}
 	declared := ""
 	var issues []ChangelogIssue
 	for _, e := range declaring {
-		links := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
+		links := migrationLinkRe.FindAllStringSubmatch(e.Body, -1)
 		if len(links) == 0 {
 			issues = append(issues, ChangelogIssue{
-				Line:     e.titleLine,
+				Line:     e.TitleLine,
 				Category: wireMigrationCategory,
 				Message: fmt.Sprintf("`(Breaking)` entry in [%s] links no migration section; link docs/migrations/%s",
-					section.version, expectedMigrationPath(section.version, isUnreleased)),
+					section.Version, expectedMigrationPath(section.Version, isUnreleased)),
 			})
 			continue
 		}
@@ -245,7 +245,7 @@ func LintWireBreak(body, version string, cuts []wireCut, migrations fs.FS) []Cha
 		if len(linkIssues) > 0 {
 			continue
 		}
-		declared += e.body + "\n" + strings.Join(sections, "\n") + "\n"
+		declared += e.Body + "\n" + strings.Join(sections, "\n") + "\n"
 	}
 	if declared == "" {
 		return issues
@@ -260,18 +260,18 @@ func LintWireBreak(body, version string, cuts []wireCut, migrations fs.FS) []Cha
 		return nil
 	}
 	return append(issues, ChangelogIssue{
-		Line:     declaring[0].titleLine,
+		Line:     declaring[0].TitleLine,
 		Category: wireCoverageCategory,
 		Message: fmt.Sprintf("the `(Breaking)` entry in [%s] and its migration section do not name %d of %d cut(s): %s; name each one verbatim in the entry or the section it links, or name the route, operation, or message type it sits under",
-			section.version, len(missing), len(cuts), strings.Join(missing, "; ")),
+			section.Version, len(missing), len(cuts), strings.Join(missing, "; ")),
 	})
 }
 
-func declaringEntries(section changelogSection, candidates []changelogEntry, cuts []wireCut, migrations fs.FS, isUnreleased bool) []changelogEntry {
-	var declaring []changelogEntry
+func declaringEntries(section docs.ReleaseSection, candidates []docs.ReleaseEntry, cuts []wireCut, migrations fs.FS, isUnreleased bool) []docs.ReleaseEntry {
+	var declaring []docs.ReleaseEntry
 	for _, e := range candidates {
-		text := e.body
-		links := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
+		text := e.Body
+		links := migrationLinkRe.FindAllStringSubmatch(e.Body, -1)
 		if len(links) > 0 {
 			sections, _ := migrationSections(section, e, links, migrations, isUnreleased)
 			text += "\n" + strings.Join(sections, "\n")
@@ -286,22 +286,22 @@ func declaringEntries(section changelogSection, candidates []changelogEntry, cut
 	return declaring
 }
 
-func migrationSections(s changelogSection, e changelogEntry, links [][]string, migrations fs.FS, isUnreleased bool) (bodies []string, issues []ChangelogIssue) {
+func migrationSections(s docs.ReleaseSection, e docs.ReleaseEntry, links [][]string, migrations fs.FS, isUnreleased bool) (bodies []string, issues []ChangelogIssue) {
 	for _, link := range links {
 		path, anchor, _ := strings.Cut(link[1], "#")
 		path, anchor = strings.TrimSpace(path), strings.TrimSpace(anchor)
-		if want := expectedMigrationPath(s.version, isUnreleased); path != want {
+		if want := expectedMigrationPath(s.Version, isUnreleased); path != want {
 			issues = append(issues, ChangelogIssue{
-				Line:     e.titleLine,
+				Line:     e.TitleLine,
 				Category: "version-mismatch",
-				Message:  fmt.Sprintf("(Breaking) entry in [%s] links to docs/migrations/%s but should link to docs/migrations/%s", s.version, path, want),
+				Message:  fmt.Sprintf("(Breaking) entry in [%s] links to docs/migrations/%s but should link to docs/migrations/%s", s.Version, path, want),
 			})
 			continue
 		}
 		headings, exists := readMigrationHeadings(migrations, path)
 		if !exists {
 			issues = append(issues, ChangelogIssue{
-				Line:     e.titleLine,
+				Line:     e.TitleLine,
 				Category: "missing-migration-file",
 				Message:  fmt.Sprintf("(Breaking) entry links to docs/migrations/%s but the file does not exist", path),
 			})
@@ -310,7 +310,7 @@ func migrationSections(s changelogSection, e changelogEntry, links [][]string, m
 		body, found := migrationSectionBody(migrations, path, anchor)
 		if !found {
 			issues = append(issues, ChangelogIssue{
-				Line:     e.titleLine,
+				Line:     e.TitleLine,
 				Category: "missing-migration-anchor",
 				Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s#%s but that anchor matches no H2 in the file; available headings: %s",
 					path, anchor, formatAnchorList(headings)),
@@ -360,14 +360,14 @@ func expectedMigrationPath(version string, isUnreleased bool) string {
 	return version + ".md"
 }
 
-func changelogSectionFor(body, version string) *changelogSection {
-	sections := parseChangelogSections(body)
-	var versionSec, unreleasedSec *changelogSection
+func changelogSectionFor(body, version string) *docs.ReleaseSection {
+	sections := docs.ParseChangelog(body)
+	var versionSec, unreleasedSec *docs.ReleaseSection
 	for i := range sections {
 		switch {
-		case strings.EqualFold(sections[i].version, version):
+		case strings.EqualFold(sections[i].Version, version):
 			versionSec = &sections[i]
-		case strings.EqualFold(sections[i].version, "Unreleased"):
+		case strings.EqualFold(sections[i].Version, "Unreleased"):
 			unreleasedSec = &sections[i]
 		}
 	}
@@ -389,157 +389,78 @@ func describeWireCuts(cuts []wireCut) string {
 	return fmt.Sprintf("the daemon's wire surface cuts %d entries (%s)", len(described), strings.Join(described, "; "))
 }
 
-func sectionHasSchemaBreakEntry(s changelogSection) bool {
-	for _, e := range s.entries {
-		if breakingScopeRe.MatchString(e.body) && strings.Contains(strings.ToLower(e.body), "schema") {
+func sectionHasSchemaBreakEntry(s docs.ReleaseSection) bool {
+	for _, e := range s.Entries {
+		if breakingScopeRe.MatchString(e.Body) && strings.Contains(strings.ToLower(e.Body), "schema") {
 			return true
 		}
 	}
 	return false
 }
 
-type changelogSection struct {
-	version   string
-	startLine int
-	subHeads  []subheadingMatch
-	entries   []changelogEntry
-}
-
-type subheadingMatch struct {
-	line int
-	name string
-}
-
-type changelogEntry struct {
-	titleLine int
-	body      string
-}
-
 var (
-	sectionHeadingRe    = regexp.MustCompile(`^##\s+(.+)$`)
-	subHeadingRe        = regexp.MustCompile(`^###\s+(.+)$`)
-	breakingScopeRe     = regexp.MustCompile(`(?m)^-\s+\*\*([^*]+?)\s*\(Breaking\)\s*:\*\*`)
-	migrationLinkRe     = regexp.MustCompile(`\(docs/migrations/([^)]+)\)`)
-	sectionVersionLabel = regexp.MustCompile(`\[?(Unreleased|v\d+\.\d+\.\d+)\]?`)
+	breakingScopeRe = regexp.MustCompile(`(?m)^-\s+\*\*([^*]+?)\s*\(Breaking\)\s*:\*\*`)
+	migrationLinkRe = regexp.MustCompile(`\(docs/migrations/([^)]+)\)`)
 )
 
-func parseChangelogSections(body string) []changelogSection {
-	var sections []changelogSection
-	var cur *changelogSection
-	var entry *changelogEntry
-	scanner := bufio.NewScanner(strings.NewReader(body))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	lineNum := 0
-	flushEntry := func() {
-		if cur == nil || entry == nil {
-			return
-		}
-		cur.entries = append(cur.entries, *entry)
-		entry = nil
-	}
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-		if m := sectionHeadingRe.FindStringSubmatch(line); m != nil {
-			flushEntry()
-			if cur != nil {
-				sections = append(sections, *cur)
-			}
-			label := sectionVersionLabel.FindStringSubmatch(m[1])
-			version := ""
-			if label != nil {
-				version = label[1]
-			} else {
-				version = strings.TrimSpace(m[1])
-			}
-			cur = &changelogSection{version: version, startLine: lineNum}
-			continue
-		}
-		if cur == nil {
-			continue
-		}
-		if m := subHeadingRe.FindStringSubmatch(line); m != nil {
-			flushEntry()
-			cur.subHeads = append(cur.subHeads, subheadingMatch{
-				line: lineNum,
-				name: strings.TrimSpace(m[1]),
-			})
-			continue
-		}
-		if strings.HasPrefix(line, "- ") {
-			flushEntry()
-			entry = &changelogEntry{titleLine: lineNum, body: line}
-			continue
-		}
-		if entry != nil {
-			entry.body += "\n" + line
-		}
-	}
-	flushEntry()
-	if cur != nil {
-		sections = append(sections, *cur)
-	}
-	return sections
-}
-
-func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
+func lintSectionHeadingsDedupe(s docs.ReleaseSection) []ChangelogIssue {
 	var issues []ChangelogIssue
 	firstSeen := map[string]int{}
-	for _, h := range s.subHeads {
-		key := normalizeHeadingName(h.name)
+	for _, h := range s.Headings {
+		key := normalizeHeadingName(h.Name)
 		if prev, ok := firstSeen[key]; ok {
 			fix := "move its bullets under the first heading and delete the repeat"
-			if s.version == "Unreleased" {
+			if s.Version == "Unreleased" {
 				fix = "move unreleased entries to docs/changes/<slug>.md and run bash bin/sync-docs.sh"
 			}
 			issues = append(issues, ChangelogIssue{
-				Line:     h.line,
+				Line:     h.Line,
 				Category: "duplicate-heading",
 				Message: fmt.Sprintf("### %s appears more than once in [%s] (first at line %d); %s",
-					h.name, s.version, prev, fix),
+					h.Name, s.Version, prev, fix),
 			})
 			continue
 		}
-		firstSeen[key] = h.line
+		firstSeen[key] = h.Line
 	}
 	return issues
 }
 
 func normalizeHeadingName(s string) string { return s }
 
-func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []ChangelogIssue {
+func lintSectionBreakingEntries(s docs.ReleaseSection, migrations fs.FS) []ChangelogIssue {
 	var issues []ChangelogIssue
-	isUnreleased := strings.EqualFold(s.version, "Unreleased")
-	for _, e := range s.entries {
-		if !breakingScopeRe.MatchString(e.body) {
+	isUnreleased := strings.EqualFold(s.Version, "Unreleased")
+	for _, e := range s.Entries {
+		if !breakingScopeRe.MatchString(e.Body) {
 			continue
 		}
 		// safety: no store, binary or pipeline is carried forward until paid launch,
 		// so a (Breaking) entry may ship without a guide; a link it carries must resolve.
-		for _, m := range migrationLinkRe.FindAllStringSubmatch(e.body, -1) {
+		for _, m := range migrationLinkRe.FindAllStringSubmatch(e.Body, -1) {
 			issues = append(issues, validateMigrationLink(s, e, m[1], migrations, isUnreleased)...)
 		}
 	}
 	return issues
 }
 
-func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string, migrations fs.FS, isUnreleased bool) []ChangelogIssue {
+func validateMigrationLink(s docs.ReleaseSection, e docs.ReleaseEntry, urlTail string, migrations fs.FS, isUnreleased bool) []ChangelogIssue {
 	path, anchor, _ := strings.Cut(urlTail, "#")
 	path = strings.TrimSpace(path)
 	anchor = strings.TrimSpace(anchor)
 
 	if !isUnreleased {
-		expected := s.version
+		expected := s.Version
 		if !strings.HasPrefix(expected, "v") {
 			expected = "v" + expected
 		}
 		expectedPath := expected + ".md"
 		if path != expectedPath {
 			return []ChangelogIssue{{
-				Line:     e.titleLine,
+				Line:     e.TitleLine,
 				Category: "version-mismatch",
 				Message: fmt.Sprintf("(Breaking) entry in [%s] links to docs/migrations/%s but should link to docs/migrations/%s",
-					s.version, path, expectedPath),
+					s.Version, path, expectedPath),
 			}}
 		}
 	}
@@ -547,7 +468,7 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 	headings, fileExists := readMigrationHeadings(migrations, path)
 	if !fileExists {
 		return []ChangelogIssue{{
-			Line:     e.titleLine,
+			Line:     e.TitleLine,
 			Category: "missing-migration-file",
 			Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s but the file does not exist (create it with the H2 sections the entry references)",
 				path),
@@ -556,7 +477,7 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 
 	if anchor == "" {
 		return []ChangelogIssue{{
-			Line:     e.titleLine,
+			Line:     e.TitleLine,
 			Category: "missing-migration-anchor",
 			Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s but the link has no #anchor; available headings: %s",
 				path, formatAnchorList(headings)),
@@ -568,7 +489,7 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 		}
 	}
 	return []ChangelogIssue{{
-		Line:     e.titleLine,
+		Line:     e.TitleLine,
 		Category: "missing-migration-anchor",
 		Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s#%s but that anchor matches no heading in the file; available headings: %s",
 			path, anchor, formatAnchorList(headings)),

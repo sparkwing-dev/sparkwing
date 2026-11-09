@@ -23,6 +23,23 @@ func planInputs(in PlanInputs) (Inputs, error) {
 	return Inputs{Sealed: Values{Options: in.Request.Request.Options}, Pipeline: Values{Options: layerOptions(in.Declarations.Pipeline)}, Defaults: Values{Options: layerOptions(in.Declarations.Defaults)}, Code: Values{Options: code}, ceilings: &in.Request.Ceilings, Context: ctx}, nil
 }
 
+// PlanningRequirements resolves repository requirements before a planner is selected.
+// Request overrides retain precedence over pipeline declarations and defaults.
+func PlanningRequirements(raw []byte, file, pipeline string, options runspec.Options) (runspec.Setting[[]string], error) {
+	declarations, err := ProjectCheckoutDeclarations(raw, file, pipeline)
+	if err != nil {
+		return runspec.Setting[[]string]{}, err
+	}
+	in, err := planInputs(PlanInputs{Request: runspec.SealedRequest{Request: runspec.Request{Options: options}}, Declarations: declarations})
+	if err != nil {
+		return runspec.Setting[[]string]{}, err
+	}
+	var out runspec.Setting[[]string]
+	err = resolveSetting(in, requires, &out)
+	out.Origin.Layer = runspec.LayerSealed
+	return out, err
+}
+
 func resolveRun(in Inputs, out runspec.Options) (runspec.Options, error) {
 	var err error
 	if err = resolveSetting(in, priority, &out.Priority); err != nil {

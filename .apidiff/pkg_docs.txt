@@ -53,9 +53,24 @@ func MigrationsBetweenMarkdown(from, to string, entries []MigrationEntry) (strin
 func MigrationsList() []MigrationEntry
 func MigrationsRead(version string) (string, error)
 func NewWebClient() *WebClient
+func ParseChangelog(body string) []ReleaseSection
 func Read(slug string) (string, error)
 func ReadGuide(name string) (string, error)
 func ReadRaw(slug string) (string, error)
+type ReleaseEntry struct {
+	TitleLine int
+	Body      string
+}
+type ReleaseHeading struct {
+	Line int
+	Name string
+}
+type ReleaseSection struct {
+	Version                          string
+	StartLine, Start, HeaderEnd, End int
+	Headings                         []ReleaseHeading
+	Entries                          []ReleaseEntry
+}
 func Search(query string) []Entry
 func SearchSections(query string) []Section
 type Section struct {

@@ -66,8 +66,6 @@ type Pipeline struct {
 	Args map[string]string
 
 	Profile string
-
-	Requires []string
 }
 func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error
 type PostCommitHookTrigger struct{}

@@ -7,9 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -92,26 +90,20 @@ func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[
 	if err := validateDataTransfer(controllerwire.DataSignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry}); err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPut, target, bytes.NewReader(body))
-	if err != nil {
-		return err
+	if timeout := u.transport.http.Timeout; timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
-	for name, value := range headers {
-		request.Header.Set(name, value)
-	}
-	response, err := u.transport.http.Do(request)
-	if err != nil {
-		return err
-	}
-	_, readErr := io.Copy(io.Discard, response.Body)
-	err = errors.Join(readErr, response.Body.Close())
-	if response.StatusCode == http.StatusPreconditionFailed && err == nil {
+	response, err := (blob.TransferClient{Transport: u.transport.http.Transport}).Transfer(ctx, blob.SignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry, Size: int64(len(body))}, bytes.NewReader(body))
+	if errors.Is(err, blob.ErrPreconditionFailed) {
 		return nil
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return errors.Join(fmt.Errorf("log upload returned HTTP %d", response.StatusCode), err)
+	if err != nil {
+		return err
 	}
-	return err
+	_, readErr := io.Copy(io.Discard, response)
+	return errors.Join(readErr, response.Close())
 }
 
 func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segment, body []byte) error {

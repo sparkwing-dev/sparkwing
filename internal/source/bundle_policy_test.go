@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -198,5 +199,66 @@ func TestSourceBundleImportsSHA1UnderSHA256DefaultAndKeepsOtherEntries(t *testin
 	body, err := os.ReadFile(path)
 	if err != nil || string(body) != "existing checkout" {
 		t.Fatal("acquisition changed another entry", string(body), err)
+	}
+}
+
+type policyBundleAccess struct {
+	freshBundleAccess
+	target string
+}
+
+func (a *policyBundleAccess) BundleURL(context.Context, string) (string, error) { return a.target, nil }
+
+type policyBundleTransport func(*http.Request) (*http.Response, error)
+
+func (f policyBundleTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type failedBundleReader struct{ failure error }
+
+func (r failedBundleReader) Read([]byte) (int, error) { return 0, r.failure }
+func (r failedBundleReader) Close() error             { return nil }
+
+func TestBundleDownloadsUseSignedTransferPolicy(t *testing.T) {
+	const target = "https://objects.example/source?signature=private-signature"
+	for _, stage := range []string{"fragment", "redirect", "request", "read", "close"} {
+		t.Run(stage, func(t *testing.T) {
+			spec, options, body := bundleFixture(t)
+			access := &policyBundleAccess{target: target}
+			if stage == "fragment" {
+				access.target += "#fragment"
+			}
+			options.Access = access
+			calls := 0
+			failure := errors.New(target)
+			options.BundleTransport = policyBundleTransport(func(*http.Request) (*http.Response, error) {
+				calls++
+				if stage == "request" {
+					return nil, failure
+				}
+				stream := io.NopCloser(bytes.NewReader(body))
+				if stage == "read" {
+					stream = failedBundleReader{failure: failure}
+				}
+				if stage == "close" {
+					stream = bundleStream{Reader: bytes.NewReader(body), closeErr: failure}
+				}
+				response := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: stream}
+				if stage == "redirect" {
+					response.StatusCode = http.StatusFound
+					response.Header.Set("Location", "https://other.example/credential-target")
+				}
+				return response, nil
+			})
+			entry, err := source.PrepareCheckout(t.Context(), spec, options)
+			if entry != nil {
+				_ = entry.Close()
+			}
+			if err == nil || strings.Contains(err.Error(), "private-signature") || errors.Is(err, failure) {
+				t.Fatalf("bundle policy = %v", err)
+			}
+			if stage == "fragment" && calls != 0 || stage == "redirect" && calls != 1 {
+				t.Fatalf("unexpected transfers: %d", calls)
+			}
+		})
 	}
 }

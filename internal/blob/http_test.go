@@ -76,3 +76,32 @@ func TestSignedTransferErrorsDoNotRetainCredentials(t *testing.T) {
 		})
 	}
 }
+
+func TestSignedTransferMetadataRejectsReusableCredentials(t *testing.T) {
+	for _, headers := range []map[string]string{
+		{"cookie": "session=private"}, {"Proxy-Authorization": "private"}, {"AUTHORIZATION": "  BeArEr private"},
+	} {
+		if err := (SignedTransfer{URL: "https://storage.example/object", Headers: headers}).Validate(); err == nil {
+			t.Fatalf("accepted reusable headers: %v", headers)
+		}
+	}
+	if err := (SignedTransfer{URL: "https://storage.example/object", Headers: map[string]string{"Authorization": "AWS4-HMAC-SHA256 one-object-signature"}}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSignedTransferPreconditionRequiresReadableResponse(t *testing.T) {
+	for _, broken := range []bool{false, true} {
+		client := TransferClient{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+			body := io.NopCloser(strings.NewReader("already exists"))
+			if broken {
+				body = failingTransferBody{failure: errors.New("private signed URL")}
+			}
+			return &http.Response{StatusCode: http.StatusPreconditionFailed, Body: body, Header: make(http.Header)}, nil
+		})}
+		_, err := client.Transfer(t.Context(), SignedTransfer{URL: "https://storage.example/object"}, strings.NewReader("hello"))
+		if err == nil || errors.Is(err, ErrPreconditionFailed) == broken {
+			t.Fatalf("broken %v: response = %v", broken, err)
+		}
+	}
+}

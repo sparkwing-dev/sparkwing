@@ -30,15 +30,17 @@ The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
 itself, a CHANGELOG.md that repeats a `###` heading within a release, and a
 branch whose merge with a freshly fetched `origin/main`
 conflicts, and names the command that fixes each; a branch behind main that
-merges cleanly goes ahead. The gate's `policy` job runs next, alone: gofmt,
+merges cleanly goes ahead. The gate's `policy` job runs next, alongside review: gofmt,
 the formatters, em dashes, tracker IDs, comments, test sleeps, tracked
 binaries, home resolution, the docs mirror, changelog lint and links, the
 required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
 generated CLI reference (`bin/gen-cli-docs.sh --check`). Each answers in
-seconds with a warm build cache, so a policy finding fails the land in under
-a minute instead of after a twenty-minute gate. Once it passes, the rest of
-the gate (the same jobs as `sparkwing run gate`) and the review (the same job
-as `sparkwing run review`, under `.review.yaml`) run in parallel. The policy
+seconds with a warm build cache. Once it passes, the rest of
+the gate (the same jobs as `sparkwing run gate`) starts while review continues.
+Review is the same job as `sparkwing run review`, under `.review.yaml`. A focused
+policy/review run selects both with `--sw-only '*[wy]'` (the job names ending in
+`w` or `y`). Selecting review
+alone includes preconditions but skips policy. The policy
 job collects every finding before it fails; the heavy `gate` job likewise lets
 every heavy step report. Every change is reviewed, docs and
 comment changes included; the review job never skips by size or path. A diff
@@ -48,7 +50,11 @@ whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any
 The record's `reviewer.model` names the model that ran. Independent default and
 security profiles run concurrently, and their findings and sessions are combined
 in profile order after both finish. A failed profile leaves the prior review
-record unchanged. The gate selects its checks from the change scope (decision 96): vet, build, lint,
+record unchanged. Review logs time diff assembly, context gathering, each model
+invocation (including failed session resumes), settlement and record writing.
+Model time includes the reviewer's repository reads and any nested reviewers.
+Prompts and findings never appear in these timing logs.
+The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
 `.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
