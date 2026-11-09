@@ -438,7 +438,8 @@ func (node authorityNode) readsMembership() bool {
 }
 
 func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, writes ...string) ([]authorityNode, error) {
-	if lock {
+	// perf: read snapshots fix authority and time without acquiring locks to revalidate.
+	if lock && !tx.snapshotRead {
 		if _, err := authorityChainTx(ctx, tx, ref, false); err != nil {
 			return nil, err
 		}

@@ -80,9 +80,7 @@ func writeHelp(stdout io.Writer, fs *flag.FlagSet, text string) error {
 	if err != nil {
 		return err
 	}
-	if output == "" && !color.IsInteractiveStdout() {
-		output = "json"
-	}
+	output = clisurface.OutputFormat(output, color.IsInteractiveStdout())
 	if output == "json" {
 		return json.NewEncoder(stdout).Encode(struct {
 			Kind string `json:"kind"`

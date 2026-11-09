@@ -14,6 +14,8 @@ type CacheStats struct {
 func Changelog() string
 func ChangelogSection(version string) (body string, ok bool)
 const ChangelogSlug = "changelog"
+func CollectChangelog(body string, sources fs.FS) (string, error)
+func CollectMigration(sources fs.FS) ([]byte, error)
 const DefaultBaseURL = "https://sparkwing.dev"
 func DefaultCacheDir() string
 type Entry struct {
@@ -37,6 +39,7 @@ func Guides() []Guide
 const IndexTTL = 24 * time.Hour
 const LatestAlias = "latest"
 func List() []Entry
+func MigrationAnchor(s string) string
 type MigrationEntry struct {
 	Version string
 	Slug    string

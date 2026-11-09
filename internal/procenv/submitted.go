@@ -17,7 +17,7 @@ func Submit(environment, allowed []string, masker *secrets.Masker) (map[string][
 	values := map[string][]byte{}
 	seen := map[string]bool{}
 	for _, entry := range environment {
-		name, value, err := parseEntry(entry)
+		name, value, err := ParseEntry(entry)
 		if err != nil {
 			return nil, err
 		}

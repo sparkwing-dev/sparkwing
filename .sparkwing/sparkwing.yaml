@@ -94,6 +94,9 @@ pipelines:
   - name: release
     entrypoint: Release
 
+  - name: release-cut
+    entrypoint: ReleaseCut
+
   - name: weekly-release
     entrypoint: WeeklyRelease
     on:

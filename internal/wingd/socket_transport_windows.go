@@ -35,6 +35,23 @@ type pipeConn struct {
 	listener *pipeListener
 }
 
+// bug: net/http must recognize deadline cancellation as net.Error when reusing a connection.
+func (c *pipeConn) Read(p []byte) (int, error) {
+	n, err := c.File.Read(p)
+	if err != nil && err != io.EOF {
+		err = &net.OpError{Op: "read", Net: "pipe", Addr: c.RemoteAddr(), Err: err}
+	}
+	return n, err
+}
+
+func (c *pipeConn) Write(p []byte) (int, error) {
+	n, err := c.File.Write(p)
+	if err != nil {
+		err = &net.OpError{Op: "write", Net: "pipe", Addr: c.RemoteAddr(), Err: err}
+	}
+	return n, err
+}
+
 func (c *pipeConn) LocalAddr() net.Addr  { return pipeAddress(c.path) }
 func (c *pipeConn) RemoteAddr() net.Addr { return pipeAddress(c.path) }
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 func TestLintChangelog_Dedupe_Clean(t *testing.T) {
@@ -65,7 +67,7 @@ func TestLintChangelog_Dedupe_DuplicateAdded(t *testing.T) {
 	if !strings.Contains(i.Message, "first at line 5") {
 		t.Errorf("message missing first-occurrence line: %q", i.Message)
 	}
-	if !strings.Contains(i.Message, "bash bin/check-changelog.sh --fix") {
+	if !strings.Contains(i.Message, "docs/changes/<slug>.md") {
 		t.Errorf("message does not name the fix command: %q", i.Message)
 	}
 }
@@ -356,9 +358,9 @@ func TestSlugifyHeading(t *testing.T) {
 		{"`Needs(...any)`→`Needs(...Dep)`", "needsanyneedsdep"},
 	}
 	for _, c := range cases {
-		got := slugifyHeading(c.in)
+		got := docs.MigrationAnchor(c.in)
 		if got != c.want {
-			t.Errorf("slugifyHeading(%q) = %q, want %q", c.in, got, c.want)
+			t.Errorf("docs.MigrationAnchor(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

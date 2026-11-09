@@ -253,7 +253,9 @@ service, then waits for the successor to acquire the same home and become ready.
 in process for standalone CI. Give it a private `SPARKWING_HOME`. Its admission
 queue belongs to that process; it does not join another controller's machine
 admission queue. It retains run and job concurrency rules. It cannot detach or
-use Cloud routing. The CLI drains and joins its controller before returning.
+use Cloud routing. The CLI closes its API client before draining and joining its
+controller, so unused client connections cannot turn a successful pipeline into a
+shutdown timeout.
 It must not open a home another controller owns. An unavailable or incompatible
 shared controller is an error, rather than permission to open its database in a
 second process. Startup reconciliation and shutdown draining belong to the
