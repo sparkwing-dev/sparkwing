@@ -54,7 +54,7 @@ func TestReplacementEnsureKeepsAcceptedLocalBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := strict.Ensure(t.Context(), identity, target); err == nil || !strings.Contains(err.Error(), "installed engine differs") {
+	if _, err := strict.Ensure(t.Context(), identity, target); err == nil || !strings.Contains(err.Error(), "planned on engine "+identity.Version) {
 		t.Fatalf("default resolver accepted retained build: %v", err)
 	}
 	for _, mutation := range []string{"path", "pin", "digest", "version", "target"} {
