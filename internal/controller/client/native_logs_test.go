@@ -322,7 +322,7 @@ func TestNativeLogPutKeepsTheConfiguredHTTPDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		uploader := &nativeLogUploader{transport: testEngine(t, func(request *http.Request) (*http.Response, error) {
 			deadline, ok := request.Context().Deadline()
-			if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > time.Minute {
+			if !ok || time.Until(deadline) != time.Minute {
 				t.Fatalf("configured upload deadline missing: %v, %v", deadline, ok)
 			}
 			return engineResponse(http.StatusCreated, ""), nil
