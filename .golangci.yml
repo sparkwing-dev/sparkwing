@@ -223,8 +223,8 @@ linters:
             - "!**/testdata/**"
             - "!$test"
           deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/sparkwing
-              desc: "Internal packages must not depend on the author SDK; move the shared value to an internal leaf the SDK re-exports."
+            - pkg: github.com/sparkwing-dev/sparkwing/sparkwing$
+              desc: "Internal packages use SDK-owned protocol and runtime packages, not the author API."
 
         no-testing-in-prod:
           list-mode: lax
@@ -232,8 +232,7 @@ linters:
             - "$all"
             - "!$test"
             - "!**/*test/**"
-            - "!**/internal/testleak/**"
-            - "!**/internal/testhome/**"
+            - "!**/sparkwing/testsupport/**"
             - "!**/internal/testshell/**"
             - "!**/internal/chaos/**"
           deny:
