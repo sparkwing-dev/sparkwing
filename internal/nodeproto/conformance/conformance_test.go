@@ -45,7 +45,7 @@ func TestGoSDKConformsV2(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	build := exec.CommandContext(t.Context(), "go", "build", "-p", "4", "-o", bin, "./testdata/gofixture")
+	build := exec.CommandContext(t.Context(), "go", "build", "-p", "2", "-o", bin, "./testdata/gofixture")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build fixture: %v\n%s", err, output)
 	}
@@ -64,6 +64,7 @@ func TestGoSDKConformsV2(t *testing.T) {
 	for _, session := range cases.Sessions {
 		t.Run(session.Name, func(t *testing.T) {
 			p := startFixture(t, bin)
+			p.recording = NewRecording(t, "go", session.Name)
 			protocol := nodeproto.Version
 			if session.Protocol != 0 {
 				protocol = session.Protocol
@@ -171,6 +172,7 @@ func (p *fixtureProcess) checkEval(t *testing.T, reply nodeproto.Reply, step cor
 }
 
 type fixtureProcess struct {
+	recording *Recording
 	process   *acceptance.GoSDKProcess
 	plan      nodeproto.PlanDoc
 	wire      *Schema
@@ -199,6 +201,7 @@ func startFixture(t *testing.T, bin string) *fixtureProcess {
 
 func (p *fixtureProcess) send(t *testing.T, req nodeproto.Request) {
 	t.Helper()
+	p.recording.Request(t, req)
 	if err := p.process.Send(req); err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +215,7 @@ func (p *fixtureProcess) reply(t *testing.T) nodeproto.Reply {
 			p.process.Close()
 			t.Fatalf("frame read: %v; stderr: %s", err, p.process.Stderr())
 		}
+		p.recording.Frame(t, line)
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(line, &fields); err != nil {
 			t.Fatal(err)

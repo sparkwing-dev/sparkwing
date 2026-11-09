@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 )
 
 func TestNativeProtocol(t *testing.T) {
@@ -214,6 +215,7 @@ func nativeCancel(t *testing.T, h *host) {
 }
 
 type host struct {
+	recording                  *conformance.Recording
 	t                          *testing.T
 	command                    *exec.Cmd
 	requests                   *os.File
@@ -266,6 +268,9 @@ func startSDKAt(t *testing.T, node, root, fixture string) *host {
 
 func (h *host) send(request nodeproto.Request) {
 	h.t.Helper()
+	if h.recording != nil {
+		h.recording.Request(h.t, request)
+	}
 	if err := json.NewEncoder(h.requests).Encode(request); err != nil {
 		h.t.Fatal(err)
 	}
@@ -283,6 +288,9 @@ func (h *host) frame() wireFrame {
 		h.t.Fatalf("frame EOF: %v\n%s", h.frames.Err(), h.stderr.String())
 	}
 	line := h.frames.Bytes()
+	if h.recording != nil {
+		h.recording.Frame(h.t, line)
+	}
 	parsed, err := nodeproto.ParseFrame(line)
 	if err != nil {
 		h.t.Fatalf("frame: %v\n%s", err, line)

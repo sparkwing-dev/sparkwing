@@ -1,0 +1,86 @@
+{
+  "protocol": 2,
+  "language": "go",
+  "exchanges": [
+    {
+      "wire_request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        }
+      },
+      "expected": {
+        "reply": "hello",
+        "ok": true,
+        "result": {
+          "protocol": 2,
+          "sdk": {
+            "language": "go",
+            "version": "(devel)"
+          }
+        }
+      },
+      "request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        }
+      },
+      "frames": [
+        {
+          "reply": "hello",
+          "ok": true,
+          "result": {
+            "protocol": 2,
+            "sdk": {
+              "language": "go",
+              "version": "(devel)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "1",
+        "op": "future_operation"
+      },
+      "expected": {
+        "reply": "1",
+        "ok": false,
+        "error": {
+          "code": "unknown_op",
+          "message": "unknown node operation \"future_operation\"; rebuild .sparkwing if the SDK is older than the engine"
+        }
+      },
+      "request": {
+        "id": "1",
+        "op": "future_operation"
+      },
+      "frames": [
+        {
+          "reply": "1",
+          "ok": false,
+          "error": {
+            "code": "unknown_op",
+            "message": "unknown node operation \"future_operation\"; rebuild .sparkwing if the SDK is older than the engine"
+          }
+        }
+      ]
+    }
+  ]
+}

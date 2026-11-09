@@ -74,6 +74,7 @@ func TestNativeConformance(t *testing.T) {
 	for _, session := range corpus.Sessions {
 		t.Run(session.Name, func(t *testing.T) {
 			h := startSDKAt(t, node, root, "conformance.mjs")
+			h.recording = conformance.NewRecording(t, "typescript", session.Name)
 			protocol := session.Protocol
 			if protocol == 0 {
 				protocol = nodeproto.Version

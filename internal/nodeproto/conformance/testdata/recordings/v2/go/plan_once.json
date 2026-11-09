@@ -1,0 +1,203 @@
+{
+  "protocol": 2,
+  "language": "go",
+  "exchanges": [
+    {
+      "wire_request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        }
+      },
+      "expected": {
+        "reply": "hello",
+        "ok": true,
+        "result": {
+          "protocol": 2,
+          "sdk": {
+            "language": "go",
+            "version": "(devel)"
+          }
+        }
+      },
+      "request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        }
+      },
+      "frames": [
+        {
+          "reply": "hello",
+          "ok": true,
+          "result": {
+            "protocol": 2,
+            "sdk": {
+              "language": "go",
+              "version": "(devel)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "1",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "expected": {
+        "reply": "1",
+        "ok": true,
+        "result": {
+          "jobs": [
+            {
+              "id": "task",
+              "memo": {},
+              "closures": {
+                "skip_if": [
+                  "task/skip/0"
+                ],
+                "before_run": [
+                  "task/before/0"
+                ],
+                "verify": "task/verify/0",
+                "after_run": [
+                  "task/after/0"
+                ],
+                "memo_key": "task/memo/0",
+                "generate": [
+                  "task/generate/0"
+                ]
+              },
+              "steps": [
+                {
+                  "id": "run"
+                }
+              ],
+              "failure_policy": "fail_fast"
+            }
+          ]
+        }
+      },
+      "request": {
+        "id": "1",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "frames": [
+        {
+          "ts": "2026-11-09T10:53:45.014944947-07:00",
+          "level": "info",
+          "msg": "planning demo"
+        },
+        {
+          "reply": "1",
+          "ok": true,
+          "result": {
+            "jobs": [
+              {
+                "id": "task",
+                "memo": {},
+                "closures": {
+                  "skip_if": [
+                    "task/skip/0"
+                  ],
+                  "before_run": [
+                    "task/before/0"
+                  ],
+                  "verify": "task/verify/0",
+                  "after_run": [
+                    "task/after/0"
+                  ],
+                  "memo_key": "task/memo/0",
+                  "generate": [
+                    "task/generate/0"
+                  ]
+                },
+                "steps": [
+                  {
+                    "id": "run"
+                  }
+                ],
+                "failure_policy": "fail_fast"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "2",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "expected": {
+        "reply": "2",
+        "ok": false,
+        "error": {
+          "code": "protocol_error",
+          "message": "plan is allowed once"
+        }
+      },
+      "request": {
+        "id": "2",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "frames": [
+        {
+          "reply": "2",
+          "ok": false,
+          "error": {
+            "code": "protocol_error",
+            "message": "plan is allowed once"
+          }
+        }
+      ]
+    }
+  ]
+}
