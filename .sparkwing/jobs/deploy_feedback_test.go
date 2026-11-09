@@ -32,15 +32,23 @@ func TestDeployScanCreatesAndUpdatesFailureTickets(t *testing.T) {
 			}
 			return `{}`, nil
 		case "list":
+			var out strings.Builder
+			for i := range report {
+				fmt.Fprintf(&out, "{\"id\":%d,\"severity\":\"high\",\"status\":\"active\",\"kind\":\"defect\",\"title\":\"scan failed\",\"promotable\":false}\n", i+1)
+			}
+			return out.String() + `{"kind":"summary","truncated":false}`, nil
+		case "show":
 			ticket := ""
 			if promotions == 2 {
 				ticket = "fixture-ticket"
 			}
-			var out strings.Builder
 			for i, finding := range report {
-				fmt.Fprintf(&out, "{\"id\":%d,\"fingerprint\":%q,\"ticket\":%q,\"detail\":%q}\n", i+1, finding["fingerprint"], ticket, finding["detail"])
+				if fmt.Sprint(i+1) == c.Args[slices.Index(c.Args, "--id")+1] {
+					return fmt.Sprintf("{\"id\":%d,\"fingerprint\":%q,\"ticket\":%q,\"detail\":%q}", i+1, finding["fingerprint"], ticket, finding["detail"]), nil
+				}
 			}
-			return out.String() + `{"kind":"summary","truncated":false}`, nil
+			t.Fatalf("unexpected finding detail: %s", c)
+			return "", nil
 		case "promote":
 			if !slices.Contains(c.Args, "--force") {
 				t.Fatal("production failure waited for repeated breaches")
@@ -92,7 +100,10 @@ func TestDeployFlagsFailedProductionScanBeforeRollout(t *testing.T) {
 		}
 		if filepath.Base(c.Name) == "bitwing" {
 			if c.Args[1] == "list" {
-				return `{"id":1,"fingerprint":"sparkwing-post-deploy-production-execution/scan/integrity_failure"}` + "\n" + `{"kind":"summary"}`, nil
+				return `{"id":1,"severity":"high","promotable":false}` + "\n" + `{"kind":"summary"}`, nil
+			}
+			if c.Args[1] == "show" {
+				return `{"id":1,"fingerprint":"sparkwing-post-deploy-production-execution/scan/integrity_failure"}`, nil
 			}
 			if c.Args[1] == "promote" {
 				promotions++
@@ -108,6 +119,97 @@ func TestDeployFlagsFailedProductionScanBeforeRollout(t *testing.T) {
 	}
 	if !flagged || promotions != 1 {
 		t.Fatal("failed pre-start scan was invisible to the next production deploy")
+	}
+}
+
+func TestDeployScanPlanningFailureCreatesTicket(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	var report []map[string]string
+	promoted := false
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		if filepath.Base(c.Name) == "sparkwing" {
+			if c.Args[1] == "list" {
+				return `{"id":"planning-scan"}` + "\n" + `{"kind":"page"}`, nil
+			}
+			if c.Args[1] == "status" {
+				return `{"id":"planning-scan","status":"failed","reason":"planning_failed","failure":"invalid plan","inputs":{"requested_args":{"environment":"production","record":"deployed image identity"}},"jobs":[]}`, nil
+			}
+		}
+		if filepath.Base(c.Name) == "bitwing" {
+			switch c.Args[1] {
+			case "record":
+				body, err := os.ReadFile(c.Args[slices.Index(c.Args, "--file")+1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(body, &report); err != nil {
+					t.Fatal(err)
+				}
+			case "list":
+				return `{"id":1,"severity":"high","promotable":false}`, nil
+			case "show":
+				return fmt.Sprintf(`{"id":1,"fingerprint":%q}`, report[0]["fingerprint"]), nil
+			case "promote":
+				promoted = true
+			}
+			return `{}`, nil
+		}
+		return f.run(ctx, c)
+	}
+	if err := d.assumeRole(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.flagProductionScan(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(report) != 1 || !promoted || !strings.Contains(report[0]["detail"], "invalid plan") || !strings.Contains(report[0]["detail"], "deployed image identity") || !slices.ContainsFunc(f.said, func(msg string) bool {
+		return strings.Contains(msg, "WARNING:") && strings.Contains(msg, "planning-scan")
+	}) {
+		t.Fatalf("planning failure disappeared: report=%v promoted=%v messages=%v", report, promoted, f.said)
+	}
+}
+
+func TestDeployScanKeepsFailureWhenEnrichmentUnavailable(t *testing.T) {
+	for _, response := range []string{"unavailable", "invalid-json", `{"id":"wrong-example"}`} {
+		t.Run(response, func(t *testing.T) {
+			f := newFakeDeploy(t)
+			d := f.deployer(false)
+			var report []map[string]string
+			promoted := false
+			d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
+				if filepath.Base(c.Name) == "sparkwing" {
+					if response == "unavailable" {
+						return "", errors.New("controller unavailable")
+					}
+					return response, nil
+				}
+				switch c.Args[1] {
+				case "record":
+					body, err := os.ReadFile(c.Args[slices.Index(c.Args, "--file")+1])
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := json.Unmarshal(body, &report); err != nil {
+						t.Fatal(err)
+					}
+				case "list":
+					return `{"id":1,"severity":"high","promotable":false}`, nil
+				case "show":
+					return `{"id":1,"fingerprint":"sparkwing-post-deploy-production/full-example"}`, nil
+				case "promote":
+					promoted = true
+				}
+				return `{}`, nil
+			}
+			rec := deployScanRecord{Environment: "production", ScanRun: "scan-1", DeployRun: "deploy-1", ExampleRun: "example-1", Images: f.candidate()}
+			if err := d.recordScanFinding(t.Context(), rec, true, errors.New("known example failure")); err != nil {
+				t.Fatal(err)
+			}
+			if len(report) != 1 || !promoted || !strings.Contains(report[0]["detail"], "known example failure") || !strings.Contains(report[0]["detail"], "example-1") {
+				t.Fatalf("known failure lost to optional enrichment: %v, promoted=%v", report, promoted)
+			}
+		})
 	}
 }
 

@@ -13,13 +13,13 @@ import (
 )
 
 type deployScanObservation struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Inputs struct {
-		Args struct {
-			Environment string `json:"environment"`
-			Record      string `json:"record"`
-		} `json:"args"`
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Failure string `json:"failure"`
+	Inputs  struct {
+		Args          DeployScanArgs `json:"args"`
+		RequestedArgs DeployScanArgs `json:"requested_args"`
 	} `json:"inputs"`
 	Jobs []struct {
 		ID      string `json:"id"`
@@ -72,7 +72,11 @@ func (d *deployer) flagProductionScan(ctx context.Context) error {
 			if scan.ID != row.ID {
 				return fmt.Errorf("scan observation returned %s, want %s", scan.ID, row.ID)
 			}
-			if scan.Inputs.Args.Environment != "production" {
+			args := scan.Inputs.Args
+			if args.Environment == "" {
+				args = scan.Inputs.RequestedArgs
+			}
+			if args.Environment != "production" {
 				continue
 			}
 			message := "Previous production post-deploy scan " + scan.ID + " is " + scan.Status + ": https://console.sparkwing.dev/runs?run=" + scan.ID
@@ -87,8 +91,11 @@ func (d *deployer) flagProductionScan(ctx context.Context) error {
 				report := []map[string]string{}
 				for _, job := range scan.Jobs {
 					if job.Attempt == 0 && (job.Outcome == "failed" || job.Outcome == "cancelled") {
-						report = append(report, map[string]string{"fingerprint": source + "/" + job.ID + "/" + job.Reason, "severity": "high", "title": "Production post-deploy scan execution failed: " + job.ID, "detail": message + "\n" + scan.Inputs.Args.Record + "\n" + job.Error})
+						report = append(report, map[string]string{"fingerprint": source + "/" + job.ID + "/" + job.Reason, "severity": "high", "title": "Production post-deploy scan execution failed: " + job.ID, "detail": message + "\n" + args.Record + "\n" + job.Error})
 					}
+				}
+				if len(scan.Jobs) == 0 {
+					report = append(report, map[string]string{"fingerprint": source + "/run/" + scan.Reason, "severity": "high", "title": "Production post-deploy scan planning failed", "detail": message + "\n" + args.Record + "\n" + scan.Failure})
 				}
 				if len(report) == 0 {
 					return nil

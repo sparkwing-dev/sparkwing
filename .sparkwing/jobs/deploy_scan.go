@@ -254,18 +254,20 @@ func (d *deployer) recordScanFinding(ctx context.Context, rec deployScanRecord, 
 			if completed && rec.ExampleRun != "" {
 				out, err := d.sw(feedback, "", "runs", "status", "--run", rec.ExampleRun, "--profile", rec.Environment+"-scan", "--exit-zero", "-o", "json")
 				var observation deployScanObservation
+				if err == nil {
+					err = json.Unmarshal([]byte(out), &observation)
+				}
+				if err == nil && observation.ID != rec.ExampleRun {
+					err = fmt.Errorf("example observation returned %s, want %s", observation.ID, rec.ExampleRun)
+				}
 				if err != nil {
-					return err
-				}
-				if err := json.Unmarshal([]byte(out), &observation); err != nil {
-					return fmt.Errorf("invalid failed example observation for %s: %w", rec.ExampleRun, err)
-				}
-				if observation.ID != rec.ExampleRun {
-					return fmt.Errorf("example observation returned %s, want %s", observation.ID, rec.ExampleRun)
-				}
-				for _, job := range observation.Jobs {
-					if job.Outcome == "failed" {
-						findings = append(findings, map[string]string{"fingerprint": source + "/example/" + job.ID, "severity": "high", "title": rec.Environment + " post-deploy example: " + job.ID + " failed", "detail": finding["detail"] + "\n" + job.Error})
+					finding["detail"] += "\nJob details unavailable: " + err.Error()
+					d.tools.say(feedback, "WARNING: failed example job details unavailable; recording the scan failure: "+err.Error())
+				} else {
+					for _, job := range observation.Jobs {
+						if job.Outcome == "failed" {
+							findings = append(findings, map[string]string{"fingerprint": source + "/example/" + job.ID, "severity": "high", "title": rec.Environment + " post-deploy example: " + job.ID + " failed", "detail": finding["detail"] + "\n" + job.Error})
+						}
 					}
 				}
 			}
@@ -321,20 +323,37 @@ func (d *deployer) scanTickets(ctx context.Context, path, source string, report 
 	}
 	decoder := json.NewDecoder(strings.NewReader(out))
 	for {
+		var row struct {
+			ID int64 `json:"id"`
+		}
+		if err := decoder.Decode(&row); errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if row.ID == 0 {
+			continue
+		}
+		out, err := d.tools.run(ctx, deployCommand{Name: path, Args: []string{"finding", "show", "--id", fmt.Sprint(row.ID), "-o", "json"}, Quiet: true})
+		if err != nil {
+			return err
+		}
 		var finding struct {
 			ID          int64  `json:"id"`
 			Fingerprint string `json:"fingerprint"`
 			Ticket      string `json:"ticket"`
 		}
-		if err := decoder.Decode(&finding); errors.Is(err, io.EOF) {
-			return nil
-		} else if err != nil {
+		if err := json.Unmarshal([]byte(out), &finding); err != nil {
 			return err
+		}
+		if finding.ID != row.ID {
+			return fmt.Errorf("finding detail returned %d, want %d", finding.ID, row.ID)
 		}
 		for _, current := range report {
 			if finding.ID == 0 || finding.Fingerprint != current["fingerprint"] {
 				continue
 			}
+			// hack: the approved delivery contract requires repair tickets on the first deployment failure.
 			args := []string{"finding", "promote", "--id", fmt.Sprint(finding.ID), "--force", "--repo", "sparkwing", "-o", "json"}
 			if finding.Ticket != "" {
 				file := filepath.Join(d.tmp, "scan-ticket-comment.txt")
