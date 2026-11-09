@@ -73,6 +73,22 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 		machine = deviceMachineName()
 	}
 	request := controllerwire.StartDeviceLoginRequest{Kind: controllerwire.DeviceLoginMember, Machine: machine, Team: inv.Value("team"), Grants: inv.Flags["scope"]}
+	if !inv.Has("team") && exists && existing.Controller.URL == base && existing.Controller.Token != nil && *existing.Controller.Token != "" {
+		prefix, err := tokenPrefix(*existing.Controller.Token)
+		if err != nil {
+			return err
+		}
+		manager, err := client.NewTokenManager(client.EngineOptions{URL: base, Bearer: func(context.Context) (string, error) { return *existing.Controller.Token, nil }}, false)
+		if err != nil {
+			return err
+		}
+		known, err := manager.ReadToken(context.Background(), prefix)
+		var failure *apierr.Error
+		if err != nil && !(errors.As(err, &failure) && (failure.Code == apierr.Unauthenticated || failure.Code == apierr.NotFound)) {
+			return fmt.Errorf("login: cannot resolve the profile's team; specify --team: %w", err)
+		}
+		request.Team = known.Team
+	}
 	token, err := deviceSignIn(context.Background(), console, base, request)
 	if err != nil {
 		return err

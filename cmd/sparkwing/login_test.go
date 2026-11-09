@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -267,7 +269,7 @@ func TestLoginWarnsOnlyWhenPreviousTokenRevocationIsUnconfirmed(t *testing.T) {
 				original.ServeHTTP(w, r)
 			})
 			stderr := captureStderr(t, func() {
-				captureStdout(t, func() { err = f.run(t, "login", "--profile", "work", "-o", "json") })
+				captureStdout(t, func() { err = f.run(t, "login", "--profile", "work", "--team", "device-test", "-o", "json") })
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -283,5 +285,51 @@ func TestLoginWarnsOnlyWhenPreviousTokenRevocationIsUnconfirmed(t *testing.T) {
 				t.Fatalf("replacement was not saved: %v", err)
 			}
 		})
+	}
+}
+
+func TestLoginDefaultsToSavedProfileTeam(t *testing.T) {
+	writeProfilesFixture(t, "profiles: {}\n")
+	f := newDeviceLoginFixture(t, "approve")
+	if err := f.run(t, "login", "--controller", "https://controller.example", "--profile", "work", "--output", "plain"); err != nil {
+		t.Fatal(err)
+	}
+	assertLoginRequestedTeam(t, f, "device-test", "login", "--profile", "work", "--output", "plain")
+}
+
+func TestLoginWithoutProfileLeavesTeamUnspecified(t *testing.T) {
+	writeProfilesFixture(t, "profiles: {}\n")
+	f := newDeviceLoginFixture(t, "approve")
+	assertLoginRequestedTeam(t, f, "", "login", "--controller", "https://controller.example", "--output", "plain")
+}
+
+func assertLoginRequestedTeam(t *testing.T, f *deviceLoginFixture, want string, args ...string) {
+	t.Helper()
+	transport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = transport })
+	started := false
+	http.DefaultTransport = profileTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/device" {
+			started = true
+			var request controllerwire.StartDeviceLoginRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if request.Team != want {
+				t.Fatalf("requested team = %q, want %q", request.Team, want)
+			}
+			body, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Body = io.NopCloser(strings.NewReader(string(body)))
+		}
+		return transport.RoundTrip(r)
+	})
+	if err := f.run(t, args...); err != nil {
+		t.Fatal(err)
+	}
+	if !started {
+		t.Fatal("device sign-in was not started")
 	}
 }
