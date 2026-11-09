@@ -36,9 +36,7 @@ type migrationRoll struct {
 	repointed      int
 }
 
-// safety: the roll writes the source docs and the embedded mirror together
-// because the pre-commit tier judges the whole tree against the mirror, so a
-// release commit that touched one alone could not be committed.
+// safety: release metadata must keep offline migration guides aligned with the published sources.
 func migrationFileTargets(repoDir, name string) []string {
 	return []string{
 		filepath.Join(repoDir, filepath.FromSlash(migrationsDirRel), name),
@@ -115,9 +113,7 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 	}, nil
 }
 
-// safety: one judge for what a released section owes its guide. The pre-commit
-// tier refuses a commit on exactly these findings, so reading them from the same
-// lint stops the cut from tagging a tree nobody can commit afterwards.
+// safety: release cuts and changelog lint must agree on which breaking entries require a migration guide.
 func refuseUnrolledBreaking(rolled changelogSection, guideName, guideBody string) error {
 	issues := lintSectionBreakingEntries(rolled, fstest.MapFS{guideName: &fstest.MapFile{Data: []byte(guideBody)}})
 	if len(issues) == 0 {

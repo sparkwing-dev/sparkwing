@@ -539,9 +539,7 @@ shell utilities, while pipelines still need native tools for the commands they
 execute. Use `node.exe` to invoke JavaScript command entrypoints.
 
 Windows process cleanup uses kill-on-close Job Objects. Unix uses owned process
-sessions. The Windows local queue still shares the controller process lifetime,
-so controller replacement can stop its hosted work even after the submitting
-terminal exits. Native Windows handle inheritance, cleanup and SDK execution
+sessions. Native Windows handle inheritance, cleanup and SDK execution
 require Windows acceptance runs. Linux fixtures and cross-compilation do not establish
 those behaviors. See [node protocol](node-protocol.md).
 

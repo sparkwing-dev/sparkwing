@@ -7,8 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-// perf: one ls-files call names ignored files and wholly ignored directories; piping every walked path to
-// check-ignore took seconds per listing on a few thousand files. Outside a repository nothing is ignored.
+// perf: one ls-files call avoids a git subprocess for each walked path.
 func ignoredUnder(dir string) (dirs, files map[string]bool) {
 	cmd := procenv.HostCommand("git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory") //nolint:forbidigo // git reads the developer's global excludes from HOME and XDG_CONFIG_HOME.
 	cmd.Dir = dir

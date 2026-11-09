@@ -72,12 +72,8 @@ func pipelinePlanOptions(inv clisurface.Invocation) pipelinePlanArgs {
 
 func runPipelinePlan(inv clisurface.Invocation) error {
 	parsed := pipelinePlanOptions(inv)
-	format, err := resolveOutputFormat(parsed.output, cmdPipelinePlan.Path)
-	if err != nil {
-		return err
-	}
 	var doc planPreviewDoc
-	err = withPipelineEntry(parsed.pipeline, func(ctx context.Context, entry pipelineInspection, _ string) error {
+	err := withPipelineEntry(parsed.pipeline, func(ctx context.Context, entry pipelineInspection, _ string) error {
 		planned, err := planPipelineEntry(ctx, entry, parsed.pipeline, parsed.passthrough)
 		if err == nil {
 			doc, err = previewPlan(planned, parsed.startAt, parsed.stopAt)
@@ -87,7 +83,7 @@ func runPipelinePlan(inv clisurface.Invocation) error {
 	if err != nil {
 		return fmt.Errorf("plan: %w", err)
 	}
-	if format == "json" {
+	if parsed.output == "json" {
 		return json.NewEncoder(os.Stdout).Encode(doc)
 	}
 	printPin(parsed.pipeline)

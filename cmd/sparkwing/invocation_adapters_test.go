@@ -26,7 +26,6 @@ func runVersionArgs(args []string) error {
 
 func runDocsArgs(args []string) error { return runSparkwing(append([]string{"docs"}, args...)) }
 
-func runDaemonArgs(args []string) error       { return runSparkwing(append([]string{"daemon"}, args...)) }
 func runWingdArgs(args []string) error        { return runSparkwing(append([]string{"wingd"}, args...)) }
 func dispatchCommandArgs(args []string) error { return runSparkwing(args) }
 

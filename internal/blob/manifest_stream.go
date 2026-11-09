@@ -7,13 +7,11 @@ import (
 )
 
 func verifyManifestStream(raw io.Reader, object Blob, members []Member) error {
+	if err := CheckManifestMembers(object.Team, object.Digest, members); err != nil {
+		return err
+	}
 	budget := int64(128)
-	paths := make(map[string]bool, len(members))
 	for _, member := range members {
-		if member.Team != object.Team || member.ManifestDigest != object.Digest || member.Size < 0 || !validDigest(member.Digest) || paths[member.Path] {
-			return ErrIntegrity
-		}
-		paths[member.Path] = true
 		// safety: JSON escapes use at most six bytes per input byte; the remaining schema and whitespace are fixed per entry.
 		budget += 512 + 6*(int64(len(member.Path))+int64(len(member.Digest)))
 	}

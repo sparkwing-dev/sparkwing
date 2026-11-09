@@ -7,10 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -55,7 +53,7 @@ func (a ArtifactRecords) Stage(ctx context.Context, request blob.RecordLookup, w
 	if lookup.Record.Key != request.Key || !artifactDigestValid(lookup.Record.Digest) {
 		return 0, errors.New("artifact lookup changed its requested record")
 	}
-	if err := checkArtifactMembers(lookup); err != nil {
+	if err := blob.CheckManifestMembers(lookup.Record.Key.Team, lookup.Record.Digest, lookup.Members); err != nil {
 		return 0, err
 	}
 	// safety: membership comes from the authorized record transaction, never an
@@ -76,27 +74,6 @@ func (a ArtifactRecords) Stage(ctx context.Context, request blob.RecordLookup, w
 		count++
 	}
 	return count, nil
-}
-
-func checkArtifactMembers(lookup blob.RecordLookupResult) error {
-	paths := make(map[string]bool, len(lookup.Members))
-	for _, member := range lookup.Members {
-		if member.Team != lookup.Record.Key.Team || member.ManifestDigest != lookup.Record.Digest || !artifactDigestValid(member.Digest) || member.Size < 0 {
-			return errors.New("artifact member differs from its manifest or has invalid metadata")
-		}
-		if member.Path == "." || !fs.ValidPath(member.Path) || !filepath.IsLocal(filepath.FromSlash(member.Path)) || paths[member.Path] {
-			return errors.New("artifact member path is invalid or duplicated")
-		}
-		paths[member.Path] = true
-	}
-	for name := range paths {
-		for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
-			if paths[parent] {
-				return errors.New("artifact member is also a parent directory")
-			}
-		}
-	}
-	return nil
 }
 
 func artifactDigestValid(digest blob.Digest) bool {
