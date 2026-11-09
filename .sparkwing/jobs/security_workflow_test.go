@@ -509,8 +509,11 @@ func TestBuildToolchainsUseFixedGoPatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if file.Go == nil || file.Go.Version != fixed {
-			t.Errorf("%s must require Go %s", name, fixed)
+		if file.Go == nil || file.Go.Version != "1.26.0" {
+			t.Errorf("%s must use the module graph floor Go 1.26.0", name)
+		}
+		if file.Toolchain == nil || file.Toolchain.Name != "go"+fixed {
+			t.Errorf("%s must select toolchain go%s", name, fixed)
 		}
 	}
 }

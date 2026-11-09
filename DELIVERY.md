@@ -1611,9 +1611,9 @@ file. Other syntax and workflow checks remain active.
   disappears or changes or a marker has no approved wait. New waits and sleeps
   still fail.
 - **Go directive policy:** the release cut and `pre-release`, beside its version
-  checks, require Go 1.26.10 or later in the published root module for the
-  patched standard library. Template registry modules still reject patch-level
-  requirements: `go 1.26` and `go 1.26.0` pass; `go 1.26.3` fails.
+  checks, reject patch-level requirements in the published root module and
+  template registry modules: `go 1.26` and `go 1.26.0` pass; `go 1.26.3` fails.
+  Our modules select the patched Go 1.26.10 toolchain separately.
   Pipeline and fixture modules are excluded from this release check. Init and
   pipeline scaffolding share a generator that takes only the running Go
   version's major and minor; this step runs a focused scaffold test against a
