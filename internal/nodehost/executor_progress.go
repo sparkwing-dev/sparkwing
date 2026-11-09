@@ -96,7 +96,7 @@ func executorProgressContext(parent context.Context, idle time.Duration) (contex
 		Await: func() func() {
 			mu.Lock()
 			paused++
-			if paused == 1 {
+			if resume == nil {
 				resume = suspend()
 			}
 			reset()

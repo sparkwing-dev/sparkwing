@@ -77,6 +77,33 @@ func TestAwaitSuspendsOnceAcrossNestedWaits(t *testing.T) {
 	}
 }
 
+func TestOverlappingAwaitPollReleasesReacquiredSlot(t *testing.T) {
+	slot := make(chan struct{}, 1)
+	slot <- struct{}{}
+	parent := WithAwaitSlot(t.Context(), func() func(context.Context) {
+		<-slot
+		return func(ctx context.Context) {
+			select {
+			case slot <- struct{}{}:
+			case <-ctx.Done():
+			}
+		}
+	})
+	_, activity, stop := executorProgressContext(parent, 0)
+	defer stop()
+	first, second := activity.Await(), activity.Await()
+	first()
+	third := activity.Await()
+	select {
+	case slot <- struct{}{}:
+		<-slot
+	default:
+		t.Fatal("repeated child poll held the only runner slot while another poll remained pending")
+	}
+	second()
+	third()
+}
+
 func TestAwaitResumeKeepsIdleBudgetPausedUntilSlotReturns(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		slot := make(chan struct{})
