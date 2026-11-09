@@ -40,8 +40,6 @@ func TestMaterialize_ColdCacheContactsNoController(t *testing.T) {
 		os.Exit(0)
 	}
 
-	t.Parallel()
-
 	var requests atomic.Int32
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
