@@ -359,3 +359,67 @@ func main(){sw.Register("labels",func() sw.Pipeline[sw.NoInputs]{return pipeline
 		t.Fatalf("unconstrained job gained runner labels: %s", raw)
 	}
 }
+
+func dryRunPreview(t *testing.T) planPreviewDoc {
+	t.Helper()
+	parsed, _, err := parsePipelinePlanArgs([]string{"--pipeline", "demo", "--sw-dry-run"})
+	if err != nil || !parsed.dryRun {
+		t.Fatalf("dry-run option: %+v, %v", parsed, err)
+	}
+	plan := strings.Replace(fixturePlan, `"id":"compile"`, `"id":"compile","has_dry_run":true`, 1)
+	plan = strings.Replace(plan, `"id":"test"`, `"id":"test","safe_without_dry_run":true`, 1)
+	bin, requests := fakePlanSDK(t, fixtureDescribe, plan, fixtureEval)
+	entry, err := inspectionCommand(pipelineentry.Binary(bin), t.TempDir(), "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.input.Run.DryRun = parsed.dryRun
+	planned, err := planPipelineEntry(t.Context(), entry, "demo", []string{"--env", "prod"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := previewPlan(planned, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(readRequests(t, requests), `"dry_run":true`) {
+		t.Fatal("planner did not receive dry-run context")
+	}
+	if strings.Contains(readRequests(t, requests), `"op":"eval"`) {
+		t.Fatal("preview evaluated SkipIf")
+	}
+	return doc
+}
+
+func TestPlanDryRunPlain(t *testing.T) {
+	doc := dryRunPreview(t)
+	got := captureStdout(t, func() { printPlanPreview(&doc) })
+	for _, want := range []string{
+		`Step "lint" [may_skip (user_skipif)]`,
+		`Step "compile" [would_dry_run]`,
+		`Step "test" [would_run]`,
+		`Job "deploy-prod" [would_skip (all_steps_skipped)]`,
+		`Step "run" [would_skip (no_dry_run_defined)]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output lacks %s:\n%s", want, got)
+		}
+	}
+}
+
+func TestPlanDryRunJSON(t *testing.T) {
+	doc := dryRunPreview(t)
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded planPreviewDoc
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	steps := decoded.Jobs[0].Work.Steps
+	if steps[0].Decision != "may_skip" || steps[1].Decision != "would_dry_run" || steps[2].Decision != "would_run" ||
+		decoded.Jobs[1].Decision != "would_skip" || decoded.Jobs[1].Work.Steps[0].SkipReason != "no_dry_run_defined" {
+		t.Fatalf("dry-run JSON: %s", raw)
+	}
+}

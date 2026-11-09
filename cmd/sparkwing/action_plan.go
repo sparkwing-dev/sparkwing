@@ -63,17 +63,19 @@ type pipelinePlanArgs struct {
 	pipeline    string
 	startAt     string
 	stopAt      string
+	dryRun      bool
 	passthrough []string
 }
 
 func pipelinePlanOptions(inv clisurface.Invocation) pipelinePlanArgs {
-	return pipelinePlanArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"), passthrough: inv.Args}
+	return pipelinePlanArgs{dryRun: inv.Bool("sw-dry-run"), output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"), passthrough: inv.Args}
 }
 
 func runPipelinePlan(inv clisurface.Invocation) error {
 	parsed := pipelinePlanOptions(inv)
 	var doc planPreviewDoc
 	err := withPipelineEntry(parsed.pipeline, func(ctx context.Context, entry pipelineInspection, _ string) error {
+		entry.input.Run.DryRun = parsed.dryRun
 		planned, err := planPipelineEntry(ctx, entry, parsed.pipeline, parsed.passthrough)
 		if err == nil {
 			doc, err = previewPlan(planned, parsed.startAt, parsed.stopAt)
@@ -230,12 +232,13 @@ func (p pipelineInspection) presentation(ctx context.Context) (runspec.PipelineP
 
 type planned struct {
 	pipeline string
+	dryRun   bool
 	args     map[string]string
 	doc      nodeproto.PlanDoc
 }
 
 func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline string, args []string) (planned, error) {
-	out := planned{pipeline: pipeline}
+	out := planned{pipeline: pipeline, dryRun: entry.input.Run.DryRun}
 	prepared, err := entry.planner.Inspect(ctx, entry.input)
 	if err != nil {
 		return out, planError(pipeline, err)
@@ -312,6 +315,13 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 					it.Decision, it.SkipReason, it.SkipDetail = "would_skip", "range_skip", reason
 				} else if len(s.Closures.SkipIf) > 0 {
 					it.Decision, it.SkipReason, it.SkipDetail = "may_skip", "user_skipif", "SkipIf is evaluated at run time"
+				}
+				if p.dryRun && it.Decision == "would_run" {
+					if s.HasDryRun {
+						it.Decision = "would_dry_run"
+					} else if !s.SafeWithoutDryRun {
+						it.Decision, it.SkipReason = "would_skip", "no_dry_run_defined"
+					}
 				}
 				if it.Decision == "would_skip" {
 					skipped++

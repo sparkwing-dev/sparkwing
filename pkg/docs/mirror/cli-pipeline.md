@@ -163,6 +163,7 @@ Render the runtime-resolved DAG without dispatching any jobs
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+| `--sw-dry-run` | Preview dry-run bodies as would_dry_run, safe steps as would_run, and steps without either as would_skip. SkipIf remains evaluated at run time. |
 | `--pipeline NAME` | Pipeline name. (required) |
 | `--start-at STEP` | Preview the run as if it started at this step, marking steps that are neither this step nor downstream of it as skipped. |
 | `--stop-at STEP` | Preview the run as if it stopped after this step, marking steps that are neither this step nor upstream of it as skipped. |
