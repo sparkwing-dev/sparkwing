@@ -48,7 +48,8 @@ func configureHostCommand(cmd *exec.Cmd) {
 		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units; write the program to a script file and invoke it with bash script.sh", limit)
 		return
 	}
-	cmd.Args[2] = `: "${` + variable + `:?host Bash program is empty; supply a Bash program or use : for a no-op}"; eval 'unset ` + variable + `;' "$` + variable + `"`
+	// safety: an empty program succeeds like an empty script on Linux; only a lost variable fails.
+	cmd.Args[2] = `: "${` + variable + `?host Bash program is missing from the command environment}"; eval 'unset ` + variable + `;' "$` + variable + `"`
 	cmd.Env = append(cmd.Environ(), variable+"="+program)
 }
 

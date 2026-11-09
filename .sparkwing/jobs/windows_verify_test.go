@@ -78,7 +78,8 @@ func TestWindowsVerifySelectsNativeRegressionFixtures(t *testing.T) {
 		"internal/testshell/shell_windows_test.go", "internal/gotoolchain/toolchain_test.go", "internal/sparks/toolchain_test.go",
 		"internal/bincache/toolchain_floor_test.go", "cmd/sparkwing/init_go_directive_test.go",
 		"internal/nodehost/host_exec_windows_test.go", "internal/pipelineentry/npm_test.go",
-		"internal/procenv/look_command_windows_test.go",
+		"internal/procenv/look_command_windows_test.go", "internal/procenv/batch_test.go",
+		"internal/nodehost/host_exec_batch_windows_test.go",
 		"internal/wingd/client/query_absent_windows_test.go", "internal/orchestrator/run_handle_test.go",
 	} {
 		source, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", filepath.FromSlash(relative)), nil, 0)

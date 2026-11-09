@@ -527,10 +527,15 @@ paths resolved against the working directory. On Windows, `PATHEXT` supplies
 executable extensions. The working directory is searched only when named in
 `PATH` or the command path. Hosts resolve the executable to an absolute path before
 constructing and validating argv. Registered cleanups use the same lookup and
-report the argument position and remedy when refused. Windows `.cmd`/`.bat` targets refuse arguments with
-cmd.exe metacharacters (`& | < > ^ % " ! ( )` and CR/LF). Use a non-batch tool,
-such as `node.exe` with its JavaScript entrypoint, when passing these values.
-Batch files that expand pipeline-set environment values without quoting are outside the host's control.
+report the argument position and remedy when refused. Windows `.cmd`/`.bat` targets run through the
+system `cmd.exe` with arguments escaped as Rust's standard library escapes them, so
+`& | < > ^ ( ) !` and `%VAR%` arrive literally and `"` arrives as `""`, which
+`node.exe` and other Microsoft C runtime programs read as one quote. Arguments
+containing CR, LF or NUL, and batch paths containing `"`, `^` or `%`, are refused;
+use a non-batch tool, such as `node.exe` with its JavaScript entrypoint, for those.
+Batch files that enable delayed expansion or expand arguments or pipeline-set
+environment values without quoting are outside the host's control.
+An empty `Bash` script succeeds.
 On Windows, `Exec` refuses the System32 WSL `bash.exe` launcher; install Git Bash or call `wsl` explicitly.
 Engine credentials and protocol settings
 are removed from child environments, including values supplied through `Env`.
