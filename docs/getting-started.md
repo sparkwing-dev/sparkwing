@@ -27,6 +27,12 @@ adds capacity from your own machines to Cloud.
 
 ## Install
 
+Building Sparkwing or pipelines with its Go SDK requires Go 1.26.10 or later.
+When upgrading the SDK, update the consuming module's `go` directive to at least
+`1.26.10`. Automatic toolchain selection can download a suitable Go version.
+With `GOTOOLCHAIN=local`, install a suitable version yourself. Existing SDK pins
+keep their existing requirements.
+
 ### macOS / Linux
 
 ```bash

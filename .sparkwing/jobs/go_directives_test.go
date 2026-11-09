@@ -12,9 +12,12 @@ func TestGoDirectivePolicy(t *testing.T) {
 		version string
 		blocked bool
 	}{
-		{"1.26", false},
-		{"1.26.0", false},
+		{"1.26", true},
+		{"1.26.0", true},
 		{"1.26.3", true},
+		{"1.26.9", true},
+		{"1.26.10", false},
+		{"1.27.0", false},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
 			repo := t.TempDir()
@@ -44,12 +47,12 @@ func TestReleaseGoDirectiveCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
-	writeFile(t, filepath.Join(repo, "go.mod"), "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26\n")
+	writeFile(t, filepath.Join(repo, "go.mod"), "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26.10\n")
 	if err := runReleaseStateCheck(t, repo, "go-directives"); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(repo, "go.mod"), "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26.3\n")
 	if err := runReleaseStateCheck(t, repo, "go-directives"); err == nil || !strings.Contains(err.Error(), "1.26.3") {
-		t.Fatalf("release accepted patch-level floor: %v", err)
+		t.Fatalf("release accepted vulnerable floor: %v", err)
 	}
 }
