@@ -255,37 +255,13 @@ func ChangelogSection(version string) (body string, ok bool) {
 	if want == "" {
 		return "", false
 	}
-	var collected []string
-	inSection := false
-	for _, line := range strings.Split(changelogMD, "\n") {
-		if strings.HasPrefix(line, "## ") {
-			if inSection {
-				break
-			}
-			if changelogHeadingMatches(line, want) {
-				inSection = true
-			}
-			continue
-		}
-		if inSection {
-			collected = append(collected, line)
+	for _, section := range ParseChangelog(changelogMD) {
+		label := strings.TrimPrefix(strings.ToLower(section.Version), "v")
+		if label == want {
+			return strings.TrimSpace(changelogMD[section.HeaderEnd:section.End]), true
 		}
 	}
-	if !inSection {
-		return "", false
-	}
-	return strings.TrimSpace(strings.Join(collected, "\n")), true
-}
-
-func changelogHeadingMatches(heading, want string) bool {
-	rest := strings.TrimSpace(strings.TrimPrefix(heading, "## "))
-	rest = strings.TrimPrefix(rest, "[")
-	if i := strings.IndexByte(rest, ']'); i >= 0 {
-		rest = rest[:i]
-	}
-	rest = strings.ToLower(strings.TrimSpace(rest))
-	rest = strings.TrimPrefix(rest, "v")
-	return rest == want
+	return "", false
 }
 
 type docsError string

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -595,13 +597,14 @@ func planChangelogRewrite(body, version string) (changelogRewrite, error) {
 }
 
 func rewriteUnreleasedToVersion(body, version, date string) (string, error) {
-	re := regexp.MustCompile(`(?m)^## \[?Unreleased\]?\s*$`)
-	loc := re.FindStringIndex(body)
-	if loc == nil {
-		return "", fmt.Errorf("CHANGELOG.md has no [Unreleased] heading to rewrite")
+	for _, section := range docs.ParseChangelog(body) {
+		if !strings.EqualFold(section.Version, "Unreleased") {
+			continue
+		}
+		newHeader := "## [Unreleased]\n\n## [" + version + "] - " + date
+		return body[:section.Start] + newHeader + body[section.HeaderEnd:], nil
 	}
-	newHeader := "## [Unreleased]\n\n## [" + version + "] - " + date
-	return body[:loc[0]] + newHeader + body[loc[1]:], nil
+	return "", fmt.Errorf("CHANGELOG.md has no [Unreleased] heading to rewrite")
 }
 
 func versionEntries(body, version string) (int, error) {
@@ -609,69 +612,15 @@ func versionEntries(body, version string) (int, error) {
 	if target == "" {
 		return 0, fmt.Errorf("empty version")
 	}
-	lines := strings.Split(body, "\n")
-	in := false
-	count := 0
-	for _, raw := range lines {
-		line := strings.TrimRight(raw, "\r")
-		if strings.HasPrefix(line, "## ") {
-			rest := strings.TrimPrefix(line, "## ")
-			rest = strings.TrimSpace(rest)
-			rest = strings.TrimSuffix(strings.TrimPrefix(rest, "["), "]")
-			if i := strings.Index(rest, "] - "); i >= 0 {
-				rest = rest[:i]
-			}
-			if dash := strings.Index(rest, " - "); dash >= 0 {
-				rest = rest[:dash]
-			}
-			if strings.EqualFold(strings.TrimSpace(rest), target) {
-				in = true
-				continue
-			}
-			if in {
-				break
-			}
-			continue
-		}
-		if !in {
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "- ") || trimmed == "-" {
-			count++
+	for _, section := range docs.ParseChangelog(body) {
+		if strings.EqualFold(section.Version, target) {
+			return len(section.Entries), nil
 		}
 	}
-	return count, nil
+	return 0, nil
 }
 
-func unreleasedEntries(body string) (int, error) {
-	lines := strings.Split(body, "\n")
-	in := false
-	count := 0
-	for _, raw := range lines {
-		line := strings.TrimRight(raw, "\r")
-		if strings.HasPrefix(line, "## ") {
-			h := strings.TrimSpace(strings.TrimPrefix(line, "## "))
-			h = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"))
-			if strings.EqualFold(h, "Unreleased") {
-				in = true
-				continue
-			}
-			if in {
-				break
-			}
-			continue
-		}
-		if !in {
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "- ") || trimmed == "-" {
-			count++
-		}
-	}
-	return count, nil
-}
+func unreleasedEntries(body string) (int, error) { return versionEntries(body, "Unreleased") }
 
 type pushTagJob struct {
 	Source string

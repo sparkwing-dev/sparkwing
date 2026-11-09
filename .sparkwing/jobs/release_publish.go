@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
+
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -117,12 +119,12 @@ func releaseChangelogOnMain(source, released, main, version string) (string, err
 	// safety: subtract the selected entries, not the rolled text whose migration links have changed.
 	_, pending, _ := strings.Cut(main[start:end], "\n")
 	published := make(map[string]bool)
-	for _, entry := range selected.entries {
-		published[strings.TrimSpace(entry.body)] = true
+	for _, entry := range selected.Entries {
+		published[strings.TrimSpace(entry.Body)] = true
 	}
-	for _, entry := range current.entries {
-		if published[strings.TrimSpace(entry.body)] {
-			pending = strings.Replace(pending, strings.TrimSpace(entry.body), "", 1)
+	for _, entry := range current.Entries {
+		if published[strings.TrimSpace(entry.Body)] {
+			pending = strings.Replace(pending, strings.TrimSpace(entry.Body), "", 1)
 		}
 	}
 	parts := strings.Split(pending, "\n### ")
@@ -138,19 +140,11 @@ func releaseChangelogOnMain(source, released, main, version string) (string, err
 	return main[:start] + "## [Unreleased]\n\n" + pending + released[cutStart:cutEnd] + main[end:], nil
 }
 
-func changelogSectionBounds(body, version string) (int, int, changelogSection, error) {
-	sections := parseChangelogSections(body)
-	lines := strings.SplitAfter(body, "\n")
-	for i, section := range sections {
-		if section.version != version {
-			continue
+func changelogSectionBounds(body, version string) (int, int, docs.ReleaseSection, error) {
+	for _, section := range docs.ParseChangelog(body) {
+		if section.Version == version {
+			return section.Start, section.End, section, nil
 		}
-		start := len(strings.Join(lines[:section.startLine-1], ""))
-		end := len(body)
-		if i+1 < len(sections) {
-			end = len(strings.Join(lines[:sections[i+1].startLine-1], ""))
-		}
-		return start, end, section, nil
 	}
-	return 0, 0, changelogSection{}, fmt.Errorf("release: changelog has no [%s] section", version)
+	return 0, 0, docs.ReleaseSection{}, fmt.Errorf("release: changelog has no [%s] section", version)
 }

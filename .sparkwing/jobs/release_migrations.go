@@ -53,19 +53,19 @@ func migrationFileRels(name string) []string {
 	}
 }
 
-func releasedSection(body, version string) (changelogSection, bool) {
-	for _, s := range parseChangelogSections(body) {
-		if strings.EqualFold(s.version, version) {
+func releasedSection(body, version string) (docs.ReleaseSection, bool) {
+	for _, s := range docs.ParseChangelog(body) {
+		if strings.EqualFold(s.Version, version) {
 			return s, true
 		}
 	}
-	return changelogSection{}, false
+	return docs.ReleaseSection{}, false
 }
 
-func breakingEntries(s changelogSection) []changelogEntry {
-	var out []changelogEntry
-	for _, e := range s.entries {
-		if breakingScopeRe.MatchString(e.body) {
+func breakingEntries(s docs.ReleaseSection) []docs.ReleaseEntry {
+	var out []docs.ReleaseEntry
+	for _, e := range s.Entries {
+		if breakingScopeRe.MatchString(e.Body) {
 			out = append(out, e)
 		}
 	}
@@ -85,7 +85,7 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 	}
 	guideName := version + ".md"
 	guideBody := retitleGuide(guideSource, version)
-	rolledBody, repointed := repointMigrationLinks(changelogBody, sec.startLine, guideName)
+	rolledBody, repointed := repointMigrationLinks(changelogBody, sec.StartLine, guideName)
 	rolledSec, ok := releasedSection(rolledBody, version)
 	if !ok {
 		return migrationRoll{}, fmt.Errorf("CHANGELOG.md lost its [%s] section while repointing its links", version)
@@ -118,7 +118,7 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 // safety: one judge for what a released section owes its guide. The pre-commit
 // tier refuses a commit on exactly these findings, so reading them from the same
 // lint stops the cut from tagging a tree nobody can commit afterwards.
-func refuseUnrolledBreaking(rolled changelogSection, guideName, guideBody string) error {
+func refuseUnrolledBreaking(rolled docs.ReleaseSection, guideName, guideBody string) error {
 	issues := lintSectionBreakingEntries(rolled, fstest.MapFS{guideName: &fstest.MapFile{Data: []byte(guideBody)}})
 	if len(issues) == 0 {
 		return nil
@@ -130,7 +130,7 @@ func refuseUnrolledBreaking(rolled changelogSection, guideName, guideBody string
 	return fmt.Errorf("%s does not cover every (Breaking) entry in [%s]:\n%s"+
 		"Write a section for each in %s/%s and link the entry to its anchor; the cut repoints those links to %s/%s. "+
 		"A guide section is written by a person, so the release stops here",
-		migrationsDirRel+"/"+guideName, rolled.version, b.String(),
+		migrationsDirRel+"/"+guideName, rolled.Version, b.String(),
 		migrationsDirRel, unreleasedGuideName, migrationsDirRel, guideName)
 }
 
@@ -210,10 +210,10 @@ func guideLead(guide string) string {
 	return lead
 }
 
-func breakingSummary(breaking []changelogEntry) string {
+func breakingSummary(breaking []docs.ReleaseEntry) string {
 	parts := make([]string, 0, len(breaking))
 	for _, e := range breaking {
-		s := firstSentence(flattenEntryBody(e.body))
+		s := firstSentence(flattenEntryBody(e.Body))
 		if s == "" {
 			continue
 		}

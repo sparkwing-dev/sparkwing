@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
+
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -459,7 +461,7 @@ func changelogRepeatedHeadings(dir string) (string, error) {
 		return "", fmt.Errorf("land: read CHANGELOG.md: %w", err)
 	}
 	var lines []string
-	for _, s := range parseChangelogSections(string(body)) {
+	for _, s := range docs.ParseChangelog(string(body)) {
 		for _, issue := range lintSectionHeadingsDedupe(s) {
 			lines = append(lines, issue.Format())
 		}
