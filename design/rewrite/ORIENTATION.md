@@ -47,6 +47,8 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 
 ### Run execution
 
+Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckManifestMembers` with staging. `TestManifestAdmissionRejectsUnstageablePaths` guards traversal and file/parent collisions.
+
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Human run followers report admission holders and accounting once at entry, then only material queue changes at increasing intervals; JSON keeps the stored events | `cmd/sparkwing/admission_progress.go`; `internal/opsview/admission_wait.go` | `TestAdmissionProgressMaterialChangesAndIntervals`, `TestAdmissionProgressUsesOneHumanStreamAndPreservesJSON`, `TestAdmissionWaitLine` |

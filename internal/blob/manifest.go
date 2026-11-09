@@ -4,6 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io/fs"
+	"path"
+	"path/filepath"
 )
 
 // Manifest names immutable artifact files. The store authorizes its members
@@ -33,14 +36,11 @@ func decodeManifest(body []byte, digest Digest, team string, members []Member) (
 	if len(manifest.Entries) != len(members) {
 		return Manifest{}, ErrIntegrity
 	}
+	if err := CheckManifestMembers(team, digest, members); err != nil {
+		return Manifest{}, err
+	}
 	byPath := make(map[string]Member, len(members))
 	for _, member := range members {
-		if _, exists := byPath[member.Path]; exists {
-			return Manifest{}, ErrIntegrity
-		}
-		if member.Team != team || member.ManifestDigest != digest || member.Size < 0 || !validDigest(member.Digest) {
-			return Manifest{}, ErrIntegrity
-		}
 		byPath[member.Path] = member
 	}
 	for _, entry := range manifest.Entries {
@@ -51,4 +51,26 @@ func decodeManifest(body []byte, digest Digest, team string, members []Member) (
 		delete(byPath, entry.Path)
 	}
 	return manifest, nil
+}
+
+// CheckManifestMembers validates manifest identity, file metadata and stageable paths.
+func CheckManifestMembers(team string, digest Digest, members []Member) error {
+	paths := make(map[string]bool, len(members))
+	for _, member := range members {
+		if member.Team != team || member.ManifestDigest != digest || !validDigest(member.Digest) || member.Size < 0 {
+			return ErrIntegrity
+		}
+		if member.Path == "." || !fs.ValidPath(member.Path) || !filepath.IsLocal(filepath.FromSlash(member.Path)) || paths[member.Path] {
+			return ErrIntegrity
+		}
+		paths[member.Path] = true
+	}
+	for name := range paths {
+		for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
+			if paths[parent] {
+				return ErrIntegrity
+			}
+		}
+	}
+	return nil
 }
