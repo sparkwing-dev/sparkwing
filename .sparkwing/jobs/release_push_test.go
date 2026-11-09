@@ -12,23 +12,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
-func releaseGitIdentity(t *testing.T) {
-	t.Helper()
-	for key, value := range map[string]string{
-		"GIT_CONFIG_COUNT": "4",
-		"GIT_CONFIG_KEY_0": "user.name", "GIT_CONFIG_VALUE_0": "Test",
-		"GIT_CONFIG_KEY_1": "user.email", "GIT_CONFIG_VALUE_1": "test@example.invalid",
-		"GIT_CONFIG_KEY_2": "commit.gpgsign", "GIT_CONFIG_VALUE_2": "false",
-		"GIT_CONFIG_KEY_3": "core.hooksPath", "GIT_CONFIG_VALUE_3": "/dev/null",
-	} {
-		t.Setenv(key, value)
-	}
-}
-
 func TestReleasePushKeepsTheChosenSourceWhileMainMoves(t *testing.T) {
 	for _, mode := range []string{"main already advanced", "main moves during push", "fragment notes", "push refused", "missing commit", "missing source"} {
 		t.Run(mode, func(t *testing.T) {
-			releaseGitIdentity(t)
 			sourceBody := fixtureChangelog
 			fragments := mode == "fragment notes"
 			if fragments {
