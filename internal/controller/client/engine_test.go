@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type engineTransport func(*http.Request) (*http.Response, error)
@@ -294,5 +295,60 @@ func TestEngineServerFailureNamesTheControllerRequest(t *testing.T) {
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || failure.Details["request_id"] != "request-42" {
 		t.Fatalf("server failure lost its request id: %#v", err)
+	}
+}
+
+func TestReadRunProofEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name, value       string
+		eligible, invalid bool
+	}{
+		{"absent", "", false, false},
+		{"false", "false", false, false},
+		{"true", "true", true, false},
+		{"null", "null", false, true},
+		{"string", `"false"`, false, true},
+		{"number", "0", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(controllerwire.RunDetail{ID: "r1", Status: "success", Inputs: runspec.Display{Pipeline: "hello"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(body, &fields); err != nil {
+				t.Fatal(err)
+			}
+			var inputs map[string]json.RawMessage
+			if err := json.Unmarshal(fields["inputs"], &inputs); err != nil {
+				t.Fatal(err)
+			}
+			delete(inputs, "proof_eligible")
+			if tc.value != "" {
+				inputs["proof_eligible"] = json.RawMessage(tc.value)
+			}
+			fields["inputs"], err = json.Marshal(inputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err = json.Marshal(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := testEngine(t, func(*http.Request) (*http.Response, error) { return engineResponse(200, string(body)), nil })
+			got, err := c.ReadRun(t.Context(), "r1")
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("accepted invalid proof eligibility")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != "success" || got.Inputs.ProofEligible != tc.eligible {
+				t.Fatalf("unexpected run: %+v", got)
+			}
+		})
 	}
 }

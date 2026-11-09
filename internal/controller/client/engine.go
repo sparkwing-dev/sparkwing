@@ -248,6 +248,9 @@ func requiredResponseFields(fields map[string]json.RawMessage, typ reflect.Type)
 			}
 		}
 		raw, ok := fields[name]
+		if !ok && typ == reflect.TypeFor[runspec.Display]() && name == "proof_eligible" {
+			continue
+		}
 		if !ok && !strings.Contains(options, "omitempty") && !strings.Contains(options, "omitzero") {
 			return fmt.Errorf("controller response is missing %s", name)
 		}

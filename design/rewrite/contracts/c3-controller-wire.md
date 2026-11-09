@@ -1,5 +1,12 @@
 # Controller API contract
 
+## Run display proof eligibility
+
+`runspec.Display.proof_eligible` is a boolean. Controllers emit it even when
+false; readers treat an absent field as false. Null and non-boolean values
+are invalid. This display hint cannot grant proof eligibility. The immutable
+sealed request remains the authority for proof selection.
+
 ## Submitted environment transport
 
 CreateRunRequest.SubmittedEnv carries only filtered, present variables privately
