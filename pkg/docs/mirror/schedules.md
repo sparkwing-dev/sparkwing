@@ -145,7 +145,7 @@ Environment values stay in private host storage and do not appear in schedule
 views. Installation pins the proved entry unless `--unpinned` is selected.
 Go entries retain their compiled binary pin. TypeScript pins fingerprint the
 resolved Node executable, entry path and installed pipeline tree, including the
-SDK. Before a pinned TypeScript schedule fires, preparation must produce the
+SDK and linked npm dependencies. Before a pinned TypeScript schedule fires, preparation must produce the
 same identity. A committed source, dependency or Node change refuses the fire with
 instructions to reinstall the pin or unpin it. Working edits appear as a dirty
 lock and stay outside the committed pin. `--unpinned` still prepares the

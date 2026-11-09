@@ -379,6 +379,12 @@ func proveLocalSchedule(ctx context.Context, home, root, pipeline string, enviro
 	// safety: scheduled intake acquires committed code, so its proof must use the same source.
 	if typescript && spec.PipelineSHA == "" {
 		spec.PipelineSHA = spec.SHA
+		if spec.PipelineSHA == "" {
+			spec.PipelineSHA, err = source.ResolveRef(ctx, spec, "HEAD", options)
+			if err != nil {
+				return crons.Proof{}, err
+			}
+		}
 	}
 	options.SDK = ""
 	entry, err := source.Acquire(ctx, spec, options)
