@@ -29,13 +29,16 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 	if err != nil {
 		return UnitDemand{}, err
 	}
-	if tx.store.claimProfiles != nil && !here {
-		profile, err := tx.store.claimProfiles.ResolveClaimProfile(ctx, owner)
-		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: profile.Labels, OS: profile.OS, Arch: profile.Arch}, err
-	}
 	chain, err := authorityChainTx(ctx, tx, owner.Authority, false)
 	if err != nil {
 		return UnitDemand{}, err
+	}
+	if tx.store.claimProfiles != nil && !here {
+		profile, err := tx.store.claimProfiles.ResolveClaimProfile(ctx, owner)
+		if err == nil {
+			err = checkRunnerLabelsTx(ctx, tx, chain, profile.Labels)
+		}
+		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: profile.Labels, OS: profile.OS, Arch: profile.Arch}, err
 	}
 	for _, ancestor := range chain {
 		c := ancestor.principal.Capability
@@ -56,6 +59,9 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		if poll.ObservedAt.IsZero() || poll.ObservedAt.After(tx.now(ctx)) {
 			continue
 		}
+		if err := checkRunnerLabelsTx(ctx, tx, chain, poll.Labels); err != nil {
+			return UnitDemand{}, err
+		}
 		// The owner occupies its queue slot already; only the host profile carries into self-execution.
 		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: poll.Labels, OS: poll.OS, Arch: poll.Arch}, nil
 	}
@@ -68,6 +74,11 @@ func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability
 		return false, err
 	}
 	return ownerDemandEligibleTx(ctx, tx, owner, demand, ref)
+}
+
+func ownerPlacementRefused(err error) bool {
+	var denied *apierr.Error
+	return errors.As(err, &denied) && (denied.Code == apierr.Forbidden || denied.Code == apierr.BadRequest)
 }
 
 // safety: ok=false means the owner has no current host observation, which is not an error.

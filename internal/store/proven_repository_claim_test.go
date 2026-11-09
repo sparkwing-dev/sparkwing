@@ -48,7 +48,7 @@ func TestPersonalMachinesNeverClaimProvenRepositoryRuns(t *testing.T) {
 					s, demand := unitClaimFixture(t)
 					personal := authorityRoot("laptop", "a")
 					authorityPersist(t, s, personal)
-					setMachineOrigin(t, s, personal.Prefix, &CapabilityOrigin{Kind: capability.ProvisionMachine, Personal: true, RegistrationID: "runner:a:laptop"})
+					setMachineOrigin(t, s, personal.Prefix, &CapabilityOrigin{Kind: capability.ProvisionMachine, AllowedLabels: demand.Labels, Personal: true, RegistrationID: "runner:a:laptop"})
 					rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix=?`, personal.Prefix)
 					var raw []byte
 					if err := s.db.QueryRow(`SELECT request_json FROM runs WHERE team='a' AND id='run'`).Scan(&raw); err != nil {

@@ -5,6 +5,7 @@
   "status": "running",
   "state_seq": 0,
   "inputs": {
+    "proof_eligible": true,
     "trust_class": "asserted",
     "pipeline": "hello",
     "requested_args": {

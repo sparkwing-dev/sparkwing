@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -358,5 +360,81 @@ func TestOwnerNodeReadPreservesStateWhenPlacementIsRefused(t *testing.T) {
 	node, err := tenant.ReadOwnerNode(t.Context(), actor.Authority, snapshot.Nodes[0].Ref)
 	if err != nil || node.Ref != snapshot.Nodes[0].Ref || node.OwnerExecution != nil {
 		t.Fatalf("one-node state read projected placement: %+v %v", node, err)
+	}
+}
+
+//sparkwing:critical
+func TestOwnerSelfExecutionRefusesRemovedAllowedLabels(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		t.Run(fmt.Sprintf("configured=%t", configured), func(t *testing.T) {
+			s, demand := unitClaimFixture(t)
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=CAST(json_set(CAST(request_json AS TEXT),'$.request.dispatch','host') AS BLOB)`)
+			proveClaimFixtureRepository(t, s)
+			admin := authorityMember(t, s, "label-admin", RoleOwner)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
+				Kind: capability.ProvisionMachine, Authority: &admin.Authority, Team: "a",
+				Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "label-owner"}, RegistrationID: "runner:a:label-owner",
+				Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone},
+				Repositories: []string{"github.com/acme/*"}, AllowedLabels: []string{"gpu"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			demand.CapabilityPrefix, demand.Labels = issued.Capability.Prefix, []string{"gpu"}
+			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+			if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
+				t.Fatal(err)
+			}
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+			if configured {
+				s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"gpu"}}}
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration',execution_json=?`, []byte(`{"requires":{"set":true,"value":["gpu"]}}`))
+			indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
+			tenant := &Tenant{s: s, team: "a"}
+			owner, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := tenant.ReadOwnerSnapshot(t.Context(), actor.Authority, "run")
+			if err != nil || len(snapshot.Nodes) != 1 || !OwnerCanExecute(owner)(snapshot.Nodes[0]) {
+				t.Fatalf("initial owner eligibility: %+v %v", snapshot, err)
+			}
+			empty := []string{}
+			if _, err := s.AsOperator().ConfigureRunnerLabels(t.Context(), "a", "label-owner", "label-admin", &empty); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.ReadRunView(t.Context(), "run"); err != nil {
+				t.Fatalf("removed label hid active run: %v", err)
+			}
+			if views, err := tenant.ListRunViews(t.Context(), 0, 1, 10); err != nil || len(views) != 1 {
+				t.Fatalf("removed label hid run list: %d %v", len(views), err)
+			}
+			var denied *apierr.Error
+			current, err := tenant.ReadOwnerSnapshot(t.Context(), actor.Authority, "run")
+			if err != nil || len(current.Nodes) != 1 || OwnerCanExecute(owner)(current.Nodes[0]) {
+				t.Fatalf("owner visibility or placement after label removal: %+v %v", current, err)
+			}
+			view, err := tenant.ReadRunView(t.Context(), "run")
+			if err != nil || !strings.Contains(view.HostIneligible["job"], "gpu") {
+				t.Fatalf("placement refusal missing from run: %+v %v", view.HostIneligible, err)
+			}
+			result, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: runstate.SourceNone})
+			if !errors.As(err, &denied) || denied.Code != apierr.Forbidden || result.Kind == runstate.Execute {
+				t.Fatalf("owner executed with removed label: %s %v", result.Kind, err)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET status='success',finished_at=?`, s.now().UnixNano())
+			if _, err := tenant.ReadRunView(t.Context(), "run"); err != nil {
+				t.Fatalf("removed label hid finished run: %v", err)
+			}
+			views, err := tenant.ListRunViews(t.Context(), 0, 1, 10)
+			if err != nil || len(views) != 1 {
+				t.Fatalf("removed label hid finished run list: %d %v", len(views), err)
+			}
+		})
 	}
 }

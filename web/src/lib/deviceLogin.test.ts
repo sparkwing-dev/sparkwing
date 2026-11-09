@@ -155,16 +155,30 @@ describe("device requests", () => {
     assert.deepEqual(JSON.parse(calls[0].body), { user_code: "BCDFGHJK" });
   });
 
+  it("retains the exact allowed labels returned for approval", async () => {
+    respond = () => json(200, { kind: "runner", runner: { name: "box", personal: true, allowed_labels: ["deploy-prod", "os=linux", "tool:terraform"] } });
+    const request = await lib.lookupDeviceRequest("BCDFGHJK");
+    assert.deepEqual(request.runner?.allowed_labels, ["deploy-prod", "os=linux", "tool:terraform"]);
+  });
+
+  it("refuses incomplete runner consent metadata", async () => {
+    for (const runner of [undefined, { name: "box", personal: true }, { name: "box", personal: true, allowed_labels: null }]) {
+      respond = () => json(200, { kind: "runner", runner });
+      await assert.rejects(lib.lookupDeviceRequest("BCDFGHJK"), /allowed labels/);
+    }
+  });
+
   it("fills a runner's missing lists", async () => {
     respond = () =>
       json(200, {
         kind: "runner",
         team: "acme",
-        runner: { name: "box", personal: false },
+        runner: { name: "box", personal: false, allowed_labels: [] },
       });
     const request = await lib.lookupDeviceRequest("BCDFGHJK");
     assert.deepEqual(request.runner?.repos, []);
     assert.deepEqual(request.runner?.reserved_pools, []);
+    assert.deepEqual(request.runner?.allowed_labels, []);
     assert.deepEqual(request.grants, []);
   });
 

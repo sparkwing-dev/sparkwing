@@ -127,6 +127,9 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		return profile, match.Demand{}, run.err
 	}
 	chain, here, team, display, requestSeal := run.chain, run.here, run.team, run.display, run.request
+	if err := checkRunnerLabelsTx(ctx, tx, chain, request.Labels); err != nil {
+		return profile, match.Demand{}, err
+	}
 	var err error
 	if requestSeal.Request.Burst != nil {
 		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {

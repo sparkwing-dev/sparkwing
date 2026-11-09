@@ -132,11 +132,16 @@ func (f *appFixture) teamRunner(owner signedIn, name string) (auth, prefix strin
 
 func (f *appFixture) enrollRunner(owner signedIn, name string, personal bool, pools ...string) (auth, prefix string) {
 	f.t.Helper()
+	return f.enrollRunnerWithLabels(owner, name, personal, githubClaimBody(capability.UnitNode, "", "").Labels, pools...)
+}
+
+func (f *appFixture) enrollRunnerWithLabels(owner signedIn, name string, personal bool, labels []string, pools ...string) (auth, prefix string) {
+	f.t.Helper()
 	var m struct {
 		Capability string `json:"capability"`
 		Prefix     string `json:"prefix"`
 	}
-	body := map[string]any{"name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}, "personal": personal}
+	body := map[string]any{"allowed_labels": labels, "name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}, "personal": personal}
 	if len(pools) > 0 {
 		body["reserved_pools"], body["grants"] = pools, []capability.Grant{capability.ClaimsLaunch}
 	}

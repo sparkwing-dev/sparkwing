@@ -112,7 +112,7 @@ func TestPlacementJobOverrideReplacesThePipelineList(t *testing.T) {
 func scopedRunner(t *testing.T, f *store.RankingFixture) string {
 	t.Helper()
 	issued, err := f.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-		Kind: capability.ProvisionMachine, Authority: &f.Admin.Authority, RegistrationID: "runner:a:scoped", Team: "a",
+		Kind: capability.ProvisionMachine, AllowedLabels: []string{"team-4cpu"}, Authority: &f.Admin.Authority, RegistrationID: "runner:a:scoped", Team: "a",
 		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "scoped"}, Repositories: []string{"github.com/acme/*"},
 		Grants: []capability.Grant{capability.TriggersClaim, capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone},
 	})

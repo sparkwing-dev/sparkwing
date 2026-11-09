@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,8 +15,10 @@ import (
 // Architectural lint restricts the known ledger writers. Production admission
 // tests establish permit enforcement and complete-set behavior.
 func TestAdmissionArchitectureHasOneGrantOwner(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Dir(file)
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	reservationInsert := regexp.MustCompile(`(?i)\binsert\s+into\s+concurrency_(holders|waiters)\b`)
 	permitGrant := regexp.MustCompile(`(?is)\binsert\s+into\s+admission_work\b|\bupdate\s+admission_work\s+set[^;]*\bgranted\s*=\s*1\b`)
 	for _, dir := range []string{root, filepath.Join(root, "..", "nodehost")} {

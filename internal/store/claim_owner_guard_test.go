@@ -6,17 +6,15 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot resolve claim module source")
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
 	}
-	directory := filepath.Dir(source)
 	files, err := filepath.Glob(filepath.Join(directory, "*.go"))
 	if err != nil {
 		t.Fatal(err)

@@ -25,7 +25,7 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 	s, demand := unitClaimFixture(t)
 	fundUnitClaim(t, s)
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
-	setMachineOrigin(t, s, "runner", &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
+	setMachineOrigin(t, s, "runner", &CapabilityOrigin{Kind: capability.ProvisionMachine, AllowedLabels: demand.Labels, RegistrationID: "runner:a:runner"})
 	demand.Target = &UnitRef{Kind: kind, RunID: "run"}
 	if kind == capability.UnitNode {
 		demand.Target.NodeID = "job"

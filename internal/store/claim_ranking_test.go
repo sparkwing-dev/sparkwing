@@ -65,7 +65,7 @@ func TestRankingLiveSelfHostedRunnerPrecedesCloudForProvenWork(t *testing.T) {
 			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 			f.At(-time.Minute)
 			issued, err := f.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-				Kind: capability.ProvisionMachine, Authority: &f.Admin.Authority,
+				Kind: capability.ProvisionMachine, AllowedLabels: []string{"team-4cpu"}, Authority: &f.Admin.Authority,
 				RegistrationID: "runner:a:scoped", Team: "a",
 				Subject:      capability.Subject{Kind: capability.SubjectMachine, ID: "scoped"},
 				Repositories: []string{"github.com/acme/*"},
