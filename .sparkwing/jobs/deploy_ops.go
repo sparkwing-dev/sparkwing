@@ -543,7 +543,7 @@ func (d *deployer) requireMainAncestor(ctx context.Context, commit string) error
 			return err
 		}
 		if _, err := d.sourceGit(ctx, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"); err != nil {
-			return fmt.Errorf("candidate %s is not an ancestor of origin/main; production was not changed: %w", commit, err)
+			return fmt.Errorf("candidate %s is not an ancestor of origin/main; refusing deployment: %w", commit, err)
 		}
 		return nil
 	})
@@ -807,6 +807,11 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 			return err
 		}
 		commit = strings.TrimSpace(head)
+		if env.Name == d.cfg.Production.Name {
+			if err := d.requireMainAncestor(ctx, images.Commit); err != nil {
+				return fmt.Errorf("refusing production GitOps push for %s: %w", images.Commit, err)
+			}
+		}
 		_, err = d.git(ctx, gitEnv, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+d.cfg.GitopsBranch)
 		return err
 	}); err != nil {
