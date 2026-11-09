@@ -23,6 +23,7 @@ var releaseRecipe = []string{
 	"prepare-changelog",
 	"push-tag",
 	"release-cut-checks",
+	"release-sdk",
 	"validate-version",
 }
 
@@ -104,7 +105,7 @@ func TestReleasePlanTagsOnlyAfterTheChangelogCommit(t *testing.T) {
 	plan := releasePlan(t)
 
 	deps := ancestors(t, plan, "push-tag")
-	for _, need := range []string{"validate-version", "check-clean-tree", "prepare-changelog", "gate-schema-changelog", "gate-wire-changelog", "release-cut-checks", "commit-changelog"} {
+	for _, need := range []string{"validate-version", "check-clean-tree", "prepare-changelog", "gate-schema-changelog", "gate-wire-changelog", "release-cut-checks", "release-sdk", "commit-changelog"} {
 		if !deps[need] {
 			t.Errorf("push-tag must depend on %s; the tag has to land on the tree that already carries the release notes", need)
 		}

@@ -42,6 +42,7 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 
 // safety: a release may come from an older checkout; a local replacement's
 // distance from origin/main is a development check, not a published-pin check.
+// safety: SDK publication owns SDK freshness because a resumed engine cut repairs those pins.
 func checkPublishedVersionsFreshness(ctx context.Context, repoRoot string) error {
 	return checkVersionsFreshness(ctx, repoRoot, false)
 }
@@ -67,6 +68,10 @@ func checkVersionsFreshness(ctx context.Context, repoRoot string, checkLocalRepl
 		}
 		relMod, _ := filepath.Rel(repoRoot, modPath)
 		for _, req := range f.Require {
+			// safety: the cut selects and publishes its SDK before preparing these pins.
+			if !checkLocalReplacements && req.Mod.Path == independentSDKModule {
+				continue
+			}
 			if !isWatchedModule(req.Mod.Path) {
 				continue
 			}
@@ -103,8 +108,10 @@ func checkVersionsFreshness(ctx context.Context, repoRoot string, checkLocalRepl
 			}
 		}
 	}
-	if msg := checkScaffoldFallbackPin(ctx, repoRoot); msg != "" {
-		problems = append(problems, msg)
+	if checkLocalReplacements {
+		if msg := checkScaffoldFallbackPin(ctx, repoRoot); msg != "" {
+			problems = append(problems, msg)
+		}
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("version freshness:\n  - %s", strings.Join(problems, "\n  - "))

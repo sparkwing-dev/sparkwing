@@ -97,11 +97,14 @@ func (r *ReleaseCut) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArg
 	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{}).
 		Timeout(releaseCutBudget + releaseLintLockAllowance)
 
+	sdk := sparkwing.Job(plan, "release-sdk", &releaseSDKJob{RepoDir: repoDir, Source: in.Commit}).Inline().Timeout(30 * time.Minute)
+	sdk.Needs(clean, validate, cutChecks)
+
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	changelog.Needs(discover, validate, clean, cutChecks)
+	changelog.Needs(discover, validate, clean, cutChecks, sdk)
 
 	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
 		RepoDir: repoDir,
@@ -116,8 +119,9 @@ func (r *ReleaseCut) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArg
 	wireGate.Needs(discover, changelog)
 
 	commit := sparkwing.Job(plan, "commit-changelog", &commitChangelogJob{
-		Version: versionRef,
-		RepoDir: repoDir,
+		SDKVersion: sparkwing.RefTo[string](sdk),
+		Version:    versionRef,
+		RepoDir:    repoDir,
 	})
 	commit.Needs(changelog, schemaGate, wireGate)
 
@@ -415,6 +419,7 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 }
 
 type commitChangelogJob struct {
+	SDKVersion sparkwing.Ref[string]
 	sparkwing.Base
 	sparkwing.Produces[string]
 	RepoDir string
@@ -437,10 +442,10 @@ func (j *commitChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 func (j *commitChangelogJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
 	// safety: changing the sealed SDK pin before this job starts prevents source acquisition.
-	if err := prepareReleasePins(ctx, j.RepoDir, version); err != nil {
+	if err := prepareReleasePins(ctx, j.RepoDir, j.SDKVersion.Get(ctx)); err != nil {
 		return err
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add", "--"}, sparkwingPinArtifacts...)...); err != nil {
+	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add", "--", "go.mod", "go.sum"}, sparkwingPinArtifacts...)...); err != nil {
 		return err
 	}
 	pending, err := runGitIn(ctx, j.RepoDir, append([]string{"diff", "--cached", "--no-renames", "--name-only", "--"}, releasePreparedPaths(version)...)...)
@@ -460,7 +465,7 @@ func (j *commitChangelogJob) run(ctx context.Context) error {
 }
 
 func releasePreparedPaths(version string) []string {
-	paths := append([]string{"CHANGELOG.md", embeddedChangelogRel}, sparkwingPinArtifacts...)
+	paths := append([]string{"CHANGELOG.md", embeddedChangelogRel, "go.mod", "go.sum"}, sparkwingPinArtifacts...)
 	paths = append(paths, releaseFragmentDirs...)
 	for _, name := range []string{version + ".md", unreleasedGuideName, migrationIndexName} {
 		paths = append(paths, migrationFileRels(name)...)
@@ -469,6 +474,16 @@ func releasePreparedPaths(version string) []string {
 }
 
 func prepareReleasePins(ctx context.Context, repoDir, version string) error {
+	if err := validateReleaseVersion(version); err != nil {
+		return err
+	}
+	if _, err := sparkwing.Exec(ctx, "go", "mod", "edit", "-require", independentSDKModule+"@"+version).Dir(repoDir).Env("GOWORK", "off").Run(); err != nil {
+		return err
+	}
+	if _, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(repoDir).Env("GOWORK", "off").Run(); err != nil {
+		return err
+	}
+
 	if err := bumpFallbackSDKVersionFile(repoDir, version); err != nil {
 		return err
 	}
@@ -523,7 +538,7 @@ func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
 	case rewriteApply:
 		sparkwing.Info(ctx, "dry-run: would rename [Unreleased] -> [%s] (%d entries) and stage", version, action.unreleasedEntries)
 	}
-	sparkwing.Info(ctx, "dry-run: would align scaffold, API snapshot and pipeline module pins to %s", version)
+	sparkwing.Info(ctx, "dry-run: would align scaffold, API snapshot and pipeline module pins to the selected independent SDK version for engine %s", version)
 	roll, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
