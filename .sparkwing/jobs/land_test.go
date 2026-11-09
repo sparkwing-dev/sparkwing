@@ -230,7 +230,7 @@ func landPlan(t *testing.T) map[string]landPlanJob {
 	return jobs
 }
 
-func TestLandRunsPolicyFirstThenTheGateAndReviewInParallelBeforeThePush(t *testing.T) {
+func TestLandOverlapsPolicyAndReviewBeforeTheGateAndPush(t *testing.T) {
 	jobs := landPlan(t)
 	gate := inspectPipeline(t, "Gate", nil)
 	var gateIDs []string
@@ -246,14 +246,13 @@ func TestLandRunsPolicyFirstThenTheGateAndReviewInParallelBeforeThePush(t *testi
 		switch id {
 		case recordTreeJob:
 			// safety: record-tree follows the gate jobs it records.
-		case policyJobID:
+		case policyJobID, "review":
 			if !slices.Equal(j.Needs, []string{"preconditions"}) {
-				t.Fatalf("policy needs %v; it should wait only for the preconditions", j.Needs)
+				t.Fatalf("%s needs %v; policy and review should wait only for the preconditions", id, j.Needs)
 			}
 		default:
 			if !slices.Equal(j.Needs, []string{policyJobID}) {
-				t.Fatalf("%s needs %v; it should wait only for the policy job, so a policy finding fails the land "+
-					"before it starts and the heavy gate jobs and the review then run side by side", id, j.Needs)
+				t.Fatalf("%s needs %v; heavy gate jobs should wait for policy", id, j.Needs)
 			}
 		}
 	}
