@@ -41,7 +41,10 @@ evaluations settle without reacquiring the plan. Queue views name the group.
 Burst awards provisionally, requests logical admission, then tries compute without
 waiting. Busy compute relinquishes the award, permit and job reservations while
 preserving the readiness-ranking window. Compute releases after cleanup joins.
-Terminal transitions release logical reservations. `cancel_others` replaces
+A cancelled running job renews its held logical reservations while cleanup drains,
+bounded by the same claim, funding and cancellation deadlines. Cancelled waiters
+do not renew their queue membership. Terminal transitions release logical
+reservations. `cancel_others` replaces
 capacity immediately and requests cooperative cancellation. Disconnected work can
 overlap until cleanup or the five-minute drain deadline. No timeout knob remains.
 
