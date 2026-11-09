@@ -27,6 +27,11 @@ type sourcePosition struct {
 
 var approvedExternalBoundaries = []externalBoundary{
 	{
+		file: "bin/desktop_update_systemd_test.go", function: "TestDesktopUpdaterSystemdLifetimeAndControllerKeys",
+		duration: "20 * time.Millisecond",
+		marker:   "// sleepcheck:external-boundary await the fixture build child in the real user unit",
+	},
+	{
 		file: "bin/desktop_update_e2e_test.go", function: "TestDesktopUpdaterRealIntakeRaceAndRollback",
 		duration: "25 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary coordinate updater and CLI subprocess markers",

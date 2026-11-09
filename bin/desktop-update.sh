@@ -8,6 +8,8 @@ fi
 repo="$1" dest="$2" wait_seconds="$3"
 shift 3
 homes=("$@")
+declare -A controller_environment
+controller_variables=(HOME XDG_CONFIG_HOME SPARKWING_CONFIG SPARKWING_SECRETS_KEY_FILE SPARKWING_SECRETS_KEY SPARKWING_SECRETS_PREVIOUS_KEY)
 for path in "$repo" "$dest" "${homes[@]}"; do
   [[ "$path" == /* ]] || fail 'repository, install directory and state homes must be absolute'
 done
@@ -46,6 +48,7 @@ done
 inspect() {
   busy=0
   restart_homes=()
+  restart_pids=()
   for home in "${homes[@]}"; do
     SPARKWING_HOME="$home" timeout 10s "$dest/sparkwing" daemon status -o json >"$stage/status.json" \
       || fail "cannot inspect controller at $home; installed binaries unchanged"
@@ -56,6 +59,8 @@ inspect() {
       || fail "invalid controller status at $home; installed binaries unchanged"
     if jq -e '.state == "running"' "$stage/status.json" >/dev/null; then
       restart_homes+=("$home")
+      restart_pids+=("$(jq -er '.pid | select(type == "number" and . > 0 and floor == .)' "$stage/status.json")") \
+        || fail "invalid controller PID at $home; installed binaries unchanged"
     fi
     if ! jq -e '[.activity.runs, .activity.queued_triggers, .activity.held_leases] | all(. == 0)' \
       "$stage/status.json" >/dev/null; then
@@ -86,6 +91,20 @@ while true; do
   sleep 2
 done
 
+# safety: pipeline environments omit key selectors; each live owner is the source for its replacement.
+for i in "${!restart_homes[@]}"; do
+  home="${restart_homes[$i]}"
+  for name in "${controller_variables[@]}"; do controller_environment["$home:$name"]=""; done
+  while IFS= read -r -d '' entry; do
+    name="${entry%%=*}"
+    case "$name" in
+      HOME|XDG_CONFIG_HOME|SPARKWING_CONFIG|SPARKWING_SECRETS_KEY_FILE|SPARKWING_SECRETS_KEY|SPARKWING_SECRETS_PREVIOUS_KEY)
+        controller_environment["$home:$name"]="${entry#*=}" ;;
+    esac
+  done <"/proc/${restart_pids[$i]}/environ" || fail "cannot read controller environment at $home; installed binaries unchanged"
+  [[ -n "${controller_environment["$home:HOME"]}" ]] || fail "missing controller HOME at $home; installed binaries unchanged"
+done
+
 echo "desktop-update: idle; installing main@$sha"
 cp -p -- "$dest/sparkwing-runner" "$stage/previous-runner"
 mv -f -- "$stage/bin/sparkwing-runner" "$dest/sparkwing-runner"
@@ -95,7 +114,10 @@ if ! mv -f -- "$stage/bin/sparkwing" "$dest/sparkwing"; then
   fail 'CLI swap failed; previous binaries restored; retry the desktop update'
 fi
 for home in "${restart_homes[@]}"; do
-  SPARKWING_HOME="$home" timeout 40s "$dest/sparkwing" daemon restart --force -o json
+  (
+    for name in "${controller_variables[@]}"; do export "$name=${controller_environment["$home:$name"]}"; done
+    SPARKWING_HOME="$home" timeout 40s "$dest/sparkwing" daemon restart --force -o json
+  )
 done
 complete=1
 echo "desktop-update: installed main@$sha"

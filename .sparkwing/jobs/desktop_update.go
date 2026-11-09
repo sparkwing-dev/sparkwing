@@ -56,7 +56,7 @@ func (j *desktopUpdateJob) run(ctx context.Context, dry bool) error {
 	}
 	// safety: the updater must outlive this run before it can restart the controller that owns the run.
 	args := []string{
-		"--user", "--collect", "--unit=sparkwing-desktop-update", "--property=Type=exec",
+		"--user", "--collect", "--unit=sparkwing-desktop-update", "--property=Type=exec", "--property=KillMode=control-group",
 		"--setenv=HOME=" + home, "--setenv=PATH=" + os.Getenv("PATH"),
 		"--", "bash", filepath.Join(j.RepoDir, "bin", "desktop-update.sh"),
 		j.RepoDir, filepath.Join(home, ".local", "bin"), "1800",

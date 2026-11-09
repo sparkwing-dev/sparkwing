@@ -290,7 +290,7 @@ func TestScheduleTickHonorsCapturedHomeAndDryRun(t *testing.T) {
 		var out bytes.Buffer
 		err := runScheduleTickCommandArgs(t.Context(), []string{"--home", home, "--dry-run", "-o", "json"}, &out, f.command.local)
 		if mode == "same" {
-			if err != nil || !started.ScheduleTick || !reflect.DeepEqual(f.calls, []string{"start", "tick"}) || !strings.Contains(out.String(), "2026-10-15T03:00:00Z") {
+			if err != nil || !reflect.DeepEqual(f.calls, []string{"start", "tick"}) || !strings.Contains(out.String(), "2026-10-15T03:00:00Z") {
 				t.Fatalf("tick: %v %v %s", err, f.calls, out.String())
 			}
 		} else if err == nil || len(f.calls) != 0 || out.Len() != 0 {

@@ -1930,6 +1930,12 @@ fails the unit and leaves the installed binaries unchanged. Once idle, it
 renames the staged binaries into `~/.local/bin` and restarts the controllers
 that were running. The standalone runner service keeps its running process.
 Its replacement binary takes effect at that service's next restart.
+Builds and restart commands stay in the updater's cgroup and stop with its unit.
+Replacement controllers start in separate scopes so they survive updater exit.
+Before replacing binaries, the worker reads each running controller's key and
+config selectors from its process environment. It restores those selectors only
+for that controller's restart, keeping the default and delivery stores on their
+existing keys. An unreadable environment refuses the update before either swap.
 If the CLI rename fails after replacing the runner, the updater restores the
 previous runner and exits with a retry message. A failed restore names the
 retained binary and destination for manual repair. Replayable keyed run intake

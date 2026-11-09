@@ -23,7 +23,7 @@ func defaultSpawn(home, version string) error {
 	if err != nil {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
-	return spawnDetached(self, home, version, false)
+	return spawnDetached(self, home, version)
 }
 
 const hostStartGrace = 2 * time.Second
@@ -34,7 +34,10 @@ var errNoDaemonHost = errors.New("wingd/client: no admission daemon is running a
 
 var errDaemonHostFailed = errors.New("wingd/client: the daemon host binary exited without serving")
 
-func spawnDetached(bin, home, version string, scheduleTick bool) error {
+func spawnDetached(bin, home, version string) error {
+	if _, err := exec.LookPath(bin); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
+	}
 	if _, err := wingd.EnsureSocketPath(home); err != nil {
 		return err
 	}
@@ -48,7 +51,7 @@ func spawnDetached(bin, home, version string, scheduleTick bool) error {
 
 	logF, logExisted := openDaemonLog(home)
 
-	scope := scheduleTick && runtime.GOOS == "linux" && os.Getenv("INVOCATION_ID") != ""
+	scope := runtime.GOOS == "linux" && os.Getenv("INVOCATION_ID") != ""
 	name, commandArgs := daemonCommandLine(bin, args, scope)
 	cmd := procenv.ControlCommand(os.Environ(), name, commandArgs...)
 	cmd.Stdin = nil
@@ -60,18 +63,12 @@ func spawnDetached(bin, home, version string, scheduleTick bool) error {
 		// safety: a log this spawn created and never wrote to would imply a
 		// daemon ran here; leave the directory as it was found instead.
 		discardUnusedDaemonLog(logF, home, logExisted)
-		if scope {
-			return spawnDetached(bin, home, version, false)
-		}
 		return fmt.Errorf("start daemon: %w", err)
 	}
 	if logF != nil {
 		_ = logF.Close()
 	}
 	if err := watchHostStart(cmd, bin, home); err != nil {
-		if scope {
-			return spawnDetached(bin, home, version, false)
-		}
 		return err
 	}
 	_ = cmd.Process.Release()

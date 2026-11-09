@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,7 +15,7 @@ func TestDesktopUpdateWaitsForWorkAndRefusesUnverifiedIdle(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux systemd updater")
 	}
-	for _, mode := range []string{"idle", "drain", "run", "trigger", "lease", "land", "opaque-land", "status-error", "malformed", "missing-count", "units-error", "malformed-units", "show-error", "red", "build-error", "rename-error", "rollback-error", "restart-error", "stopped"} {
+	for _, mode := range []string{"idle", "drain", "run", "trigger", "lease", "land", "opaque-land", "status-error", "malformed", "missing-count", "missing-pid", "environment-error", "units-error", "malformed-units", "show-error", "red", "build-error", "rename-error", "rollback-error", "restart-error", "stopped"} {
 		t.Run(mode, func(t *testing.T) {
 			root, err := filepath.Abs(".")
 			if err != nil {
@@ -80,6 +81,8 @@ case "$MODE" in
 status-error) exit 1 ;;
 malformed) echo invalid; exit ;;
 missing-count) echo '{"kind":"service","tool":"sparkwing","service":"controller","state":"running","activity":{}}'; exit ;;
+missing-pid) FIXTURE_CONTROLLER_PID=0 ;;
+environment-error) FIXTURE_CONTROLLER_PID=2147483647 ;;
 esac
 runs=0; triggers=0; leases=0; state=running
 case "$MODE" in
@@ -89,7 +92,7 @@ trigger) triggers=1 ;;
 lease) leases=1 ;;
 stopped) state=stopped ;;
 esac
-printf '{"kind":"service","tool":"sparkwing","service":"controller","state":"%s","activity":{"runs":%s,"queued_triggers":%s,"held_leases":%s}}\n' "$state" "$runs" "$triggers" "$leases"
+printf '{"kind":"service","tool":"sparkwing","service":"controller","state":"%s","pid":%s,"activity":{"runs":%s,"queued_triggers":%s,"held_leases":%s}}\n' "$state" "$FIXTURE_CONTROLLER_PID" "$runs" "$triggers" "$leases"
 `)
 			write(filepath.Join(bin, "systemctl"), `#!/bin/bash
 set -eu
@@ -135,6 +138,12 @@ exec /bin/mv "$@"
 			}
 			environment := append(os.Environ(), "HOME="+home, "SPARKWING_HOME="+filepath.Join(home, "state"), "MODE="+mode,
 				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FIXTURE_INSTALLER="+filepath.Join(dir, "install.sh"), "FIXTURE_CANDIDATE="+filepath.Join(dir, "candidate"))
+			controller := procenv.ControlCommand(environment, "/bin/sleep", "300")
+			if err := controller.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = controller.Process.Kill(); _ = controller.Wait() })
+			environment = append(environment, "FIXTURE_CONTROLLER_PID="+strconv.Itoa(controller.Process.Pid))
 			cmd := procenv.ControlCommandContext(t.Context(), environment, "bash", filepath.Join(root, "desktop-update.sh"), dir, dest, wait, filepath.Join(home, "state"), filepath.Join(home, "delivery"))
 			out, err := cmd.CombinedOutput()
 			success := mode == "idle" || mode == "drain" || mode == "stopped"

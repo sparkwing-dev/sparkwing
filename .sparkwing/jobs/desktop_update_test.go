@@ -45,6 +45,7 @@ printf '%s\n' "$@" > "$DESKTOP_TEST_CALL"
 				t.Fatal(readErr)
 			}
 			for _, want := range []string{
+				"--property=KillMode=control-group\n",
 				"--user\n", "--collect\n", "--unit=sparkwing-desktop-update\n", "--setenv=HOME=" + home + "\n",
 				"--\nbash\n/private/repo/bin/desktop-update.sh\n/private/repo\n", filepath.Join(home, ".local/bin") + "\n1800\n",
 				filepath.Join(home, ".sparkwing") + "\n" + filepath.Join(home, "delivery") + "\n",
