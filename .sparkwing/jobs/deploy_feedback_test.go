@@ -34,7 +34,7 @@ func TestDeployScanCreatesAndUpdatesFailureTickets(t *testing.T) {
 		case "list":
 			ticket := ""
 			if promotions == 2 {
-				ticket = "BW-100"
+				ticket = "fixture-ticket"
 			}
 			var out strings.Builder
 			for i, finding := range report {
