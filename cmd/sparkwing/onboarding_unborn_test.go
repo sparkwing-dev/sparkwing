@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,24 +25,13 @@ func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	t.Chdir(repo)
 	runSnapshotGit(t, repo, "init", "--quiet")
+	writeSDKFixtureModule(t, filepath.Join(repo, ".sparkwing"))
 	var commandErr error
 	captureStdout(t, func() {
 		commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "hello"})
 	})
 	if commandErr != nil {
 		t.Fatal(commandErr)
-	}
-	root, err := moduleRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	mod, err := os.OpenFile(filepath.Join(repo, ".sparkwing", "go.mod"), os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, writeErr := fmt.Fprintf(mod, "\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %q\n", filepath.Join(root, "sparkwing"))
-	if err := mod.Close(); err != nil || writeErr != nil {
-		t.Fatalf("local SDK replacement: %v %v", writeErr, err)
 	}
 	output := captureStdout(t, func() {
 		commandErr = runSparkwing([]string{"pipeline", "plan", "--pipeline", "hello", "-o=json"})

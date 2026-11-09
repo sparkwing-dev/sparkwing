@@ -154,8 +154,17 @@ func TestGitHubLookupFallbackRequiresExplicitToken(t *testing.T) {
 			if tc.wantSuccess && got != 17 {
 				t.Fatalf("identity: %d", got)
 			}
-			if !tc.wantSuccess && err.Error() != "controller lookup" {
-				t.Fatalf("controller refusal lost: %v", err)
+			if !tc.wantSuccess {
+				var expected struct {
+					Error apierr.Error `json:"error"`
+				}
+				if decodeErr := json.Unmarshal([]byte(tc.body), &expected); decodeErr != nil {
+					t.Fatal(decodeErr)
+				}
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || failure.Code != expected.Error.Code || failure.Message != expected.Error.Message || failure.Details["reason"] != expected.Error.Details["reason"] {
+					t.Fatalf("controller refusal lost: %v", err)
+				}
 			}
 		})
 	}

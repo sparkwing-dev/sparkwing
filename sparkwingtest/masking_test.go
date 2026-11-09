@@ -11,7 +11,7 @@ import (
 )
 
 func TestTestHostMaskingConformance(t *testing.T) {
-	vectors, err := masktest.Load("../../internal/secrets/testdata/masking.json")
+	vectors, err := masktest.Load("../internal/secrets/testdata/masking.json")
 	if err != nil {
 		t.Fatal(err)
 	}

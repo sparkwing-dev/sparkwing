@@ -161,7 +161,7 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			configBody = append(configBody, []byte("sparks:\n  - name: sdk\n    source: github.com/sparkwing-dev/sparkwing\n    version: v0.0.0\n")...)
+			configBody = append(configBody, []byte("sparks:\n  - name: sdk\n    source: github.com/sparkwing-dev/sparkwing/sparkwing\n    version: v0.0.0\n")...)
 			writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", string(configBody), 0o600)
 			sums, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
 			if err != nil {
