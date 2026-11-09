@@ -45,10 +45,10 @@ func configureHostCommand(cmd *exec.Cmd) {
 	const limit = 32767 - len(variable) - 2
 	program := cmd.Args[2]
 	if len(utf16.Encode([]rune(program))) > limit {
-		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
+		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units; write the program to a script file and invoke it with bash script.sh", limit)
 		return
 	}
-	cmd.Args[2] = `: "${` + variable + `:?host Bash program is empty; on Windows use Git Bash and set the Bash path to its bash.exe instead of WSL bash.exe}"; eval 'unset ` + variable + `;' "$` + variable + `"`
+	cmd.Args[2] = `: "${` + variable + `:?host Bash program is empty; supply a Bash program or use : for a no-op}"; eval 'unset ` + variable + `;' "$` + variable + `"`
 	cmd.Env = append(cmd.Environ(), variable+"="+program)
 }
 

@@ -15,7 +15,7 @@ func TestCaptureRejectsFIFO(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, _, _ := testData()
-	if _, err := Capture(t.Context(), d, ws, []string{"out"}, func(string) {}); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+	if _, err := Capture(t.Context(), d, ws, []string{"out"}, func(string) {}); err == nil || !strings.Contains(err.Error(), "exclude it from the artifact glob or write a regular file") {
 		t.Fatalf("Capture FIFO: %v", err)
 	}
 }

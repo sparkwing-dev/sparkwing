@@ -262,7 +262,7 @@ func TestRunnerTrustRefusalNamesOnlyCurrentClasses(t *testing.T) {
 func TestDeviceLoginRefusesAllowedRunnerLabels(t *testing.T) {
 	s, _, _ := reviewAccount(t, "owner")
 	response := devicePost(t, s.Handler(), "/api/v1/auth/device", `{"kind":"runner","runner":{"name":"label-consent","personal":true,"allowed_labels":["deploy-prod"]}}`, 400)
-	if !strings.Contains(response.Body.String(), "runner labels are set by admin enrollment") {
+	if !strings.Contains(response.Body.String(), "sparkwing runners add --runner NAME --personal --label LABEL --session-stdin") {
 		t.Fatalf("label refusal gave no remedy: %s", response.Body)
 	}
 }

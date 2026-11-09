@@ -312,7 +312,7 @@ func TestWindowsHostCommandRejectsOversizedBashProgram(t *testing.T) {
 	}
 	cmd := procenv.SDKCommand(os.Environ(), dir, tool, "-c", strings.Repeat("x", 32768))
 	configureHostCommand(cmd)
-	if cmd.Err == nil || !strings.Contains(cmd.Err.Error(), "exceeds environment limit") {
+	if cmd.Err == nil || !strings.Contains(cmd.Err.Error(), "write the program to a script file") {
 		t.Fatalf("oversized Bash program error = %v", cmd.Err)
 	}
 }
@@ -361,7 +361,7 @@ func TestWindowsHostCommandBashRequiresProgram(t *testing.T) {
 			cmd.Env = append(cmd.Env, "SPARKWING_BASH_PROGRAM=")
 		}
 		output, err := cmd.CombinedOutput()
-		if err == nil || !strings.Contains(string(output), "host Bash program is empty; on Windows use Git Bash and set the Bash path") || strings.Contains(string(output), "unexpected") {
+		if err == nil || !strings.Contains(string(output), "host Bash program is empty; supply a Bash program or use : for a no-op") || strings.Contains(string(output), "unexpected") {
 			t.Fatalf("empty=%v: missing Bash program succeeded: %v, output=%q", empty, err, output)
 		}
 	}

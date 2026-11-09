@@ -18,7 +18,7 @@ type downloadTransport func(*http.Request) (*http.Response, error)
 func (f downloadTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestDownloadReleaseAPIFallback(t *testing.T) {
-	for _, mode := range []string{"504", "timeout", "body-timeout", "404", "403", "200", "missing", "api-failure", "oversize", "custom"} {
+	for _, mode := range []string{"504", "timeout", "body-timeout", "404", "403", "200", "missing", "api-failure", "metadata-oversize", "oversize", "custom"} {
 		t.Run(mode, func(t *testing.T) {
 			var apiCalls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +36,10 @@ func TestDownloadReleaseAPIFallback(t *testing.T) {
 					}
 				case "/repos/org/repo/releases/tags/v0.1.0":
 					apiCalls.Add(1)
+					if mode == "metadata-oversize" {
+						_, _ = io.WriteString(w, strings.Repeat(" ", (4<<20)+1))
+						return
+					}
 					if mode == "api-failure" {
 						w.WriteHeader(http.StatusForbidden)
 						return
@@ -85,11 +89,14 @@ func TestDownloadReleaseAPIFallback(t *testing.T) {
 			if !success && err == nil {
 				t.Fatal("expected failure")
 			}
+			if mode == "metadata-oversize" && (!strings.Contains(err.Error(), "4194304-byte limit") || !strings.Contains(err.Error(), "retry the release download") || !strings.Contains(err.Error(), "console Help menu")) {
+				t.Fatalf("missing metadata remedy: %v", err)
+			}
 			expected := 2
 			switch mode {
 			case "403", "404", "200", "custom":
 				expected = 0
-			case "missing", "api-failure":
+			case "missing", "api-failure", "metadata-oversize":
 				expected = 1
 			}
 			if apiCalls.Load() != int32(expected) {

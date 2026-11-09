@@ -271,7 +271,7 @@ func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 			return invalidEngineBody("a runner device login carries its enrollment in runner and no member grants")
 		}
 		if len(request.Runner.AllowedLabels) != 0 {
-			return invalidEngineBody("browser approval does not accept allowed_labels; runner labels are set by admin enrollment")
+			return invalidEngineBody("browser approval does not accept allowed_labels; have an administrator run sparkwing runners add --runner NAME --personal --label LABEL --session-stdin with an admin session token on stdin")
 		}
 		// safety: a browser approval is phishable, so it never grants a credential that runs other members' work.
 		if runner := request.Runner; !runner.Personal || len(runner.ReservedPools) != 0 || runner.Trust != "" || runner.Platform != "" || runner.Grants != nil {

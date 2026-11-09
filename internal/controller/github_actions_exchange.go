@@ -69,7 +69,7 @@ func (s *Server) verifyActionsExchange(r *http.Request) error {
 	}
 	branch, isBranch := strings.CutPrefix(claims.Ref, "refs/heads/")
 	if team == "" || !githubRunnerEvents[claims.EventName] || !isBranch || branch == "" || !runspec.IsCommitID(claims.SHA) || claims.RunID == "" || claims.RunAttempt == "" || !strings.HasPrefix(claims.WorkflowRef, claims.Repository+"/.github/workflows/") || !strings.HasSuffix(claims.WorkflowRef, "@"+claims.Ref) {
-		return actionsExchangeRefusal()
+		return actionsExchangeRefusal("OIDC repository, ref or workflow claims are invalid; use a branch workflow with a supported event and the correct team")
 	}
 	spec, err := s.actionsProvision(r.Context(), team, claims)
 	if err != nil {
@@ -96,17 +96,17 @@ func (s *Server) readActionsBinding(ctx context.Context, team store.Team, reposi
 func (s *Server) actionsProvision(ctx context.Context, team store.Team, claims githuboidc.Claims) (capability.ProvisionSpec, error) {
 	binding, err := s.readActionsBinding(ctx, team, claims.RepositoryID)
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return capability.ProvisionSpec{}, actionsExchangeRefusal()
+		return capability.ProvisionSpec{}, actionsExchangeRefusal("repository enrollment is missing; have an administrator enroll the repository for this team")
 	}
 	if err != nil {
 		return capability.ProvisionSpec{}, engineLookupError(err)
 	}
 	if binding.Team != team || binding.RepositoryID != claims.RepositoryID || binding.RepositoryOwnerID != claims.RepositoryOwnerID {
-		return capability.ProvisionSpec{}, actionsExchangeRefusal()
+		return capability.ProvisionSpec{}, actionsExchangeRefusal("repository enrollment does not match the OIDC owner; have an administrator enroll the correct repository for this team")
 	}
 	repository, err := runspec.CanonicalRepository(runspec.RepoInput{GitHubRepositoryID: runspec.Optional[int64]{Set: true, Value: claims.RepositoryID}})
 	if err != nil {
-		return capability.ProvisionSpec{}, actionsExchangeRefusal()
+		return capability.ProvisionSpec{}, actionsExchangeRefusal("repository identity is invalid; check the workflow repository ID")
 	}
 	expires := claims.ExpiresAt.Add(limits.GitHubRunnerCredentialTTL)
 	registration := "github:" + strconv.FormatInt(claims.RepositoryID, 10) + ":" + strconv.FormatInt(claims.RepositoryOwnerID, 10)
@@ -140,6 +140,6 @@ func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-func actionsExchangeRefusal() error {
-	return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "GitHub Actions repository binding refused")
+func actionsExchangeRefusal(problem string) error {
+	return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "GitHub Actions: "+problem)
 }

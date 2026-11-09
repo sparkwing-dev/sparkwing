@@ -109,7 +109,10 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		} else {
 			retry, err := c.readResponse(resp, output)
 			if !mayRetry || attempt >= retries || !retry {
-				return err
+				if err != nil {
+					return fmt.Errorf("controller %s %s: %w", req.Method, req.URL.Path, err)
+				}
+				return nil
 			}
 			wait, ok := parseRetryAfter(resp)
 			if recoverIntake {
@@ -140,7 +143,7 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 		return false, fmt.Errorf("read controller response: %w", err)
 	}
 	if len(data) > maxEngineResponseBytes {
-		return false, fmt.Errorf("controller response exceeds %d bytes", maxEngineResponseBytes)
+		return false, fmt.Errorf("controller response exceeds %d bytes; contact support through the console Help menu with the operation and run ID", maxEngineResponseBytes)
 	}
 	if closeErr != nil {
 		return false, fmt.Errorf("close controller response: %w", closeErr)

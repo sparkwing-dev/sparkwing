@@ -106,7 +106,7 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 			return fmt.Errorf("artifact %q: %w", rel, serr)
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("artifact %q: not a regular file", rel)
+			return fmt.Errorf("artifact %q: not a regular file; exclude it from the artifact glob or write a regular file", rel)
 		}
 		digest, size, berr := storeArtifactFile(ctx, data, f)
 		if berr != nil {

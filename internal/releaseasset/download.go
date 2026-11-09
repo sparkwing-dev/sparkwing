@@ -62,7 +62,7 @@ func Download(ctx context.Context, client *http.Client, address string, maxBytes
 	api := "https://api.github.com/repos/" + parts[0] + "/" + parts[1] + "/releases/"
 	metadata, err := fetch(api+"tags/"+url.PathEscape(parts[4]), "application/vnd.github+json", 4<<20)
 	if err != nil {
-		return nil, fmt.Errorf("release API lookup: %w", err)
+		return nil, fmt.Errorf("release API lookup: %w; retry the release download or contact support through the console Help menu with the release tag", err)
 	}
 	var release struct {
 		Assets []struct {

@@ -117,7 +117,7 @@ func TestActionsDispatchRequiresDefaultBranchWorkflow(t *testing.T) {
 				}
 				return
 			}
-			if d.State != "refused" || len(f.app.ActionsCalls()) != 0 || !strings.Contains(d.Reason, fallbackWorkflow) || !strings.Contains(d.Reason, "sync the fallback branch's workflow with the default branch") {
+			if d.State != "refused" || len(f.app.ActionsCalls()) != 0 || !strings.Contains(d.Reason, fallbackWorkflow) || !strings.Contains(d.Reason, map[string]string{"differs": "sync the fallback", "fallback missing": "add the approved workflow", "default missing": "add the approved workflow", "default unresolved": "check GitHub availability", "truncated": "reduce the workflow file"}[name]) {
 				t.Fatalf("unverified workflow dispatched or missing repair hint: %+v", d)
 			}
 		})

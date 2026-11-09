@@ -35,7 +35,7 @@ func TestEngineClientResponseLimit(t *testing.T) {
 			})
 			result, err := c.Claim(t.Context(), controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitNode}})
 			if test.oversized {
-				if err == nil || !strings.Contains(err.Error(), "controller response exceeds 67108864 bytes") {
+				if err == nil || (!strings.Contains(err.Error(), "controller POST ") || !strings.Contains(err.Error(), "controller response exceeds 67108864 bytes") || !strings.Contains(err.Error(), "console Help menu")) {
 					t.Fatalf("oversized response: %v", err)
 				}
 			} else if err != nil || result.Claim != nil {
