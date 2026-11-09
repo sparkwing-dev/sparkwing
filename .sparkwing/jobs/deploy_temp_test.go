@@ -65,6 +65,33 @@ func TestDeployCleanupRemovesReadOnlyCache(t *testing.T) {
 	}
 }
 
+func TestDeployCleanupPreservesCombinedStagingBudget(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
+	cfg := defaultDeployConfig()
+	cfg.ToolDir = ""
+	now := time.Now()
+	live := filepath.Join(root, deployDirPrefix+"run-live-staging-gate-1")
+	if err := os.Mkdir(live, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	started := now.Add(-cfg.productionBudget() - time.Minute)
+	if err := os.Chtimes(live, started, started); err != nil {
+		t.Fatal(err)
+	}
+	tools := realDeployTools()
+	tools.now = func() time.Time { return now }
+	j := deployJob{Cfg: cfg, RunID: "run-new", Name: "build-images", tools: &tools}
+	_, done, err := j.deployer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	if _, err := os.Stat(live); err != nil {
+		t.Fatalf("combined staging job swept before its budget: %v", err)
+	}
+}
+
 func TestDeployCLIUsesWritableModuleCache(t *testing.T) {
 	f := newFakeDeploy(t)
 	d := f.deployer(false)

@@ -8,13 +8,16 @@ import (
 	"strings"
 )
 
-// LookupCommand resolves name using env and dir. An unset PATH uses /bin:/usr/bin
-// on Unix and the host PATH on Windows. Windows also searches dir and applies PATHEXT.
+// LookupCommand returns an absolute executable path from the process's PATH or an explicit path.
+// Relative paths use dir; Windows never adds an implicit working-directory search.
 func LookupCommand(name string, env []string, dir string) (string, error) {
 	windows := runtime.GOOS == "windows"
-	if !windows && strings.Contains(name, string(filepath.Separator)) {
-		return name, nil
+	var err error
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return "", &exec.Error{Name: name, Err: err}
 	}
+	explicit := windows && strings.ContainsAny(name, `:\/`) || !windows && strings.Contains(name, "/")
 	path, set := "", false
 	extensions := []string{""}
 	pathExt := ""
@@ -49,24 +52,21 @@ func LookupCommand(name string, env []string, dir string) (string, error) {
 		}
 	}
 	entries := filepath.SplitList(path)
-	if path == "" {
+	if path == "" && !windows {
 		entries = []string{""}
 	}
-	if windows {
-		entries = append([]string{""}, entries...)
-		if strings.ContainsAny(name, `:\/`) {
-			entries = []string{""}
-		}
-	}
-	if filepath.IsAbs(name) {
+	if explicit {
 		entries = []string{""}
 	}
 	for _, entry := range entries {
+		if windows && entry == "" && !explicit {
+			continue
+		}
 		if entry == "" {
 			entry = "."
 		}
 		candidate := filepath.Join(entry, name)
-		if filepath.IsAbs(name) || windows && strings.ContainsAny(name, `:\/`) {
+		if explicit {
 			candidate = name
 		}
 		if windows && !filepath.IsAbs(candidate) {

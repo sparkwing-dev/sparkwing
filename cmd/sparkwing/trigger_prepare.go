@@ -204,13 +204,13 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if err != nil {
 		return result, err
 	}
-	identity, err := clisurface.ResolvePipeline(cfg, input.pipeline)
+	identity, err := clisurface.ResolvePipeline(cfg.Project(), input.pipeline)
 	if err != nil {
 		return result, err
 	}
 	selected.Entrypoint = identity.Entrypoint
 	profile := ""
-	if entry := cfg.Registry().Find(identity.Name); entry != nil {
+	if entry := cfg.Project().Registry().Find(identity.Name); entry != nil {
 		profile = entry.Profile
 	}
 	return preparedTriggerSource{pipeline: identity.Name, profile: profile, git: git, source: selected, checkout: reader}, nil

@@ -22,8 +22,22 @@ type commandSession struct{ job *procgroup.Job }
 // safety: distinguish host termination from a natural nonzero exit racing cancellation.
 const commandCancellationExitCode uint32 = 0x53574341
 
+// safety: host execution assumes Bash inherits Windows environment variables.
+// Shared SDK helpers and cleanups must keep their original argv.
 func configureHostCommand(cmd *exec.Cmd) {
-	if len(cmd.Args) != 3 || cmd.Args[1] != "-c" || !strings.EqualFold(filepath.Base(cmd.Path), "bash.exe") {
+	if cmd.Err != nil || !strings.EqualFold(filepath.Base(cmd.Path), "bash.exe") {
+		return
+	}
+	path, err := filepath.Abs(cmd.Path)
+	if err != nil {
+		cmd.Err = fmt.Errorf("resolve Windows Bash program: %w", err)
+		return
+	}
+	if strings.EqualFold(path, filepath.Join(os.Getenv("SystemRoot"), "System32", "bash.exe")) {
+		cmd.Err = errors.New("WSL bash.exe is not supported for host commands; install Git Bash or call wsl explicitly")
+		return
+	}
+	if len(cmd.Args) != 3 || cmd.Args[1] != "-c" {
 		return
 	}
 	// bug: Git Bash truncates long -c arguments from Windows; the environment preserves the program and stdin.
@@ -34,7 +48,7 @@ func configureHostCommand(cmd *exec.Cmd) {
 		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
 		return
 	}
-	cmd.Args[2] = `eval 'unset ` + variable + `;' "$` + variable + `"`
+	cmd.Args[2] = `: "${` + variable + `:?host Bash program is empty}"; eval 'unset ` + variable + `;' "$` + variable + `"`
 	cmd.Env = append(cmd.Environ(), variable+"="+program)
 }
 

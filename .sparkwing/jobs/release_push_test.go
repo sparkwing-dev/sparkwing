@@ -149,12 +149,12 @@ exec "$RELEASE_TEST_REAL_GIT" "$@"
 				t.Fatal(err)
 			}
 			if fragments {
-				if len(pending.entries) != 0 || !strings.Contains(gitRun(t, origin, "show", "main:docs/changes/later.md"), "later") ||
+				if len(pending.Entries) != 0 || !strings.Contains(gitRun(t, origin, "show", "main:docs/changes/later.md"), "later") ||
 					strings.TrimSpace(gitRun(t, origin, "ls-tree", "main", "--", "docs/changes/chosen.md")) != "" || !strings.Contains(notes, "Chosen source notes.") {
 					t.Fatal("publication lost later fragments or retained consumed fragments")
 				}
-			} else if len(pending.entries) != 1 || !strings.Contains(pending.entries[0].body, "later") {
-				t.Fatalf("pending notes = %v", pending.entries)
+			} else if len(pending.Entries) != 1 || !strings.Contains(pending.Entries[0].Body, "later") {
+				t.Fatalf("pending notes = %v", pending.Entries)
 			}
 			if mirror := gitRun(t, origin, "show", "main:"+embeddedChangelogRel); mirror != notes {
 				t.Fatal("changelog mirror drifted")

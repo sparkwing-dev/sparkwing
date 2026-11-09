@@ -47,7 +47,7 @@ func TestSDKCommandDropsOnlyEngineCredentials(t *testing.T) {
 			t.Fatalf("engine credential %s escapes the SDKCommand prefix check", row.Name)
 		}
 	}
-	cmd := SDKCommand([]string{"PATH=/bin", "SPARKWING_NODE_TOKEN=minted", "SPARKWING_SECRETS_KEY=k", "GITHUB_TOKEN=user", "SPARKWING_HOME=/h"}, "true")
+	cmd := SDKCommand([]string{"PATH=/bin", "SPARKWING_NODE_TOKEN=minted", "SPARKWING_SECRETS_KEY=k", "GITHUB_TOKEN=user", "SPARKWING_HOME=/h"}, "", "true")
 	if got := strings.Join(cmd.Env, ","); got != "PATH=/bin,GITHUB_TOKEN=user,SPARKWING_HOME=/h" {
 		t.Fatalf("SDKCommand env = %s", got)
 	}

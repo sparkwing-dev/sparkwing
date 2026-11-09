@@ -515,8 +515,7 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 	return out, err
 }
 
-// perf: stale queued runs stop before builds or Cloud smokes; an admitted run
-// keeps its slot through promotion so pushes cannot starve production.
+// perf: stale waiters stop before image work or a staging rollout.
 func (d *deployer) requireMainTip(ctx context.Context, commit string) error {
 	return d.act(ctx, "check that "+commit+" is still the tip of origin/main", func() error {
 		out, err := d.sourceGit(ctx, "ls-remote", "--exit-code", "origin", "refs/heads/main")
@@ -697,7 +696,7 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 			return rec, err
 		}
 		rec.Changes = append(rec.Changes, gitopsChange{Phase: phase.name, Commit: commit})
-		if err := d.waitRollout(ctx, env, commit, phase, want.Digest); err != nil {
+		if err := d.waitRollout(ctx, env, commit, phase, want.Digest, gitEnv); err != nil {
 			return rec, err
 		}
 	}
@@ -842,17 +841,36 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 			return err
 		}
 		commit = strings.TrimSpace(head)
-		if env.Name == d.cfg.Production.Name {
-			if err := d.requireMainAncestor(ctx, images.Commit); err != nil {
-				return fmt.Errorf("refusing production GitOps push for %s: %w", images.Commit, err)
-			}
-		}
-		_, err = d.git(ctx, gitEnv, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+d.cfg.GitopsBranch)
-		return err
+		return d.pushGitops(ctx, env, dir, gitEnv, images.Commit)
 	}); err != nil {
 		return "", err
 	}
 	return commit, nil
+}
+
+// safety: merge the other environment's pushes without rewriting the phase
+// commits that production rollback must still be able to revert.
+func (d *deployer) pushGitops(ctx context.Context, env deployEnv, dir string, gitEnv map[string]string, source string) error {
+	for attempt := 0; ; attempt++ {
+		if source != "" && env.Name == d.cfg.Production.Name {
+			if err := d.requireMainAncestor(ctx, source); err != nil {
+				return fmt.Errorf("refusing production GitOps push for %s: %w", source, err)
+			}
+		}
+		_, pushErr := d.git(ctx, gitEnv, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+d.cfg.GitopsBranch)
+		if pushErr == nil || attempt == 3 {
+			return pushErr
+		}
+		if _, err := d.git(ctx, gitEnv, dir, "fetch", "--quiet", "origin", d.cfg.GitopsBranch); err != nil {
+			return errors.Join(pushErr, err)
+		}
+		if _, err := d.git(ctx, gitEnv, dir, "merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD"); err == nil {
+			return pushErr
+		}
+		if _, err := d.git(ctx, gitEnv, dir, "merge", "--quiet", "--no-edit", "FETCH_HEAD"); err != nil {
+			return errors.Join(pushErr, err)
+		}
+	}
 }
 
 func shortCommit(c string) string {
@@ -862,7 +880,7 @@ func shortCommit(c string) string {
 	return c
 }
 
-func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string, phase deployPhase, digest string) error {
+func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string, phase deployPhase, digest string, gitEnv map[string]string) error {
 	if err := d.act(ctx, "refresh Argo application "+env.ArgoApp+" after GitOps push "+commit, func() error {
 		_, err := d.kubectl(ctx, "-n", "argocd", "annotate", "application", env.ArgoApp, "argocd.argoproj.io/refresh=hard", "--overwrite")
 		if err != nil {
@@ -891,8 +909,19 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 				return err
 			}
 			last = fmt.Sprintf("%s %s %s", app.Status.Sync.Revision, app.Status.Sync.Status, app.Status.Health.Status)
-			if app.Status.Sync.Revision == commit && app.Status.Sync.Status == "Synced" && app.Status.Health.Status == "Healthy" {
-				return nil
+			if app.Status.Sync.Status == "Synced" && app.Status.Health.Status == "Healthy" {
+				if app.Status.Sync.Revision == commit {
+					return nil
+				}
+				if fullCommitRE.MatchString(app.Status.Sync.Revision) && fullCommitRE.MatchString(commit) {
+					matches, err := d.gitopsEnvironmentUnchanged(ctx, env, commit, app.Status.Sync.Revision, gitEnv)
+					if err != nil {
+						return err
+					}
+					if matches {
+						return nil
+					}
+				}
 			}
 			if !d.tools.now().Before(deadline) {
 				return fmt.Errorf("still %s after %s", last, d.cfg.ArgoTimeout)
@@ -919,6 +948,22 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 		}
 		return nil
 	})
+}
+
+func (d *deployer) gitopsEnvironmentUnchanged(ctx context.Context, env deployEnv, commit, observed string, gitEnv map[string]string) (bool, error) {
+	dir := filepath.Join(d.tmp, "gitops-"+env.Name)
+	if _, err := d.git(ctx, gitEnv, dir, "fetch", "--quiet", "--no-tags", "origin", observed); err != nil {
+		return false, err
+	}
+	base, err := d.git(ctx, gitEnv, dir, "merge-base", commit, observed)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(base) != commit {
+		return false, nil
+	}
+	changed, err := d.git(ctx, gitEnv, dir, "diff", "--name-only", commit, observed, "--", env.GitopsDir)
+	return strings.TrimSpace(changed) == "" && err == nil, err
 }
 
 // safety: a cancelled or timed-out job still owes production its rollback, so
@@ -962,11 +1007,10 @@ func (d *deployer) rollback(ctx context.Context, env deployEnv, rec envDeploymen
 				return err
 			}
 			revert = strings.TrimSpace(head)
-			_, err = d.git(ctx, gitEnv, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+d.cfg.GitopsBranch)
-			return err
+			return d.pushGitops(ctx, env, dir, gitEnv, "")
 		})
 		if err == nil {
-			err = d.waitRollout(ctx, env, revert, phase, phase.current(rec.Previous).Digest)
+			err = d.waitRollout(ctx, env, revert, phase, phase.current(rec.Previous).Digest, gitEnv)
 		}
 		if err != nil {
 			errs = append(errs, err)

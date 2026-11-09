@@ -288,7 +288,7 @@ func TestGitHubAppAutomationListingReadsAContinuationPage(t *testing.T) {
 }
 
 func TestDeployPlanningRequiresTheOwnedRunner(t *testing.T) {
-	for _, pipeline := range []string{"deploy", "deploy-scan"} {
+	for _, pipeline := range []string{"deploy", "deploy-scan", "sdk-only"} {
 		t.Run(pipeline, func(t *testing.T) {
 			f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
 			owner := f.ghUser(501, "olga")
@@ -296,6 +296,9 @@ func TestDeployPlanningRequiresTheOwnedRunner(t *testing.T) {
 			config, err := os.ReadFile(filepath.Join("..", "..", ".sparkwing", "sparkwing.yaml"))
 			if err != nil {
 				t.Fatal(err)
+			}
+			if pipeline == "sdk-only" {
+				config = []byte("defaults:\n  requires: [deploy-kikd-prod]\n")
 			}
 			f.app.SetCommit("acme/widgets", "main", headSHA)
 			f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", config)

@@ -64,24 +64,6 @@ func TestChangelogSection_VPrefixEquivalence(t *testing.T) {
 	}
 }
 
-func TestChangelogHeadingMatches(t *testing.T) {
-	cases := []struct {
-		heading string
-		want    string
-		match   bool
-	}{
-		{"## [v0.16.3] - 2026-07-12", "0.16.3", true},
-		{"## [Unreleased]", "unreleased", true},
-		{"## [v0.16.3] - 2026-07-12", "0.16.2", false},
-		{"## How to read this", "0.16.3", false},
-	}
-	for _, c := range cases {
-		if got := changelogHeadingMatches(c.heading, c.want); got != c.match {
-			t.Errorf("changelogHeadingMatches(%q, %q) = %v, want %v", c.heading, c.want, got, c.match)
-		}
-	}
-}
-
 func firstReleasedVersion(t *testing.T) string {
 	t.Helper()
 	for _, line := range strings.Split(Changelog(), "\n") {

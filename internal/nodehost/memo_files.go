@@ -13,6 +13,7 @@ import (
 	pathmatch "path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -323,8 +324,7 @@ func runCommandAt(ctx context.Context, environment procenv.Env, dir, name string
 	if dir == "" {
 		return "", errors.New("memo requires a checkout")
 	}
-	command := procenv.CommandContext(ctx, environment, name, args...)
-	command.Dir = dir
+	command := procenv.SDKCommandContext(ctx, slices.Collect(environment.Values()), dir, name, args...)
 	output, err := command.Output()
 	if err != nil {
 		var processError *exec.ExitError

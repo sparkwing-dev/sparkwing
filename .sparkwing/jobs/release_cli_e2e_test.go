@@ -175,7 +175,7 @@ exec %q -c user.name=Acceptance -c user.email=acceptance@example.invalid -c comm
 			}
 			notes := gitRun(t, origin, "show", "main:CHANGELOG.md")
 			_, _, pending, err := changelogSectionBounds(notes, "Unreleased")
-			if err != nil || len(pending.entries) != 1 || !strings.Contains(pending.entries[0].body, "second actor") {
+			if err != nil || len(pending.Entries) != 1 || !strings.Contains(pending.Entries[0].Body, "second actor") {
 				t.Fatalf("pending notes: %+v: %v", pending, err)
 			}
 			if strings.Contains(gitRun(t, origin, "show", cut+":CHANGELOG.md"), "second actor") || notes != gitRun(t, origin, "show", "main:"+embeddedChangelogRel) {

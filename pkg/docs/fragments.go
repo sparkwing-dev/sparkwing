@@ -14,15 +14,15 @@ func CollectChangelog(body string, sources fs.FS) (string, error) {
 	if err != nil || len(fragments) == 0 {
 		return body, err
 	}
-	const heading = "## [Unreleased]"
-	start := strings.Index(body, heading+"\n")
-	if start < 0 {
-		return "", fmt.Errorf("CHANGELOG.md has no %s section", heading)
+	start, end := -1, len(body)
+	for _, section := range ParseChangelog(body) {
+		if section.Version == "Unreleased" {
+			start, end = section.HeaderEnd, section.End
+			break
+		}
 	}
-	start += len(heading)
-	end := len(body)
-	if next := strings.Index(body[start:], "\n## "); next >= 0 {
-		end = start + next
+	if start < 0 {
+		return "", fmt.Errorf("CHANGELOG.md has no [Unreleased] section")
 	}
 	if strings.TrimSpace(body[start:end]) != "" {
 		return "", fmt.Errorf("move CHANGELOG.md [Unreleased] entries to docs/changes/*.md")
@@ -33,8 +33,8 @@ func CollectChangelog(body string, sources fs.FS) (string, error) {
 		category := ""
 		bullets := 0
 		for line := range strings.Lines(fragment) {
-			if strings.HasPrefix(line, "### ") {
-				category = strings.TrimSpace(strings.TrimPrefix(line, "### "))
+			if heading := categoryHeadingRE.FindStringSubmatch(strings.TrimRight(line, "\r\n")); heading != nil {
+				category = strings.TrimSpace(heading[1])
 				if !containsCategory(categories, category) {
 					return "", fmt.Errorf("unknown changelog category %q", category)
 				}

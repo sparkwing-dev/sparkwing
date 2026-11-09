@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
@@ -411,7 +413,7 @@ func TestBreakingSummaryTakesOneSentencePerEntry(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := breakingSummary([]changelogEntry{{titleLine: 1, body: c.body}})
+			got := breakingSummary([]docs.ReleaseEntry{{TitleLine: 1, Body: c.body}})
 			if got != c.want {
 				t.Fatalf("summary = %q, want %q", got, c.want)
 			}
@@ -420,9 +422,9 @@ func TestBreakingSummaryTakesOneSentencePerEntry(t *testing.T) {
 }
 
 func TestBreakingSummaryJoinsEveryBreakingEntry(t *testing.T) {
-	got := breakingSummary([]changelogEntry{
-		{titleLine: 1, body: "- **cli (Breaking):** The flag is gone. More prose."},
-		{titleLine: 5, body: "- **sdk (Breaking):** The signature changed. More prose."},
+	got := breakingSummary([]docs.ReleaseEntry{
+		{TitleLine: 1, Body: "- **cli (Breaking):** The flag is gone. More prose."},
+		{TitleLine: 5, Body: "- **sdk (Breaking):** The signature changed. More prose."},
 	})
 	want := "The flag is gone; The signature changed."
 	if got != want {

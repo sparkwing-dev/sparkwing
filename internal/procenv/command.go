@@ -2,7 +2,10 @@ package procenv
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -24,17 +27,44 @@ func CommandContext(ctx context.Context, environment Env, name string, args ...s
 // SDKCommand constructs a command an SDK asked its host to run. environment is the one
 // the SDK process, started with Build's result, would have given the command, so a
 // pipeline's own changes still apply; engine-minted credentials never reach it.
-func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
-	cmd := exec.Command(name, args...)
-	cmd.Env = sdkCommandEnvironment(environment)
-	return cmd
+// Name resolves against environment and dir before the final argv is validated.
+func SDKCommand(environment []string, dir, name string, args ...string) *exec.Cmd {
+	return SDKCommandContext(context.Background(), environment, dir, name, args...)
 }
 
 // SDKCommandContext applies SDK child environment policy with context cancellation.
-func SDKCommandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = sdkCommandEnvironment(environment)
+func SDKCommandContext(ctx context.Context, environment []string, dir, name string, args ...string) *exec.Cmd {
+	environment = sdkCommandEnvironment(environment)
+	path, err := LookupCommand(name, environment, dir)
+	if err != nil {
+		return &exec.Cmd{Path: name, Args: append([]string{name}, args...), Dir: dir, Env: environment, Err: err}
+	}
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env, cmd.Dir = environment, dir
+	refuseUnsafeBatch(cmd)
 	return cmd
+}
+
+func refuseUnsafeBatch(cmd *exec.Cmd) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	extension := filepath.Ext(strings.TrimRight(cmd.Path, " ."))
+	if !strings.EqualFold(extension, ".cmd") && !strings.EqualFold(extension, ".bat") {
+		return
+	}
+	// safety: cmd.exe reparses batch argv, including environment expansion inside quotes.
+	for i, arg := range cmd.Args {
+		metacharacters := "&|<>^%\"!()\r\n"
+		if i == 0 && strings.ContainsAny(arg, " \t") {
+			// safety: Go quotes a spaced program path, keeping install-directory parentheses literal.
+			metacharacters = "&|<>^%\"!\r\n"
+		}
+		if strings.ContainsAny(arg, metacharacters) {
+			cmd.Err = fmt.Errorf("windows batch command refused: argv[%d] contains cmd.exe metacharacters; use a non-batch executable, such as node.exe with the tool's JavaScript entrypoint", i)
+			return
+		}
+	}
 }
 
 func sdkCommandEnvironment(environment []string) []string {

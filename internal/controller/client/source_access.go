@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -74,8 +75,7 @@ func (s *sourceAccess) BundleURL(ctx context.Context, digest string) (string, er
 	if err != nil {
 		return "", err
 	}
-	parsed, err := url.Parse(result.URL)
-	if err != nil || parsed.Scheme != "https" && parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || result.Digest != digest || !result.Expires.After(time.Now()) || len(result.Headers) != 0 {
+	if err := (blob.SignedTransfer{URL: result.URL}).Validate(); err != nil || result.Digest != digest || !result.Expires.After(time.Now()) || len(result.Headers) != 0 {
 		return "", dataProtocolError("source bundle requires a live matching signed URL without headers")
 	}
 	return result.URL, nil

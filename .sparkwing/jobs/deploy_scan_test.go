@@ -154,7 +154,7 @@ func TestDeployRefreshPrecedesEachRolloutAndRefusesMissingPermission(t *testing.
 	d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
 		return "", errors.New("Forbidden")
 	}
-	if err := d.waitRollout(t.Context(), d.cfg.Staging, f.head, deployPhases[0], f.candidate().Controller.Digest); err == nil || !strings.Contains(err.Error(), "patch permission") {
+	if err := d.waitRollout(t.Context(), d.cfg.Staging, f.head, deployPhases[0], f.candidate().Controller.Digest, nil); err == nil || !strings.Contains(err.Error(), "patch permission") {
 		t.Fatalf("missing refresh permission was hidden: %v", err)
 	}
 }
@@ -286,9 +286,12 @@ func TestDeployScanPipelineSeparatesConcurrencyAndPinsSource(t *testing.T) {
 		if (job.ID == "staging-gate" || job.ID == "production") && (len(job.Children) != 1 || job.Children[0].Pipeline != "deploy-scan") {
 			t.Fatalf("deploy job %s must declare scan children: %+v", job.ID, job.Children)
 		}
+		if len(job.Concurrency) != 1 || strings.HasPrefix(job.Concurrency[0].Group, "sparkwing-post-deploy") {
+			t.Fatalf("deploy stage %s shares scan capacity: %+v", job.ID, job.Concurrency)
+		}
 	}
-	if len(deploy.Concurrency) != 1 || deploy.Concurrency[0].Group != "sparkwing-cloud-deploy" || len(deploy.Jobs) != 4 {
-		t.Fatalf("deploy must have its own slot and no scan jobs: %+v", deploy)
+	if len(deploy.Concurrency) != 0 || len(deploy.Jobs) != 3 {
+		t.Fatalf("deploy must pipeline its stages without scan jobs: %+v", deploy)
 	}
 }
 
