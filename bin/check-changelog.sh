@@ -5,129 +5,29 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-usage() {
-  cat <<'EOF'
-usage: bash bin/check-changelog.sh [--fix]
-
-  (no flags)  reject the doubled release heading a union merge of two
-              competing [Unreleased] renames leaves behind, then require a
-              CHANGELOG.md entry when the diff touches a covered surface
-  --fix       collapse duplicate ### headings under [Unreleased] into one
-              block per category, keeping bullets in landing order, then
-              re-sync the embedded mirror
-  -h, --help  this message
-EOF
-}
-
-# The union merge driver CHANGELOG.md carries (.gitattributes) keeps both sides
-# of every hunk, so two branches that each rename [Unreleased] to their own
-# version leave both headings stacked on adjacent lines. Nothing downstream
-# reads that as an error, so catch it here.
-check_stacked_headings() {
-  local stacked
-  stacked="$(
-    awk '
-      /^## / {
-        if (prev != "") { print prevLine ": " prev; print NR ": " $0 }
-        prev = $0
-        prevLine = NR
-        next
-      }
-      { prev = "" }
-    ' CHANGELOG.md
-  )"
-  if [[ -z "$stacked" ]]; then
-    return 0
+if [[ $# -gt 0 ]]; then
+  if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    echo "usage: bash bin/check-changelog.sh"
+    echo "Require a nonempty docs/changes/<slug>.md fragment for covered surfaces."
+    exit 0
   fi
-  echo "check-changelog: two release headings sit on adjacent lines:" >&2
-  sed 's/^/  /' <<<"$stacked" >&2
-  echo "" >&2
-  echo "A union merge stacked them. Keep the heading this release is cutting," >&2
-  echo "delete the other, and run bash bin/sync-docs.sh." >&2
+  echo "check-changelog: unknown argument: $1" >&2
+  exit 2
+fi
+
+if awk '
+ /^## \[Unreleased\]/ { section=1; next }
+ section && /^## / { section=0 }
+ section && /[^[:space:]]/ { found=1 }
+ END { exit !found }
+' CHANGELOG.md; then
+  echo "check-changelog: move [Unreleased] entries to docs/changes/<slug>.md" >&2
   exit 1
-}
-
-fix_unreleased() {
-  check_stacked_headings
-  local dups
-  dups="$(
-    awk '
-      /^## \[Unreleased\]/ { in_section = 1; next }
-      in_section && /^## / { in_section = 0 }
-      in_section && /^### / { print }
-    ' CHANGELOG.md | sort | uniq -d
-  )"
-  if [[ -z "$dups" ]]; then
-    echo "check-changelog --fix: [Unreleased] already has one block per category"
-    return 0
-  fi
-
-  local tmp
-  tmp="$(mktemp)"
-  awk '
-    function trim(s) {
-      sub(/^\n+/, "", s)
-      sub(/\n+$/, "", s)
-      return s
-    }
-    function flush(  text) {
-      text = trim(buf)
-      buf = ""
-      if (text == "") { return }
-      if (category == "") {
-        preamble = preamble (preamble == "" ? "" : "\n") text
-      } else {
-        body[category] = body[category] (body[category] == "" ? "" : "\n") text
-      }
-    }
-    function emit(  i, c) {
-      if (preamble != "") { print preamble; print "" }
-      else if (count > 0) { print "" }
-      for (i = 1; i <= count; i++) {
-        c = order[i]
-        print "### " c
-        print ""
-        if (body[c] != "") { print body[c]; print "" }
-      }
-    }
-    in_section && /^## / { flush(); emit(); in_section = 0; print; next }
-    in_section && /^### / {
-      flush()
-      category = substr($0, 5)
-      if (!(category in body)) { body[category] = ""; order[++count] = category }
-      next
-    }
-    in_section { buf = buf $0 "\n"; next }
-    /^## \[Unreleased\]/ { print; in_section = 1; category = ""; next }
-    { print }
-    END { if (in_section) { flush(); emit() } }
-  ' CHANGELOG.md > "$tmp"
-  mv "$tmp" CHANGELOG.md
-  bash bin/sync-docs.sh >/dev/null
-
-  echo "check-changelog --fix: collapsed duplicate headings under [Unreleased]:"
-  sed 's/^/  /' <<<"$dups"
-}
-
-for arg in "$@"; do
-  case "$arg" in
-    --fix)
-      fix_unreleased
-      exit 0
-      ;;
-    -h | --help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "check-changelog: unknown argument: $arg" >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-done
-
-check_stacked_headings
+fi
+if [[ -f docs/migrations/_unreleased.md ]] && grep -q '^## ' docs/migrations/_unreleased.md; then
+  echo "check-changelog: move migration sections to docs/migrations/unreleased/<slug>.md" >&2
+  exit 1
+fi
 
 base="${BASE_REF:-}"
 if [[ -z "$base" ]]; then
@@ -149,6 +49,7 @@ done < <(
     git diff --name-only -z "$base"...HEAD
     git diff --name-only -z HEAD
     git diff --name-only -z --cached
+    git ls-files --others --exclude-standard -z
   } | sort -zu
 )
 
@@ -178,13 +79,38 @@ is_covered() {
   return 1
 }
 
+has_collected_release() {
+  local consumed
+  consumed=$(
+    git diff --no-renames --name-only --diff-filter=D "$base"...HEAD -- 'docs/changes/*.md'
+    git diff --no-renames --name-only --diff-filter=D HEAD -- 'docs/changes/*.md'
+  )
+  [[ -n "$consumed" ]] || return 1
+  {
+    git diff "$base"...HEAD -- CHANGELOG.md
+    git diff HEAD -- CHANGELOG.md
+  } | awk '
+    /^\+## / { released = ($0 ~ /^\+## \[v[0-9]+\.[0-9]+\.[0-9]+[^]]*\] - /) }
+    released && /^\+- / { entry = 1 }
+    END { exit !entry }
+  '
+}
+
 covered_changes=()
-changelog_touched=false
+fragment_added=false
 for f in "${changed[@]}"; do
   [[ -z "$f" ]] && continue
-  if [[ "$f" == "CHANGELOG.md" ]]; then
-    changelog_touched=true
-    continue
+  if [[ "$f" == docs/changes/*.md && -s "$f" ]]; then
+    added=$(
+      {
+        git diff "$base"...HEAD -- "$f"
+        git diff HEAD -- "$f"
+        if ! git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+          sed 's/^/+/' "$f"
+        fi
+      } | awk '/^\+[^+]/ && $0 !~ /^\+[[:space:]]*$/ { print }'
+    )
+    if [[ -n "$added" ]] && grep -q '^- ' "$f"; then fragment_added=true; fi
   fi
   if is_covered "$f"; then
     covered_changes+=("$f")
@@ -195,30 +121,18 @@ if [[ ${#covered_changes[@]} -eq 0 ]]; then
   exit 0
 fi
 
-if [[ "$changelog_touched" == "true" ]]; then
-  added=$(
-    {
-      git diff "$base"...HEAD -- CHANGELOG.md
-      git diff HEAD -- CHANGELOG.md
-      git diff --cached -- CHANGELOG.md
-    } | awk '
-      /^@@/ { in_hunk=1; next }
-      in_hunk && /^\+[^+]/ { print substr($0, 2) }
-    ' | grep -v '^[[:space:]]*$' || true
-  )
-  if [[ -n "$added" ]]; then
-    exit 0
-  fi
+if [[ "$fragment_added" == "true" ]] || has_collected_release; then
+  exit 0
 fi
 
-echo "check-changelog: CHANGELOG.md update required" >&2
+echo "check-changelog: docs/changes/<slug>.md entry required" >&2
 echo "" >&2
 echo "Files changed on covered surfaces (per VERSIONING.md):" >&2
 for f in "${covered_changes[@]}"; do
   echo "  $f" >&2
 done
 echo "" >&2
-echo "Add an entry under the [Unreleased] section of CHANGELOG.md," >&2
-echo "then re-run. See VERSIONING.md for what counts as a breaking" >&2
+echo "Add a ### category and bullet in docs/changes/<slug>.md," >&2
+echo "run bash bin/sync-docs.sh, then re-run. See VERSIONING.md for a breaking" >&2
 echo "change and how to phrase entries." >&2
 exit 1
