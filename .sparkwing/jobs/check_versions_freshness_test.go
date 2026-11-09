@@ -171,6 +171,16 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		if err := recordPinBumpInChangelog(dir, "v0.19.0"); err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range pinBumpFragmentPaths("v0.19.0") {
+			body, err := os.ReadFile(filepath.Join(dir, pinBumpFragmentPaths("v0.19.0")[0]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeReleaseFixture(t, filepath.Join(dir, rel), string(body))
+		}
 	}
 
 	t.Run("creates commit with correct message and staged files", func(t *testing.T) {
@@ -243,7 +253,7 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		dir := initRepo(t)
 		createBumpFiles(t, dir)
 
-		mustGit(t, dir, append([]string{"add", "--"}, sparkwingPinArtifacts...)...)
+		mustGit(t, dir, append([]string{"add", "--"}, pinBumpArtifacts("v0.19.0")...)...)
 		mustGit(t, dir, "commit", "-m", "initial")
 
 		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err == nil {
@@ -560,6 +570,10 @@ const fixtureSyncDocs = `#!/bin/sh
 set -eu
 mkdir -p pkg/docs
 cp CHANGELOG.md pkg/docs/changelog.md
+if [ -d docs ]; then
+  mkdir -p pkg/docs/mirror
+  cp -R docs/. pkg/docs/mirror/
+fi
 `
 
 const fixtureChangelog = `# Changelog
