@@ -53,7 +53,11 @@ func init() {
 		os.Exit(2)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "env" {
-		fmt.Fprint(os.Stdout, "auto\ngo1.26.6\noff\n")
+		if len(os.Args) > 2 && os.Args[2] == "-json" {
+			fmt.Fprintln(os.Stdout, `{"GOVERSION":"go1.26.6"}`)
+		} else {
+			fmt.Fprint(os.Stdout, "auto\ngo1.26.6\noff\n")
+		}
 		os.Exit(0)
 	}
 	if log := os.Getenv("SPARKWING_TEST_GO_LOG"); log != "" {
