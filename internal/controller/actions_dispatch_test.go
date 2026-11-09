@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
 	"github.com/sparkwing-dev/sparkwing/internal/jwks/jwkstest"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -25,6 +26,7 @@ import (
 const (
 	fallbackWorkflow = ".github/workflows/fallback.yaml"
 	fallbackSHA      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	defaultSHA       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 type dispatchFixture struct {
@@ -42,6 +44,8 @@ func newDispatchFixture(t *testing.T) *dispatchFixture {
 	f.app.AddInstallation(githubapptest.Installation{ID: 7, Account: githubapp.Account{ID: 7, Login: "acme", Type: "Organization"}, Repos: []githubapptest.Repo{{ID: 1, FullName: "acme/repo", Owner: githubapp.Account{ID: 7}, DefaultBranch: "main"}}})
 	f.app.SetCommit("acme/repo", "refs/heads/sparkwing-fallback", fallbackSHA)
 	f.app.SetFile("acme/repo", fallbackSHA, fallbackWorkflow, []byte("name: fallback\non: workflow_dispatch\n"))
+	f.app.SetCommit("acme/repo", "refs/heads/main", defaultSHA)
+	f.app.SetFile("acme/repo", defaultSHA, fallbackWorkflow, []byte("name: fallback\non: workflow_dispatch\n"))
 	f.app.ActionsRun = githubapp.WorkflowRun{ID: 1000, Attempt: 1, Event: "workflow_dispatch", Path: fallbackWorkflow, SHA: fallbackSHA, Repository: githubapp.Repository{ID: 1, Owner: githubapp.Account{ID: 7}}}
 	f.app.ActionsLabels = []string{"ubuntu-latest"}
 	f.e.Server.WithGitHubApp(f.app.Config())
@@ -85,6 +89,75 @@ func (f *dispatchFixture) dispatch(t *testing.T) store.ActionsDispatch {
 		t.Fatal(err)
 	}
 	return d
+}
+
+//sparkwing:critical
+func TestActionsDispatchRequiresDefaultBranchWorkflow(t *testing.T) {
+	for _, name := range []string{"identical", "differs", "fallback missing", "default missing", "default unresolved", "truncated"} {
+		t.Run(name, func(t *testing.T) {
+			f := newDispatchFixture(t)
+			switch name {
+			case "differs":
+				f.app.SetFile("acme/repo", fallbackSHA, fallbackWorkflow, []byte("name: fallback\non: workflow_dispatch\n "))
+			case "fallback missing":
+				f.app.SetFile("acme/repo", fallbackSHA, fallbackWorkflow, nil)
+			case "default missing":
+				f.app.SetFile("acme/repo", defaultSHA, fallbackWorkflow, nil)
+			case "default unresolved":
+				f.app.SetCommit("acme/repo", "refs/heads/main", "")
+			case "truncated":
+				prefix := strings.Repeat("#", int(limits.ProjectConfigBytes)+1)
+				f.app.SetFile("acme/repo", fallbackSHA, fallbackWorkflow, []byte(prefix+"attacker"))
+				f.app.SetFile("acme/repo", defaultSHA, fallbackWorkflow, []byte(prefix+"trusted"))
+			}
+			d := f.dispatch(t)
+			if name == "identical" {
+				if d.State != "accepted" || d.WorkflowSHA != fallbackSHA || len(f.app.ActionsCalls()) != 1 {
+					t.Fatalf("matching workflow not dispatched at verified commit: %+v", d)
+				}
+				return
+			}
+			if d.State != "refused" || len(f.app.ActionsCalls()) != 0 || !strings.Contains(d.Reason, fallbackWorkflow) || !strings.Contains(d.Reason, "sync the fallback branch's workflow with the default branch") {
+				t.Fatalf("unverified workflow dispatched or missing repair hint: %+v", d)
+			}
+		})
+	}
+}
+
+//sparkwing:critical
+func TestActionsReceiptRechecksVerifiedWorkflow(t *testing.T) {
+	for _, name := range []string{"unchanged", "default changed", "default missing", "branch moved", "original run after branch moved", "run changed"} {
+		t.Run(name, func(t *testing.T) {
+			f := newDispatchFixture(t)
+			d := f.dispatch(t)
+			claims := f.claims()
+			movedSHA := strings.Repeat("c", 40)
+			switch name {
+			case "default changed":
+				f.app.SetCommit("acme/repo", "refs/heads/main", movedSHA)
+				f.app.SetFile("acme/repo", movedSHA, fallbackWorkflow, []byte("name: new trusted workflow\n"))
+			case "default missing":
+				f.app.SetFile("acme/repo", defaultSHA, fallbackWorkflow, nil)
+			case "branch moved", "original run after branch moved":
+				f.app.SetCommit("acme/repo", claims.Ref, movedSHA)
+				f.app.SetFile("acme/repo", movedSHA, fallbackWorkflow, []byte("name: attacker\n"))
+				if name == "branch moved" {
+					claims.WorkflowSHA, claims.SHA = movedSHA, movedSHA
+					f.app.ActionsRun.SHA = movedSHA
+				}
+			case "run changed":
+				f.app.ActionsRun.SHA = movedSHA
+			}
+			spec, err := f.e.Server.actionsReceiptProvision(t.Context(), "a", d.Receipt, claims)
+			if name == "unchanged" || name == "original run after branch moved" {
+				if err != nil || spec.Binding.Push == nil || spec.Binding.Push.WorkflowSHA != fallbackSHA {
+					t.Fatalf("verified workflow lost its commit binding: %+v %v", spec, err)
+				}
+			} else if err == nil {
+				t.Fatal("unverified workflow received hosted-runner trust")
+			}
+		})
+	}
 }
 
 func TestActionsDispatchAtMostOnceAcrossLostResponseAndRestart(t *testing.T) {
@@ -585,12 +658,19 @@ func TestActionsReceiptCancelledWhenAnotherRunnerRunsTheJob(t *testing.T) {
 func TestActionsExchangeReadsWithoutActionsWrite(t *testing.T) {
 	f := newDispatchFixture(t)
 	d := f.dispatch(t)
+	before := len(f.app.Minted())
 	if _, err := f.e.Server.actionsReceiptProvision(t.Context(), "a", d.Receipt, f.claims()); err != nil {
 		t.Fatal(err)
 	}
-	minted := f.app.Minted()
-	if got := minted[len(minted)-1].Permissions; got["actions"] != "read" {
-		t.Fatalf("exchange token permissions: %v", got)
+	readActions := false
+	for _, token := range f.app.Minted()[before:] {
+		if token.Permissions["actions"] == "write" {
+			t.Fatalf("exchange minted Actions write: %v", token.Permissions)
+		}
+		readActions = readActions || token.Permissions["actions"] == "read"
+	}
+	if !readActions {
+		t.Fatal("exchange did not request Actions read")
 	}
 }
 
