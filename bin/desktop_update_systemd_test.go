@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,7 +26,7 @@ func TestDesktopUpdaterSystemdLifetimeAndControllerKeys(t *testing.T) {
 	if err := procenv.ControlCommandContext(t.Context(), os.Environ(), "systemctl", "--user", "show-environment").Run(); err != nil {
 		t.Skip("systemd user manager unavailable")
 	}
-	for _, mode := range []string{"keys", "unit-exit", "cancel-build", "cancel-restart"} {
+	for _, mode := range []string{"keys", "default-config", "unit-exit", "cancel-build", "cancel-restart"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
@@ -42,8 +43,15 @@ func TestDesktopUpdaterSystemdLifetimeAndControllerKeys(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			write(filepath.Join(home, "config.yaml"), "admission: {budget: ignore-external}\ndashboard: {address: '127.0.0.1:0'}\n")
-			if err := os.Chmod(filepath.Join(home, "config.yaml"), 0o600); err != nil {
+			config := filepath.Join(home, "config.yaml")
+			if mode == "default-config" {
+				config = filepath.Join(home, "config", "sparkwing", "config.yaml")
+				if err := os.MkdirAll(filepath.Dir(config), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(config, "admission: {budget: ignore-external}\ndashboard: {address: '127.0.0.1:0'}\n")
+			if err := os.Chmod(config, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(cli)
@@ -93,6 +101,9 @@ cp "$HOME/../install/sparkwing" "$SPARKWING_INSTALL_BIN/sparkwing"
 cp "$HOME/../install/sparkwing-runner" "$SPARKWING_INSTALL_BIN/sparkwing-runner"
 `)
 			base := append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "config"), "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"), "SPARKWING_SECRETS_KEY=", "SPARKWING_SECRETS_PREVIOUS_KEY=", "SPARKWING_SECRETS_KEY_FILE=", "INVOCATION_ID=")
+			if mode == "default-config" {
+				base = slices.DeleteFunc(base, func(entry string) bool { return strings.HasPrefix(entry, "SPARKWING_CONFIG=") })
+			}
 			run := func(environment []string, name string, args ...string) []byte {
 				t.Helper()
 				out, err := procenv.ControlCommandContext(ctx, environment, name, args...).CombinedOutput()
@@ -143,7 +154,7 @@ cp "$HOME/../install/sparkwing-runner" "$SPARKWING_INSTALL_BIN/sparkwing-runner"
 				t.Fatal(err)
 			}
 			args[0] = script
-			if mode == "keys" {
+			if mode == "keys" || mode == "default-config" {
 				run(workerEnv, "bash", args...)
 			} else {
 				launch := []string{"--user", "--quiet", "--collect", "--unit=" + unit, "--property=Type=exec", "--property=KillMode=control-group"}

@@ -94,7 +94,6 @@ done
 # safety: pipeline environments omit key selectors; each live owner is the source for its replacement.
 for i in "${!restart_homes[@]}"; do
   home="${restart_homes[$i]}"
-  for name in "${controller_variables[@]}"; do controller_environment["$home:$name"]=""; done
   while IFS= read -r -d '' entry; do
     name="${entry%%=*}"
     case "$name" in
@@ -102,7 +101,7 @@ for i in "${!restart_homes[@]}"; do
         controller_environment["$home:$name"]="${entry#*=}" ;;
     esac
   done <"/proc/${restart_pids[$i]}/environ" || fail "cannot read controller environment at $home; installed binaries unchanged"
-  [[ -n "${controller_environment["$home:HOME"]}" ]] || fail "missing controller HOME at $home; installed binaries unchanged"
+  [[ -n "${controller_environment["$home:HOME"]:-}" ]] || fail "missing controller HOME at $home; installed binaries unchanged"
 done
 
 echo "desktop-update: idle; installing main@$sha"
@@ -115,7 +114,13 @@ if ! mv -f -- "$stage/bin/sparkwing" "$dest/sparkwing"; then
 fi
 for home in "${restart_homes[@]}"; do
   (
-    for name in "${controller_variables[@]}"; do export "$name=${controller_environment["$home:$name"]}"; done
+    for name in "${controller_variables[@]}"; do
+      if [[ "${controller_environment["$home:$name"]+set}" ]]; then
+        export "$name=${controller_environment["$home:$name"]}"
+      else
+        unset "$name"
+      fi
+    done
     SPARKWING_HOME="$home" timeout 40s "$dest/sparkwing" daemon restart --force -o json
   )
 done
