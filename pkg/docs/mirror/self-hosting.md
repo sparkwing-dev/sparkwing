@@ -307,9 +307,9 @@ arguments, and logs. The distribution must serve the private data bucket through
 access control configuration.
 
 The controller returns a 60-second CloudFront URL for data and artifact requests
-arriving through the public ingress. Its policy restricts the URL to its expiry.
-Requests through the in-cluster Service receive a
-regional S3 URL instead, so runner pods in the bucket's region can use the S3
+arriving through the public ingress. Its policy restricts the URL to its expiry. Any client holding the URL can
+download during that lifetime. If the link expires, rerun the command to request
+a fresh link. Requests through the in-cluster Service receive a regional S3 URL instead, so runner pods in the bucket's region can use the S3
 gateway endpoint. Without an S3 bucket, the standalone controller opens filesystem storage in
 its home directory's `data` directory and mounts signed data and log transfers.
 It uses `--external-url` when set, otherwise its listener address. Wildcard
