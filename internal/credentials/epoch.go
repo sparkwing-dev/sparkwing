@@ -46,7 +46,7 @@ func LoadOrCreateEpoch(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := fssecure.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 	if errors.Is(err, os.ErrExist) {
 		return LoadOrCreateEpoch(dir)
 	}
@@ -76,6 +76,9 @@ func RotateEpoch(dir string) (string, error) {
 		return "", err
 	}
 	defer os.Remove(f.Name())
+	if err := fssecure.TightenOpen(f); err != nil {
+		return "", errors.Join(err, f.Close())
+	}
 	_, writeErr := f.WriteString(epoch + "\n")
 	if err := errors.Join(writeErr, f.Sync(), f.Close()); err != nil {
 		return "", err
