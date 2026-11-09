@@ -114,11 +114,18 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 	}
 }
 
+// safety: scheduling snapshots repeat plan declarations and accepted expansions, so
+// allow ample space beyond the 4 MiB plan while bounding a faulty peer.
+const maxEngineResponseBytes = 64 << 20
+
 func (c *engineClient) readResponse(resp *http.Response, output any) (bool, error) {
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxEngineResponseBytes+1))
 	closeErr := resp.Body.Close()
 	if err != nil {
 		return false, fmt.Errorf("read controller response: %w", err)
+	}
+	if len(data) > maxEngineResponseBytes {
+		return false, fmt.Errorf("controller response exceeds %d bytes", maxEngineResponseBytes)
 	}
 	if closeErr != nil {
 		return false, fmt.Errorf("close controller response: %w", closeErr)
