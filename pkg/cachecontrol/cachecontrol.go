@@ -1,12 +1,39 @@
-// Package cachecontrol exposes Sparkwing-owned pipeline-cache measurement and
-// reclamation without exposing cache paths or entry layout.
+// Package cachecontrol exposes Sparkwing-owned pipeline-cache sharing, measurement
+// and reclamation without exposing cache paths or entry layout.
 package cachecontrol
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
+
+// ShareWithHome connects a private Sparkwing home's pipeline cache to this
+// process's existing cache. Configuration, credentials and stores stay private.
+// The destination must be unused or already linked to the same cache.
+func ShareWithHome(home string) error {
+	source, err := filepath.Abs(filepath.Join(bincache.SparkwingHome(), "cache", "pipelines"))
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(home, "cache", "pipelines")
+	if err := os.MkdirAll(source, 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return err
+	}
+	if err := os.Symlink(source, dest); err != nil {
+		if target, readErr := os.Readlink(dest); readErr == nil && target == source {
+			return nil
+		}
+		return fmt.Errorf("share pipeline cache: %w", err)
+	}
+	return nil
+}
 
 // PruneOptions bounds one reclamation attempt.
 type PruneOptions struct {

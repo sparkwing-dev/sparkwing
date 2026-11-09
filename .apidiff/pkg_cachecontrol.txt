@@ -7,4 +7,5 @@ type PruneOptions struct {
 	MaxEntries  int
 }
 type PruneResult = bincache.PruneResult
+func ShareWithHome(home string) error
 type Status = bincache.CacheStatus

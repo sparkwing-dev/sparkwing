@@ -25,6 +25,7 @@ import (
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/cachecontrol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -962,6 +963,9 @@ func (d *deployer) cliBin() string { return filepath.Join(d.tmp, "sparkwing") }
 
 func (d *deployer) sw(ctx context.Context, stdin string, args ...string) (string, error) {
 	home := filepath.Join(d.tmp, "cli-home")
+	if err := cachecontrol.ShareWithHome(filepath.Join(home, ".sparkwing")); err != nil {
+		d.tools.say(ctx, "pipeline cache sharing unavailable; use the private job cache: "+err.Error())
+	}
 	return d.cmd(ctx, deployCommand{Stdin: stdin, Quiet: true, Name: d.cliBin(), Args: args, Env: map[string]string{
 		"HOME": home, "SPARKWING_HOME": filepath.Join(home, ".sparkwing"), "XDG_CONFIG_HOME": filepath.Join(home, ".config"),
 		"GOFLAGS": "-modcacherw",
