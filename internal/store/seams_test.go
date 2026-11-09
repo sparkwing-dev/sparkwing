@@ -405,18 +405,6 @@ func (t *Tenant) nodeIsAncestor(ctx context.Context, runID, ancestor, node strin
 	return found, err
 }
 
-func (s *Store) creditSetting(ctx context.Context, key string, fallback int64) (int64, error) {
-	raw, err := s.creditSettingRaw(ctx, key)
-	if err != nil {
-		return 0, err
-	}
-	return integerCreditSetting(key, raw, fallback)
-}
-
-func (s *Store) creditSettingRaw(ctx context.Context, key string) (string, error) {
-	return scanCreditSetting(s.queryRow(ctx, "SELECT value,sealed FROM settings WHERE key=?", key), key)
-}
-
 // safety: SQLite's immediate transaction already serializes writers. The
 // Postgres advisory lock gives its read-committed transaction the same single
 // settings writer before an operator checks which rate representation owns the
@@ -494,13 +482,6 @@ func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expire
 		return err
 	})
 	return err == nil && used, err
-}
-
-func (t *storeTx) forKeyShare() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR KEY SHARE"
-	}
-	return ""
 }
 
 // safety: these records never take a cascading run foreign key.
@@ -713,14 +694,6 @@ const (
 	runStatusFailed    = "failed"
 	runStatusCancelled = "cancelled"
 	runStatusSuccess   = "success"
-)
-
-const (
-	outcomeSuccess    = "success"
-	outcomeFailed     = "failed"
-	outcomeSkipped    = "skipped"
-	outcomeCancelled  = "cancelled"
-	outcomeSuperseded = "superseded"
 )
 
 const failureComputeLimit = "compute_limit"

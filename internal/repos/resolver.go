@@ -2,7 +2,6 @@ package repos
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
-
-var errNotFound = errors.New("repos: no registered repo provides that pipeline")
 
 // describeRepo builds the pipeline binary a repository declares, or installs
 // its TypeScript pipeline's dependencies, and returns gated discovery.

@@ -585,13 +585,9 @@ var commandSynopses = map[string]string{
 
 var (
 	cmdSparkwing        = surfaceCommand("sparkwing")
-	cmdInfo             = surfaceCommand("sparkwing info")
 	cmdDebug            = surfaceCommand("sparkwing debug")
 	cmdPipelineTrigger  = surfaceCommand("sparkwing pipeline trigger")
-	cmdPipelineList     = surfaceCommand("sparkwing pipeline list")
 	cmdPipelineDescribe = surfaceCommand("sparkwing pipeline describe")
-	cmdPipelineLint     = surfaceCommand("sparkwing pipeline lint")
-	cmdPipelinePlan     = surfaceCommand("sparkwing pipeline plan")
 	cmdRun              = surfaceCommand("sparkwing run")
 	cmdApprove          = surfaceCommand("sparkwing runs approvals approve")
 	cmdDeny             = surfaceCommand("sparkwing runs approvals deny")
