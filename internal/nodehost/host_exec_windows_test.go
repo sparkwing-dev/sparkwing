@@ -247,11 +247,41 @@ func TestWindowsHostCommandNaturalFailureIsNotCancellation(t *testing.T) {
 	}
 }
 
-func TestWindowsHostCommandLongBashProgram(t *testing.T) {
-	shell, err := exec.LookPath("bash.exe")
-	if err != nil {
-		t.Skip("Git Bash is unavailable")
+func windowsGitBash(t *testing.T) string {
+	t.Helper()
+	for _, root := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs")} {
+		if root == "" {
+			continue
+		}
+		for _, dir := range []string{"bin", "usr/bin"} {
+			path := filepath.Join(root, "Git", dir, "bash.exe")
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				return path
+			}
+		}
 	}
+	t.Skip("Git Bash is unavailable in standard installation paths")
+	return ""
+}
+
+func TestWindowsHostCommandAcceptsGitBash(t *testing.T) {
+	dir := t.TempDir()
+	tool := filepath.Join(dir, "Git", "bin", "bash.exe")
+	if err := os.MkdirAll(filepath.Dir(tool), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tool, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := procenv.SDKCommand(os.Environ(), dir, tool, "-c", "printf expected")
+	configureHostCommand(cmd)
+	if cmd.Err != nil || !strings.Contains(strings.Join(cmd.Env, "\n"), "SPARKWING_BASH_PROGRAM=printf expected") {
+		t.Fatalf("Git Bash command was not configured: %v, %v", cmd.Err, cmd.Args)
+	}
+}
+
+func TestWindowsHostCommandLongBashProgram(t *testing.T) {
+	shell := windowsGitBash(t)
 	for _, program := range []string{`read -r value; printf '%s' "$value"; bash -c 'test -z "${SPARKWING_BASH_PROGRAM+x}"'`, strings.Repeat(":\n", 6000) + `printf 'input with spaces'`} {
 		req := nodeproto.ExecRequest{ID: "bash", Argv: []string{shell, "-c", program}, Dir: t.TempDir(), Env: append(os.Environ(), "SPARKWING_BASH_PROGRAM=exit 42"), Stdin: []byte("input with spaces\n"), Capture: true}
 		var output, diagnostic strings.Builder
@@ -307,7 +337,7 @@ func TestWindowsHostCommandRejectsWSLBash(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if session != nil || done.StartError != "WSL bash.exe is not supported for host commands; install Git Bash or call wsl explicitly" {
+		if session != nil || !strings.Contains(done.StartError, "WSL bash.exe is not supported") || !strings.Contains(done.StartError, "install Git Bash and set the Bash path") {
 			t.Fatalf("WSL launcher not refused: %+v", done)
 		}
 	}
@@ -315,10 +345,7 @@ func TestWindowsHostCommandRejectsWSLBash(t *testing.T) {
 
 //sparkwing:critical
 func TestWindowsHostCommandBashRequiresProgram(t *testing.T) {
-	shell, err := exec.LookPath("bash.exe")
-	if err != nil {
-		t.Skip("Git Bash is unavailable")
-	}
+	shell := windowsGitBash(t)
 	for _, empty := range []bool{false, true} {
 		cmd := procenv.SDKCommand(os.Environ(), t.TempDir(), shell, "-c", "printf unexpected")
 		configureHostCommand(cmd)
@@ -334,7 +361,7 @@ func TestWindowsHostCommandBashRequiresProgram(t *testing.T) {
 			cmd.Env = append(cmd.Env, "SPARKWING_BASH_PROGRAM=")
 		}
 		output, err := cmd.CombinedOutput()
-		if err == nil || !strings.Contains(string(output), "host Bash program is empty") || strings.Contains(string(output), "unexpected") {
+		if err == nil || !strings.Contains(string(output), "host Bash program is empty; on Windows use Git Bash and set the Bash path") || strings.Contains(string(output), "unexpected") {
 			t.Fatalf("empty=%v: missing Bash program succeeded: %v, output=%q", empty, err, output)
 		}
 	}

@@ -16,6 +16,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
+// perf: requesting build inputs avoids Go's unrelated package-staleness calculations.
+const compiledInputFields = "Dir,ImportPath,GoFiles,CgoFiles,CFiles,CXXFiles,MFiles,HFiles,FFiles,SFiles," +
+	"SwigFiles,SwigCXXFiles,SysoFiles,EmbedFiles,Error,DepsErrors,Module"
+
 func effectiveBuildInputs(ctx context.Context, dir string, env []string) ([]byte, []byte, error) {
 	if env == nil {
 		env = os.Environ()
@@ -60,7 +64,7 @@ func effectiveBuildInputs(ctx context.Context, dir string, env []string) ([]byte
 		}
 		resolved = append(resolved, name+"="+effective[name])
 	}
-	args := append([]string{"list", "-e", "-deps", "-json"}, pipelineBuildFlags...)
+	args := append([]string{"list", "-e", "-deps", "-json=" + compiledInputFields}, pipelineBuildFlags...)
 	if overlay := EffectiveOverlay(dir, env); overlay != "" {
 		args = append(args, "-modfile="+overlay)
 	}
@@ -103,6 +107,13 @@ func compiledInputDigest(list func() ([]byte, error), dir, flags, workspace stri
 				break
 			} else if err != nil {
 				return nil, err
+			}
+			// safety: Go emits requested empty fields as null, while unrestricted JSON omits them.
+			if string(pkg.Error) == "null" {
+				pkg.Error = nil
+			}
+			if string(pkg.DepsErrors) == "null" {
+				pkg.DepsErrors = nil
 			}
 			fmt.Fprintf(&digest, "package:%s\n%s\n%s\n", pkg.ImportPath, pkg.Error, pkg.DepsErrors)
 			var files []string

@@ -464,6 +464,8 @@ digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
 same for the launcher with every other chart change. Each GitOps push requests a hard
 Argo refresh before waiting, requiring patch permission on the named Application.
+The candidate CLI compiles alongside staging rollout. Both finish successfully before
+either Cloud smoke is submitted. A failure cancels and joins the other operation.
 The same job holds staging's concurrency slot through the Cloud gate. Production
 can run alongside it. GitOps pushes merge concurrent changes from the other
 environment after a rejected push, preserving phase commits for rollback. Argo

@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -31,7 +33,7 @@ func (Deploy) ShortHelp() string {
 func (Deploy) Help() string {
 	return "Turns the Sparkwing Cloud deploy lanes into one DAG. build-images builds linux/amd64 and linux/arm64 binaries with bin/build-release-target.sh and appends them to the runtime bases with publish-images, " +
 		"reusing images an earlier run already published for the same commit. Before changing GitOps, deploy protects candidate and previous image indexes and platform manifests with immutable cloud-deploy-<digest> retention tags. A tagging failure stops deployment. staging-gate and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
-		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate runs deploy-smoke with a child run and the hello reference pipeline on staging Cloud. " +
+		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate compiles its candidate CLI alongside rollout, joining both before smoke submission. It runs deploy-smoke with a child run and the hello reference pipeline on staging Cloud. " +
 		"production reuses the staging-verified candidate CLI only for the same source SHA, native platform and binary digest, rebuilding on a missing or mismatched handoff. It requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in the " +
 		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs after both rollouts complete. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
 		"Take a manual snapshot before a risky migration. Staging summarizes its deployed and previous digests and emits the gate record. Production emits its deployment record. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
@@ -251,9 +253,27 @@ func (d *deployer) stage(ctx context.Context, images deployImages) (stagingGateR
 	if err := d.requireMainTip(ctx, images.Commit); err != nil {
 		return stagingGateRecord{}, err
 	}
-	rec, _, err := d.deployTo(ctx, d.cfg.Staging, images)
-	if err != nil {
-		return stagingGateRecord{}, err
+	var rec envDeployment
+	if d.dry {
+		var err error
+		rec, _, err = d.deployTo(ctx, d.cfg.Staging, images)
+		if err != nil {
+			return stagingGateRecord{}, err
+		}
+	} else {
+		group, workCtx := errgroup.WithContext(ctx)
+		compiler := *d
+		compiler.resolved = nil
+		group.Go(func() error { return compiler.buildCLI(workCtx) })
+		group.Go(func() error {
+			var err error
+			rec, _, err = d.deployTo(workCtx, d.cfg.Staging, images)
+			return err
+		})
+		if err := group.Wait(); err != nil {
+			return stagingGateRecord{}, err
+		}
+		d.cliBuilt = true
 	}
 	summarizeDeployment(ctx, rec)
 	return d.stagingGate(ctx, images)

@@ -137,6 +137,7 @@ type deployer struct {
 	resolved  map[string]string
 	gate      stagingGateRecord
 	awsExpiry time.Time
+	cliBuilt  bool
 	ecrPass   string
 }
 
@@ -1023,6 +1024,9 @@ func (d *deployer) rollback(ctx context.Context, env deployEnv, rec envDeploymen
 // safety: the CLI is built from the candidate checkout and runs under a
 // throwaway HOME and SPARKWING_HOME, so no machine's profiles or store are read.
 func (d *deployer) buildCLI(ctx context.Context) error {
+	if d.cliBuilt {
+		return nil
+	}
 	home := filepath.Join(d.tmp, "cli-home")
 	return d.act(ctx, "build the candidate CLI into "+d.cliBin(), func() error {
 		if err := os.MkdirAll(home, 0o700); err != nil {
