@@ -19,7 +19,7 @@ func sdkFixture(t *testing.T) string {
 	for name, body := range map[string]string{
 		"sparkwing/go.mod":             "module github.com/sparkwing-dev/sparkwing/sparkwing\n\ngo 1.25.0\n",
 		"sparkwing/sdk.go":             "package sparkwing\n",
-		"sparkwing/assets/message.txt": "embedded\x00data\n",
+		"sparkwing/assets/message.txt": "embedded\x00\xffdata\n",
 		"sparkwing/testdata/case.json": "{}\n",
 		"LICENSE":                      "license\n",
 		"go.mod":                       "module engine\n",
@@ -64,6 +64,8 @@ func TestSDKReleaseSelection(t *testing.T) {
 	sdkFixtureWrite(t, repo, "go.mod", "module changedengine\n")
 	sdkFixtureWrite(t, repo, "sparkwing/go.work", "workspace state")
 	sdkFixtureWrite(t, repo, "sparkwing/dist/output", "generated output")
+	sdkFixtureWrite(t, repo, "sparkwing/build/generated.go", "generated output")
+	sdkFixtureWrite(t, repo, "sparkwing/go.work.sum", "workspace state")
 	sdkFixtureCommit(t, repo)
 	unchanged, err := selectSDKRelease(ctx, repo, "HEAD")
 	if err != nil {
@@ -72,9 +74,15 @@ func TestSDKReleaseSelection(t *testing.T) {
 	if unchanged.Changed || unchanged.Version != first.Version || unchanged.Digest != first.Digest {
 		t.Fatalf("engine-only = %+v", unchanged)
 	}
-	for _, name := range []string{"sparkwing/sdk.go", "sparkwing/assets/message.txt", "sparkwing/testdata/case.json", "sparkwing/go.mod", "LICENSE"} {
+	for _, name := range []string{"sparkwing/sdk.go", "sparkwing/assets/message.txt", "sparkwing/testdata/case.json", "sparkwing/go.mod", "LICENSE", "sparkwing/testdata/build/input.go", "sparkwing/testdata/dist/embed.txt", "sparkwing/testdata/go.work"} {
 		t.Run(name, func(t *testing.T) {
-			sdkFixtureWrite(t, repo, name, "changed "+name)
+			repo := sdkFixture(t)
+			sdkFixtureTag(t, repo, first.Version, first.Digest)
+			body := "changed " + name
+			if name == "sparkwing/assets/message.txt" {
+				body = "embedded\x00\xfedata\n"
+			}
+			sdkFixtureWrite(t, repo, name, body)
 			sdkFixtureCommit(t, repo)
 			next, err := selectSDKRelease(ctx, repo, "HEAD")
 			if err != nil {
@@ -117,6 +125,10 @@ func TestSDKSourceDigestUsesTrackedCommitAndDetectsDeletion(t *testing.T) {
 	after, err := sdkSourceDigest(ctx, repo, "HEAD")
 	if err != nil || before != after {
 		t.Fatalf("checkout state changed digest: %s %s %v", before, after, err)
+	}
+	sdkFixtureWrite(t, repo, "sparkwing/sdk.go", "package sparkwing\n")
+	if err := os.Remove(filepath.Join(repo, "sparkwing/untracked.txt")); err != nil {
+		t.Fatal(err)
 	}
 	gitRun(t, repo, "rm", "sparkwing/testdata/case.json")
 	sdkFixtureCommit(t, repo)

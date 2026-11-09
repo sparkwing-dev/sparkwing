@@ -77,12 +77,11 @@ func sdkSourceDigest(ctx context.Context, repo, ref string) (string, error) {
 func sdkPublishablePath(name string) bool {
 	for _, part := range strings.Split(name, "/") {
 		switch part {
-		case ".git", "node_modules", "vendor", ".cache", "dist", "build":
+		case ".git", "node_modules", "vendor", ".cache":
 			return false
 		}
 	}
-	switch path.Base(name) {
-	case "go.work", "go.work.sum", ".DS_Store":
+	if strings.HasPrefix(name, "dist/") || strings.HasPrefix(name, "build/") || name == "go.work" || name == "go.work.sum" || path.Base(name) == ".DS_Store" {
 		return false
 	}
 	return true
