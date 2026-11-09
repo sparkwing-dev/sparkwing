@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -381,11 +382,15 @@ func proveLocalSchedule(ctx context.Context, home, root, pipeline string, enviro
 	if entry == nil {
 		return crons.Proof{}, errors.New("schedule source acquisition returned no entry")
 	}
-	if len(entry.Command) != 1 {
-		return crons.Proof{}, errors.Join(fmt.Errorf("%s: schedule pinning requires a standalone pipeline executable", pipeline), entry.Close())
-	}
 	if err := writeEngineNotices(os.Stderr, entry.Engine.Notices); err != nil {
 		return crons.Proof{}, errors.Join(err, entry.Close())
+	}
+	if len(entry.Command) != 1 {
+		identity, err := pipelineentry.Command(entry.Command).Identity(entry.Directory)
+		if err != nil {
+			return crons.Proof{}, errors.Join(err, entry.Close())
+		}
+		return crons.Proof{Identity: identity, Release: entry.Close}, nil
 	}
 	return crons.Proof{Binary: entry.Command[0], Release: entry.Close}, nil
 }

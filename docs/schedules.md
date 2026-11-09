@@ -142,7 +142,13 @@ An API request with an unknown schedule write mode returns HTTP 400.
 Local installation records the selected declarations and captured environment
 identity durably. Proofs and later pin changes use that captured environment.
 Environment values stay in private host storage and do not appear in schedule
-views. Installation pins a proved binary unless `--unpinned` is selected.
+views. Installation pins the proved entry unless `--unpinned` is selected.
+Go entries retain their compiled binary pin. TypeScript pins fingerprint the
+resolved Node executable, entry path and installed pipeline tree, including the
+SDK. Before a pinned TypeScript schedule fires, preparation must produce the
+same identity. A source, dependency or Node change refuses the fire with
+instructions to reinstall the pin or unpin it. `--unpinned` still prepares the
+entry during registration. `--no-prove` skips preparation and follows source.
 Linux and macOS managed timers invoke the stable hidden `sparkwing __tick` entrypoint and start the local
 controller on demand. Windows installation records schedules, but automatic
 schedule evaluation is unavailable. Run them explicitly with

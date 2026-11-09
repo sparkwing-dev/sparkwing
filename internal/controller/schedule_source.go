@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
@@ -37,6 +38,9 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 			return request, err
 		}
 		request.Git.Repository = repository
+		if err := s.verifyPreparedSchedulePin(ctx, row, request); err != nil {
+			return request, err
+		}
 	} else {
 		request.Source.Location = runspec.SourceLocation{RemoteURL: row.RepoPath, PipelineDir: ".sparkwing"}
 		if err := s.resolveIntakeSource(ctx, string(row.Team), &request); err != nil {
@@ -158,3 +162,25 @@ var (
 	_ scheduledRunWriter = (*store.Tenant)(nil)
 	_ ConcurrencyStore   = (*store.Tenant)(nil)
 )
+
+func (s *Server) verifyPreparedSchedulePin(ctx context.Context, row store.CronSchedule, request runspec.Request) error {
+	identity, err := crons.PreparedPinIdentity(row.LockedBinary)
+	if err != nil || identity == "" {
+		return err
+	}
+	environment, err := s.localScheduleEnvironments.Load(ctx, request.Env)
+	if err != nil {
+		return err
+	}
+	proof, err := s.proveScheduleEntry(ctx, row.RepoPath, row.Pipeline, environment)
+	if proof.Release != nil {
+		defer func() { _ = proof.Release() }()
+	}
+	if err != nil {
+		return err
+	}
+	if proof.Identity != identity {
+		return &apierr.Error{Code: apierr.PlanFailed, Message: "the pinned TypeScript pipeline source, installed dependencies or Node runtime changed; re-run `sparkwing schedules install` to pin it again, or use `sparkwing schedules set --schedule " + crons.DisplayName(row) + " --unpin` to follow the checkout"}
+	}
+	return nil
+}

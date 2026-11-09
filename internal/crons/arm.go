@@ -22,18 +22,16 @@ import (
 // <Service.PinRoot>/<schedule id>/.
 const pinnedBinaryName = "pipeline"
 
-// Proof is what compiling a repository's pipelines produced: the binary that
-// answers for the pipeline.
+// Proof retains a compiled binary or a prepared entry identity until pinning.
 type Proof struct {
-	Binary  string
-	Release func() error
+	Binary string
+	// Identity binds an interpreted entry to its runtime and installed source.
+	Identity string
+	Release  func() error
 }
 
-// Prover compiles a repository's pipelines and reports the binary that carries
-// the named one. Arming refuses the whole repository when it fails, because a
-// schedule fires unattended and a pipeline that will not build is refused here
-// rather than at three in the morning. The binary it names is what a pinned
-// schedule runs.
+// Prover prepares a pipeline for unattended execution. Binary proofs retain
+// compiled code; identity proofs bind an interpreted entry to its installed inputs.
 type Prover func(ctx context.Context, repoRoot, pipeline string) (Proof, error)
 
 // ArmOptions shapes one arm.
@@ -298,10 +296,9 @@ func (s *Service) withdrawUndeclared(
 	return nil
 }
 
-// safety: a re-arm replaces the pinned file in place, so a tick firing during
-// an arm execs either the old binary or the new one and never a partial write.
+// safety: rename publishes the complete pin while another reader may inspect it.
 func (s *Service) pin(id, head string, proof Proof) (store.CronLock, error) {
-	if proof.Binary == "" {
+	if proof.Binary == "" && proof.Identity == "" {
 		return store.CronLock{}, nil
 	}
 	if s.PinRoot == "" {
@@ -312,7 +309,21 @@ func (s *Service) pin(id, head string, proof Proof) (store.CronLock, error) {
 		return store.CronLock{}, fmt.Errorf("make %s: %w", dir, err)
 	}
 	dest := filepath.Join(dir, pinnedBinaryName)
-	if err := copyExecutable(proof.Binary, dest); err != nil {
+	if proof.Identity != "" {
+		staged, err := os.CreateTemp(dir, "entry-*")
+		if err != nil {
+			return store.CronLock{}, err
+		}
+		name := staged.Name()
+		defer discardStaged(name)
+		_, writeErr := staged.WriteString(preparedPinPrefix + proof.Identity)
+		if err := errors.Join(writeErr, staged.Close()); err != nil {
+			return store.CronLock{}, err
+		}
+		if err := os.Rename(name, dest); err != nil {
+			return store.CronLock{}, err
+		}
+	} else if err := copyExecutable(proof.Binary, dest); err != nil {
 		return store.CronLock{}, err
 	}
 	// safety: the digest is the pinned file's own sha256, not the compiler's

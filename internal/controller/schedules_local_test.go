@@ -407,3 +407,37 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 		t.Fatalf("fire history: %+v %v", fires, err)
 	}
 }
+
+func TestPreparedSchedulePinRejectsChangedEntry(t *testing.T) {
+	home := t.TempDir()
+	pin := filepath.Join(home, "pin")
+	identity := strings.Repeat("a", 64)
+	if err := os.WriteFile(pin, []byte("sparkwing-prepared-entry-v1\n"+identity), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshots := &localScheduleSnapshots{values: map[runspec.Hash][]string{}}
+	seal, err := snapshots.Capture(t.Context(), []string{"PATH=/captured"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := 0
+	server := New(nil, nil).WithLocalSchedules(nil, func(_ context.Context, _, _ string, environment []string) (crons.Proof, error) {
+		if !slices.Equal(environment, []string{"PATH=/captured"}) {
+			t.Fatalf("environment = %v", environment)
+		}
+		return crons.Proof{Identity: identity, Release: func() error { released++; return nil }}, nil
+	}, snapshots)
+	row := store.CronSchedule{LockedBinary: pin, Pipeline: "hello", RepoPath: home}
+	request := runspec.Request{Env: seal}
+	if err := server.verifyPreparedSchedulePin(t.Context(), row, request); err != nil {
+		t.Fatal(err)
+	}
+	identity = strings.Repeat("b", 64)
+	err = server.verifyPreparedSchedulePin(t.Context(), row, request)
+	if err == nil || !strings.Contains(err.Error(), "changed") || !strings.Contains(err.Error(), "schedules install") {
+		t.Fatalf("changed entry: %v", err)
+	}
+	if released != 2 {
+		t.Fatalf("released = %d", released)
+	}
+}

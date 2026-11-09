@@ -1,0 +1,68 @@
+package pipelineentry
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+)
+
+// Identity fingerprints the resolved runtime, entry and installed pipeline files.
+func (c Command) Identity(directory string) (string, error) {
+	if len(c) != 2 {
+		return "", errors.New("prepared entry needs a runtime and script")
+	}
+	sum := sha256.New()
+	runtime, err := os.Open(c[0])
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(sum, runtime)
+	closeErr := runtime.Close()
+	if err != nil {
+		return "", err
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	entry, err := filepath.Rel(directory, c[1])
+	if err != nil {
+		return "", err
+	}
+	body, err := os.ReadFile(c[1])
+	if err != nil {
+		return "", err
+	}
+	entryDigest := sha256.Sum256(body)
+	fmt.Fprintf(sum, "\x00entry:%s\x00%x\x00", filepath.ToSlash(entry), entryDigest)
+	err = filepath.WalkDir(directory, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		relative, err := filepath.Rel(directory, path)
+		if err != nil {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		digest := sha256.Sum256(body)
+		fmt.Fprintf(sum, "%s\x00%x\x00", filepath.ToSlash(relative), digest)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
