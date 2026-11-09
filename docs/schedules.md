@@ -146,8 +146,9 @@ views. Installation pins the proved entry unless `--unpinned` is selected.
 Go entries retain their compiled binary pin. TypeScript pins fingerprint the
 resolved Node executable, entry path and installed pipeline tree, including the
 SDK. Before a pinned TypeScript schedule fires, preparation must produce the
-same identity. A source, dependency or Node change refuses the fire with
-instructions to reinstall the pin or unpin it. `--unpinned` still prepares the
+same identity. A committed source, dependency or Node change refuses the fire with
+instructions to reinstall the pin or unpin it. Working edits appear as a dirty
+lock and stay outside the committed pin. `--unpinned` still prepares the
 entry during registration. `--no-prove` skips preparation and follows source.
 Linux and macOS managed timers invoke the stable hidden `sparkwing __tick` entrypoint and start the local
 controller on demand. Windows installation records schedules, but automatic
