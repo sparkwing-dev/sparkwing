@@ -27,11 +27,9 @@ adds capacity from your own machines to Cloud.
 
 ## Install
 
-Building Sparkwing or pipelines with its Go SDK requires Go 1.26.10 or later.
-When upgrading the SDK, update the consuming module's `go` directive to at least
-`1.26.10`. Automatic toolchain selection can download a suitable Go version.
-With `GOTOOLCHAIN=local`, install a suitable version yourself. Existing SDK pins
-keep their existing requirements.
+Building Sparkwing or pipelines with its Go SDK requires Go 1.26.0 or later.
+Sparkwing's source modules select Go 1.26.10 for patched builds with automatic
+toolchain selection. SDK consumers choose their own Go patch release.
 
 ### macOS / Linux
 
@@ -229,10 +227,11 @@ This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin,
 `--hidden` and `--short` flags as the Go shapes. Repeat the command with another
 pipeline name to add a pipeline to the TypeScript entry. Sparkwing installs
 the SDK dependencies when the pipeline runs. Commit `.sparkwing/package-lock.json` because
-the installer validates dependencies with `npm ci`. Node.js and npm must be on
+the installer validates dependencies with `npm ci`. Node.js 22.18 or later and npm must be on
 PATH. `pipeline plan` explains the resolved jobs and steps without running them.
 `pipeline lint` analyzes Go source only. Its successful exit does not validate
-TypeScript source.
+TypeScript source. See [TypeScript authoring](authoring-pipelines.md#typescript-authoring)
+for jobs, steps, outputs, runtime conditions and other authoring topics.
 
 Examples are for reading, not scaffolding: `--template` takes a shape,
 not an example name. See the

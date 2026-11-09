@@ -109,3 +109,23 @@ func TestAgentSearchExamplesMatchTheRegistry(t *testing.T) {
 		}
 	}
 }
+
+func TestInfoAgentReportsTypeScriptAuthoringBoundaries(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	out := captureStdout(t, func() {
+		if err := runInfoArgs([]string{"--for-agent", "-o", "plain"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, want := range []string{"Go or TypeScript programs", "Go shapes compile, lint", "Node 22.18+", "npm lockfile", "detached CLI runs", "schedules", "TypeScript lint is unsupported", "zero exit does not validate source"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("agent info missing %q", want)
+		}
+	}
+	for _, stale := range []string{"Pipelines are Go programs", "It compiles, lints, and explains as generated"} {
+		if strings.Contains(out, stale) {
+			t.Errorf("agent info retains false promise %q", stale)
+		}
+	}
+}
