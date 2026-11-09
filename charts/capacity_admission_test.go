@@ -18,6 +18,7 @@ import (
 	"k8s.io/apiserver/pkg/admission/plugin/policy/validating"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"k8s.io/apiserver/pkg/authentication/user"
+	apiservercel "k8s.io/apiserver/pkg/cel"
 	"k8s.io/apiserver/pkg/cel/environment"
 	"sigs.k8s.io/yaml"
 
@@ -71,6 +72,9 @@ func TestLauncherCapacityAdmission(t *testing.T) {
 			}
 			var classes []string
 			for _, v := range policy.Spec.Variables {
+				if escaped, ok := apiservercel.Escape(v.Name); !ok || escaped != v.Name {
+					t.Fatalf("capacity variable %q is not a CEL identifier", v.Name)
+				}
 				if v.Name == "cloudClasses" {
 					if err := yaml.Unmarshal([]byte(v.Expression), &classes); err != nil {
 						t.Fatal(err)

@@ -1746,12 +1746,6 @@ version. Active revocation/minimum errors become enforcement notices on stored
 runs. Other policy failures discard the response instead of returning partial
 status. A run without an accepted engine needs no version lookup.
 
-`EngineController.Compatibility` looks up the exact release in verified metadata
-and delegates calendar arithmetic to `controllerwire.CompatibilityFor`. Execution
-eligibility does not change that release's API guarantee. Missing configuration,
-failed index reads and unknown releases return errors. The engine index/evaluation
-and wire calendar helper remain their owners' runtime integrations.
-
 The controller calls `Operator.ReconcileControllerRuns` on startup and each
 maintenance tick. It pages across all teams. A reconciliation failure stops the
 pass. The hostname is displayed in schedule history. Another process on the same machine

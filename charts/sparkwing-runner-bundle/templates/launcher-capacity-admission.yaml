@@ -23,7 +23,7 @@ spec:
   variables:
     - name: launcher
       expression: {{ $launcher | toJson | quote }}
-    - name: namespace
+    - name: jobNamespace
       expression: {{ $jobs | toJson | quote }}
     - name: labels
       expression: "oldObject == null ? {} : oldObject.metadata.?labels.orValue({})"
@@ -44,7 +44,7 @@ spec:
     - expression: >-
         request.userInfo.username != variables.launcher ||
         oldObject != null &&
-        variables.labels[?'sparkwing.dev/launcher-namespace'].orValue('') == variables.namespace &&
+        variables.labels[?'sparkwing.dev/launcher-namespace'].orValue('') == variables.jobNamespace &&
         variables.labels[?'node-restriction.kubernetes.io/sparkwing-cloud-class'].orValue('') in variables.cloudClasses &&
         variables.labels[?'karpenter.sh/nodepool'].orValue('') != '' &&
         (request.operation != 'DELETE' || !('node-restriction.kubernetes.io/sparkwing-team-node' in variables.labels))

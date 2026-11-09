@@ -221,10 +221,6 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 	if Version == "v1.2.3" && (len(page.Runs[0].Notices) != 1 || page.Runs[0].Notices[0].Kind != engineid.NoticePolicyUnavailable) {
 		t.Fatalf("offline policy warning missing from local status: %+v", page.Runs[0].Notices)
 	}
-	compatibility, err := engine.Compatibility(t.Context(), "v1.2.3")
-	if err != nil || compatibility.EngineRelease != "v1.2.3" {
-		t.Fatalf("offline local compatibility: %+v: %v", compatibility, err)
-	}
 	if requests != 0 {
 		t.Fatalf("local controller fetched policy %d times", requests)
 	}

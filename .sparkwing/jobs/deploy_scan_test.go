@@ -430,7 +430,7 @@ func TestDeployScanReusesRunningAndRecentFailedExamples(t *testing.T) {
 					if outcome == "failed" && !slices.Contains(c.Args, "--exit-zero") {
 						return "", errors.New("completed run failed")
 					}
-					return fmt.Sprintf(`{"id":"%s","status":%q}`, c.Args[3], outcome), nil
+					return fmt.Sprintf(`{"id":"%s","status":%q,"inputs":{"args":{"scan-receipt":%q}}}`, c.Args[3], outcome, d.cfg.Production.ControllerURL), nil
 				}
 				return f.run(ctx, c)
 			}
@@ -491,7 +491,7 @@ func TestDeployScanUsesNativeChildSubmissionAndAwait(t *testing.T) {
 		Secrets: map[string]sparkwingtest.Secret{"DEPLOY_SCAN_PRODUCTION_TOKEN": {Value: "fixture-token", Masked: true}},
 		StartChild: func(_ context.Context, pipeline string, args map[string]string) (string, error) {
 			started = true
-			if pipeline != "example" || args["post-deploy"] != "true" || args["api-controller"] != d.cfg.Production.ControllerURL {
+			if pipeline != "example" || args["post-deploy"] != "true" || args["api-controller"] != d.cfg.Production.ControllerURL || args["scan-receipt"] != d.cfg.Production.ControllerURL {
 				t.Fatalf("scan child request = %s %v", pipeline, args)
 			}
 			return "native-example", nil
