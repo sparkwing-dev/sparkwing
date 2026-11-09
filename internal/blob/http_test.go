@@ -12,6 +12,17 @@ import (
 
 type roundTrip func(*http.Request) (*http.Response, error)
 
+func TestSignedDownloadForbiddenExplainsFreshLink(t *testing.T) {
+	client := TransferClient{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	_, err := client.Transfer(t.Context(), SignedTransfer{URL: "https://storage.example/object?signature=secret"}, nil)
+	const want = "signed blob transfer: HTTP 403: download links are tied to the requester's address and may expire; re-run the command over IPv4 from the network that will download to get a fresh link"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+}
+
 func (r roundTrip) RoundTrip(q *http.Request) (*http.Response, error) { return r(q) }
 
 func TestSignedTransferHTTP(t *testing.T) {
