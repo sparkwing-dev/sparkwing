@@ -398,21 +398,6 @@ func SocketPath(home string) (string, error) {
 	return l.sock, nil
 }
 
-// LegacySocketPath locates daemons from before per-home socket tokens so startup
-// can drain them before acquiring the same home's election lock.
-func LegacySocketPath(home string) (string, error) {
-	l, err := resolveLayout(home)
-	if err != nil {
-		return "", err
-	}
-	_, key, err := socketHomeIdentity(l.home)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256([]byte(key))
-	return filepath.Join(filepath.Dir(filepath.Dir(l.sock)), socketDirPrefix()+hex.EncodeToString(sum[:])[:12], "d.sock"), nil
-}
-
 // APISocketBeside reports the controller API socket that belongs to the
 // admission socket at sock. A caller that already holds a daemon connection
 // derives the path from the socket it reached rather than recomputing the
