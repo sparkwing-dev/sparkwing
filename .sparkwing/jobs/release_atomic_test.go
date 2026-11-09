@@ -23,14 +23,14 @@ func atomicReleaseRepo(t *testing.T, body string) string {
 	writeFile(t, filepath.Join(repo, scaffoldFallbackRel), "package scaffold\nconst FallbackSDKVersion = \"v0.1.0\"\n")
 	writeFile(t, filepath.Join(repo, scaffoldAPISnapshotRel), "const FallbackSDKVersion = \"v0.1.0\"\n")
 	writeFile(t, filepath.Join(repo, "go.sum"), "")
-	sdkFixtureWrite(t, repo, "sparkwing/go.mod", "module "+independentSDKModule+"\n\ngo 1.25.0\n")
+	sdkFixtureWrite(t, repo, "sparkwing/go.mod", "module "+sdkModulePath+"\n\ngo 1.25.0\n")
 	sdkFixtureWrite(t, repo, "sparkwing/sdk.go", "package sdk\n")
-	writeFile(t, filepath.Join(repo, "go.mod"), "module example/engine\n\ngo 1.26.0\nreplace "+independentSDKModule+" => ./sparkwing\n")
-	writeFile(t, filepath.Join(repo, "sdk.go"), "package sdk\nimport _ \""+independentSDKModule+"\"\n")
+	writeFile(t, filepath.Join(repo, "go.mod"), "module example/engine\n\ngo 1.26.0\nreplace "+sdkModulePath+" => ./sparkwing\n")
+	writeFile(t, filepath.Join(repo, "sdk.go"), "package sdk\nimport _ \""+sdkModulePath+"\"\n")
 	for _, module := range []string{".sparkwing", kubernetesE2EPipelineModuleRel} {
-		writeFile(t, filepath.Join(repo, module, "go.mod"), "module fixture\n\ngo 1.26.0\nrequire "+independentSDKModule+" v0.1.0\nreplace "+independentSDKModule+" => "+filepath.ToSlash(filepath.Join(repo, "sparkwing"))+"\n")
+		writeFile(t, filepath.Join(repo, module, "go.mod"), "module fixture\n\ngo 1.26.0\nrequire "+sdkModulePath+" v0.1.0\nreplace "+sdkModulePath+" => "+filepath.ToSlash(filepath.Join(repo, "sparkwing"))+"\n")
 		writeFile(t, filepath.Join(repo, module, "go.sum"), "")
-		writeFile(t, filepath.Join(repo, module, "main.go"), "package main\nimport _ \""+independentSDKModule+"\"\nfunc main() {}\n")
+		writeFile(t, filepath.Join(repo, module, "main.go"), "package main\nimport _ \""+sdkModulePath+"\"\nfunc main() {}\n")
 	}
 	writeFile(t, filepath.Join(repo, "bin/regen-api-snapshot.sh"), "mkdir -p \"$1\"\ncp pkg/scaffold/version.go \"$1/pkg_scaffold.txt\"\n")
 	gitRun(t, repo, "init", "-b", "main")
@@ -155,7 +155,7 @@ func TestReleaseCommitPreservesUnrelatedStagedFiles(t *testing.T) {
 		}
 	}
 	gitRun(t, repo, "tag", "v0.9.0")
-	if body := gitRun(t, repo, "show", "HEAD:go.mod"); !strings.Contains(body, independentSDKModule+" v0.4.0") {
+	if body := gitRun(t, repo, "show", "HEAD:go.mod"); !strings.Contains(body, sdkModulePath+" v0.4.0") {
 		t.Fatalf("engine requirement = %s", body)
 	}
 }

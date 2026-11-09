@@ -17,7 +17,7 @@ import (
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
-const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
+const sdkModulePath = "github.com/sparkwing-dev/sparkwing/sparkwing"
 
 const scaffoldFallbackRel = "pkg/scaffold/version.go"
 
@@ -69,7 +69,7 @@ func checkVersionsFreshness(ctx context.Context, repoRoot string, checkLocalRepl
 		relMod, _ := filepath.Rel(repoRoot, modPath)
 		for _, req := range f.Require {
 			// safety: the cut selects and publishes its SDK before preparing these pins.
-			if !checkLocalReplacements && req.Mod.Path == independentSDKModule {
+			if !checkLocalReplacements && req.Mod.Path == sdkModulePath {
 				continue
 			}
 			if !isWatchedModule(req.Mod.Path) {
@@ -226,6 +226,7 @@ var watchedModulePrefixes = []string{
 
 var maxAllowedMajor = map[string]int{
 	"github.com/sparkwing-dev/sparkwing": 0,
+	sdkModulePath:                        0,
 }
 
 func isWatchedModule(path string) bool {

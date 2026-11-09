@@ -17,8 +17,7 @@ import (
 )
 
 const (
-	independentSDKModule = "github.com/sparkwing-dev/sparkwing/sparkwing"
-	sdkDigestMarker      = "SDK-Source-SHA256: "
+	sdkDigestMarker = "SDK-Source-SHA256: "
 )
 
 type sdkReleaseDecision struct {
@@ -233,7 +232,7 @@ func (j *releaseSDKJob) run(ctx context.Context, dry bool) (string, error) {
 		}
 	}()
 	// safety: the engine must never require a module the public Go proxy cannot serve.
-	if _, err := sparkwing.Exec(ctx, "go", "mod", "download", independentSDKModule+"@"+decision.Version).Dir(j.RepoDir).
+	if _, err := sparkwing.Exec(ctx, "go", "mod", "download", sdkModulePath+"@"+decision.Version).Dir(j.RepoDir).
 		Env("GOMODCACHE", proxyCache).Env("GOWORK", "off").Env("GOPROXY", "https://proxy.golang.org").Env("GONOPROXY", "none").Env("GOPRIVATE", "").Run(); err != nil {
 		return "", fmt.Errorf("SDK %s published but proxy unavailable; retry the cut without moving its tag: %w", decision.Version, err)
 	}

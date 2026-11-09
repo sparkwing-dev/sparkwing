@@ -477,7 +477,7 @@ func prepareReleasePins(ctx context.Context, repoDir, version string) error {
 	if err := validateReleaseVersion(version); err != nil {
 		return err
 	}
-	if _, err := sparkwing.Exec(ctx, "go", "mod", "edit", "-require", independentSDKModule+"@"+version).Dir(repoDir).Env("GOWORK", "off").Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, "go", "mod", "edit", "-require", sdkModulePath+"@"+version).Dir(repoDir).Env("GOWORK", "off").Run(); err != nil {
 		return err
 	}
 	if _, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(repoDir).Env("GOWORK", "off").Run(); err != nil {
