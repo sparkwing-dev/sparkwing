@@ -85,3 +85,57 @@ func TestOwnerDrainsCancelledHoldersWithoutReconciliation(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnerSettlesCancellationRacingFinalJobReports(t *testing.T) {
+	for _, cancelFirst := range []bool{true, false} {
+		t.Run(map[bool]string{true: "cancel-before-report", false: "report-before-cancel"}[cancelFirst], func(t *testing.T) {
+			state, host, input := newOwnerFixture(t, true)
+			state.snapshot.Run.State = runstate.RunRunning
+			for _, job := range []struct {
+				id      string
+				outcome runstate.NodeState
+			}{
+				{"preconditions", runstate.NodeSuccess}, {"policy", ""}, {"review", runstate.NodeFailed},
+				{"gate", runstate.NodeSkipped}, {"race-touched", runstate.NodeSkipped}, {"record-tree", runstate.NodeSkipped}, {"land", runstate.NodeSkipped},
+			} {
+				status := runstate.StatusDone
+				if job.outcome == "" {
+					status = runstate.StatusPending
+				}
+				now := time.Now()
+				state.snapshot.Nodes = append(state.snapshot.Nodes, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(job.id)}, Status: status, Outcome: job.outcome, ReadyAt: &now, Spec: marshalEventFixture(t, nodewire.JobSpec{ID: job.id})})
+			}
+			host.Store = cancelledReconciliation{OwnerStore: state, cancel: func() {
+				state.mu.Lock()
+				defer state.mu.Unlock()
+				now := time.Now()
+				state.snapshot.Run.CancelRequestedAt = &now
+				for i := range state.snapshot.Nodes {
+					row := &state.snapshot.Nodes[i]
+					if row.Ref.NodeID == "policy" {
+						row.Status, row.Outcome = runstate.StatusDone, runstate.NodeSuccess
+						if cancelFirst {
+							row.CancelRequestedAt = &now
+							row.Outcome = runstate.NodeCancelled
+						}
+						row.StateSeq++
+					}
+				}
+			}}
+			host.Local = func(row runstate.NodeRow) bool { return row.Ref.NodeID == "policy" }
+			host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
+				graph := store.ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil}
+				for _, row := range snapshot.Nodes {
+					graph.Nodes = append(graph.Nodes, store.ScheduleNode{ID: string(row.Ref.NodeID), Status: string(row.Status), Outcome: string(row.Outcome), Ready: row.ReadyAt != nil})
+				}
+				return graph, nil
+			}
+			host.Decide = store.Decide
+			host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error { t.Error("terminal job executed"); return nil })
+			completion, err := host.Run(t.Context(), input)
+			if err != nil || completion.Outcome != "cancelled" || state.snapshot.Run.State != runstate.RunCancelled || state.finished.Transition.RunID != "run" {
+				t.Fatalf("terminal jobs left run unsettled: completion=%+v state=%s err=%v", completion, state.snapshot.Run.State, err)
+			}
+		})
+	}
+}
