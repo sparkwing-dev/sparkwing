@@ -40,7 +40,7 @@ func TestReplacementEnsureKeepsAcceptedLocalBuild(t *testing.T) {
 	if selected.Identity != identity || selected.AssetDigest != identity.ManifestDigest || selected.Executable != path {
 		t.Fatalf("retained engine selection = %+v", selected)
 	}
-	if err := selected.verifyInstalledEngine(); err != nil {
+	if err := selected.verifyInstalledEngine(t.Context()); err != nil {
 		t.Fatalf("retained SDK installer verification: %v", err)
 	}
 	installed, err := resolver.Resolve(t.Context(), identity.Pin, target)
@@ -72,7 +72,7 @@ func TestReplacementEnsureKeepsAcceptedLocalBuild(t *testing.T) {
 			case "target":
 				changed.Target.GOARCH = "other"
 			}
-			if err := changed.verifyInstalledEngine(); err == nil {
+			if err := changed.verifyInstalledEngine(t.Context()); err == nil {
 				t.Fatal("mutated retained engine reached SDK installation")
 			}
 		})
@@ -89,7 +89,7 @@ func TestReplacementEnsureKeepsAcceptedLocalBuild(t *testing.T) {
 	if err := os.Chtimes(path, stat.ModTime(), stat.ModTime()); err != nil {
 		t.Fatal(err)
 	}
-	if err := selected.verifyInstalledEngine(); err == nil {
+	if err := selected.verifyInstalledEngine(t.Context()); err == nil {
 		t.Fatal("retained SDK engine mutation escaped full-byte verification")
 	}
 }

@@ -114,7 +114,7 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 		restored.ownedDirectory = ownedDirectory
 		return restored, nil
 	}
-	if err := r.verifyInstalledEngine(); err != nil {
+	if err := r.verifyInstalledEngine(ctx); err != nil {
 		return SDKCommand{}, err
 	}
 	body, err := json.Marshal(request)
@@ -223,7 +223,7 @@ func (request SDKInstallRequest) PipelineDirectory() (string, error) {
 	return dir, nil
 }
 
-func (r Resolved) verifyInstalledEngine() error {
+func (r Resolved) verifyInstalledEngine(ctx context.Context) error {
 	if r.Identity.Pin.Replacement != "" {
 		var current Resolved
 		var err error
@@ -231,9 +231,9 @@ func (r Resolved) verifyInstalledEngine() error {
 			if r.Identity != r.retainedIdentity {
 				return integrity(errors.New("SDK installation requires the accepted local engine identity"))
 			}
-			current, err = replacementEngineAt(context.Background(), r.Identity.Pin, r.Target, r.retainedExecutable, true)
+			current, err = replacementEngineAt(ctx, r.Identity.Pin, r.Target, r.retainedExecutable, true)
 		} else {
-			current, err = installedEngine(context.Background(), r.Identity.Pin, r.Target)
+			current, err = installedEngine(ctx, r.Identity.Pin, r.Target)
 		}
 		if err == nil && (current.Identity != r.Identity || current.AssetDigest != r.AssetDigest || current.Executable != r.Executable) {
 			err = integrity(errors.New("SDK installation requires the exact selected replacement-pin engine"))

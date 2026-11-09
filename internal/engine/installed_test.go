@@ -47,7 +47,7 @@ func TestReplacementSelectsInstalledEngineWithoutNetwork(t *testing.T) {
 	if err != nil || ensured.Identity != selected.Identity || ensured.Executable != selected.Executable {
 		t.Fatalf("sealed replacement: %+v %v", ensured, err)
 	}
-	if err := selected.verifyInstalledEngine(); err != nil {
+	if err := selected.verifyInstalledEngine(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	cancelled, cancel := context.WithCancel(t.Context())
@@ -82,7 +82,7 @@ func FuzzReplacementEngineCannotSubstituteAcceptedBinary(f *testing.F) {
 			changed.Target.GOARCH = executable
 		}
 		want := changed.Executable == current.Executable && changed.AssetDigest == current.AssetDigest && changed.Identity == current.Identity && changed.Target == current.Target
-		if err := changed.verifyInstalledEngine(); (err == nil) != want {
+		if err := changed.verifyInstalledEngine(t.Context()); (err == nil) != want {
 			t.Fatalf("substituted installed engine: %+v: %v", changed, err)
 		}
 		_, err = (&Resolver{}).Ensure(t.Context(), changed.Identity, changed.Target)
@@ -119,7 +119,7 @@ func TestLocalTypeScriptSDKSelectsInstalledEngineWithoutNetwork(t *testing.T) {
 	if selected.Identity.Pin != pin {
 		t.Fatalf("selected pin=%+v", selected.Identity.Pin)
 	}
-	if err := selected.verifyInstalledEngine(); err != nil {
+	if err := selected.verifyInstalledEngine(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }

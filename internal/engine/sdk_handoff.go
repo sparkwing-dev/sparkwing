@@ -99,7 +99,7 @@ func restoreSDKHandoff(ctx context.Context, dir string, request SDKInstallReques
 	}
 	var receipt installationHandoff
 	err = json.Unmarshal(body, &receipt)
-	if err != nil || closeErr != nil || receipt.Engine != request.Engine || receipt.Directory != dir || receipt.Environment != handoffEnvironment(environment) || receipt.HashAllFiles != request.HashAllFiles || receipt.Inputs == nil {
+	if err != nil || receipt.Engine != request.Engine || receipt.Directory != dir || receipt.Environment != handoffEnvironment(environment) || receipt.HashAllFiles != request.HashAllFiles || receipt.Inputs == nil {
 		return SDKCommand{}, false
 	}
 	entry, err := bincache.PipelineEntry(receipt.Key)
