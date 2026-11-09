@@ -73,8 +73,9 @@ func validBlobDigest(digest blob.Digest) bool {
 }
 
 type blobActor struct {
-	// safety: Prepared artifacts cross worker host partitions only within their sealed run.
+	// safety: prepared artifacts cross worker host partitions within a sealed run or its exact-source child.
 	preparedFacts blob.RefFacts
+	request       runspec.Request
 	owner         *runstate.Actor
 	authority     blob.Authority
 	source        blob.UploadIdentity
@@ -128,6 +129,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		return a, err
 	}
 	a.preparedFacts = facts
+	a.request = sealed.Request
 	a.authority.Ref = hostRefFacts(facts, grantHost(c.Data.WriteRef))
 	a.source = blob.UploadIdentity{Team: string(team), RunID: c.Binding.RunID, Principal: a.authority.Principal, CapabilityRef: c.Prefix}
 	if grant == capability.SourceRead {

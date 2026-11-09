@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -286,7 +287,7 @@ func TestUpgradeVerificationRetainsIsolatedGitMetadata(t *testing.T) {
 		t.Run(fmt.Sprintf("linked=%t", linked), func(t *testing.T) {
 			git := func(dir string, args ...string) string {
 				t.Helper()
-				cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
+				cmd := testgit.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
 				out, err := cmd.CombinedOutput()
 				if err != nil {
 					t.Fatalf("git %v: %v: %s", args, err, out)

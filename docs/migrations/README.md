@@ -1,11 +1,13 @@
 # Migration guides
 
 One guide per release that contains a breaking change; releases with
-no breaking changes have no guide. Write each section in
-[_unreleased.md](_unreleased.md) as the breaking change lands, and link
-the changelog entry to its anchor there. `sparkwing run release` rolls
-that file to `vX.Y.Z.md` when it cuts the tag, writes a fresh
-`_unreleased.md`, and adds the row below. Guides marked Before are historical
+no breaking changes have no guide. Write each section in a unique
+`docs/migrations/unreleased/<slug>.md` starting with an H2, and link the
+changelog fragment to its anchor in [_unreleased.md](_unreleased.md).
+The CLI composes that topic from the fragments. Run `bash bin/sync-docs.sh`
+and commit the matching mirror files. `sparkwing run release` collects the
+fragments into `vX.Y.Z.md`, consumes them, resets the placeholder and adds
+the row below. Guides marked Before are historical
 snapshots. Start with the latest guide and the unreleased changes for the
 current CLI.
 
@@ -15,6 +17,7 @@ Format conventions live in `CHANGELOG-STYLE.md` at the repository root.
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.71.0](v0.71.0.md) | 2026-11-08 | The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts; Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`; The schema baseline advances to version 35, adding durable GitHub Actions approvals and dispatch receipts, upgrading recognized schema 34 stores in place. |
 | [v0.70.0](v0.70.0.md) | 2026-11-08 | This release moves command execution to host helpers, updates controller commands, and upgrades the store to schema 34. |
 | [v0.69.0](v0.69.0.md) | 2026-11-05 | This release upgrades the store to schema baseline 30 in place, and removes the retired `warm_cpu_class_cores` credit setting. |
 | [v0.68.7](v0.68.7.md) | 2026-11-04 | The schema baseline advances to version 29, the first forward migration: a store at schema 28 with the v0.68.3 baseline digest (v0.68.3 and later 0.68 releases) upgrades in place on its first open The upgrade adds `nodes.trusted_host` and records version 29 and its digest in one transaction on SQLite and PostgreSQL; on PostgreSQL the migration advisory lock lets controllers starting together run it once; `--sw-run-handle-file` writes an identity-only handle without `status` The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended; `--sw-run-handle-file` writes an identity-only handle without `status` The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended. |

@@ -4,11 +4,12 @@ import (
 	"context"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestScaffoldFallbackProblem(t *testing.T) {
@@ -121,7 +122,7 @@ func TestBumpFallbackSDKVersionFile(t *testing.T) {
 func TestCommitSparkwingPinBump(t *testing.T) {
 	mustGit := func(t *testing.T, dir string, args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -169,6 +170,16 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
+		}
+		if err := recordPinBumpInChangelog(dir, "v0.19.0"); err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range pinBumpFragmentPaths("v0.19.0") {
+			body, err := os.ReadFile(filepath.Join(dir, pinBumpFragmentPaths("v0.19.0")[0]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeReleaseFixture(t, filepath.Join(dir, rel), string(body))
 		}
 	}
 
@@ -242,7 +253,7 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		dir := initRepo(t)
 		createBumpFiles(t, dir)
 
-		mustGit(t, dir, append([]string{"add", "--"}, sparkwingPinArtifacts...)...)
+		mustGit(t, dir, append([]string{"add", "--"}, pinBumpArtifacts("v0.19.0")...)...)
 		mustGit(t, dir, "commit", "-m", "initial")
 
 		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err == nil {
@@ -370,7 +381,7 @@ func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *tes
 
 	mustGit := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -418,7 +429,7 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 	dir := t.TempDir()
 	mustGit := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -524,7 +535,7 @@ func TestAutoBumpSparkwingPinIfStaleRegeneratesAPISnapshot(t *testing.T) {
 
 func captureGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -559,6 +570,10 @@ const fixtureSyncDocs = `#!/bin/sh
 set -eu
 mkdir -p pkg/docs
 cp CHANGELOG.md pkg/docs/changelog.md
+if [ -d docs ]; then
+  mkdir -p pkg/docs/mirror
+  cp -R docs/. pkg/docs/mirror/
+fi
 `
 
 const fixtureChangelog = `# Changelog
@@ -581,7 +596,7 @@ printf '# pkg/other\n' > "$out/pkg_other.txt"
 
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

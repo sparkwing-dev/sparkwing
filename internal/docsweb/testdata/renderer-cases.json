@@ -1,0 +1,422 @@
+[
+  {
+    "name": "empty",
+    "requires": "common",
+    "markdown": "",
+    "html": ""
+  },
+  {
+    "name": "blank-lines",
+    "requires": "common",
+    "markdown": "\n  \n",
+    "html": ""
+  },
+  {
+    "name": "paragraph",
+    "requires": "common",
+    "markdown": "hello",
+    "html": "<p>hello</p>\n"
+  },
+  {
+    "name": "paragraph-wrap",
+    "requires": "common",
+    "markdown": "hello\nworld",
+    "html": "<p>hello world</p>\n"
+  },
+  {
+    "name": "paragraph-break",
+    "requires": "common",
+    "markdown": "one\n\ntwo",
+    "html": "<p>one</p>\n<p>two</p>\n"
+  },
+  {
+    "name": "trim-prose",
+    "requires": "common",
+    "markdown": "  hello  \n world ",
+    "html": "<p>hello world</p>\n"
+  },
+  {
+    "name": "heading-1",
+    "requires": "common",
+    "markdown": "# title",
+    "html": "<h1>title</h1>\n"
+  },
+  {
+    "name": "heading-2",
+    "requires": "common",
+    "markdown": "## title",
+    "html": "<h2>title</h2>\n"
+  },
+  {
+    "name": "heading-3",
+    "requires": "common",
+    "markdown": "### title",
+    "html": "<h3>title</h3>\n"
+  },
+  {
+    "name": "heading-no-space",
+    "requires": "common",
+    "markdown": "#title",
+    "html": "<p>#title</p>\n"
+  },
+  {
+    "name": "heading-between-paragraphs",
+    "requires": "common",
+    "markdown": "before\n## title\nafter",
+    "html": "<p>before</p>\n<h2>title</h2>\n<p>after</p>\n"
+  },
+  {
+    "name": "heading-inline",
+    "requires": "common",
+    "markdown": "# **bold** `code`",
+    "html": "<h1><strong>bold</strong> <code>code</code></h1>\n"
+  },
+  {
+    "name": "bullet",
+    "requires": "common",
+    "markdown": "- one",
+    "html": "<ul>\n<li>one</li>\n</ul>\n"
+  },
+  {
+    "name": "bullets",
+    "requires": "common",
+    "markdown": "- one\n- two",
+    "html": "<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n"
+  },
+  {
+    "name": "bullet-break",
+    "requires": "common",
+    "markdown": "- one\n\nafter",
+    "html": "<ul>\n<li>one</li>\n</ul>\n<p>after</p>\n"
+  },
+  {
+    "name": "paragraph-to-list",
+    "requires": "common",
+    "markdown": "before\n- one",
+    "html": "<p>before</p>\n<ul>\n<li>one</li>\n</ul>\n"
+  },
+  {
+    "name": "list-to-heading",
+    "requires": "common",
+    "markdown": "- one\n# after",
+    "html": "<ul>\n<li>one</li>\n</ul>\n<h1>after</h1>\n"
+  },
+  {
+    "name": "indented-bullet",
+    "requires": "common",
+    "markdown": "  - one",
+    "html": "<ul>\n<li>one</li>\n</ul>\n"
+  },
+  {
+    "name": "bullet-inline",
+    "requires": "common",
+    "markdown": "- **bold** and `code`",
+    "html": "<ul>\n<li><strong>bold</strong> and <code>code</code></li>\n</ul>\n"
+  },
+  {
+    "name": "bullet-wrap",
+    "requires": "wrapped",
+    "markdown": "- one\n  continued",
+    "html": "<ul>\n<li>one continued</li>\n</ul>\n"
+  },
+  {
+    "name": "bullet-wrap-next",
+    "requires": "wrapped",
+    "markdown": "- one\n  continued\n- two",
+    "html": "<ul>\n<li>one continued</li>\n<li>two</li>\n</ul>\n"
+  },
+  {
+    "name": "bullet-hash-continuation",
+    "requires": "wrapped",
+    "markdown": "- one\n#tag",
+    "html": "<ul>\n<li>one #tag</li>\n</ul>\n"
+  },
+  {
+    "name": "fence",
+    "requires": "common",
+    "markdown": "```\nhello\n```",
+    "html": "<pre><code>hello\n</code></pre>\n"
+  },
+  {
+    "name": "fence-language",
+    "requires": "common",
+    "markdown": "```go\nhello\n```",
+    "html": "<pre><code>hello\n</code></pre>\n"
+  },
+  {
+    "name": "fence-unclosed",
+    "requires": "common",
+    "markdown": "```\nhello",
+    "html": "<pre><code>hello\n</code></pre>\n"
+  },
+  {
+    "name": "fence-empty",
+    "requires": "common",
+    "markdown": "```\n```",
+    "html": "<pre><code></code></pre>\n"
+  },
+  {
+    "name": "fence-literal-blocks",
+    "requires": "common",
+    "markdown": "```\n# head\n- item\n| row |\n<!-- comment -->\n```",
+    "html": "<pre><code># head\n- item\n| row |\n&lt;!-- comment --&gt;\n</code></pre>\n"
+  },
+  {
+    "name": "fence-escape",
+    "requires": "common",
+    "markdown": "```\n<a>&\"\n```",
+    "html": "<pre><code>&lt;a&gt;&amp;&#34;\n</code></pre>\n"
+  },
+  {
+    "name": "fence-preserve-indent",
+    "requires": "common",
+    "markdown": "```\n  x\n\n```",
+    "html": "<pre><code>  x\n\n</code></pre>\n"
+  },
+  {
+    "name": "fence-after-list",
+    "requires": "common",
+    "markdown": "- one\n```\nx\n```",
+    "html": "<ul>\n<li>one</li>\n</ul>\n<pre><code>x\n</code></pre>\n"
+  },
+  {
+    "name": "fence-between-paragraphs",
+    "requires": "common",
+    "markdown": "before\n```\nx\n```\nafter",
+    "html": "<p>before</p>\n<pre><code>x\n</code></pre>\n<p>after</p>\n"
+  },
+  {
+    "name": "escape-html",
+    "requires": "common",
+    "markdown": "<b> & \"quoted\"",
+    "html": "<p>&lt;b&gt; &amp; &#34;quoted&#34;</p>\n"
+  },
+  {
+    "name": "inline-code",
+    "requires": "common",
+    "markdown": "a `x` b",
+    "html": "<p>a <code>x</code> b</p>\n"
+  },
+  {
+    "name": "inline-bold",
+    "requires": "common",
+    "markdown": "a **x** b",
+    "html": "<p>a <strong>x</strong> b</p>\n"
+  },
+  {
+    "name": "inline-repeat",
+    "requires": "common",
+    "markdown": "`x` `y` **a** **b**",
+    "html": "<p><code>x</code> <code>y</code> <strong>a</strong> <strong>b</strong></p>\n"
+  },
+  {
+    "name": "inline-unclosed",
+    "requires": "common",
+    "markdown": "`x **y",
+    "html": "<p>`x **y</p>\n"
+  },
+  {
+    "name": "inline-escape",
+    "requires": "common",
+    "markdown": "`<x>` **a&b**",
+    "html": "<p><code>&lt;x&gt;</code> <strong>a&amp;b</strong></p>\n"
+  },
+  {
+    "name": "link-https",
+    "requires": "common",
+    "markdown": "[label](https://example.test/path)",
+    "html": "<p><a href=\"https://example.test/path\">label</a></p>\n"
+  },
+  {
+    "name": "link-http",
+    "requires": "common",
+    "markdown": "[label](http://example.test)",
+    "html": "<p><a href=\"http://example.test\">label</a></p>\n"
+  },
+  {
+    "name": "link-local",
+    "requires": "common",
+    "markdown": "[label](/docs/page)",
+    "html": "<p><a href=\"/docs/page\">label</a></p>\n"
+  },
+  {
+    "name": "link-reject-script",
+    "requires": "common",
+    "markdown": "[label](javascript:alert)",
+    "html": "<p>label</p>\n"
+  },
+  {
+    "name": "link-reject-data",
+    "requires": "common",
+    "markdown": "[label](data:text/html,hello)",
+    "html": "<p>label</p>\n"
+  },
+  {
+    "name": "link-reject-relative",
+    "requires": "common",
+    "markdown": "[label](other)",
+    "html": "<p>label</p>\n"
+  },
+  {
+    "name": "link-query",
+    "requires": "common",
+    "markdown": "[label](https://example.test/?a=1&b=2)",
+    "html": "<p><a href=\"https://example.test/?a=1&amp;b=2\">label</a></p>\n"
+  },
+  {
+    "name": "link-malformed",
+    "requires": "common",
+    "markdown": "[label](missing",
+    "html": "<p>[label](missing</p>\n"
+  },
+  {
+    "name": "link-bracket-before-valid",
+    "requires": "common",
+    "markdown": "[broken] text [label](/docs)",
+    "html": "<p>[broken] text <a href=\"/docs\">label</a></p>\n"
+  },
+  {
+    "name": "link-repeat",
+    "requires": "common",
+    "markdown": "[a](/a) [b](/b)",
+    "html": "<p><a href=\"/a\">a</a> <a href=\"/b\">b</a></p>\n"
+  },
+  {
+    "name": "ordered",
+    "requires": "full",
+    "markdown": "1. one\n2. two",
+    "html": "<ol>\n<li>one</li>\n<li>two</li>\n</ol>\n"
+  },
+  {
+    "name": "numeric-marker",
+    "requires": "full",
+    "markdown": "2026. year",
+    "html": "<ol>\n<li>year</li>\n</ol>\n"
+  },
+  {
+    "name": "numeric-text-reduced",
+    "requires": "reduced",
+    "markdown": "2026. year",
+    "html": "<p>2026. year</p>\n"
+  },
+  {
+    "name": "star-list",
+    "requires": "full",
+    "markdown": "* one",
+    "html": "<ul>\n<li>one</li>\n</ul>\n"
+  },
+  {
+    "name": "switch-lists",
+    "requires": "full",
+    "markdown": "- one\n1. two",
+    "html": "<ul>\n<li>one</li>\n</ul>\n<ol>\n<li>two</li>\n</ol>\n"
+  },
+  {
+    "name": "heading-four",
+    "requires": "full",
+    "markdown": "#### title",
+    "html": "<h4>title</h4>\n"
+  },
+  {
+    "name": "heading-clamp",
+    "requires": "full",
+    "markdown": "###### title",
+    "html": "<h4>title</h4>\n"
+  },
+  {
+    "name": "table-header",
+    "requires": "full",
+    "markdown": "| A | B |\n| --- | :---: |\n| x | y |",
+    "html": "<table>\n<tr><th>A</th><th>B</th></tr>\n<tr><td>x</td><td>y</td></tr>\n</table>\n"
+  },
+  {
+    "name": "table-no-header",
+    "requires": "full",
+    "markdown": "| a | b |",
+    "html": "<table>\n<tr><td>a</td><td>b</td></tr>\n</table>\n"
+  },
+  {
+    "name": "table-inline",
+    "requires": "full",
+    "markdown": "| **a** | `b` |",
+    "html": "<table>\n<tr><td><strong>a</strong></td><td><code>b</code></td></tr>\n</table>\n"
+  },
+  {
+    "name": "table-end-paragraph",
+    "requires": "full",
+    "markdown": "| a |\n\nafter",
+    "html": "<table>\n<tr><td>a</td></tr>\n</table>\n<p>after</p>\n"
+  },
+  {
+    "name": "lone-pipe",
+    "requires": "full",
+    "markdown": "|",
+    "html": "<table>\n<tr></tr>\n</table>\n"
+  },
+  {
+    "name": "lone-pipe-reduced",
+    "requires": "reduced",
+    "markdown": "|",
+    "html": "<p>|</p>\n"
+  },
+  {
+    "name": "bullet-pipe-reduced",
+    "requires": "reduced-wrapped",
+    "markdown": "- one\n  | continuation",
+    "html": "<ul>\n<li>one | continuation</li>\n</ul>\n"
+  },
+  {
+    "name": "comment-line",
+    "requires": "full",
+    "markdown": "before\n<!-- hidden -->\nafter",
+    "html": "<p>before</p>\n<p>after</p>\n"
+  },
+  {
+    "name": "comment-region",
+    "requires": "full",
+    "markdown": "before\n<!--\nhidden\n-->\nafter",
+    "html": "<p>before</p>\n<p>after</p>\n"
+  },
+  {
+    "name": "comment-unclosed",
+    "requires": "full",
+    "markdown": "before\n<!-- hidden\nrest",
+    "html": "<p>before</p>\n"
+  },
+  {
+    "name": "comment-after-list",
+    "requires": "full",
+    "markdown": "- one\n<!-- hidden -->\nafter",
+    "html": "<ul>\n<li>one</li>\n</ul>\n<p>after</p>\n"
+  },
+  {
+    "name": "comment-literal-reduced",
+    "requires": "reduced",
+    "markdown": "<!-- hidden -->",
+    "html": "<p>&lt;!-- hidden --&gt;</p>\n"
+  },
+  {
+    "name": "link-reject-authority",
+    "requires": "authority-rejection",
+    "markdown": "[label](//example.test)",
+    "html": "<p>label</p>\n"
+  },
+  {
+    "name": "link-reject-backslash-authority",
+    "requires": "authority-rejection",
+    "markdown": "[label](/\\example.test)",
+    "html": "<p>label</p>\n"
+  },
+  {
+    "name": "link-reject-space-authority",
+    "requires": "authority-rejection",
+    "markdown": "[label]( //example.test)",
+    "html": "<p>label</p>\n"
+  },
+  {
+    "name": "link-reject-tab-authority",
+    "requires": "authority-rejection",
+    "markdown": "[label](/\t/example.test)",
+    "html": "<p>label</p>\n"
+  }
+]

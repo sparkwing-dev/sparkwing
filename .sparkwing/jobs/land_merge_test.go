@@ -3,11 +3,12 @@ package jobs
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 type landRemote struct {
@@ -37,7 +38,7 @@ func newLandRemote(t *testing.T) *landRemote {
 
 func (r *landRemote) git(dir string, args ...string) string {
 	r.t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -181,7 +182,7 @@ func TestLandStopsAfterThreeMergesWhenMainKeepsMoving(t *testing.T) {
 	if len(recheck.calls) != landMaxMerges {
 		t.Fatalf("re-checked %d times, want %d", len(recheck.calls), landMaxMerges)
 	}
-	if out, err := exec.Command("git", "-C", r.bare, "merge-base", "--is-ancestor", head.Commit, "main").CombinedOutput(); err == nil {
+	if out, err := testgit.Command("git", "-C", r.bare, "merge-base", "--is-ancestor", head.Commit, "main").CombinedOutput(); err == nil {
 		t.Fatalf("the branch reached main although every push was refused: %s", out)
 	}
 }
@@ -214,64 +215,66 @@ func changelogWith(pairs ...string) string {
 	return body + "\n## [v0.1.0] - 2026-01-01\n\n### Added\n\n- seed\n"
 }
 
-// safety: the real check-changelog and sync-docs scripts, so the test fails when
-// the --fix the land runs stops merging what a union merge repeats.
-func (r *landRemote) seedChangelogTooling() {
-	r.t.Helper()
-	files := map[string]string{
-		"CHANGELOG.md":          changelogWith(),
-		"pkg/docs/changelog.md": changelogWith(),
-		"docs/a.md":             "a\n",
-		"pkg/docs/mirror/a.md":  "a\n",
-		".gitattributes":        "CHANGELOG.md merge=union\npkg/docs/changelog.md merge=union\n",
-	}
-	for _, script := range []string{"check-changelog.sh", "sync-docs.sh"} {
-		body, err := os.ReadFile(filepath.Join("..", "..", "bin", script))
-		if err != nil {
-			r.t.Fatal(err)
-		}
-		files["bin/"+script] = string(body)
-	}
-	r.moveMain(files)
-	r.git(r.dev, "fetch", "--quiet", "origin")
-	r.git(r.dev, "reset", "--quiet", "--hard", "origin/main")
-}
-
-func TestLandMergesTheChangelogHeadingsAUnionMergeRepeats(t *testing.T) {
+func TestLandMergesIndependentReleaseFragments(t *testing.T) {
 	r := newLandRemote(t)
-	r.seedChangelogTooling()
-	r.commit(r.dev, map[string]string{"CHANGELOG.md": changelogWith("Added", "branch added", "Fixed", "branch entry"), "pkg/docs/changelog.md": changelogWith("Added", "branch added", "Fixed", "branch entry")}, "branch entry")
+	files := map[string]string{
+		"CHANGELOG.md": changelogWith(), "pkg/docs/changelog.md": changelogWith(),
+		"docs/migrations/_unreleased.md":            "# Unreleased migrations\n\nNo breaking changes so far.\n",
+		"pkg/docs/mirror/migrations/_unreleased.md": "# Unreleased migrations\n\nNo breaking changes so far.\n",
+		"design/rewrite/ORIENTATION.md":             "| Rule | Owner | Test |\n|---|---|---|\n",
+	}
+	for _, name := range []string{".gitattributes", "bin/sync-docs.sh"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = string(body)
+	}
+	r.commit(r.dev, files, "fragment tooling")
+	r.git(r.dev, "push", "--quiet", "origin", "HEAD:main")
+	r.git(r.other, "pull", "--quiet", "--ff-only")
+	entries := func(name string) map[string]string {
+		fragment := "### Fixed\n\n- **" + name + ":** Change\n"
+		migration := "## " + name + "\n\nUpgrade " + name + ".\n"
+		return map[string]string{
+			"docs/changes/" + name + ".md": fragment, "pkg/docs/mirror/changes/" + name + ".md": fragment,
+			"docs/migrations/unreleased/" + name + ".md": migration, "pkg/docs/mirror/migrations/unreleased/" + name + ".md": migration,
+			"design/rewrite/ORIENTATION.md": files["design/rewrite/ORIENTATION.md"] + "| " + name + " | owner | guard |\n",
+		}
+	}
+	r.commit(r.dev, entries("branch"), "branch entry")
 	head := r.head()
-	moved := r.moveMain(map[string]string{"CHANGELOG.md": changelogWith("Fixed", "main entry"), "pkg/docs/changelog.md": changelogWith("Fixed", "main entry")})
+	r.moveMain(entries("main"))
 	var recheck recordingRecheck
 	landed, err := landOnto(newTestContext(t), r.dev, head, recheck.run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := r.remoteMain(); got != landed.Commit {
-		t.Fatalf("origin main = %s, want the landed %s", short(got), short(landed.Commit))
+	if r.remoteMain() != landed.Commit {
+		t.Fatal("main did not advance")
 	}
-	if subject := r.git(r.dev, "log", "-1", "--format=%s", landed.Commit); subject != "chore(changelog): merge headings after main merge" {
-		t.Fatalf("landed commit subject = %q, want the changelog follow-up on the merge", subject)
+	body, err := readChangelog(r.dev)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if parents := r.git(r.dev, "rev-parse", landed.Commit+"^^2"); parents != moved {
-		t.Fatalf("the follow-up's parent merged %s, want main %s", short(parents), short(moved))
+	guide, err := readMigrationFile(r.dev, unreleasedGuideName)
+	if err != nil {
+		t.Fatal(err)
 	}
-	landedLog := r.git(r.dev, "show", landed.Commit+":CHANGELOG.md")
-	if issues, err := changelogRepeatedHeadings(r.dev); err != nil || issues != "" {
-		t.Fatalf("landed changelog still repeats a heading (%v):\n%s\n%s", err, issues, landedLog)
+	orientation := r.git(r.dev, "show", "HEAD:design/rewrite/ORIENTATION.md")
+	for _, name := range []string{"branch", "main"} {
+		if strings.Count(string(body), "**"+name+":**") != 1 || strings.Count(guide, "## "+name+"\n") != 1 || strings.Count(orientation, "| "+name+" |") != 1 {
+			t.Fatalf("lost or duplicated %s", name)
+		}
 	}
-	if !strings.Contains(landedLog, "branch entry") || !strings.Contains(landedLog, "main entry") {
-		t.Fatalf("landed changelog lost an entry:\n%s", landedLog)
+	if _, err := captureCmd(t.Context(), r.dev, "bash", "bin/sync-docs.sh", "--check"); err != nil {
+		t.Fatal(err)
 	}
-	if mirror := r.git(r.dev, "show", landed.Commit+":pkg/docs/changelog.md"); mirror != landedLog {
-		t.Fatalf("the mirror was not re-synced:\n%s", mirror)
+	if raw := r.git(r.dev, "show", "HEAD:CHANGELOG.md"); raw != strings.TrimSpace(changelogWith()) {
+		t.Fatal("aggregate changed")
 	}
 	if status := r.git(r.dev, "status", "--porcelain"); status != "" {
-		t.Fatalf("the checkout is dirty after the land: %q", status)
-	}
-	if len(recheck.calls) != 1 || !slices.Contains(recheck.calls[0], "CHANGELOG.md") {
-		t.Fatalf("re-checks = %v, want one covering the changelog", recheck.calls)
+		t.Fatalf("dirty after merge: %s", status)
 	}
 }
 
@@ -279,7 +282,7 @@ func TestLandPreconditionsRefuseABranchChangelogThatRepeatsAHeading(t *testing.T
 	r := newLandRemote(t)
 	r.commit(r.dev, map[string]string{"CHANGELOG.md": changelogWith("Added", "one", "Added", "two")}, "repeat a heading")
 	_, err := checkLandPreconditions(newTestContext(t), gitIn(r.dev), r.dev)
-	if err == nil || !strings.Contains(err.Error(), "check-changelog.sh --fix") {
-		t.Fatalf("err = %v, want the repeated heading refused with the --fix remedy", err)
+	if err == nil || !strings.Contains(err.Error(), "repeats a heading") {
+		t.Fatalf("err = %v, want the repeated heading refused with a heading diagnostic", err)
 	}
 }

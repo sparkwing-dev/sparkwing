@@ -117,7 +117,7 @@ func (op *Operator) NextActionsDispatch(ctx context.Context) (*ActionsDispatch, 
 		pending, err := scanActionsDispatch(tx.QueryRowContext(ctx, `SELECT `+actionsDispatchColumns+` FROM github_actions_dispatches WHERE state='requested' ORDER BY receipt LIMIT 1`))
 		if err == nil {
 			out = &pending
-			return takeActionsSendTx(ctx, tx, pending.Receipt)
+			return takeActionsSendTx(ctx, tx, pending.Team, pending.Receipt)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -150,7 +150,7 @@ func (op *Operator) NextActionsDispatch(ctx context.Context) (*ActionsDispatch, 
 			if !run.Request.Request.Placement.Active() || actionsForkWork(run) {
 				continue
 			}
-			waits, err := readPlacementWaitsTx(ctx, tx, k.team, run)
+			waits, err := readPendingPlacementWaitsTx(ctx, tx, k.team, run)
 			if err != nil {
 				return err
 			}
@@ -191,7 +191,7 @@ func (op *Operator) NextActionsDispatch(ctx context.Context) (*ActionsDispatch, 
 						return err
 					}
 					out = &d
-					return takeActionsSendTx(ctx, tx, d.Receipt)
+					return takeActionsSendTx(ctx, tx, d.Team, d.Receipt)
 				}
 			}
 		}
@@ -215,7 +215,7 @@ func (op *Operator) BeginActionsDispatch(ctx context.Context, d ActionsDispatch,
 		if err := lockClaimQueueTx(ctx, tx); err != nil {
 			return err
 		}
-		result, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='sending',workflow_sha=?,send_until=? WHERE receipt=? AND state='sending' AND workflow_sha='' AND send_until>? AND `+actionsConsentSQL+` AND EXISTS (SELECT 1 FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at AND n.status='pending' AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.status IN ('pending','running'))`, sha, tx.now(ctx).Add(time.Minute).UnixNano(), d.Receipt, tx.now(ctx).UnixNano())
+		result, err := tx.execContext(ctx, `UPDATE github_actions_dispatches AS d SET state='sending',workflow_sha=?,send_until=? WHERE team=? AND receipt=? AND state='sending' AND workflow_sha='' AND send_until>? AND `+actionsConsentSQL+` AND EXISTS (SELECT 1 FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at AND n.status='pending' AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.status IN ('pending','running'))`, sha, tx.now(ctx).Add(time.Minute).UnixNano(), d.Team, d.Receipt, tx.now(ctx).UnixNano())
 		if err != nil {
 			return err
 		}
@@ -275,11 +275,6 @@ func (op *Operator) FinishActionsCancellation(ctx context.Context, receipt strin
 	return err
 }
 
-func actionsReceiptScopeSQL(q *claimSQL, push, alias string) string {
-	b := func(name string) string { return q.at(push, name) }
-	return `EXISTS (SELECT 1 FROM github_actions_dispatches d WHERE d.receipt=` + b("receipt") + ` AND d.team=` + alias + `.team AND d.run_id=` + alias + `.run_id AND d.node_id=` + alias + `.node_id AND ` + alias + `.kind='node' AND d.state IN ('sending','accepted','uncertain') AND d.provider_run_id=` + b("workflow_run_id") + ` AND d.provider_attempt=` + b("workflow_run_attempt") + ` AND ` + actionsConsentSQL + ` AND EXISTS (SELECT 1 FROM nodes n WHERE n.team=d.team AND n.run_id=d.run_id AND n.node_id=d.node_id AND COALESCE(n.queue_started_at,n.ready_at)=d.queue_started_at))`
-}
-
 // RetryActionsDispatch invalidates a failed receipt before an audited operator opens a new generation.
 func (op *Operator) RetryActionsDispatch(ctx context.Context, a capability.Authorized, team Team, receipt, reason string) error {
 	if strings.TrimSpace(reason) == "" {
@@ -310,7 +305,7 @@ func (op *Operator) RetryActionsDispatch(ctx context.Context, a capability.Autho
 		if available != 1 {
 			return bindingRefusal()
 		}
-		if _, err = tx.execContext(ctx, `UPDATE github_actions_dispatches SET state='cancelled',reason='operator retry superseded receipt' WHERE receipt=?`, receipt); err != nil {
+		if _, err = tx.execContext(ctx, `UPDATE github_actions_dispatches SET state='cancelled',reason='operator retry superseded receipt' WHERE team=? AND receipt=?`, team, receipt); err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT approval_id,workflow_ref FROM github_actions_approvals WHERE team=? AND repository_id=? AND workflow=? AND runner=?`, d.Team, d.RepositoryID, d.Workflow, d.Runner).Scan(&d.ApprovalID, &d.WorkflowRef); err != nil {
@@ -380,7 +375,7 @@ func actionsImageOS(image string) string {
 
 func checkReceiptEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	p := spec.Binding.Push
-	d, err := scanActionsDispatch(tx.QueryRowContext(ctx, `SELECT `+actionsDispatchColumns+` FROM github_actions_dispatches d WHERE receipt=? AND `+actionsConsentSQL, p.Receipt))
+	d, err := scanActionsDispatch(tx.QueryRowContext(ctx, `SELECT `+actionsDispatchColumns+` FROM github_actions_dispatches d WHERE team=? AND receipt=? AND `+actionsConsentSQL, spec.Team, p.Receipt))
 	if err != nil {
 		return bindingRefusal()
 	}
@@ -423,7 +418,6 @@ func actionsPlacementWaitTx(ctx context.Context, tx *storeTx, team Team, run Run
 		d, err := scanActionsDispatch(tx.QueryRowContext(ctx, `SELECT `+actionsDispatchColumns+` FROM github_actions_dispatches WHERE team=? AND run_id=? AND node_id=? AND queue_started_at=? ORDER BY generation DESC LIMIT 1`, team, run.ID, wait.JobID, wait.ReadyAt.UnixNano()))
 		if err == nil {
 			tier.Unavailable = ""
-			tier.Dispatch = &d
 			if d.State == "refused" || d.State == "cancelled" {
 				tier.Unavailable = d.Reason
 			}
@@ -458,8 +452,8 @@ func actionsPlacementWaitTx(ctx context.Context, tx *storeTx, team Team, run Run
 	return nil
 }
 
-func takeActionsSendTx(ctx context.Context, tx *storeTx, receipt string) error {
-	_, err := tx.execContext(ctx, `UPDATE github_actions_dispatches SET state='sending',send_until=? WHERE receipt=? AND state='requested'`, tx.now(ctx).Add(5*time.Minute).UnixNano(), receipt)
+func takeActionsSendTx(ctx context.Context, tx *storeTx, team Team, receipt string) error {
+	_, err := tx.execContext(ctx, `UPDATE github_actions_dispatches SET state='sending',send_until=? WHERE team=? AND receipt=? AND state='requested'`, tx.now(ctx).Add(5*time.Minute).UnixNano(), team, receipt)
 	return err
 }
 

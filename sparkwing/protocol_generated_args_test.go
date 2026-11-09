@@ -22,6 +22,7 @@ func (f generatedArgsFixture) Plan(_ context.Context, p *Plan, _ generatedArgsIn
 }
 
 func TestGeneratedJobArguments(t *testing.T) {
+	isolateRegistry(t)
 	for _, recovery := range []bool{false, true} {
 		kind := "job"
 		if recovery {

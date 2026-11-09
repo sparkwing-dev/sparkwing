@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
@@ -75,7 +77,7 @@ func realBuildPolicyFixture(t *testing.T) string {
 	writeInput(t, dir, "main.go", []byte("package main\nimport (_ \"embed\";\"fmt\")\n//go:embed payload\nvar payload string\nfunc main(){fmt.Print(payload)}\n"))
 	writeInput(t, dir, "payload", []byte("first"))
 	writeInput(t, dir, ".gitignore", []byte("payload\n"))
-	command := exec.CommandContext(t.Context(), "git", "-C", dir, "init", "--quiet")
+	command := testgit.CommandContext(t.Context(), "git", "-C", dir, "init", "--quiet")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, output)
 	}

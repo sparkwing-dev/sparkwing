@@ -2,10 +2,11 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
@@ -13,7 +14,7 @@ import (
 func enterScaffoldTestRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
-	if out, err := exec.Command("git", "-C", repo, "init", "--quiet").CombinedOutput(); err != nil {
+	if out, err := testgit.Command("git", "-C", repo, "init", "--quiet").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	old, err := os.Getwd()
@@ -32,7 +33,7 @@ func enterScaffoldTestRepo(t *testing.T) string {
 
 func checkPipelineBinaryIgnored(t *testing.T, repo string) {
 	t.Helper()
-	if out, err := exec.Command("git", "-C", repo, "check-ignore", "-v", ".sparkwing/sparkwing-pipeline").CombinedOutput(); err != nil {
+	if out, err := testgit.Command("git", "-C", repo, "check-ignore", "-v", ".sparkwing/sparkwing-pipeline").CombinedOutput(); err != nil {
 		t.Fatalf("pipeline binary is not ignored: %v: %s", err, out)
 	} else if !strings.Contains(string(out), ".sparkwing/.gitignore:") {
 		t.Fatalf("pipeline binary ignored by wrong source: %s", out)

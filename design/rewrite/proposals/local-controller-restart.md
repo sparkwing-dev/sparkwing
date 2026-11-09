@@ -271,17 +271,18 @@ Detached startup must also escape the controller's service lifetime:
   [launchd agent](https://github.com/apple-oss-distributions/launchd/blob/main/man/launchd.plist.5).
   It has its own process group because launchd cleans up a stopped agent's
   group. Stopping the controller agent must not unload runner agents.
-- **Windows:** start each runner instance through SCM as a separate service,
-  outside any controller-owned Job Object. Controller stop must not stop runner
-  services or close their handles. The runner owns its job-tree handles because
+- **Windows:** start each runner instance detached as the same user, with
+  independent stdio and `CREATE_BREAKAWAY_FROM_JOB`, outside any controller-owned
+  Job Object. An enclosing Job Object must allow breakaway. Refuse startup when
+  it does not, because a runner inside that object would die with the controller.
+  The controller records process birth and executable identity, reuses a live
+  matching runner after restart, and starts a successor after exit or build
+  replacement. The runner owns its job-tree handles because
   [`KILL_ON_JOB_CLOSE`](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
-  can kill every process in the object. A roll drains through the application
-  API before stopping the old service. An explicit runner service stop drains
-  on a worker thread, reports `STOP_PENDING` with
-  [checkpoints and wait hints](https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-service_status),
-  then reports `STOPPED` after acknowledgements. Its
-  [control handler](https://learn.microsoft.com/en-us/windows/win32/services/service-control-handler-function)
-  returns within 30 seconds. Controller restart never sends that stop request.
+  can kill every process in the object. `daemon stop` drains through the local
+  API before stopping the controller. Controller restart never requests that
+  drain. Controllers start on demand on Windows. Native login-service
+  installation remains separate work.
 
 ## Dashboard, CLI ownership and landing
 

@@ -64,7 +64,7 @@ func Registry() []Command {
 			{Name: "tail", Argument: "N"},
 			{Name: "follow", Short: "f"},
 		}},
-		{Path: "sparkwing dashboard open", Rules: []string{"Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket and carries a one-time code in its fragment that works once, expires after 60 seconds and only at the dashboard address it names. The page exchanges it for a session token kept in localStorage and sent as an Authorization bearer header; it lasts at most 30 days, and Log out or any controller restart revokes it. No cookie is set or accepted; every write also needs the dashboard's own Origin. The local socket needs no session."}, Flags: []Flag{}},
+		{Path: "sparkwing dashboard open", Rules: []string{"Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket and carries a one-time code in its fragment that works once, expires after 60 seconds and only at the dashboard address it names. The page exchanges it for a session token kept in localStorage and sent as an Authorization bearer header; it lasts at most 30 days, and Log out or any controller restart revokes it. No cookie is set or accepted; every write also needs the dashboard's own Origin. The local socket needs no session. With --host, mint for the exact DNS name in dashboard.allowed_hosts using HTTPS; the proxy keeps the loopback bind and supplies no authentication."}, Flags: []Flag{{Name: "host", Argument: "NAME"}}},
 		{Path: "sparkwing dashboard status", Flags: []Flag{}},
 		{Path: "sparkwing debug", Flags: []Flag{}},
 		{Path: "sparkwing debug attach", Flags: []Flag{
@@ -260,7 +260,6 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "detach"},
 			{Name: "working-tree"},
-			{Name: "allow-secret-file", Argument: "PATH", Repeatable: true, CommaList: true},
 			{Name: "trusted"},
 			{Name: "runner", Argument: "RUNNER"},
 			{Name: "reason", Argument: "TEXT"},
@@ -389,13 +388,12 @@ func Registry() []Command {
 			"--agent NAME records the coding agent that starts the run on your behalf, such as claude-code:land-agent, and --agent none records none. Without the flag, SPARKWING_AGENT applies, then a detected coding-agent environment (Claude Code, Codex, Gemini CLI). The label is sealed with the request, kept by retries and publication, and shown in run views; it never grants or limits authority.",
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
 			"-o applies to foreground and detached runs, their help and their errors; it beats SPARKWING_LOG_FORMAT, then terminal detection.",
-			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.",
+			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names and ranges selecting no steps in a job fail before work starts. Bounds follow dependency paths, not declaration order; omit both to run parallel steps. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.",
 			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
 		}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
 			{Name: "sw-route", Argument: "ROUTE", Values: []string{"local", "cloud"}, Meaning: "Select local execution or direct Cloud execution for this invocation."},
 			{Name: "profile", Argument: "NAME", Requires: []string{"sw-route"}, Meaning: "Cloud connection profile; requires --sw-route cloud."},
-			{Name: "allow-secret-file", Argument: "PATH", Repeatable: true, CommaList: true, Requires: []string{"sw-route"}, Meaning: "Upload this repository-relative file even though its name or content looks like a secret; the secret-value scan still applies. Requires --sw-route cloud."},
 			{Name: "agent", Argument: "NAME"},
 			{Name: "sw-cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
 			{Name: "sw-pause-before", Argument: "JOB", Repeatable: true, CommaList: true},
@@ -586,6 +584,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing runs retry", Rules: []string{
 			"Select --failed to reuse successful jobs or --all-jobs to execute the sealed plan again. Retry preserves the source request, plan, source trust and actor. The controller records the retrier separately.",
+			"Reuse requires readable source results in the retry's data scope. Missing, expired or host-confined results can make a successful job run again. Run status lists a job in `retry.reused` only after its source result has been materialized without an execution attempt.",
 			"Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.",
 			"--reason records why the retry should pass on the new run, shown by runs list and runs status. It is required when an agent retries: the CLI detects Claude Code, Codex and Gemini CLI, or reads --agent or SPARKWING_AGENT, and the controller refuses an agent's retry without a reason. --agent none opts out.",
 		}, Flags: []Flag{

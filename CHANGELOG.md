@@ -20,19 +20,38 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.71.0] - 2026-11-08
 ### Changed
 
-- **controller (Breaking):** The schema baseline advances to version 35, adding durable GitHub Actions approvals and dispatch receipts, upgrading recognized schema 34 stores in place. Explicit repository Actions tiers require a receipt from the approved workflow on a GitHub-hosted image. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-35).
+- **controller (Breaking):** The schema baseline advances to version 36, adding direct team foreign keys to Actions approvals and dispatch receipts. Recognized schema 35 stores upgrade in place and retain their rows. See [the migration guide](docs/migrations/v0.71.0.md#upgrade-the-store-in-place-to-schema-baseline-36).
+
+- **CLI (Breaking):** Cloud source uploads and working-tree triggers read `allow_secret_files` from `.sparkwing/sparkwing.yaml`. The `--allow-secret-file` flag is removed. Literal paths allow public credential-shaped fixtures through the file scan; secret-value scanning still applies. See [the migration guide](docs/migrations/v0.71.0.md#declare-upload-allowances-in-repository-config).
+
+- **local controller:** Windows queued work runs in a detached same-user runner that survives controller replacement. A matching live runner is reused; a new build starts a successor while held work drains. The enclosing Job Object must permit breakaway. `daemon stop` drains through the local API. See [the migration guide](docs/migrations/v0.71.0.md#windows-local-runners-survive-controller-replacement).
+
+- **controller (Breaking):** The schema baseline advances to version 35, adding durable GitHub Actions approvals and dispatch receipts, upgrading recognized schema 34 stores in place. Explicit repository Actions tiers require a receipt from the approved workflow on a GitHub-hosted image. See [the migration guide](docs/migrations/v0.71.0.md#upgrade-the-store-in-place-to-schema-baseline-35).
 
 ### Fixed
 
-- **controller + runner:** Reduce duplicate authorization reads and JSON object parsing work when following execution snapshots
+- **Release downloads:** Installer, updater, engine and runner downloads fall back to GitHub’s asset API after a release-route server error or timeout, preserving signature and checksum verification.
+- **template verification:** Render local sparks-core template text and verification manifests when a checkout is discovered, and report the selected source.
+- **cli:** Reject step ranges that select no steps in a job instead of reporting success with every step skipped
+- **build-images:** Source-built controller and runner images record the clean full Git HEAD, version and source URL in OCI labels so deployment can verify their revision.
 
-- **local execution:** Avoid rehashing unchanged engine digests across installed and retained paths, and compare pinned runner bytes without a second SHA-256 pass.
+- **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller’s configuration and index untouched.
+- **local execution:** Cancelled runs finish as their holders settle. The owner no longer retries reconciliation of cancelling jobs, which could fail authentication and leave completion waiting for the reaper.
+- **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
+
+- **Landing:** Verification reads the review record saved in Git’s common directory, so missing output blobs cannot discard a completed review. Missing or invalid review files still refuse landing.
+- **Local execution:** Run events show CPU admission queue reasons, queue positions and wait durations. Job status explains a live CPU admission wait until capacity is granted.
+- **local execution:** Avoid rehashing unchanged engine digests across installed and retained paths. Reuse retained runner images without staging another executable, while checking every source and retained byte against the accepted engine digest.
+- **local execution:** Compute local Go replacement cache keys with two source listings on Unix when directories stay unchanged. Directory change times guard files created during enumeration; ignored files and embedded dot/underscore assets keep their existing rules.
 
 - **releases:** Prepare SDK pins with the cut, preserve unrelated staged files, record a durable release workflow handoff, and retry owned SDK landings.
 
 ### Added
+
+- **local dashboard:** Tailscale Serve can proxy the loopback dashboard through exact `dashboard.allowed_hosts` DNS names. `sparkwing dashboard open --host NAME` prints an HTTPS sign-in link bound to that origin. Browser sessions still require the socket-minted code.
 
 - **scheduling:** GitHub Actions fallback dispatches one workflow per waiting job generation after earlier placement holds open. Team-approved workflows and images use receipt-bound OIDC credentials limited to that job's original trust. Status shows refused and uncertain sends, cancellation cancels known provider runs, and only an audited operator retry opens a new dispatch generation. Each installation must approve the App's Actions write permission. The approved ref must be a dedicated protected branch, never the default branch or a tag, and fork pull requests are never dispatched. See [on-demand fallback](docs/github-actions-runners.md#on-demand-fallback).
 
@@ -90,10 +109,13 @@ unlock.
 
 ### Fixed
 
+- Jobs cancelled while queued for machine capacity report cancelled instead of an internal failure, without starting an attempt.
+
 - **local dashboard:** job CPU and memory include commands the host runs for the SDK, which previously escaped the job's measurement.
 - **Scaffolding:** Generated pipelines select the SDK published with this release.
 
 - **local runner:** Held jobs reconnect after controller restarts because cancelled admission polls return an unavailable response instead of an empty success.
+- **tests:** Git fixtures scrub inherited repository bindings, so running repository tests from a Git hook leaves the caller's configuration and index untouched
 
 - **controller:** Run listings load at most the requested page plus one lookahead row per batch, reducing database work for small pages while preserving filters and stable cursors.
 
@@ -154,6 +176,8 @@ unlock.
   Home and team pages show the next step without sending team requests that return Permission denied.
 
 ### Docs
+
+- **controller:** Add SQLite and PostgreSQL backup and recovery procedures, controller-first upgrades, configured-data preservation and Cloud roll-forward and RDS recovery
 
 - **auth:** Explain that browser sign-out ends `sparkwing login` tokens and enrollment cookies should come from a separate private browser window
 

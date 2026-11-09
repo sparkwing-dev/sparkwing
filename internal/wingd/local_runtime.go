@@ -284,7 +284,7 @@ func (r *localRuntime) bindDashboard(ctx context.Context, session *localRuntimeS
 		close(ready)
 		return
 	}
-	session.logins.serving("http://" + ln.Addr().String())
+	session.logins.serving("http://"+ln.Addr().String(), settings.AllowedHosts)
 	handler := guardDashboard(controller.HTTP(), ln.Addr().String(), session.logins, settings.ReadOnly)
 	workers.Go(func() {
 		defer func() {
@@ -453,5 +453,5 @@ func guardDashboard(local localhostwire.LocalHTTP, addr string, logins *dashboar
 			}
 		})
 	}
-	return originguard.Guard(logins.gate(dashboard, local.Shell), originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), nil))
+	return originguard.Guard(logins.gate(dashboard, local.Shell), originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), logins.allowedOrigins()))
 }

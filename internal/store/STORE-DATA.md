@@ -9,7 +9,7 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 35. Both dialects are translated from `schema.sql`.
+The baseline version is 37. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
@@ -31,7 +31,11 @@ one job queue start and placement generation to its workflow revision and provid
 run. Sending is persisted before HTTP. Expired sender leases become uncertain,
 never another send. An operator retry invalidates the earlier receipt and records
 an audit mutation before opening a new placement generation. Receipt credentials
-have only node-claim authority and keep the original workload's provenance. A step adds a
+have only node-claim authority and keep the original workload's provenance. Schema 36
+adds direct team foreign keys to both Actions tables. SQLite copies all columns
+inside the upgrade transaction because it cannot add foreign keys. PostgreSQL
+adds the constraints in place. Schema 37 drops the unused team build-trust table. The schema 35 digest remains a recognized upgrade
+source. A step adds a
 column at the end of its table so the upgraded schema matches a fresh one.
 Other versions and digests are refused unchanged. Any reset must preserve secrets,
 teams and memberships, tokens, runner registrations, GitHub App installations,
@@ -239,12 +243,6 @@ Their consumer cutovers and old cache RPC client removal remain open.
 `Operator.ConfigureDeployment` persists checked JSON in the final settings table. Negative
 values and sealed rows refuse updates. The policy survives reopening, and an
 unreadable slot source cannot open the controller's signup gate.
-
-Build trust uses `Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds`.
-Their raw Store methods are removed. Missing policy defaults to false, invalid
-flags return an error, and writes cannot change another tenant's opt-in.
-Policy survives reopening and cannot change persisted upload provenance.
-Execution still needs W7's binary check and W3's adapter.
 
 Financial writes use the same transaction as the state change that caused them.
 Unpriced work is refused by the claim transaction without changing the job,
@@ -469,7 +467,11 @@ and through the transaction that owns receipt changes.
 
 `ReadableBlobs` returns each readable digest once in request order, including
 large requests. It checks the budget after its final read and returns an empty
-presence result with `blob.ErrBudget` when the deadline has passed.
+presence result with `blob.ErrBudget` when the deadline has passed. The HTTP
+route requires an explicit deadline after authentication. Its signer bounds
+work by the earlier of that deadline and the server's 30-second write timeout,
+then rechecks cancellation after its final metadata read before returning
+any presence result.
 
 `MarkBlobTombstones` and `CollectBlobTombstones` run in the controller's
 maintenance pass. Record expiry and reachability GC replace `ExpiredOutputRuns`,
@@ -872,6 +874,8 @@ because its funding checks acquire the ledger.
 Owner claims and reapers use the same helper to lock the team before trigger or
 evaluation rows. Raw owner-row locks are confined to `lock_order.go` by the guard. Work locks
 reuse their transaction's held keys. New work locks after the ledger are refused.
+Node claims lock the controller's complete capacity work set before award billing
+locks the ledger, including sibling plan holders and waiters.
 Snapshot reads neither acquire team or work locks nor register writer lock
 bookkeeping. Global launcher snapshots may visit teams in observation or
 capability order without imposing the writer's sorted acquisition order.
@@ -1017,3 +1021,18 @@ and reservation and include only `unit_kind='node'`, excluding plan/eval
 preparation. Both upsize windows count execution starts, excluding granted awards
 that never start. Retries retain separate reservation facts. These fields belong to
 schema baseline 28, with no forward migration.
+
+## Latest-run selection
+
+`latestRunQuery` owns selection for pipeline observations, controller reference
+lookups, CLI repository status, and dashboard pipeline summaries. Observation
+ranking uses start time (creation time if unstarted), run number, then run ID.
+The caller supplies the authorized candidate set before ranking. Pipeline
+summaries include started runs and merge queued triggers separately.
+
+The same owner advances and reads success pins for declared blob references.
+Pins retain the newest non-publish success by finish time, retaining the existing
+pin on a tie. Their key remains team and pipeline. Retention protects that pin.
+Default reference lookups still require verified default-branch provenance,
+and own-pipeline lookups stay within the reader's sealed repository. Proven
+lookups still require the reader's sealed commit and trusted execution hosts.

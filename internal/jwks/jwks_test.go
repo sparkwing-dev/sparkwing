@@ -81,12 +81,14 @@ func TestKeySetServesCachedKeysWhileARefetchIsInFlight(t *testing.T) {
 		var claims map[string]any
 		done <- keys.Verify(t.Context(), good, &claims)
 	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatalf("cached key during refetch = %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("a cached key waited on the provider fetch")
 	}
 	close(release)

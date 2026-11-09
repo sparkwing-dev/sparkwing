@@ -58,27 +58,18 @@ func forceRemove(name string) {
 	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
 }
 
-func waitForContainerStopped(t *testing.T, name, cause string) {
+func assertContainerStopped(t *testing.T, name, cause string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
-	poll := time.NewTicker(100 * time.Millisecond)
-	defer poll.Stop()
-	for {
-		running, err := containerRunning(ctx, name)
-		if err != nil {
-			forceRemove(name)
-			t.Fatalf("inspect container %s after %s: %v", name, cause, err)
-		}
-		if !running {
-			return
-		}
-		select {
-		case <-poll.C:
-		case <-ctx.Done():
-			forceRemove(name)
-			t.Fatalf("container %s still running after %s", name, cause)
-		}
+	running, err := containerRunning(ctx, name)
+	if err != nil {
+		forceRemove(name)
+		t.Fatalf("inspect container %s after %s: %v", name, cause, err)
+	}
+	if running {
+		forceRemove(name)
+		t.Fatalf("container %s still running after %s returned", name, cause)
 	}
 }
 
@@ -191,15 +182,13 @@ func TestWithServices_ReadyCmdSucceeds(t *testing.T) {
 		ReadyCmd:     "wget -q -O /dev/null http://localhost/",
 		ReadyTimeout: 15 * time.Second,
 	}
-	start := time.Now()
-	err := WithServices(helperContext(t), []Service{svc}, func(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(helperContext(t), 20*time.Second)
+	defer cancel()
+	err := WithServices(ctx, []Service{svc}, func(ctx context.Context) error {
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("WithServices: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 20*time.Second {
-		t.Fatalf("ReadyCmd path took %s, suspiciously slow", elapsed)
 	}
 }
 
@@ -249,7 +238,7 @@ func TestWithServices_PanicStillCleansUp(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never captured the container name")
 	}
-	waitForContainerStopped(t, capturedName, "panic through WithServices")
+	assertContainerStopped(t, capturedName, "panic through WithServices")
 }
 
 func TestWithServices_CtxCancelCleansUp(t *testing.T) {
@@ -276,7 +265,7 @@ func TestWithServices_CtxCancelCleansUp(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never captured container")
 	}
-	waitForContainerStopped(t, capturedName, "context cancellation")
+	assertContainerStopped(t, capturedName, "context cancellation")
 }
 
 func TestWithServices_ConcurrentNoCollision(t *testing.T) {
@@ -370,6 +359,7 @@ esac
 	}
 	for name, run := range map[string]func(*testing.T){
 		"return": TestWithServices_StartAndCleanup,
+		"ready":  TestWithServices_ReadyCmdSucceeds,
 		"panic":  TestWithServices_PanicStillCleansUp,
 		"cancel": TestWithServices_CtxCancelCleansUp,
 	} {

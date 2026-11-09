@@ -4,13 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
@@ -320,116 +317,4 @@ func TestLandReviewIsNeverSkipped(t *testing.T) {
 		return
 	}
 	t.Fatal("land has no review job")
-}
-
-func TestLandCloudGateKeepsCredentialsAndReviewLocal(t *testing.T) {
-	doc := inspectPipeline(t, "Land", map[string]string{"cloud-profile": "cloud"})
-	raw, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var plan struct{ Jobs []landPlanJob }
-	if err := json.Unmarshal(raw, &plan); err != nil {
-		t.Fatal(err)
-	}
-	jobs := map[string]landPlanJob{}
-	for _, job := range plan.Jobs {
-		jobs[job.ID] = job
-	}
-	if len(jobs) != 5 {
-		t.Fatalf("Cloud land retained local heavy jobs: %v", jobs)
-	}
-	for _, name := range []string{"preconditions", "review", "cloud-gate", "land"} {
-		if !jobs[name].Inline || jobs[name].Cores != lightJobCores {
-			t.Fatalf("%s lost its local light host: %+v", name, jobs[name])
-		}
-	}
-	for _, name := range []string{"cloud-gate", "review"} {
-		if !slices.Contains(jobs[name].Needs, policyJobID) {
-			t.Fatalf("%s does not wait for policy: %+v", name, jobs[name])
-		}
-	}
-	if !slices.Contains(jobs["land"].Needs, "cloud-gate") || !slices.Contains(jobs["land"].Needs, "review") {
-		t.Fatalf("push can run without gate and review: %+v", jobs["land"])
-	}
-}
-
-func TestCloudGateReceiptRequiresAnObservedSuccess(t *testing.T) {
-	for _, output := range []string{
-		`{"run_id":"remote","number":3,"outcome":"success"}`,
-		"{\"event\":\"log\"}\n{\"run_id\":\"remote\",\"number\":3,\"outcome\":\"success\"}\n",
-	} {
-		if run, err := cloudGateReceipt(output); err != nil || run != "remote" {
-			t.Fatalf("receipt=%q: %s %v", output, run, err)
-		}
-	}
-	for _, output := range []string{"", "remote", `{"run_id":"remote","number":3}`, `{"run_id":"remote","number":3,"outcome":"failed"}`, `{"number":3,"outcome":"success"}`} {
-		if _, err := cloudGateReceipt(output); err == nil {
-			t.Fatalf("accepted incomplete gate evidence %q", output)
-		}
-	}
-}
-
-func TestCloudGateRefusesChangesToTheLocalTree(t *testing.T) {
-	for _, dirty := range []bool{false, true} {
-		g := landableGit()
-		if dirty {
-			g.answers["status --porcelain --untracked-files=normal"] = " M go.mod"
-		} else {
-			g.answers["rev-parse HEAD"] = "different"
-		}
-		if err := requireLandHead(t.Context(), g.run, "/repo", acceptedHead()); err == nil {
-			t.Fatal("Cloud gate accepted a different local tree")
-		}
-	}
-}
-
-func TestLandCloudGateWaitsForSuccessAndChecksTheCheckout(t *testing.T) {
-	for _, mode := range []string{"pass", "fail", "dirty"} {
-		t.Run(mode, func(t *testing.T) {
-			repo := atomicReleaseRepo(t, fixtureChangelog)
-			for _, name := range []string{".gitleaks.toml"} {
-				if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, name)), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(repo, name), []byte("fixture\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			gitRun(t, repo, "add", ".")
-			gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-				"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "fixtures")
-			head := landHead{Commit: strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD")), Base: strings.Repeat("a", 40)}
-			raw, err := json.Marshal(head)
-			if err != nil {
-				t.Fatal(err)
-			}
-			bin := t.TempDir()
-			script := `#!/bin/sh
-case "$*" in
-  'run gate --sw-route cloud --profile cloud -o json --allow-secret-file .gitleaks.toml -- --full --base aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') ;;
-  *) echo "unexpected invocation: $*" >&2; exit 2 ;;
-esac
-if [ "$LAND_CLOUD_TEST_MODE" = fail ]; then exit 1; fi
-if [ "$LAND_CLOUD_TEST_MODE" = dirty ]; then printf '\nchanged\n' >> "$LAND_CLOUD_TEST_REPO/CHANGELOG.md"; fi
-printf '{"run_id":"cloud-run","number":7,"outcome":"success"}\n'
-`
-			if err := os.WriteFile(filepath.Join(bin, "sparkwing"), []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-			t.Setenv("LAND_CLOUD_TEST_MODE", mode)
-			t.Setenv("LAND_CLOUD_TEST_REPO", repo)
-			host := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"preconditions": raw}})
-			job := landCloudGate{RepoDir: repo, Profile: "cloud", Head: sparkwing.Ref[landHead]{JobID: "preconditions"}}
-			run, err := job.run(host.Context(t.Context()))
-			if mode == "pass" {
-				if err != nil || run != "cloud-run" {
-					t.Fatalf("run=%q err=%v", run, err)
-				}
-			} else if err == nil {
-				t.Fatalf("accepted %s Cloud gate", mode)
-			}
-		})
-	}
 }

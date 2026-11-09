@@ -25,6 +25,17 @@ func (c *engineClient) ListRuns(ctx context.Context, query controllerwire.RunQue
 	return result, err
 }
 
+// LatestPipeline reads the newest observation in the selected repositories.
+func (c *engineClient) LatestPipeline(ctx context.Context, pipeline string, repositories []string) (controllerwire.LatestRun, error) {
+	var result controllerwire.LatestRun
+	if !validSelector(pipeline) || len(repositories) == 0 {
+		return result, &apierr.Error{Code: apierr.BadRequest, Message: "latest pipeline observation requires a pipeline and repositories"}
+	}
+	params := url.Values{"repo": repositories, "from_any_run": {"true"}, "status": {"pending,running,success,dry_run,failed,cancelled"}}
+	err := c.request(ctx, "GET", "/api/v1/pipelines/{name}/latest", "/api/v1/pipelines/"+url.PathEscape(pipeline)+"/latest?"+params.Encode(), "", nil, &result)
+	return result, err
+}
+
 func runQueryParams(query controllerwire.RunQuery) (url.Values, error) {
 	if query.Limit < 1 || query.AfterNumber < 0 || query.ParentRunID != "" && !validSelector(query.ParentRunID) {
 		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "run page requires a positive limit, nonnegative run number and valid parent selector"}

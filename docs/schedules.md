@@ -142,13 +142,19 @@ An API request with an unknown schedule write mode returns HTTP 400.
 Local installation records the selected declarations and captured environment
 identity durably. Proofs and later pin changes use that captured environment.
 Environment values stay in private host storage and do not appear in schedule
-views. Installation pins a proved binary unless `--unpinned` is selected. Linux and macOS managed timers are
-intended to invoke the stable hidden `sparkwing __tick` entrypoint and start the
-local controller on demand. Windows schedules are intended to run through that
-controller. Managed-unit refresh and native timer integration remain part of
-the rewrite. Reinstall units that still invoke the removed `crons` command.
+views. Installation pins a proved binary unless `--unpinned` is selected.
+Linux and macOS managed timers invoke the stable hidden `sparkwing __tick` entrypoint and start the local
+controller on demand. Windows installation records schedules, but automatic
+schedule evaluation is unavailable. Run them explicitly with
+`sparkwing schedules run --profile= --schedule NAME`.
+`sparkwing update` refreshes managed units. Reinstall units that still invoke
+the removed `crons` command with `sparkwing schedules install`.
 
 <!-- design:end -->
+
+On Linux, a controller started by a systemd tick runs in a separate transient
+scope, so it survives the tick without remaining in the timer's cgroup. If the
+scope cannot start, the tick starts the controller directly and keeps firing.
 
 Local schedule health reads the native timer registration and its activation
 state from systemd or launchd. `--no-timer` leaves automatic firing disabled
