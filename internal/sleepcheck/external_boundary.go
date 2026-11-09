@@ -27,6 +27,11 @@ type sourcePosition struct {
 
 var approvedExternalBoundaries = []externalBoundary{
 	{
+		file: "tests/acceptance/artifacts_cli_e2e_test.go", function: "TestArtifactsCLIRealMembersAndInterrupt",
+		duration: "10 * time.Second",
+		marker:   "// sleepcheck:external-boundary SIGINT must unwind the real streaming CLI process",
+	},
+	{
 		file: "tests/acceptance/local_features_e2e_linux_test.go", function: "await",
 		duration: "25 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary real CLI processes and filesystem markers need a paced poll",

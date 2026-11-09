@@ -46,6 +46,8 @@ unlock.
 
 ### Fixed
 
+- **CLI:** Remove partial artifact downloads when Ctrl-C interrupts the transfer.
+
 - **Local onboarding:** the welcome card calls out the initial commit, and the quick start explains run inspection, managed schedules and the daemon-owned dashboard.
 - **cli:** Show one admission-wait progress stream with holder charges, held and free capacity, external load and expected clear time. Print updates only for material queue changes at increasing intervals.
 - **template verification:** Accept unused failure recovery after a successful deploy. Skipped dry-run bodies and steps still prevent reusable proof.

@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -32,6 +34,8 @@ func runRunsArtifacts(ctx context.Context, inv clisurface.Invocation) error {
 	if err := validateRunArtifacts(inv); err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	options, closeTransport, err := controllerOptions(ctx, inv.Value("profile"))
 	if err != nil {
 		return observationError(err)

@@ -33,6 +33,7 @@ with `saved_to` in JSON, or its destination in plain output.
 Downloads select an exact path from the job's committed manifest, verify its
 size and digest, and refuse an existing destination. Downloads stay in a temporary
 file beside the destination until verification succeeds, then rename into place.
+Ctrl-C cancels the transfer and removes the temporary file.
 The destination's parent must exist. An unfinished job or an absent or expired
 manifest lists no files.
 A missing or corrupt retained manifest fails listing. Missing or corrupt file
