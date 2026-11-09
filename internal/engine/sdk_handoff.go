@@ -70,20 +70,35 @@ func WriteSDKHandoff(dir string, request SDKInstallRequest, environment procenv.
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		return ""
 	}
-	return path
+	return sdkHandoffSeal(body, path)
+}
+
+func sdkHandoffSeal(body []byte, path string) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:]) + ":" + path
+}
+
+func sdkHandoffPath(seal string) (string, bool) {
+	digest, path, ok := strings.Cut(seal, ":")
+	return path, ok && validDigest(digest) && filepath.IsAbs(path)
 }
 
 func restoreSDKHandoff(ctx context.Context, dir string, request SDKInstallRequest, environment procenv.Env) (SDKCommand, bool) {
-	if request.Handoff == "" || request.NoBincache || request.SDK != engineid.GoSDK || !filepath.IsAbs(request.Handoff) {
+	path, valid := sdkHandoffPath(request.Handoff)
+	if !valid || request.NoBincache || request.SDK != engineid.GoSDK {
 		return SDKCommand{}, false
 	}
-	f, err := fssecure.OpenPrivateConfig(request.Handoff)
+	f, err := fssecure.OpenPrivateConfig(path)
 	if err != nil {
 		return SDKCommand{}, false
 	}
-	var receipt installationHandoff
-	err = json.NewDecoder(io.LimitReader(f, 16<<20)).Decode(&receipt)
+	body, err := io.ReadAll(io.LimitReader(f, (16<<20)+1))
 	closeErr := f.Close()
+	if err != nil || closeErr != nil || len(body) > 16<<20 || sdkHandoffSeal(body, path) != request.Handoff {
+		return SDKCommand{}, false
+	}
+	var receipt installationHandoff
+	err = json.Unmarshal(body, &receipt)
 	if err != nil || closeErr != nil || receipt.Engine != request.Engine || receipt.Directory != dir || receipt.Environment != handoffEnvironment(environment) || receipt.HashAllFiles != request.HashAllFiles || receipt.Inputs == nil {
 		return SDKCommand{}, false
 	}
@@ -107,7 +122,7 @@ func restoreSDKHandoff(ctx context.Context, dir string, request SDKInstallReques
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	path := filepath.Join(request.ExecutableDirectory, name)
+	path = filepath.Join(request.ExecutableDirectory, name)
 	binary, err := lease.Install(path)
 	if err != nil {
 		return SDKCommand{}, false

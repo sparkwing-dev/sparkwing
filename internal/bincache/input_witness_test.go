@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +19,13 @@ import (
 
 func newTreeWitness(t *testing.T) (*InputWitness, string) {
 	t.Helper()
-	root := t.TempDir()
+	base := t.TempDir()
+	for _, name := range []string{"source", "external", "overlay", "links", "replacement"} {
+		if err := os.Mkdir(filepath.Join(base, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := filepath.Join(base, "source")
 	path := filepath.Join(root, "main.go")
 	if err := os.WriteFile(path, []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -26,7 +33,6 @@ func newTreeWitness(t *testing.T) (*InputWitness, string) {
 	_, w := WithInputWitness(t.Context())
 	now := time.Now().Add(time.Hour)
 	w.now = func() time.Time { return now }
-	w.tree(root)
 	w.Directory, w.Environment = root, append(os.Environ(), "GOWORK=off", "CGO_ENABLED=0")
 	var err error
 	w.Tool, err = gotoolchain.Executable(w.Environment)
@@ -39,10 +45,32 @@ func newTreeWitness(t *testing.T) (*InputWitness, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	w.tree(root)
+	scopeWitness(t, w)
 	if !w.Valid(t.Context()) {
 		t.Fatal("unchanged source was rejected")
 	}
 	return w, path
+}
+
+func fixtureDirectory(path, name string) string {
+	return filepath.Join(filepath.Dir(filepath.Dir(path)), name)
+}
+
+func scopeWitness(t *testing.T, w *InputWitness) {
+	t.Helper()
+	base := filepath.Dir(w.Directory)
+	for path := range w.States {
+		relative, err := filepath.Rel(base, path)
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		info, err := os.Lstat(path)
+		if err == nil && info.IsDir() {
+			delete(w.States, path)
+		}
+	}
+	w.ancestors = nil
 }
 
 func TestInputWitnessRoundTrip(t *testing.T) {
@@ -82,7 +110,7 @@ func TestInputWitnessRejectsSourceChanges(t *testing.T) {
 			case "deleted":
 				err = os.Remove(path)
 			case "replaced inode":
-				replacement := filepath.Join(t.TempDir(), "replacement")
+				replacement := filepath.Join(fixtureDirectory(path, "replacement"), "replacement")
 				if err := os.WriteFile(replacement, []byte("package main\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -114,7 +142,7 @@ func TestInputWitnessRejectsSymlinkAndCancellation(t *testing.T) {
 
 func TestInputWitnessIncludesExternalOverlaySource(t *testing.T) {
 	w, path := newTreeWitness(t)
-	external := filepath.Join(t.TempDir(), "replacement.go")
+	external := filepath.Join(fixtureDirectory(path, "external"), "replacement.go")
 	if err := os.WriteFile(external, []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +150,7 @@ func TestInputWitnessIncludesExternalOverlaySource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	overlayPath := filepath.Join(t.TempDir(), "overlay.json")
+	overlayPath := filepath.Join(fixtureDirectory(path, "overlay"), "overlay.json")
 	if err := os.WriteFile(overlayPath, overlay, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +161,7 @@ func TestInputWitnessIncludesExternalOverlaySource(t *testing.T) {
 	if _, err := compiledInputDigestWithWitness(func() ([]byte, error) { return listing, nil }, filepath.Dir(path), "-overlay="+overlayPath, "off", w); err != nil {
 		t.Fatal(err)
 	}
+	scopeWitness(t, w)
 	if !w.Valid(t.Context()) {
 		t.Fatal("unchanged overlay inputs rejected")
 	}
@@ -156,6 +185,7 @@ func TestInputWitnessUsesStableGoSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	scopeWitness(t, w)
 	if !w.Valid(t.Context()) {
 		t.Fatal("temporary compiler diagnostics invalidated unchanged inputs")
 	}
@@ -173,7 +203,7 @@ func TestInputWitnessFileSymlink(t *testing.T) {
 	for _, mutation := range []string{"retarget", "target edit"} {
 		t.Run(mutation, func(t *testing.T) {
 			w, path := newTreeWitness(t)
-			target := filepath.Join(t.TempDir(), "target.go")
+			target := filepath.Join(fixtureDirectory(path, "external"), "target.go")
 			if err := os.WriteFile(target, []byte("package main\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -182,8 +212,10 @@ func TestInputWitnessFileSymlink(t *testing.T) {
 				t.Fatal(err)
 			}
 			w.States = map[string]string{}
+			w.ancestors = nil
 			w.fullTrees = nil
 			w.tree(filepath.Dir(path))
+			scopeWitness(t, w)
 			body, err := json.Marshal(w)
 			if err != nil {
 				t.Fatal(err)
@@ -219,7 +251,7 @@ func TestInputWitnessDeclinesUnsupportedSymlinks(t *testing.T) {
 	for _, kind := range []string{"dangling", "directory"} {
 		t.Run(kind, func(t *testing.T) {
 			w, path := newTreeWitness(t)
-			target := t.TempDir()
+			target := fixtureDirectory(path, "external")
 			if kind == "dangling" {
 				target = filepath.Join(target, "missing")
 			}
@@ -227,6 +259,7 @@ func TestInputWitnessDeclinesUnsupportedSymlinks(t *testing.T) {
 				t.Fatal(err)
 			}
 			w.States = map[string]string{}
+			w.ancestors = nil
 			w.fullTrees = nil
 			w.tree(filepath.Dir(path))
 			if w.Valid(t.Context()) {
@@ -255,6 +288,7 @@ func TestInputWitnessCoversIgnoredEmbedDirectory(t *testing.T) {
 		}
 	}
 	w.States = map[string]string{}
+	w.ancestors = nil
 	w.fullTrees = nil
 	if _, err := hashDirIntoCounted(io.Discard, root, allFiles, false, w); err != nil {
 		t.Fatal(err)
@@ -266,6 +300,7 @@ func TestInputWitnessCoversIgnoredEmbedDirectory(t *testing.T) {
 	if _, err := compiledInputDigestWithWitness(func() ([]byte, error) { return listing, nil }, root, "", "off", w); err != nil {
 		t.Fatal(err)
 	}
+	scopeWitness(t, w)
 	if !w.Valid(t.Context()) {
 		t.Fatal("unchanged ignored embed source rejected")
 	}
@@ -279,14 +314,16 @@ func TestInputWitnessCoversIgnoredEmbedDirectory(t *testing.T) {
 
 func TestInputWitnessRejectsRestoredSymlinkBindingBetweenSnapshots(t *testing.T) {
 	w, path := newTreeWitness(t)
-	link := filepath.Join(t.TempDir(), "linked.go")
+	link := filepath.Join(fixtureDirectory(path, "links"), "linked.go")
 	if err := os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
 	w.States = map[string]string{}
+	w.ancestors = nil
 	if _, err := snapshotHashable([]string{link}, w); err != nil {
 		t.Fatal(err)
 	}
+	scopeWitness(t, w)
 	if !w.Valid(t.Context()) {
 		t.Fatal("unchanged symlink snapshot rejected")
 	}
@@ -301,5 +338,55 @@ func TestInputWitnessRejectsRestoredSymlinkBindingBetweenSnapshots(t *testing.T)
 	}
 	if w.Valid(t.Context()) {
 		t.Fatal("recreated symlink accepted under earlier snapshot")
+	}
+}
+
+func TestInputWitnessRejectsChainedSymlink(t *testing.T) {
+	w, path := newTreeWitness(t)
+	directory := fixtureDirectory(path, "links")
+	intermediate := filepath.Join(directory, "intermediate")
+	link := filepath.Join(directory, "link")
+	if err := os.Symlink(path, intermediate); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(intermediate, link); err != nil {
+		t.Fatal(err)
+	}
+	w.file(link)
+	if w.Valid(t.Context()) {
+		t.Fatal("chained symlink target accepted")
+	}
+}
+
+func TestInputWitnessRejectsRestoredExternalTargetAncestor(t *testing.T) {
+	w, path := newTreeWitness(t)
+	directory := filepath.Join(fixtureDirectory(path, "external"), "original")
+	if err := os.Mkdir(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(directory, "target.go")
+	if err := os.WriteFile(target, []byte("package main\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(fixtureDirectory(path, "links"), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	w.States = map[string]string{}
+	w.ancestors = nil
+	w.file(link)
+	scopeWitness(t, w)
+	if !w.unchanged(t.Context()) {
+		t.Fatal("unchanged direct symlink proof rejected")
+	}
+	moved := directory + "-moved"
+	if err := os.Rename(directory, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(moved, directory); err != nil {
+		t.Fatal(err)
+	}
+	if w.unchanged(t.Context()) {
+		t.Fatal("restored target ancestor accepted")
 	}
 }

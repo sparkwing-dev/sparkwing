@@ -162,8 +162,11 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 			return SDKCommand{}, errors.New("selected engine returned a nonregular Go executable")
 		}
 	}
-	if result.Handoff != "" && result.Handoff != filepath.Join(ownedDirectory, "handoff.json") {
-		return SDKCommand{}, errors.New("selected engine returned an unowned installation handoff")
+	if result.Handoff != "" {
+		path, valid := sdkHandoffPath(result.Handoff)
+		if !valid || path != filepath.Join(ownedDirectory, "handoff.json") {
+			return SDKCommand{}, errors.New("selected engine returned an unowned installation handoff")
+		}
 	}
 	result.ownedDirectory = ownedDirectory
 	return result, nil

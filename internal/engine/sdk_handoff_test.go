@@ -18,6 +18,8 @@ import (
 )
 
 func TestInstallationHandoffCopiesVerifiedBytesAndRejectsMismatches(t *testing.T) {
+	t.Setenv("CGO_ENABLED", "0")
+	t.Setenv("GOWORK", "off")
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, procenv.Runtime{})
 	if err != nil {
@@ -56,11 +58,12 @@ func TestInstallationHandoffCopiesVerifiedBytesAndRejectsMismatches(t *testing.T
 	if request.Handoff == "" {
 		t.Fatal("unchanged verified installation produced no handoff")
 	}
-	body, err := os.ReadFile(request.Handoff)
+	handoffPath, _ := sdkHandoffPath(request.Handoff)
+	body, err := os.ReadFile(handoffPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []string{"unchanged", "identity", "engine", "environment", "source", "digest", "cache", "missing", "disabled", "mode"} {
+	for _, test := range []string{"unchanged", "corrupt", "identity", "engine", "environment", "source", "digest", "cache", "missing", "disabled", "mode"} {
 		t.Run(test, func(t *testing.T) {
 			current := request
 			current.ExecutableDirectory = t.TempDir()
@@ -82,7 +85,7 @@ func TestInstallationHandoffCopiesVerifiedBytesAndRejectsMismatches(t *testing.T
 			case "cache":
 				receipt.CachedExecutable = filepath.Join(t.TempDir(), "pipeline")
 			case "missing":
-				current.Handoff = filepath.Join(t.TempDir(), "absent")
+				current.Handoff = sdkHandoffSeal(body, filepath.Join(t.TempDir(), "absent"))
 			case "disabled":
 				receipt.Inputs.Disabled = true
 			case "mode":
@@ -92,8 +95,15 @@ func TestInstallationHandoffCopiesVerifiedBytesAndRejectsMismatches(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(request.Handoff, changed, 0o600); err != nil {
+			if err := os.WriteFile(handoffPath, changed, 0o600); err != nil {
 				t.Fatal(err)
+			}
+			if test == "corrupt" {
+				if err := os.WriteFile(handoffPath, append(changed, ' '), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else if test != "missing" {
+				current.Handoff = sdkHandoffSeal(changed, handoffPath)
 			}
 			got, reused := restoreSDKHandoff(t.Context(), dir, current, environment)
 			if reused != (test == "unchanged") {
@@ -117,6 +127,8 @@ func TestInstallationHandoffCopiesVerifiedBytesAndRejectsMismatches(t *testing.T
 }
 
 func TestInstallSDKRestoresHandoffBeforeRunningEngine(t *testing.T) {
+	t.Setenv("CGO_ENABLED", "0")
+	t.Setenv("GOWORK", "off")
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	key := testSigningKey(t)
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}

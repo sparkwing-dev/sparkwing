@@ -27,6 +27,7 @@ type InputWitness struct {
 	Disabled    bool              `json:"disabled"`
 	now         func() time.Time
 	fullTrees   map[string]bool
+	ancestors   map[string]bool
 }
 
 // WithInputWitness collects a proof alongside the normal cache-key computation.
@@ -47,8 +48,42 @@ func (w *InputWitness) clock() time.Time {
 	return time.Now()
 }
 
+func (w *InputWitness) parents(path string) bool {
+	var captured []string
+	for parent := filepath.Dir(path); ; parent = filepath.Dir(parent) {
+		if w.ancestors[parent] {
+			break
+		}
+		info, err := os.Lstat(parent)
+		if err != nil || !info.IsDir() {
+			w.Disabled = true
+			return false
+		}
+		identity := directoryIdentity(info)
+		if previous, exists := w.States[parent]; identity == "" || exists && previous != identity {
+			w.Disabled = true
+			return false
+		}
+		w.States[parent] = identity
+		captured = append(captured, parent)
+		if filepath.Dir(parent) == parent {
+			break
+		}
+	}
+	if w.ancestors == nil {
+		w.ancestors = map[string]bool{}
+	}
+	for _, parent := range captured {
+		w.ancestors[parent] = true
+	}
+	return true
+}
+
 func (w *InputWitness) capture(path string, info os.FileInfo) bool {
 	if w == nil || w.Disabled {
+		return false
+	}
+	if !w.parents(path) {
 		return false
 	}
 	if len(w.States) >= 100000 {
@@ -59,6 +94,18 @@ func (w *InputWitness) capture(path string, info os.FileInfo) bool {
 	if info.Mode()&os.ModeSymlink != 0 {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
+			w.Disabled = true
+			return false
+		}
+		raw, err := os.Readlink(path)
+		if err != nil {
+			w.Disabled = true
+			return false
+		}
+		if !filepath.IsAbs(raw) {
+			raw = filepath.Join(filepath.Dir(path), raw)
+		}
+		if filepath.Clean(raw) != resolved {
 			w.Disabled = true
 			return false
 		}
@@ -216,6 +263,18 @@ func (w *InputWitness) unchanged(ctx context.Context) bool {
 	return true
 }
 
+func witnessGoSettings() []string {
+	names := make([]string, 0, len(buildEnvironmentNames)+4)
+	for _, name := range buildEnvironmentNames {
+		switch name {
+		case "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS", "PKG_CONFIG":
+			continue
+		}
+		names = append(names, name)
+	}
+	return append(names, "GOENV", "GOMOD", "GOWORK", "GOTOOLDIR")
+}
+
 // Valid checks Go settings and source identities without listing packages.
 func (w *InputWitness) Valid(ctx context.Context) bool {
 	if w == nil || w.Disabled || len(w.States) == 0 || w.Tool == "" || w.Directory == "" || len(w.Settings) == 0 {
@@ -225,7 +284,7 @@ func (w *InputWitness) Valid(ctx context.Context) bool {
 	if err != nil || tool != w.Tool {
 		return false
 	}
-	command := procenv.ControlCommand(w.Environment, tool, "env", "-json")
+	command := procenv.ControlCommand(w.Environment, tool, append([]string{"env", "-json"}, witnessGoSettings()...)...)
 	command.Dir = w.Directory
 	var stdout bytes.Buffer
 	command.Stdout = &stdout
@@ -236,13 +295,14 @@ func (w *InputWitness) Valid(ctx context.Context) bool {
 	if json.Unmarshal(w.Settings, &expected) != nil || json.Unmarshal(stdout.Bytes(), &actual) != nil {
 		return false
 	}
-	// safety: GOGCCFLAGS contains a per-command temporary path. Compare the key's
-	// build settings and selection paths instead of Go's diagnostic-only fields.
-	for _, names := range [][]string{buildEnvironmentNames, {"GOENV", "GOMOD", "GOWORK", "GOTOOLDIR"}} {
-		for _, name := range names {
-			if expected[name] != actual[name] {
-				return false
-			}
+	if expected["CGO_ENABLED"] != "0" {
+		return false
+	}
+	// safety: C-only settings require temporary work directories even with cgo off;
+	// eligible proofs bind their captured environment and GOENV file instead.
+	for _, name := range witnessGoSettings() {
+		if expected[name] != actual[name] {
+			return false
 		}
 	}
 	return w.unchanged(ctx)
