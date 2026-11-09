@@ -13,8 +13,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// Version is checked once in hello; documents and HTTP headers carry no protocol version.
+// Version identifies SDK messages announced in hello replies.
 const Version = 2
+
+// HelloProtocol is the frozen bootstrap request version. SDK replies announce
+// their message Version so newer engines can select adapters for older SDKs.
+const HelloProtocol = 2
 
 // Op keeps the complete launch operation vocabulary separate from requests.
 type Op string
@@ -284,8 +288,8 @@ func (r Request) Validate() error {
 	}
 	switch r.Op {
 	case OpHello:
-		if r.Protocol != Version {
-			return &apierr.Error{Code: apierr.ProtocolMismatch, Message: "node protocol major does not match", Details: map[string]any{"supported_majors": []int{Version}}}
+		if r.Protocol != HelloProtocol {
+			return &apierr.Error{Code: apierr.ProtocolMismatch, Message: "node protocol major does not match", Details: map[string]any{"supported_majors": []int{HelloProtocol}}}
 		}
 		if r.Engine == nil || r.Engine.Version == "" || r.Runner == nil || r.Runner.Name == "" || r.Runner.Type == "" || r.Runner.Labels == nil {
 			return bad("hello needs engine and granted runner identity")

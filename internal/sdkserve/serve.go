@@ -249,8 +249,8 @@ func (s *server) negotiate(req nodeproto.Request) {
 		s.reply(req.ID, nil, protocolError("hello is allowed once"))
 		return
 	}
-	if req.Protocol != nodeproto.Version {
-		s.reply(req.ID, nil, &apierr.Error{Code: apierr.ProtocolMismatch, Message: "unsupported SDK protocol", Hint: "rebuild the pipeline with its matching engine", Details: map[string]any{"supported": []int{nodeproto.Version}}})
+	if req.Protocol != nodeproto.HelloProtocol {
+		s.reply(req.ID, nil, &apierr.Error{Code: apierr.ProtocolMismatch, Message: "unsupported SDK protocol", Hint: "rebuild the pipeline with its matching engine", Details: map[string]any{"supported": []int{nodeproto.HelloProtocol}}})
 		return
 	}
 	s.hello = &req
