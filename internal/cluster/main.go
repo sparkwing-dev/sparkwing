@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -94,13 +95,7 @@ func runRunnerVersionIO(writer, diagnostics io.Writer, args []string, version st
 		return parsedHelp(err)
 	}
 	identity := buildinfo.Read("sparkwing-runner", version)
-	format := textFlag(fs, "output")
-	if format == "" {
-		format = "json"
-		if color.IsInteractiveStdout() {
-			format = "pretty"
-		}
-	}
+	format := clisurface.OutputFormat(textFlag(fs, "output"), color.IsInteractiveStdout())
 	switch format {
 	case "json":
 		return json.NewEncoder(writer).Encode(identity)

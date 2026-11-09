@@ -304,7 +304,7 @@ class Session {
       definition,
       outputs,
       bodyEnv: env,
-      ...(process.platform === "win32" ? {} : { hostExec: this.#hostExec }),
+      hostExec: this.#hostExec,
       ...(failureInfo === undefined ? {} : { failure: failureInfo }),
       ...(this.#services === undefined ? {} : { services: this.#services }),
     });

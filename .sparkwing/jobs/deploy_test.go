@@ -546,6 +546,7 @@ func deployGitIn(t *testing.T, dir string, args ...string) string {
 func newFakeDeploy(t *testing.T) *fakeDeploy {
 	t.Helper()
 	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
 	f := &fakeDeploy{
 		t: t, bare: filepath.Join(root, "gitops.git"), repo: filepath.Join(root, "sparkwing"), claimsPerRun: 1,
 		failRuns: map[string]bool{}, clock: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
@@ -753,7 +754,7 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 	case name == "bitwing":
 		return "", nil
 	case name == "go":
-		return "", nil
+		return "", os.WriteFile(arg("-o"), []byte("candidate CLI"), 0o700)
 	case name == "kubectl":
 		return f.kubectl(c)
 	case name == "sparkwing":
@@ -957,9 +958,20 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 		t.Fatalf("smoke was not triggered at the candidate commit with its child check: %q", f.calls)
 	}
 
-	prod, err := f.deployer(false).promote(t.Context(), images)
+	production := f.deployer(false)
+	production.gate = gate
+	prod, err := production.promote(t.Context(), images)
 	if err != nil {
 		t.Fatal(err)
+	}
+	builds := 0
+	for _, call := range f.calls {
+		if strings.Contains(call, "go build -o") {
+			builds++
+		}
+	}
+	if builds != 1 || gate.CLIDigest == "" {
+		t.Fatalf("staging and production built CLI %d times, gate digest %q", builds, gate.CLIDigest)
 	}
 	if got := f.pinsOnMain("sparkwing"); got.Controller != images.Controller || got.Launcher != images.Runner {
 		t.Fatalf("production pins = %+v", got)
