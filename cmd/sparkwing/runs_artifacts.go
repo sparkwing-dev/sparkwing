@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,12 +19,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 func validateRunArtifacts(inv clisurface.Invocation) error {
 	if inv.Has("path") != inv.Has("dest") || inv.Has("path") && !inv.Has("job") {
 		return &clisurface.UsageError{Path: inv.Command.Path, Message: "a download requires --job, --path and --dest together"}
+	}
+	if inv.Has("path") && (inv.Has("limit") || inv.Has("cursor")) {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--limit and --cursor apply to listings only"}
 	}
 	return nil
 }
@@ -88,13 +94,41 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 		if err := errors.Join(readErr, file.Close(), ctx.Err()); err != nil {
 			return err
 		}
-		if err := artifactDestinationAvailable(dest); err != nil {
-			return err
-		}
-		if err := os.Rename(file.Name(), dest); err != nil {
+		if err := publishArtifactFile(file.Name(), dest); err != nil {
 			return err
 		}
 		return writeArtifact(out, artifactRecord{ManifestEntry: entry, RunID: run, JobID: job, SavedTo: dest}, inv.Output(color.IsInteractiveStdout()))
+	}
+	return listRunArtifacts(ctx, inv, reader, detail, out)
+}
+
+type artifactCursor struct {
+	Run    string `json:"run"`
+	Filter string `json:"filter"`
+	Job    string `json:"job"`
+	After  string `json:"after"`
+}
+
+type artifactListingPage struct {
+	Kind       string `json:"kind"`
+	Returned   int    `json:"returned"`
+	Limit      int    `json:"limit"`
+	Truncated  bool   `json:"truncated"`
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+func listRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader client.ArtifactReader, detail controllerwire.RunDetail, out io.Writer) error {
+	job := inv.Value("job")
+	limit := 40
+	if inv.Has("limit") {
+		parsed, err := strconv.Atoi(inv.Value("limit"))
+		if err != nil {
+			return fmt.Errorf("--limit must be a positive integer")
+		}
+		limit = parsed
+	}
+	if limit < 1 {
+		return fmt.Errorf("--limit must be at least one")
 	}
 	jobs := []string{job}
 	if job == "" {
@@ -103,18 +137,71 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 			jobs = append(jobs, row.ID)
 		}
 	}
-	for _, job := range jobs {
-		entries, err := reader.ReadArtifacts(ctx, run, job)
-		if err != nil {
-			return err
+	slices.Sort(jobs)
+	position := artifactCursor{Run: detail.ID, Filter: job}
+	if raw := inv.Value("cursor"); raw != "" {
+		body, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil || json.Unmarshal(body, &position) != nil || position.Run != detail.ID || position.Filter != job || !slices.Contains(jobs, position.Job) {
+			return fmt.Errorf("--cursor must come from this run with the same filters")
 		}
-		for _, entry := range entries {
-			if err := writeArtifact(out, artifactRecord{ManifestEntry: entry, RunID: run, JobID: job}, inv.Output(color.IsInteractiveStdout())); err != nil {
+	}
+	page := artifactListingPage{Kind: "page", Limit: limit}
+	mode := inv.Output(color.IsInteractiveStdout())
+	for _, job := range jobs {
+		if job < position.Job {
+			continue
+		}
+		position.Job = job
+		for {
+			remaining := limit - page.Returned
+			entries, err := reader.ReadArtifacts(ctx, detail.ID, job, min(max(remaining, 1), 200), position.After)
+			if err != nil {
 				return err
+			}
+			if remaining == 0 && len(entries.Artifacts) > 0 {
+				body, err := json.Marshal(position)
+				if err != nil {
+					return err
+				}
+				page.Truncated, page.NextCursor = true, base64.RawURLEncoding.EncodeToString(body)
+				return writeArtifactPage(out, page, mode)
+			}
+			for _, entry := range entries.Artifacts {
+				if err := writeArtifact(out, artifactRecord{ManifestEntry: entry, RunID: detail.ID, JobID: job}, mode); err != nil {
+					return err
+				}
+				page.Returned++
+			}
+			position.After = entries.NextCursor
+			if !entries.Truncated {
+				break
 			}
 		}
 	}
+	return writeArtifactPage(out, page, mode)
+}
+
+func writeArtifactPage(out io.Writer, page artifactListingPage, mode string) error {
+	if mode == "json" {
+		return json.NewEncoder(out).Encode(page)
+	}
+	if mode == "plain" {
+		out = os.Stderr
+	}
+	if page.Truncated {
+		_, err := fmt.Fprintf(out, "%d artifacts shown; continue with the same filters and --cursor %q\n", page.Returned, page.NextCursor)
+		return err
+	}
+	if mode == "pretty" {
+		_, err := fmt.Fprintf(out, "%d artifacts shown\n", page.Returned)
+		return err
+	}
 	return nil
+}
+
+func publishArtifactFile(source, dest string) error {
+	// safety: linking a verified sibling file creates the destination atomically without replacing another writer.
+	return os.Link(source, dest)
 }
 
 func writeArtifact(out io.Writer, record artifactRecord, format string) error {

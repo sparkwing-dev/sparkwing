@@ -105,6 +105,58 @@ func TestArtifactsCLIRealMembersAndInterrupt(t *testing.T) {
 			}
 		}
 	}
+
+	cursor := ""
+	var paths []string
+	for {
+		args := []string{"--job", "producer", "--limit", "1", "-o", "json"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		out, err := command("second", args...)
+		if err != nil {
+			t.Fatalf("paged second-member list: %v: %s", err, out)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(out))
+		var page struct {
+			Kind       string `json:"kind"`
+			Returned   int    `json:"returned"`
+			Truncated  bool   `json:"truncated"`
+			NextCursor string `json:"next_cursor"`
+		}
+		count := 0
+		for decoder.More() {
+			var record struct {
+				Kind       string `json:"kind"`
+				Path       string `json:"path"`
+				Returned   int    `json:"returned"`
+				Truncated  bool   `json:"truncated"`
+				NextCursor string `json:"next_cursor"`
+			}
+			if err := decoder.Decode(&record); err != nil {
+				t.Fatal(err)
+			}
+			if record.Kind == "page" {
+				page.Kind, page.Returned, page.Truncated, page.NextCursor = record.Kind, record.Returned, record.Truncated, record.NextCursor
+			} else {
+				paths = append(paths, record.Path)
+				count++
+			}
+		}
+		if page.Kind != "page" || page.Returned != count || count > 1 {
+			t.Fatalf("unbounded CLI page: %s", out)
+		}
+		if !page.Truncated {
+			break
+		}
+		if page.NextCursor == "" || page.NextCursor == cursor || len(paths) > 2 {
+			t.Fatal("CLI cursor did not advance")
+		}
+		cursor = page.NextCursor
+	}
+	if len(paths) != 2 || paths[0] == paths[1] {
+		t.Fatalf("CLI pages lost or repeated artifacts: %q", paths)
+	}
 	dest := filepath.Join(t.TempDir(), "download")
 	if out, err := command("second", "--job", "producer", "--path", name, "--dest", dest, "-o", "json"); err != nil {
 		t.Fatalf("second-member download: %v: %s", err, out)
@@ -160,6 +212,9 @@ func TestArtifactsCLIRealMembersAndInterrupt(t *testing.T) {
 			}
 			_ = response.Body.Close()
 			result.Download.URL = stream.URL
+			if response.Request.URL.Query().Get("path") == name {
+				result.Download.URL = "http://127.0.0.1:0/object?X-Amz-Credential=fixture-private&X-Amz-Signature=fixture-secret"
+			}
 			body, err := json.Marshal(result)
 			if err != nil {
 				return err
@@ -172,6 +227,15 @@ func TestArtifactsCLIRealMembersAndInterrupt(t *testing.T) {
 		gateway := httptest.NewServer(proxy)
 		defer gateway.Close()
 		profile("slow", f.second, gateway.URL)
+		failedDir := t.TempDir()
+		failedDest := filepath.Join(failedDir, "failed")
+		out, err := command("slow", "--job", "producer", "--path", name, "--dest", failedDest, "-o", "json")
+		if err == nil || bytes.Contains(out, []byte("X-Amz")) || bytes.Contains(out, []byte("fixture-private")) || bytes.Contains(out, []byte("fixture-secret")) {
+			t.Fatal("failed CLI download exposed signed credentials or succeeded")
+		}
+		if entries, err := os.ReadDir(failedDir); err != nil || len(entries) != 0 {
+			t.Fatalf("failed CLI download left files: %v, %v", entries, err)
+		}
 		dir := t.TempDir()
 		dest := filepath.Join(dir, "interrupted")
 		cmd := procenv.ControlCommandContext(f.ctx, f.env, cli, "runs", "artifacts", "--profile", "slow", "--run", run, "--job", "producer", "--path", "slow.bin", "--dest", dest, "-o", "json")

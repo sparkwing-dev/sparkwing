@@ -20,6 +20,14 @@ func (s *Server) handleJobArtifacts(w http.ResponseWriter, r *http.Request, a ca
 	if s.dataController == nil || s.dataController.Objects == nil {
 		return routepolicy.MissingEndpointPolicy()
 	}
+	query := r.URL.Query()
+	if query.Has("path") {
+		if query.Get("path") == "" || len(query["path"]) != 1 || query.Has("limit") || query.Has("cursor") {
+			return invalidEngineBody("an exact artifact download accepts one nonempty path without limit or cursor")
+		}
+	} else if _, _, err := collectionSelection(r, a); err != nil {
+		return err
+	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return engineLookupError(err)
@@ -27,8 +35,7 @@ func (s *Server) handleJobArtifacts(w http.ResponseWriter, r *http.Request, a ca
 	manifest, err := tenant.ReadJobManifest(r.Context(), a)
 	result := controllerwire.JobArtifacts{Artifacts: []blob.ManifestEntry{}}
 	if errors.Is(err, store.ErrNoOutput) && r.URL.Query().Get("path") == "" {
-		writeJSON(w, http.StatusOK, result)
-		return nil
+		return writeArtifactPage(w, r, a, result.Artifacts)
 	}
 	if err != nil {
 		return dataRouteError(err)
@@ -60,7 +67,12 @@ func (s *Server) handleJobArtifacts(w http.ResponseWriter, r *http.Request, a ca
 		}
 		transfer := dataTransfer(signed)
 		result.Artifacts, result.Download = []blob.ManifestEntry{entry}, &transfer
+		writeJSON(w, http.StatusOK, result)
+		return nil
 	}
-	writeJSON(w, http.StatusOK, result)
-	return nil
+	return writeArtifactPage(w, r, a, result.Artifacts)
+}
+
+func writeArtifactPage(w http.ResponseWriter, r *http.Request, a capability.Authorized, entries []blob.ManifestEntry) error {
+	return writeListPage(w, r, a, "artifacts", entries, func(e blob.ManifestEntry) string { return e.Path }, nil)
 }

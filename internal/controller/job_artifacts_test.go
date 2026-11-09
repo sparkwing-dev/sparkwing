@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,13 +42,21 @@ func TestJobArtifactsPublishesListsAndDownloadsUnderCurrentMembership(t *testing
 	}
 	file := dataResultUpload(t, tenant, objects, authority, authority.Upload.Value, "artifact-file", []byte("published file\n"))
 	entry := blob.ManifestEntry{Path: "dist/file.txt", Digest: file.Digest, Size: file.Size, Mode: 0o644}
-	body, err := json.Marshal(blob.Manifest{Entries: []blob.ManifestEntry{entry}})
+	files := []blob.ManifestEntry{entry}
+	for i := range 54 {
+		files = append(files, blob.ManifestEntry{Path: fmt.Sprintf("extra/%03d", i), Digest: entry.Digest, Size: entry.Size, Mode: entry.Mode})
+	}
+	body, err := json.Marshal(blob.Manifest{Entries: files})
 	if err != nil {
 		t.Fatal(err)
 	}
 	manifest := dataResultUpload(t, tenant, objects, authority, authority.Upload.Value, "artifact-manifest", body)
 	key := blob.ResultRecordKey(authority.Attempt.Value, authority.Repo, authority.Ref.Scope, "ci", blob.KindManifest)
-	if _, err := tenant.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Source: authority.Upload.Value, Key: key, Digest: manifest.Digest, Members: []blob.Member{{Team: "a", ManifestDigest: manifest.Digest, Path: entry.Path, Digest: entry.Digest, Size: entry.Size, Mode: entry.Mode}}}); err != nil {
+	members := make([]blob.Member, 0, len(files))
+	for _, file := range files {
+		members = append(members, blob.Member{Team: "a", ManifestDigest: manifest.Digest, Path: file.Path, Digest: file.Digest, Size: file.Size, Mode: file.Mode})
+	}
+	if _, err := tenant.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Source: authority.Upload.Value, Key: key, Digest: manifest.Digest, Members: members}); err != nil {
 		t.Fatal(err)
 	}
 	options, _, server := memberObservationOptions(t, e.Store, objects)
@@ -69,7 +79,7 @@ func TestJobArtifactsPublishesListsAndDownloadsUnderCurrentMembership(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries, err := cacheReader.ReadArtifacts(t.Context(), "run", "job"); err == nil || len(entries) != 0 {
+	if entries, err := cacheReader.ReadArtifacts(t.Context(), "run", "job", 50, ""); err == nil || len(entries.Artifacts) != 0 {
 		t.Fatalf("cache credential read artifacts = %+v, %v", entries, err)
 	}
 
@@ -77,7 +87,7 @@ func TestJobArtifactsPublishesListsAndDownloadsUnderCurrentMembership(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries, err := reader.ReadArtifacts(t.Context(), "run", "job"); err != nil || len(entries) != 0 {
+	if entries, err := reader.ReadArtifacts(t.Context(), "run", "job", 50, ""); err != nil || len(entries.Artifacts) != 0 {
 		t.Fatalf("uncommitted files = %+v, %v", entries, err)
 	}
 	finished, err := json.Marshal(controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: new(int64(1)), Result: &controllerwire.JobResult{Outcome: "success", Manifest: &key}})
@@ -85,9 +95,44 @@ func TestJobArtifactsPublishesListsAndDownloadsUnderCurrentMembership(t *testing
 		t.Fatal(err)
 	}
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", string(finished), 200)
-	entries, err := reader.ReadArtifacts(t.Context(), "1", "job")
-	if err != nil || len(entries) != 1 || entries[0] != entry {
+	entries, err := reader.ReadArtifacts(t.Context(), "1", "job", 50, "")
+	if err != nil || len(entries.Artifacts) != 50 || entries.Artifacts[0] != entry || !entries.Truncated || entries.NextCursor == "" {
 		t.Fatalf("artifact listing = %+v, %v", entries, err)
+	}
+
+	member, err := options.Bearer(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultPage := engineClaimHTTP(t, server.Handler(), member, "GET", "/api/v1/runs/run/jobs/job/artifacts", "", http.StatusOK)
+	var first controllerwire.ArtifactPage
+	if err := json.Unmarshal(defaultPage.Body.Bytes(), &first); err != nil || len(first.Artifacts) != 50 || !first.Truncated || strings.Contains(defaultPage.Body.String(), "download") {
+		t.Fatalf("default artifact page: %s, %v", defaultPage.Body, err)
+	}
+	cursor := ""
+	var collected []blob.ManifestEntry
+	for {
+		page, err := reader.ReadArtifacts(t.Context(), "run", "job", 2, cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Artifacts) > 2 {
+			t.Fatal("unbounded artifact page")
+		}
+		collected = append(collected, page.Artifacts...)
+		if !page.Truncated {
+			break
+		}
+		if page.NextCursor == cursor || len(collected) > len(files) {
+			t.Fatal("artifact pagination did not advance")
+		}
+		cursor = page.NextCursor
+	}
+	if !slices.Equal(collected, files) {
+		t.Fatalf("artifact pages lost or duplicated files: got %d, want %d", len(collected), len(files))
+	}
+	for _, query := range []string{"?limit=0", "?limit=201", "?cursor=invalid", "?path=dist%2Ffile.txt&limit=1"} {
+		engineClaimHTTP(t, server.Handler(), member, "GET", "/api/v1/runs/run/jobs/job/artifacts"+query, "", http.StatusBadRequest)
 	}
 	var downloaded bytes.Buffer
 	got, err := reader.DownloadArtifact(t.Context(), "run", "job", entry.Path, &downloaded)
@@ -110,11 +155,11 @@ func TestJobArtifactsPublishesListsAndDownloadsUnderCurrentMembership(t *testing
 		t.Fatal("missing artifact bytes succeeded")
 	}
 	engineSQL(t, e.Store, `UPDATE blob_records SET expires_at=1 WHERE team='a' AND kind='manifest'`)
-	if entries, err := reader.ReadArtifacts(t.Context(), "run", "job"); err != nil || len(entries) != 0 {
+	if entries, err := reader.ReadArtifacts(t.Context(), "run", "job", 50, ""); err != nil || len(entries.Artifacts) != 0 {
 		t.Fatalf("expired files = %+v, %v", entries, err)
 	}
 	engineSQL(t, e.Store, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
-	if entries, err := reader.ReadArtifacts(t.Context(), "run", "job"); err == nil || len(entries) != 0 {
+	if entries, err := reader.ReadArtifacts(t.Context(), "run", "job", 50, ""); err == nil || len(entries.Artifacts) != 0 {
 		t.Fatalf("revoked membership read files = %+v, %v", entries, err)
 	}
 }

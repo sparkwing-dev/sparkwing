@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -34,7 +36,7 @@ func TestArtifactDownloadsVerifyBytesAndKeepControllerCredentialsPrivate(t *test
 				if err != nil {
 					t.Fatal(err)
 				}
-				return engineResponse(200, string(body)), nil
+				return engineResponse(http.StatusOK, string(body)), nil
 			})}})
 			if err != nil {
 				t.Fatal(err)
@@ -49,5 +51,67 @@ func TestArtifactDownloadsVerifyBytesAndKeepControllerCredentialsPrivate(t *test
 				t.Fatalf("accepted corrupt bytes %q", contents)
 			}
 		})
+	}
+}
+
+func TestArtifactDownloadFailuresKeepSignedURLsInsideTransfer(t *testing.T) {
+	const signedURL = "https://bucket.s3.example/file?X-Amz-Credential=private&X-Amz-Signature=secret"
+	for _, stage := range []string{"request", "read", "close"} {
+		t.Run(stage, func(t *testing.T) {
+			failure := fmt.Errorf("failed to read %s", signedURL)
+			entry := blob.ManifestEntry{Path: "file", Size: 4, Digest: blob.Digest(strings.Repeat("a", 64))}
+			reader, err := NewArtifactReader(EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: engineTransport(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Host == "bucket.s3.example" {
+					if stage == "request" {
+						return nil, failure
+					}
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: artifactFailureBody{err: failure, failRead: stage == "read"}}, nil
+				}
+				body, err := json.Marshal(controllerwire.JobArtifacts{Artifacts: []blob.ManifestEntry{entry}, Download: &blob.SignedTransfer{URL: signedURL, Size: entry.Size, Digest: entry.Digest}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return engineResponse(http.StatusOK, string(body)), nil
+			})}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = reader.DownloadArtifact(t.Context(), "run", "job", "file", io.Discard)
+			if err == nil || strings.Contains(fmt.Sprintf("%+v", err), "secret") || strings.Contains(err.Error(), "X-Amz") || errors.Is(err, failure) {
+				t.Fatal("download retained signed credentials or failed to report the transfer failure")
+			}
+		})
+	}
+}
+
+type artifactFailureBody struct {
+	err      error
+	failRead bool
+}
+
+func (b artifactFailureBody) Read([]byte) (int, error) {
+	if b.failRead {
+		return 0, b.err
+	}
+	return 0, io.EOF
+}
+
+func (b artifactFailureBody) Close() error { return b.err }
+
+func TestArtifactListingReadsOneBoundedPageWithoutCredentials(t *testing.T) {
+	requests := 0
+	reader, err := NewArtifactReader(EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: engineTransport(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.URL.Query().Get("limit") != "2" || req.URL.Query().Get("cursor") != "previous" || req.URL.Query().Has("path") {
+			t.Fatalf("wrong page request: %s", req.URL.RequestURI())
+		}
+		return engineResponse(http.StatusOK, `{"artifacts":[{"path":"file","digest":"abc","size":0,"mode":0}],"truncated":true,"next_cursor":"next"}`), nil
+	})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := reader.ReadArtifacts(t.Context(), "run", "job", 2, "previous")
+	if err != nil || requests != 1 || len(page.Artifacts) != 1 || !page.Truncated || page.NextCursor != "next" {
+		t.Fatalf("page = %+v, %v, requests=%d", page, err, requests)
 	}
 }

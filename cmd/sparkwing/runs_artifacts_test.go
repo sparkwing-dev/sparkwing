@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,8 +27,22 @@ func (r artifactTestReader) ReadRun(context.Context, string) (controllerwire.Run
 	return controllerwire.RunDetail{ID: "canonical", Jobs: []controllerwire.JobDetail{{ID: "build"}, {ID: "test"}}}, nil
 }
 
-func (r artifactTestReader) ReadArtifacts(_ context.Context, run, job string) ([]blob.ManifestEntry, error) {
-	return r.read(run, job)
+func (r artifactTestReader) ReadArtifacts(_ context.Context, run, job string, limit int, cursor string) (controllerwire.ArtifactPage, error) {
+	entries, err := r.read(run, job)
+	if err != nil {
+		return controllerwire.ArtifactPage{}, err
+	}
+	slices.SortFunc(entries, func(a, b blob.ManifestEntry) int { return strings.Compare(a.Path, b.Path) })
+	start := 0
+	for start < len(entries) && entries[start].Path <= cursor && cursor != "" {
+		start++
+	}
+	end := min(start+limit, len(entries))
+	page := controllerwire.ArtifactPage{Artifacts: entries[start:end], Truncated: end < len(entries)}
+	if page.Truncated {
+		page.NextCursor = entries[end-1].Path
+	}
+	return page, nil
 }
 
 func (r artifactTestReader) DownloadArtifact(_ context.Context, _, _, _ string, out io.Writer) (blob.ManifestEntry, error) {
@@ -49,11 +65,11 @@ func TestRunArtifactsListsNDJSONAndPlainPaths(t *testing.T) {
 			t.Fatal(err)
 		}
 		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-		if len(lines) != 2 {
+		if (mode == "plain" && len(lines) != 2) || (mode != "plain" && len(lines) != 3) {
 			t.Fatalf("records = %q", out.String())
 		}
 		if mode == "json" {
-			for _, line := range lines {
+			for _, line := range lines[:2] {
 				var row artifactRecord
 				if err := json.Unmarshal([]byte(line), &row); err != nil || row.RunID != "canonical" || row.JobID != "build" {
 					t.Fatalf("record = %+v, %v", row, err)
@@ -179,6 +195,121 @@ func TestRunArtifactsRejectsIncompleteDownloadFlags(t *testing.T) {
 		inv := logInvocation(t, append([]string{"artifacts", "--run", "run"}, args...)...)
 		if err := validateRunArtifacts(inv); err == nil {
 			t.Fatalf("accepted %v", args)
+		}
+	}
+}
+
+func TestArtifactPublicationAtomicallyRefusesRacingDestination(t *testing.T) {
+	dir := t.TempDir()
+	source, dest := filepath.Join(dir, "verified"), filepath.Join(dir, "artifact")
+	if err := os.WriteFile(source, []byte("download"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifactDestinationAvailable(dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("racing creator"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := publishArtifactFile(source, dest); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("publication did not refuse racing destination: %v", err)
+	}
+	contents, err := os.ReadFile(dest)
+	if err != nil || string(contents) != "racing creator" {
+		t.Fatalf("racing destination replaced: %q, %v", contents, err)
+	}
+}
+
+func TestRunArtifactsBoundsListing(t *testing.T) {
+	reader := artifactTestReader{read: func(_, _ string) ([]blob.ManifestEntry, error) {
+		return []blob.ManifestEntry{{Path: "a"}, {Path: "b"}, {Path: "c"}}, nil
+	}}
+	var out bytes.Buffer
+	if err := observeRunArtifacts(t.Context(), logInvocation(t, "artifacts", "--run", "run", "--limit", "2", "-o", "json"), reader, &out); err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Count(out.String(), "\n"); lines != 3 {
+		t.Fatalf("want two artifacts and one page, got %d records", lines)
+	}
+}
+
+func TestRunArtifactsPagesAcrossJobsWithoutDuplicates(t *testing.T) {
+	files := map[string][]blob.ManifestEntry{
+		"build": {{Path: "a"}, {Path: "b"}, {Path: "c"}},
+		"test":  {{Path: "a"}, {Path: "z"}},
+	}
+	reader := artifactTestReader{read: func(_, job string) ([]blob.ManifestEntry, error) { return files[job], nil }}
+	for _, limit := range []string{"1", "2", "3", "4", "40"} {
+		t.Run(limit, func(t *testing.T) {
+			cursor := ""
+			var got []string
+			for {
+				args := []string{"artifacts", "--run", "1", "--limit", limit, "-o", "json"}
+				if cursor != "" {
+					args = append(args, "--cursor", cursor)
+				}
+				var out bytes.Buffer
+				if err := observeRunArtifacts(t.Context(), logInvocation(t, args...), reader, &out); err != nil {
+					t.Fatal(err)
+				}
+				lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+				var page artifactListingPage
+				if err := json.Unmarshal([]byte(lines[len(lines)-1]), &page); err != nil {
+					t.Fatal(err)
+				}
+				if page.Kind != "page" || page.Returned != len(lines)-1 || page.Returned > page.Limit {
+					t.Fatalf("bad page: %+v", page)
+				}
+				for _, line := range lines[:len(lines)-1] {
+					var row artifactRecord
+					if err := json.Unmarshal([]byte(line), &row); err != nil {
+						t.Fatal(err)
+					}
+					got = append(got, row.JobID+"/"+row.Path)
+				}
+				if !page.Truncated {
+					break
+				}
+				if page.NextCursor == "" || page.NextCursor == cursor || len(got) > 5 {
+					t.Fatal("cursor did not advance")
+				}
+				cursor = page.NextCursor
+			}
+			if !slices.Equal(got, []string{"build/a", "build/b", "build/c", "test/a", "test/z"}) {
+				t.Fatalf("paged files = %v", got)
+			}
+		})
+	}
+}
+
+func TestRunArtifactsDefaultPageAndCursorScope(t *testing.T) {
+	reader := artifactTestReader{read: func(_, _ string) ([]blob.ManifestEntry, error) {
+		entries := make([]blob.ManifestEntry, 55)
+		for i := range entries {
+			entries[i].Path = fmt.Sprintf("file-%03d", i)
+		}
+		return entries, nil
+	}}
+	var out bytes.Buffer
+	if err := observeRunArtifacts(t.Context(), logInvocation(t, "artifacts", "--run", "run", "--job", "build", "-o", "json"), reader, &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var page artifactListingPage
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.Limit != 40 || page.Returned != 40 || !page.Truncated || len(lines) != 41 {
+		t.Fatalf("default page = %+v, %d records", page, len(lines))
+	}
+	for _, args := range [][]string{
+		{"--cursor", page.NextCursor},
+		{"--job", "test", "--cursor", page.NextCursor},
+		{"--job", "build", "--cursor", "garbage"},
+	} {
+		inv := logInvocation(t, append([]string{"artifacts", "--run", "run"}, args...)...)
+		if err := observeRunArtifacts(t.Context(), inv, reader, io.Discard); err == nil {
+			t.Fatalf("accepted mismatched cursor: %v", args)
 		}
 	}
 }

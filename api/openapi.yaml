@@ -814,6 +814,25 @@ components:
         - approvals
       type: object
       x-sparkwing-go-type: controllerwire.Approvals
+    internal.controllerwire.ArtifactPage:
+      additionalProperties: true
+      properties:
+        artifacts:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.blob.ManifestEntry'
+              type: array
+            - type: "null"
+        next_cursor:
+          type: string
+        truncated:
+          type: boolean
+      required:
+        - artifacts
+        - next_cursor
+        - truncated
+      type: object
+      x-sparkwing-go-type: controllerwire.ArtifactPage
     internal.controllerwire.AttemptDetail:
       additionalProperties: true
       properties:
@@ -2054,6 +2073,7 @@ components:
             - type: "null"
       required:
         - artifacts
+        - download
       type: object
       x-sparkwing-go-type: controllerwire.JobArtifacts
     internal.controllerwire.JobDetail:
@@ -12679,13 +12699,31 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: path
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.JobArtifacts'
-          description: Successful response.
+                anyOf:
+                  - $ref: '#/components/schemas/internal.controllerwire.ArtifactPage'
+                  - $ref: '#/components/schemas/internal.controllerwire.JobArtifacts'
+          description: Response selected by the request operation.
         default:
           content:
             application/json:
