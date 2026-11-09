@@ -524,9 +524,20 @@ before building or running fixtures, so the newest waiting revision wins. The ta
 existing example history is the hourly receipt: an in-flight run suppresses another scan
 without waiting or changing findings. A result finished within the last hour is read once
 and reported again without starting another example, including failed results.
-Staging leaves the full scan for
-production. Bitwing must be installed on that user's PATH. The scan also
+Staging leaves the full scan for production. Failed example jobs use a fingerprint
+containing the environment and job ID. Each finding is promoted immediately to a
+Bitwing ticket. Later failures append deploy, scan and example run links to that
+ticket, preserving the first report. A clean scan resolves unpromoted findings.
+Promoted tickets stay with their repair owner rather than closing automatically.
+Bitwing must be installed on that user's PATH. The scan also
 requires the runner label and trust conditions documented below.
+
+Before changing production images, deploy reads the latest production scan through
+the controller and puts its status and run link in the log and job summary. A failed,
+cancelled or unfinished scan warns. Failed jobs that never started are recorded and
+ticketed under a separate execution source because their scan feedback could not run.
+An unavailable observation or ledger warns too. These warnings allow repair deploys
+to continue. The check reuses the scan-submit token and starts no runs.
 
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
 Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked

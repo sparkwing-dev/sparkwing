@@ -38,7 +38,7 @@ func (Deploy) Help() string {
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. A capacity-one global queue serializes the whole deploy. At build admission, superseded commits stop before credentials, images or Cloud smoke. " +
 		"An admitted candidate can finish while main advances: staging and production require its SHA to be an ancestor of origin/main or its tip. Production checks source ancestry again immediately before each GitOps push and requires both image revisions to advance without lowering their versions. Identical digests allow retries to finish partial deployments or leave an already deployed candidate unchanged. " +
-		"After production smoke, deploy starts a detached deploy-scan child at the same revision and with the same verified lineage and links it in the job summary without awaiting it. All scans share one concurrency slot and an hourly revision receipt, leaving the desktop runner's other slot for deploys. Full scans execute on our hardware. Scan failures upsert a stable per-environment Bitwing finding; a clean scan resolves it. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. Bitwing resolves from the runner user's PATH and uses their existing ledger configuration; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
+		"After production smoke, deploy starts a detached deploy-scan child at the same revision and with the same verified lineage and links it in the job summary without awaiting it. All scans share one concurrency slot and an hourly revision receipt, leaving the desktop runner's other slot for deploys. Full scans execute on our hardware. Scan failures create Bitwing tickets per failed example job and append later run links to the same ticket. A clean scan resolves unpromoted findings. Before rollout, production flags its latest scan status, including failures before the scan job started, and files those execution failures. Repair deploys continue with the warning. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. Bitwing resolves from the runner user's PATH and uses their existing ledger configuration; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
 }
 
 func (Deploy) Examples() []sparkwing.Example {
@@ -206,6 +206,16 @@ func (d *deployer) deployTo(ctx context.Context, env deployEnv, images deployIma
 	}
 	if err := d.assumeRole(ctx); err != nil {
 		return envDeployment{}, nil, err
+	}
+	if env.Name == d.cfg.Production.Name {
+		if err := d.productionCLI(ctx, images.Commit); err != nil {
+			return envDeployment{}, nil, err
+		}
+		if err := d.act(ctx, "check latest production post-deploy scan before rollout", func() error { return d.flagProductionScan(ctx) }); err != nil {
+			message := "WARNING: production scan feedback unavailable; repair deploy continues: " + err.Error()
+			d.tools.say(ctx, message)
+			sparkwing.Summary(ctx, message)
+		}
 	}
 	if err := d.ecrLogin(ctx); err != nil {
 		return envDeployment{}, nil, err
