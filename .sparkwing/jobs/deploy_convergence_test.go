@@ -91,22 +91,18 @@ func TestDeployBurstOfLandsConvergesOnNewestWaitingCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activeGate, err := f.deployer(false).stage(t.Context(), active)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var waiting []string
 	for range 4 {
 		waiting = append(waiting, advanceDeployMain(t, f))
 	}
 	newest := waiting[len(waiting)-1]
 	var gated []string
-	finish := func(images deployImages) {
+	finish := func(images deployImages, rec stagingGateRecord) {
 		t.Helper()
-		d := f.deployer(false)
-		if _, _, err := d.deployTo(t.Context(), d.cfg.Staging, images); err != nil {
-			t.Fatal(err)
-		}
-		rec, err := f.deployer(false).stagingGate(t.Context(), images)
-		if err != nil {
-			t.Fatal(err)
-		}
 		gated = append(gated, rec.Images.Commit)
 		raw, err := json.Marshal(rec)
 		if err != nil {
@@ -121,7 +117,7 @@ func TestDeployBurstOfLandsConvergesOnNewestWaitingCommit(t *testing.T) {
 		}
 	}
 	deployGitIn(t, f.repo, "checkout", "--quiet", "--detach", active.Commit)
-	finish(active)
+	finish(active, activeGate)
 	for _, commit := range waiting {
 		deployGitIn(t, f.repo, "checkout", "--quiet", "--detach", commit)
 		sessions, published, smokes := f.sessions, len(f.registry.published), len(f.triggered("deploy-smoke"))
@@ -138,7 +134,11 @@ func TestDeployBurstOfLandsConvergesOnNewestWaitingCommit(t *testing.T) {
 		if err != nil || images.Commit != newest {
 			t.Fatalf("newest waiter failed admission: %+v, %v", images, err)
 		}
-		finish(images)
+		rec, err := f.deployer(false).stage(t.Context(), images)
+		if err != nil {
+			t.Fatal(err)
+		}
+		finish(images, rec)
 	}
 	if !slices.Equal(gated, []string{active.Commit, newest}) || len(f.registry.published) != 2 || len(f.triggered("deploy-smoke")) != 4 {
 		t.Fatalf("burst did not coalesce: gates=%v, publications=%d, smokes=%v", gated, len(f.registry.published), f.triggered("deploy-smoke"))

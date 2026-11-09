@@ -453,11 +453,16 @@ publishes them through `publish-images`, reusing the image pair when its immutab
 already exist and both revision labels match the candidate commit. A new build checks that both
 pinned runtime-base manifests exist before compiling the dashboard or binaries. A missing base
 fails with its reference and a repair hint. Reusing published candidate images needs no base lookup.
-`staging-deploy` pins the
+`staging-gate` pins the
 digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
 same for the launcher with every other chart change. Each GitOps push requests a hard
 Argo refresh before waiting, requiring patch permission on the named Application.
+The same job holds staging's concurrency slot through the Cloud gate. Production
+can run alongside it. GitOps pushes merge concurrent changes from the other
+environment after a rejected push, preserving phase commits for rollback. Argo
+may report a descendant of the phase commit only when that environment's entire
+GitOps directory is unchanged. Deployment readiness still checks the exact image digest.
 
 The successful staging gate records the candidate CLI's SHA-256 and native platform.
 It retains only those executable bytes in a content-addressed temporary directory,
@@ -477,7 +482,7 @@ Smoke status follows poll every second. NodeClaim sampling interrupts its wait
 when all followers finish, then takes a final sample before checking the claims
 and logs.
 Recovered startup probe failures before readiness remain visible in pod logs but do not
-fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Each environment's deployed and previous digests are its job output. Credentials come
+fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Staging summarizes its deployed and previous digests before emitting the gate record. Production emits its deployment record. Credentials come
 from the run's OIDC token through the `sparkwing-deploy` role in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
 
@@ -568,11 +573,16 @@ downgrade or restore runs. Staging and production have separate database servers
 Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. A capacity-one global
-queue serializes the whole deploy, including staging and production. At build admission,
-`git ls-remote` checks main's tip. Superseded waiters stop before credentials, image work or
-Cloud smoke. Several stale rows can wait, but only the newest waiting commit can pass
-admission. Once admitted, a candidate keeps its slot and can finish even when more pushes land.
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Separate capacity-one
+global job queues serialize image builds, staging rollout plus gate, and production
+promotion plus smoke and recovery. A later candidate can build and stage while an earlier
+candidate promotes. At build admission and again at staging admission, `git ls-remote`
+checks main's tip. Superseded waiters stop before credentials or Cloud smoke at that stage.
+Several stale rows can wait, but only the newest waiting commit can pass admission.
+Once staging admits a candidate, its rollout and gate finish even when more pushes land.
+Before landing this queue-layout change, drain deploy runs and pending intake that
+still use the whole-run queue. Their plans do not hold the new stage slots, so
+the landing owner must keep the old and new layouts from executing together.
 Staging and production fetch main's tip at depth one in shallow checkouts and require the
 exact candidate SHA to be an ancestor of `origin/main` or its tip. Ancestry checks first use
 available history. A missing proof deepens the descendant's exact SHA by 64 commits, then
