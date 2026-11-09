@@ -672,6 +672,14 @@ sparkwing run deploy -- --dry-run --promote-proven        # preview promoting th
 
 #### Deploy toolchain
 
+Deploy CLI homes share only the runner's existing content-addressed pipeline
+binary cache. Each invocation keeps its profiles, credentials and store in its
+private job home. The cache key covers pipeline source and local dependencies,
+toolchain identity, GOOS/GOARCH and build flags. Changed inputs rebuild, and
+installation verifies the cached bytes before executing a private copy.
+If linking the cache fails, submission uses its private cache. Job cleanup
+removes the link, while existing cache limits and pruning own retained entries.
+
 Deploys run only on runners labelled `deploy-kikd-prod`. After installing the root-owned toolchain
 below, enroll one with `sparkwing runners add --profile prod --runner korey-desktop --session-stdin
 --repos github.com/sparkwing-dev/sparkwing --trust verified-default --label deploy-kikd-prod`, using
