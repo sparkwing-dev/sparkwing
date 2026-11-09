@@ -43,6 +43,13 @@ func readHostIneligibleTx(ctx context.Context, tx *storeTx, team Team, snapshot 
 	}
 	owner := chain[0].principal
 	demand, observed, err := ownerExecutionDemandTx(ctx, tx, owner)
+	if ownerPlacementRefused(err) {
+		reasons := map[string]string{}
+		for _, node := range waiting {
+			reasons[string(node.Ref.NodeID)] = "waiting: " + err.Error()
+		}
+		return reasons, nil
+	}
 	if err != nil || !observed {
 		return nil, err
 	}

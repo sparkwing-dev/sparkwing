@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"testing"
 	"time"
 
@@ -367,6 +368,7 @@ func TestOwnerSelfExecutionRefusesRemovedAllowedLabels(t *testing.T) {
 	for _, configured := range []bool{false, true} {
 		t.Run(fmt.Sprintf("configured=%t", configured), func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=CAST(json_set(CAST(request_json AS TEXT),'$.request.dispatch','host') AS BLOB)`)
 			proveClaimFixtureRepository(t, s)
 			admin := authorityMember(t, s, "label-admin", RoleOwner)
 			issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
@@ -406,13 +408,32 @@ func TestOwnerSelfExecutionRefusesRemovedAllowedLabels(t *testing.T) {
 			if _, err := s.AsOperator().ConfigureRunnerLabels(t.Context(), "a", "label-owner", "label-admin", &empty); err != nil {
 				t.Fatal(err)
 			}
+			if _, err := tenant.ReadRunView(t.Context(), "run"); err != nil {
+				t.Fatalf("removed label hid active run: %v", err)
+			}
+			if views, err := tenant.ListRunViews(t.Context(), 0, 1, 10); err != nil || len(views) != 1 {
+				t.Fatalf("removed label hid run list: %d %v", len(views), err)
+			}
 			var denied *apierr.Error
-			if _, err := tenant.ReadOwnerSnapshot(t.Context(), actor.Authority, "run"); !errors.As(err, &denied) || denied.Code != apierr.Forbidden {
-				t.Fatalf("owner snapshot accepted removed label: %v", err)
+			current, err := tenant.ReadOwnerSnapshot(t.Context(), actor.Authority, "run")
+			if err != nil || len(current.Nodes) != 1 || OwnerCanExecute(owner)(current.Nodes[0]) {
+				t.Fatalf("owner visibility or placement after label removal: %+v %v", current, err)
+			}
+			view, err := tenant.ReadRunView(t.Context(), "run")
+			if err != nil || !strings.Contains(view.HostIneligible["job"], "gpu") {
+				t.Fatalf("placement refusal missing from run: %+v %v", view.HostIneligible, err)
 			}
 			result, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: runstate.SourceNone})
 			if !errors.As(err, &denied) || denied.Code != apierr.Forbidden || result.Kind == runstate.Execute {
 				t.Fatalf("owner executed with removed label: %s %v", result.Kind, err)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET status='success',finished_at=?`, s.now().UnixNano())
+			if _, err := tenant.ReadRunView(t.Context(), "run"); err != nil {
+				t.Fatalf("removed label hid finished run: %v", err)
+			}
+			views, err := tenant.ListRunViews(t.Context(), 0, 1, 10)
+			if err != nil || len(views) != 1 {
+				t.Fatalf("removed label hid finished run list: %d %v", len(views), err)
 			}
 		})
 	}

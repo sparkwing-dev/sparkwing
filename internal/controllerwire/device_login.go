@@ -61,6 +61,7 @@ type UserCodeRequest struct {
 
 // DeviceRunner is the enrollment shown on the approval page.
 type DeviceRunner struct {
+	AllowedLabels []string `json:"allowed_labels"`
 	Name          string   `json:"name"`
 	Personal      bool     `json:"personal"`
 	Repos         []string `json:"repos"`

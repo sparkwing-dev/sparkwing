@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
@@ -173,7 +174,8 @@ func (s *Server) handleLookupDeviceLogin(w http.ResponseWriter, r *http.Request,
 	}
 	if runner := request.Runner; runner != nil {
 		out.Runner = &controllerwire.DeviceRunner{
-			Name: runner.Name, Personal: runner.Personal, Repos: append([]string{}, runner.Repos...), ReservedPools: append([]string{}, runner.ReservedPools...),
+			AllowedLabels: match.SelfAsserted(runner.AllowedLabels),
+			Name:          runner.Name, Personal: runner.Personal, Repos: append([]string{}, runner.Repos...), ReservedPools: append([]string{}, runner.ReservedPools...),
 			Trust: string(runner.Trust), Platform: runner.Platform, Launcher: slices.Contains(grants, capability.ClaimsLaunch),
 		}
 	}

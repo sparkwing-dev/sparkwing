@@ -28,6 +28,9 @@ type runnerPoll struct {
 
 // RecordRunnerPoll stores a live claimant's advertised labels and platform with the store clock.
 func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
+	if err := ValidateRunnerLabels(observation.Labels); err != nil {
+		return err
+	}
 	if observation.MaxConcurrent < 0 {
 		return authorityError(apierr.BadRequest, "runner concurrency must not be negative")
 	}

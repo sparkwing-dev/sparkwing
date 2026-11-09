@@ -76,6 +76,11 @@ func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability
 	return ownerDemandEligibleTx(ctx, tx, owner, demand, ref)
 }
 
+func ownerPlacementRefused(err error) bool {
+	var denied *apierr.Error
+	return errors.As(err, &denied) && (denied.Code == apierr.Forbidden || denied.Code == apierr.BadRequest)
+}
+
 // safety: ok=false means the owner has no current host observation, which is not an error.
 func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal) (UnitDemand, bool, error) {
 	if owner.Capability.Subject.Kind == capability.SubjectLocal {

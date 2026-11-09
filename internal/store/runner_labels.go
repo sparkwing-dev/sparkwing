@@ -5,13 +5,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
+// ValidateRunnerLabels bounds enrollment and claim metadata before it is stored or shown for approval.
+// Labels are trimmed like matching input and may contain ASCII letters, digits, '-', '_', '.', ':', '/' and '='.
+func ValidateRunnerLabels(labels []string) error {
+	if len(labels) > 32 {
+		return authorityError(apierr.BadRequest, "runner labels must contain at most 32 entries; remove extra labels")
+	}
+	for i, raw := range labels {
+		label := strings.TrimSpace(raw)
+		if len(label) == 0 || len(label) > 128 {
+			return authorityError(apierr.BadRequest, fmt.Sprintf("runner labels entry %d must be 1 to 128 characters after trimming whitespace", i+1))
+		}
+		for _, c := range label {
+			if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("-_.:/=", c) {
+				continue
+			}
+			return authorityError(apierr.BadRequest, fmt.Sprintf("runner labels entry %d may contain only ASCII letters, digits, '-', '_', '.', ':', '/' and '='; remove spaces, control characters and selector punctuation", i+1))
+		}
+	}
+	return nil
+}
+
 func checkRunnerLabelsTx(ctx context.Context, tx *storeTx, chain []authorityNode, labels []string) error {
+	if err := ValidateRunnerLabels(labels); err != nil {
+		return err
+	}
 	for _, node := range chain {
 		if node.principal.Capability.Purpose == capability.PurposeHere {
 			return nil
@@ -39,6 +64,11 @@ func checkRunnerLabelsTx(ctx context.Context, tx *storeTx, chain []authorityNode
 // ConfigureRunnerLabels reads or replaces an enrolled runner's allowed labels using in-pod administration.
 // A nil replacement reads the set; an empty replacement clears it. Operator must be a team administrator.
 func (o *Operator) ConfigureRunnerLabels(ctx context.Context, team Team, name, operator string, replacement *[]string) ([]string, error) {
+	if replacement != nil {
+		if err := ValidateRunnerLabels(*replacement); err != nil {
+			return nil, err
+		}
+	}
 	return inTxResult(ctx, o.s, func(tx *storeTx) ([]string, error) {
 		if err := acquireLockSet(ctx, tx, func() lockSet {
 			set := tx.operator.discoverAccountTeams(ctx, tx, lockSet{}, operator)

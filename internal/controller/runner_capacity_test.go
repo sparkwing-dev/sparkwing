@@ -48,6 +48,16 @@ func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 	fetchedRunFixture(t, e.Store, "a", "run", "acme/repo")
 	engineAcceptedFixturePlan(t, e, "a", "run")
 	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"requires":{"set":true,"value":["deploy-kikd-prod"]}}`))
+	for _, labels := range [][]string{strings.Fields(strings.Repeat("gpu ", 33)), {strings.Repeat("a", 129)}, {"gpu\nprod"}} {
+		body, err := json.Marshal(controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: labels})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", string(body), 400)
+		if !strings.Contains(response.Body.String(), "runner labels") {
+			t.Fatalf("claim labels refusal is unclear: %s", response.Body)
+		}
+	}
 	for _, kinds := range []string{`["node"]`, `["trigger"]`, `["plan"]`} {
 		response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":`+kinds+`,"labels":["team-4cpu","deploy-kikd-prod"]}`, 403)
 		for _, hint := range []string{"deploy-kikd-prod", "allowed labels", "revoke this enrollment", "sparkwing runners add --runner capacity-machine --label LABEL --force", "Self-hosted operators", "admin runner-labels"} {

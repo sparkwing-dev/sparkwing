@@ -257,3 +257,39 @@ func TestRunnerTrustRefusalNamesOnlyCurrentClasses(t *testing.T) {
 		t.Fatalf("trust refusal = %v", err)
 	}
 }
+
+//sparkwing:critical
+func TestDeviceApprovalShowsExactlyTheAllowedRunnerLabels(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "owner")
+	started := startDevice(t, s, `{"kind":"runner","runner":{"name":"label-consent","personal":true,"allowed_labels":["deploy-kikd-prod","tool:terraform"," os=linux ","pool=ignored"]}}`)
+	response := reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/lookup", `{"user_code":"`+started.UserCode+`"}`, 200)
+	var lookup struct {
+		Runner struct {
+			AllowedLabels []string `json:"allowed_labels"`
+		} `json:"runner"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &lookup); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"deploy-kikd-prod", "tool:terraform", "os=linux"}
+	if !slices.Equal(lookup.Runner.AllowedLabels, want) {
+		t.Fatalf("approval hid allowed labels: %v, want %v", lookup.Runner.AllowedLabels, want)
+	}
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+started.UserCode+`"}`, 204)
+	poll := pollDevice(t, s, started.DeviceCode, 200)
+	if poll.Credential == nil {
+		t.Fatal("approval issued no runner")
+	}
+	var body []byte
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT authority_json FROM capabilities WHERE prefix=?`, poll.Credential.Prefix).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Origin struct {
+			AllowedLabels []string `json:"allowed_labels"`
+		} `json:"origin"`
+	}
+	if err := json.Unmarshal(body, &record); err != nil || !slices.Equal(record.Origin.AllowedLabels, lookup.Runner.AllowedLabels) {
+		t.Fatalf("issued labels differ from consent: %s %v", body, err)
+	}
+}

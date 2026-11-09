@@ -51,6 +51,9 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 
 // safety: the store rechecks the authority's grants when it issues the spec.
 func runnerEnrollmentSpec(request runnerEnrollmentRequest, authority capability.AuthorityRef, team string) (capability.ProvisionSpec, error) {
+	if err := store.ValidateRunnerLabels(request.AllowedLabels); err != nil {
+		return capability.ProvisionSpec{}, err
+	}
 	if !store.ValidRunnerName(request.Name) || !request.Personal && len(request.Repos) == 0 || len(request.Repos) > maxRunnerRepos {
 		return capability.ProvisionSpec{}, invalidEngineBody("name must be 1 to 63 letters, digits, '-', '_' or '.'; repos must contain at most 32 patterns and are required for shared runners")
 	}

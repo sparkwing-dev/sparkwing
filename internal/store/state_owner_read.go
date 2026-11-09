@@ -81,9 +81,11 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 		}
 		if !loaded {
 			demand, observed, err := ownerExecutionDemandTx(ctx, tx, p)
-			if err != nil {
+			// safety: placement refusal stops execution without revoking visibility of held work.
+			if err != nil && !ownerPlacementRefused(err) {
 				return RunSnapshot{}, err
 			}
+			observed = observed && err == nil
 			if observed {
 				eligible, err = ownerEligibleNodesTx(ctx, tx, p, demand)
 				if err != nil {

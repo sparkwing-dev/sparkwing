@@ -244,6 +244,7 @@ test("a runner request shows what the runner may do", async ({
         runner: {
           name: "build-box",
           personal: false,
+          allowed_labels: ["deploy-prod", "tool:terraform"],
           repos: ["github.com/acme/*"],
           reserved_pools: ["gpu"],
           trust: "high",
@@ -260,6 +261,9 @@ test("a runner request shows what the runner may do", async ({
     page.getByRole("heading", { name: "Approve runner build-box?" }),
   ).toBeVisible();
   await expect(page.getByText("Shared with acme")).toBeVisible();
+  await expect(page.getByText("Allowed labels", { exact: true })).toBeVisible();
+  await expect(page.getByText("deploy-prod", { exact: true })).toBeVisible();
+  await expect(page.getByText("tool:terraform", { exact: true })).toBeVisible();
   await expect(page.getByText("github.com/acme/*")).toBeVisible();
   await expect(page.getByText("linux/amd64")).toBeVisible();
   await expect(page.getByText("A runner token for acme with:")).toBeVisible();
