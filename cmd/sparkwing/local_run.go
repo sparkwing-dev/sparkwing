@@ -218,6 +218,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		return localRunPreparation{}, err
 	}
 	options.SDK = ""
+	options.ExportHandoff = !flags.detached
 	options.InstallSDK = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 		if err := resolveSparks(ctx, filepath.Join(request.Directory, request.PipelineDir), flags.noUpdate); err != nil {
 			return engine.SDKCommand{}, err
@@ -230,7 +231,11 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	}
 	entry, err := source.Acquire(ctx, spec, options)
 	if entry != nil {
-		defer func() { err = errors.Join(err, entry.Close()) }()
+		defer func() {
+			if err != nil {
+				err = errors.Join(err, entry.Close())
+			}
+		}()
 	}
 	if err != nil {
 		return localRunPreparation{}, err
@@ -282,7 +287,15 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, prepared.Declarations.Error(err)
 	}
+	var closeEntry func() error
+	if entry.Installation != "" {
+		closeEntry = entry.Close
+	} else if err := entry.Close(); err != nil {
+		return localRunPreparation{}, err
+	}
+	selection.source.Location.Installation = entry.Installation
 	return localRunPreparation{
+		close:    closeEntry,
 		identity: identity, declarations: prepared.Declarations,
 		git:         selection.git,
 		source:      selection.source,

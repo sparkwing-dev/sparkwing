@@ -29,14 +29,17 @@ const (
 
 // SDKInstallRequest gives the verified matching engine its acquired source and filtered install base.
 type SDKInstallRequest struct {
-	Directory           string           `json:"directory"`
-	PipelineDir         string           `json:"pipeline_dir"`
-	ExecutableDirectory string           `json:"executable_directory,omitempty"`
-	SDK                 engineid.SDKKind `json:"sdk"`
-	NoBincache          bool             `json:"no_bincache,omitempty"`
-	HashAllFiles        bool             `json:"hash_all_files,omitempty"`
-	Environment         []string         `json:"-"`
-	Masker              *secrets.Masker  `json:"-"`
+	Engine              engineid.Identity `json:"engine"`
+	Directory           string            `json:"directory"`
+	PipelineDir         string            `json:"pipeline_dir"`
+	ExecutableDirectory string            `json:"executable_directory,omitempty"`
+	SDK                 engineid.SDKKind  `json:"sdk"`
+	NoBincache          bool              `json:"no_bincache,omitempty"`
+	HashAllFiles        bool              `json:"hash_all_files,omitempty"`
+	ExportHandoff       bool              `json:"export_handoff,omitempty"`
+	Handoff             string            `json:"handoff,omitempty"`
+	Environment         []string          `json:"-"`
+	Masker              *secrets.Masker   `json:"-"`
 }
 
 // UnmarshalJSON refuses ambiguous requests and credentials sent through the input pipe.
@@ -53,9 +56,11 @@ func (r *SDKInstallRequest) UnmarshalJSON(body []byte) error {
 
 // SDKCommand names the locally built Go command or Node/main command without protocol argv.
 type SDKCommand struct {
+	Reused           bool     `json:"reused,omitempty"`
 	Directory        string   `json:"directory"`
 	Command          []string `json:"command"`
 	CachedExecutable string   `json:"cached_executable,omitempty"`
+	Handoff          string   `json:"handoff,omitempty"`
 	ownedDirectory   string
 }
 
@@ -107,6 +112,7 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 			}
 		}()
 	}
+	request.Engine = r.Identity
 	body, err := json.Marshal(request)
 	if err != nil {
 		return SDKCommand{}, err
@@ -151,6 +157,9 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 		if !info.Mode().IsRegular() {
 			return SDKCommand{}, errors.New("selected engine returned a nonregular Go executable")
 		}
+	}
+	if result.Handoff != "" && result.Handoff != filepath.Join(ownedDirectory, "handoff.json") {
+		return SDKCommand{}, errors.New("selected engine returned an unowned installation handoff")
 	}
 	result.ownedDirectory = ownedDirectory
 	return result, nil

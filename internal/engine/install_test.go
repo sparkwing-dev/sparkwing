@@ -25,7 +25,7 @@ import("encoding/json";"fmt";"os";"path/filepath";"strings";"runtime")
 var Version="dev"
 func main(){
  if len(os.Args)!=2 || os.Args[1]!="__sdk-install" { os.Exit(20) }
- var req struct{Directory string;PipelineDir string ` + "`json:\"pipeline_dir\"`" + `;SDK string; ExecutableDirectory string ` + "`json:\"executable_directory\"`" + `}
+ var req struct{Engine json.RawMessage;Directory string;PipelineDir string ` + "`json:\"pipeline_dir\"`" + `;SDK string; ExecutableDirectory string ` + "`json:\"executable_directory\"`" + `}
  dec:=json.NewDecoder(os.Stdin); dec.DisallowUnknownFields()
  if dec.Decode(&req)!=nil { os.Exit(21) }
  if os.Getenv("SPARKWING_TOKEN")!="" || os.Getenv("AMBIENT_INSTALL_TEST")!="" { os.Exit(22) }

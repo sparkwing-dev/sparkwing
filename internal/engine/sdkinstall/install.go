@@ -60,6 +60,14 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	if err != nil {
 		return err
 	}
+	if command, reused := restoreHandoff(ctx, version, dir, pin, request, environment); reused {
+		fmt.Fprintln(diagnostics, "Cache hit: verified local SDK handoff")
+		return json.NewEncoder(output).Encode(command)
+	}
+	var inputs *bincache.InputWitness
+	if request.ExportHandoff && request.SDK == engineid.GoSDK && !request.NoBincache {
+		ctx, inputs = bincache.WithInputWitness(ctx)
+	}
 	var command []string
 	var cachedExecutable string
 	if request.SDK == engineid.GoSDK {
@@ -70,7 +78,11 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable})
+	result := engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable}
+	if inputs != nil {
+		result.Handoff = writeHandoff(ctx, version, dir, pin, request, environment, result, inputs)
+	}
+	return json.NewEncoder(output).Encode(result)
 }
 
 // GoEnvironment applies the native SDK compiler settings used by installation and cache diagnostics.

@@ -27,6 +27,7 @@ func ForRequest(sealed runspec.SealedRequest) (Spec, error) {
 		spec.PipelineSHA = r.Source.Ref
 	}
 	if location.LocalCheckout != "" {
+		spec.Installation = location.Installation
 		spec.CommittedCheckout = r.Source.CommittedCheckout
 		if !filepath.IsAbs(location.LocalCheckout) {
 			return Spec{}, errors.New("sealed local checkout must be absolute")

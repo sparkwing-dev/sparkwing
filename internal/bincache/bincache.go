@@ -338,6 +338,21 @@ func stableKeyParts(ctx context.Context, sparkwingDir, goos, goarch string, env 
 }
 
 func keyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
+	witness := inputWitness(ctx)
+	witness.sourceTree(sparkwingDir, hashAllFiles)
+	if witness != nil && !witness.Disabled {
+		targets, err := localReplaceTargets(filepath.Join(sparkwingDir, "go.mod"))
+		if err != nil {
+			witness.Disabled = true
+		}
+		workTargets, _, err := localWorkspaceTargets(sparkwingDir, env)
+		if err != nil {
+			witness.Disabled = true
+		}
+		for _, target := range append(targets, workTargets...) {
+			witness.sourceTree(target.Dir, hashAllFiles)
+		}
+	}
 	var parts []KeyPart
 	add := func(label, detail string, material []byte) {
 		parts = append(parts, KeyPart{

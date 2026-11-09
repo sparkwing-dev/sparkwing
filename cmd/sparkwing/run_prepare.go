@@ -19,6 +19,7 @@ import (
 )
 
 type localRunPreparation struct {
+	close        func() error
 	identity     clisurface.PipelineIdentity
 	declarations *runspec.DeclarationGate
 	git          runspec.Git

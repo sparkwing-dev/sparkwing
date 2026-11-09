@@ -16,6 +16,7 @@ import (
 
 // Spec carries the sealed source identity, commit and checkout policy.
 type Spec struct {
+	Installation      string
 	RepoKey           string
 	RemoteURL         string
 	SHA               string
@@ -56,6 +57,7 @@ type EngineResolver interface {
 
 // Options supplies host-owned workspace and authority separately from sealed source data.
 type Options struct {
+	ExportHandoff bool
 	// Timing receives host-owned stage receipts independently of SDK output discovery.
 	Timing      func(context.Context, Timing)
 	Prepared    *Prepared
@@ -108,11 +110,12 @@ func (o Options) ownerGit() bool { return o.GitAccess == GitAccessOwner }
 
 // Entry contains the acquired checkout and SDK command without protocol arguments.
 type Entry struct {
-	Engine    engine.Resolved
-	Directory string
-	Command   []string
-	RepoKey   string
-	SHA       string
+	Installation string
+	Engine       engine.Resolved
+	Directory    string
+	Command      []string
+	RepoKey      string
+	SHA          string
 	// DefaultBranch is resolved from origin HEAD only when the sealed request lacks it.
 	DefaultBranch     string
 	ownedDirectory    string
