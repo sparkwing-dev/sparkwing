@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,16 +29,6 @@ type PrettyRenderer struct {
 	pendingStepEnd    *Record
 	pendingRunSummary *Record
 	pendingRunStart   *Record
-}
-
-func newPrettyRenderer() *PrettyRenderer {
-	return &PrettyRenderer{
-		w:         os.Stdout,
-		errW:      os.Stderr,
-		useColor:  color.Enabled(),
-		nodeStart: map[string]time.Time{},
-		nodeSlot:  map[string]int{},
-	}
 }
 
 func NewPrettyRendererTo(w io.Writer, useColor bool) *PrettyRenderer {
