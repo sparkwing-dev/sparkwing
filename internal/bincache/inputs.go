@@ -65,11 +65,11 @@ func effectiveBuildInputs(ctx context.Context, dir string, env []string) ([]byte
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, ".")
-	compiled, err := compiledInputDigest(func() ([]byte, error) { return output(args...) }, dir, effective["GOFLAGS"])
+	compiled, err := compiledInputDigest(func() ([]byte, error) { return output(args...) }, dir, effective["GOFLAGS"], effective["GOWORK"])
 	return buildEnvironmentKey(resolved), compiled, err
 }
 
-func compiledInputDigest(list func() ([]byte, error), dir, flags string) ([]byte, error) {
+func compiledInputDigest(list func() ([]byte, error), dir, flags, workspace string) ([]byte, error) {
 	var previous []byte
 	for range 2 {
 		raw, err := list()
@@ -81,6 +81,9 @@ func compiledInputDigest(list func() ([]byte, error), dir, flags string) ([]byte
 		if err != nil {
 			return nil, err
 		}
+		if replacement := replacements[workspace]; replacement != "" {
+			selected = append(selected, replacement)
+		}
 		if _, err := hashFilesInto(&digest, dir, selected); err != nil {
 			return nil, err
 		}
@@ -91,6 +94,10 @@ func compiledInputDigest(list func() ([]byte, error), dir, flags string) ([]byte
 				GoFiles, CgoFiles, CFiles, CXXFiles, MFiles, HFiles, FFiles, SFiles, SwigFiles, SwigCXXFiles, SysoFiles, EmbedFiles []string
 				Error                                                                                                               json.RawMessage
 				DepsErrors                                                                                                          json.RawMessage
+				Module                                                                                                              *struct {
+					GoMod   string
+					Replace *struct{ GoMod string }
+				}
 			}
 			if err := decoder.Decode(&pkg); errors.Is(err, io.EOF) {
 				break
@@ -99,9 +106,28 @@ func compiledInputDigest(list func() ([]byte, error), dir, flags string) ([]byte
 			}
 			fmt.Fprintf(&digest, "package:%s\n%s\n%s\n", pkg.ImportPath, pkg.Error, pkg.DepsErrors)
 			var files []string
-			for _, group := range [][]string{pkg.GoFiles, pkg.CgoFiles, pkg.CFiles, pkg.CXXFiles, pkg.MFiles, pkg.HFiles, pkg.FFiles, pkg.SFiles, pkg.SwigFiles, pkg.SwigCXXFiles, pkg.SysoFiles, pkg.EmbedFiles} {
+			var metadata []string
+			if pkg.Module != nil {
+				path := pkg.Module.GoMod
+				if pkg.Module.Replace != nil {
+					path = pkg.Module.Replace.GoMod
+				}
+				if path != "" {
+					if !filepath.IsAbs(path) {
+						path, err = filepath.Abs(filepath.Join(dir, path))
+						if err != nil {
+							return nil, err
+						}
+					}
+					metadata = append(metadata, path)
+				}
+			}
+			for _, group := range [][]string{pkg.GoFiles, pkg.CgoFiles, pkg.CFiles, pkg.CXXFiles, pkg.MFiles, pkg.HFiles, pkg.FFiles, pkg.SFiles, pkg.SwigFiles, pkg.SwigCXXFiles, pkg.SysoFiles, pkg.EmbedFiles, metadata} {
 				for _, name := range group {
-					path := filepath.Join(pkg.Dir, name)
+					path := name
+					if !filepath.IsAbs(path) {
+						path = filepath.Join(pkg.Dir, path)
+					}
 					if replacement, ok := replacements[path]; ok {
 						path = replacement
 					}
@@ -170,7 +196,6 @@ func selectedBuildFiles(dir, flags string) (map[string]string, []string, error) 
 		for original, replacement := range overlay.Replace {
 			if replacement != "" {
 				replacement = absolute(replacement)
-				files = append(files, replacement)
 			}
 			replacements[absolute(original)] = replacement
 		}

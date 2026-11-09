@@ -57,6 +57,88 @@ func TestGoFileOverlayChangesRebuildPipeline(t *testing.T) {
 	}
 }
 
+func TestGoFileOverlayIgnoresUnselectedReplacement(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	dir := newPipelineDir(t)
+	manifest := filepath.Join(t.TempDir(), "overlay.json")
+	replacement := filepath.Join(t.TempDir(), "unread.go")
+	for _, state := range []string{"missing", "unreadable"} {
+		t.Run(state, func(t *testing.T) {
+			if state == "unreadable" {
+				if err := os.WriteFile(replacement, []byte("unused"), 0); err != nil {
+					t.Fatal(err)
+				}
+			}
+			body, err := json.Marshal(map[string]any{"Replace": map[string]string{filepath.Join(t.TempDir(), "unselected.go"): replacement}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, manifest, string(body))
+			t.Setenv("GOFLAGS", "-buildvcs=false -p=1 -overlay="+manifest)
+			if _, built := materializeFixture(t, dir); !built {
+				t.Fatal("new overlay manifest reused the previous key")
+			}
+			if _, built := materializeFixture(t, dir); built {
+				t.Fatal("unselected overlay destination prevented cache reuse")
+			}
+		})
+	}
+}
+
+func TestGoFileOverlayMetadataChangesRebuildPipeline(t *testing.T) {
+	for _, name := range []string{"go.mod", "go.work"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("GOWORK", "off")
+			t.Setenv("SPARKWING_HOME", t.TempDir())
+			dir := newPipelineDir(t)
+			writeFile(t, filepath.Join(dir, "main.go"), "package main\nfunc main(){defer func(){if recover()==nil{print(\"nil\")}else{print(\"value\")}}();panic(nil)}\n")
+			prefix := "module example.com/pipeline\ngo 1.26\n"
+			if name == "go.work" {
+				prefix = "go 1.26\nuse .\n"
+				writeFile(t, filepath.Join(dir, name), prefix)
+				t.Setenv("GOWORK", filepath.Join(dir, name))
+			}
+			replacement := filepath.Join(t.TempDir(), name)
+			manifest := filepath.Join(t.TempDir(), "overlay.json")
+			body, err := json.Marshal(map[string]any{"Replace": map[string]string{filepath.Join(dir, name): replacement}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, manifest, string(body))
+			t.Setenv("GOFLAGS", "-buildvcs=false -p=1 -overlay="+manifest)
+			for _, setting := range []struct{ flag, output string }{{"1", "nil"}, {"0", "value"}} {
+				writeFile(t, replacement, prefix+"godebug panicnil="+setting.flag+"\n")
+				if out, built := materializeFixture(t, dir); out != setting.output || !built {
+					t.Fatalf("overlaid %s = %q, built=%t; want %s and rebuild", name, out, built, setting.output)
+				}
+			}
+			if out, built := materializeFixture(t, dir); out != "value" || built {
+				t.Fatalf("unchanged overlaid metadata = %q, built=%t; want cache hit", out, built)
+			}
+		})
+	}
+}
+
+func TestRelativeModfileMetadataUsesBuildDirectory(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("GOFLAGS", "-buildvcs=false -p=1 -modfile=go.mod")
+	dir := newPipelineDir(t)
+	writeFile(t, filepath.Join(dir, "main.go"), "package main\nimport \"example.com/pipeline/jobs\"\nfunc main(){print(jobs.Value)}\n")
+	writeFile(t, filepath.Join(dir, "jobs", "value.go"), "package jobs\nconst Value=\"first\"\n")
+	if out, built := materializeFixture(t, dir); out != "first" || !built {
+		t.Fatalf("first relative-modfile build = %q, %t", out, built)
+	}
+	if out, built := materializeFixture(t, dir); out != "first" || built {
+		t.Fatalf("unchanged relative-modfile build = %q, %t; want cache hit", out, built)
+	}
+	writeFile(t, filepath.Join(dir, "jobs", "value.go"), "package jobs\nconst Value=\"second\"\n")
+	if out, built := materializeFixture(t, dir); out != "second" || !built {
+		t.Fatalf("changed jobs build = %q, %t; want second and rebuild", out, built)
+	}
+}
+
 func TestGoPGOChangesRebuildPipeline(t *testing.T) {
 	root, err := procenv.ControlCommandContext(t.Context(), os.Environ(), "go", "env", "GOROOT").Output()
 	if err != nil {

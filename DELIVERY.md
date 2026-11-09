@@ -530,9 +530,32 @@ before building or running fixtures, so the newest waiting revision wins. The ta
 existing example history is the hourly receipt: an in-flight run suppresses another scan
 without waiting or changing findings. A result finished within the last hour is read once
 and reported again without starting another example, including failed results.
-Staging leaves the full scan for
-production. Bitwing must be installed on that user's PATH. The scan also
+Staging leaves the full scan for production. Failed example jobs use a fingerprint
+containing the environment and job ID. Bitwing promotes each eligible finding to a
+ticket after three consecutive breaches or ten total breaches. Later failures append deploy, scan and example run links to that
+ticket, preserving the first report. A clean scan resolves unpromoted findings.
+Automatic promotion uses Bitwing's eligibility decision and normal `finding promote`;
+checks never force promotion.
+Finding list supplies IDs; finding show supplies fingerprints and linked tickets.
+If per-job status enrichment fails, the known scan failure still creates a ticket
+with its run links and the unavailable-details warning. Publication receives its
+full 30-second budget after optional enrichment finishes, including on timeout.
+Promoted tickets stay with their repair owner rather than closing automatically.
+Bitwing must be installed on that user's PATH. The scan also
 requires the runner label and trust conditions documented below.
+
+Before changing production images, deploy reads the latest production scan through
+the controller and puts its status and run link in the log and job summary. A failed,
+cancelled or unfinished scan warns. Failed jobs that never started are recorded and
+ticketed under a separate execution source because their scan feedback could not run.
+Pre-planning observations use requested arguments when resolved arguments are
+absent. When those arguments are redacted, repository-inherited children of the
+`production` job identify production scans; their parent deployment link remains
+available. Planning failures with no jobs produce a run-level execution finding. Conclusive
+observations without startup failures clear execution findings and reset their
+streak; unfinished observations preserve them.
+An unavailable observation or ledger warns too. These warnings allow repair deploys
+to continue. The check reuses the scan-submit token and starts no runs.
 
 The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
 Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked

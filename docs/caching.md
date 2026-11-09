@@ -227,7 +227,7 @@ file list and checks it twice for changes. The broader module-tree hash excludes
 ignored files unless `sparkwing run --sw-hash-all-files` is set. That flag also
 hashes ignored files outside the selected build inputs.
 Go file overlays contribute their map and replacement contents, including files
-that exist only in the overlay. Automatic `default.pgo` profiles and profiles
+that exist only in the overlay, plus the module and workspace metadata Go reads. Automatic `default.pgo` profiles and profiles
 selected by `-pgo` contribute their contents even when ignored or outside the checkout.
 
 Builds run with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`.
