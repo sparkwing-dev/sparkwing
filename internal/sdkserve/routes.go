@@ -184,6 +184,26 @@ func (s *routeServices) RunPipeline(ctx context.Context, request ChildRequest) (
 	}
 }
 
+func (s *routeServices) AwaitChild(ctx context.Context, runID string) (string, error) {
+	for {
+		var state struct {
+			Status string `json:"status"`
+		}
+		path := "/node/v1/children/" + routeSegment(runID) + "/await?wait_ms=" + strconv.FormatInt(limits.ChildAwait.Milliseconds(), 10)
+		if err := s.call(ctx, "GET", path, nil, &state); err != nil {
+			return "", err
+		}
+		switch state.Status {
+		case "pending", "running", "queued":
+			continue
+		case "success", "memoized", "failed", "cancelled", "skipped", "superseded":
+			return state.Status, nil
+		default:
+			return "", fmt.Errorf("invalid child state")
+		}
+	}
+}
+
 func (s *routeServices) OIDC(ctx context.Context, audience string) (string, error) {
 	var out struct {
 		Token string `json:"token"`

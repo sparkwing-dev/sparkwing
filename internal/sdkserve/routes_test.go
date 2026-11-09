@@ -333,3 +333,37 @@ func TestHostRoutesDetachedChildStartDoesNotAwait(t *testing.T) {
 		t.Fatalf("start-only request: %q, calls %d, error %v", id, calls, err)
 	}
 }
+
+func TestHostRoutesAwaitExistingChildWithoutResubmitting(t *testing.T) {
+	for _, status := range []string{"success", "failed", "cancelled", "skipped", "superseded"} {
+		t.Run(status, func(t *testing.T) {
+			calls := 0
+			s := &routeServices{binding: fakeBinding, dial: routeTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				state := "running"
+				if calls == 2 {
+					state = status
+				}
+				return fakeTransport(t, "GET", "/node/v1/children/scan%2Fchild/await?wait_ms=60000", "null", `{"status":"`+state+`"}`)(r)
+			}).dial}
+			got, err := s.AwaitChild(t.Context(), "scan/child")
+			if err != nil || got != status || calls != 2 {
+				t.Fatalf("await = %q, %v, calls=%d", got, err, calls)
+			}
+		})
+	}
+}
+
+func TestHostRoutesChildAwaitRefusesInvalidStatesAndCancellation(t *testing.T) {
+	for _, status := range []string{"", "invented"} {
+		s := fakeRoutes(t, "GET", "/node/v1/children/scan/await?wait_ms=60000", "null", `{"status":"`+status+`"}`)
+		if _, err := s.AwaitChild(t.Context(), "scan"); err == nil {
+			t.Fatalf("accepted status %q", status)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := (&routeServices{}).AwaitChild(ctx, "scan"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation = %v", err)
+	}
+}

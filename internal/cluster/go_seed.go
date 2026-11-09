@@ -9,16 +9,21 @@ import (
 	"path/filepath"
 )
 
-// safety: build/Dockerfile.runner primes a module cache and a build cache here, per SDK version.
-const goSeedRoot = "/usr/local/share/sparkwing/go-seed"
+// safety: build/Dockerfile.runner primes these content-addressed caches with the image's toolchain.
+const (
+	goSeedRoot     = "/usr/local/share/sparkwing/go-seed"
+	goStandardSeed = "/usr/local/share/sparkwing/go-stdlib"
+)
 
-// perf: a Cloud plan pins the runner's own SDK version, so copying the image's primed
-// caches into empty cache paths turns its SDK download and compile into a copy. The root
-// filesystem is read-only, so Go cannot use the seed in place; an existing cache is left alone.
-func seedGoCaches(root, version, modules, gocache string) error {
+// perf: the image is read-only, so Go needs writable copies of its primed caches.
+// Standard-library cache keys let versions without an SDK seed reuse compiler work too.
+func seedGoCaches(root, standard, version, modules, gocache string) error {
 	var errs []error
 	for _, cache := range []struct{ seed, target string }{{"modules", modules}, {"gocache", gocache}} {
 		source := filepath.Join(root, version, cache.seed)
+		if cache.seed == "gocache" && !exists(source) {
+			source = standard
+		}
 		if cache.target == "" || !exists(source) || exists(cache.target) {
 			continue
 		}

@@ -15,6 +15,10 @@ type WeatherOut struct {
 	At       time.Time `json:"at"`
 }
 
+type WeatherInputs struct {
+	PostDeploy bool `flag:"post-deploy" help:"Run on the deploy runner"`
+}
+
 type WeatherReport struct{ sparkwing.Base }
 
 func (WeatherReport) ShortHelp() string {
@@ -59,11 +63,14 @@ func (j *weatherStamp) run(ctx context.Context) (WeatherOut, error) {
 	return out, nil
 }
 
-func (p *WeatherReport) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "stamp", &weatherStamp{}).Inline()
+func (p *WeatherReport) Plan(_ context.Context, plan *sparkwing.Plan, in WeatherInputs, _ sparkwing.RunContext) error {
+	node := sparkwing.Job(plan, "stamp", &weatherStamp{}).Inline()
+	if in.PostDeploy {
+		node.Requires("deploy-kikd-prod")
+	}
 	return nil
 }
 
 func init() {
-	sparkwing.Register("WeatherReport", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &WeatherReport{} })
+	sparkwing.Register("WeatherReport", func() sparkwing.Pipeline[WeatherInputs] { return &WeatherReport{} })
 }
