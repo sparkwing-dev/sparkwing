@@ -188,7 +188,7 @@ func TestWithheldPlanningOutputExplainsIncompleteDiscovery(t *testing.T) {
 			if _, err := p.Prepare(t.Context(), input, fixture.input); err != nil {
 				t.Fatal(err)
 			}
-			want := "sparkwing: output withheld because secret declarations were unavailable (1 lines): " + tc.want
+			want := "sparkwing: output withheld because secret declarations were unavailable (1 records): " + tc.want
 			if !slices.Contains(logs, want) || slices.ContainsFunc(logs, func(log string) bool { return strings.Contains(log, private) }) {
 				t.Fatalf("withheld output was not explained or leaked: %q", logs)
 			}

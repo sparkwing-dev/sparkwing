@@ -99,13 +99,25 @@ func (l *planningLogs) release(ctx context.Context) error {
 	}
 	l.buffer, l.bytes = nil, 0
 	if l.err == nil && l.dropped > 0 {
-		l.err = l.sink(ctx, l.masker.Log(nodeproto.FrameLog{Level: "warn", Message: fmt.Sprintf("sparkwing: %d log lines dropped before describe completed", l.dropped)}))
+		l.err = l.sink(ctx, l.masker.Log(nodeproto.FrameLog{Level: "warn", Message: fmt.Sprintf("sparkwing: %d log records dropped before describe completed", l.dropped)}))
 	}
 	l.dropped = 0
 	return l.err
 }
 
 func (l *planningLogs) finish(ctx context.Context) error {
+	done := make(chan error, 1)
+	// safety: an unresponsive sink must not extend the owner's shutdown budget.
+	go func() { done <- l.finishOutput(ctx) }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+}
+
+func (l *planningLogs) finishOutput(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.closed = true
@@ -113,8 +125,11 @@ func (l *planningLogs) finish(ctx context.Context) error {
 		l.timer.Stop()
 		l.timer = nil
 	}
+	if l.err == nil {
+		l.err = context.Cause(ctx)
+	}
 	if l.err == nil && !l.known && len(l.buffer)+l.dropped > 0 {
-		message := fmt.Sprintf("sparkwing: output withheld because secret declarations were unavailable (%d lines)", len(l.buffer)+l.dropped)
+		message := fmt.Sprintf("sparkwing: output withheld because secret declarations were unavailable (%d records)", len(l.buffer)+l.dropped)
 		if l.withheld != "" {
 			message += ": " + l.withheld
 		}

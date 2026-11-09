@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -113,5 +114,67 @@ func TestNativeLogIngressUsesAcceptedDebugPolicy(t *testing.T) {
 				t.Fatalf("levels=%v want=%v", levels, want)
 			}
 		})
+	}
+}
+
+func TestPlanningLogsFinishHonorsCancellationWithBlockedSink(t *testing.T) {
+	for _, known := range []bool{false, true} {
+		t.Run(fmt.Sprint(known), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			entered, unblock, written := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			logs := planningLogs{known: known, masker: secrets.NewMasker(), sink: func(context.Context, nodeproto.FrameLog) error {
+				close(entered)
+				<-unblock
+				return nil
+			}}
+			if known {
+				go func() { defer close(written); _ = logs.write(t.Context(), nodeproto.FrameLog{Message: "hello"}) }()
+				<-entered
+			} else {
+				if err := logs.text(t.Context(), "info", "unclassified", false); err != nil {
+					t.Fatal(err)
+				}
+				close(written)
+			}
+			finished := make(chan error, 1)
+			go func() { finished <- logs.finish(ctx) }()
+			if !known {
+				<-entered
+			}
+			cancel()
+			err := <-finished
+			close(unblock)
+			<-written
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("finish error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPlanningLogsNoticeCountsRecords(t *testing.T) {
+	var notice string
+	logs := planningLogs{masker: secrets.NewMasker(), sink: func(_ context.Context, frame nodeproto.FrameLog) error { notice = frame.Message; return nil }}
+	if err := logs.text(t.Context(), "info", strings.Repeat("line\n", 10), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := logs.finish(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(notice, "(1 records)") {
+		t.Fatalf("notice = %q", notice)
+	}
+}
+
+func TestPlanningLogsEmptyRecordsConsumeBudget(t *testing.T) {
+	logs := planningLogs{masker: secrets.NewMasker()}
+	for range planningLogBufferBytes/64 + 1 {
+		if err := logs.text(t.Context(), "info", "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if logs.dropped != 1 || logs.bytes != planningLogBufferBytes {
+		t.Fatalf("bytes=%d dropped=%d", logs.bytes, logs.dropped)
 	}
 }

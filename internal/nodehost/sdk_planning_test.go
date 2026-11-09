@@ -436,10 +436,10 @@ func TestSDKPlanningReportsBufferedLogLoss(t *testing.T) {
 				t.Fatal(err)
 			}
 			if fail {
-				if len(logs) != 1 || !strings.Contains(logs[0].Message, "2 lines") {
+				if len(logs) != 1 || !strings.Contains(logs[0].Message, "2 records") {
 					t.Fatalf("withheld logs not counted: %+v", logs)
 				}
-			} else if len(logs) != 2 || logs[0].Message != "kept" || !strings.Contains(logs[1].Message, "1 log lines dropped") {
+			} else if len(logs) != 2 || logs[0].Message != "kept" || !strings.Contains(logs[1].Message, "1 log records dropped") {
 				t.Fatalf("overflow not reported: %+v", logs)
 			}
 		})
