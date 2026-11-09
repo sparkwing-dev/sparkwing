@@ -211,7 +211,7 @@ func TestArtifactPublicationAtomicallyRefusesRacingDestination(t *testing.T) {
 	if err := os.WriteFile(dest, []byte("racing creator"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := publishArtifactFile(source, dest); !errors.Is(err, os.ErrExist) {
+	if err := publishArtifactFile(source, dest, os.Link); !errors.Is(err, os.ErrExist) {
 		t.Fatalf("publication did not refuse racing destination: %v", err)
 	}
 	contents, err := os.ReadFile(dest)
@@ -311,5 +311,31 @@ func TestRunArtifactsDefaultPageAndCursorScope(t *testing.T) {
 		if err := observeRunArtifacts(t.Context(), inv, reader, io.Discard); err == nil {
 			t.Fatalf("accepted mismatched cursor: %v", args)
 		}
+	}
+}
+
+func TestArtifactPublicationExplainsLinkFailure(t *testing.T) {
+	cause := errors.New("hard links unsupported")
+	err := publishArtifactFile("verified", "artifact", func(source, dest string) error {
+		if source != "verified" || dest != "artifact" {
+			t.Fatalf("link paths = %q, %q", source, dest)
+		}
+		return cause
+	})
+	if !errors.Is(err, cause) {
+		t.Fatalf("publication lost link error: %v", err)
+	}
+	for _, want := range []string{"hard links unsupported", "destination filesystem must support hard links", "choose a --dest", "NTFS", "APFS", "ext4", "FAT/exFAT", "network shares"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("publication error %q omits %q", err, want)
+		}
+	}
+}
+
+func TestArtifactPublicationPreservesExistingDestinationError(t *testing.T) {
+	cause := &os.LinkError{Op: "link", Old: "verified", New: "artifact", Err: os.ErrExist}
+	err := publishArtifactFile("verified", "artifact", func(string, string) error { return cause })
+	if err != cause {
+		t.Fatalf("existing destination error changed: %v", err)
 	}
 }
