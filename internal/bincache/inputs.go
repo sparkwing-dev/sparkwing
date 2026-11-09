@@ -20,12 +20,12 @@ func effectiveBuildInputs(ctx context.Context, dir string, env []string) ([]byte
 		env = os.Environ()
 	}
 	env = pipelineBuildEnvironment(env)
-	tool, _ := gotoolchain.Executable(env)
-	if tool == "" {
+	tool, err := gotoolchain.Executable(env)
+	if err != nil {
 		// safety: no compiler can publish under this identity; a compiler's arrival changes the key.
-		return nil, nil, nil
+		return nil, nil, nil //nolint:nilerr // Missing Go has a distinct identity and cannot publish a binary.
 	}
-	env, err := gotoolchain.BuildEnv(ctx, dir, env, EffectiveOverlay(dir, env))
+	env, err = gotoolchain.BuildEnv(ctx, dir, env, EffectiveOverlay(dir, env))
 	if err != nil {
 		return nil, nil, err
 	}
