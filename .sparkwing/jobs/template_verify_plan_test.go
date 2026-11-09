@@ -106,3 +106,63 @@ func TestRequireTemplateVerifyDisk_FailsBeforeWorkBelowFloor(t *testing.T) {
 		t.Fatalf("disk at floor rejected: %v", err)
 	}
 }
+
+func TestTemplateVerifyOnlyPlansSelectedTemplate(t *testing.T) {
+	name := "new-local-template"
+	registry := map[string]templates.Template{
+		name:               {Manifest: templates.Manifest{Name: name}},
+		"another-template": {Manifest: templates.Manifest{Name: "another-template"}},
+	}
+	raw, err := json.Marshal(verifyEnv{Templates: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, exhaustive := range []bool{false, true} {
+		host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+			return (TemplateVerify{}).Plan(ctx, plan, TemplateVerifyArgs{Only: name, Exhaustive: exhaustive}, sparkwing.RunContext{})
+		})
+		declaration, err := host.Plan(t.Context(), "TemplateVerify", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		generator := declaration.Jobs[0].Closures.Generate[0]
+		expanded, err := host.Eval(t.Context(), plan, "build-cli", generator, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected := decodePipeline(t, expanded)
+		if len(selected.Jobs) != 1 || selected.Jobs[0].ID != "verify-"+name {
+			t.Fatalf("selected jobs = %+v", selected.Jobs)
+		}
+		summaryHost := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"build-cli": raw}})
+		output, err := summaryHost.RunStep(t.Context(), plan, "summary", "run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var summary TemplateVerifySummary
+		if err := json.Unmarshal(output, &summary); err != nil {
+			t.Fatal(err)
+		}
+		if summary.Total != 1 || summary.Only != name {
+			t.Fatalf("selected summary = %+v", summary)
+		}
+	}
+}
+
+func TestTemplateVerifyOnlyRejectsUnknownName(t *testing.T) {
+	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (TemplateVerify{}).Plan(ctx, plan, TemplateVerifyArgs{Only: "missing-template-name"}, sparkwing.RunContext{})
+	})
+	raw, err := json.Marshal(verifyEnv{Templates: map[string]templates.Template{"present": {Manifest: templates.Manifest{Name: "present"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, err := host.Plan(t.Context(), "TemplateVerify", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = host.Eval(t.Context(), plan, "build-cli", declaration.Jobs[0].Closures.Generate[0], raw)
+	if err == nil {
+		t.Fatalf("unknown selection = %v", err)
+	}
+}
