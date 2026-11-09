@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 type ChangelogIssue struct {
@@ -34,7 +36,7 @@ func LintChangelog(body string, migrations fs.FS) []ChangelogIssue {
 }
 
 func CheckChangelogLint(ctx context.Context, repoRoot string) error {
-	body, err := os.ReadFile(filepath.Join(repoRoot, "CHANGELOG.md"))
+	body, err := readChangelog(repoRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -324,13 +326,12 @@ func migrationSectionBody(migrations fs.FS, path, anchor string) (body string, f
 	if anchor == "" || migrations == nil {
 		return "", false
 	}
-	f, err := migrations.Open(path)
+	data, err := readMigrationContent(migrations, path)
 	if err != nil {
 		return "", false
 	}
-	defer func() { _ = f.Close() }()
 	var b strings.Builder
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -338,7 +339,7 @@ func migrationSectionBody(migrations fs.FS, path, anchor string) (body string, f
 			if found {
 				break
 			}
-			found = slugifyHeading(strings.TrimSpace(strings.TrimPrefix(line, "## "))) == anchor
+			found = docs.MigrationAnchor(strings.TrimSpace(strings.TrimPrefix(line, "## "))) == anchor
 			continue
 		}
 		if found {
@@ -489,7 +490,7 @@ func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
 		if prev, ok := firstSeen[key]; ok {
 			fix := "move its bullets under the first heading and delete the repeat"
 			if s.version == "Unreleased" {
-				fix = "run `bash bin/check-changelog.sh --fix` to merge every repeated heading in [Unreleased] and re-sync the mirror, then commit CHANGELOG.md and pkg/docs/changelog.md"
+				fix = "move unreleased entries to docs/changes/<slug>.md and run bash bin/sync-docs.sh"
 			}
 			issues = append(issues, ChangelogIssue{
 				Line:     h.line,
@@ -562,7 +563,7 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 		}}
 	}
 	for _, h := range headings {
-		if slugifyHeading(h) == anchor {
+		if docs.MigrationAnchor(h) == anchor {
 			return nil
 		}
 	}
@@ -578,7 +579,7 @@ func readMigrationHeadings(migrations fs.FS, path string) ([]string, bool) {
 	if migrations == nil {
 		return nil, false
 	}
-	body, err := fs.ReadFile(migrations, path)
+	body, err := readMigrationContent(migrations, path)
 	if err != nil {
 		return nil, false
 	}
@@ -597,31 +598,13 @@ func markdownHeadings(body string) []string {
 	return headings
 }
 
-func slugifyHeading(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-' || r == '_':
-			b.WriteRune(r)
-		case r == ' ' || r == '\t':
-			b.WriteRune('-')
-		default:
-		}
-	}
-	return b.String()
-}
-
 func formatAnchorList(headings []string) string {
 	if len(headings) == 0 {
 		return "(file has no H2 headings yet)"
 	}
 	anchors := make([]string, 0, len(headings))
 	for _, h := range headings {
-		anchors = append(anchors, "#"+slugifyHeading(h))
+		anchors = append(anchors, "#"+docs.MigrationAnchor(h))
 	}
 	return strings.Join(anchors, ", ")
 }
@@ -646,3 +629,10 @@ func migrationsFS(repoRoot string) fs.FS {
 type emptyFS struct{}
 
 func (emptyFS) Open(string) (fs.File, error) { return nil, fs.ErrNotExist }
+
+func readMigrationContent(migrations fs.FS, path string) ([]byte, error) {
+	if path == "_unreleased.md" {
+		return docs.CollectMigration(migrations)
+	}
+	return fs.ReadFile(migrations, path)
+}

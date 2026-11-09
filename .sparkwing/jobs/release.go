@@ -33,7 +33,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "For an isolated preview, run HOME=\"$(mktemp -d)\" SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run. Cuts a release from the commit in the working tree: refuses to start unless SPARKWING_HOME names a directory other than ~/.sparkwing, resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, stages all of that, checks schema and wire change coverage, commits after every gate passes, then atomically pushes the changelog commit to main and an annotated vX.Y.Z tag. The push uses the recorded commit SHA from the original checkout, so a detached job snapshot cannot change what is released. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before changing the changelog, the release cut checks published module-version freshness, Go directive policy, SDK pin coherence and changelog links alongside build, full lint and the short test suite, under a forty-minute wall budget that includes thirty minutes of lint-lock allowance and the ten-minute check allowance. Lint prints that it is waiting for the box-wide lock before running. Local replacement checkouts are not required to match origin/main. Rolled changelog, migration-guide, schema and wire checks run before the changelog commit. A gate failure after preparation leaves HEAD unchanged with the prepared release files staged for inspection. Every refusal precedes push-tag. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
+	return "For an isolated preview, run HOME=\"$(mktemp -d)\" SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run. Cuts a release from the commit in the working tree: refuses to start unless SPARKWING_HOME names a directory other than ~/.sparkwing, resolves the version, checks it is ahead of the newest tag origin carries, collects docs/changes/*.md into the versioned CHANGELOG.md section, rolls docs/migrations/unreleased/*.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, consumes source and mirror fragments, stages all of that, checks schema and wire change coverage, commits after every gate passes, then atomically pushes the changelog commit to main and an annotated vX.Y.Z tag. The push uses the recorded commit SHA from the original checkout, so a detached job snapshot cannot change what is released. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before changing the changelog, the release cut checks published module-version freshness, Go directive policy, SDK pin coherence and changelog links alongside build, full lint and the short test suite, under a forty-minute wall budget that includes thirty minutes of lint-lock allowance and the ten-minute check allowance. Lint prints that it is waiting for the box-wide lock before running. Local replacement checkouts are not required to match origin/main. Rolled changelog, migration-guide, schema and wire checks run before the changelog commit. A gate failure after preparation leaves HEAD unchanged with the prepared release files staged for inspection. Every refusal precedes push-tag. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -335,11 +335,20 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
+	if !roll.needed {
+		pending, err := filepath.Glob(filepath.Join(j.RepoDir, migrationsDirRel, "unreleased", "*.md"))
+		if err != nil {
+			return err
+		}
+		if len(pending) > 0 {
+			return errors.New("release: migration fragments need a (Breaking) changelog entry before they can be collected")
+		}
+	}
 	staged := []string{"CHANGELOG.md", embeddedChangelogRel}
 	if err := prepareReleasePins(ctx, j.RepoDir, version); err != nil {
 		return err
 	}
-	staged = append(staged, sparkwingPinArtifacts[2:]...)
+	staged = append(staged, sparkwingPinArtifacts...)
 	switch {
 	case roll.needed && roll.guideOnDisk:
 		body = roll.changelogBody
@@ -371,7 +380,12 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if err := checkMigrationGuide(ctx, j.RepoDir, version); err != nil {
 		return fmt.Errorf("release migration-guide: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add"}, staged...)...); err != nil {
+	consumed, err := consumeReleaseFragments(j.RepoDir)
+	if err != nil {
+		return err
+	}
+	staged = append(staged, consumed...)
+	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add", "--"}, staged...)...); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
 	}
 	sparkwing.Info(ctx, "staged release notes and SDK pins for %s; commit waits for the schema and wire gates", version)
@@ -400,7 +414,7 @@ func (j *commitChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 
 func (j *commitChangelogJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	pending, err := runGitIn(ctx, j.RepoDir, append([]string{"diff", "--cached", "--name-only", "--"}, releasePreparedPaths(version)...)...)
+	pending, err := runGitIn(ctx, j.RepoDir, append([]string{"diff", "--cached", "--no-renames", "--name-only", "--"}, releasePreparedPaths(version)...)...)
 	if err != nil {
 		return fmt.Errorf("release: read the staged set: %w", err)
 	}
@@ -417,7 +431,8 @@ func (j *commitChangelogJob) run(ctx context.Context) error {
 }
 
 func releasePreparedPaths(version string) []string {
-	paths := slices.Clone(sparkwingPinArtifacts)
+	paths := append([]string{"CHANGELOG.md", embeddedChangelogRel}, sparkwingPinArtifacts...)
+	paths = append(paths, releaseFragmentDirs...)
 	for _, name := range []string{version + ".md", unreleasedGuideName, migrationIndexName} {
 		paths = append(paths, migrationFileRels(name)...)
 	}
@@ -453,7 +468,7 @@ func releaseDateFor(body, version string) string {
 }
 
 func (j *prepareChangelogJob) planned(version string) (string, changelogRewrite, error) {
-	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	body, err := readChangelog(j.RepoDir)
 	if err != nil {
 		return "", changelogRewrite{}, fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
@@ -915,7 +930,7 @@ func checkSchemaBreak(ctx context.Context, repoDir, version string) error {
 		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d); gate passes", prevTag, curSchema)
 		return nil
 	}
-	body, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
+	body, err := readChangelog(repoDir)
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
@@ -964,7 +979,7 @@ func checkWireBreak(ctx context.Context, repoDir, version string) error {
 		sparkwing.Info(ctx, "wire surface added to or unchanged since %s; gate passes", prevTag)
 		return nil
 	}
-	body, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
+	body, err := readChangelog(repoDir)
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}

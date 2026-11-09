@@ -79,11 +79,9 @@ merges, gate run, review record path and result). The gate's `test` step reports
 
 When `origin/main` is not an ancestor of HEAD at push time, the `push` step
 merges it into the branch in the checkout (`git merge --no-ff`, the default
-git identity and signing; never a rebase). CHANGELOG.md merges with the union
-driver, so two branches that each open the same `###` heading under
-`[Unreleased]` merge into a repeated heading the changelog lint refuses; when
-the merge leaves one, the step runs `bash bin/check-changelog.sh --fix` and
-commits CHANGELOG.md and its mirror as a follow-up commit (never an amend). It
+git identity and signing; never a rebase). Independent changelog and migration
+fragments merge as separate files. Orientation table additions use union merge;
+changes to the same rule need review. The push step
 then runs `go build` in every module
 and the affected-test selection over the files that differ between the gated
 tree and the merged tree, then pushes the merge. The review is not run again:
@@ -100,7 +98,7 @@ landing record names both.
 ### Cutting a release
 
 A release is a tag push. The `release` pipeline resolves the version, renames
-`## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
+the collected `## [Unreleased]` section to the version, stages the release notes,
 checks the section covers any schema or wire change since the previous tag,
 aligns scaffold and pipeline SDK pins to the chosen version with local replacements,
 then commits and atomically pushes that commit to `main` with an annotated
@@ -1763,18 +1761,13 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   `pkg/docs/mirror/`, and the vendored runner-bundle tarball) in one pass and
   is a no-op on a clean tree. Resolve a merge conflict in any of them by
   taking either side, running that script, and committing the result.
-  `CHANGELOG.md` and the mirror `pkg/docs` embeds resolve themselves instead:
-  `.gitattributes` marks both `merge=union`, so a merge of two branches that
-  each added `[Unreleased]` bullets keeps both sides with no conflict. Union
-  merge gets two cases wrong. Two branches that reword the same bullet produce
-  both wordings, and two branches that each rename `[Unreleased]` to their own
-  version stack both headings on adjacent lines -- `bin/check-changelog.sh`
-  fails on the stacked pair, and the reworded pair needs a reader. Where both
-  sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
-  collapses it into one block and re-syncs the mirror.
-- **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
-  follows `CHANGELOG-STYLE.md`. Mark breaking changes; until paid launch
-  they need no migration guide. Keep the embedded changelog mirror byte-identical.
+- **Changelog:** notable adopter-facing behavior belongs in a unique
+  `docs/changes/<slug>.md` with a `###` category and scope-prefixed bullets.
+  Breaking guides go in `docs/migrations/unreleased/<slug>.md`, starting with
+  an H2. Follow `CHANGELOG-STYLE.md` and run `bash bin/sync-docs.sh` to mirror
+  the fragments. Keep shared unreleased aggregates empty. Embedded docs,
+  weekly-release and release gates collect fragments; the release cut writes
+  the versioned notes, repoints guide links and deletes consumed fragment pairs.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. The local
