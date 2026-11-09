@@ -134,11 +134,6 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 		done.StartError = fmt.Sprintf("dir %q: not a directory", req.Dir)
 		return done, nil
 	}
-	path, err := procenv.LookupCommand(req.Argv[0], req.Env, req.Dir)
-	if err != nil {
-		done.StartError, done.NotFound = err.Error(), errors.Is(err, exec.ErrNotFound)
-		return done, nil
-	}
 	outR, outW, err := commandPipe()
 	if err != nil {
 		done.StartError = err.Error()
@@ -150,9 +145,9 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 		done.StartError = err.Error()
 		return done, nil
 	}
-	command := func(path, arg0 string, args []string) *exec.Cmd {
-		cmd := procenv.SDKCommand(req.Env, path, args...)
-		cmd.Args[0], cmd.Dir, cmd.Stdout, cmd.Stderr = arg0, req.Dir, outW, errW
+	command := func(name string, args []string) *exec.Cmd {
+		cmd := procenv.SDKCommand(req.Env, req.Dir, name, args...)
+		cmd.Stdout, cmd.Stderr = outW, errW
 		if req.Stdin != nil {
 			cmd.Stdin = bytes.NewReader(req.Stdin)
 		}
@@ -161,7 +156,7 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 		configureHostCommand(cmd)
 		return cmd
 	}
-	cmd := command(path, req.Argv[0], req.Argv[1:])
+	cmd := command(req.Argv[0], req.Argv[1:])
 	select {
 	case <-kill:
 		closeFiles(outR, outW, errR, errW)
@@ -176,12 +171,12 @@ func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, clo
 	session, err := startHostCommand(cmd, req.Env)
 	if err != nil && execFormatError(err) {
 		// hack: execvp runs executable text without #! through /bin/sh for both SDKs.
-		cmd = command("/bin/sh", "/bin/sh", append([]string{path}, req.Argv[1:]...))
+		cmd = command("/bin/sh", append([]string{cmd.Path}, req.Argv[1:]...))
 		session, err = startHostCommand(cmd, req.Env)
 	}
 	if err != nil {
 		closeFiles(outR, outW, errR, errW)
-		done.StartError = err.Error()
+		done.StartError, done.NotFound = err.Error(), errors.Is(err, exec.ErrNotFound)
 		return done, nil
 	}
 	// safety: the child owns the write ends now; dropping ours lets the readers see EOF.

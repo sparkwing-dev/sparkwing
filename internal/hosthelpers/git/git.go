@@ -421,11 +421,13 @@ func runGit(ctx context.Context, repoDir string, args ...string) (string, error)
 func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, error) {
 	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
 	sdkserve.RequireExecution(ctx, "git "+firstWord(args))
+	if repoDir != "" {
+		dir := helperruntime.Path(ctx, repoDir)
+		_, environment := helperruntime.Environment(ctx)
+		ctx = helperruntime.WithEnvironment(ctx, dir, environment)
+	}
 	cmd := helperruntime.Command(ctx, "git", args...)
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=0")
-	if repoDir != "" {
-		cmd.Dir = helperruntime.Path(ctx, repoDir)
-	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

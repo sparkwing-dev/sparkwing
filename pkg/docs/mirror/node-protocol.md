@@ -339,7 +339,9 @@ searches `/bin:/usr/bin`, and executable text without
 case-insensitive environment names and `PATHEXT` extension
 order. An absent Windows `PATH` uses the host path. An empty or absent `PATHEXT`
 uses `.com;.exe;.bat;.cmd`. Empty Windows `PATH` entries are skipped. Explicit
-paths bypass `PATH`. Windows batch targets (`.cmd` and `.bat`, case-insensitive)
+paths bypass `PATH`. All commands, including registered cleanups, resolve to an
+absolute program path before argv construction and validation; `argv[0]` is that
+resolved path. Windows batch targets (`.cmd` and `.bat`, case-insensitive)
 refuse arguments containing `&`, `|`, `<`, `>`, `^`, `%`, `"`, `!`, `(`, `)` or
 CR/LF because cmd.exe interprets them as syntax or environment expansion.
 The error names the `argv` position without repeating the value. Use a non-batch

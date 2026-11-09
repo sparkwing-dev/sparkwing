@@ -28,15 +28,7 @@ func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 	if !ok {
 		e.env = os.Environ()
 	}
-	path, err := procenv.LookupCommand(name, e.env, e.dir)
-	if err != nil {
-		cmd := procenv.SDKCommandContext(ctx, e.env, name, args...)
-		cmd.Err = err
-		return cmd
-	}
-	command := procenv.SDKCommandContext(ctx, e.env, path, args...)
-	command.Dir = e.dir
-	return command
+	return procenv.SDKCommandContext(ctx, e.env, e.dir, name, args...)
 }
 
 // LookPath resolves a helper executable in the pipeline's environment.

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -58,13 +59,31 @@ func TestLookupCommandWindowsEnvironment(t *testing.T) {
 }
 
 func TestSDKCommandWindowsRefusesBatchArguments(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "Program Files (x86)")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tool := filepath.Join(bin, "tool.cmd")
+	if err := os.WriteFile(tool, []byte("@echo off\r\necho tool\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, contextBound := range []bool{false, true} {
-		cmd := SDKCommand(nil, filepath.Join(t.TempDir(), "tool.cmd"), "main&ver&rem")
-		if contextBound {
-			cmd = SDKCommandContext(t.Context(), nil, filepath.Join(t.TempDir(), "tool.BAT"), "%FIXTURE%")
-		}
-		if cmd.Err == nil {
-			t.Fatalf("context=%v: unsafe batch argument accepted", contextBound)
+		for _, arg := range []string{"plain", "main&ver&rem", "%FIXTURE%"} {
+			cmd := SDKCommand(nil, dir, tool, arg)
+			if contextBound {
+				cmd = SDKCommandContext(t.Context(), nil, dir, tool, arg)
+			}
+			if cmd.Path != tool || cmd.Args[0] != tool || !filepath.IsAbs(cmd.Path) {
+				t.Fatalf("command not fully resolved: %q, %q", cmd.Path, cmd.Args)
+			}
+			if arg == "plain" {
+				if cmd.Err != nil {
+					t.Fatalf("context=%v: safe batch argument refused: %v", contextBound, cmd.Err)
+				}
+			} else if cmd.Err == nil || !strings.Contains(cmd.Err.Error(), "argv[1]") || !strings.Contains(cmd.Err.Error(), "non-batch executable") || strings.Contains(cmd.Err.Error(), arg) {
+				t.Fatalf("context=%v: unsafe batch argument error: %v", contextBound, cmd.Err)
+			}
 		}
 	}
 }

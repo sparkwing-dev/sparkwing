@@ -525,7 +525,9 @@ Both return a command builder with `Dir`, `Env` and `EnvMap`.
 Commands resolve executables using their `PATH` or an explicit path, with relative
 paths resolved against the working directory. On Windows, `PATHEXT` supplies
 executable extensions. The working directory is searched only when named in
-`PATH` or the command path. Windows `.cmd`/`.bat` targets refuse arguments with
+`PATH` or the command path. Hosts resolve the executable to an absolute path before
+constructing and validating argv. Registered cleanups use the same lookup and
+report the argument position and remedy when refused. Windows `.cmd`/`.bat` targets refuse arguments with
 cmd.exe metacharacters (`& | < > ^ % " ! ( )` and CR/LF). Use a non-batch tool,
 such as `node.exe` with its JavaScript entrypoint, when passing these values.
 Batch files that expand pipeline-set environment values without quoting are outside the host's control.

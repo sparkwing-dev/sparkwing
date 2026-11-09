@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func windowsHostRequest(t *testing.T, mode string) nodeproto.ExecRequest {
@@ -274,8 +275,12 @@ func TestWindowsHostCommandLongBashProgram(t *testing.T) {
 }
 
 func TestWindowsHostCommandRejectsOversizedBashProgram(t *testing.T) {
-	cmd := exec.Command(filepath.Join(t.TempDir(), "bash.exe"), "-c", strings.Repeat("x", 32768))
-	configureHostCommand(cmd)
+	dir := t.TempDir()
+	tool := filepath.Join(dir, "bash.exe")
+	if err := os.WriteFile(tool, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := procenv.SDKCommand(os.Environ(), dir, tool, "-c", strings.Repeat("x", 32768))
 	if cmd.Err == nil || !strings.Contains(cmd.Err.Error(), "exceeds environment limit") {
 		t.Fatalf("oversized Bash program error = %v", cmd.Err)
 	}

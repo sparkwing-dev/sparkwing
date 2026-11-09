@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf16"
 )
 
 // Command constructs a process with a policy-owned environment. The zero Env
@@ -27,23 +28,51 @@ func CommandContext(ctx context.Context, environment Env, name string, args ...s
 // SDKCommand constructs a command an SDK asked its host to run. environment is the one
 // the SDK process, started with Build's result, would have given the command, so a
 // pipeline's own changes still apply; engine-minted credentials never reach it.
-func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
-	cmd := exec.Command(name, args...)
-	cmd.Env = sdkCommandEnvironment(environment)
-	RefuseUnsafeBatch(cmd)
-	return cmd
+// Name resolves against environment and dir before the final argv is validated.
+func SDKCommand(environment []string, dir, name string, args ...string) *exec.Cmd {
+	return sdkCommand(nil, environment, dir, name, args...)
 }
 
 // SDKCommandContext applies SDK child environment policy with context cancellation.
-func SDKCommandContext(ctx context.Context, environment []string, name string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = sdkCommandEnvironment(environment)
-	RefuseUnsafeBatch(cmd)
+func SDKCommandContext(ctx context.Context, environment []string, dir, name string, args ...string) *exec.Cmd {
+	return sdkCommand(ctx, environment, dir, name, args...)
+}
+
+func sdkCommand(ctx context.Context, environment []string, dir, name string, args ...string) *exec.Cmd {
+	environment = sdkCommandEnvironment(environment)
+	path, err := LookupCommand(name, environment, dir)
+	if err != nil {
+		return &exec.Cmd{Path: name, Args: append([]string{name}, args...), Dir: dir, Env: environment, Err: err}
+	}
+	var cmd *exec.Cmd
+	if ctx == nil {
+		cmd = exec.Command(path, args...)
+	} else {
+		cmd = exec.CommandContext(ctx, path, args...)
+	}
+	cmd.Env, cmd.Dir = environment, dir
+	prepareSDKCommand(cmd)
+	refuseUnsafeBatch(cmd)
 	return cmd
 }
 
-// RefuseUnsafeBatch sets cmd.Err when Windows batch argv contains cmd.exe syntax.
-func RefuseUnsafeBatch(cmd *exec.Cmd) {
+func prepareSDKCommand(cmd *exec.Cmd) {
+	if runtime.GOOS != "windows" || len(cmd.Args) != 3 || cmd.Args[1] != "-c" || !strings.EqualFold(filepath.Base(cmd.Path), "bash.exe") {
+		return
+	}
+	// bug: Git Bash truncates long -c arguments from Windows; the environment preserves the program and stdin.
+	const variable = "SPARKWING_BASH_PROGRAM"
+	const limit = 32767 - len(variable) - 2
+	program := cmd.Args[2]
+	if len(utf16.Encode([]rune(program))) > limit {
+		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
+		return
+	}
+	cmd.Args[2] = `eval 'unset ` + variable + `;' "$` + variable + `"`
+	cmd.Env = append(cmd.Environ(), variable+"="+program)
+}
+
+func refuseUnsafeBatch(cmd *exec.Cmd) {
 	if runtime.GOOS != "windows" {
 		return
 	}
@@ -53,7 +82,12 @@ func RefuseUnsafeBatch(cmd *exec.Cmd) {
 	}
 	// safety: cmd.exe reparses batch argv, including environment expansion inside quotes.
 	for i, arg := range cmd.Args {
-		if strings.ContainsAny(arg, "&|<>^%\"!()\r\n") {
+		metacharacters := "&|<>^%\"!()\r\n"
+		if i == 0 && strings.ContainsAny(arg, " \t") {
+			// safety: Go quotes a spaced program path, keeping install-directory parentheses literal.
+			metacharacters = "&|<>^%\"!\r\n"
+		}
+		if strings.ContainsAny(arg, metacharacters) {
 			cmd.Err = fmt.Errorf("windows batch command refused: argv[%d] contains cmd.exe metacharacters; use a non-batch executable, such as node.exe with the tool's JavaScript entrypoint", i)
 			return
 		}

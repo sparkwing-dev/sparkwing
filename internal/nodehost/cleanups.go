@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -72,20 +70,20 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env procenv.Env, log
 	} else {
 		fmt.Fprintf(log, "cleanup %s\n", name)
 	}
-	path, err := lookPathIn(name, env)
-	if err != nil {
+	cmd := procenv.SDKCommand(slices.Collect(env.Values()), dir, name, c.argv[1:]...)
+	if errors.Is(cmd.Err, exec.ErrNotFound) {
 		fmt.Fprintf(log, "cleanup %s failed: not found in the node's PATH\n", name)
 		return errors.New("registered cleanup program is unavailable")
 	}
+	if cmd.Err != nil {
+		fmt.Fprintf(log, "cleanup %s failed: %v\n", name, cmd.Err)
+		return fmt.Errorf("registered cleanup command failed: %w", cmd.Err)
+	}
 	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
 	defer cancel()
-	cmd := procenv.Command(env, path, c.argv[1:]...)
-	procenv.RefuseUnsafeBatch(cmd)
-	cmd.Args[0] = name
-	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.WaitDelay = cleanupWaitDelay
-	err = runCleanupProcess(ctx, cmd)
+	err := runCleanupProcess(ctx, cmd)
 	var exit *exec.ExitError
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
@@ -102,28 +100,4 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env procenv.Env, log
 		fmt.Fprintf(log, "cleanup %s failed: could not run\n", name)
 	}
 	return errors.New("registered cleanup command failed")
-}
-
-// safety: the node's PATH picks the program, not the host's; relative entries
-// are skipped so the host's working directory never decides it.
-func lookPathIn(name string, env procenv.Env) (string, error) {
-	if strings.ContainsAny(name, `/\`) {
-		return name, nil
-	}
-	var path string
-	for kv := range env.Values() {
-		k, v, _ := strings.Cut(kv, "=")
-		if k == "PATH" || (runtime.GOOS == "windows" && strings.EqualFold(k, "PATH")) {
-			path = v
-		}
-	}
-	for _, dir := range filepath.SplitList(path) {
-		if !filepath.IsAbs(dir) {
-			continue
-		}
-		if p, err := exec.LookPath(filepath.Join(dir, name)); err == nil {
-			return p, nil
-		}
-	}
-	return "", exec.ErrNotFound
 }

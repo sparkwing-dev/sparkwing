@@ -69,10 +69,74 @@ func TestWindowsHostCommandCleanupBatchArguments(t *testing.T) {
 					if err != nil || !strings.Contains(log.String(), "CLEANUP-RAN") {
 						t.Fatalf("safe cleanup: %v, log=%q", err, log.String())
 					}
-				} else if err == nil || strings.Contains(log.String(), "CLEANUP-RAN") || strings.Contains(log.String(), arg) {
+				} else if err == nil || !strings.Contains(err.Error(), "argv[2]") || !strings.Contains(log.String(), "non-batch executable") || strings.Contains(log.String(), "CLEANUP-RAN") || strings.Contains(log.String(), arg) {
 					t.Fatalf("unsafe cleanup: %v, log=%q", err, log.String())
 				}
 			})
+		}
+	}
+}
+
+//sparkwing:critical
+func TestWindowsHostCommandCleanupResolvesBatchPaths(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, folder := range []string{dir, bin} {
+		if err := os.WriteFile(filepath.Join(folder, "tool.cmd"), []byte("@echo off\r\necho CLEANUP-RAN\r\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{`.\tool`, `bin\tool`, "tool"} {
+		for _, arg := range []string{"plain", "main&ver&rem"} {
+			t.Run(name+"/"+arg, func(t *testing.T) {
+				cleanups := &ProcessCleanups{}
+				mustRegisterCleanup(t, cleanups, name, "safe", arg)
+				var log strings.Builder
+				env := cleanupProcessEnv(t, append(os.Environ(), "PATH=bin", "PATHEXT=.cmd")...)
+				err := cleanups.run(cleanupContext(t), CleanupScope{Dir: dir, Env: env, Log: &log})
+				if arg == "plain" {
+					if err != nil || !strings.Contains(log.String(), "CLEANUP-RAN") {
+						t.Fatalf("resolved cleanup: %v, log=%q", err, log.String())
+					}
+				} else if err == nil || !strings.Contains(err.Error(), "argv[2]") || !strings.Contains(log.String(), "non-batch executable") || strings.Contains(log.String(), "CLEANUP-RAN") || strings.Contains(log.String(), arg) {
+					t.Fatalf("unsafe extensionless cleanup: %v, log=%q", err, log.String())
+				}
+			})
+		}
+	}
+}
+
+//sparkwing:critical
+func TestWindowsHostCommandFinalBatchArgv(t *testing.T) {
+	for _, folder := range []string{"bin", "Program Files (x86)", "Program Files (x86) & Tools"} {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, folder)
+		if err := os.Mkdir(bin, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		tool := filepath.Join(bin, "tool.cmd")
+		if err := os.WriteFile(tool, []byte("@echo off\r\necho %0\r\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		req := nodeproto.ExecRequest{ID: "argv", Argv: []string{"tool", "plain"}, Dir: dir, Env: append(os.Environ(), "PATH="+bin, "PATHEXT=.cmd"), Capture: true}
+		var output strings.Builder
+		done, session := runHostCommand(req, nil, nil, nil, func(_ string, data []byte, _ bool) error { output.Write(data); return nil }, nil)
+		if session != nil {
+			if err := endCommandSessions([]*commandSession{session}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if strings.Contains(folder, "&") {
+			if session != nil || output.Len() != 0 || !strings.Contains(done.StartError, "argv[0]") || !strings.Contains(done.StartError, "non-batch executable") {
+				t.Fatalf("unsafe resolved program path: %+v, output=%q", done, output.String())
+			}
+			continue
+		}
+		if done.StartError != "" || done.ExitCode != 0 || strings.Trim(output.String(), "\" \r\n") != tool {
+			t.Fatalf("final argv[0]: %+v, output=%q, want %q", done, output.String(), tool)
 		}
 	}
 }
