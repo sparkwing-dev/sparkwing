@@ -457,7 +457,7 @@ func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGT"[exp])
 }
 
-// ErrUnstableInputs reports build inputs that kept changing while the cache key was computed; the build must
+// ErrUnstableInputs reports build inputs that changed while hashing or compiling; the build must
 // neither use nor store a cached binary.
 var ErrUnstableInputs = errors.New("pipeline build inputs changed while the cache key was computed")
 
