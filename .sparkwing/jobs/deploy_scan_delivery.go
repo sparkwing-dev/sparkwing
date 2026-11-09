@@ -98,10 +98,10 @@ func (d *deployer) flagProductionScan(ctx context.Context) error {
 			}
 			d.tools.say(ctx, message)
 			sparkwing.Summary(ctx, message)
-			// bug: a scan can fail before its job starts, bypassing its own feedback.
+			// safety: pre-start failures bypass deferred feedback, and recovery must reset their streak.
+			const source = "sparkwing-post-deploy-production-execution"
+			report := []map[string]string{}
 			if scan.Status == "failed" || scan.Status == "cancelled" {
-				const source = "sparkwing-post-deploy-production-execution"
-				report := []map[string]string{}
 				for _, job := range scan.Jobs {
 					if job.Attempt == 0 && (job.Outcome == "failed" || job.Outcome == "cancelled") {
 						report = append(report, map[string]string{"fingerprint": source + "/" + job.ID + "/" + job.Reason, "severity": "high", "title": "Production post-deploy scan execution failed: " + job.ID, "detail": message + "\n" + args.Record + "\n" + job.Error})
@@ -110,27 +110,25 @@ func (d *deployer) flagProductionScan(ctx context.Context) error {
 				if len(scan.Jobs) == 0 {
 					report = append(report, map[string]string{"fingerprint": source + "/run/" + scan.Reason, "severity": "high", "title": "Production post-deploy scan planning failed", "detail": message + "\n" + args.Record + "\n" + scan.Failure})
 				}
-				if len(report) == 0 {
-					return nil
-				}
-				body, err := json.Marshal(report)
-				if err != nil {
-					return err
-				}
-				file := filepath.Join(d.tmp, "scan-execution-findings.json")
-				if err := os.WriteFile(file, body, 0o600); err != nil {
-					return err
-				}
-				if _, err := d.cmd(ctx, deployCommand{Name: "bitwing", Args: []string{"finding", "record", "--source", source, "--file", file, "-o", "json"}}); err != nil {
-					return err
-				}
-				path, err := d.tool("bitwing")
-				if err != nil {
-					return err
-				}
-				return d.scanTickets(ctx, path, source, report)
+			} else if scan.Status != "success" {
+				return nil
 			}
-			return nil
+			body, err := json.Marshal(report)
+			if err != nil {
+				return err
+			}
+			file := filepath.Join(d.tmp, "scan-execution-findings.json")
+			if err := os.WriteFile(file, body, 0o600); err != nil {
+				return err
+			}
+			if _, err := d.cmd(ctx, deployCommand{Name: "bitwing", Args: []string{"finding", "record", "--source", source, "--file", file, "-o", "json"}}); err != nil {
+				return err
+			}
+			path, err := d.tool("bitwing")
+			if err != nil {
+				return err
+			}
+			return d.scanTickets(ctx, path, source, report)
 		}
 		if cursor == "" {
 			return nil

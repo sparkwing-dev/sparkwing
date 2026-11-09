@@ -345,3 +345,48 @@ func TestDeployScanKeepsPublicationBudgetAfterEnrichment(t *testing.T) {
 		t.Fatal("known failure was not recorded")
 	}
 }
+
+func TestDeployScanExecutionRecoveryResetsFindings(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	status := "failed"
+	var sizes []int
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		if filepath.Base(c.Name) == "sparkwing" && c.Args[0] == "runs" {
+			if c.Args[1] == "list" {
+				return `{"id":"scan-1"}`, nil
+			}
+			return fmt.Sprintf(`{"id":"scan-1","status":%q,"inputs":{"args":{"environment":"production"}},"jobs":[{"id":"scan","attempt":0,"outcome":%q,"reason":"integrity_failure"}]}`, status, status), nil
+		}
+		if filepath.Base(c.Name) == "bitwing" {
+			if c.Args[1] == "record" {
+				if c.Args[slices.Index(c.Args, "--source")+1] != "sparkwing-post-deploy-production-execution" {
+					t.Fatal("wrong execution finding source")
+				}
+				body, err := os.ReadFile(c.Args[slices.Index(c.Args, "--file")+1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				var report []map[string]string
+				if err := json.Unmarshal(body, &report); err != nil {
+					t.Fatal(err)
+				}
+				sizes = append(sizes, len(report))
+			}
+			return "", nil
+		}
+		return f.run(ctx, c)
+	}
+	if err := d.assumeRole(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, current := range []string{"failed", "success", "failed", "success", "failed"} {
+		status = current
+		if err := d.flagProductionScan(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(sizes, []int{1, 0, 1, 0, 1}) {
+		t.Fatalf("recovery did not reset execution findings: %v", sizes)
+	}
+}

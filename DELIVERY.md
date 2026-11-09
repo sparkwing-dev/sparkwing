@@ -551,7 +551,9 @@ ticketed under a separate execution source because their scan feedback could not
 Pre-planning observations use requested arguments when resolved arguments are
 absent. When those arguments are redacted, repository-inherited children of the
 `production` job identify production scans; their parent deployment link remains
-available. Planning failures with no jobs produce a run-level execution finding.
+available. Planning failures with no jobs produce a run-level execution finding. Conclusive
+observations without startup failures clear execution findings and reset their
+streak; unfinished observations preserve them.
 An unavailable observation or ledger warns too. These warnings allow repair deploys
 to continue. The check reuses the scan-submit token and starts no runs.
 
