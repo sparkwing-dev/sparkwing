@@ -709,7 +709,7 @@ rollbacks. A release whose chart changes a rule, the RBAC or the namespaces upda
 before its deploy, staging first, then production:
 
 1. Render the chart at the new tag with `helm template <release> charts/sparkwing-full --namespace <ns> -f <env dir>/helm-values.yaml`.
-2. Copy its cluster-scoped documents into the environment's file in kikd-infra `k8s/sparkwing-cluster/`.
+2. Copy its cluster-scoped documents into the environment's file in kikd-infra `k8s/sparkwing-cluster/`. Verify the kustomize output preserves the rendered policy specs, including CEL string values.
 3. Land that on kikd-infra main and wait for `sparkwing-cluster` to report Synced.
 
 Add permissions before the deploy and remove them after the old version is gone. That application
