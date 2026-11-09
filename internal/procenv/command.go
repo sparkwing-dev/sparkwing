@@ -30,26 +30,17 @@ func CommandContext(ctx context.Context, environment Env, name string, args ...s
 // pipeline's own changes still apply; engine-minted credentials never reach it.
 // Name resolves against environment and dir before the final argv is validated.
 func SDKCommand(environment []string, dir, name string, args ...string) *exec.Cmd {
-	return sdkCommand(nil, environment, dir, name, args...)
+	return SDKCommandContext(context.Background(), environment, dir, name, args...)
 }
 
 // SDKCommandContext applies SDK child environment policy with context cancellation.
 func SDKCommandContext(ctx context.Context, environment []string, dir, name string, args ...string) *exec.Cmd {
-	return sdkCommand(ctx, environment, dir, name, args...)
-}
-
-func sdkCommand(ctx context.Context, environment []string, dir, name string, args ...string) *exec.Cmd {
 	environment = sdkCommandEnvironment(environment)
 	path, err := LookupCommand(name, environment, dir)
 	if err != nil {
 		return &exec.Cmd{Path: name, Args: append([]string{name}, args...), Dir: dir, Env: environment, Err: err}
 	}
-	var cmd *exec.Cmd
-	if ctx == nil {
-		cmd = exec.Command(path, args...)
-	} else {
-		cmd = exec.CommandContext(ctx, path, args...)
-	}
+	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env, cmd.Dir = environment, dir
 	prepareSDKCommand(cmd)
 	refuseUnsafeBatch(cmd)

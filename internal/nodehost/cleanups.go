@@ -70,7 +70,11 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env procenv.Env, log
 	} else {
 		fmt.Fprintf(log, "cleanup %s\n", name)
 	}
-	cmd := procenv.SDKCommand(slices.Collect(env.Values()), dir, name, c.argv[1:]...)
+	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+	cmd := procenv.SDKCommandContext(ctx, slices.Collect(env.Values()), dir, name, c.argv[1:]...)
+	// safety: runCleanupProcess cancels the whole session rather than only its leader.
+	cmd.Cancel = nil
 	if errors.Is(cmd.Err, exec.ErrNotFound) {
 		fmt.Fprintf(log, "cleanup %s failed: not found in the node's PATH\n", name)
 		return errors.New("registered cleanup program is unavailable")
@@ -79,8 +83,6 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env procenv.Env, log
 		fmt.Fprintf(log, "cleanup %s failed: %v\n", name, cmd.Err)
 		return fmt.Errorf("registered cleanup command failed: %w", cmd.Err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
-	defer cancel()
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.WaitDelay = cleanupWaitDelay
 	err := runCleanupProcess(ctx, cmd)
