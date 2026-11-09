@@ -365,6 +365,9 @@ An applicable Go SDK replacement uses the installed CLI's engine and emits an
 `engine_pin_disabled` notice. The pin retains the declared SDK version and the
 `replacement` module selector. The accepted identity records the installed
 executable's digest in `manifest_digest`, rather than a signed release manifest.
+If the executing host has a different engine, `integrity_failure` names both
+versions and executable digests. Route planning to that host with repository
+runner requirements, or install the exact engine used for planning.
 
 <!-- design:end -->
 

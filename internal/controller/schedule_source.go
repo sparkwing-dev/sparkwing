@@ -63,7 +63,7 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 			return request, err
 		}
 	}
-	git, code, err := s.selectIntakeSource(ctx, row.Team, request, read)
+	git, code, err := s.selectIntakeSource(ctx, row.Team, &request, read)
 	if err != nil {
 		return request, err
 	}

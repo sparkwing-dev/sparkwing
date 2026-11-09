@@ -388,3 +388,53 @@ func TestACheckedJobIsListedFromTheCache(t *testing.T) {
 		t.Fatal("later passes stopped looking for a replacement Pod")
 	}
 }
+
+func TestDeletedPodDoesNotRejectTheAward(t *testing.T) {
+	for _, kind := range []CloudUnitKind{CloudPlan, CloudEval, CloudWork} {
+		t.Run(string(kind), func(t *testing.T) {
+			l, kube, boundary, control := fixture()
+			binding := &control.award.Binding
+			binding.Kind = kind
+			if kind == CloudPlan {
+				binding.NodeID, binding.Attempt = "", 0
+			} else if kind == CloudEval {
+				binding.SourceNodeID = binding.NodeID
+				binding.SourceGeneration = 1
+			}
+			if _, err := l.LaunchOne(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(*binding), metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+			pod.Name, pod.Namespace, pod.UID = "original-pod", "cloud", "pod-uid"
+			pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr(true)}}
+			if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			kube.PrependReactor("list", "pods", ktesting.ObjectReaction(kube.Tracker()))
+			if err := l.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := kube.CoreV1().Pods("cloud").Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.Sync(t.Context()); err != nil {
+				t.Fatalf("Pod deletion became a verification failure: %v", err)
+			}
+			pod.Name, pod.UID = "replacement-pod", "replacement-uid"
+			if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.Sync(t.Context()); err != nil {
+				t.Fatalf("unchanged replacement Pod failed verification: %v", err)
+			}
+			job, err = kube.BatchV1().Jobs("cloud").Get(t.Context(), job.Name, metav1.GetOptions{})
+			if err != nil || job.DeletionTimestamp != nil || job.Annotations[rejectedAnnotation] != "" || boundary.retirements != 0 || boundary.releases != 0 {
+				t.Fatalf("Pod deletion rejected the award or released its node: job=%+v boundary=%+v err=%v", job, boundary, err)
+			}
+		})
+	}
+}

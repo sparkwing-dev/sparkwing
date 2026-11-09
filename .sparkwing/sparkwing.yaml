@@ -122,12 +122,14 @@ pipelines:
 
   - name: deploy
     entrypoint: Deploy
+    requires: [deploy-kikd-prod]
     on:
       push:
         branches: [main]
 
   - name: deploy-scan
     entrypoint: DeployScan
+    requires: [deploy-kikd-prod]
 
   - name: deploy-smoke
     entrypoint: DeploySmoke

@@ -49,7 +49,9 @@ pool requirement. An unreserved runner cannot claim work requiring a pool.
 sw.Job(plan, "deploy", &Deploy{}).Requires("pool=production")
 ```
 
-A pipeline's `requires` is inherited by its jobs. Allowed pools come only from
+A pipeline's `requires` also constrains planning. Controller App and schedule intake
+read it from the execution revision before awarding planning. Detached children
+inherit the parent's resolved requirements. Jobs inherit the same requirements. Allowed pools come only from
 access rules, read against the run's sealed identity each time the run is
 placed, releases a reserved secret or mints an OIDC token, so removing a rule
 cuts off runs already admitted, retries included. Neither a pipeline declaration
