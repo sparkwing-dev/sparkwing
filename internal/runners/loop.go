@@ -124,7 +124,8 @@ type unitResult struct {
 	err error
 }
 
-// Run checks signed runner policy before claims and drains held work on denial.
+// Run claims work and joins held hosts before returning.
+// CheckVersion, when supplied, may stop claims and drain hosts on a policy denial.
 func (l *Loop) Run(ctx context.Context) error {
 	policyErr, runErr := l.run(ctx)
 	return errors.Join(policyErr, runErr)
@@ -151,10 +152,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
+	workSlots := make(chan struct{}, l.Config.MaxConcurrent)
+	ownerSlots := make(chan struct{}, l.Config.MaxConcurrent)
 	active := make(map[capability.LeaseRef]struct{})
-	// safety: a unit whose job is blocked in RunAndAwait holds no slot, or its child could never run here.
-	var awaitMu sync.Mutex
-	awaiting := make(map[capability.LeaseRef]int)
 	awaitChanged := make(chan struct{}, 1)
 	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
 	var transportSince time.Time
@@ -164,9 +164,6 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	finish := func(result unitResult) {
 		pollAt = time.Time{}
 		delete(active, result.key)
-		awaitMu.Lock()
-		delete(awaiting, result.key)
-		awaitMu.Unlock()
 		if len(active) == 0 {
 			idleSince = time.Now()
 		}
@@ -190,6 +187,14 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}
 	}
 	accept := func(outcome claimOutcome) error {
+		defer func() {
+			if outcome.workSlot != nil {
+				outcome.workSlot()
+			}
+			if outcome.ownerSlot != nil {
+				outcome.ownerSlot()
+			}
+		}()
 		if outcome.response.Claim == nil {
 			return nil
 		}
@@ -211,20 +216,51 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if l.Config.FailOnFailedWork {
 			hostCtx = nodehost.WithOutcomeNotify(ctx, failed.record)
 		}
-		hostCtx = nodehost.WithAwaitNotify(hostCtx, func(on bool) {
-			awaitMu.Lock()
-			if on {
-				awaiting[key]++
-			} else if awaiting[key]--; awaiting[key] <= 0 {
-				delete(awaiting, key)
+
+		slots, release := workSlots, outcome.workSlot
+		if unit.Unit == capability.UnitTrigger {
+			slots, release = ownerSlots, outcome.ownerSlot
+			outcome.ownerSlot = nil
+		} else {
+			outcome.workSlot = nil
+		}
+		go func() {
+			var slotMu sync.Mutex
+			changed := func() {
+				select {
+				case awaitChanged <- struct{}{}:
+				default:
+				}
 			}
-			awaitMu.Unlock()
-			select {
-			case awaitChanged <- struct{}{}:
-			default:
+			hostCtx = nodehost.WithAwaitSlot(hostCtx, func() func(context.Context) {
+				slotMu.Lock()
+				if release != nil {
+					release()
+					release = nil
+				}
+				changed()
+				slotMu.Unlock()
+				return func(ctx context.Context) {
+					slotMu.Lock()
+					defer slotMu.Unlock()
+					if release == nil {
+						select {
+						case slots <- struct{}{}:
+							release = func() { <-slots }
+						case <-ctx.Done():
+						}
+					}
+					changed()
+				}
+			})
+			err := l.Host.Host(hostCtx, unit)
+			slotMu.Lock()
+			if release != nil {
+				release()
 			}
-		})
-		go func() { results <- unitResult{key: key, err: l.Host.Host(hostCtx, unit)} }()
+			slotMu.Unlock()
+			results <- unitResult{key: key, err: err}
+		}()
 		return nil
 	}
 	var pending <-chan claimOutcome
@@ -259,18 +295,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			nextClaim = backoffUntil
 		}
 		request := l.request()
-		owners, working := 0, 0
-		awaitMu.Lock()
-		for key := range active {
-			switch {
-			case awaiting[key] > 0:
-			case key.Kind == capability.UnitTrigger:
-				owners++
-			default:
-				working++
-			}
-		}
-		awaitMu.Unlock()
+		owners, working := len(ownerSlots), len(workSlots)
 		freeSlots := l.Config.MaxConcurrent
 		// safety: Owners and awaiting jobs wait for jobs, so sharing their claim slots would deadlock.
 		request.Kinds = slices.DeleteFunc(request.Kinds, func(kind capability.UnitKind) bool {
@@ -291,12 +316,38 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			if stop, err := l.checkPolicy(claims); stop {
 				return err, nil
 			}
+
+			reserve := func(slots chan struct{}) func() {
+				select {
+				case slots <- struct{}{}:
+					return func() { <-slots }
+				default:
+					return nil
+				}
+			}
+			workSlot := reserve(workSlots)
+			var ownerSlot func()
+			if slices.Contains(request.Kinds, capability.UnitTrigger) {
+				ownerSlot = reserve(ownerSlots)
+			}
+			request.Kinds = slices.DeleteFunc(request.Kinds, func(kind capability.UnitKind) bool {
+				return workSlot == nil || kind == capability.UnitTrigger && ownerSlot == nil
+			})
+			if len(request.Kinds) == 0 {
+				if workSlot != nil {
+					workSlot()
+				}
+				if ownerSlot != nil {
+					ownerSlot()
+				}
+				continue
+			}
 			done := make(chan claimOutcome, 1)
 			pending = done
 			request.FreeSlots = &freeSlots
 			go func() {
 				response, err := l.Controller.Claim(claims, request)
-				done <- claimOutcome{response: response, err: err, kinds: request.Kinds}
+				done <- claimOutcome{response: response, err: err, kinds: request.Kinds, workSlot: workSlot, ownerSlot: ownerSlot}
 			}()
 		}
 		wait := limits.VersionIndexRefresh
@@ -366,9 +417,10 @@ func (l *Loop) lifecycleWait(wait time.Duration, idleSince time.Time, idle bool)
 }
 
 type claimOutcome struct {
-	response controllerwire.ClaimResponse
-	err      error
-	kinds    []capability.UnitKind
+	response            controllerwire.ClaimResponse
+	err                 error
+	kinds               []capability.UnitKind
+	workSlot, ownerSlot func()
 }
 
 func (l *Loop) checkPolicy(ctx context.Context) (bool, error) {

@@ -55,12 +55,8 @@ func runSparksList(inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	outFmt := inv.Output(color.IsInteractiveStdout())
+	format := inv.Output(color.IsInteractiveStdout())
 	noResolve := inv.Bool("no-resolve")
-	format, err := resolveOutputFormat(outFmt, "spark list")
-	if err != nil {
-		return err
-	}
 	sparkwingDir, err := defaultSparkwingDir()
 	if err != nil {
 		return err

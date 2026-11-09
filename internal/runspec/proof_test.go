@@ -1,6 +1,7 @@
 package runspec
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -37,6 +38,29 @@ func TestProofEligible(t *testing.T) {
 		tc.set(&r)
 		if got := r.ProofEligible(); got != tc.eligible {
 			t.Errorf("%s: ProofEligible = %v, want %v", name, got, tc.eligible)
+		}
+	}
+}
+
+func TestDisplayDerivesProofEligibility(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		request := Request{}
+		if partial {
+			request.Options.Only.Value = "configure"
+		}
+		sealed := SealedRequest{Request: request}
+		for _, display := range []Display{DisplayRequest(sealed), DisplaySpec(Spec{Request: sealed})} {
+			body, err := json.Marshal(display)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]any
+			if err := json.Unmarshal(body, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := fields["proof_eligible"].(bool); !ok || got == partial {
+				t.Fatalf("partial=%v proof eligibility missing or incorrect: %s", partial, body)
+			}
 		}
 	}
 }

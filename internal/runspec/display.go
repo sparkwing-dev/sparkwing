@@ -65,7 +65,7 @@ func redactArgs(args map[string]string, names []string, classified bool) map[str
 func displayBase(r Request) Display {
 	git := r.Git
 	git.Repository.Display = safeDisplay(git.Repository.Display)
-	return Display{Pipeline: r.Pipeline, Git: git, Actor: r.Actor, Agent: r.Agent, PullRequest: r.PullRequest, Lineage: r.Lineage, EnvNames: append([]string(nil), r.Env.Names...)}
+	return Display{ProofEligible: r.ProofEligible(), Pipeline: r.Pipeline, Git: git, Actor: r.Actor, Agent: r.Agent, PullRequest: r.PullRequest, Lineage: r.Lineage, EnvNames: append([]string(nil), r.Env.Names...)}
 }
 
 // DisplayRequest hides all values until describe supplied a valid classification.

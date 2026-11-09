@@ -9,5 +9,5 @@
 
 - **CLI:** Remove partial artifact downloads when Ctrl-C interrupts the transfer.
 - **CLI:** Keep signed storage URLs out of transfer errors and publish verified
-  downloads atomically without replacing a destination created by another writer.
+  downloads atomically.
 - **API:** Bound artifact listings and document the exact-path download selector.

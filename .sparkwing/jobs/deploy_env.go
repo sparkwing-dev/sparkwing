@@ -43,9 +43,7 @@ type deployConfig struct {
 	ToolDir        string
 }
 
-// safety: a real deploy holds production credentials, so it refuses a missing
-// toolchain instead of trusting the runner's PATH (decision 86). A dry run holds
-// none and previews from PATH, as do tests, which leave ToolDir empty.
+// safety: production credentials require pinned tools. Preview and test configurations may use PATH.
 func (c deployConfig) toolDirInUse(dry bool) (bool, error) {
 	if c.ToolDir == "" {
 		return false, nil
@@ -402,7 +400,7 @@ func pinValues(values, phase string, want imagePin) (string, error) {
 
 var logLevelRE = regexp.MustCompile(`(?i)\blevel=(WARN|ERROR)\b|"level"\s*:\s*"(WARN|ERROR)"|\s(WARN|ERROR)\s`)
 
-// safety: the bar the manual release window held each rollout to.
+// safety: rollout warnings and errors require inspection even when readiness succeeds.
 func dirtyLogLines(logs string) []string {
 	var out []string
 	for _, line := range strings.Split(logs, "\n") {

@@ -174,9 +174,12 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 			out, err := d.sw(ctx, "", "runs", "status", "--run", prior.ID, "--profile", profile, "--exit-zero", "-o", "json")
 			var receipt struct {
 				ID, Status string
-				Inputs     struct{ Args map[string]string }
+				Inputs     struct {
+					ProofEligible bool `json:"proof_eligible"`
+					Args          map[string]string
+				}
 			}
-			if err == nil && json.Unmarshal([]byte(out), &receipt) == nil && receipt.ID == prior.ID && receipt.Inputs.Args["scan-receipt"] == env.ControllerURL {
+			if err == nil && json.Unmarshal([]byte(out), &receipt) == nil && receipt.ID == prior.ID && receipt.Inputs.ProofEligible && receipt.Inputs.Args["post-deploy"] == "true" && receipt.Inputs.Args["api-controller"] == env.ControllerURL {
 				rec.ExampleRun = prior.ID
 				coalesced = prior.FinishedAt.IsZero()
 				priorFinished = !coalesced
@@ -184,7 +187,7 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 				return nil
 			}
 		}
-		rec.ExampleRun, err = d.tools.startChild(ctx, "example", map[string]string{"api-controller": env.ControllerURL, "post-deploy": "true", "scan-receipt": env.ControllerURL})
+		rec.ExampleRun, err = d.tools.startChild(ctx, "example", map[string]string{"api-controller": env.ControllerURL, "post-deploy": "true"})
 		if err != nil {
 			return err
 		}

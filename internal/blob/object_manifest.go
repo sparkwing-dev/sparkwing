@@ -93,15 +93,16 @@ func (s *S3) manifestReader(ctx context.Context, team string, digest Digest) (*v
 
 func readManifestMembers(reader *verifiedReader, team string, digest Digest) ([]Member, error) {
 	members := []Member{}
-	paths := map[string]bool{}
 	err := walkManifestStream(&manifestJSONReader{reader: reader}, func(entry ManifestEntry) error {
-		if entry.Size < 0 || !validDigest(entry.Digest) || paths[entry.Path] {
+		if entry.Size < 0 || !validDigest(entry.Digest) {
 			return ErrIntegrity
 		}
-		paths[entry.Path] = true
 		members = append(members, Member{Team: team, ManifestDigest: digest, Digest: entry.Digest, Path: entry.Path, Size: entry.Size, Mode: entry.Mode})
 		return nil
 	})
+	if err == nil {
+		err = CheckManifestMembers(team, digest, members)
+	}
 	if err := finishManifest(reader, err); err != nil {
 		return nil, err
 	}

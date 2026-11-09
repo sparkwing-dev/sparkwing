@@ -2,9 +2,9 @@
 //
 // A selector is a list of terms. Terms are ANDed; the comma-separated
 // alternatives inside a term are ORed. Each alternative is a bare label
-// ("gpu") or key=value ("arch=arm64"). The keys name, class, os, arch and
-// location, and the alias local, are answered from the agent's granted or
-// observed facts, never from labels the agent asserted for itself.
+// ("gpu") or key=value ("arch=arm64"). Name, class and location come from
+// granted facts. Observed OS and Arch take precedence over self-reported
+// platform labels. The alias local matches the coordinator class.
 package match
 
 import (
@@ -73,8 +73,7 @@ type Profile struct {
 	// Labels are free-form. [SelfAsserted] strips the fixed keys from labels an
 	// agent sends for itself.
 	Labels []string
-	// OS and Arch are observed. Empty falls back to an os= or arch= label, which
-	// is how a runner that reports no platform has always matched.
+	// OS and Arch are observed. Empty fields fall back to os= and arch= labels.
 	OS, Arch string
 	// Accept narrows the repositories the agent takes; nil takes every one.
 	Accept RepoFilter

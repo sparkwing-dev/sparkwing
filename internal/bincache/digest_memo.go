@@ -13,10 +13,8 @@ import (
 	"time"
 )
 
-// perf: a replace target's key re-read every file (37 MB in the sparkwing repo, 300-700 ms under load) on each
-// SDK install, twice per local run. Digests are kept per directory under each file's exact identity
-// (device, inode, size, modification and change time), so an unchanged file is not read again.
-// hack: go test binaries hash fixture trees in a real home; they keep no records.
+// perf: stable file identities avoid rereading unchanged replace-target content on each key calculation.
+// hack: test binaries disable persistence because fixture hashing must not write to the user cache.
 var digestMemoEnabled = !strings.HasSuffix(filepath.Base(os.Args[0]), ".test")
 
 type digestMemo struct {
