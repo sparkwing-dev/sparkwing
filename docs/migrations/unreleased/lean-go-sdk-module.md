@@ -18,6 +18,10 @@ The root manifest has no replacements. A workspace-off build uses the published
 SDK pin. Before the first SDK release, checkout verification uses a temporary
 modfile replacement rather than changing the publishable root manifest.
 
+The removed `github.com/sparkwing-dev/sparkwing/pkg/match.ToolPrefix` constant
+is now `github.com/sparkwing-dev/sparkwing/sparkwing/protocol/labels.ToolPrefix`.
+Update the import to the SDK-owned labels package.
+
 Go SDK tags use `sparkwing/v0.x.y`. Engine tags remain `v0.x.y`.
 
 ### OpenAPI schema names
