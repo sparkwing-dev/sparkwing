@@ -34,7 +34,7 @@ func configureHostCommand(cmd *exec.Cmd) {
 		return
 	}
 	if strings.EqualFold(path, filepath.Join(os.Getenv("SystemRoot"), "System32", "bash.exe")) {
-		cmd.Err = errors.New("WSL bash.exe is not supported for host commands; install Git Bash or call wsl explicitly")
+		cmd.Err = errors.New("WSL bash.exe is not supported for host commands; install Git Bash and set the Bash path to its bash.exe (for example C:\\Program Files\\Git\\bin\\bash.exe)")
 		return
 	}
 	if len(cmd.Args) != 3 || cmd.Args[1] != "-c" {
@@ -48,7 +48,7 @@ func configureHostCommand(cmd *exec.Cmd) {
 		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
 		return
 	}
-	cmd.Args[2] = `: "${` + variable + `:?host Bash program is empty}"; eval 'unset ` + variable + `;' "$` + variable + `"`
+	cmd.Args[2] = `: "${` + variable + `:?host Bash program is empty; on Windows use Git Bash and set the Bash path to its bash.exe instead of WSL bash.exe}"; eval 'unset ` + variable + `;' "$` + variable + `"`
 	cmd.Env = append(cmd.Environ(), variable+"="+program)
 }
 
