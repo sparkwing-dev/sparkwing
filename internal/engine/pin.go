@@ -33,18 +33,15 @@ func ReadPin(checkout string, sdk engineid.SDKKind) (engineid.Pin, error) {
 	if err != nil {
 		return engineid.Pin{}, invalid(err.Error(), "Pin an exact SDK release or a version-stamped local TypeScript package and update its native lockfile.")
 	}
-	if _, err = VersionForPin(pin); err != nil {
+	if _, err = SDKVersionForPin(pin); err != nil {
 		return engineid.Pin{}, err
 	}
 	pin.InputsDigest, err = pinInputsDigest(checkout, pin)
 	return pin, err
 }
 
-// VersionForPin normalizes the SDK release spelling or identifies a local replacement.
-func VersionForPin(pin engineid.Pin) (string, error) {
-	if pin.Replacement != "" && pin.Version != "" {
-		return installedEngineVersion()
-	}
+// SDKVersionForPin normalizes SDK versions without selecting an engine.
+func SDKVersionForPin(pin engineid.Pin) (string, error) {
 	version := pin.Version
 	switch pin.SDK {
 	case engineid.GoSDK:
@@ -52,6 +49,9 @@ func VersionForPin(pin engineid.Pin) (string, error) {
 		version = "v" + version
 	default:
 		return "", invalid("unknown SDK kind", "Select go or typescript.")
+	}
+	if pin.Replacement != "" && pin.Version != "" {
+		return version, nil
 	}
 	if !releaseVersion(version) {
 		return "", invalid("SDK pin must identify an exact published release", "Use vMAJOR.MINOR.PATCH for Go or MAJOR.MINOR.PATCH for TypeScript; local and pseudo-version pins need a development workflow.")

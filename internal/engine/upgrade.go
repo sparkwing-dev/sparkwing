@@ -200,7 +200,7 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest, p
 	if err != nil {
 		return stage, plan, resolved, err
 	}
-	actual, err := VersionForPin(after)
+	actual, err := SDKVersionForPin(after)
 	if err != nil {
 		return stage, plan, resolved, err
 	}

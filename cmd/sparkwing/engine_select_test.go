@@ -159,7 +159,7 @@ func TestPipelineEnginePinComesFromPipelineDirectoryProperty(t *testing.T) {
 					}
 					return selected, nil
 				}
-				report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: pipeline}}, sdk, engine.ReadPin, engine.VersionForPin)
+				report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: pipeline}}, sdk, engine.ReadPin, func(engineid.Pin) (string, error) { return "v1.2.3", nil })
 				return command.run(t.Context(), pipeline, sdk, "auto", nil, nil) == nil && *calls == 1 && report.Refusal == "" && report.Pin == pin.Version && report.Runs == "v1.2.3"
 			}
 			if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
@@ -182,7 +182,7 @@ func TestSDKPinInspectionRetainsManifestAndLockfileSizes(t *testing.T) {
 				body := `{"dependencies":{"@sparkwing/sdk":"1.2.3"},"description":"` + strings.Repeat("x", maxMetadataBytes+1) + `"}`
 				writeRepoFile(t, filepath.Join(dir, "package.json"), body)
 			}
-			report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, sdk, engine.ReadPin, engine.VersionForPin)
+			report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, sdk, engine.ReadPin, func(engineid.Pin) (string, error) { return "v1.2.3", nil })
 			if report.Runs != "v1.2.3" || report.Refusal != "" {
 				t.Fatalf("valid SDK inputs refused: %+v", report)
 			}

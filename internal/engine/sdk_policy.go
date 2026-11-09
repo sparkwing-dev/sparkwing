@@ -81,7 +81,7 @@ func selectEngine(index VerifiedIndex, sdk SDKRelease, now time.Time) (string, e
 }
 
 func acceptsSDK(index VerifiedIndex, pin engineid.Pin, version string, now time.Time) ([]engineid.Notice, error) {
-	sdkVersion, err := VersionForPin(pin)
+	sdkVersion, err := SDKVersionForPin(pin)
 	if err != nil {
 		return nil, err
 	}

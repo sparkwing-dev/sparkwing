@@ -98,7 +98,12 @@ func checkUpdate(t *testing.T, args ...string) (updateCheckReport, int) {
 }
 
 func readPinSummary(dir string) *InfoSDKPin {
-	return gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, engineid.GoSDK, engine.ReadPin, engine.VersionForPin)
+	return gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, engineid.GoSDK, engine.ReadPin, func(pin engineid.Pin) (string, error) {
+		if pin.Replacement != "" {
+			return "(devel)", nil
+		}
+		return "v0.80.0", nil
+	})
 }
 
 func TestUnifiedUpdateCheckReleaseStatesAndProvenance(t *testing.T) {
@@ -269,7 +274,7 @@ func TestUnifiedSDKCheckReadsPinWithoutGoOrModuleWrites(t *testing.T) {
 	testshell.Install(t, filepath.Join(bin, "go"), "#!/bin/sh\nprintf called > "+shellSingleQuote(filepath.ToSlash(spy))+"\nexit 99\n")
 	t.Setenv("PATH", bin)
 	report := readPinSummary(dir)
-	if report.Pin != "v0.48.0" || report.Runs != "v0.48.0" || report.Refusal != "" {
+	if report.Pin != "v0.48.0" || report.Runs != "v0.80.0" || report.Refusal != "" {
 		t.Fatalf("SDK summary: %+v", report)
 	}
 	after, err := os.ReadFile(filepath.Join(dir, "go.mod"))

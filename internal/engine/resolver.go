@@ -89,9 +89,12 @@ func (r *Resolver) Resolve(ctx context.Context, pin engineid.Pin, target release
 
 // EngineVersion resolves a pin through signed SDK and engine policy without downloading executables.
 func (r *Resolver) EngineVersion(ctx context.Context, pin engineid.Pin) (string, error) {
-	version, err := VersionForPin(pin)
-	if err != nil || pin.Replacement != "" {
-		return version, err
+	version, err := SDKVersionForPin(pin)
+	if err != nil {
+		return "", err
+	}
+	if pin.Replacement != "" {
+		return installedEngineVersion()
 	}
 	policy, err := r.sdkIndex(ctx, time.Now())
 	if err != nil {
