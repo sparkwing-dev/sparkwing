@@ -103,7 +103,7 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 	}
 	checked := 0
 	for _, block := range blocks {
-		if block.file != "node-nodewire.md" {
+		if block.file != "node-protocol.md" {
 			continue
 		}
 		for _, line := range strings.Split(block.body, "\n") {
@@ -184,7 +184,7 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 }
 
 func TestPublishedProtocolGuideMatchesWireFields(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "node-nodewire.md"))
+	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "node-protocol.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func protocolGuideFieldsMatch(body string) bool {
 
 // The published request schema and the host's decoder judge the same requests alike.
 func TestRequestSchemaAgreesWithTheDecoder(t *testing.T) {
-	schema, err := conformance.LoadSchema(filepath.Join("..", "..", "docs", "schemas", "node-nodewire.schema.json"))
+	schema, err := conformance.LoadSchema(filepath.Join("..", "..", "docs", "schemas", "node-protocol.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

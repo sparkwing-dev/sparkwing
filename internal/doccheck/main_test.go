@@ -28,14 +28,14 @@ func TestModuleGoModAbsolutizesRelativeReplacePath(t *testing.T) {
 	}
 }
 
-func TestModuleGoModKeepsAbsoluteReplacePath(t *testing.T) {
+func TestModuleGoModUsesSDKUnderAbsoluteRepositoryPath(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "repo")
 	got, err := moduleGoMod(abs)
 	if err != nil {
 		t.Fatalf("moduleGoMod: %v", err)
 	}
-	if !strings.Contains(got, "=> "+abs+"\n") {
-		t.Fatalf("absolute repo root not preserved in:\n%s", got)
+	if !strings.Contains(got, "=> "+filepath.Join(abs, "sparkwing")+"\n") {
+		t.Fatalf("absolute SDK path not preserved in:\n%s", got)
 	}
 }
 
