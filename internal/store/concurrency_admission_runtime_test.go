@@ -462,3 +462,34 @@ func TestAdmissionCancelledWaiterCannotBlockLiveWork(t *testing.T) {
 		t.Fatal("terminal waiter reacquired capacity")
 	}
 }
+
+func TestAdmissionCancelledHolderKeepsSlotUntilCleanupReports(t *testing.T) {
+	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
+	binding := admissionBinding(f)
+	admissionWant(t, f, binding, f.holder, runstate.AcquireGranted)
+	if _, err := f.tenant.TransitionNode(t.Context(), store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {
+		t.Fatal(err)
+	}
+	competitor, award := admissionPolicyBlocker(t, f)
+	admissionWant(t, f, competitor, award, runstate.AcquireQueued)
+	state := admissionState(t, f)
+	expires := state.Holders[0].LeaseExpiresAt
+	now := expires.Add(-time.Second)
+	f.s.SetTestClock(t, func() time.Time { return now })
+	if _, err := f.tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: f.ref.RunID, To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}, Reason: "user_cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+	beat, err := f.tenant.RenewNodeClaim(t.Context(), f.ref, f.holder)
+	if err != nil || !beat.CancelRequested {
+		t.Fatalf("cleanup renewal: %+v %v", beat, err)
+	}
+	if _, err := f.tenant.RenewNodeClaim(t.Context(), runspec.NodeRef{RunID: runspec.RunID(competitor.RunID), NodeID: runspec.NodeID(competitor.NodeID)}, award); err != nil {
+		t.Fatal(err)
+	}
+	now = expires.Add(time.Nanosecond)
+	admissionWant(t, f, competitor, award, runstate.AcquireQueued)
+	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, Outcome: runstate.NodeCancelled, SourceAttempt: acceptanceAttempt(1)}); err != nil {
+		t.Fatal(err)
+	}
+	admissionWant(t, f, competitor, award, runstate.AcquireGranted)
+}

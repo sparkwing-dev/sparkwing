@@ -85,9 +85,6 @@ type Server struct {
 	costPerRunnerHour float64
 	costRateSource    string
 
-	computeAlarmMu sync.Mutex
-	computeAlarmOn bool
-
 	bucketUsageStore storage.UsageReporter
 	logRetention     map[store.Team]int
 	egress           *egress.Meter

@@ -20,7 +20,6 @@ const GitHubActionsLabel = "github-actions"
 var githubRunnerEvents = map[string]bool{"push": true, "workflow_dispatch": true, "schedule": true}
 
 type githubRunnerConfig struct {
-	registry func(context.Context, store.Team) (GitHubRunnerRegistry, error)
 	once     sync.Once
 	override *githuboidc.Config
 	verifier *githuboidc.Verifier
