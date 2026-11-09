@@ -1,5 +1,7 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"testing"
@@ -26,7 +28,7 @@ func wantNoJob(t *testing.T, f *store.RankingFixture, prefix string, labels ...s
 	t.Helper()
 	if claim, err := f.ClaimLabels(t, prefix, labels...); !errors.Is(err, store.ErrNotFound) {
 		var held *apierr.Error
-		if !errors.As(err, &held) || held.Code != apierr.LockHeld {
+		if !errors.As(err, &held) || held.Code != hosterr.LockHeld {
 			t.Fatalf("%s took a job it should wait for or cannot have: %+v %v", prefix, claim, err)
 		}
 	}

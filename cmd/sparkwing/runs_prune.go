@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -96,7 +98,7 @@ func pruneObservedRuns(ctx context.Context, inv clisurface.Invocation, c control
 			if err := c.DeleteRun(ctx, id); err != nil {
 				failures = append(failures, fmt.Errorf("prune %s: %w", id, err))
 				if !errors.As(err, &record.Error) {
-					record.Error = &apierr.Error{Code: apierr.Internal, Message: err.Error()}
+					record.Error = &apierr.Error{Code: hosterr.Internal, Message: err.Error()}
 				}
 			}
 		}

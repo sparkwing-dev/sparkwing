@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -170,7 +172,7 @@ func TestClaimUnitRejectsForeignAndMissingRequirements(t *testing.T) {
 				}
 			} else {
 				var refused *apierr.Error
-				if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+				if !errors.As(err, &refused) || refused.Code != hosterr.Forbidden {
 					t.Fatalf("claim refusal = %v", err)
 				}
 			}
@@ -217,7 +219,7 @@ func TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement(t *testing.
 				s.claimProfiles = claimProfileFake{profile: match.Profile{Accept: accept}}
 				_, err = s.AsOperator().ClaimUnit(t.Context(), demand)
 				var denied *apierr.Error
-				if queued && !errors.Is(err, ErrNotFound) || !queued && (!errors.As(err, &denied) || denied.Code != apierr.Forbidden) {
+				if queued && !errors.Is(err, ErrNotFound) || !queued && (!errors.As(err, &denied) || denied.Code != hosterr.Forbidden) {
 					t.Fatalf("repository denial=%v", err)
 				}
 				rewriteSchemaCount(t, s.db, "billing_awards", 0)
@@ -265,7 +267,7 @@ func TestClaimUnitGrantedProfileKeys(t *testing.T) {
 				}
 				_, err = s.AsOperator().ClaimUnit(t.Context(), demand)
 				var denied *apierr.Error
-				if queued && !errors.Is(err, ErrNotFound) || !queued && (!errors.As(err, &denied) || denied.Code != apierr.Forbidden) {
+				if queued && !errors.Is(err, ErrNotFound) || !queued && (!errors.As(err, &denied) || denied.Code != hosterr.Forbidden) {
 					t.Fatalf("unmet requirement=%v", err)
 				}
 				rewriteSchemaCount(t, s.db, "billing_awards", 0)

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -56,7 +58,7 @@ func TestPersonalEnrollmentTransportNeverPromotesCapabilityAncestryProperty(t *t
 			_, err = manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "runner-" + hex.EncodeToString(input[:]), Repos: []string{"github.com/acme/*"}, Personal: true})
 		}
 		var refused *apierr.Error
-		return errors.As(err, &refused) && (refused.Code == apierr.Unauthenticated || refused.Code == apierr.Forbidden)
+		return errors.As(err, &refused) && (refused.Code == hosterr.Unauthenticated || refused.Code == hosterr.Forbidden)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

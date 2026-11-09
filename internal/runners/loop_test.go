@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -544,7 +546,7 @@ func TestLoopWaitsOutAControllerRetryAfter(t *testing.T) {
 			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 				calls++
 				if calls == 1 {
-					return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(5000)}}
+					return controllerwire.ClaimResponse{}, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(5000)}}
 				}
 				if time.Since(start) != 5*time.Second {
 					t.Errorf("repolled after %v, want the controller's 5s", time.Since(start))
@@ -649,7 +651,7 @@ func TestLoopControllerRestartKeepsHeldHostAliveThroughDrain(t *testing.T) {
 }
 
 func TestLoopTransportRecoveryKeepsRefusalsFatal(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.Unauthenticated, apierr.Forbidden, apierr.ProtocolError} {
+	for _, code := range []apierr.Code{hosterr.Unauthenticated, hosterr.Forbidden, apierr.ProtocolError} {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				calls := 0
@@ -689,7 +691,7 @@ func TestLoopHostCompletionKeepsServerBackoff(t *testing.T) {
 					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
 				case 2:
 					refusedAt = time.Now()
-					return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(60000)}}
+					return controllerwire.ClaimResponse{}, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(60000)}}
 				}
 				if waited := time.Since(refusedAt); waited < time.Minute {
 					t.Errorf("claimed %v after a 60s refusal", waited)

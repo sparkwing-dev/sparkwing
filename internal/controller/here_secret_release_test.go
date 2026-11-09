@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -18,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -187,7 +188,7 @@ func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if body := h.refuse(t, "undeclared shared secret", h.award, "UNDECLARED"); !strings.Contains(body, string(apierr.ReasonSecretUndeclared)) {
+		if body := h.refuse(t, "undeclared shared secret", h.award, "UNDECLARED"); !strings.Contains(body, string(hosterr.ReasonSecretUndeclared)) {
 			t.Fatalf("undeclared refusal did not name the missing declaration: %s", body)
 		}
 	})

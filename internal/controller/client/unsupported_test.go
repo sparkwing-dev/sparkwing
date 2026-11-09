@@ -1,5 +1,7 @@
 package client_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -22,7 +24,7 @@ func TestUnregisteredRouteAnswersCanonicalNotFound(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 		t.Errorf("content type = %q, want application/json", got)
 	}
-	var body apierr.Envelope
+	var body hosterr.Envelope
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"time"
@@ -14,7 +16,7 @@ import (
 // PrepareLogWrite checks the exact current writer and returns the run's sealed retention class.
 func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, actor runstate.Actor) (string, error) {
 	if subject.Team != string(t.team) {
-		return "", authorityError(apierr.Forbidden, "log belongs to another team")
+		return "", authorityError(hosterr.Forbidden, "log belongs to another team")
 	}
 	if err := subject.Validate(); err != nil {
 		return "", authorityError(apierr.BadRequest, "invalid log subject")
@@ -43,7 +45,7 @@ func (t *Tenant) prepareLogWriteTx(ctx context.Context, tx *storeTx, subject blo
 		return "", err
 	}
 	if _, ok := blob.LogClassDays(class); !ok {
-		return "", authorityError(apierr.Unavailable, "invalid persisted log retention")
+		return "", authorityError(hosterr.Unavailable, "invalid persisted log retention")
 	}
 	return class, nil
 }
@@ -63,7 +65,7 @@ type LogSlot struct {
 // committed, so no URL for a slot outlives its first signing by more than limits.LogUploadURLTTL.
 func (t *Tenant) OpenLogSlot(ctx context.Context, subject blob.LogSubject, actor runstate.Actor, index, size int64) (LogSlot, error) {
 	if subject.Team != string(t.team) {
-		return LogSlot{}, authorityError(apierr.Forbidden, "log belongs to another team")
+		return LogSlot{}, authorityError(hosterr.Forbidden, "log belongs to another team")
 	}
 	if err := subject.Validate(); err != nil {
 		return LogSlot{}, authorityError(apierr.BadRequest, "invalid log subject")

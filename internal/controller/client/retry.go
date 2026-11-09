@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -30,13 +32,13 @@ func retryHeldRead(ctx context.Context, read func() error) error {
 		retry := RetryableTransportError(err)
 		var failure *apierr.Error
 		if errors.As(err, &failure) {
-			retry = failure.Code == apierr.Unavailable
+			retry = failure.Code == hosterr.Unavailable
 		}
 		if !retry {
 			return err
 		}
 		delay := time.Second
-		if advised, ok := apierr.RetryDelay(err); ok {
+		if advised, ok := hosterr.RetryDelay(err); ok {
 			delay = max(advised, 100*time.Millisecond)
 		}
 		if err := waitFor(ctx, delay); err != nil {

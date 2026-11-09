@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -37,7 +39,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	operator := settings.OperatorInputs{}
 	if guards.RunSeconds > 0 {
 		if guards.RunSeconds > math.MaxInt64/int64(time.Second) {
-			return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.Unavailable, Message: "operator run duration is not representable"}
+			return store.IntakePolicyFacts{}, &apierr.Error{Code: hosterr.Unavailable, Message: "operator run duration is not representable"}
 		}
 		duration := time.Duration(guards.RunSeconds) * time.Second
 		operator.Global = settings.OperatorValues{OwnerExecution: &duration, Origins: map[string]settings.Origin{"operator.owner_execution": {Source: settings.GlobalDB, Key: store.ComputeLimitRunSeconds}}}
@@ -53,7 +55,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	localPeer := principal.Capability.Subject.Kind == capability.SubjectLocal
 	published := request.Request.Mode == runspec.IntakePublish
 	if !localPeer && !published && request.Request.Origin == runspec.OriginLocal {
-		return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.Forbidden, Message: "executable local origin requires local peer authority"}
+		return store.IntakePolicyFacts{}, &apierr.Error{Code: hosterr.Forbidden, Message: "executable local origin requires local peer authority"}
 	}
 	placement := store.RequestPlacement(request.Request)
 	local := placement == nodeproto.PlacementLocal || localPeer && placement == nodeproto.PlacementLocalTriggered
@@ -91,7 +93,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if strings.HasPrefix(string(request.Request.Git.Repository.Key), "gh:") && !localPeer {
 		verified, ok := ctx.Value(verifiedIntakeSourceKey{}).(verifiedIntakeSource)
 		if !ok || verified.location != location || verified.repository != request.Request.Git.Repository {
-			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "GitHub source requires verified intake repository identity"}
+			return facts, &apierr.Error{Code: hosterr.Forbidden, Message: "GitHub source requires verified intake repository identity"}
 		}
 	}
 	if location == (runspec.SourceLocation{}) {
@@ -110,12 +112,12 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 		return facts, nil
 	}
 	if location.LocalCheckout != "" {
-		return facts, &apierr.Error{Code: apierr.Forbidden, Message: "remote intake cannot name a local checkout"}
+		return facts, &apierr.Error{Code: hosterr.Forbidden, Message: "remote intake cannot name a local checkout"}
 	}
 	if !strings.HasPrefix(string(request.Request.Git.Repository.Key), "gh:") {
 		repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: location.RemoteURL})
 		if err != nil || repository.Key != request.Request.Git.Repository.Key {
-			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "source does not match repository identity"}
+			return facts, &apierr.Error{Code: hosterr.Forbidden, Message: "source does not match repository identity"}
 		}
 	}
 	facts.SourceLocation = &location

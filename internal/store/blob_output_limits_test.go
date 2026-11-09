@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"strconv"
@@ -27,7 +29,7 @@ func FuzzOutputRecordUsesSharedLimit(f *testing.F) {
 			return
 		}
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.PayloadTooLarge {
+		if !errors.As(err, &refusal) || refusal.Code != hosterr.PayloadTooLarge {
 			t.Fatalf("oversized output %d: %v", size, err)
 		}
 		rewriteSchemaCount(t, s.db, "blob_records", 0)
@@ -44,7 +46,7 @@ func TestBlobRecordsMemoCannotBypassOutputLimit(t *testing.T) {
 			_, err := records.CommitRecord(t.Context(), memo)
 			if size > protolimits.NodeOutputBytes {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.PayloadTooLarge {
+				if !errors.As(err, &failure) || failure.Code != hosterr.PayloadTooLarge {
 					t.Fatalf("oversized output refusal=%v, want payload_too_large", err)
 				}
 				rewriteSchemaCount(t, s.db, "blob_records", 0)

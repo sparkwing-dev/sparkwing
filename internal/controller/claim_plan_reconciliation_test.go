@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/json"
@@ -47,7 +49,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/plan", string(body), http.StatusUnprocessableEntity)
-	var failure apierr.Envelope
+	var failure hosterr.Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != apierr.PlanInvalid {
 		t.Fatalf("preflight error=%s: %v", w.Body, err)
 	}

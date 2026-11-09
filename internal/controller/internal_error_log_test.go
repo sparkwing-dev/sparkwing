@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -88,7 +90,7 @@ func TestRequestCancellationLogLevel(t *testing.T) {
 
 func TestUnexpectedMetricsUnavailableLogsError(t *testing.T) {
 	h, logs := auditHarness(t, "/api/v1/runs/{run}/jobs/{job}/metrics", func(w http.ResponseWriter, _ *http.Request) {
-		if err := apierrhttp.Write(w, &apierr.Error{Code: apierr.Unavailable, Message: errCloudMetricsUnavailable.Message}); err != nil {
+		if err := apierrhttp.Write(w, &apierr.Error{Code: hosterr.Unavailable, Message: errCloudMetricsUnavailable.Message}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -121,7 +123,7 @@ func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
 					case "encoded":
 						routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.BadRequest, Message: form, Details: map[string]any{"invalid": make(chan int)}})
 					case "typed":
-						routepolicy.WritePolicyError(w, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: form, Hint: form, Details: map[string]any{"private": form, "retry_after_ms": 1000}}, cause))
+						routepolicy.WritePolicyError(w, errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: form, Hint: form, Details: map[string]any{"private": form, "retry_after_ms": 1000}}, cause))
 					case "browser":
 						tmpl := template.Must(template.New("broken").Funcs(template.FuncMap{"fail": func() (string, error) { return "", cause }}).Parse("{{fail}}"))
 						renderPage(w, http.StatusOK, tmpl, nil)

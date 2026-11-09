@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/hmac"
@@ -139,7 +141,7 @@ func TestPaymentHTTPRefusals(t *testing.T) {
 				body = `{}`
 			}
 			signature := paymentSignature(body, time.Now())
-			want := apierr.Unauthenticated
+			want := hosterr.Unauthenticated
 			switch name {
 			case "missing proof":
 				signature = ""
@@ -150,24 +152,24 @@ func TestPaymentHTTPRefusals(t *testing.T) {
 			case "changed body":
 				body += " "
 			case "wrong mode":
-				want = apierr.Forbidden
+				want = hosterr.Forbidden
 			case "malformed event":
 				want = apierr.BadRequest
 			case "ledger unavailable":
 				ledger.err = errors.New("private database credentials")
-				want = apierr.Internal
+				want = hosterr.Internal
 			case "settlement conflict":
 				ledger.err = &apierr.Error{Code: apierr.Conflict, Message: "payment differs from committed checkout"}
 				want = apierr.Conflict
 			case "unconfigured":
 				auth = nil
-				want = apierr.Unavailable
+				want = hosterr.Unavailable
 			case "missing ledger":
-				want = apierr.Unavailable
+				want = hosterr.Unavailable
 			case "oversized body":
 				body = strings.Repeat(" ", (1<<20)+1)
 				signature = paymentSignature(body, time.Now())
-				want = apierr.PayloadTooLarge
+				want = hosterr.PayloadTooLarge
 			}
 			r := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", strings.NewReader(body))
 			r.Header.Set("Authorization", "Bearer service-credits-or-admin")
@@ -183,11 +185,11 @@ func TestPaymentHTTPRefusals(t *testing.T) {
 			}
 			w := httptest.NewRecorder()
 			server.Handler().ServeHTTP(w, r)
-			var envelope apierr.Envelope
+			var envelope hosterr.Envelope
 			if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
 				t.Fatal(err)
 			}
-			if w.Code != apierr.Status(want) || envelope.Error == nil || envelope.Error.Code != want || strings.Contains(w.Body.String(), "private database") {
+			if w.Code != hosterr.Status(want) || envelope.Error == nil || envelope.Error.Code != want || strings.Contains(w.Body.String(), "private database") {
 				t.Fatalf("refusal = %d %s, want %s", w.Code, w.Body.String(), want)
 			}
 			calls := 0

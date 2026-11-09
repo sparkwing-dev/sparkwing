@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -13,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type executorCleanupProcess struct {
@@ -147,7 +148,7 @@ func TestNodeExecutorTimeoutRunsFinallyAndAfterRun(t *testing.T) {
 		t.Fatalf("timeout cleanup: finally=%v after_run=%v", finally, after)
 	}
 	result := s.changes[len(s.changes)-1].Extra.Result
-	if result.Outcome != runstate.NodeFailed || result.Reason != string(apierr.DeadlineExceeded) {
+	if result.Outcome != runstate.NodeFailed || result.Reason != string(hosterr.DeadlineExceeded) {
 		t.Fatalf("timeout result=%+v", result)
 	}
 }
@@ -217,7 +218,7 @@ func TestNodeExecutorAwaitsHoldNoProgressUntilLastResume(t *testing.T) {
 			t.Fatal(err)
 		}
 		result := s.changes[len(s.changes)-1].Extra.Result
-		if elapsed := time.Since(start); elapsed != 12*time.Second || result.Reason != string(apierr.DeadlineExceeded) || result.MaskedError != "job attempt exceeded its no-progress deadline" {
+		if elapsed := time.Since(start); elapsed != 12*time.Second || result.Reason != string(hosterr.DeadlineExceeded) || result.MaskedError != "job attempt exceeded its no-progress deadline" {
 			t.Fatalf("elapsed=%s result=%+v", elapsed, result)
 		}
 	})
@@ -398,7 +399,7 @@ func TestNodeExecutorClosureTimeoutRunsAfterRun(t *testing.T) {
 					}
 					afterCalls++
 					var result nodewire.RunResult
-					if err := json.Unmarshal(request.Input, &result); err != nil || result.Outcome != "failed" || result.Error == nil || result.Error.Code != apierr.DeadlineExceeded {
+					if err := json.Unmarshal(request.Input, &result); err != nil || result.Outcome != "failed" || result.Error == nil || result.Error.Code != hosterr.DeadlineExceeded {
 						t.Errorf("after_run input=%s error=%v", request.Input, err)
 					}
 					if ctx.Err() != nil {

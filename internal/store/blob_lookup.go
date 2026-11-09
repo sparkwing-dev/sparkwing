@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -9,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
@@ -174,7 +175,7 @@ func (r *blobRecords) readMembers(ctx context.Context, tx *storeTx, record blob.
 		return nil, nil
 	}
 	if r.manifests == nil {
-		return nil, authorityError(apierr.Unavailable, "verified manifest reader is not configured")
+		return nil, authorityError(hosterr.Unavailable, "verified manifest reader is not configured")
 	}
 	members, err := tx.blobIO.read("read:"+string(manifest.Value), func(ctx context.Context) ([]blob.Member, error) {
 		return r.manifests.ReadBlobManifest(ctx, r.tenant.team, manifest.Value)

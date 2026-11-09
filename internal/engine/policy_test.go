@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/ed25519"
 	"encoding/json"
@@ -43,7 +45,7 @@ func FuzzSignedPolicyRejectsDuplicateKeys(f *testing.F) {
 			candidate := append(append([]byte(nil), body[:len(body)-1]...), []byte(`,"extension":`+extension+`}`)...)
 			_, err := VerifyIndex(SignedIndex{Body: candidate, Signature: ed25519.Sign(key, candidate)}, now, signingKeys(key))
 			if duplicate {
-				requireCode(t, err, apierr.IntegrityFailure)
+				requireCode(t, err, hosterr.IntegrityFailure)
 			} else if err != nil {
 				t.Fatalf("unique extension refused: %v", err)
 			}
@@ -103,7 +105,7 @@ func TestSignedPolicyExpiryRevocationAndMinimum(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Evaluate(index, "v0.10.2", now)
-	requireCode(t, err, apierr.VersionRevoked)
+	requireCode(t, err, hosterr.VersionRevoked)
 	var api *apierr.Error
 	if !errors.As(err, &api) || api.Hint != UpgradeCommand {
 		t.Fatalf("%v", err)
@@ -120,7 +122,7 @@ func TestSignedPolicyExpiryRevocationAndMinimum(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Evaluate(index, "v0.10.2", now)
-	requireCode(t, err, apierr.VersionUnsupported)
+	requireCode(t, err, hosterr.VersionUnsupported)
 }
 
 func TestSignedPolicyRejectsMalformedAndUnverifiedAuthority(t *testing.T) {
@@ -157,7 +159,7 @@ func TestVerifyIndexUsesOnlySuppliedTrust(t *testing.T) {
 	other := testSigningKey(t)
 	for _, keys := range [][]ed25519.PublicKey{nil, {}, signingKeys(other)} {
 		_, err := VerifyIndex(signed, now, keys)
-		requireCode(t, err, apierr.IntegrityFailure)
+		requireCode(t, err, hosterr.IntegrityFailure)
 	}
 	if _, err := VerifyIndex(signed, now, signingKeys(key)); err != nil {
 		t.Fatal(err)

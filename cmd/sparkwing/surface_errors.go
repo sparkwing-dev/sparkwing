@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -32,23 +34,23 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 	}
 	var failure *apierr.Error
 	if !errors.As(err, &failure) {
-		failure = &apierr.Error{Code: apierr.Internal, Message: err.Error()}
+		failure = &apierr.Error{Code: hosterr.Internal, Message: err.Error()}
 		var field *userconfig.FieldError
 		var setting *settings.Error
 		switch {
 		case errors.As(err, &setting):
 			failure.Code = apierr.BadRequest
 			if setting.CeilingFrom != nil {
-				failure.Code = apierr.LimitExceeded
+				failure.Code = hosterr.LimitExceeded
 			}
 		case errors.As(err, &field), errors.Is(err, configguard.ErrOutsideSandboxHome):
 			failure.Code = apierr.BadRequest
 		case errors.Is(err, docs.ErrNotFound):
 			failure.Code = apierr.NotFound
 		case errors.Is(err, context.Canceled):
-			failure.Code = apierr.Cancelled
+			failure.Code = hosterr.Cancelled
 		case errors.Is(err, context.DeadlineExceeded):
-			failure.Code = apierr.DeadlineExceeded
+			failure.Code = hosterr.DeadlineExceeded
 		}
 		var usage *clisurface.UsageError
 		if errors.As(err, &usage) {
@@ -61,7 +63,7 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 		contextual.Message = err.Error()
 		failure = &contextual
 	}
-	if failure.Code == apierr.Unauthenticated && failure.Hint == "" {
+	if failure.Code == hosterr.Unauthenticated && failure.Hint == "" {
 		profile := inv.Value("profile")
 		var routed *profileError
 		if profile == "" && errors.As(err, &routed) {

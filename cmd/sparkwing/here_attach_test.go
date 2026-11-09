@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -132,7 +134,7 @@ func TestHereAttachmentLogFailureDoesNotAbandonHost(t *testing.T) {
 }
 
 func TestHereAttachmentLogRefusalsRemainErrorsAfterCompletion(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.Forbidden, apierr.ProtocolError, apierr.IntegrityFailure} {
+	for _, code := range []apierr.Code{hosterr.Forbidden, apierr.ProtocolError, hosterr.IntegrityFailure} {
 		t.Run(string(code), func(t *testing.T) {
 			failure := &apierr.Error{Code: code, Message: "log read refused"}
 			completion, err := observeHereRun(hereObservationContext(t), "run", hereObservation{

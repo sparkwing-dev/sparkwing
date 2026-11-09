@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -58,7 +60,7 @@ func engineHTTP(t *testing.T, b *credentialBoundary, f *engineTransactions, path
 
 func assertEngineError(t *testing.T, w *httptest.ResponseRecorder, status int, code apierr.Code) {
 	t.Helper()
-	var envelope apierr.Envelope
+	var envelope hosterr.Envelope
 	if w.Code != status || json.Unmarshal(w.Body.Bytes(), &envelope) != nil || envelope.Error == nil || envelope.Error.Code != code || strings.Contains(w.Body.String(), "private credential") {
 		t.Fatalf("HTTP %d %s, want %d %s", w.Code, w.Body.String(), status, code)
 	}
@@ -89,24 +91,24 @@ func TestEngineIntakeHTTP(t *testing.T) {
 				parent := "run"
 				job := "job"
 				if name == "wrong parent" {
-					parent, status, code, writes = "other", 403, apierr.Forbidden, 0
+					parent, status, code, writes = "other", 403, hosterr.Forbidden, 0
 				}
 				if name == "sibling parent job" {
-					job, status, code, writes = "sibling", 403, apierr.Forbidden, 0
+					job, status, code, writes = "sibling", 403, hosterr.Forbidden, 0
 				}
 				body = `{"request":{"version":1,"team":"team","pipeline":"build","mode":"execute","origin":"child","dispatch":"host",` + sourceFields + `,"lineage":{"parent_run_id":"` + parent + `","parent_job_id":"` + job + `"}},"idempotency_key":"once"}`
 			case "foreign team":
 				body = strings.Replace(body, `"team":"team"`, `"team":"foreign"`, 1)
-				status, code, writes = 403, apierr.Forbidden, 0
+				status, code, writes = 403, hosterr.Forbidden, 0
 			case "read only":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
-				status, code, writes = 403, apierr.Forbidden, 0
+				status, code, writes = 403, hosterr.Forbidden, 0
 			case "anonymous":
 				b.raw = ""
-				status, code, writes = 401, apierr.Unauthenticated, 0
+				status, code, writes = 401, hosterr.Unauthenticated, 0
 			case "revoked":
 				b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-				status, code, writes = 401, apierr.Unauthenticated, 0
+				status, code, writes = 401, hosterr.Unauthenticated, 0
 			case "unknown field":
 				body = `{"request":{"team":"team","pipeline":"build"},"authority":"forged"}`
 				status, code, writes = 400, apierr.BadRequest, 0
@@ -120,14 +122,14 @@ func TestEngineIntakeHTTP(t *testing.T) {
 				body = `{"id":"old-upsert","pipeline":"build","status":"running"}`
 				status, code, writes = 400, apierr.BadRequest, 0
 			case "transaction refusal":
-				f.err = &apierr.Error{Code: apierr.LockHeld, Message: "intake authority changed"}
-				status, code = 409, apierr.LockHeld
+				f.err = &apierr.Error{Code: hosterr.LockHeld, Message: "intake authority changed"}
+				status, code = 409, hosterr.LockHeld
 			case "source removed":
 				f.err = store.ErrNotFound
 				status, code = 404, apierr.NotFound
 			case "private error":
 				f.err = errors.New("private credential")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			}
 			w := engineHTTP(t, b, f, "/api/v1/runs", body)
 			if f.writes != writes {
@@ -172,16 +174,16 @@ func TestEnginePlanHTTP(t *testing.T) {
 				b.snapshot.Binding.Current = p.Capability.Binding
 			case "work claim":
 				b = newCredentialBoundary()
-				status, code, writes = 403, apierr.Forbidden, 0
+				status, code, writes = 403, hosterr.Forbidden, 0
 			case "sibling run":
 				path = "/api/v1/runs/sibling/plan"
-				status, code, writes = 403, apierr.Forbidden, 0
+				status, code, writes = 403, hosterr.Forbidden, 0
 			case "cancelled":
 				b.snapshot.Binding.RunCancelled = true
 			case "ended", "exact replay", "changed replay", "wrong route replay":
 				finished := b.snapshot.Now.Add(-time.Second)
 				b.snapshot.Binding.FinishedAt = &finished
-				status, code, writes = 401, apierr.Unauthenticated, 0
+				status, code, writes = 401, hosterr.Unauthenticated, 0
 				if name != "ended" {
 					digest := sha256.Sum256([]byte(body))
 					b.snapshot.Binding.Result = &capability.RecordedResult{
@@ -206,8 +208,8 @@ func TestEnginePlanHTTP(t *testing.T) {
 				body = `{"jobs":[]}`
 				status, code, writes = 400, apierr.BadRequest, 0
 			case "transaction refusal":
-				f.err = &apierr.Error{Code: apierr.SpecDrift, Message: "declarations changed"}
-				status, code = 409, apierr.SpecDrift
+				f.err = &apierr.Error{Code: hosterr.SpecDrift, Message: "declarations changed"}
+				status, code = 409, hosterr.SpecDrift
 			case "first seal removed":
 				f.runReadErr = store.ErrNotFound
 				status, code, writes = 404, apierr.NotFound, 0

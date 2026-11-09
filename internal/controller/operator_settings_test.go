@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -136,7 +138,7 @@ type operatorAuthorityFixture struct {
 
 func (f *operatorAuthorityFixture) ReadAuthentication(_ context.Context, lookup capability.CredentialLookup, _ capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
 	if lookup.Digest != sha256.Sum256([]byte(f.raw)) {
-		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Unauthenticated}
+		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: hosterr.Unauthenticated}
 	}
 	return capability.AuthenticationSnapshot{Now: time.Now(), Authorities: []capability.AuthorityState{{Principal: f.principal}}}, nil
 }
@@ -247,7 +249,7 @@ func TestOperatorSettingsHTTPInvalidBodiesDoNotWrite(t *testing.T) {
 }
 
 func TestOperatorSettingsHTTPStoreFailuresStayPrivate(t *testing.T) {
-	for _, failure := range []error{errors.New("private database details"), &apierr.Error{Code: apierr.LockHeld, Message: "authority changed"}} {
+	for _, failure := range []error{errors.New("private database details"), &apierr.Error{Code: hosterr.LockHeld, Message: "authority changed"}} {
 		s, f, a := newOperatorSettingsFixture(t)
 		f.failure = failure
 		h := s.Handler()

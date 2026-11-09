@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -76,7 +78,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	}
 	awards, prepared, err := s.store.ReconcileLauncherAwards(ctx, ref, observed, reservations, body.Preparing, rejected, body.Activations)
 	var refusal *apierr.Error
-	if err != nil && ctx.Err() == nil && (!errors.As(err, &refusal) || apierr.Status(refusal.Code) >= http.StatusInternalServerError) {
+	if err != nil && ctx.Err() == nil && (!errors.As(err, &refusal) || hosterr.Status(refusal.Code) >= http.StatusInternalServerError) {
 		if diagnosticErr := s.store.RecordLauncherSyncFailure(ctx, ref); diagnosticErr != nil {
 			slog.ErrorContext(ctx, "record launcher reconciliation diagnostic", "err", diagnosticErr)
 		}

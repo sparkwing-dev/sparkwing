@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -159,7 +161,7 @@ func TestPreparationRenewalIgnoresPersistentRetirementFailure(t *testing.T) {
 				return false, nil, nil
 			}
 			retirementCalls++
-			return true, nil, &apierr.Error{Code: apierr.Forbidden, Message: "retirement denied"}
+			return true, nil, &apierr.Error{Code: hosterr.Forbidden, Message: "retirement denied"}
 		})
 		preparer := preparationControl{CloudControl: control, prepare: func(context.Context, []capability.LeaseRef) (time.Time, error) {
 			renewals++

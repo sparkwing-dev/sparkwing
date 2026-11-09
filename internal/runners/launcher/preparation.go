@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -40,7 +42,7 @@ func (c *ControllerControl) Prepare(ctx context.Context, fences []capability.Lea
 		}
 	}
 	if len(remaining) > 0 || expires.IsZero() {
-		return time.Time{}, &apierr.Error{Code: apierr.LockHeld, Message: "Cloud preparation award ended or was exchanged"}
+		return time.Time{}, &apierr.Error{Code: hosterr.LockHeld, Message: "Cloud preparation award ended or was exchanged"}
 	}
 	return expires, nil
 }

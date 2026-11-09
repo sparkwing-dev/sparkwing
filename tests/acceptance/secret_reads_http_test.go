@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -164,7 +166,7 @@ func TestSecretReadHTTPAuthorityProperty(t *testing.T) {
 		case 8:
 			path = "/api/v1/secrets/TOKEN?run=foreign"
 		case 9:
-			b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "undeclared secret", Details: map[string]any{"reason": apierr.ReasonBinding}}
+			b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "undeclared secret", Details: map[string]any{"reason": hosterr.ReasonBinding}}
 		}
 		w := authorityHTTP(s.Handler(), b, "GET", path, "")
 		return (w.Code == 401 || w.Code == 403) && f.reads == 0 && c.opens == 0
@@ -183,7 +185,7 @@ func TestSecretReadHTTPRefusalsNeverOpenValues(t *testing.T) {
 			}
 			f, c, server := secretReadFixture(t, b, "private-value")
 			path, method := "/api/v1/secrets/TOKEN?run=run", "GET"
-			code, reads, opens := apierr.Unauthenticated, 0, 0
+			code, reads, opens := hosterr.Unauthenticated, 0, 0
 			switch state {
 			case "absent":
 				b.raw = ""
@@ -195,48 +197,48 @@ func TestSecretReadHTTPRefusalsNeverOpenValues(t *testing.T) {
 				b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
 			case "cancelled":
 				b.snapshot.Binding.RunCancelled = true
-				code = apierr.Forbidden
+				code = hosterr.Forbidden
 			case "finished":
 				b.snapshot.Binding.FinishedAt = &b.snapshot.Now
 			case "stale holder":
 				b.snapshot.Binding.Current.Holder = "replacement"
 			case "missing grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-				code = apierr.Forbidden
+				code = hosterr.Forbidden
 			case "root":
 				p := &b.snapshot.Authorities[0].Principal.Capability
 				p.Binding, p.Unit, p.Purpose = capability.Binding{Kind: capability.BindingNone}, "", ""
 				p.Issuance, p.Parent = capability.Delegate, nil
 				b.snapshot.Authorities = b.snapshot.Authorities[:1]
-				code = apierr.Forbidden
+				code = hosterr.Forbidden
 			case "bootstrap":
 				b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.SourceRead, capability.ClaimExchange}
-				code = apierr.Forbidden
+				code = hosterr.Forbidden
 			case "foreign run":
-				path, code = "/api/v1/secrets/TOKEN?run=foreign", apierr.Forbidden
+				path, code = "/api/v1/secrets/TOKEN?run=foreign", hosterr.Forbidden
 			case "undeclared", "pool":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "secret binding refused", Details: map[string]any{"reason": apierr.ReasonBinding}}
-				code = apierr.Forbidden
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "secret binding refused", Details: map[string]any{"reason": hosterr.ReasonBinding}}
+				code = hosterr.Forbidden
 			case "transaction":
-				f.err, code, reads = &apierr.Error{Code: apierr.LockHeld, Message: "authority changed"}, apierr.LockHeld, 1
+				f.err, code, reads = &apierr.Error{Code: hosterr.LockHeld, Message: "authority changed"}, hosterr.LockHeld, 1
 			case "missing row":
 				f.err, code, reads = store.ErrNotFound, apierr.NotFound, 1
 			case "masked member":
-				f.err, code, reads = &apierr.Error{Code: apierr.Forbidden, Message: "masked secret is write-only", Details: map[string]any{"reason": apierr.ReasonBinding}}, apierr.Forbidden, 1
+				f.err, code, reads = &apierr.Error{Code: hosterr.Forbidden, Message: "masked secret is write-only", Details: map[string]any{"reason": hosterr.ReasonBinding}}, hosterr.Forbidden, 1
 			case "foreign reader":
-				f.team, code = "foreign", apierr.PolicyMissing
+				f.team, code = "foreign", hosterr.PolicyMissing
 			case "wrong row":
-				f.row.Name, code, reads = "FOREIGN", apierr.Internal, 1
+				f.row.Name, code, reads = "FOREIGN", hosterr.Internal, 1
 			case "cipher":
-				c.err = &apierr.Error{Code: apierr.Forbidden, Message: "private-value"}
-				code, reads, opens = apierr.Internal, 1, 1
+				c.err = &apierr.Error{Code: hosterr.Forbidden, Message: "private-value"}
+				code, reads, opens = hosterr.Internal, 1, 1
 			case "no cipher":
 				server.WithSecretsCipher(nil)
-				code = apierr.Unavailable
+				code = hosterr.Unavailable
 			case "unbound cipher":
 				server.WithSecretsCipher(plainCipher{})
-				code = apierr.Unavailable
+				code = hosterr.Unavailable
 			case "malformed selector":
 				path, code = "/api/v1/secrets/TOKEN?run=%zz", apierr.BadRequest
 			case "duplicate run":
@@ -244,10 +246,10 @@ func TestSecretReadHTTPRefusalsNeverOpenValues(t *testing.T) {
 			case "invalid name":
 				path, code = "/api/v1/secrets/bad%20name", apierr.BadRequest
 			case "head":
-				method, code = "HEAD", apierr.MethodNotAllowed
+				method, code = "HEAD", hosterr.MethodNotAllowed
 			}
 			w := authorityHTTP(server.Handler(), b, method, path, "")
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			if f.reads != reads || c.opens != opens || bytes.Contains(w.Body.Bytes(), []byte("private-value")) || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("reads=%d opens=%d HTTP %d %s", f.reads, c.opens, w.Code, w.Body.String())
 			}
@@ -303,17 +305,17 @@ func TestSecretReadHTTPBindingProperty(t *testing.T) {
 		}
 		query := url.Values{"team": {selector}, "pipeline": {selector}, "run": {"run"}}
 		w := authorityHTTP(server.Handler(), b, "GET", "/api/v1/secrets/TOKEN?"+query.Encode(), "")
-		var result apierr.Envelope
+		var result hosterr.Envelope
 		if mutation%11 >= 9 {
-			return w.Code == 503 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && result.Error.Code == apierr.Unavailable && f.reads == 0 && c.opens == 0
+			return w.Code == 503 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && result.Error.Code == hosterr.Unavailable && f.reads == 0 && c.opens == 0
 		}
 		if w.Code != 500 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Error == nil {
 			return false
 		}
 		if mutation%11 == 0 {
-			return result.Error.Code == apierr.PolicyMissing && c.opens == 0
+			return result.Error.Code == hosterr.PolicyMissing && c.opens == 0
 		}
-		return result.Error.Code == apierr.Internal && result.Error.Message == "request failed" && result.Error.Hint == "" && len(result.Error.Details) == 0
+		return result.Error.Code == hosterr.Internal && result.Error.Message == "request failed" && result.Error.Hint == "" && len(result.Error.Details) == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 80}); err != nil {
 		t.Fatal(err)
@@ -325,7 +327,7 @@ func TestSecretReadHTTPRequiresTransactionalReader(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			b := secretClaim()
 			_, c, s := secretReadFixture(t, b, "private-value")
-			code := apierr.PolicyMissing
+			code := hosterr.PolicyMissing
 			bindTenantPort[controller.SecretReader](s, nil)
 			switch state {
 			case "nil":
@@ -334,14 +336,14 @@ func TestSecretReadHTTPRequiresTransactionalReader(t *testing.T) {
 				bindTenantPort[controller.SecretReader](s, func(context.Context, store.Team) (controller.SecretReader, error) {
 					return nil, errors.New("private-value")
 				})
-				code = apierr.Internal
+				code = hosterr.Internal
 			case "real tenant":
-				code = apierr.Unauthenticated
+				code = hosterr.Unauthenticated
 				st, _ := credentialMutationStore(t)
 				s = controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(c).WithAuthorization(consoleAuthorization(b))
 			}
 			w := authorityHTTP(s.Handler(), b, "GET", "/api/v1/secrets/TOKEN?run=run", "")
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			if c.opens != 0 || bytes.Contains(w.Body.Bytes(), []byte("private-value")) {
 				t.Fatal("missing transaction reached secret decryption")
 			}

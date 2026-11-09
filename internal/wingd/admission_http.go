@@ -1,5 +1,7 @@
 package wingd
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -35,12 +37,12 @@ func (d *Daemon) admissionHTTP(next http.Handler) http.Handler {
 		peer, ok := localhostwire.LocalPeer(r.Context())
 		owner, err := controllerPeerIdentity()
 		if !ok || err != nil || !verifiedSocketPeer(r.Context()) {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "machine admission requires a verified local socket peer"})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: "machine admission requires a verified local socket peer"})
 			return
 		}
 		subject, err := LocalSubject(peer, owner)
 		if err != nil {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Forbidden, Message: err.Error()})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.Forbidden, Message: err.Error()})
 			return
 		}
 		reply := &admissionResponseBuffer{header: make(http.Header)}
@@ -115,7 +117,7 @@ func (d *Daemon) admissionHTTP(next http.Handler) http.Handler {
 				d.getAdmissionHTTP(w, r, subject, id, watch)
 				return
 			}
-			writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "ticket requests use GET or DELETE"})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "ticket requests use GET or DELETE"})
 		case strings.HasPrefix(path, "/leases/") && r.Method == http.MethodGet:
 			token := strings.TrimPrefix(path, "/leases/")
 			d.mu.Lock()
@@ -133,7 +135,7 @@ func (d *Daemon) admissionHTTP(next http.Handler) http.Handler {
 			}
 			d.getAdmissionHTTP(w, r, subject, id, false)
 		default:
-			writeLoginFailure(w, &apierr.Error{Code: apierr.UnsupportedRoute, Message: "unknown machine admission operation"})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.UnsupportedRoute, Message: "unknown machine admission operation"})
 		}
 	})
 }
@@ -165,7 +167,7 @@ func writeAdmissionJSON(w http.ResponseWriter, value any) {
 }
 
 func admissionHTTPFailure(w http.ResponseWriter, err error) {
-	writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: err.Error()})
+	writeLoginFailure(w, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error()})
 }
 
 func (d *Daemon) requestAdmissionHTTP(w http.ResponseWriter, r *http.Request, subject string, peer localhostwire.LocalPeerIdentity) {
@@ -217,7 +219,7 @@ func (d *Daemon) requestAdmissionHTTP(w http.ResponseWriter, r *http.Request, su
 		return
 	}
 	if err := verifyAdmissionProcess(peer, input.RootPID, input.ProcessBirth); err != nil {
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Forbidden, Message: err.Error()})
+		writeLoginFailure(w, &apierr.Error{Code: hosterr.Forbidden, Message: err.Error()})
 		return
 	}
 	req := input.Request
@@ -236,7 +238,7 @@ func (d *Daemon) requestAdmissionHTTP(w http.ResponseWriter, r *http.Request, su
 		return
 	}
 	if d.draining || d.shuttingDown {
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "local controller is draining"})
+		writeLoginFailure(w, &apierr.Error{Code: hosterr.Unavailable, Message: "local controller is draining"})
 		return
 	}
 	id := rand.Text()
@@ -670,7 +672,7 @@ func (d *Daemon) processAdmissionHTTP(w http.ResponseWriter, r *http.Request, su
 		return
 	}
 	if err := verifyAdmissionProcess(peer, request.PID, request.ProcessBirth); err != nil {
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Forbidden, Message: err.Error()})
+		writeLoginFailure(w, &apierr.Error{Code: hosterr.Forbidden, Message: err.Error()})
 		return
 	}
 	d.mu.Lock()

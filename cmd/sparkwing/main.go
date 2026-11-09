@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -51,7 +53,7 @@ func writeFailure(w io.Writer, err error) {
 	if errors.As(err, &reported) && reported.reported {
 		return
 	}
-	if writeErr := writeInvocationError(w, err, apierr.WriteJSON); writeErr != nil {
+	if writeErr := writeInvocationError(w, err, hosterr.WriteJSON); writeErr != nil {
 		fmt.Fprintln(w, "sparkwing: write diagnostic:", writeErr)
 	}
 }
@@ -95,8 +97,8 @@ func observationError(err error) error {
 	var failure *apierr.Error
 	if errors.As(err, &failure) {
 		switch failure.Code {
-		case apierr.NotFound, apierr.Unauthenticated, apierr.Forbidden, apierr.BadRequest, apierr.InvalidArgs,
-			apierr.UnsupportedRoute, apierr.MethodNotAllowed, apierr.VersionRevoked, apierr.VersionUnsupported:
+		case apierr.NotFound, hosterr.Unauthenticated, hosterr.Forbidden, apierr.BadRequest, apierr.InvalidArgs,
+			hosterr.UnsupportedRoute, hosterr.MethodNotAllowed, hosterr.VersionRevoked, hosterr.VersionUnsupported:
 			return exitError(exitRefused, err)
 		}
 	}

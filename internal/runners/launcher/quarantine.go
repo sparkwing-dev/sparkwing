@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -133,6 +135,6 @@ func reservationRefused(err error) bool {
 
 func bindingRefused(err error) bool {
 	var failure *apierr.Error
-	return errors.As(err, &failure) && failure.Code == apierr.Forbidden &&
-		(failure.Details["reason"] == apierr.ReasonBinding || failure.Details["reason"] == string(apierr.ReasonBinding))
+	return errors.As(err, &failure) && failure.Code == hosterr.Forbidden &&
+		(failure.Details["reason"] == hosterr.ReasonBinding || failure.Details["reason"] == string(hosterr.ReasonBinding))
 }

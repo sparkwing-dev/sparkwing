@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -65,18 +67,18 @@ func processAuthorityFixture(t *testing.T) (*ProcessAuthorities, *processParent,
 		ValidateAuthority: func(chain []capability.AuthorityState, now time.Time) (capability.Principal, error) {
 			for _, state := range chain {
 				if !capability.CredentialAlive(state.Principal.Capability, now) {
-					return capability.Principal{}, executorError(apierr.Unauthenticated, "parent ended")
+					return capability.Principal{}, executorError(hosterr.Unauthenticated, "parent ended")
 				}
 			}
 			return chain[0].Principal, nil
 		},
 		ValidateDelegation: func(parent capability.Principal, child capability.DelegateSpec, _ time.Time) error {
 			if parent.Authority != child.Parent || !reflect.DeepEqual(parent.Capability.Binding, child.Binding) {
-				return executorError(apierr.Forbidden, "changed delegation")
+				return executorError(hosterr.Forbidden, "changed delegation")
 			}
 			for _, grant := range child.Grants {
 				if !slices.Contains(parent.Capability.Grants, grant) {
-					return executorError(apierr.Forbidden, "widened delegation")
+					return executorError(hosterr.Forbidden, "widened delegation")
 				}
 			}
 			return nil
@@ -194,7 +196,7 @@ func TestProcessAuthorityRejectsUnknownCredentialsBeforeParentRead(t *testing.T)
 		bad.Digest = sha256.Sum256([]byte(raw))
 		_, err := registry.ReadAuthentication(t.Context(), bad, capability.RequestEvidence{})
 		var canonical *apierr.Error
-		if !errors.As(err, &canonical) || canonical.Code != apierr.Unauthenticated {
+		if !errors.As(err, &canonical) || canonical.Code != hosterr.Unauthenticated {
 			t.Fatalf("unknown credential result=%v", err)
 		}
 	}

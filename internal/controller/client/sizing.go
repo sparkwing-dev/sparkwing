@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"net/url"
@@ -36,5 +38,5 @@ func (c *engineClient) ListSizing(ctx context.Context, q controllerwire.SizingQu
 }
 
 func (c *engineClient) ResetSizing(context.Context, controllerwire.SizingReset) (controllerwire.SizingResetSummary, error) {
-	return controllerwire.SizingResetSummary{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "sizing reset has no authorized controller route"}
+	return controllerwire.SizingResetSummary{}, &apierr.Error{Code: hosterr.PolicyMissing, Message: "sizing reset has no authorized controller route"}
 }

@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -20,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSecrets_ManagementClientListsScopedAndSharedSecrets(t *testing.T) {
@@ -221,8 +222,8 @@ func checkSecretBindingMutation(t *testing.T, field, private string) {
 		t.Fatal(err)
 	}
 	code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/"+edited.Name, claim, nil)
-	var failure apierr.Envelope
-	if code != http.StatusInternalServerError || json.Unmarshal([]byte(body), &failure) != nil || failure.Error.Code != apierr.Internal || failure.Error.Message != "request failed" || strings.Contains(body, private) || strings.Contains(f.logs.String(), private) {
+	var failure hosterr.Envelope
+	if code != http.StatusInternalServerError || json.Unmarshal([]byte(body), &failure) != nil || failure.Error.Code != hosterr.Internal || failure.Error.Message != "request failed" || strings.Contains(body, private) || strings.Contains(f.logs.String(), private) {
 		t.Fatalf("%s relocation: HTTP %d %s", field, code, body)
 	}
 	stored, err := teststore.SecretRow(teststore.ForTeam(t, f.st, team), edited.Name, edited.Repo, edited.Pipeline)
@@ -274,8 +275,8 @@ func TestSecrets_PlaintextRowFailsClosedOnceEncrypted(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/PREDATES", "", nil)
-	var failure apierr.Envelope
-	if status != http.StatusInternalServerError || json.Unmarshal([]byte(body), &failure) != nil || failure.Error.Code != apierr.Internal || failure.Error.Message != "request failed" || strings.Contains(body, "plain value") || strings.Contains(body, "not sealed") {
+	var failure hosterr.Envelope
+	if status != http.StatusInternalServerError || json.Unmarshal([]byte(body), &failure) != nil || failure.Error.Code != hosterr.Internal || failure.Error.Message != "request failed" || strings.Contains(body, "plain value") || strings.Contains(body, "not sealed") {
 		t.Fatalf("plaintext read: HTTP %d %s", status, body)
 	}
 	row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), "PREDATES", "", "")
@@ -366,8 +367,8 @@ func TestSecretsMalformedEnvelopeReadsProperty(t *testing.T) {
 		}
 		status, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/MALFORMED", "", nil)
 		row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), "MALFORMED", "", "")
-		var failure apierr.Envelope
-		return err == nil && row.Value == stored && status == http.StatusInternalServerError && json.Unmarshal([]byte(body), &failure) == nil && failure.Error.Code == apierr.Internal && failure.Error.Message == "request failed" && !strings.Contains(body, private) && !strings.Contains(f.logs.String(), private)
+		var failure hosterr.Envelope
+		return err == nil && row.Value == stored && status == http.StatusInternalServerError && json.Unmarshal([]byte(body), &failure) == nil && failure.Error.Code == hosterr.Internal && failure.Error.Message == "request failed" && !strings.Contains(body, private) && !strings.Contains(f.logs.String(), private)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

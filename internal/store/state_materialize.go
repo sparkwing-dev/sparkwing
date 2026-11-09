@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -49,7 +51,7 @@ func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change nod
 		return change, holderRefusal()
 	}
 	if reason := runGuardRefusal(run); reason != "" {
-		return change, authorityError(apierr.IllegalTransition, "guard refused materialization")
+		return change, authorityError(hosterr.IllegalTransition, "guard refused materialization")
 	}
 	if node.ClaimedBy != "" {
 		if err := checkSelfClaimTx(ctx, tx, team, change.Actor, node); err != nil {
@@ -61,10 +63,10 @@ func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change nod
 		return change, err
 	}
 	if change.To != "" && change.To != result.Outcome {
-		return change, authorityError(apierr.IllegalTransition, "materialization outcome differs from its persisted source")
+		return change, authorityError(hosterr.IllegalTransition, "materialization outcome differs from its persisted source")
 	}
 	if tx.store.materializations == nil {
-		return change, authorityError(apierr.Unavailable, "transactional materialization records are not configured")
+		return change, authorityError(hosterr.Unavailable, "transactional materialization records are not configured")
 	}
 	records, err := tx.store.materializations.CopyMaterializedRecords(ctx, tx, team, change.Actor, change.Ref, source)
 	if err != nil {
@@ -131,17 +133,17 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 		}
 	}
 	if node.Status != runstate.StatusDone || node.SpecHash == "" || node.SpecHash != target.SpecHash {
-		return runstate.NodeResult{}, authorityError(apierr.IllegalTransition, "materialization source is not a matching terminal attempt")
+		return runstate.NodeResult{}, authorityError(hosterr.IllegalTransition, "materialization source is not a matching terminal attempt")
 	}
 	if source.Result != nil {
 		if node.StateSeq != source.Result.StateSeq {
-			return runstate.NodeResult{}, authorityError(apierr.IllegalTransition, "materialized result fence does not match")
+			return runstate.NodeResult{}, authorityError(hosterr.IllegalTransition, "materialized result fence does not match")
 		}
 	} else if node.Generation != runspec.ClaimGeneration(source.Source.Generation) || node.Attempt != runspec.AttemptOrdinal(source.Source.Attempt) {
-		return runstate.NodeResult{}, authorityError(apierr.IllegalTransition, "source attempt fence does not match")
+		return runstate.NodeResult{}, authorityError(hosterr.IllegalTransition, "source attempt fence does not match")
 	}
 	if source.Kind == runstate.SourceManualRetry && !slices.Contains([]runstate.NodeState{runstate.NodeSuccess, runstate.NodeMemoized}, node.Outcome) {
-		return runstate.NodeResult{}, authorityError(apierr.IllegalTransition, "manual retry must execute an unsuccessful source")
+		return runstate.NodeResult{}, authorityError(hosterr.IllegalTransition, "manual retry must execute an unsuccessful source")
 	}
 	if source.Result == nil {
 		var attemptOutcome runstate.NodeState
@@ -151,7 +153,7 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 			return runstate.NodeResult{}, err
 		}
 		if !finished.Valid || attemptOutcome != node.Outcome {
-			return runstate.NodeResult{}, authorityError(apierr.IllegalTransition, "source attempt and job outcome disagree")
+			return runstate.NodeResult{}, authorityError(hosterr.IllegalTransition, "source attempt and job outcome disagree")
 		}
 	}
 	return readStoredNodeResultTx(ctx, tx, team, node)
@@ -165,7 +167,7 @@ func readStoredNodeResultTx(ctx context.Context, tx *storeTx, team Team, node ru
 	if err == nil && len(failure) > 0 && node.Outcome == runstate.NodeFailed {
 		err = json.Unmarshal(failure, &result.Failure)
 		if err == nil && result.Failure == nil {
-			err = authorityError(apierr.IntegrityFailure, "materialized failure is null")
+			err = authorityError(hosterr.IntegrityFailure, "materialized failure is null")
 		}
 		if err == nil {
 			err = validateRecordedFailure(ref, result.Failure)

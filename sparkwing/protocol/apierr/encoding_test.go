@@ -1,10 +1,7 @@
 package apierr_test
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -44,25 +41,3 @@ func TestErrorUnmarshalUsesInnerCodec(t *testing.T) {
 		t.Fatalf("additive inner error = %+v, %v", failure, err)
 	}
 }
-
-func TestErrorWriters(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.RateLimited, Message: "retry later", Details: map[string]any{"retry_after_ms": 1001}}
-	var stream bytes.Buffer
-	if err := apierr.WriteJSON(&stream, failure); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(stream.String(), "\n") != 1 || apierr.RetryAfter(failure) != "2" {
-		t.Fatalf("stream error %q, retry after %q", stream.String(), apierr.RetryAfter(failure))
-	}
-	var envelope apierr.Envelope
-	if err := json.Unmarshal(stream.Bytes(), &envelope); err != nil || envelope.Error.Code != apierr.RateLimited {
-		t.Fatalf("envelope: %+v, %v", envelope, err)
-	}
-	if err := apierr.WriteJSON(failingWriter{}, failure); err == nil {
-		t.Fatal("writer failure hidden")
-	}
-}
-
-type failingWriter struct{}
-
-func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }

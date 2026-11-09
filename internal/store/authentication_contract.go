@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -7,7 +9,6 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ReadAuthentication reads presentation identity, full ancestry, membership and
@@ -31,7 +32,7 @@ func (o *Operator) ReadAuthentication(ctx context.Context, lookup capability.Cre
 		return capability.AuthenticationSnapshot{}, err
 	}
 	if chain[0].principal.Capability.Audience != lookup.Audience {
-		return capability.AuthenticationSnapshot{}, authorityError(apierr.Unauthenticated, "credential audience does not match")
+		return capability.AuthenticationSnapshot{}, authorityError(hosterr.Unauthenticated, "credential audience does not match")
 	}
 	out := capability.AuthenticationSnapshot{}
 	for _, node := range chain {
@@ -53,7 +54,7 @@ func (o *Operator) ReadAuthentication(ctx context.Context, lookup capability.Cre
 
 func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
 	if lookup.Peer.Kind != capability.SubjectLocal || lookup.Peer.ID == "" || lookup.Digest != ([32]byte{}) || lookup.Audience != "" || evidence.Target.Team != "" && evidence.Target.Team != string(DefaultTeam) {
-		return capability.AuthenticationSnapshot{}, authorityError(apierr.Unauthenticated, "verified local peer required")
+		return capability.AuthenticationSnapshot{}, authorityError(hosterr.Unauthenticated, "verified local peer required")
 	}
 	return inTxResult(ctx, s, func(tx *storeTx) (capability.AuthenticationSnapshot, error) {
 		var team string
@@ -104,7 +105,7 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 			return capability.AuthenticationSnapshot{}, err
 		}
 		if p.Capability.Subject != lookup.Peer || p.Class != capability.CredentialPeer {
-			return capability.AuthenticationSnapshot{}, authorityError(apierr.Unauthenticated, "invalid local peer authority")
+			return capability.AuthenticationSnapshot{}, authorityError(hosterr.Unauthenticated, "invalid local peer authority")
 		}
 		out := capability.AuthenticationSnapshot{Now: tx.now(ctx), Authorities: []capability.AuthorityState{{Principal: p}}}
 		return out, nil
@@ -120,11 +121,11 @@ func (op *Operator) authenticationAuthorityTx(ctx context.Context, tx *storeTx, 
 	case capability.CredentialSession:
 		ref.Kind, query = capability.AuthoritySession, `SELECT hash FROM sessions WHERE hash=?`
 	default:
-		return ref, authorityError(apierr.Unauthenticated, "credential class has no persisted authentication authority")
+		return ref, authorityError(hosterr.Unauthenticated, "credential class has no persisted authentication authority")
 	}
 	err := tx.QueryRowContext(ctx, query, hex.EncodeToString(lookup.Digest[:])).Scan(&ref.ID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ref, authorityError(apierr.Unauthenticated, "credential is unavailable")
+		return ref, authorityError(hosterr.Unauthenticated, "credential is unavailable")
 	}
 	return ref, err
 }

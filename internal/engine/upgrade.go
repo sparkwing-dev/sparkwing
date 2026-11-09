@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -585,7 +587,7 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 	required := false
 	if policyErr != nil {
 		var api *apierr.Error
-		if !errors.As(policyErr, &api) || (api.Code != apierr.VersionRevoked && api.Code != apierr.VersionUnsupported) {
+		if !errors.As(policyErr, &api) || (api.Code != hosterr.VersionRevoked && api.Code != hosterr.VersionUnsupported) {
 			return SoftwareUpdate{}, policyErr
 		}
 		required = true
@@ -611,7 +613,7 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 	}
 	update.Release, err = r.fetchRelease(ctx, version, target)
 	if err != nil {
-		return update, &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("Runner update to %s failed: %v", version, err), Hint: runnerHint}
+		return update, &apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("Runner update to %s failed: %v", version, err), Hint: runnerHint}
 	}
 	if _, err := r.storeVerified(ctx, identity.Pin, update.Release); err != nil {
 		return update, err

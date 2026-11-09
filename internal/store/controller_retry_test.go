@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -11,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestControllerRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
@@ -271,8 +272,8 @@ func (f failingResultBytes) VerifyBlob(context.Context, blob.Blob) error { retur
 // repeat a successful job's work and side effects, so the sweep retries instead.
 func TestControllerRetryWaitsOutATransientReuseFailure(t *testing.T) {
 	for name, cause := range map[string]error{
-		"unavailable reader":        authorityError(apierr.Unavailable, "result reader is restarting"),
-		"refusal past its deadline": errors.Join(authorityError(apierr.IllegalTransition, "refused"), context.DeadlineExceeded),
+		"unavailable reader":        authorityError(hosterr.Unavailable, "result reader is restarting"),
+		"refusal past its deadline": errors.Join(authorityError(hosterr.IllegalTransition, "refused"), context.DeadlineExceeded),
 	} {
 		t.Run(name, func(t *testing.T) {
 			source := retrySourceFixture(t, []nodewire.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)

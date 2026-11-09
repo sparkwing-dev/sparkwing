@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -68,15 +70,15 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 						Issuance: capability.Delegate, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsControl, capability.TeamAdmin, capability.ApprovalsWrite},
 					},
 				}
-				status, code := 401, apierr.Unauthenticated
+				status, code := 401, hosterr.Unauthenticated
 				switch mutation%7 + 1 {
 				case 1:
-					p.Capability.RevokedAt, status, code = &now, 401, apierr.Unauthenticated
+					p.Capability.RevokedAt, status, code = &now, 401, hosterr.Unauthenticated
 				case 2:
-					p.Capability.Grants, status, code = []capability.Grant{capability.NodesClaim}, 403, apierr.Forbidden
+					p.Capability.Grants, status, code = []capability.Grant{capability.NodesClaim}, 403, hosterr.Forbidden
 				case 3:
 					if strings.Contains(endpoint.Pattern, "{run}") {
-						p.Capability.Team, status, code = "b", 403, apierr.Forbidden
+						p.Capability.Team, status, code = "b", 403, hosterr.Forbidden
 						if endpoint.ResolveTarget != nil {
 							status, code = 404, apierr.NotFound
 						}
@@ -84,13 +86,13 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 						p.Capability.RevokedAt = &now
 					}
 				case 4:
-					p.Capability.Subject.Kind, status, code = capability.SubjectOperator, 403, apierr.Forbidden
+					p.Capability.Subject.Kind, status, code = capability.SubjectOperator, 403, hosterr.Forbidden
 				case 5:
-					p.Capability.Audience, status, code = capability.NodeHost, 401, apierr.Unauthenticated
+					p.Capability.Audience, status, code = capability.NodeHost, 401, hosterr.Unauthenticated
 				case 6:
-					p.Capability.RevokedAt, status, code = &now, 401, apierr.Unauthenticated
+					p.Capability.RevokedAt, status, code = &now, 401, hosterr.Unauthenticated
 				case 7:
-					p.Capability.ExpiresAt, status, code = &now, 401, apierr.Unauthenticated
+					p.Capability.ExpiresAt, status, code = &now, 401, hosterr.Unauthenticated
 				}
 				facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p}}}}
 				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci", "{schedule}", "schedule", "{installation}", "17", "{invitation}", "invite").Replace(endpoint.Pattern)
@@ -104,7 +106,7 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 					t.Logf("mutation=%d: HTTP %d %s; binding checks=%d", mutation%7+1, w.Code, w.Body, facts.checks)
 					return false
 				}
-				var failure apierr.Envelope
+				var failure hosterr.Envelope
 				return json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == code
 			}
 			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 40})); err != nil {

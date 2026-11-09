@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -14,7 +16,7 @@ import (
 )
 
 func TestOwnerCannotExecuteBeforeItsSelfClaimRenews(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.LockHeld, apierr.Unavailable} {
+	for _, code := range []apierr.Code{hosterr.LockHeld, hosterr.Unavailable} {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				input, state, _, _ := executorFixture(t)

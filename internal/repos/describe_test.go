@@ -2,6 +2,8 @@
 
 package repos
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -113,7 +115,7 @@ func TestDescribeMasksProtocolErrors(t *testing.T) {
 			t.Fatalf("protocol error was not masked with its type retained: %v", err)
 		}
 		var output bytes.Buffer
-		if err := apierr.WriteJSON(&output, typed); err != nil {
+		if err := hosterr.WriteJSON(&output, typed); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(output.String(), "proxy-private-password") {
@@ -142,7 +144,7 @@ func FuzzDescribeErrorsNeverExposeProxyCredentials(f *testing.F) {
 			t.Fatalf("missing typed failure: %v", err)
 		}
 		var output bytes.Buffer
-		if err := apierr.WriteJSON(&output, typed); err != nil {
+		if err := hosterr.WriteJSON(&output, typed); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(output.String(), password) || strings.Contains(err.Error(), password) {

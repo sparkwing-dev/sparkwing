@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -148,7 +150,7 @@ func TestJSONLogScansTakeTheDownloadSlotFirst(t *testing.T) {
 		}
 		err = json.NewDecoder(response.Body).Decode(&refused)
 		_ = response.Body.Close()
-		if err != nil || response.StatusCode != http.StatusTooManyRequests || refused.Error == nil || refused.Error.Code != apierr.RateLimited {
+		if err != nil || response.StatusCode != http.StatusTooManyRequests || refused.Error == nil || refused.Error.Code != hosterr.RateLimited {
 			t.Fatalf("%s with the slot held = HTTP %d, %+v, %v", path, response.StatusCode, refused.Error, err)
 		}
 	}

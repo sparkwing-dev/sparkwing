@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -10,7 +12,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // DeviceLogin is one device sign-in request. Request is the device's own description of what it asks for,
@@ -107,7 +108,7 @@ func (o *Operator) PendingDeviceLogin(ctx context.Context, userCode string) (Dev
 func (o *Operator) DecideDeviceLogin(ctx context.Context, p capability.Principal, userCode string, grants []capability.Grant, spec *capability.ProvisionSpec) (DeviceLogin, error) {
 	approve := spec != nil
 	if !p.DirectAccountSession() || p.Capability.Team == "" {
-		return DeviceLogin{}, authorityError(apierr.Forbidden, "approving a device requires a direct account sign-in session")
+		return DeviceLogin{}, authorityError(hosterr.Forbidden, "approving a device requires a direct account sign-in session")
 	}
 	state, decision := "denied", "denied"
 	if approve {

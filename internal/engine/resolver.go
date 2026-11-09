@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -98,7 +100,7 @@ func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, targe
 		}
 		if r.config.LocalBuildDirectory == "" {
 			return Resolved{}, &apierr.Error{
-				Code: apierr.IntegrityFailure,
+				Code: hosterr.IntegrityFailure,
 				Message: fmt.Sprintf("planned on engine %s (sha256 %s), this host has %s (sha256 %s); route planning to the executing host (repository runner requirements) or install %s (sha256 %s)",
 					identity.Version, identity.ManifestDigest, resolved.Identity.Version, resolved.Identity.ManifestDigest, identity.Version, identity.ManifestDigest),
 			}
@@ -156,7 +158,7 @@ func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, targ
 		return cached, nil
 	}
 	if r.config.Mode == toolchain.ModeLocal {
-		return Resolved{}, &apierr.Error{Code: apierr.Unavailable, Message: "Exact verified engine is absent from the machine cache", Hint: "Use auto toolchain mode once to fetch the matching official release."}
+		return Resolved{}, &apierr.Error{Code: hosterr.Unavailable, Message: "Exact verified engine is absent from the machine cache", Hint: "Use auto toolchain mode once to fetch the matching official release."}
 	}
 	release, err := r.fetchRelease(ctx, identity.Version, target)
 	if err != nil {
@@ -232,7 +234,7 @@ func (r *Resolver) cached(ctx context.Context, identity engineid.Identity, targe
 	}
 	release, err := readCachedRelease(version, target, executable, r.config.TrustedKeys)
 	var failure *apierr.Error
-	if errors.Is(err, os.ErrNotExist) || errors.As(err, &failure) && failure.Code == apierr.IntegrityFailure {
+	if errors.Is(err, os.ErrNotExist) || errors.As(err, &failure) && failure.Code == hosterr.IntegrityFailure {
 		return Resolved{}, false, nil
 	}
 	if err != nil {

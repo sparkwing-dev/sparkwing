@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -7,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // CloudAwardResources reads Cloud's committed allocation or a self-hosted pool's selected size.
@@ -50,11 +51,11 @@ func cloudAwardResourcesTx(ctx context.Context, tx *storeTx, ref capability.Auth
 		return nil, nil
 	}
 	if !c.Billing.Metered {
-		return nil, authorityError(apierr.IntegrityFailure, "Cloud award has no metered allocation")
+		return nil, authorityError(hosterr.IntegrityFailure, "Cloud award has no metered allocation")
 	}
 	award, err := readBillingAwardTx(ctx, tx, Team(c.Team), c.Billing.ReservationID)
 	if errors.Is(err, ErrNotFound) {
-		err = authorityError(apierr.IntegrityFailure, "Cloud award has no billing record")
+		err = authorityError(hosterr.IntegrityFailure, "Cloud award has no billing record")
 	}
 	if err != nil {
 		return nil, err
@@ -64,7 +65,7 @@ func cloudAwardResourcesTx(ctx context.Context, tx *storeTx, ref capability.Auth
 		generation = c.Binding.Expansion.Generation
 	}
 	if award.provenance != *c.Billing || award.run != c.Binding.RunID || award.node != c.Binding.NodeID || award.unit != c.Unit || award.generation != generation {
-		return nil, authorityError(apierr.IntegrityFailure, "Cloud allocation differs from its award")
+		return nil, authorityError(hosterr.IntegrityFailure, "Cloud allocation differs from its award")
 	}
 	_, class, _, err := billingPriceTx(ctx, tx, award)
 	if err != nil {
@@ -72,7 +73,7 @@ func cloudAwardResourcesTx(ctx context.Context, tx *storeTx, ref capability.Auth
 	}
 	memory := CPUClassMemoryBytes(class)
 	if class <= 0 || memory <= 0 {
-		return nil, authorityError(apierr.IntegrityFailure, "Cloud allocation has no priced resources")
+		return nil, authorityError(hosterr.IntegrityFailure, "Cloud allocation has no priced resources")
 	}
 	return &match.Resources{Cores: float64(class), MemoryBytes: memory}, nil
 }

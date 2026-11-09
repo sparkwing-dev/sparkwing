@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -161,7 +163,7 @@ func TestSecretManagementPreservesStructuredRefusal(t *testing.T) {
 	c := testEngine(t, func(*http.Request) (*http.Response, error) {
 		return engineResponse(403, `{"error":{"code":"forbidden","message":"restricted pool required","hint":"request pool=prod","details":{"pool":"prod"}}}`), nil
 	})
-	want := &apierr.Error{Code: apierr.Forbidden, Message: "restricted pool required", Hint: "request pool=prod", Details: map[string]any{"pool": "prod"}}
+	want := &apierr.Error{Code: hosterr.Forbidden, Message: "restricted pool required", Hint: "request pool=prod", Details: map[string]any{"pool": "prod"}}
 	_, err := c.ReadSecret(context.Background(), controllerwire.SecretSelector{Name: "TOKEN"})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || !reflect.DeepEqual(failure, want) {

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -143,7 +145,7 @@ func (s *Server) writeComputeLimitRefusal(
 	if refused.Scope != "" {
 		details["scope"] = refused.Scope
 	}
-	routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: refused.Error(), Details: details})
+	routepolicy.WritePolicyError(w, &apierr.Error{Code: hosterr.RateLimited, Message: refused.Error(), Details: details})
 	return true
 }
 

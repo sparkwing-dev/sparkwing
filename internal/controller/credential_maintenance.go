@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -42,7 +44,7 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a c
 	}
 	cipher, ok := s.secretsCipher.(BoundCipher)
 	if !ok {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": apierr.ReasonSecretsKeyRequired}}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": hosterr.ReasonSecretsKeyRequired}}
 	}
 	rotator, err := s.credentialRotator(r.Context(), a.Target.Team)
 	if err != nil {
@@ -107,7 +109,7 @@ func (s *Server) handleRotateSealedValues(w http.ResponseWriter, r *http.Request
 	}
 	cipher, ok := s.secretsCipher.(store.SealedRotationCipher)
 	if !ok || s.operator == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": apierr.ReasonSecretsKeyRequired}}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": hosterr.ReasonSecretsKeyRequired}}
 	}
 	result, err := s.operator.RotateSealedValues(r.Context(), a, cipher, verify)
 	if err != nil {

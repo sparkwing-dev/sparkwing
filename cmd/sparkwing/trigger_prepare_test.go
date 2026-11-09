@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -429,7 +431,7 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 			args:         args,
 		})
 		var canonical *apierr.Error
-		if !errors.As(err, &canonical) || (canonical.Code != apierr.InvalidArgs && canonical.Code != apierr.Internal) {
+		if !errors.As(err, &canonical) || (canonical.Code != apierr.InvalidArgs && canonical.Code != hosterr.Internal) {
 			t.Fatalf("error changed: %v", err)
 		}
 		raw, marshalErr := json.Marshal(canonical)

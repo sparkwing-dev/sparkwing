@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -124,19 +126,19 @@ func TestActionsIssuanceHTTPRefusesInvalidProofAndConsent(t *testing.T) {
 	for _, failure := range []string{"issuer", "audience", "expired", "future", "signature", "foreign key", "no token", "no team", "repository", "repository id", "owner id", "transfer", "wrong binding id", "wrong binding team", "missing binding", "unknown team", "lookup error", "pull request", "pull request on branch", "pull request target", "pull request target on branch", "workflow run", "tag", "no branch", "sha", "no sha", "no run", "no workflow", "transaction", "private issuer error", "missing issuer", "missing verifier", "missing lookup", "keys unavailable"} {
 		t.Run(failure, func(t *testing.T) {
 			f := newActionsExchangeFixture(t)
-			status, code, issued := 403, apierr.Forbidden, 0
+			status, code, issued := 403, hosterr.Forbidden, 0
 			team := "team"
 			switch failure {
 			case "issuer":
-				f.claims["iss"], status, code = "https://foreign.test", 401, apierr.Unauthenticated
+				f.claims["iss"], status, code = "https://foreign.test", 401, hosterr.Unauthenticated
 			case "audience":
-				f.claims["aud"], status, code = "https://foreign.test", 401, apierr.Unauthenticated
+				f.claims["aud"], status, code = "https://foreign.test", 401, hosterr.Unauthenticated
 			case "expired":
-				f.claims["exp"], status, code = int64(1), 401, apierr.Unauthenticated
+				f.claims["exp"], status, code = int64(1), 401, hosterr.Unauthenticated
 			case "future":
-				f.claims["nbf"], status, code = time.Now().Add(time.Hour).Unix(), 401, apierr.Unauthenticated
+				f.claims["nbf"], status, code = time.Now().Add(time.Hour).Unix(), 401, hosterr.Unauthenticated
 			case "signature", "foreign key", "no token", "repository", "repository id", "owner id":
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 				if failure == "repository" {
 					f.claims["repository"] = "invalid"
 				}
@@ -164,7 +166,7 @@ func TestActionsIssuanceHTTPRefusesInvalidProofAndConsent(t *testing.T) {
 					err = store.ErrUnknownTeam
 				}
 				if failure == "lookup error" {
-					err, status, code = errors.New("private lookup detail"), 500, apierr.Internal
+					err, status, code = errors.New("private lookup detail"), 500, hosterr.Internal
 				}
 				f.lookup = func(context.Context, store.Team, int64) (store.GitHubRunnerBinding, error) {
 					return store.GitHubRunnerBinding{}, err
@@ -192,24 +194,24 @@ func TestActionsIssuanceHTTPRefusesInvalidProofAndConsent(t *testing.T) {
 			case "no workflow":
 				delete(f.claims, "workflow_ref")
 			case "transaction":
-				f.issuer.err, issued = &apierr.Error{Code: apierr.Forbidden, Message: "registration removed"}, 1
+				f.issuer.err, issued = &apierr.Error{Code: hosterr.Forbidden, Message: "registration removed"}, 1
 			case "private issuer error":
-				f.issuer.err, issued, status, code = errors.New("private issuer detail"), 1, 500, apierr.Internal
+				f.issuer.err, issued, status, code = errors.New("private issuer detail"), 1, 500, hosterr.Internal
 			case "missing issuer":
 				f.server.WithCredentialIssuer(nil)
-				status, code = 500, apierr.PolicyMissing
+				status, code = 500, hosterr.PolicyMissing
 			case "missing verifier":
 				f.server = controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithCredentialIssuer(f.issuer)
-				status, code = 503, apierr.Unavailable
+				status, code = 503, hosterr.Unavailable
 			case "missing lookup":
 				f.server.WithGitHubRunnerBindingLookup(nil)
-				status, code = 500, apierr.PolicyMissing
+				status, code = 500, hosterr.PolicyMissing
 			case "keys unavailable":
 				f.server.WithGitHubRunners(githuboidc.Config{
 					Audience: "https://controller.test", Issuer: "https://actions.test", JWKSURL: "https://actions.test/keys",
 					HTTP: &http.Client{Transport: reportTransport{http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })}},
 				})
-				status, code = 503, apierr.Unavailable
+				status, code = 503, hosterr.Unavailable
 			}
 			token := f.token(t)
 			if failure == "no token" {
@@ -254,7 +256,7 @@ func TestActionsIssuanceHTTPCallerFieldsCannotSelectAuthority(t *testing.T) {
 	for _, method := range []string{"GET", "HEAD", "PUT"} {
 		t.Run(method, func(t *testing.T) {
 			w := f.request(t, method, token, "team", nil)
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+			assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 		})
 	}
 	session := newSessionFlow(t)
@@ -352,7 +354,7 @@ func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		t.Fatal(err)
 	}
 	w = f.request(t, "POST", f.token(t), "team", nil)
-	assertEngineError(t, w, 403, apierr.Forbidden)
+	assertEngineError(t, w, 403, hosterr.Forbidden)
 	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("failed issuance persisted: capabilities=%d err=%v", count, err)
 	}

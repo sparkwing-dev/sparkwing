@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -53,7 +55,7 @@ func (s *Server) verifySessionFlow(r *http.Request) error {
 	var role store.Role
 	if unsafeMethod(r.Method) {
 		if !validAPIRequestCSRF(r, session.CSRFToken, s.cookiesSecure()) {
-			return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
+			return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 		}
 	} else {
 		raw, err := s.sessionPresentation(r)
@@ -102,7 +104,7 @@ func (s *Server) validateSessionFlow(session *store.Session) error {
 		return sessionUnavailable()
 	}
 	if s.sessionExpired(session.CreatedAt, session.Now) {
-		return &apierr.Error{Code: apierr.Unauthenticated, Message: errSessionLifetimeExceeded.Error()}
+		return &apierr.Error{Code: hosterr.Unauthenticated, Message: errSessionLifetimeExceeded.Error()}
 	}
 	return nil
 }
@@ -142,7 +144,7 @@ func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) erro
 	}
 	revoked, err := s.operator.DeleteSession(proof.session.ID)
 	if err != nil {
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	if revoked != nil {
 		notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
@@ -155,12 +157,12 @@ func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) erro
 }
 
 func sessionUnavailable() error {
-	return &apierr.Error{Code: apierr.Unauthenticated, Message: "session is unavailable"}
+	return &apierr.Error{Code: hosterr.Unauthenticated, Message: "session is unavailable"}
 }
 
 func sessionFlowError(err error) error {
 	if errors.Is(err, store.ErrSessionBackend) {
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	return sessionUnavailable()
 }

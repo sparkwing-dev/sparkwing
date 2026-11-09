@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -100,14 +102,14 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 		key := a.Principal.Authority.ID + "\x00" + a.Target.RunID
 		if ok, wait := s.oidc.limit.AllowWithRetry(key, facts.Now); !ok {
 			limited = wait
-			return store.OIDCMint{}, &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("OIDC minting limit is %d tokens per claim and run refilled over 5 minutes; current budget usage is at least %d tokens; wait for Retry-After or contact support@sparkwing.dev to raise this limit", oidcTokensPerRun, oidcTokensPerRun)}
+			return store.OIDCMint{}, &apierr.Error{Code: hosterr.RateLimited, Message: fmt.Sprintf("OIDC minting limit is %d tokens per claim and run refilled over 5 minutes; current budget usage is at least %d tokens; wait for Retry-After or contact support@sparkwing.dev to raise this limit", oidcTokensPerRun, oidcTokensPerRun)}
 		}
 		if err := r.Context().Err(); err != nil {
 			return store.OIDCMint{}, err
 		}
 		token, err := s.oidc.issuer.Mint(claims, facts.Now, facts.NotAfter)
 		if err != nil {
-			return store.OIDCMint{}, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "OIDC issuance unavailable"}, err)
+			return store.OIDCMint{}, errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "OIDC issuance unavailable"}, err)
 		}
 		return store.OIDCMint{Token: token.Value, ID: token.ID, Subject: token.Subject, ExpiresAt: token.ExpiresAt}, nil
 	})

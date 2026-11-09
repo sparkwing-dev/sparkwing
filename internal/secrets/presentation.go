@@ -1,5 +1,7 @@
 package secrets
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -15,7 +17,7 @@ func (m *Masker) Error(source *apierr.Error) *apierr.Error {
 	}
 	code := source.Code
 	if m.Mask(string(code)) != string(code) {
-		code = apierr.Internal
+		code = hosterr.Internal
 	}
 	result := &apierr.Error{Code: code, Message: m.Mask(source.Message), Hint: m.Mask(source.Hint)}
 	if source.Details != nil {

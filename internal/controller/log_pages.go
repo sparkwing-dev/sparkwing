@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -65,7 +67,7 @@ func (b *logBudget) exhausted(err error) bool {
 
 var errLogBudget = errors.New("log search budget exhausted")
 
-var errLogScanStalled = &apierr.Error{Code: apierr.Unavailable, Message: "the log scan ran out of its time budget before making progress; retry the request"}
+var errLogScanStalled = &apierr.Error{Code: hosterr.Unavailable, Message: "the log scan ran out of its time budget before making progress; retry the request"}
 
 type lineScanner struct {
 	budget  *logBudget
@@ -333,7 +335,7 @@ func appendSubjectLines(reader segmentLogs, subject blob.LogSubject, q controlle
 		if json.Unmarshal(raw, &frame) == nil && frame.TS != "" {
 			at, err := time.Parse(time.RFC3339Nano, frame.TS)
 			if err != nil {
-				return &apierr.Error{Code: apierr.IntegrityFailure, Message: "log record has an invalid timestamp"}
+				return &apierr.Error{Code: hosterr.IntegrityFailure, Message: "log record has an invalid timestamp"}
 			}
 			record.Time = &at
 		}

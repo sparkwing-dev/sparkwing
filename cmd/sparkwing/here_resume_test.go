@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -302,7 +304,7 @@ func TestHereRejectsWrongAwardsBeforeHostConstruction(t *testing.T) {
 
 func TestHereHandoffRetainsAuthorityBeforeNativeRefusal(t *testing.T) {
 	store := hereCredentials{dir: t.TempDir()}
-	refusal := &apierr.Error{Code: apierr.Unavailable, Message: "run host binding unavailable"}
+	refusal := &apierr.Error{Code: hosterr.Unavailable, Message: "run host binding unavailable"}
 	deps := hereDependencies{
 		credentials: func() (hereCredentials, error) { return store, nil },
 		resolve:     func(context.Context, client.EngineOptions) (hereRuntime, error) { return hereRuntime{}, refusal },
@@ -455,11 +457,11 @@ func FuzzHereDiagnosticsExcludePrivateInputs(f *testing.F) {
 		award.Capability = secret
 		award.Request.Request.RequestedArgs["password"] = argument
 		award.Request.Hash, _ = runspec.CanonicalHash(award.Request)
-		refusal := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: argument, Details: map[string]any{"secret": secret, "argument": argument}}
-		wantCode := apierr.Unavailable
+		refusal := &apierr.Error{Code: hosterr.Unavailable, Message: secret, Hint: argument, Details: map[string]any{"secret": secret, "argument": argument}}
+		wantCode := hosterr.Unavailable
 		if len(secret)%2 == 0 {
 			refusal.Code = apierr.Code(secret)
-			wantCode = apierr.Internal
+			wantCode = hosterr.Internal
 		}
 		deps := hereDependencies{
 			credentials: func() (hereCredentials, error) { return store, nil },
@@ -679,7 +681,7 @@ func TestHereResumeWaitsForRateLimitedClaim(t *testing.T) {
 				return hereRuntime{controller: hereTestController{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 					calls++
 					if calls <= 2 {
-						return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.RateLimited, Details: map[string]any{"retry_after_ms": 2000}}
+						return controllerwire.ClaimResponse{}, &apierr.Error{Code: hosterr.RateLimited, Details: map[string]any{"retry_after_ms": 2000}}
 					}
 					if elapsed := time.Since(start); elapsed != 4*time.Second {
 						t.Errorf("claim after %s, want 4s", elapsed)

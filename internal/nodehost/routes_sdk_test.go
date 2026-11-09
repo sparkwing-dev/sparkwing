@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -114,7 +116,7 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 			}
 			_, _, err = services.Secret(ctx, "OTHER")
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || failure.Details["reason"] != "secret_undeclared" {
+			if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden || failure.Details["reason"] != "secret_undeclared" {
 				return errors.New("SDK secret refusal lost canonical reason")
 			}
 			if err := services.Mask(ctx, "dynamic-credential"); err != nil {

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"slices"
@@ -13,7 +15,7 @@ import (
 // CheckDataAccess rechecks persisted authority and data edges in one transaction.
 func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error {
 	if authorized.Principal.Capability.Team != string(t.team) {
-		return authorityError(apierr.Forbidden, "data route requires tenant capability authority")
+		return authorityError(hosterr.Forbidden, "data route requires tenant capability authority")
 	}
 	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
 		if err := tx.CheckDataAccess(ctx, authorized, target); err != nil {
@@ -27,7 +29,7 @@ func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Au
 	c := authorized.Principal.Capability
 	ref := authorized.Principal.Authority
 	if ref.Kind != capability.AuthorityCapability || ref.ID == "" || c.Prefix != ref.ID || c.Team == "" {
-		return authorityError(apierr.Forbidden, "data route requires tenant capability authority")
+		return authorityError(hosterr.Forbidden, "data route requires tenant capability authority")
 	}
 	p, err := tx.ResolveAuthority(ctx, ref)
 	if err != nil {

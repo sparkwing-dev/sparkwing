@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"database/sql"
 	"errors"
@@ -185,17 +187,17 @@ func TestReleaseUnitRefusesForgedStartedAndCancelledClaims(t *testing.T) {
 			err := s.ReleaseUnit(t.Context(), claim, prefix)
 			if problem == "cancelled" {
 				var refused *apierr.Error
-				if !errors.As(err, &refused) || refused.Code != apierr.LockHeld {
+				if !errors.As(err, &refused) || refused.Code != hosterr.LockHeld {
 					t.Fatalf("cancellation refusal = %v", err)
 				}
 			} else if problem == "team" {
 				var refused *apierr.Error
-				if !errors.As(err, &refused) || refused.Details["reason"] != apierr.ReasonBinding {
+				if !errors.As(err, &refused) || refused.Details["reason"] != hosterr.ReasonBinding {
 					t.Fatalf("foreign-team release refusal = %v", err)
 				}
 			} else if problem == "revoked_parent" {
 				var refused *apierr.Error
-				if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated {
+				if !errors.As(err, &refused) || refused.Code != hosterr.Unauthenticated {
 					t.Fatalf("revocation refusal = %v", err)
 				}
 			} else {
@@ -235,7 +237,7 @@ func TestReleaseUnitCannotRequeueCancelledOwnerWork(t *testing.T) {
 			}
 			err = s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix)
 			var denied *apierr.Error
-			if !errors.As(err, &denied) || denied.Code != apierr.LockHeld {
+			if !errors.As(err, &denied) || denied.Code != hosterr.LockHeld {
 				t.Fatalf("cancelled owner release = %v", err)
 			}
 			events, err := tenant.ReadStateEvents(t.Context(), claim.RunID, beforeEvents[len(beforeEvents)-1].Seq, 10)

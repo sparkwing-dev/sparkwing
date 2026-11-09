@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -16,7 +18,7 @@ import (
 func (h *OwnerEvaluator) approvalSkipIf(ctx context.Context, input EvaluationInput) (skipEvaluation, error) {
 	spec, row, job, err := h.accepted(ctx, input)
 	if err == nil && (job.Approval == nil || row.Status != runstate.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" || row.Outcome != "") {
-		err = executorError(apierr.IllegalTransition, "owner guard requires an unreleased approval")
+		err = executorError(hosterr.IllegalTransition, "owner guard requires an unreleased approval")
 	}
 	if err != nil {
 		return skipEvaluation{}, h.policyError(ctx, err)
@@ -52,7 +54,7 @@ func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, r
 	result, err := h.approvalSkipIf(ctx, input)
 	if err != nil {
 		var refusal *apierr.Error
-		if context.Cause(ctx) != nil || store.IsProtocolErr(err) || errors.As(err, &refusal) && (refusal.Code == apierr.Forbidden || refusal.Code == apierr.Unauthenticated || refusal.Code == apierr.LockHeld) {
+		if context.Cause(ctx) != nil || store.IsProtocolErr(err) || errors.As(err, &refusal) && (refusal.Code == hosterr.Forbidden || refusal.Code == hosterr.Unauthenticated || refusal.Code == hosterr.LockHeld) {
 			return ownerLayerResult{}, err
 		}
 		return ownerLayerResult{Transition: store.OwnerPolicyNode{Outcome: runstate.NodeFailed, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalFail, Generation: row.Generation}, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: string(apierr.SDKError), MaskedError: boundedNodeErrText(h.deps.Masker.Mask(err.Error()))}}}, nil

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -44,7 +46,7 @@ func FuzzLocalSchedulesRequireVerifiedTransportPeer(f *testing.F) {
 		authorized := capability.Authorized{Target: capability.Target{Team: string(store.DefaultTeam)}, Principal: capability.Principal{Class: capability.CredentialPeer, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectLocal, ID: subject}}}}
 		_, err := new(Server).localScheduleService(request, authorized)
 		var canonical *apierr.Error
-		if !errors.As(err, &canonical) || canonical.Code != apierr.Forbidden {
+		if !errors.As(err, &canonical) || canonical.Code != hosterr.Forbidden {
 			t.Fatal("request material substituted for kernel peer identity")
 		}
 	})

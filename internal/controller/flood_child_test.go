@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -11,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestChildrenSpendTheirRootsFloodBudget(t *testing.T) {
@@ -177,11 +178,11 @@ func TestChildFloodAdmissionRequiresRecordedIdentity(t *testing.T) {
 	}
 	s := e.Server.WithEngineController(e.EngineController).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
 	response := engineClaimHTTP(t, s.Handler(), claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", root.Request.Request.Git), http.StatusInternalServerError)
-	var body apierr.Envelope
+	var body hosterr.Envelope
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Error == nil || body.Error.Code != apierr.Internal || body.Error.Message != "request failed" || body.Error.Hint != "" || len(body.Error.Details) != 0 {
+	if body.Error == nil || body.Error.Code != hosterr.Internal || body.Error.Message != "request failed" || body.Error.Hint != "" || len(body.Error.Details) != 0 {
 		t.Fatalf("persisted identity failure exposed internal details: %+v", body.Error)
 	}
 	var count int

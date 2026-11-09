@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -36,7 +38,7 @@ func (s refusedClaimSnapshot) ReadSnapshot(context.Context, string) (store.RunSn
 func TestClaimedNodeHostMasksReadFailuresBeforeRenewal(t *testing.T) {
 	input, state, host, processes := claimedNodeFixture(t)
 	secret := "private-claim-read-credential"
-	failure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: secret, Details: map[string]any{"credential": secret}}
+	failure := &apierr.Error{Code: hosterr.Unavailable, Message: secret, Hint: secret, Details: map[string]any{"credential": secret}}
 	host.Store = refusedClaimSnapshot{ClaimStore: state, failure: failure}
 	host.Masker = testMasker(secret)
 	state.renew = func(context.Context) (runstate.LeaseBeat, error) {
@@ -129,7 +131,7 @@ func TestClaimedNodeHostRenewsBeforeSourceAndJoinsExecution(t *testing.T) {
 }
 
 func TestClaimedNodeHostRejectsLostAuthorityBeforeAcquisition(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.LockHeld, apierr.Unauthenticated, apierr.Forbidden} {
+	for _, code := range []apierr.Code{hosterr.LockHeld, hosterr.Unauthenticated, hosterr.Forbidden} {
 		t.Run(string(code), func(t *testing.T) {
 			input, s, host, processes := claimedNodeFixture(t)
 			s.renew = func(context.Context) (runstate.LeaseBeat, error) {
@@ -239,7 +241,7 @@ func TestClaimedNodeHostLossDuringAcquisitionDiscardsEntry(t *testing.T) {
 			if beats == 1 {
 				return runstate.LeaseBeat{}, nil
 			}
-			return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
+			return runstate.LeaseBeat{}, &apierr.Error{Code: hosterr.LockHeld}
 		}
 		acquire := host.Acquire
 		host.Acquire = func(ctx context.Context, spec source.Spec, opts source.Options) (*source.Entry, error) {

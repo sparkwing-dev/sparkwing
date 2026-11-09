@@ -1,5 +1,7 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -46,7 +48,7 @@ func checkStoreActionsEnrollment(t *testing.T) (err error) {
 		return err
 	}
 	var used *apierr.Error
-	if again, err := s.AsOperator().ProvisionCapability(ctx, spec); again.Raw != "" || !errors.As(err, &used) || used.Code != apierr.Forbidden || used.Details["reason"] != apierr.ReasonExchangeUsed {
+	if again, err := s.AsOperator().ProvisionCapability(ctx, spec); again.Raw != "" || !errors.As(err, &used) || used.Code != hosterr.Forbidden || used.Details["reason"] != hosterr.ReasonExchangeUsed {
 		return errors.Join(errors.New("second exchange for one run attempt was not refused as exchange_used"), err)
 	}
 	child, err := s.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim}, Binding: spec.Binding, Repositories: spec.Repositories, ExpiresAt: spec.ExpiresAt})
@@ -88,7 +90,7 @@ func checkStoreActionsEnrollment(t *testing.T) (err error) {
 	for _, issued := range []capability.Issued{issued, child} {
 		_, err := s.AsOperator().LookupCapability(ctx, issued.Capability.Digest)
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+		if !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated {
 			return errors.Join(errors.New("unexpected revoked Actions authority after reopening"), err)
 		}
 	}

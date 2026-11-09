@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -15,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 var deploymentRequests = []struct {
@@ -101,11 +102,11 @@ func TestDeploymentHTTPAuthorization(t *testing.T) {
 				r := httptest.NewRequest(route.method, route.path, strings.NewReader(`{}`))
 				r.Header.Set("Authorization", "Bearer "+b.raw)
 				r.Header.Set("Content-Type", "application/json")
-				want := apierr.Forbidden
+				want := hosterr.Forbidden
 				switch name {
 				case "anonymous":
 					r.Header.Del("Authorization")
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 				case "wrong grant":
 					p.Capability.Grants = []capability.Grant{capability.OperatorTokens}
 				case "member":
@@ -121,10 +122,10 @@ func TestDeploymentHTTPAuthorization(t *testing.T) {
 					r.Header.Set("X-CSRF-Token", "session-csrf")
 				case "revoked":
 					p.Capability.RevokedAt = &b.snapshot.Now
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 				case "expired":
 					p.Capability.ExpiresAt = &b.snapshot.Now
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 				case "console without csrf":
 					b = consoleBoundary()
 					r.Header.Del("Authorization")
@@ -156,11 +157,11 @@ func TestDeploymentHTTPAuthorization(t *testing.T) {
 				if len(writes.seen) != 0 {
 					t.Fatal("refused authority reached a settings transaction")
 				}
-				var body apierr.Envelope
+				var body hosterr.Envelope
 				if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
 				}
-				if w.Code != apierr.Status(want) || body.Error == nil || body.Error.Code != want {
+				if w.Code != hosterr.Status(want) || body.Error == nil || body.Error.Code != want {
 					t.Fatalf("got %d %s, want %s", w.Code, w.Body.String(), want)
 				}
 			})

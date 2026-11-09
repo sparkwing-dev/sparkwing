@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -85,7 +87,7 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 
 func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(tx.now(ctx)) {
-		return authorityError(apierr.Forbidden, "root expiry has passed")
+		return authorityError(hosterr.Forbidden, "root expiry has passed")
 	}
 	var p capability.Principal
 	if spec.Authority != nil {
@@ -104,16 +106,16 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		return bindingRefusal()
 	}
 	if spec.Platform != "" && (spec.Platform != "kubernetes" || spec.Kind != capability.ProvisionMachine || spec.Personal || !deployment && !slices.Contains(c.Grants, capability.TeamAdmin)) {
-		return authorityError(apierr.Forbidden, "runner platform requires team administration of a shared Kubernetes runner")
+		return authorityError(hosterr.Forbidden, "runner platform requires team administration of a shared Kubernetes runner")
 	}
 	bootstrap := spec.Kind == capability.ProvisionBootstrap
 	for _, grant := range spec.Grants {
 		if grant == capability.OperatorConsole || (!bootstrap && !deployment && ((grant == capability.ClaimsLaunch && spec.Kind != capability.ProvisionMachine) || strings.HasPrefix(string(grant), "operator."))) {
-			return authorityError(apierr.Forbidden, "root origin cannot issue deployment or console authority")
+			return authorityError(hosterr.Forbidden, "root origin cannot issue deployment or console authority")
 		}
 	}
 	if spec.Metered && !deployment && tx.rotatingRoot == nil {
-		return authorityError(apierr.Forbidden, "metering requires deployment authority")
+		return authorityError(hosterr.Forbidden, "metering requires deployment authority")
 	}
 	switch spec.Kind {
 	case capability.ProvisionMember:
@@ -159,14 +161,14 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 		for _, grant := range spec.Grants {
 			if grant != capability.NodesClaim && grant != capability.TriggersClaim && grant != capability.ClaimsLaunch {
-				return authorityError(apierr.Forbidden, "machine roots require claim grants")
+				return authorityError(hosterr.Forbidden, "machine roots require claim grants")
 			}
 		}
 		if !deployment && len(spec.ReservedPools) != 0 && !slices.Contains(c.Grants, capability.TeamAdmin) {
-			return authorityError(apierr.Forbidden, "reserved pools require team administration")
+			return authorityError(hosterr.Forbidden, "reserved pools require team administration")
 		}
 		if !deployment && spec.Trust != "" && (spec.Personal || !slices.Contains(c.Grants, capability.TeamAdmin)) {
-			return authorityError(apierr.Forbidden, "a runner trust class requires team administration of a shared runner")
+			return authorityError(hosterr.Forbidden, "a runner trust class requires team administration of a shared runner")
 		}
 	case capability.ProvisionService:
 		if !deployment || spec.Team != "" || spec.Subject.Kind != capability.SubjectService || spec.Binding.Kind != capability.BindingNone || spec.Data != nil || len(spec.ReservedPools) != 0 || len(spec.Repositories) != 0 {
@@ -196,7 +198,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 			return ErrUnknownTeam
 		}
 		if err == nil && spec.Personal && !membersCanAddMachines && !slices.Contains(c.Grants, capability.TeamAdmin) {
-			return authorityError(apierr.Forbidden, "personal machine enrollment requires team administration while members_can_add_machines is off")
+			return authorityError(hosterr.Forbidden, "personal machine enrollment requires team administration while members_can_add_machines is off")
 		}
 		return err
 	}
@@ -208,7 +210,7 @@ func checkMemberProvision(ctx context.Context, tx *storeTx, spec capability.Prov
 	session := p.DirectAccountSession() || tx.rotatingRoot != nil && p.Class == capability.CredentialBearer && c.Unit == "" && c.Binding.Kind == capability.BindingNone
 	owner := c.Subject == spec.Subject || tx.rotatingRoot != nil && c.Subject.Kind == capability.SubjectAccount && slices.Contains(c.Grants, capability.TeamAdmin)
 	if spec.Authority == nil || !session || !owner || spec.Subject.Kind != capability.SubjectAccount || spec.Team != c.Team || spec.Metered || len(spec.ReservedPools) != 0 || spec.Binding != (capability.Binding{Kind: capability.BindingNone}) || spec.Data != nil || len(spec.Repositories) != 0 || spec.RegistrationID != "" {
-		return authorityError(apierr.Forbidden, "member provisioning exceeds current account authority")
+		return authorityError(hosterr.Forbidden, "member provisioning exceeds current account authority")
 	}
 	allowed := c.Grants
 	if tx.rotatingRoot != nil {
@@ -224,7 +226,7 @@ func checkMemberProvision(ctx context.Context, tx *storeTx, spec capability.Prov
 	}
 	for _, grant := range spec.Grants {
 		if !slices.Contains(allowed, grant) {
-			return authorityError(apierr.Forbidden, "member provisioning exceeds current account grants")
+			return authorityError(hosterr.Forbidden, "member provisioning exceeds current account grants")
 		}
 	}
 	return nil

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -644,7 +646,7 @@ func ChildPipelinesMustBeDeclared(t *testing.T, open func(*testing.T) *Store) {
 	parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
 	_, _, err := admitReferenceChild(t, open(t), parent, git, childRequest("deploy2", "refs/heads/main", referenceMain))
 	var refused *apierr.Error
-	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+	if !errors.As(err, &refused) || refused.Code != hosterr.Forbidden {
 		t.Fatalf("undeclared child pipeline admitted: %v", err)
 	}
 	if !strings.Contains(refused.Message, "StartsChildren") {
@@ -661,7 +663,7 @@ func ChildrenOfTheirParentsRepositoryUseItsSourceLocation(t *testing.T, open fun
 	child.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/attacker/repo.git"}
 	_, _, err := admitReferenceChild(t, open(t), parent, git, child)
 	var refused *apierr.Error
-	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+	if !errors.As(err, &refused) || refused.Code != hosterr.Forbidden {
 		t.Fatalf("child in its parent's repository used another source location: %v", err)
 	}
 }

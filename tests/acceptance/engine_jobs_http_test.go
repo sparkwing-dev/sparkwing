@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -95,7 +97,7 @@ func TestEngineJobsHTTP(t *testing.T) {
 				}
 				w := snapshotRequest(jobViewServer(t, b, f), b, "GET", path+"?team=other&generation=99")
 				if identity == "job" && list {
-					assertEngineError(t, w, 403, apierr.Forbidden)
+					assertEngineError(t, w, 403, hosterr.Forbidden)
 					if f.reads != 0 || f.nodeReads != 0 {
 						t.Fatal("job authority listed its siblings")
 					}
@@ -144,7 +146,7 @@ func TestEngineJobsHTTPRefusals(t *testing.T) {
 				if !list {
 					path += "/job"
 				}
-				status, code, reads := 401, apierr.Unauthenticated, 0
+				status, code, reads := 401, hosterr.Unauthenticated, 0
 				switch state {
 				case "absent":
 					b.raw = ""
@@ -164,41 +166,41 @@ func TestEngineJobsHTTPRefusals(t *testing.T) {
 					b.snapshot.Binding.FinishedAt = &b.snapshot.Now
 				case "cancelled":
 					b.snapshot.Binding.RunCancelled = true
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "missing grant":
 					b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "nodehost":
 					b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")
 					p := &b.snapshot.Authorities[0].Principal
 					p.Capability.Digest = sha256.Sum256([]byte(b.raw))
 					p.Capability.Audience = capability.NodeHost
 					b.snapshot.Binding.ProcessAlive = true
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "bootstrap":
 					b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
 					b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants()
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "wrong run":
 					path = strings.Replace(path, "/run/", "/other/", 1)
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "wrong job":
 					path = strings.TrimSuffix(path, "/job") + "/other"
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "foreign team":
 					b.snapshot.Authorities[0].Principal.Capability.Team = "other"
 					status, code = 404, apierr.NotFound
 				case "relational refusal":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "wrong resource"}
-					status, code = 403, apierr.Forbidden
+					b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "wrong resource"}
+					status, code = 403, hosterr.Forbidden
 				case "missing":
 					f.readErr = store.ErrNotFound
 					status, code, reads = 404, apierr.NotFound, 1
 				case "private error":
 					f.readErr = errors.New("private credential")
-					status, code, reads = 500, apierr.Internal, 1
+					status, code, reads = 500, hosterr.Internal, 1
 				default:
-					status, code, reads = 500, apierr.Internal, 1
+					status, code, reads = 500, hosterr.Internal, 1
 					switch state {
 					case "foreign persisted run":
 						f.node.Ref.RunID = "other"
@@ -235,7 +237,7 @@ func TestEngineJobsEmptyListAndMethods(t *testing.T) {
 	}
 	for _, path := range []string{"/api/v1/runs/run/jobs", "/api/v1/runs/run/jobs/job"} {
 		w = snapshotRequest(jobViewServer(t, b, f), b, "HEAD", path)
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 	}
 }
 

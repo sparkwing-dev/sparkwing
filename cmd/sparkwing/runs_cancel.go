@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -50,7 +52,7 @@ func cancelRunIDs(ctx context.Context, controller controllerwire.Controller, ids
 		} else {
 			failures = append(failures, fmt.Errorf("run %s: %w", id, err))
 			if !errors.As(err, &record.Error) {
-				record.Error = &apierr.Error{Code: apierr.Internal, Message: err.Error()}
+				record.Error = &apierr.Error{Code: hosterr.Internal, Message: err.Error()}
 			}
 		}
 		if err := writeCancellation(out, record, format); err != nil {

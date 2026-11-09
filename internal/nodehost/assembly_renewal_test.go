@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -54,7 +56,7 @@ func FuzzLocalOwnerRenewKeepsAuthenticatedFence(f *testing.F) {
 			}
 		} else {
 			var denied *apierr.Error
-			if called || !errors.As(err, &denied) || denied.Code != apierr.LockHeld {
+			if called || !errors.As(err, &denied) || denied.Code != hosterr.LockHeld {
 				t.Fatalf("changed owner renewed: %v", err)
 			}
 		}

@@ -1,12 +1,13 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (s *Server) browserSessionEndpoints() []controllerwire.Endpoint {
@@ -25,7 +26,7 @@ func (s *Server) verifyBrowserLogout(r *http.Request) error {
 		return invalidEngineBody("invalid sign-out form")
 	}
 	if !validFormCSRF(r, s.cookiesSecure()) || !constantTimeEqual(r.PostForm.Get("csrf_token"), session.CSRFToken) {
-		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
+		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
 		Team: string(session.Team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: session.AccountID},

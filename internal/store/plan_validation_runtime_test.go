@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -118,7 +120,7 @@ func TestAcceptedPlanIdentifierSecretsProperty(t *testing.T) {
 			request.Seal.Plan = body
 			_, err = tenant.AcceptPlan(t.Context(), request)
 			var refusal *apierr.Error
-			if !errors.As(err, &refusal) || refusal.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), secret) {
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.SecretInIdentifier || strings.Contains(err.Error(), secret) {
 				t.Fatalf("secret-bearing identifier accepted or disclosed: %v", err)
 			}
 			diagnostic, err := json.Marshal(refusal)

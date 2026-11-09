@@ -1,5 +1,7 @@
 package apierrhttp_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"net/http/httptest"
@@ -10,7 +12,7 @@ import (
 )
 
 func TestWriteMatchesTheJSONStream(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.RateLimited, Message: "retry later", Details: map[string]any{"retry_after_ms": 1001}}
+	failure := &apierr.Error{Code: hosterr.RateLimited, Message: "retry later", Details: map[string]any{"retry_after_ms": 1001}}
 	w := httptest.NewRecorder()
 	if err := apierrhttp.Write(w, failure); err != nil {
 		t.Fatal(err)
@@ -19,10 +21,10 @@ func TestWriteMatchesTheJSONStream(t *testing.T) {
 		t.Fatalf("HTTP error metadata: %d %v", w.Code, w.Header())
 	}
 	var stream bytes.Buffer
-	if err := apierr.WriteJSON(&stream, failure); err != nil || stream.String() != w.Body.String() {
+	if err := hosterr.WriteJSON(&stream, failure); err != nil || stream.String() != w.Body.String() {
 		t.Fatalf("HTTP and stream errors differ: %v", err)
 	}
-	for _, bad := range []*apierr.Error{nil, {Code: "unknown", Message: "x"}, {Code: apierr.Internal, Details: map[string]any{"bad": make(chan int)}}} {
+	for _, bad := range []*apierr.Error{nil, {Code: "unknown", Message: "x"}, {Code: hosterr.Internal, Details: map[string]any{"bad": make(chan int)}}} {
 		w = httptest.NewRecorder()
 		if err := apierrhttp.Write(w, bad); err == nil || w.Body.Len() != 0 || len(w.Header()) != 0 {
 			t.Fatal("invalid error committed a partial response")

@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -24,7 +26,7 @@ func (s *protocolSession) gateDeclarations() {
 
 func (s *protocolSession) releaseDeclarations(ctx context.Context, spec runspec.Spec, result nodewire.EvalResult) error {
 	if s.cfg.output == nil || s.cfg.Masks == nil {
-		return executorError(apierr.Internal, "generator output requires host masking")
+		return executorError(hosterr.Internal, "generator output requires host masking")
 	}
 	if result.Error != nil || !result.DeclarationsKnown {
 		return executorError(apierr.SDKError, generatorFailureMessage)
@@ -48,7 +50,7 @@ func finishGeneratorLogs(ctx context.Context, process ExecutorProcess, accepted 
 	}
 	var spec runspec.Spec
 	if json.Unmarshal(accepted.Spec, &spec) != nil {
-		return executorError(apierr.SpecDrift, "generator masking requires accepted inputs")
+		return executorError(hosterr.SpecDrift, "generator masking requires accepted inputs")
 	}
 	return gate.releaseDeclarations(ctx, spec, result)
 }

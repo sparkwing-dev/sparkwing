@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -88,7 +90,7 @@ func (s *RemoteHostStore) FinishRunAndUnit(ctx context.Context, request runstate
 	}
 	body := controllerwire.FinishRequest{Reason: change.Reason}
 	if change.MaskedError != "" {
-		body.Error = &apierr.Error{Code: apierr.Internal, Message: change.MaskedError}
+		body.Error = &apierr.Error{Code: hosterr.Internal, Message: change.MaskedError}
 	}
 	response, err := s.controller.Finish(ctx, string(change.RunID), body)
 	if err != nil {

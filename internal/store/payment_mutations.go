@@ -1,13 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference string, actor auditActor, amountMicro int64) (creditReversal, error) {
@@ -149,7 +149,7 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 			return 0, fmt.Errorf("%w: only an operator hold can be released as no fault found", ErrInvalidInput)
 		}
 		if actor == "" || others > 0 {
-			return 0, authorityError(apierr.Forbidden, "only the operator who placed a hold can release it as no fault found")
+			return 0, authorityError(hosterr.Forbidden, "only the operator who placed a hold can release it as no fault found")
 		}
 	}
 	released, err := releasedDisputesTx(ctx, tx, query+` RETURNING dispute_id`, args...)

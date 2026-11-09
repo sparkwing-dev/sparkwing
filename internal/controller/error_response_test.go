@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
@@ -12,7 +14,6 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestWriteErrorMasksInternalDetails(t *testing.T) {
@@ -56,8 +57,8 @@ func TestRunnerRoutesMaskDependencyFailuresProperty(t *testing.T) {
 				r.Header.Set("Authorization", "Bearer "+tc.raw)
 				w := httptest.NewRecorder()
 				tc.handler.ServeHTTP(w, r)
-				var body apierr.Envelope
-				if w.Code != http.StatusInternalServerError || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != apierr.Internal || strings.Contains(w.Body.String(), private) {
+				var body hosterr.Envelope
+				if w.Code != http.StatusInternalServerError || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != hosterr.Internal || strings.Contains(w.Body.String(), private) {
 					t.Logf("dependency failure: %d %s", w.Code, w.Body)
 					return false
 				}

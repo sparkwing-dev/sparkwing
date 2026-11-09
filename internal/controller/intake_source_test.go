@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -209,7 +211,7 @@ func TestIntakeSourceProofCannotBeChangedProperty(t *testing.T) {
 	refused := func(ctx context.Context, request runspec.Request) bool {
 		_, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: p.Authority, Request: request})
 		var failure *apierr.Error
-		return errors.As(err, &failure) && failure.Code == apierr.Forbidden
+		return errors.As(err, &failure) && failure.Code == hosterr.Forbidden
 	}
 	if !refused(t.Context(), input) {
 		t.Fatal("GitHub intake accepted an unverified source")

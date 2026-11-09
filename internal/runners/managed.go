@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -61,7 +63,7 @@ func (r ManagedRunner) checkVersion(ctx context.Context, version string) error {
 	}
 	if policyErr != nil {
 		var denial *apierr.Error
-		if !errors.As(policyErr, &denial) || (denial.Code != apierr.VersionRevoked && denial.Code != apierr.VersionUnsupported) {
+		if !errors.As(policyErr, &denial) || (denial.Code != hosterr.VersionRevoked && denial.Code != hosterr.VersionUnsupported) {
 			return policyErr
 		}
 		if r.Loop.Config.VersionPinned {

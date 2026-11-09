@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -363,14 +365,14 @@ FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=?
 func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claimant capability.Capability, root capability.Principal) (LauncherAward, bool, error) {
 	c, err := loadCapabilityTx(ctx, tx, prefix)
 	var missing *apierr.Error
-	if errors.As(err, &missing) && missing.Code == apierr.Unauthenticated {
-		return LauncherAward{}, false, authorityError(apierr.IntegrityFailure, "live launcher unit has no capability")
+	if errors.As(err, &missing) && missing.Code == hosterr.Unauthenticated {
+		return LauncherAward{}, false, authorityError(hosterr.IntegrityFailure, "live launcher unit has no capability")
 	}
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
 	if c.Parent == nil || *c.Parent != root.Authority || c.Subject != claimant.Subject || c.Audience != capability.Controller || !slices.Contains([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, c.Unit) || c.Purpose != claimPurpose(c.Unit) || c.Billing == nil || c.Billing.ExecutorClass != launcherExecutor(claimant) || c.Delivery != capability.DeliveryBootstrap && c.Issuance != capability.Exchange {
-		return LauncherAward{}, false, authorityError(apierr.IntegrityFailure, "invalid persisted launcher award")
+		return LauncherAward{}, false, authorityError(hosterr.IntegrityFailure, "invalid persisted launcher award")
 	}
 	now := tx.now(ctx)
 	if c.RevokedAt != nil && !c.RevokedAt.After(now) || c.ExpiresAt != nil && !c.ExpiresAt.After(now) {
@@ -378,7 +380,7 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	}
 	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
 	var refusal *apierr.Error
-	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) || errors.As(err, &refusal) && refusal.Code == apierr.LockHeld {
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) || errors.As(err, &refusal) && refusal.Code == hosterr.LockHeld {
 		return LauncherAward{}, false, nil
 	}
 	if err != nil {
@@ -398,7 +400,7 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	}
 	run, err := readRunTx(ctx, tx, Team(c.Team), string(unit.RunID))
 	if errors.Is(err, ErrNotFound) {
-		err = authorityError(apierr.IntegrityFailure, "launcher award has no run")
+		err = authorityError(hosterr.IntegrityFailure, "launcher award has no run")
 	}
 	if err != nil {
 		return LauncherAward{}, false, err
@@ -412,7 +414,7 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	if c.Unit == capability.UnitNode || c.Unit == capability.UnitEval {
 		award.Node, err = readNodeTx(ctx, tx, Team(c.Team), runspec.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
 		if errors.Is(err, ErrNotFound) {
-			err = authorityError(apierr.IntegrityFailure, "launcher award has no job")
+			err = authorityError(hosterr.IntegrityFailure, "launcher award has no job")
 		}
 		if err != nil {
 			return LauncherAward{}, false, err
@@ -582,12 +584,12 @@ func launcherFence(c capability.Capability) (capability.LeaseRef, error) {
 			return capability.LeaseRef{}, err
 		}
 		if c.Binding.Expansion == nil || c.Binding.Expansion.Kind != c.Unit || c.Binding.Expansion.ID != c.UnitID || c.Binding.Generation != unit.SourceGeneration {
-			return capability.LeaseRef{}, authorityError(apierr.IntegrityFailure, "invalid persisted eval fence")
+			return capability.LeaseRef{}, authorityError(hosterr.IntegrityFailure, "invalid persisted eval fence")
 		}
 		fence = *c.Binding.Expansion
 	}
 	if fence.Holder == "" || fence.Generation <= 0 {
-		return capability.LeaseRef{}, authorityError(apierr.IntegrityFailure, "invalid persisted launcher fence")
+		return capability.LeaseRef{}, authorityError(hosterr.IntegrityFailure, "invalid persisted launcher fence")
 	}
 	return fence, nil
 }

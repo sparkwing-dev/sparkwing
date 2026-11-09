@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -204,7 +206,7 @@ func TestSecretManagementRotationPreservesSkippedRows(t *testing.T) {
 }
 
 func TestSecretManagementFailureEmitsNoSuccess(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.Forbidden, Message: "team admin required"}
+	failure := &apierr.Error{Code: hosterr.Forbidden, Message: "team admin required"}
 	manager := secretManagerFake{write: func(controllerwire.SecretWrite) (controllerwire.SecretWritten, error) {
 		return controllerwire.SecretWritten{}, failure
 	}}

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -756,7 +758,7 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 		}
 		var refusal *apierr.Error
 		if errors.As(err, &refusal) {
-			return apierr.Status(refusal.Code), "", err
+			return hosterr.Status(refusal.Code), "", err
 		}
 		var minimum *store.ComputeLimitError
 		if errors.As(err, &minimum) || errors.Is(err, store.ErrInvalidInput) {

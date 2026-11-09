@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"database/sql"
@@ -261,7 +263,7 @@ func TestIdentityLinkHTTPStartProofProperty(t *testing.T) {
 		r.Method = method
 		w := httptest.NewRecorder()
 		f.handler.ServeHTTP(w, r)
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 	}
 }
 

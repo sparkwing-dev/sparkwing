@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"os"
 	"path/filepath"
@@ -9,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestReplacementEnsureKeepsAcceptedLocalBuild(t *testing.T) {
@@ -139,7 +140,7 @@ func TestReplacementEnsureRejectsUnusableRetainedBuild(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = resolver.Ensure(t.Context(), accepted, target)
-			requireCode(t, err, apierr.IntegrityFailure)
+			requireCode(t, err, hosterr.IntegrityFailure)
 		})
 	}
 }
@@ -170,5 +171,5 @@ func TestReplacementEnsureRejectsForeignRetainedPlatform(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = resolver.Ensure(t.Context(), identity, target)
-	requireCode(t, err, apierr.IntegrityFailure)
+	requireCode(t, err, hosterr.IntegrityFailure)
 }

@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -123,7 +125,7 @@ func TestEngineAmendmentsNeverReplayOneTimeAuthority(t *testing.T) {
 				calls := 0
 				c, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(*http.Request) (*http.Response, error) {
 					calls++
-					resp := engineContractResponse(t, apierr.Envelope{Error: &apierr.Error{Code: apierr.Unavailable, Message: "response lost"}})
+					resp := engineContractResponse(t, hosterr.Envelope{Error: &apierr.Error{Code: hosterr.Unavailable, Message: "response lost"}})
 					resp.StatusCode = 503
 					resp.Header = http.Header{"Retry-After": {"0"}}
 					return resp, nil
@@ -132,7 +134,7 @@ func TestEngineAmendmentsNeverReplayOneTimeAuthority(t *testing.T) {
 					t.Fatal(err)
 				}
 				var failure *apierr.Error
-				if err := call(c); !errors.As(err, &failure) || failure.Code != apierr.Unavailable || calls != 1 {
+				if err := call(c); !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || calls != 1 {
 					t.Fatalf("one-time authority replayed: calls=%d err=%v", calls, err)
 				}
 			}

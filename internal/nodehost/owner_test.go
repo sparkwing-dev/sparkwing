@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -184,7 +186,7 @@ func TestOwnerHostAuthorityLossStopsWhileWaitingForRemoteAttempt(t *testing.T) {
 			var beats atomic.Int64
 			host.Renew = func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
 				if beats.Add(1) > 1+int64(selector%4) {
-					codes := []apierr.Code{apierr.LockHeld, apierr.Unauthenticated, apierr.Forbidden}
+					codes := []apierr.Code{hosterr.LockHeld, hosterr.Unauthenticated, hosterr.Forbidden}
 					return runstate.LeaseBeat{}, &apierr.Error{Code: codes[selector%3]}
 				}
 				return runstate.LeaseBeat{}, nil
@@ -220,7 +222,7 @@ func TestOwnerHostCancellationStopsSourcePreparation(t *testing.T) {
 		}
 		_, err := host.Run(t.Context(), input)
 		var cancelled *lease.CancelError
-		if !errors.As(err, &cancelled) || state.finished.Transition.Reason != string(apierr.ReasonCancelled) || slices.Contains(state.trace, "prepare") {
+		if !errors.As(err, &cancelled) || state.finished.Transition.Reason != string(hosterr.ReasonCancelled) || slices.Contains(state.trace, "prepare") {
 			t.Fatalf("cancelled preparation reached planning: %v trace=%v", err, state.trace)
 		}
 	})
@@ -446,7 +448,7 @@ func TestOwnerHostRefusedAcceptanceAndFinishAreLoud(t *testing.T) {
 
 func TestOwnerHostRejectedReattachNeverAcquires(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	f.renewErr = &apierr.Error{Code: apierr.LockHeld}
+	f.renewErr = &apierr.Error{Code: hosterr.LockHeld}
 	_, err := h.Run(t.Context(), in)
 	if !errors.Is(err, lease.ErrLeaseLost) {
 		t.Fatalf("error=%v", err)
@@ -549,7 +551,7 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 				}
 				f.nodeRenew = func(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error) {
 					if lost && renewed {
-						return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
+						return runstate.LeaseBeat{}, &apierr.Error{Code: hosterr.Unavailable, Message: "controller unreachable"}
 					}
 					cancelled := !lost && renewed
 					renewed = true

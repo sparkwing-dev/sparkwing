@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"cmp"
 	"context"
@@ -374,7 +376,7 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 			return ErrNotFound
 		}
 		if k.tier == lockMembership {
-			return authorityError(apierr.Unauthenticated, "membership is unavailable")
+			return authorityError(hosterr.Unauthenticated, "membership is unavailable")
 		}
 		return errAuthorityChanged
 	}
@@ -493,7 +495,7 @@ func discoverAuthorityWrite(ctx context.Context, tx *storeTx, set lockSet, ref c
 	depth := len(chain) - 1
 	if err != nil {
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.Unauthenticated && failure.Code != apierr.IntegrityFailure {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unauthenticated && failure.Code != hosterr.IntegrityFailure {
 			set.err = err
 			return set
 		}

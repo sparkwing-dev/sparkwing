@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -69,7 +71,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		return result, authorityError(apierr.PlanInvalid, err.Error())
 	}
 	if len(request.Registration.Values) > 0 && !slices.Equal(request.Registration.Values, registration.Values) {
-		return result, authorityError(apierr.SpecDrift, "expansion secret registration differs from declarations")
+		return result, authorityError(hosterr.SpecDrift, "expansion secret registration differs from declarations")
 	}
 	for _, value := range registration.Values {
 		if err := secrets.Register(value); err != nil {
@@ -201,14 +203,14 @@ func checkExpansionSecretPoolsTx(ctx context.Context, tx *storeTx, team Team, sp
 			continue
 		}
 		if spec.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
-			return authorityError(apierr.Forbidden, "restricted secret requires an authorized pool")
+			return authorityError(hosterr.Forbidden, "restricted secret requires an authorized pool")
 		}
 		allowed, _, err := runPoolsTx(ctx, tx, team, spec.Request.Provenance)
 		if err != nil {
 			return err
 		}
 		if !slices.Contains(allowed, pool) {
-			return authorityError(apierr.Forbidden, "restricted secret requires an authorized pool")
+			return authorityError(hosterr.Forbidden, "restricted secret requires an authorized pool")
 		}
 		for _, job := range jobs {
 			if !slices.Contains(job.Requires.Value, "pool="+pool) {

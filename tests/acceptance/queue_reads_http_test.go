@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -64,9 +66,9 @@ func TestQueueReadAuthenticatesBeforePersistence(t *testing.T) {
 	b := intakeBoundary()
 	b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
 	h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).Handler()
-	assertEngineError(t, snapshotRequest(h, b, "GET", "/api/v1/queue"), 500, apierr.PolicyMissing)
+	assertEngineError(t, snapshotRequest(h, b, "GET", "/api/v1/queue"), 500, hosterr.PolicyMissing)
 	b.raw = ""
-	assertEngineError(t, snapshotRequest(h, b, "GET", "/api/v1/queue"), 401, apierr.Unauthenticated)
+	assertEngineError(t, snapshotRequest(h, b, "GET", "/api/v1/queue"), 401, hosterr.Unauthenticated)
 }
 
 func TestQueueReadProjectsTenantGroups(t *testing.T) {
@@ -102,7 +104,7 @@ func TestQueueReadRefusesUnrelatedAuthority(t *testing.T) {
 	for _, identity := range []string{"missing", "revoked", "expired", "membership removed", "missing parent", "machine", "claim", "trigger", "publisher", "deployment", "wrong audience", "missing grant", "no team", "relational refusal", "authentication failure"} {
 		t.Run(identity, func(t *testing.T) {
 			b, f := queueReadFixture()
-			status, code := 401, apierr.Unauthenticated
+			status, code := 401, hosterr.Unauthenticated
 			p := &b.snapshot.Authorities[0].Principal
 			switch identity {
 			case "missing":
@@ -120,7 +122,7 @@ func TestQueueReadRefusesUnrelatedAuthority(t *testing.T) {
 				if identity == "deployment" {
 					p.Capability.Subject.Kind = capability.SubjectOperator
 				}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "claim", "trigger", "publisher":
 				b = newCredentialBoundary()
 				if identity == "trigger" {
@@ -129,7 +131,7 @@ func TestQueueReadRefusesUnrelatedAuthority(t *testing.T) {
 					b = publisherBoundary()
 				}
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "wrong audience":
 				b = newCredentialBoundary()
 				p = &b.snapshot.Authorities[0].Principal
@@ -137,19 +139,19 @@ func TestQueueReadRefusesUnrelatedAuthority(t *testing.T) {
 				p.Capability.Audience, p.Capability.Digest = capability.NodeHost, sha256.Sum256([]byte(b.raw))
 				p.Capability.Grants = []capability.Grant{capability.RunsRead}
 				b.snapshot.Binding.ProcessAlive = true
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "missing grant":
 				p.Capability.Grants = nil
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "no team":
 				p.Capability.Team = ""
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "relational refusal":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "not a member"}
-				status, code = 403, apierr.Forbidden
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "not a member"}
+				status, code = 403, hosterr.Forbidden
 			case "authentication failure":
 				b.readErr = errors.New("private authentication credential")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			}
 			w := snapshotRequest(queueReadServer(t, b, f), b, "GET", "/api/v1/queue")
 			assertEngineError(t, w, status, code)
@@ -164,7 +166,7 @@ func TestQueueReadErrorsAndMethods(t *testing.T) {
 	for _, scenario := range []string{"foreign tenant", "nil reader", "unknown team", "no team", "resolver error", "private error", "not found", "partial error", "nil group", "head", "post", "old path"} {
 		t.Run(scenario, func(t *testing.T) {
 			b, f := queueReadFixture()
-			method, path, status, code := "GET", "/api/v1/queue", 500, apierr.PolicyMissing
+			method, path, status, code := "GET", "/api/v1/queue", 500, hosterr.PolicyMissing
 			switch scenario {
 			case "foreign tenant":
 				f.team = "foreign"
@@ -175,16 +177,16 @@ func TestQueueReadErrorsAndMethods(t *testing.T) {
 			case "no team":
 				f.resolveErr, status, code = store.ErrNoTeam, 404, apierr.NotFound
 			case "resolver error":
-				f.resolveErr, code = errors.New("private resolver credential"), apierr.Internal
+				f.resolveErr, code = errors.New("private resolver credential"), hosterr.Internal
 			case "private error", "partial error":
-				f.err, code = errors.New("private queue credential"), apierr.Internal
+				f.err, code = errors.New("private queue credential"), hosterr.Internal
 				f.states = []*store.ConcurrencyState{{Key: "private-partial-group"}}
 			case "not found":
 				f.err, status, code = store.ErrNotFound, 404, apierr.NotFound
 			case "nil group":
-				f.states, code = []*store.ConcurrencyState{{Key: "private-partial-group"}, nil}, apierr.Internal
+				f.states, code = []*store.ConcurrencyState{{Key: "private-partial-group"}, nil}, hosterr.Internal
 			case "head", "post":
-				method, status, code = strings.ToUpper(scenario), 405, apierr.MethodNotAllowed
+				method, status, code = strings.ToUpper(scenario), 405, hosterr.MethodNotAllowed
 			case "old path":
 				path, status = "/api/v1/queue/state", 404
 			}

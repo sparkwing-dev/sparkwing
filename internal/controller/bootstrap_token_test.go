@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/base64"
@@ -60,7 +62,7 @@ func TestEnsureBootstrapAdminTokenRefusals(t *testing.T) {
 	}
 	created, err := controller.EnsureBootstrapAdminToken(t.Context(), nil, raw)
 	var api *apierr.Error
-	if created || !errors.As(err, &api) || api.Code != apierr.PolicyMissing {
+	if created || !errors.As(err, &api) || api.Code != hosterr.PolicyMissing {
 		t.Fatalf("missing transaction: %t %v", created, err)
 	}
 }

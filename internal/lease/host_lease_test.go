@@ -1,5 +1,7 @@
 package lease
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -29,7 +31,7 @@ func TestKeeperConflictAndStop(t *testing.T) {
 }
 
 func checkRejectedOwnerAndNode(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.LockHeld, apierr.Unauthenticated, apierr.Forbidden} {
+	for _, code := range []apierr.Code{hosterr.LockHeld, hosterr.Unauthenticated, hosterr.Forbidden} {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				calls := 0
@@ -135,7 +137,7 @@ func checkSilence(t *testing.T) {
 }
 
 func checkRetryAfter(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.RateLimited, apierr.Unavailable, apierr.QuotaExceeded} {
+	for _, code := range []apierr.Code{hosterr.RateLimited, hosterr.Unavailable, hosterr.QuotaExceeded} {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				var failure apierr.Error
@@ -264,7 +266,7 @@ func checkParentCancellation(t *testing.T) {
 			Renew: func(ctx context.Context) (Beat, error) {
 				close(started)
 				<-ctx.Done()
-				return Beat{CancelRequested: true}, &apierr.Error{Code: apierr.LockHeld}
+				return Beat{CancelRequested: true}, &apierr.Error{Code: hosterr.LockHeld}
 			},
 		}
 		unit, stop := keeper.Run(parent)
@@ -288,7 +290,7 @@ func checkIllegalTransition(t *testing.T) {
 			Renew: func(context.Context) (Beat, error) {
 				calls++
 				if calls == 1 {
-					return Beat{}, &apierr.Error{Code: apierr.IllegalTransition}
+					return Beat{}, &apierr.Error{Code: hosterr.IllegalTransition}
 				}
 				return Beat{}, nil
 			},

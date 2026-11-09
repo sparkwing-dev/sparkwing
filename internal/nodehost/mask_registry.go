@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"sync"
@@ -7,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // MaskRegistry serializes run-local registrations and topology acceptance.
@@ -135,7 +136,7 @@ func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matche
 }
 
 func identifierMaskError(path string) error {
-	return executorError(apierr.SecretInIdentifier, "registered secret conflicts with identifier at "+path)
+	return executorError(hosterr.SecretInIdentifier, "registered secret conflicts with identifier at "+path)
 }
 
 func (r *MaskRegistry) mask(text string) string { return r.masker.Mask(text) }

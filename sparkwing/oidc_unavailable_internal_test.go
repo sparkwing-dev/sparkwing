@@ -19,7 +19,7 @@ type oidcResultServices struct {
 func (s oidcResultServices) OIDC(context.Context, string) (string, error) { return "", s.err }
 
 func TestProtocolOIDCUnavailableSentinelPreservesWireFailure(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.NotFound, apierr.Forbidden, apierr.Internal} {
+	for _, code := range []apierr.Code{apierr.NotFound, apierr.Code("forbidden"), apierr.Code("internal")} {
 		t.Run(string(code), func(t *testing.T) {
 			failure := &apierr.Error{Code: code, Message: "OIDC test failure"}
 			ctx := (sdkOperations{}).Context(t.Context(), nodeproto.RunContext{}, nodeproto.RunnerIdentity{}, oidcResultServices{err: failure})

@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -12,7 +14,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestDevelopmentPolicySkipsIndexAndRunnerUpdates(t *testing.T) {
@@ -77,9 +78,9 @@ func TestMainBuildEnforcesSignedEnginePolicy(t *testing.T) {
 				t.Fatalf("listed engine refused: %v", err)
 			}
 			_, err = Evaluate(index.Index, "v0.10.2", now)
-			requireCode(t, err, apierr.VersionRevoked)
+			requireCode(t, err, hosterr.VersionRevoked)
 			_, err = Evaluate(index.Index, "v0.30.0", now)
-			requireCode(t, err, apierr.VersionUnsupported)
+			requireCode(t, err, hosterr.VersionUnsupported)
 			if _, err := Evaluate(index.Index, config.BuildVersion, now); err == nil {
 				t.Fatal("unlisted service build accepted as a pinned engine")
 			}
@@ -90,7 +91,7 @@ func TestMainBuildEnforcesSignedEnginePolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = unsigned.Index(t.Context(), now)
-			requireCode(t, err, apierr.Unavailable)
+			requireCode(t, err, hosterr.Unavailable)
 		})
 	}
 }

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -116,12 +118,12 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 		}
 		inherited := parent.Request.Provenance
 		if !inherited.Valid() {
-			return runspec.Provenance{}, authorityError(apierr.IntegrityFailure, "parent run has no sealed provenance")
+			return runspec.Provenance{}, authorityError(hosterr.IntegrityFailure, "parent run has no sealed provenance")
 		}
 		from := parent.Request.Request
 		sameRepository := input.Git.Repository.Key == from.Git.Repository.Key
 		if sameRepository && input.Source.Location != from.Source.Location {
-			return runspec.Provenance{}, authorityError(apierr.Forbidden, "a child in its parent's repository uses its parent's source location")
+			return runspec.Provenance{}, authorityError(hosterr.Forbidden, "a child in its parent's repository uses its parent's source location")
 		}
 		if sameRepository && input.Git.Ref == from.Git.Ref && input.Git.SHA == from.Git.SHA && input.Source.Ref == from.Source.Ref {
 			return inherited, nil
@@ -181,7 +183,7 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 		}
 		id, err := strconv.ParseInt(strings.TrimPrefix(push.RepositoryKey, "gh:"), 10, 64)
 		if err != nil || !strings.HasPrefix(push.RepositoryKey, "gh:") {
-			return runspec.Provenance{}, authorityError(apierr.Forbidden, "an Actions push binding names no GitHub repository")
+			return runspec.Provenance{}, authorityError(hosterr.Forbidden, "an Actions push binding names no GitHub repository")
 		}
 		return refused(runspec.ActionsProvenance(id, push.Repository, push.Ref, push.SHA, input.Pipeline))
 	}

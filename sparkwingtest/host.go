@@ -1,5 +1,7 @@
 package sparkwingtest
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -491,11 +493,11 @@ func (h *host) OIDC(ctx context.Context, a string) (string, error) {
 }
 
 func (h *host) RegisterCleanup(context.Context, []string, string) (string, error) {
-	return "", &apierr.Error{Code: apierr.Unavailable, Message: "fake host does not execute cleanups"}
+	return "", &apierr.Error{Code: hosterr.Unavailable, Message: "fake host does not execute cleanups"}
 }
 
 func (h *host) ReleaseCleanup(context.Context, string) error {
-	return &apierr.Error{Code: apierr.Unavailable, Message: "fake host does not execute cleanups"}
+	return &apierr.Error{Code: hosterr.Unavailable, Message: "fake host does not execute cleanups"}
 }
 
 func (h *host) registerIssued(ctx context.Context, value string) error {
@@ -574,7 +576,7 @@ func (h *host) accept(raw json.RawMessage) (nodewire.PlanDoc, error) {
 	}
 	if err := nodeproto.VisitPlanIdentifiers(fresh, func(value, path string) error {
 		if h.masker.ContainsSecret(value) {
-			return &apierr.Error{Code: apierr.SecretInIdentifier, Message: "registered secret conflicts with identifier at " + path}
+			return &apierr.Error{Code: hosterr.SecretInIdentifier, Message: "registered secret conflicts with identifier at " + path}
 		}
 		return nil
 	}); err != nil {

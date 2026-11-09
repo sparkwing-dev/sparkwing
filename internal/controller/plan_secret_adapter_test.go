@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -52,7 +54,7 @@ func TestPlanSecretOpenerUsesStoreSelectedBinding(t *testing.T) {
 		if configured {
 			want = "plan secret decryption failed"
 		}
-		if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || failure.Message != want || (probe.opens == 1) != configured {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || failure.Message != want || (probe.opens == 1) != configured {
 			t.Fatalf("configured=%v opens=%d err=%v", configured, probe.opens, err)
 		}
 		run, err := tenant.ReadRun(t.Context(), "run")
@@ -143,7 +145,7 @@ func TestPlanSecretOpenerRejectsSecretIdentifiersInAcceptance(t *testing.T) {
 		}
 		_, err = e.AcceptPlan(t.Context(), owner, controllerwire.PlanSubmission{Plan: raw, Resolved: runspec.Resolved{SecretArgs: []string{}}})
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), "private-value") {
+		if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || strings.Contains(err.Error(), "private-value") {
 			t.Logf("secret-bearing plan returned %v", err)
 			return false
 		}

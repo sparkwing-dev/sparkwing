@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -74,7 +76,7 @@ func createLogStreamTx(ctx context.Context, tx *storeTx, subject blob.LogSubject
 // RecordSegments atomically commits contiguous segments and seals under the current writer fence.
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
 	if commit.Subject.Team != string(t.team) {
-		return authorityError(apierr.Forbidden, "log subject belongs to another team")
+		return authorityError(hosterr.Forbidden, "log subject belongs to another team")
 	}
 	identity, err := logIdentity(commit.Subject)
 	if err != nil {
@@ -89,7 +91,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 			return err
 		}
 		if segment.ObjectKey != key {
-			return authorityError(apierr.Forbidden, "log segment object belongs to another signing slot")
+			return authorityError(hosterr.Forbidden, "log segment object belongs to another signing slot")
 		}
 	}
 	body, err := json.Marshal(commit)
@@ -111,7 +113,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return err
 	}
 	if commit.RetentionClass != retention {
-		return authorityError(apierr.Forbidden, "log retention differs from the sealed run")
+		return authorityError(hosterr.Forbidden, "log retention differs from the sealed run")
 	}
 	var sealed sql.NullInt64
 	var finalDigest string
@@ -217,7 +219,7 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 			return authorityError(apierr.BadRequest, "invalid immutable log segment")
 		}
 		if segment.Size > limits.LogSegmentUploadBytes || segment.StoredBytes > limits.LogSegmentUploadBytes || segment.Offset > limits.AttemptLogBytes-segment.Size {
-			return authorityError(apierr.PayloadTooLarge, "log segment exceeds the byte limit")
+			return authorityError(hosterr.PayloadTooLarge, "log segment exceeds the byte limit")
 		}
 		if segment.Index < next {
 			var existing runstate.Segment
@@ -261,7 +263,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 	}
 	if subject.Kind == blob.LogJobAttempt {
 		if !slices.Contains(c.Grants, capability.LogTail) || c.Binding.Kind != capability.BindingNode {
-			return authorityError(apierr.Forbidden, "job log grant is required")
+			return authorityError(hosterr.Forbidden, "job log grant is required")
 		}
 		a := subject.Attempt
 		if a.Team != string(team) || a.RunID != subject.RunID || a.NodeID != c.Binding.NodeID || runspec.ClaimGeneration(a.Generation) != runspec.ClaimGeneration(c.Binding.Generation) || runspec.ClaimGeneration(a.Generation) != actor.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
@@ -355,7 +357,7 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor runstate.Actor, request blob.LogReadRequest) (runstate.LogSegments, error) {
 	result := runstate.LogSegments{Subject: request.Subject}
 	if request.Subject.Team != string(t.team) {
-		return result, authorityError(apierr.Forbidden, "log subject belongs to another team")
+		return result, authorityError(hosterr.Forbidden, "log subject belongs to another team")
 	}
 	if request.Offset < 0 {
 		return result, authorityError(apierr.BadRequest, "log offset must be nonnegative")
@@ -372,7 +374,7 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor runstate.Actor, requ
 		}
 		c := principal.Capability
 		if !slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit) {
-			return result, authorityError(apierr.Forbidden, "log read grant is required")
+			return result, authorityError(hosterr.Forbidden, "log read grant is required")
 		}
 		if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {
 			return result, holderRefusal()

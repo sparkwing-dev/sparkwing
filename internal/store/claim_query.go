@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -16,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const kubernetesEnrollmentRefusal = "this runner runs in a Kubernetes pod, but its credential was not enrolled as Kubernetes capacity; enroll it with `sparkwing runners add --platform kubernetes --no-service` and put the new credential in the runner's token Secret"
@@ -111,7 +112,7 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	// never takes verified default-branch work; an enrollment that does not say so
 	// would let it, so the runner stops until it is enrolled correctly.
 	if demand.Kubernetes && root.Subject.Kind == capability.SubjectMachine && root.Parent == nil && root.Binding.Kind == capability.BindingNone && !capability.Launcher(root) && !observed.PersistentKubernetes {
-		return f, authorityError(apierr.Forbidden, kubernetesEnrollmentRefusal)
+		return f, authorityError(hosterr.Forbidden, kubernetesEnrollmentRefusal)
 	}
 	profile := match.Profile{}
 	if tx.store.claimProfiles != nil {

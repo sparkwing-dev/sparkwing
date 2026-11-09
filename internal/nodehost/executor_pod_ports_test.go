@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
@@ -194,7 +196,7 @@ func TestNodeExecutorGeneratedReplayUsesAttemptTimeout(t *testing.T) {
 		}
 	}
 	last := state.changes[len(state.changes)-1]
-	if last.To != runstate.NodeFailed || last.Extra.Result == nil || last.Extra.Result.Reason != string(apierr.DeadlineExceeded) {
+	if last.To != runstate.NodeFailed || last.Extra.Result == nil || last.Extra.Result.Reason != string(hosterr.DeadlineExceeded) {
 		t.Fatalf("timeout report: %+v", last)
 	}
 }

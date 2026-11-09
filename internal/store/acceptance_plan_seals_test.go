@@ -1,5 +1,7 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -67,7 +69,7 @@ func checkStorePlanSeals(t *testing.T) (err error) {
 	}
 	request.Seal.Resolved.Args = map[string]string{"message": "changed"}
 	var drift *apierr.Error
-	if _, err := tenant.AcceptPlan(ctx, request); !errors.As(err, &drift) || drift.Code != apierr.SpecDrift {
+	if _, err := tenant.AcceptPlan(ctx, request); !errors.As(err, &drift) || drift.Code != hosterr.SpecDrift {
 		return fmt.Errorf("changed acceptance: %v", err)
 	}
 	after, err := tenant.ReadSnapshot(ctx, request.RunID)

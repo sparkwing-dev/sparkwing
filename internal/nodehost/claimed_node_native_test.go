@@ -2,6 +2,8 @@
 
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -166,7 +168,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 						bound = time.Now().Add(100 * time.Millisecond)
 						return runstate.LeaseBeat{ExpiresAt: bound}, nil
 					}
-					return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
+					return runstate.LeaseBeat{}, &apierr.Error{Code: hosterr.Unavailable, Message: "controller unreachable"}
 				}
 			}
 			var reported []WorkOutcome

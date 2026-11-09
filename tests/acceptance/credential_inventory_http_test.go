@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -180,16 +182,16 @@ func TestCredentialInventoryHTTPRefusesUnrelatedAuthority(t *testing.T) {
 			t.Run(path+"/"+identity, func(t *testing.T) {
 				b := authorityMember()
 				p := &b.snapshot.Authorities[0].Principal
-				code := apierr.Forbidden
+				code := hosterr.Forbidden
 				switch identity {
 				case "missing":
-					b.raw, code = "", apierr.Unauthenticated
+					b.raw, code = "", hosterr.Unauthenticated
 				case "revoked":
-					p.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "expired":
-					p.Capability.ExpiresAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.ExpiresAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "grant":
 					p.Capability.Grants = nil
 				case "machine":
@@ -211,11 +213,11 @@ func TestCredentialInventoryHTTPRefusesUnrelatedAuthority(t *testing.T) {
 					p.Capability.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "runner", Generation: 4, Attempt: 2}
 					b.snapshot.Binding.Current, b.snapshot.Binding.ProcessAlive = p.Capability.Binding, true
 				case "binding":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "outside team"}
+					b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "outside team"}
 				}
 				f := &credentialInventory{team: "team"}
 				w := authorityHTTP(inventoryServer(t, b, f).Handler(), b, "GET", path, "")
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				if f.resolves != 0 || f.reads != 0 {
 					t.Fatal("refused authority reached inventory")
 				}
@@ -259,7 +261,7 @@ func TestCredentialInventoryHTTPGrantsAreRouteSpecific(t *testing.T) {
 			f := &credentialInventory{team: "team"}
 			w := authorityHTTP(inventoryServer(t, b, f).Handler(), b, "GET", path, "")
 			if grant == capability.TeamAdmin && path == "/api/v1/team/git-credentials" {
-				assertEngineError(t, w, 403, apierr.Forbidden)
+				assertEngineError(t, w, 403, hosterr.Forbidden)
 				if f.reads != 0 || f.resolves != 0 {
 					t.Fatal("missing inventory grant reached persistence")
 				}
@@ -275,31 +277,31 @@ func TestCredentialInventoryHTTPFailuresArePrivate(t *testing.T) {
 		for _, failure := range []string{"reader", "resolver", "nil", "foreign", "unknown team", "head", "authenticator", "missing dependency"} {
 			t.Run(path+"/"+failure, func(t *testing.T) {
 				b, f := authorityMember(), &credentialInventory{team: "team"}
-				code, method, reads := apierr.Internal, "GET", 0
+				code, method, reads := hosterr.Internal, "GET", 0
 				switch failure {
 				case "reader":
 					f.err, reads = errors.New("private credential"), 1
 				case "resolver":
 					f.resolveErr = errors.New("private resolver credential")
 				case "nil":
-					f.nilReader, code = true, apierr.PolicyMissing
+					f.nilReader, code = true, hosterr.PolicyMissing
 				case "foreign":
-					f.team, code = "foreign", apierr.PolicyMissing
+					f.team, code = "foreign", hosterr.PolicyMissing
 				case "unknown team":
 					f.resolveErr, code = store.ErrUnknownTeam, apierr.NotFound
 				case "head":
-					method, code = "HEAD", apierr.MethodNotAllowed
+					method, code = "HEAD", hosterr.MethodNotAllowed
 				case "authenticator":
 					b.readErr = errors.New("private authentication credential")
 				case "missing dependency":
-					code = apierr.PolicyMissing
+					code = hosterr.PolicyMissing
 				}
 				s := inventoryServer(t, b, f)
 				if failure == "missing dependency" {
 					bindTenantPort[controller.CredentialInventoryReader](s, nil)
 				}
 				w := authorityHTTP(s.Handler(), b, method, path, "")
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				if strings.Contains(w.Body.String(), "private") || f.reads != reads {
 					t.Fatalf("HTTP %d %s reads=%d", w.Code, w.Body.String(), f.reads)
 				}
@@ -321,13 +323,13 @@ func TestCredentialInventoryHTTPConfigFailureReturnsNoPartialList(t *testing.T) 
 		}
 		f := &credentialInventory{team: "team", secrets: []store.Secret{{Name: "CONFIG", Pipeline: "build", Value: value}, {Name: "BROKEN", Value: "private envelope"}}}
 		s := inventoryServer(t, b, f)
-		code := apierr.Unavailable
+		code := hosterr.Unavailable
 		if configured {
 			s.WithSecretsCipher(cipher)
-			code = apierr.Internal
+			code = hosterr.Internal
 		}
 		w := authorityHTTP(s.Handler(), b, "GET", "/api/v1/secrets", "")
-		assertEngineError(t, w, apierr.Status(code), code)
+		assertEngineError(t, w, hosterr.Status(code), code)
 		if strings.Contains(w.Body.String(), "partial-config") || strings.Contains(w.Body.String(), "private") {
 			t.Fatalf("partial list: %s", w.Body.String())
 		}
@@ -362,8 +364,8 @@ func TestCredentialInventoryHTTPRejectsChangedSecretBinding(t *testing.T) {
 		b := authorityMember()
 		f := &credentialInventory{team: "team", secrets: []store.Secret{row}}
 		w := authorityHTTP(inventoryServer(t, b, f).WithSecretsCipher(cipher).Handler(), b, "GET", "/api/v1/secrets", "")
-		var result apierr.Envelope
-		return w.Code == 500 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error.Code == apierr.Internal && result.Error.Message == "request failed"
+		var result hosterr.Envelope
+		return w.Code == 500 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error.Code == hosterr.Internal && result.Error.Message == "request failed"
 	}
 	for field := range uint8(5) {
 		if !property("secret", field) {

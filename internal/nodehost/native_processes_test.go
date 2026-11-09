@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -184,7 +186,7 @@ func TestNativeProcessesRejectEndedServicesBeforeProjection(t *testing.T) {
 	}
 	_, err = processes.Start(t.Context(), NodeInput{RouteBinding: grant.Binding, processRevoke: grant.Revoke}, ExecutorActivity{})
 	var canonical *apierr.Error
-	if !errors.As(err, &canonical) || canonical.Code != apierr.Unauthenticated {
+	if !errors.As(err, &canonical) || canonical.Code != hosterr.Unauthenticated {
 		t.Fatal("ended services reached native startup:", err)
 	}
 }

@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -102,13 +104,13 @@ func TestEngineClientRoutes(t *testing.T) {
 }
 
 func TestEngineClientErrorsAndRetry(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.LockHeld, apierr.IllegalTransition, apierr.Forbidden, apierr.Unauthenticated, "future_code", apierr.Unavailable} {
+	for _, code := range []apierr.Code{hosterr.LockHeld, hosterr.IllegalTransition, hosterr.Forbidden, hosterr.Unauthenticated, "future_code", hosterr.Unavailable} {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				calls := 0
 				c := testEngine(t, func(r *http.Request) (*http.Response, error) {
 					calls++
-					resp := engineResponse(apierr.Status(code), `{"error":{"code":"`+string(code)+`","message":"safe","hint":"next","details":{"reason":"binding"}},"future":true}`)
+					resp := engineResponse(hosterr.Status(code), `{"error":{"code":"`+string(code)+`","message":"safe","hint":"next","details":{"reason":"binding"}},"future":true}`)
 					resp.Header.Set("Retry-After", "1")
 					return resp, nil
 				})
@@ -118,7 +120,7 @@ func TestEngineClientErrorsAndRetry(t *testing.T) {
 					t.Fatalf("error lost: %v", err)
 				}
 				want := 1
-				if code == apierr.Unavailable {
+				if code == hosterr.Unavailable {
 					want = unavailableRetries + 1
 				}
 				if calls != want {
@@ -293,7 +295,7 @@ func TestEngineServerFailureNamesTheControllerRequest(t *testing.T) {
 	})
 	_, err := c.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}})
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || failure.Details["request_id"] != "request-42" {
+	if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || failure.Details["request_id"] != "request-42" {
 		t.Fatalf("server failure lost its request id: %#v", err)
 	}
 }

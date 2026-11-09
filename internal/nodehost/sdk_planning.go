@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -171,7 +173,7 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 		return err
 	}
 	if !reflect.DeepEqual(resolved.Identity, input.Entry.Engine.Identity) {
-		return executorError(apierr.SpecDrift, "planning engine differs from the acquired release")
+		return executorError(hosterr.SpecDrift, "planning engine differs from the acquired release")
 	}
 	input = clonePlanningProcessInput(input)
 	input.Entry.Engine = resolved
@@ -218,13 +220,13 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 	if errors.As(err, &structured) {
 		code = structured.Code
 	} else if errors.Is(err, context.DeadlineExceeded) {
-		code = apierr.DeadlineExceeded
+		code = hosterr.DeadlineExceeded
 	}
 	if code == apierr.IsolatedHomeRequired {
 		// safety: unknown declarations permit only host text, never the SDK's payload.
 		return errors.Join(context.Cause(ctx), apierr.IsolatedHomeRefusal())
 	}
-	if !known && !slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == code }) {
+	if !known && !slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == code }) {
 		code = apierr.SDKError
 	}
 	message := "describe failed: " + string(code) + " (details withheld: secrets not yet known)"

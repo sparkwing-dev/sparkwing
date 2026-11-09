@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -56,7 +58,7 @@ func followControllerRunLogs(ctx context.Context, options client.EngineOptions, 
 func retryableRunRead(err error) bool {
 	var failure *apierr.Error
 	if errors.As(err, &failure) {
-		return failure.Code == apierr.Unavailable
+		return failure.Code == hosterr.Unavailable
 	}
 	return client.RetryableTransportError(err)
 }

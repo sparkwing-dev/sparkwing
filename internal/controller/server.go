@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql/driver"
@@ -305,7 +307,7 @@ func (s *Server) buildRegisteredRouters() *registeredMux {
 			router.handleFunc("GET /api/v1/data/objects/{key...}", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
 					w.Header().Set("Allow", http.MethodGet)
-					routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
+					routepolicy.WritePolicyError(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "method is not registered"})
 					return
 				}
 				objects.ServeHTTP(w, r)

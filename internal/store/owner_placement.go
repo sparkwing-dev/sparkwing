@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -65,7 +67,7 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		// The owner occupies its queue slot already; only the host profile carries into self-execution.
 		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: poll.Labels, OS: poll.OS, Arch: poll.Arch}, nil
 	}
-	return UnitDemand{}, authorityError(apierr.Unavailable, "self-claim host observation is unavailable")
+	return UnitDemand{}, authorityError(hosterr.Unavailable, "self-claim host observation is unavailable")
 }
 
 func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, ref runspec.NodeRef) (bool, error) {
@@ -78,7 +80,7 @@ func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability
 
 func ownerPlacementRefused(err error) bool {
 	var denied *apierr.Error
-	return errors.As(err, &denied) && (denied.Code == apierr.Forbidden || denied.Code == apierr.BadRequest)
+	return errors.As(err, &denied) && (denied.Code == hosterr.Forbidden || denied.Code == apierr.BadRequest)
 }
 
 // safety: ok=false means the owner has no current host observation, which is not an error.
@@ -94,7 +96,7 @@ func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.P
 	demand, err := ownerClaimDemandTx(ctx, tx, owner)
 	if err != nil {
 		var denied *apierr.Error
-		if errors.As(err, &denied) && denied.Code == apierr.Unavailable {
+		if errors.As(err, &denied) && denied.Code == hosterr.Unavailable {
 			return UnitDemand{}, false, nil
 		}
 		return UnitDemand{}, false, err

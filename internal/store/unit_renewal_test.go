@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"database/sql"
 	"errors"
@@ -163,7 +165,7 @@ func TestRenewUnitRefusesStaleAndRootAuthority(t *testing.T) {
 				_, err := s.AsOperator().RenewUnit(t.Context(), prefix, false)
 				if problem == "revoked" {
 					var refused *apierr.Error
-					if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated {
+					if !errors.As(err, &refused) || refused.Code != hosterr.Unauthenticated {
 						t.Fatalf("revocation refusal = %v", err)
 					}
 				} else {

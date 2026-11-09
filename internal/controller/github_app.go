@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/aes"
@@ -80,7 +82,7 @@ func (s *Server) InstallationTokenByIDs(ctx context.Context, installation int64,
 	return s.githubApp.client.InstallationTokenByIDs(ctx, installation, ids, permissions)
 }
 
-var errGitHubAppUnavailable = &apierr.Error{Code: apierr.Unavailable, Message: "GitHub App unavailable"}
+var errGitHubAppUnavailable = &apierr.Error{Code: hosterr.Unavailable, Message: "GitHub App unavailable"}
 
 func (s *Server) githubAppUnavailable() error {
 	if s.githubAppProblem != nil {
@@ -91,7 +93,7 @@ func (s *Server) githubAppUnavailable() error {
 
 func (s *Server) writeGitHubAppUnavailable(w http.ResponseWriter) error {
 	apierrhttp.NoteResponseError(w, s.githubAppUnavailable())
-	return apierrhttp.Write(w, &apierr.Error{Code: apierr.Unavailable, Message: errGitHubAppUnavailable.Error()})
+	return apierrhttp.Write(w, &apierr.Error{Code: hosterr.Unavailable, Message: errGitHubAppUnavailable.Error()})
 }
 
 const previousWebhookSecretWarning = "GitHub App: remove the previous webhook secret after rotation"
@@ -576,7 +578,7 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), id)
 	if err != nil {
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub could not list the installation's repositories"}, err)
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "GitHub could not list the installation's repositories"}, err)
 	}
 	out := []githubAppRepositoryJSON{}
 	for _, repo := range repos {

@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"crypto/ed25519"
@@ -145,7 +147,7 @@ func evaluate(index VerifiedIndex, version string, now time.Time, hint string) (
 		return nil, nil
 	}
 	if index.index.Format != VersionIndexFormat || len(index.signed.Body) == 0 {
-		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "No verified version policy is available", Hint: "Check connectivity to sparkwing.dev and retry."}
+		return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "No verified version policy is available", Hint: "Check connectivity to sparkwing.dev and retry."}
 	}
 	if !releaseVersion(version) {
 		return nil, invalid("invalid release version", "Use an exact release version.")
@@ -170,20 +172,20 @@ func evaluatePolicy(p VersionIndex, version string, now time.Time, hint string) 
 		}
 	}
 	if !found {
-		return nil, &apierr.Error{Code: apierr.VersionUnsupported, Message: "Release is not listed in the verified version index", Hint: hint, Details: map[string]any{"version": version}}
+		return nil, &apierr.Error{Code: hosterr.VersionUnsupported, Message: "Release is not listed in the verified version index", Hint: hint, Details: map[string]any{"version": version}}
 	}
 	for _, r := range p.Revoked {
 		if r.Version != version {
 			continue
 		}
 		if !now.Before(r.EffectiveAt) {
-			return nil, restrictionError(apierr.VersionRevoked, version, r, hint)
+			return nil, restrictionError(hosterr.VersionRevoked, version, r, hint)
 		}
 		notices = append(notices, restrictionNotice(version, r, hint))
 	}
 	if r := p.Minimum; r.Version != "" && semver.Compare(version, r.Version) < 0 {
 		if !now.Before(r.EffectiveAt) {
-			return nil, restrictionError(apierr.VersionUnsupported, version, r, hint)
+			return nil, restrictionError(hosterr.VersionUnsupported, version, r, hint)
 		}
 		notices = append(notices, restrictionNotice(version, r, hint))
 	}
@@ -200,7 +202,7 @@ func restrictionNotice(version string, r Restriction, hint string) engineid.Noti
 }
 
 func integrity(err error) error {
-	return &apierr.Error{Code: apierr.IntegrityFailure, Message: err.Error(), Hint: "Retry with the official signed release; do not execute unverified bytes."}
+	return &apierr.Error{Code: hosterr.IntegrityFailure, Message: err.Error(), Hint: "Retry with the official signed release; do not execute unverified bytes."}
 }
 
 func decodeUniqueJSON(body []byte, out any) error {

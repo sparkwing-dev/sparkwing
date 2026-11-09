@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -79,7 +81,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		return NativeServices{}, err
 	}
 	if cfg.Principal.Capability.Unit == capability.UnitTrigger && cfg.Local == nil {
-		return NativeServices{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "owner hosting requires canonical placement eligibility"}
+		return NativeServices{}, &apierr.Error{Code: hosterr.PolicyMissing, Message: "owner hosting requires canonical placement eligibility"}
 	}
 	if cfg.Services == nil || cfg.Storage == nil || cfg.Logs == nil {
 		return NativeServices{}, errors.New("local native host requires process services, byte/record storage and shared log publication")

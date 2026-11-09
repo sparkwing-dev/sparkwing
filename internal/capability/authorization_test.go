@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -54,13 +56,13 @@ func TestAuthorizeCompleteAlternatives(t *testing.T) {
 	}{
 		{"audience", func(a *Authenticated, _ *Target) {
 			a.Principal.Capability.Audience = NodeHost
-		}, apierr.Forbidden},
-		{"team", func(_ *Authenticated, x *Target) { x.Team = "foreign" }, apierr.Forbidden},
-		{"job", func(_ *Authenticated, x *Target) { x.NodeID = "sibling" }, apierr.Forbidden},
-		{"run", func(_ *Authenticated, x *Target) { x.RunID = "foreign" }, apierr.Forbidden},
-		{"grant", func(a *Authenticated, _ *Target) { a.Principal.Capability.Grants = nil }, apierr.Forbidden},
-		{"dead", func(a *Authenticated, _ *Target) { a.Live = nil }, apierr.Unauthenticated},
-		{"other route", func(a *Authenticated, _ *Target) { a.Pattern = "/other" }, apierr.PolicyMissing},
+		}, hosterr.Forbidden},
+		{"team", func(_ *Authenticated, x *Target) { x.Team = "foreign" }, hosterr.Forbidden},
+		{"job", func(_ *Authenticated, x *Target) { x.NodeID = "sibling" }, hosterr.Forbidden},
+		{"run", func(_ *Authenticated, x *Target) { x.RunID = "foreign" }, hosterr.Forbidden},
+		{"grant", func(a *Authenticated, _ *Target) { a.Principal.Capability.Grants = nil }, hosterr.Forbidden},
+		{"dead", func(a *Authenticated, _ *Target) { a.Live = nil }, hosterr.Unauthenticated},
+		{"other route", func(a *Authenticated, _ *Target) { a.Pattern = "/other" }, hosterr.PolicyMissing},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, x := auth, target
@@ -77,9 +79,9 @@ func TestAuthorizeCompleteAlternatives(t *testing.T) {
 	auth.Principal.Capability.Grants = []Grant{SourceRead}
 	auth.Live = []LiveAccess{{RuleIndex: 0, ResultReplay: true}}
 	_, err := Authorize(context.Background(), bindingCheck(allowBinding), route, auth, target)
-	requireCode(t, err, apierr.Forbidden)
+	requireCode(t, err, hosterr.Forbidden)
 	_, err = Authorize(context.Background(), nil, route, auth, target)
-	requireCode(t, err, apierr.PolicyMissing)
+	requireCode(t, err, hosterr.PolicyMissing)
 }
 
 func TestDelegateCannotWiden(t *testing.T) {
@@ -117,11 +119,11 @@ func TestDelegateCannotWiden(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := child
 			tc.change(&c)
-			requireCode(t, ValidateDelegation(p, c, now), apierr.Forbidden)
+			requireCode(t, ValidateDelegation(p, c, now), hosterr.Forbidden)
 		})
 	}
 	p.Capability.RevokedAt = &now
-	requireCode(t, ValidateDelegation(p, child, now), apierr.Unauthenticated)
+	requireCode(t, ValidateDelegation(p, child, now), hosterr.Unauthenticated)
 }
 
 // A push binding is the identity GitHub's token proved for one Actions push, so
@@ -135,7 +137,7 @@ func TestOnlyAPushBoundCredentialDelegatesAPush(t *testing.T) {
 		Grants: []Grant{RunsWrite}, Binding: Binding{Kind: BindingNone},
 	}}
 	child := DelegateSpec{Parent: parent.Authority, Audience: Controller, Grants: []Grant{RunsWrite}, Binding: push}
-	requireCode(t, ValidateDelegation(parent, child, now), apierr.Forbidden)
+	requireCode(t, ValidateDelegation(parent, child, now), hosterr.Forbidden)
 	parent.Capability.Binding = push
 	if err := ValidateDelegation(parent, child, now); err != nil {
 		t.Fatalf("a push-bound credential could not pass on its own push: %v", err)
@@ -159,12 +161,12 @@ func TestOwnJobInputHasNoAdminBypass(t *testing.T) {
 			}
 			target.NodeID, target.SlotNodeID = "sibling", "sibling"
 			_, err := Authorize(context.Background(), bindingCheck(allowBinding), route, auth, target)
-			requireCode(t, err, apierr.Forbidden)
+			requireCode(t, err, hosterr.Forbidden)
 			auth.Principal.Capability.Grants = Grants()
 			auth.Principal.Capability.Subject.Kind = SubjectOperator
 			auth.Principal.Capability.Unit = ""
 			_, err = Authorize(context.Background(), bindingCheck(allowBinding), route, auth, target)
-			requireCode(t, err, apierr.Forbidden)
+			requireCode(t, err, hosterr.Forbidden)
 		})
 	}
 }

@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -161,7 +163,7 @@ func TestOwnerEvaluationRefusesFreshIdentifierAfterIssuance(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _, failure, err := host.evaluateExpansion(t.Context(), in)
-	if err != nil || failure == nil || failure.Code != apierr.SecretInIdentifier || len(body) != 0 {
+	if err != nil || failure == nil || failure.Code != hosterr.SecretInIdentifier || len(body) != 0 {
 		t.Fatalf("fresh expansion = %s, failure = %+v, error = %v", body, failure, err)
 	}
 	generatedID = "unrelated-job"
@@ -206,7 +208,7 @@ func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 			if err != nil || len(body) != 0 || failure == nil || strings.Contains(failure.MaskedError, "private") {
 				t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 			}
-			if mode == "drift" && failure.Code != apierr.PlanDrift {
+			if mode == "drift" && failure.Code != hosterr.PlanDrift {
 				t.Fatalf("failure = %+v", failure)
 			}
 			if mode != "output" && (p.closed != 1 || p.cleaned != 1) {

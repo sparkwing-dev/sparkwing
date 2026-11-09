@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -44,7 +46,7 @@ func (s *Server) actionsEndpoints() []controllerwire.Endpoint {
 func (s *Server) verifyActionsExchange(r *http.Request) error {
 	verifier := s.githubVerifier()
 	if verifier == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub Actions verification is not configured"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "GitHub Actions verification is not configured"}
 	}
 	var request githubExchangeReq
 	r.Body = http.MaxBytesReader(nil, r.Body, actionsExchangeBody)
@@ -53,10 +55,10 @@ func (s *Server) verifyActionsExchange(r *http.Request) error {
 	}
 	claims, err := verifier.Verify(r.Context(), request.IDToken)
 	if errors.Is(err, githuboidc.ErrRejected) {
-		return &apierr.Error{Code: apierr.Unauthenticated, Message: "GitHub Actions identity refused"}
+		return &apierr.Error{Code: hosterr.Unauthenticated, Message: "GitHub Actions identity refused"}
 	}
 	if err != nil {
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub Actions signing keys are unavailable"}, err)
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "GitHub Actions signing keys are unavailable"}, err)
 	}
 	team := store.NormalizeTeam(store.Team(request.Team))
 	if request.Receipt != "" {
@@ -131,7 +133,7 @@ func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, 
 		return engineLookupError(err)
 	}
 	if issued.Capability.ExpiresAt == nil {
-		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "Actions credential has no expiry"}
+		return &apierr.Error{Code: hosterr.IntegrityFailure, Message: "Actions credential has no expiry"}
 	}
 	writeJSON(w, http.StatusCreated, githubExchangeResp{
 		Token: issued.Raw, Team: proof.spec.Team, Repository: proof.repository, Binding: issued.Capability.Binding,
@@ -141,5 +143,5 @@ func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, 
 }
 
 func actionsExchangeRefusal(problem string) error {
-	return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "GitHub Actions: "+problem)
+	return hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "GitHub Actions: "+problem)
 }

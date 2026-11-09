@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -86,7 +88,7 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy paymentEvent
 		return route, false, err
 	case stamp != "" && stamp != scope.Deployment && recorded:
 		return route, false, &apierr.Error{
-			Code: apierr.IntegrityFailure, Message: "payment object " + head.ID + " is recorded here but stamped for deployment " + stamp,
+			Code: hosterr.IntegrityFailure, Message: "payment object " + head.ID + " is recorded here but stamped for deployment " + stamp,
 			Details: map[string]any{"reason": PaymentOwnershipReason, "object": head.ID, "stamp": stamp},
 		}
 	case stamp != "" && stamp != scope.Deployment:

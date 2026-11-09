@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -359,7 +361,7 @@ func creditsRefusal(refused *store.InsufficientCreditsError) *apierr.Error {
 	if refused.Hold != "" {
 		reason = creditsFrozenCode
 	}
-	return &apierr.Error{Code: apierr.InsufficientCredit, Message: refused.Error(), Details: map[string]any{"reason": reason, "hold": refused.Hold}}
+	return &apierr.Error{Code: hosterr.InsufficientCredit, Message: refused.Error(), Details: map[string]any{"reason": reason, "hold": refused.Hold}}
 }
 
 // unpricedCPUClassCode identifies a claim whose CPU class has no rate.

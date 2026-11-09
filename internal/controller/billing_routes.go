@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -43,7 +45,7 @@ func (s *Server) billingEndpoints() []controllerwire.Endpoint {
 
 func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capability.Authorized, kind capability.BillingPageKind, amount int64) error {
 	if s.checkout == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": checkoutUnavailableCode}}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": checkoutUnavailableCode}}
 	}
 	key, err := controlIdempotencyKey(r)
 	if err != nil {
@@ -81,7 +83,7 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 		}
 		if err != nil {
 			recordErr := writer.RecordAuthorizedBillingPageFailure(r.Context(), a, page)
-			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the payment page could not be opened; try again"}, err, recordErr)
+			return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "the payment page could not be opened; try again"}, err, recordErr)
 		}
 		if err := writer.CompleteAuthorizedBillingPage(r.Context(), a, page); err != nil {
 			return billingMutationError(err)

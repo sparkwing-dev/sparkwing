@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
@@ -18,7 +20,7 @@ func ResolveLocalSecrets(ctx context.Context, declarations []nodewire.SecretDecl
 		seen[declaration.Name] = true
 	}
 	if lookup == nil {
-		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "local secret source is unavailable"}
+		return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "local secret source is unavailable"}
 	}
 	values := make(map[string]string, len(declarations))
 	for _, declaration := range declarations {
@@ -27,7 +29,7 @@ func ResolveLocalSecrets(ctx context.Context, declarations []nodewire.SecretDecl
 		}
 		value, present, err := lookup(ctx, declaration.Name)
 		if err != nil {
-			return nil, &apierr.Error{Code: apierr.Unavailable, Message: "requester local secret resolution failed"}
+			return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "requester local secret resolution failed"}
 		}
 		if !present {
 			if declaration.Optional {

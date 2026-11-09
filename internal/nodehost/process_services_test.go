@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -30,7 +32,7 @@ func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
 			}
 			err := registry.registerValue(value)
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || !strings.Contains(failure.Message, "jobs[0]") || len(m.Values()) != 0 {
+			if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || !strings.Contains(failure.Message, "jobs[0]") || len(m.Values()) != 0 {
 				t.Fatalf("collision=%v, registry=%v", err, m.Values())
 			}
 		})
@@ -64,7 +66,7 @@ func (r *serviceRegistrar) Register(endpoint controllerwire.Endpoint) error {
 }
 
 func TestProcessServicesPreserveResolutionRefusalCodes(t *testing.T) {
-	for _, definition := range apierr.Codes {
+	for _, definition := range hosterr.Codes {
 		t.Run(string(definition.Code), func(t *testing.T) {
 			routes := &serviceRegistrar{}
 			failure := &apierr.Error{Code: definition.Code, Message: "private-credential", Hint: "private-credential", Details: map[string]any{"private-credential": "private-credential"}}
@@ -253,7 +255,7 @@ func TestMaskRegistryRefusesIssuedValueInFreshExpansion(t *testing.T) {
 	committed := false
 	err := registry.acceptPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "generated-private-token"}}}, func() error { committed = true; return nil })
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || committed {
+	if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || committed {
 		t.Fatalf("fresh expansion acceptance = %v, committed = %v", err, committed)
 	}
 }

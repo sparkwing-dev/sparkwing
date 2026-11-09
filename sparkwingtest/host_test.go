@@ -1,5 +1,7 @@
 package sparkwingtest_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -254,7 +256,7 @@ func TestFakeHostCleanupDoesNotUseAmbientLedger(t *testing.T) {
 	release, err := cleanup.Register(host.Context(t.Context()), cleanup.Spec{Argv: []string{"fixture-cleanup"}})
 	defer release()
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable {
+	if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable {
 		t.Errorf("cleanup error = %v, want unavailable", err)
 	}
 	entries, err := os.ReadDir(home)

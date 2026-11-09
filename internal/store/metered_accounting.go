@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -248,7 +250,7 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	if a.provenance.Metered {
 		result, err = capability.SettleBilling(a.provenance, intervals)
 		if err != nil {
-			return result, authorityError(apierr.IntegrityFailure, "invalid persisted billing: "+err.Error())
+			return result, authorityError(hosterr.IntegrityFailure, "invalid persisted billing: "+err.Error())
 		}
 		if err := validateBillingCalculation(a, intervals, result); err != nil {
 			return result, err
@@ -328,7 +330,7 @@ func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservatio
 
 func validateBillingCalculation(a billingAward, intervals []capability.BillableInterval, result capability.BillingSettlement) error {
 	if result.ReservationID != a.provenance.ReservationID || result.BillableSeconds < 0 || (result.RefundUnstarted && (len(intervals) > 0 || result.BillableSeconds != 0)) || (!a.provenance.Metered && result.BillableSeconds != 0) {
-		return authorityError(apierr.IntegrityFailure, "invalid billing calculation")
+		return authorityError(hosterr.IntegrityFailure, "invalid billing calculation")
 	}
 	return nil
 }
@@ -354,7 +356,7 @@ func readBillingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, th
 			i.End = time.Unix(0, charged).UTC()
 		}
 		if charged > through.UnixNano() || i.End.Before(i.Start) || i.End.After(through) || i.CapabilityPrefix != a.prefix || i.Unit != a.provenance.Unit {
-			return nil, errors.Join(authorityError(apierr.IntegrityFailure, "persisted interval conflicts with settlement"), rows.Close())
+			return nil, errors.Join(authorityError(hosterr.IntegrityFailure, "persisted interval conflicts with settlement"), rows.Close())
 		}
 		intervals = append(intervals, i)
 	}
@@ -380,7 +382,7 @@ func billingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, throug
 func billingPriceTx(ctx context.Context, tx *storeTx, a billingAward) (rate, class, seconds int64, err error) {
 	err = tx.QueryRowContext(ctx, "SELECT rate_micro_per_second,cpu_class,seconds FROM credit_charges WHERE team=? AND id=? AND kind='reservation'", a.team, billingID("reservation", a.team, a.provenance.ReservationID, "")).Scan(&rate, &class, &seconds)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && (seconds < 0 || rate < 0 || class < 0 || a.provenance.Metered && (rate == 0 || class == 0)) {
-		err = authorityError(apierr.IntegrityFailure, "invalid persisted reservation price")
+		err = authorityError(hosterr.IntegrityFailure, "invalid persisted reservation price")
 	}
 	return rate, class, seconds, err
 }

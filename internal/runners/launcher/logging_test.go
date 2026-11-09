@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -106,7 +108,7 @@ func (c *rateLimitLoggingControl) Claim(context.Context, string, []string) (*Clo
 }
 
 func TestLauncherLogsOnlyFirstClaimRateLimitAsInfo(t *testing.T) {
-	limited := &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(2000)}}
+	limited := &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(2000)}}
 	for _, test := range []struct {
 		name       string
 		replies    []error
@@ -140,7 +142,7 @@ func TestLauncherKeepsWaitingPlacementRateLimitAtWarn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		l, _, boundary, base := fixture()
 		l.wait(base.award)
-		boundary.reserveErr = &apierr.Error{Code: apierr.RateLimited, Message: "placement refused"}
+		boundary.reserveErr = &apierr.Error{Code: hosterr.RateLimited, Message: "placement refused"}
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		time.AfterFunc(time.Second, cancel)

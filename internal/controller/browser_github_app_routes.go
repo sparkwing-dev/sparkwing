@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"net/http"
@@ -9,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // gitHubConnectWriter rechecks session authority and linked identity when connecting an installation.
@@ -106,7 +107,7 @@ func (s *Server) readGitHubAppForm(r *http.Request, csrf string) error {
 	}
 	if len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 || len(r.PostForm["csrf_token"]) != 1 ||
 		!validFormCSRF(r, s.cookiesSecure()) || !constantTimeEqual(r.PostForm.Get("csrf_token"), csrf) {
-		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
+		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	for key, values := range r.PostForm {
 		if len(values) != 1 || (key != "csrf_token" && (key != "installation_id" || r.URL.Path != "/github/app/select")) {
@@ -134,12 +135,12 @@ func (s *Server) verifyGitHubAppReturn(r *http.Request) error {
 	}
 	flow, ok := s.readGitHubAppFlow(r)
 	if !ok || s.githubApp == nil || !constantTimeEqual(query.Get("state"), flow.State) {
-		return apierr.Authorization(apierr.ReasonReauthRequired, errConnectState.Error())
+		return hosterr.Authorization(hosterr.ReasonReauthRequired, errConnectState.Error())
 	}
 	var state githubConnectState
 	if !openFlowState(s.githubApp.stateKey, flow.State, &state) || state.Nonce == "" || time.Now().Unix() >= state.Expires ||
 		!constantTimeEqual(state.Verifier, verifierDigest(flow.Verifier)) {
-		return apierr.Authorization(apierr.ReasonReauthRequired, errConnectState.Error())
+		return hosterr.Authorization(hosterr.ReasonReauthRequired, errConnectState.Error())
 	}
 	return nil
 }

@@ -1,5 +1,7 @@
 package secrets
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"strings"
@@ -22,7 +24,7 @@ func TestPresentationAdaptersKeepTrustedEnvelopeNames(t *testing.T) {
 	if !strings.Contains(string(encoded), `"msg":"***"`) || !strings.Contains(string(encoded), `"attrs":{"***":"***"}`) {
 		t.Fatalf("trusted log envelope changed: %s", encoded)
 	}
-	source := &apierr.Error{Code: apierr.Internal, Message: "message", Details: map[string]any{"message": "message"}}
+	source := &apierr.Error{Code: hosterr.Internal, Message: "message", Details: map[string]any{"message": "message"}}
 	projected := m.Error(source)
 	encoded, err = json.Marshal(projected)
 	if err != nil {

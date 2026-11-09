@@ -1,10 +1,11 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func resolveProvisionAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, proof *capability.ConsoleProof) (capability.Principal, error) {
@@ -13,7 +14,7 @@ func resolveProvisionAuthorityTx(ctx context.Context, tx *storeTx, ref capabilit
 		return p, err
 	}
 	if proof.Session != ref || tx.store.consolePolicy == nil || !tx.store.consolePolicy(p, tx.now(ctx)) {
-		return capability.Principal{}, authorityError(apierr.Forbidden, "direct operator session required")
+		return capability.Principal{}, authorityError(hosterr.Forbidden, "direct operator session required")
 	}
 	p.Class = capability.CredentialConsole
 	p.Capability.Team = ""

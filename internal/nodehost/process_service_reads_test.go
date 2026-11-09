@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -30,8 +32,8 @@ func registeredServiceRequest(t *testing.T, routes *serviceRegistrar, auth capab
 				if !errors.As(err, &failure) {
 					t.Fatalf("unstructured service refusal: %v", err)
 				}
-				w.WriteHeader(apierr.Status(failure.Code))
-				if err := json.NewEncoder(w).Encode(apierr.Envelope{Error: failure}); err != nil {
+				w.WriteHeader(hosterr.Status(failure.Code))
+				if err := json.NewEncoder(w).Encode(hosterr.Envelope{Error: failure}); err != nil {
 					t.Fatal(err)
 				}
 			}

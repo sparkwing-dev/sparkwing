@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -951,7 +953,7 @@ func TestAdmissionRechecksAuthorityAfterPolicyWork(t *testing.T) {
 	})
 	_, err := tenant.AdmitRun(t.Context(), request)
 	var denied *apierr.Error
-	if !errors.As(err, &denied) || denied.Code != apierr.Unauthenticated {
+	if !errors.As(err, &denied) || denied.Code != hosterr.Unauthenticated {
 		t.Fatalf("expired intake authority = %v", err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "runs", 0)

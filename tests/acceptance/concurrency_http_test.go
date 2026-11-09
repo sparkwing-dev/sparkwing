@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -29,7 +31,7 @@ func (b concurrencyBoundary) CheckBinding(ctx context.Context, p capability.Prin
 		return err
 	}
 	if rule == capability.BindSlotOfBoundNode && (target.SlotKey != b.group) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "undeclared slot", Details: map[string]any{"reason": apierr.ReasonBinding}}
+		return &apierr.Error{Code: hosterr.Forbidden, Message: "undeclared slot", Details: map[string]any{"reason": hosterr.ReasonBinding}}
 	}
 	return nil
 }

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -184,38 +186,38 @@ func nodeState(row runstate.NodeRow) (runstate.NodeState, error) {
 	switch row.Status {
 	case runstate.StatusDone:
 		if !slices.Contains([]runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSkipped, runstate.NodeSuperseded, runstate.NodeMemoized}, row.Outcome) || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" || row.FinishedAt == nil {
-			return "", authorityError(apierr.IntegrityFailure, "invalid terminal job state")
+			return "", authorityError(hosterr.IntegrityFailure, "invalid terminal job state")
 		}
 		return row.Outcome, nil
 	case runstate.StatusRunning:
 		if row.ClaimedBy == "" || row.LeaseExpiresAt == nil || row.CapabilityPrefix == "" || row.Generation <= 0 || row.Attempt <= 0 {
-			return "", authorityError(apierr.IntegrityFailure, "running job has no claim or attempt")
+			return "", authorityError(hosterr.IntegrityFailure, "running job has no claim or attempt")
 		}
 		return runstate.NodeRunning, nil
 	case runstate.StatusApprovalPending:
 		if row.ClaimedBy != "" || row.Outcome != "" {
-			return "", authorityError(apierr.IntegrityFailure, "invalid approval state")
+			return "", authorityError(hosterr.IntegrityFailure, "invalid approval state")
 		}
 		return runstate.NodeApprovalPending, nil
 	case runstate.StatusPending:
 		if row.Outcome != "" || row.FinishedAt != nil {
-			return "", authorityError(apierr.IntegrityFailure, "invalid pending job")
+			return "", authorityError(hosterr.IntegrityFailure, "invalid pending job")
 		}
 		if row.ClaimedBy != "" {
 			if row.LeaseExpiresAt == nil || row.CapabilityPrefix == "" || row.Generation <= 0 {
-				return "", authorityError(apierr.IntegrityFailure, "incomplete job claim")
+				return "", authorityError(hosterr.IntegrityFailure, "incomplete job claim")
 			}
 			return runstate.NodeClaimed, nil
 		}
 		if row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" {
-			return "", authorityError(apierr.IntegrityFailure, "orphan job claim fields")
+			return "", authorityError(hosterr.IntegrityFailure, "orphan job claim fields")
 		}
 		if row.ReadyAt != nil {
 			return runstate.NodeReady, nil
 		}
 		return nodePending, nil
 	default:
-		return "", authorityError(apierr.IntegrityFailure, "unknown job status")
+		return "", authorityError(hosterr.IntegrityFailure, "unknown job status")
 	}
 }
 

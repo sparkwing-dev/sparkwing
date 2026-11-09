@@ -2,6 +2,8 @@
 
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
@@ -50,7 +52,7 @@ func TestClaimedEnvironmentRegistrationCannotCollideWithAcceptedIdentifiers(t *t
 		}
 		err = claimed.Execute(t.Context(), input)
 		var structured *apierr.Error
-		if !called || !errors.As(err, &structured) || structured.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), value) {
+		if !called || !errors.As(err, &structured) || structured.Code != hosterr.SecretInIdentifier || strings.Contains(err.Error(), value) {
 			t.Fatalf("environment collision not refused safely: %v", err)
 		}
 		if !reflect.DeepEqual(before, config.Masks.masker.Values()) {

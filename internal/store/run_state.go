@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -141,7 +143,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 				change.MaskedError = "run preparation failed"
 			}
 			if row.CancelRequestedAt != nil {
-				change.Reason, change.MaskedError = string(apierr.ReasonCancelled), "cancellation requested"
+				change.Reason, change.MaskedError = string(hosterr.ReasonCancelled), "cancellation requested"
 			}
 		}
 	}

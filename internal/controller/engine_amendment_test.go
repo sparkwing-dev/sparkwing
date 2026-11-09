@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -57,7 +59,7 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 			t.Fatal("runner version was replaced")
 		}
 		if !allowed {
-			return &apierr.Error{Code: apierr.VersionRevoked, Message: "revoked"}
+			return &apierr.Error{Code: hosterr.VersionRevoked, Message: "revoked"}
 		}
 		return nil
 	})
@@ -110,7 +112,7 @@ func TestEngineClaimRequiresTrustedServicesBeforeAward(t *testing.T) {
 		}
 		_, err := server.Claim(t.Context(), capability.Authorized{Principal: root}, body)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.Unavailable {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable {
 			t.Fatalf("missing trusted service: %v", err)
 		}
 	}

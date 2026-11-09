@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -125,7 +127,7 @@ func TestBillingCLIRefusesMembersAndInvalidTiers(t *testing.T) {
 	var out bytes.Buffer
 	err := runBillingArgs(t.Context(), []string{"request-tier", "--tier", "high", "--message", "m", "--profile", "work"}, &out, connect)
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || out.Len() != 0 {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden || out.Len() != 0 {
 		t.Fatalf("editor request: %q %v", out.String(), err)
 	}
 	for _, args := range [][]string{
@@ -199,7 +201,7 @@ func TestBillingCLIRefillRefusesMembers(t *testing.T) {
 	var out bytes.Buffer
 	err := runBillingArgs(t.Context(), []string{"refill", "--disable", "--profile", "work"}, &out, connect)
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || out.Len() != 0 {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden || out.Len() != 0 {
 		t.Fatalf("editor refill: %q %v", out.String(), err)
 	}
 }

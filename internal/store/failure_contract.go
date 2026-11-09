@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -91,7 +93,7 @@ func (t *Tenant) ReadFailure(ctx context.Context, source runspec.NodeRef, genera
 			return err
 		}
 		if failure == nil {
-			return authorityError(apierr.IntegrityFailure, "recorded failure is null")
+			return authorityError(hosterr.IntegrityFailure, "recorded failure is null")
 		}
 		return validateRecordedFailure(source, failure)
 	})

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -103,7 +105,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 		masked = *req.Masked
 	}
 	if s.secretsCipher == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "secret encryption is unavailable"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "secret encryption is unavailable"}
 	}
 	cipher, ok := s.secretsCipher.(BoundCipher)
 	if !ok {
@@ -148,7 +150,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a cap
 		var value string
 		if !sec.Masked {
 			if s.secretsCipher == nil {
-				return &apierr.Error{Code: apierr.Unavailable, Message: "secret decryption is unavailable"}
+				return &apierr.Error{Code: hosterr.Unavailable, Message: "secret decryption is unavailable"}
 			}
 			value, err = openSecret(s.secretsCipher, bindingForRow(tn.Team(), &sec), sec.Value)
 			if err != nil {

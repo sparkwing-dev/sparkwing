@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -197,7 +199,7 @@ func TestGeneratorReplay(t *testing.T) {
 				t.Fatal("changed expansion reached execution")
 			} else {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.PlanDrift {
+				if !errors.As(err, &failure) || failure.Code != hosterr.PlanDrift {
 					t.Fatalf("changed expansion returned %v, want plan_drift", err)
 				}
 			}

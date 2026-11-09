@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"slices"
 	"time"
@@ -220,14 +222,14 @@ func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) err
 		return unauthenticated()
 	}
 	if child.Parent.ID == "" || child.Parent != parent.Authority {
-		return forbidden(apierr.ReasonBinding)
+		return forbidden(hosterr.ReasonBinding)
 	}
 	if child.Audience != Controller && child.Audience != NodeHost || p.Audience != Controller && p.Audience != child.Audience {
-		return forbidden(apierr.ReasonAudience)
+		return forbidden(hosterr.ReasonAudience)
 	}
 	accountData := accountDataDelegation(parent, child)
 	if !subset(child.Grants, grants) || !subset(child.Grants, p.Grants) && !accountData {
-		return forbidden(apierr.ReasonMissingGrant)
+		return forbidden(hosterr.ReasonMissingGrant)
 	}
 	ownerExpansion := narrowOwnerExpansion(parent, child)
 	dataNarrowed := narrowData(p.Data, child.Data) || accountData
@@ -235,11 +237,11 @@ func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) err
 		dataNarrowed = narrowOwnerExpansionData(p, child)
 	}
 	if !repositoryScopeNarrows(p.Repositories, child.Repositories) || !dataNarrowed {
-		return forbidden(apierr.ReasonRepositoryUnauthorized)
+		return forbidden(hosterr.ReasonRepositoryUnauthorized)
 	}
 	if (!narrowBinding(p.Binding, child.Binding) && !ownerExpansion) || !boundedExpiry(child.ExpiresAt, p.ExpiresAt, now) ||
 		!boundedExpiry(child.ExpiresAt, p.Binding.Deadline, now) || !boundedExpiry(child.ExpiresAt, child.Binding.Deadline, now) {
-		return forbidden(apierr.ReasonBinding)
+		return forbidden(hosterr.ReasonBinding)
 	}
 	return nil
 }

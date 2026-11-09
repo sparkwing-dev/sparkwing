@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -332,7 +334,7 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 	}
 	if err != nil {
 		var failure *apierr.Error
-		if errors.As(err, &failure) && failure.Code == apierr.Unauthenticated {
+		if errors.As(err, &failure) && failure.Code == hosterr.Unauthenticated {
 			return capability.Principal{}, localHostRefusal()
 		}
 		return capability.Principal{}, err
@@ -367,7 +369,7 @@ func localHostOwnsNode(owner capability.Principal, node runstate.NodeRow, child 
 }
 
 func localHostRefusal() error {
-	return &apierr.Error{Code: apierr.Forbidden, Message: "authority is outside the local host award"}
+	return &apierr.Error{Code: hosterr.Forbidden, Message: "authority is outside the local host award"}
 }
 
 func (s *Server) localHostDebugPause(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

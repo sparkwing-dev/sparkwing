@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -12,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // RunView keeps status, attempt history and committed log identities in one snapshot.
@@ -262,7 +263,7 @@ func readRunLogSubjectsTx(ctx context.Context, tx *storeTx, team Team, runID str
 				subject.Unit.Source = &blob.LogSource{NodeID: source.String, Generation: sourceGeneration.Int64}
 			}
 		default:
-			return nil, authorityError(apierr.IntegrityFailure, "invalid persisted log subject")
+			return nil, authorityError(hosterr.IntegrityFailure, "invalid persisted log subject")
 		}
 		subjects = append(subjects, subject)
 	}

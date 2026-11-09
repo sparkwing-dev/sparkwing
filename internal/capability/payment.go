@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/hmac"
@@ -208,7 +210,7 @@ func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentat
 		return nil, invalidPaymentEvent()
 	}
 	if event.LiveMode == nil || *event.LiveMode != (a.mode == PaymentLive) {
-		return nil, forbidden(apierr.ReasonBinding)
+		return nil, forbidden(hosterr.ReasonBinding)
 	}
 	for _, policy := range paymentEventPolicies {
 		if policy.ProviderType != event.Type {

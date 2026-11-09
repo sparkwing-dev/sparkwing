@@ -1,5 +1,7 @@
 package blob
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/hmac"
@@ -137,7 +139,7 @@ func (f *Filesystem) transferPath(object capability.ObjectToSign) string {
 func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	object, err := f.signedRequest(r)
 	if err != nil {
-		if err := apierrhttp.Write(w, apierr.Authorization(apierr.ReasonBinding, "invalid object signature")); err != nil {
+		if err := apierrhttp.Write(w, hosterr.Authorization(hosterr.ReasonBinding, "invalid object signature")); err != nil {
 			panic(http.ErrAbortHandler) //nolint:forbidigo // net/http aborts the incomplete response.
 		}
 		return
@@ -145,7 +147,7 @@ func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if object.Method == http.MethodPut {
 		if err := f.put(r, object); err != nil {
 			apierrhttp.NoteResponseError(w, err)
-			code := apierr.Internal
+			code := hosterr.Internal
 			if errors.Is(err, ErrIntegrity) {
 				code = apierr.BadRequest
 			}

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -178,7 +180,7 @@ func TestCapabilityInventoryFiltersAndRefusals(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET grants=? WHERE prefix='machine'`, []byte(`["team.admin"]`))
 	rows, err = tenant.ListCapabilities(t.Context(), a, capability.InventoryFilter{})
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.IntegrityFailure || rows != nil {
+	if !errors.As(err, &failure) || failure.Code != hosterr.IntegrityFailure || rows != nil {
 		t.Fatalf("corrupt inventory returned partial rows: %+v %v", rows, err)
 	}
 }
@@ -497,7 +499,7 @@ func TestCapabilityRotationAdministratorCannotRotateMemberToken(t *testing.T) {
 	tenant := &Tenant{s: s, team: "a"}
 	rotation, err := tenant.RotateCapability(t.Context(), a, time.Hour, nil)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || rotation.Issued.Raw != "" {
+	if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden || rotation.Issued.Raw != "" {
 		t.Fatalf("admin rotated a member token: %+v %v", rotation, err)
 	}
 	rewriteSchemaCount(t, s.db, "capabilities", 1)
@@ -568,7 +570,7 @@ func TestCapabilityRotationCompetingTransactions(t *testing.T) {
 					}
 				} else {
 					var failure *apierr.Error
-					if !errors.As(result.err, &failure) || failure.Code != apierr.LockHeld {
+					if !errors.As(result.err, &failure) || failure.Code != hosterr.LockHeld {
 						t.Fatalf("competing transaction: %v", result.err)
 					}
 				}

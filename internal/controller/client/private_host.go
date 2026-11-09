@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -379,7 +381,7 @@ func (c *LocalHostClient) Close() error {
 }
 
 func localHostClientRefusal() error {
-	return &apierr.Error{Code: apierr.Forbidden, Message: "operation is outside the local host award"}
+	return &apierr.Error{Code: hosterr.Forbidden, Message: "operation is outside the local host award"}
 }
 
 var (

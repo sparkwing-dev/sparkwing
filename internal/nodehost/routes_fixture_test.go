@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -27,7 +29,7 @@ func (p *routeParent) ReadAuthentication(_ context.Context, lookup capability.Cr
 	defer p.mu.Unlock()
 	snapshot, ok := p.snapshots[lookup.Digest]
 	if !ok || lookup.Class != capability.CredentialBearer || lookup.Audience != capability.Controller {
-		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown parent"}
+		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "unknown parent"}
 	}
 	return snapshot, nil
 }

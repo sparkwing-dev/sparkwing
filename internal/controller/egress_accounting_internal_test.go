@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -13,7 +15,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
@@ -139,8 +140,8 @@ func TestControllerEgressConcurrencyUsesCanonicalError(t *testing.T) {
 	w := httptest.NewRecorder()
 	called := false
 	s.meterResponse(w, r, egress.ClassLog, egress.SlotDownload, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "a/account", "a")
-	var body apierr.Envelope
-	if w.Code != 429 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != apierr.RateLimited || body.Error.Details["reason"] != "egress_download_limit" || w.Header().Get("Retry-After") == "" || called {
+	var body hosterr.Envelope
+	if w.Code != 429 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != hosterr.RateLimited || body.Error.Details["reason"] != "egress_download_limit" || w.Header().Get("Retry-After") == "" || called {
 		t.Fatalf("refusal=%d %s", w.Code, w.Body)
 	}
 }

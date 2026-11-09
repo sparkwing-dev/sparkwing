@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -107,7 +109,7 @@ func testGoSDKOutputFailures(t *testing.T) {
 		{name: "missing"},
 		{name: "corrupt", raw: json.RawMessage(`{"broken":`)},
 		{name: "non-json-whitespace", raw: json.RawMessage("\u00a0null")},
-		{name: "unavailable", err: &apierr.Error{Code: apierr.Unavailable, Message: "fixture unavailable"}},
+		{name: "unavailable", err: &apierr.Error{Code: hosterr.Unavailable, Message: "fixture unavailable"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recordLeaf(t)

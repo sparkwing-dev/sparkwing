@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -318,7 +320,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	}
 	_, err = state.ReadNode(ctx, row.Ref)
 	var refused *apierr.Error
-	if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated || native == nil && !closed || processes.Computing(award.RunID) {
+	if !errors.As(err, &refused) || refused.Code != hosterr.Unauthenticated || native == nil && !closed || processes.Computing(award.RunID) {
 		t.Fatalf("completed SDK retained claim authority: closed=%v error=%v", closed, err)
 	}
 	secretValue := "requesting-machine-only-secret"

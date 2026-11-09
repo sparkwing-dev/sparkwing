@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -7,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type consolePolicy func(capability.Principal, time.Time) bool
@@ -18,7 +19,7 @@ func consoleAuthorityTx(ctx context.Context, tx *storeTx, a capability.Authorize
 		return bindingRefusal()
 	}
 	if tx.store.consolePolicy == nil {
-		return authorityError(apierr.Unavailable, "console policy is unavailable")
+		return authorityError(hosterr.Unavailable, "console policy is unavailable")
 	}
 	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
 	if err != nil {

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/ed25519"
@@ -22,7 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -328,8 +329,8 @@ func TestTeamGitCredentialNeedsASecretsKey(t *testing.T) {
 	}
 	f.s.WithSecretsCipher(nil)
 	w = engineClaimHTTP(t, f.s.Handler(), member.Capability, "POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"github.com","kind":"https","token":"private-token"}`, 503)
-	var failure apierr.Envelope
-	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != apierr.Unavailable || strings.Contains(w.Body.String(), "private-token") {
+	var failure hosterr.Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != hosterr.Unavailable || strings.Contains(w.Body.String(), "private-token") {
 		t.Fatalf("missing key=%s: %v", w.Body, err)
 	}
 	var count int

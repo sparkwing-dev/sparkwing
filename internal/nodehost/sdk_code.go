@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -27,7 +29,7 @@ func (h *sdkCode) readResult(ctx context.Context, row runstate.NodeRow, storage 
 	if storage.Bytes != nil || storage.Records != nil {
 		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
-			return nil, executorError(apierr.PlanDrift, "generator source declaration is invalid")
+			return nil, executorError(hosterr.PlanDrift, "generator source declaration is invalid")
 		}
 		if job.ResultStep == "" && row.OutputRecord == nil {
 			return json.RawMessage("null"), nil
@@ -35,7 +37,7 @@ func (h *sdkCode) readResult(ctx context.Context, row runstate.NodeRow, storage 
 		return (OutputRecords{Blobs: storage.Bytes, Records: storage.Records}).ReadResult(ctx, row, storage.Authority)
 	}
 	if h.ReadOutput == nil {
-		return nil, executorError(apierr.Unavailable, "result storage is not configured")
+		return nil, executorError(hosterr.Unavailable, "result storage is not configured")
 	}
 	return h.ReadOutput(ctx, row.Ref, int64(row.Generation))
 }
@@ -53,10 +55,10 @@ type executorSession struct {
 
 func checkProcessBinding(parent, child nodewire.ProcessBinding) error {
 	if child.RunID != parent.RunID || child.JobID != parent.JobID {
-		return executorError(apierr.SpecDrift, "process binding changed its accepted job")
+		return executorError(hosterr.SpecDrift, "process binding changed its accepted job")
 	}
 	if parent.Routes.Bearer != "" && (child.Routes.Bearer == "" || child.Routes.Bearer == parent.Routes.Bearer) {
-		return executorError(apierr.SpecDrift, "process requires a fresh delegated route bearer")
+		return executorError(hosterr.SpecDrift, "process requires a fresh delegated route bearer")
 	}
 	return nil
 }
@@ -160,7 +162,7 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 		return err
 	}
 	if string(hash) != input.Accepted.PlanHash {
-		return executorError(apierr.PlanDrift, "SDK plan differs from the accepted plan")
+		return executorError(hosterr.PlanDrift, "SDK plan differs from the accepted plan")
 	}
 	if len(input.Replay) == 0 && !slices.ContainsFunc(plan.Jobs, func(job nodewire.JobSpec) bool { return job.ID == input.NodeID }) {
 		input.Replay, err = h.recordedReplay(ctx, input, plan.Jobs)
@@ -181,11 +183,11 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 			return err
 		}
 		if string(hash) != input.SpecHash {
-			return executorError(apierr.PlanDrift, "SDK job differs from the accepted job")
+			return executorError(hosterr.PlanDrift, "SDK job differs from the accepted job")
 		}
 		return session.prepareArguments(job)
 	}
-	return executorError(apierr.PlanDrift, "SDK did not reconstruct the accepted job")
+	return executorError(hosterr.PlanDrift, "SDK did not reconstruct the accepted job")
 }
 
 func (h *sdkCode) eval(ctx context.Context, session *executorSession, input NodeInput, closure, kind string, payload json.RawMessage, settled []string) (json.RawMessage, error) {

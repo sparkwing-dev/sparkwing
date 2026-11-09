@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -8,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // GitHubAppAdmission carries provider-verified delivery facts from the trusted webhook adapter.
@@ -117,7 +118,7 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 func VerifiedAppIntake(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) (VerifiedRunDelivery, error) {
 	tx, ok := resolver.(*storeTx)
 	if !ok || tx.appAdmission == nil || tx.appAdmission.authority() != request.Authority || tx.appAdmission.Request.Git.App.Value.DeliveryKey != request.VerifiedDeliveryID {
-		return VerifiedRunDelivery{}, authorityError(apierr.Forbidden, "verified App origin is unavailable")
+		return VerifiedRunDelivery{}, authorityError(hosterr.Forbidden, "verified App origin is unavailable")
 	}
 	if _, err := tx.appAdmission.resolve(ctx, tx); err != nil {
 		return VerifiedRunDelivery{}, err

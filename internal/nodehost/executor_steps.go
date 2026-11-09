@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -79,7 +81,7 @@ func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input
 	if !spec.Resolved.Settings.Options.DryRun.Value {
 		for _, risk := range step.Risks {
 			if !executorContains(spec.Resolved.Settings.Options.AllowRisk.Value, risk) {
-				return nil, "", "", executorError(apierr.Forbidden, "step requires an unapproved risk")
+				return nil, "", "", executorError(hosterr.Forbidden, "step requires an unapproved risk")
 			}
 		}
 	}

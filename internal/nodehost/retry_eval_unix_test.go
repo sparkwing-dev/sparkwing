@@ -2,6 +2,8 @@
 
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -141,7 +143,7 @@ func TestMaterializedGeneratorEvaluationKeepsTheJobTimeout(t *testing.T) {
 		}
 		start := time.Now()
 		body, _, failure, err := host.evaluateExpansion(t.Context(), input)
-		if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.DeadlineExceeded || failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" || time.Since(start) != 400*time.Millisecond {
+		if err != nil || len(body) != 0 || failure == nil || failure.Code != hosterr.DeadlineExceeded || failure.MaskedError != "generator failed (details withheld: secret declarations unavailable)" || time.Since(start) != 400*time.Millisecond {
 			t.Fatalf("body=%s failure=%+v elapsed=%s error=%v", body, failure, time.Since(start), err)
 		}
 		if process.closed != 1 || process.cleaned != 1 || len(state.changes) != 0 {
@@ -192,7 +194,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	err = host.Execute(ctx, input)
-	if hostCode(err) != apierr.PlanDrift {
+	if hostCode(err) != hosterr.PlanDrift {
 		t.Fatalf("changed generator error=%v, want plan_drift", err)
 	}
 	for _, request := range process.requests {

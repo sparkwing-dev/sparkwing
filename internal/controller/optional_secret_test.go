@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -74,13 +76,13 @@ func TestSecrets_OptionalUnavailableReadsAreMissing(t *testing.T) {
 				t.Fatalf("Go optional secret: value=%q error=%v", value, err)
 			}
 			code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/TOKEN", claim, nil)
-			var missing apierr.Envelope
+			var missing hosterr.Envelope
 			if code != http.StatusNotFound || json.Unmarshal([]byte(body), &missing) != nil || missing.Error == nil || missing.Error.Code != apierr.NotFound || strings.Contains(body, "private-value") || strings.Contains(body, "deploy") || strings.Contains(body, "gh:2") {
 				t.Fatalf("unavailable optional secret: HTTP %d %s", code, body)
 			}
 			code, body, _ = secretsRequest(t, f, "GET", "/api/v1/secrets/UNDECLARED", claim, nil)
-			var refused apierr.Envelope
-			if code != http.StatusForbidden || json.Unmarshal([]byte(body), &refused) != nil || refused.Error == nil || refused.Error.Details["reason"] != string(apierr.ReasonSecretUndeclared) {
+			var refused hosterr.Envelope
+			if code != http.StatusForbidden || json.Unmarshal([]byte(body), &refused) != nil || refused.Error == nil || refused.Error.Details["reason"] != string(hosterr.ReasonSecretUndeclared) {
 				t.Fatalf("undeclared secret: HTTP %d %s", code, body)
 			}
 		})

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -32,7 +34,7 @@ func childSourceBundleRequiresExactParentSource(t *testing.T, open func(*testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			code, message := apierr.Forbidden, "child source bundle differs from its parent's source"
+			code, message := hosterr.Forbidden, "child source bundle differs from its parent's source"
 			switch mutation {
 			case "digest":
 				request.Request.Source.BundleDigest.Value = strings.Repeat("b", 64)
@@ -65,7 +67,7 @@ func childSourceBundleRequiresExactParentSource(t *testing.T, open func(*testing
 			admitted, err := tenant.AdmitRun(t.Context(), request)
 			if mutation != "none" {
 				if mutation == "missing record" || mutation == "foreign run record" || mutation == "foreign team record" {
-					code, message = apierr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", "run", digest)
+					code, message = hosterr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", "run", digest)
 				}
 				requireSourceBundleError(t, err, code, message)
 				rewriteSchemaCount(t, s.db, "runs", 1)
@@ -180,7 +182,7 @@ func childSourceBundleRetry(t *testing.T, open func(*testing.T) *Store) {
 			retry, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, RetryMode: "all", Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: child.RunID}}})
 			digest := request.Request.Source.BundleDigest.Value
 			if !matching {
-				requireSourceBundleError(t, err, apierr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", child.RunID, digest))
+				requireSourceBundleError(t, err, hosterr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", child.RunID, digest))
 				rewriteSchemaCount(t, s.db, "runs", 2)
 				return
 			}

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -424,7 +426,7 @@ func TestOwnerSelfExecutionRefusesRemovedAllowedLabels(t *testing.T) {
 				t.Fatalf("placement refusal missing from run: %+v %v", view.HostIneligible, err)
 			}
 			result, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: runstate.SourceNone})
-			if !errors.As(err, &denied) || denied.Code != apierr.Forbidden || result.Kind == runstate.Execute {
+			if !errors.As(err, &denied) || denied.Code != hosterr.Forbidden || result.Kind == runstate.Execute {
 				t.Fatalf("owner executed with removed label: %s %v", result.Kind, err)
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET status='success',finished_at=?`, s.now().UnixNano())

@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -84,7 +86,7 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 		}
 		known, err := manager.ReadToken(context.Background(), prefix)
 		var failure *apierr.Error
-		if err != nil && !(errors.As(err, &failure) && (failure.Code == apierr.Unauthenticated || failure.Code == apierr.NotFound)) {
+		if err != nil && !(errors.As(err, &failure) && (failure.Code == hosterr.Unauthenticated || failure.Code == apierr.NotFound)) {
 			return fmt.Errorf("login: cannot resolve the profile's team; specify --team: %w", err)
 		}
 		request.Team = known.Team
@@ -119,7 +121,7 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 	if replaced != nil && replaced.ControllerURL() == base {
 		err := revokeProfileToken(replaced)
 		var failure *apierr.Error
-		if err != nil && !(errors.As(err, &failure) && (failure.Code == apierr.Unauthenticated || failure.Code == apierr.NotFound)) {
+		if err != nil && !(errors.As(err, &failure) && (failure.Code == hosterr.Unauthenticated || failure.Code == apierr.NotFound)) {
 			fmt.Fprintf(os.Stderr, "warning: the profile's previous token was not revoked; revoke it from the console's Machines page or with sparkwing tokens revoke --profile %s\n", name)
 		}
 	}

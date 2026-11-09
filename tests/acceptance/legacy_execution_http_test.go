@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/hex"
 	"encoding/json"
@@ -76,11 +78,11 @@ func TestEngineRetiredExecutionRoutesProperty(t *testing.T) {
 				r.Header.Set("X-Sparkwing-Claim-Generation", "1")
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, r)
-				var envelope apierr.Envelope
+				var envelope hosterr.Envelope
 				err := json.Unmarshal(w.Body.Bytes(), &envelope)
 				status, code, registered := http.StatusNotFound, apierr.NotFound, false
 				if path.path == "/api/v1/runs/RUN/events" {
-					status, code, registered = http.StatusMethodNotAllowed, apierr.MethodNotAllowed, true
+					status, code, registered = http.StatusMethodNotAllowed, hosterr.MethodNotAllowed, true
 					if w.Header().Get("Allow") == "" {
 						return false
 					}

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -183,7 +185,7 @@ func TestAuthorityMissingCycleExpiryAndForgedFenceFailClosed(t *testing.T) {
 	actor.CapabilityPrefix = "forged"
 	err := (&Tenant{s: s, team: "a"}).RevokeAuthority(context.Background(), actor, actor.Authority)
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden {
 		t.Fatalf("forged fence: %v", err)
 	}
 }

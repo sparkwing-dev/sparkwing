@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -71,7 +73,7 @@ func checkAuthorityRequirementTx(ctx context.Context, tx *storeTx, team string, 
 	var epoch int64
 	err := tx.QueryRowContext(ctx, `SELECT role,COALESCE((SELECT epoch FROM membership_epochs WHERE team=m.team AND account_id=m.account_id),0) FROM memberships m WHERE team=? AND account_id=?`, team, requirement.Account).Scan(&role, &epoch)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && (!role.Valid() || epoch != requirement.Epoch || requirement.Grant != "" && !slices.Contains(ScopesForRole(role), string(requirement.Grant))) {
-		return authorityError(apierr.Unauthenticated, "credential membership authority has ended")
+		return authorityError(hosterr.Unauthenticated, "credential membership authority has ended")
 	}
 	if err != nil {
 		return err
@@ -83,7 +85,7 @@ func checkAuthorityRequirementTx(ctx context.Context, tx *storeTx, team string, 
 			return err
 		}
 		if (!allowed || machineEpoch != requirement.MemberMachinesEpoch) && !slices.Contains(ScopesForRole(role), scopeTeamAdmin) {
-			return authorityError(apierr.Unauthenticated, "credential enrollment setting has ended")
+			return authorityError(hosterr.Unauthenticated, "credential enrollment setting has ended")
 		}
 	}
 	return nil
@@ -96,7 +98,7 @@ func memberIssuancePolicy(ctx context.Context, tx *storeTx, spec capability.Prov
 	maximum := 90 * 24 * time.Hour
 	if admin {
 		if !spec.AllowTeamAdmin {
-			return c, authorityError(apierr.Forbidden, "team.admin requires explicit authorization and an expiry of at most 30 days")
+			return c, authorityError(hosterr.Forbidden, "team.admin requires explicit authorization and an expiry of at most 30 days")
 		}
 		maximum = adminTokenLifetime
 	}

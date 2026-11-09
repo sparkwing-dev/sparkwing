@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
@@ -27,7 +29,7 @@ func (s *EngineController) sourceExpansionAuthorization(ctx context.Context, a c
 		return a, engineLookupError(err)
 	}
 	if source.Generation != runspec.ClaimGeneration(generation) {
-		return a, &apierr.Error{Code: apierr.LockHeld, Message: "expansion names another source generation"}
+		return a, &apierr.Error{Code: hosterr.LockHeld, Message: "expansion names another source generation"}
 	}
 	binding := parent.Capability.Binding
 	binding.Kind, binding.NodeID, binding.Generation, binding.Attempt = capability.BindingNode, string(source.Ref.NodeID), int64(source.Generation), int64(source.Attempt)

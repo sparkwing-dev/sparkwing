@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"net/http"
@@ -73,7 +75,7 @@ type runnerSessionTransport struct {
 
 func (t *runnerSessionTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request.URL.Scheme != t.base.Scheme || request.URL.Host != t.base.Host || !strings.HasPrefix(request.URL.Path, strings.TrimRight(t.base.Path, "/")+"/") {
-		return nil, &apierr.Error{Code: apierr.Forbidden, Message: "session credentials cannot leave the selected controller"}
+		return nil, &apierr.Error{Code: hosterr.Forbidden, Message: "session credentials cannot leave the selected controller"}
 	}
 	r := request.Clone(request.Context())
 	r.Header.Set("Authorization", "Session "+t.session)

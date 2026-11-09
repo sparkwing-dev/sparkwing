@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -98,7 +100,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		defer func() { resultErr = errors.Join(resultErr, runtime.close()) }()
 	}
 	if runtime.controller == nil || runtime.prepare == nil || runtime.close == nil || (!flags.detached && (runtime.follow == nil || flags.allowUnadmitted && runtime.bind == nil)) {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "local run integration has incomplete intake or host bindings"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "local run integration has incomplete intake or host bindings"}
 	}
 	prepared, err := runtime.prepare(ctx, pipeline, flags)
 	if err != nil {
@@ -113,7 +115,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	}
 	hostedInCLI := localRunNeedsCLIHost(flags, request.Request.Options.Publish.Value)
 	if hostedInCLI && runtime.bind == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "local run integration has no CLI host binding"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "local run integration has no CLI host binding"}
 	}
 	if request.Request.Pipeline != pipeline || request.Request.Origin != runspec.OriginLocal || request.Request.Mode != runspec.IntakeExecute || request.Request.Dispatch != runspec.DispatchHost {
 		return localRunProtocolError("local preparation returned an invalid intake request")
@@ -143,7 +145,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	}
 	if request.Request.Options.CacheFrom.Value != "" && runtime.remoteCache == nil {
 		if runtime.openCache == nil {
-			return &apierr.Error{Code: apierr.Unavailable, Message: "run: remote cache requires an authorized read-only storage binding before intake"}
+			return &apierr.Error{Code: hosterr.Unavailable, Message: "run: remote cache requires an authorized read-only storage binding before intake"}
 		}
 		var closeCache func() error
 		runtime.remoteCache, closeCache, err = runtime.openCache(ctx, request.Request.Options.CacheFrom.Value, &request.Request)
@@ -164,7 +166,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if mode := strings.TrimSpace(flags.priority); mode == wingwire.PriorityFront || mode == wingwire.PriorityBack {
 		queue, ok := runtime.controller.(controllerwire.QueueManager)
 		if !ok {
-			return &apierr.Error{Code: apierr.Unavailable, Message: "run: controller cannot resolve relative priority"}
+			return &apierr.Error{Code: hosterr.Unavailable, Message: "run: controller cannot resolve relative priority"}
 		}
 		rank, err := resolveRelativeRunPriority(ctx, mode, queue)
 		if err != nil {
@@ -349,7 +351,7 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 		return completion, err
 	}
 	if response.Claim == nil {
-		return completion, &apierr.Error{Code: apierr.LockHeld, Message: "local run has no available owner claim"}
+		return completion, &apierr.Error{Code: hosterr.LockHeld, Message: "local run has no available owner claim"}
 	}
 	award := *response.Claim
 	masker := secrets.NewMasker()
@@ -379,7 +381,7 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 		session.input.Storage.RemoteCache = nil
 		if award.Request.Request.Options.CacheFrom.Value != "" {
 			if runtime.remoteCache == nil {
-				return session, &apierr.Error{Code: apierr.Unavailable, Message: "local host requires its sealed remote-cache binding"}
+				return session, &apierr.Error{Code: hosterr.Unavailable, Message: "local host requires its sealed remote-cache binding"}
 			}
 			session.input.Storage.RemoteCache = runtime.remoteCache
 		}

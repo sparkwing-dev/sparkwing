@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -63,7 +65,7 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 			apierrhttp.NoteResponseError(w, err)
 			pid := strconv.Itoa(os.Getpid())
 			return apierrhttp.Write(w, &apierr.Error{
-				Code: apierr.Unavailable, Message: "The local admission daemon did not answer.",
+				Code: hosterr.Unavailable, Message: "The local admission daemon did not answer.",
 				Hint: "Stop the sparkwing process " + pid + " by hand (for example `kill " + pid + "`), then run `sparkwing dashboard open`.",
 			})
 		}

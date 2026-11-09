@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -95,7 +97,7 @@ func TestAuthenticationAncestry(t *testing.T) {
 			r, p, route := authenticationFixture()
 			mutate(r)
 			_, err := NewAuthenticator(r).Authenticate(t.Context(), p, route)
-			requireAuthenticationCode(t, err, apierr.Unauthenticated)
+			requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 		})
 	}
 	r, p, route := authenticationFixture()
@@ -134,15 +136,15 @@ func TestAuthenticationTerminalExceptions(t *testing.T) {
 	}
 	p.Evidence.ResultDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	_, err = authenticator.Authenticate(t.Context(), p, route)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 	p.Evidence.ResultDigest = r.snapshot.Binding.Result.Digest
 	p.Evidence.Target.NodeID = "sibling"
 	_, err = authenticator.Authenticate(t.Context(), p, route)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 	p.Evidence.Target.NodeID = "job"
 	r.snapshot.Binding.Result.Actor.ID = "another actor"
 	_, err = authenticator.Authenticate(t.Context(), p, route)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 
 	logRoute, _ := LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/log-manifest")
 	auth, err = authenticator.Authenticate(t.Context(), p, logRoute)
@@ -151,7 +153,7 @@ func TestAuthenticationTerminalExceptions(t *testing.T) {
 	}
 	r.snapshot.Now = finish.Add(limits.LogSealGrace)
 	_, err = authenticator.Authenticate(t.Context(), p, logRoute)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 }
 
 func TestAuthenticationCancelAndAlternativeIsolation(t *testing.T) {
@@ -162,7 +164,7 @@ func TestAuthenticationCancelAndAlternativeIsolation(t *testing.T) {
 	}
 	source, _ := LookupRoute("POST", "/api/v1/runs/{run}/source-credential")
 	_, err := NewAuthenticator(r).Authenticate(t.Context(), p, source)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 	route.Access = []AccessRule{
 		{Credential: CredentialClaim, Grants: []Grant{SourceRead}, Binding: BindSource, Liveness: LiveSensitive},
 		{Credential: CredentialClaim, Grants: []Grant{NodeReport}, Binding: BindOwnNode, Liveness: LiveReporting},
@@ -172,7 +174,7 @@ func TestAuthenticationCancelAndAlternativeIsolation(t *testing.T) {
 		t.Fatalf("alternatives = %+v, %v", auth, err)
 	}
 	_, err = Authorize(t.Context(), allowAuthenticationBinding{}, route, auth, p.Evidence.Target)
-	requireAuthenticationCode(t, err, apierr.Forbidden)
+	requireAuthenticationCode(t, err, hosterr.Forbidden)
 }
 
 type allowAuthenticationBinding struct{}
@@ -257,7 +259,7 @@ func TestTriggerAuthorityUsesSupportedJobBindings(t *testing.T) {
 				t.Fatalf("trigger %s: binding=%s err=%v", suffix, authorized.Access.Binding, err)
 			}
 		} else {
-			requireAuthenticationCode(t, err, apierr.Forbidden)
+			requireAuthenticationCode(t, err, hosterr.Forbidden)
 		}
 	}
 }

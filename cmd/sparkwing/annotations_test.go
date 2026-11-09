@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -128,12 +130,12 @@ func TestReviewAnnotationWriteAndPolicyGap(t *testing.T) {
 	}
 	var api *apierr.Error
 	_, err = runReviewCommandWithoutTransport(t, []string{"runs", "annotations", "add", "--run", "412", "--message", "note"})
-	if !errors.As(err, &api) || api.Code != apierr.PolicyMissing {
+	if !errors.As(err, &api) || api.Code != hosterr.PolicyMissing {
 		t.Fatalf("run annotation gap: %v", err)
 	}
-	f.errorWrite = &apierr.Error{Code: apierr.Forbidden, Message: "member cannot report"}
+	f.errorWrite = &apierr.Error{Code: hosterr.Forbidden, Message: "member cannot report"}
 	out, err = runReviewFake(t, f, []string{"runs", "annotations", "add", "--run", "412", "--job", "deploy", "--message", "note", "-o", "plain"})
-	if !errors.As(err, &api) || api.Code != apierr.Forbidden || out != "" {
+	if !errors.As(err, &api) || api.Code != hosterr.Forbidden || out != "" {
 		t.Fatalf("forbidden write: %q %v", out, err)
 	}
 }

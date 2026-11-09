@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -109,7 +111,7 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 		}
 	} else {
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+		if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier {
 			t.Fatalf("secret identifier was not refused by the shared validator: %v", err)
 		}
 		if strings.Contains(err.Error()+failure.Message+failure.Hint+fmt.Sprint(failure.Details), secret) {

@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -226,7 +228,7 @@ func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 	if current.ID != "generated" || current.Status != "running" || current.Generation != 8 || current.Attempt != 3 || current.StateSeq != 12 || current.ClaimedBy != "current-holder" || current.ApplicationRetries != 2 || current.Disruptions != 1 || current.SpecHash != "generated-seal" {
 		t.Fatalf("replayed expansion lost current execution state: %+v", current)
 	}
-	refusal := &apierr.Error{Code: apierr.LockHeld, Message: "transaction fence changed"}
+	refusal := &apierr.Error{Code: hosterr.LockHeld, Message: "transaction fence changed"}
 	f.err = refusal
 	if _, err := e.AcceptExpansion(t.Context(), a, controllerwire.ExpansionSubmission{SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[]}`)}); !errors.Is(err, refusal) {
 		t.Fatalf("transaction refusal = %v", err)
@@ -316,47 +318,47 @@ func TestEngineExpansionHTTP(t *testing.T) {
 				b.snapshot.Authorities = []capability.AuthorityState{b.snapshot.Authorities[0], {Principal: owner}, b.snapshot.Authorities[1]}
 			case "anonymous":
 				b.raw = ""
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 			case "ended source claim":
 				b.snapshot.Authorities[0].Principal.Capability.Binding.Expansion = nil
 				b.snapshot.Binding.Expansion = nil
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 			case "revoked":
 				b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 			case "cancelled":
 				b.snapshot.Binding.RunCancelled = true
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 			case "expired eval":
 				b.snapshot.Binding.Expansion.ExpiresAt = b.snapshot.Now
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 			case "wrong grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "wrong audience":
 				b.snapshot.Authorities[0].Principal.Capability.Audience = capability.NodeHost
 				b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")
 				b.snapshot.Authorities[0].Principal.Capability.Digest = sha256.Sum256([]byte(b.raw))
 				b.snapshot.Binding.ProcessAlive = true
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "sibling source":
 				path = "/api/v1/runs/run/jobs/sibling/expansion"
 				f.node.Ref.NodeID = "sibling"
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "wrong run":
 				path = "/api/v1/runs/other/jobs/job/expansion"
 				f.node.Ref.RunID = "other"
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "stale source":
 				body = `{"source_generation":3,"body":{"jobs":[]}}`
-				status, code = 409, apierr.LockHeld
+				status, code = 409, hosterr.LockHeld
 			case "stale persisted generation":
 				f.node.Generation = 5
 				body = `{"source_generation":5,"body":{"jobs":[]}}`
-				status, code = 409, apierr.LockHeld
+				status, code = 409, hosterr.LockHeld
 			case "transaction race":
-				f.err = &apierr.Error{Code: apierr.LockHeld, Message: "transaction fence changed"}
-				status, code = 409, apierr.LockHeld
+				f.err = &apierr.Error{Code: hosterr.LockHeld, Message: "transaction fence changed"}
+				status, code = 409, hosterr.LockHeld
 			case "bad body":
 				body = `{"source_generation":4,"body":{"jobs":null}}`
 				status, code = 400, apierr.BadRequest
@@ -381,13 +383,13 @@ func TestEngineExpansionHTTP(t *testing.T) {
 			case "dead with unknown source":
 				f.readErr = &apierr.Error{Code: apierr.NotFound, Message: "job not found"}
 				b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 			case "private store error":
 				f.err = errors.New("private database credential")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			case "corrupt persisted expansion":
 				f.expanded.Nodes = []runstate.NodeRow{{Spec: json.RawMessage(`null`)}}
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			}
 			r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 			r.Header.Set("Authorization", "Bearer "+b.raw)
@@ -407,7 +409,7 @@ func TestEngineExpansionHTTP(t *testing.T) {
 				if f.writes != wantWrites {
 					t.Fatalf("refused request reached %d writes, want %d", f.writes, wantWrites)
 				}
-				var envelope apierr.Envelope
+				var envelope hosterr.Envelope
 				if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil || envelope.Error == nil || envelope.Error.Code != code {
 					t.Fatalf("error = %s, %v", w.Body.String(), err)
 				}
@@ -436,8 +438,8 @@ func TestEngineExpansionHTTPMethodRefusal(t *testing.T) {
 		if w.Code != http.StatusMethodNotAllowed || w.Header().Get("Allow") != "POST" {
 			t.Fatalf("%s: %d %s, Allow %q", method, w.Code, w.Body.String(), w.Header().Get("Allow"))
 		}
-		var envelope apierr.Envelope
-		if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil || envelope.Error == nil || envelope.Error.Code != apierr.MethodNotAllowed {
+		var envelope hosterr.Envelope
+		if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil || envelope.Error == nil || envelope.Error.Code != hosterr.MethodNotAllowed {
 			t.Fatalf("%s: error %s, %v", method, w.Body.String(), err)
 		}
 	}

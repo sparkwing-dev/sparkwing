@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/ed25519"
@@ -293,7 +295,7 @@ func TestPinnedRunnerKeepsItsVersionWhenANewerReleaseExists(t *testing.T) {
 				return
 			}
 			var refusal *apierr.Error
-			if !errors.As(err, &refusal) || refusal.Code != apierr.VersionUnsupported || !strings.Contains(err.Error(), ".sparkwing/go.mod") || claims != 0 {
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.VersionUnsupported || !strings.Contains(err.Error(), ".sparkwing/go.mod") || claims != 0 {
 				t.Fatalf("Run = %v after %d claims", err, claims)
 			}
 		})

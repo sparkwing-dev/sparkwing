@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -38,75 +40,75 @@ type CapabilityOrigin struct {
 func (r CapabilityRecord) Validate() error {
 	c := r.Value
 	if c.Host != nil && !slices.Contains([]capability.HostKind{capability.HostCloud, capability.HostSelfHosted, capability.HostPersonal, capability.HostHere}, c.Host.Kind) {
-		return authorityError(apierr.IntegrityFailure, "invalid sealed host kind")
+		return authorityError(hosterr.IntegrityFailure, "invalid sealed host kind")
 	}
 	if r.Origin != nil && !validCapabilityOrigin(c, *r.Origin) {
-		return authorityError(apierr.IntegrityFailure, "invalid capability origin")
+		return authorityError(hosterr.IntegrityFailure, "invalid capability origin")
 	}
 	if r.Version != 1 || c.Prefix == "" || c.Subject.ID == "" || c.IssuedAt.IsZero() {
-		return authorityError(apierr.IntegrityFailure, "invalid capability envelope")
+		return authorityError(hosterr.IntegrityFailure, "invalid capability envelope")
 	}
 	if !slices.Contains([]capability.SubjectKind{capability.SubjectAccount, capability.SubjectMachine, capability.SubjectService, capability.SubjectOperator, capability.SubjectLocal, capability.SubjectAnonymous}, c.Subject.Kind) {
-		return authorityError(apierr.IntegrityFailure, "invalid capability subject")
+		return authorityError(hosterr.IntegrityFailure, "invalid capability subject")
 	}
 	if c.Audience != capability.Controller && c.Audience != capability.NodeHost {
-		return authorityError(apierr.IntegrityFailure, "invalid capability audience")
+		return authorityError(hosterr.IntegrityFailure, "invalid capability audience")
 	}
 	seen := map[capability.Grant]bool{}
 	for _, g := range c.Grants {
 		if !slices.Contains(capability.Grants(), g) || seen[g] {
-			return authorityError(apierr.IntegrityFailure, "invalid capability grants")
+			return authorityError(hosterr.IntegrityFailure, "invalid capability grants")
 		}
 		seen[g] = true
 	}
 	if c.Parent != nil && !validAuthorityRef(*c.Parent) {
-		return authorityError(apierr.IntegrityFailure, "invalid capability parent")
+		return authorityError(hosterr.IntegrityFailure, "invalid capability parent")
 	}
 	if c.ExpiresAt != nil && !c.ExpiresAt.After(c.IssuedAt) {
-		return authorityError(apierr.IntegrityFailure, "invalid capability expiry")
+		return authorityError(hosterr.IntegrityFailure, "invalid capability expiry")
 	}
 	if c.Team == "" && (c.Binding.Kind != capability.BindingNone || (c.Subject.Kind != capability.SubjectService && c.Subject.Kind != capability.SubjectOperator)) {
-		return authorityError(apierr.IntegrityFailure, "unbound capability has tenant authority")
+		return authorityError(hosterr.IntegrityFailure, "unbound capability has tenant authority")
 	}
 	switch c.Binding.Kind {
 	case capability.BindingNone:
 		if c.Binding.RunID != "" || c.Binding.NodeID != "" || c.Binding.Generation != 0 || c.Binding.Holder != "" || c.Binding.Push != nil || c.Binding.Expansion != nil {
-			return authorityError(apierr.IntegrityFailure, "unbound capability has a resource fence")
+			return authorityError(hosterr.IntegrityFailure, "unbound capability has a resource fence")
 		}
 	case capability.BindingPush:
 		if c.Binding.Push == nil || c.Binding.Push.RepositoryKey == "" || c.Binding.Push.Ref == "" || c.Binding.Push.SHA == "" || c.Binding.Push.WorkflowRunID == "" {
-			return authorityError(apierr.IntegrityFailure, "invalid push binding")
+			return authorityError(hosterr.IntegrityFailure, "invalid push binding")
 		}
 	case capability.BindingNode, capability.BindingRun, capability.BindingTrigger:
 		if c.Team == "" || c.Binding.RunID == "" || (c.Binding.Kind == capability.BindingNode && c.Binding.NodeID == "") {
-			return authorityError(apierr.IntegrityFailure, "invalid resource binding")
+			return authorityError(hosterr.IntegrityFailure, "invalid resource binding")
 		}
 	default:
-		return authorityError(apierr.IntegrityFailure, "unknown capability binding")
+		return authorityError(hosterr.IntegrityFailure, "unknown capability binding")
 	}
 	if c.Binding.Generation < 0 || c.Binding.Attempt < 0 {
-		return authorityError(apierr.IntegrityFailure, "invalid capability fence")
+		return authorityError(hosterr.IntegrityFailure, "invalid capability fence")
 	}
 	if c.Issuance != capability.Delegate && c.Issuance != capability.Award && c.Issuance != capability.Exchange {
-		return authorityError(apierr.IntegrityFailure, "unknown capability issuance")
+		return authorityError(hosterr.IntegrityFailure, "unknown capability issuance")
 	}
 	if c.Unit == "" {
 		if c.UnitID != "" || c.Purpose != "" || c.Delivery != "" || c.Billing != nil || c.Issuance != capability.Delegate {
-			return authorityError(apierr.IntegrityFailure, "incomplete award identity")
+			return authorityError(hosterr.IntegrityFailure, "incomplete award identity")
 		}
 	} else {
 		p, ok := awardPolicy(c.Purpose)
 		if !ok || p.Unit != c.Unit || c.UnitID == "" || c.Parent == nil || c.Team == "" || c.Billing == nil {
-			return authorityError(apierr.IntegrityFailure, "invalid award identity")
+			return authorityError(hosterr.IntegrityFailure, "invalid award identity")
 		}
 		if _, err := decodeAwardUnit(c.Unit, c.UnitID); err != nil {
-			return authorityError(apierr.IntegrityFailure, "invalid persisted award unit identity")
+			return authorityError(hosterr.IntegrityFailure, "invalid persisted award unit identity")
 		}
 		if c.Delivery != capability.DeliveryDirect && c.Delivery != capability.DeliveryBootstrap {
-			return authorityError(apierr.IntegrityFailure, "invalid award delivery")
+			return authorityError(hosterr.IntegrityFailure, "invalid award delivery")
 		}
 		if c.Delivery == capability.DeliveryBootstrap && !slices.Contains(capability.BootstrapUnits(), c.Unit) {
-			return authorityError(apierr.IntegrityFailure, "invalid bootstrap unit")
+			return authorityError(hosterr.IntegrityFailure, "invalid bootstrap unit")
 		}
 		b := c.Billing
 		expected := capability.BillingUnit(c.Unit)
@@ -117,7 +119,7 @@ func (r CapabilityRecord) Validate() error {
 			expected = capability.BillingJob
 		}
 		if b.PayerTeam != c.Team || b.ReservationID == "" || b.ExecutorClass == "" || b.Unit != expected || (b.Start != capability.BillingAtStart && b.Start != capability.BillingAtAward) {
-			return authorityError(apierr.IntegrityFailure, "invalid billing provenance")
+			return authorityError(hosterr.IntegrityFailure, "invalid billing provenance")
 		}
 	}
 	return nil
@@ -125,12 +127,12 @@ func (r CapabilityRecord) Validate() error {
 
 func isIntegrityError(err error) bool {
 	var integrity *apierr.Error
-	return errors.As(err, &integrity) && integrity.Code == apierr.IntegrityFailure
+	return errors.As(err, &integrity) && integrity.Code == hosterr.IntegrityFailure
 }
 
 func authorityError(code apierr.Code, message string) error {
-	if code == apierr.Forbidden {
-		return apierr.Authorization(apierr.ReasonMissingGrant, message)
+	if code == hosterr.Forbidden {
+		return hosterr.Authorization(hosterr.ReasonMissingGrant, message)
 	}
 	return &apierr.Error{Code: code, Message: message}
 }
@@ -231,7 +233,7 @@ func (op *Operator) persistCapabilityTx(ctx context.Context, tx *storeTx, c capa
 		return err
 	}
 	if c.Digest == ([32]byte{}) {
-		return authorityError(apierr.IntegrityFailure, "missing bearer digest")
+		return authorityError(hosterr.IntegrityFailure, "missing bearer digest")
 	}
 	body, err := json.Marshal(record)
 	if err != nil {
@@ -266,14 +268,14 @@ func (op *Operator) loadCapabilityRecordTx(ctx context.Context, tx *storeTx, pre
 	}
 	err := tx.QueryRowContext(ctx, "SELECT digest,authority_json,"+strings.Join(authorityColumns, ",")+" FROM capabilities WHERE prefix = ?", prefix).Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
-		return CapabilityRecord{}, authorityError(apierr.Unauthenticated, "authority is unavailable")
+		return CapabilityRecord{}, authorityError(hosterr.Unauthenticated, "authority is unavailable")
 	}
 	if err != nil {
 		return CapabilityRecord{}, err
 	}
 	var record CapabilityRecord
 	if err := json.Unmarshal(body, &record); err != nil {
-		return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "invalid capability envelope")
+		return CapabilityRecord{}, authorityError(hosterr.IntegrityFailure, "invalid capability envelope")
 	}
 	if err := record.Validate(); err != nil {
 		return CapabilityRecord{}, err
@@ -284,12 +286,12 @@ func (op *Operator) loadCapabilityRecordTx(ctx context.Context, tx *storeTx, pre
 	}
 	for i, v := range actual {
 		if !equalProjection(v, expected[i]) {
-			return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "capability projection mismatch: "+authorityColumns[i])
+			return CapabilityRecord{}, authorityError(hosterr.IntegrityFailure, "capability projection mismatch: "+authorityColumns[i])
 		}
 	}
 	bytes, err := hex.DecodeString(digest)
 	if err != nil || len(bytes) != sha256.Size {
-		return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "invalid bearer digest")
+		return CapabilityRecord{}, authorityError(hosterr.IntegrityFailure, "invalid bearer digest")
 	}
 	copy(record.Value.Digest[:], bytes)
 	return record, nil
@@ -313,7 +315,7 @@ type authorityNode struct {
 
 func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, sessionChild ...authorityNode) (authorityNode, error) {
 	if !validAuthorityRef(ref) {
-		return authorityNode{}, authorityError(apierr.Unauthenticated, "invalid authority reference")
+		return authorityNode{}, authorityError(hosterr.Unauthenticated, "invalid authority reference")
 	}
 	node := authorityNode{principal: capability.Principal{Authority: ref}}
 	if ref.Kind == capability.AuthorityCapability {
@@ -323,7 +325,7 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 			return node, err
 		}
 		if record.Value.CredentialEpoch != tx.store.credentialEpoch {
-			return node, authorityError(apierr.Unauthenticated, "credential epoch has ended")
+			return node, authorityError(hosterr.Unauthenticated, "credential epoch has ended")
 		}
 		node.principal.Capability = record.Value
 		if record.Origin != nil {
@@ -345,10 +347,10 @@ func (op *Operator) readAuthorityNodeTx(ctx context.Context, tx *storeTx, ref ca
 			return node, err
 		}
 		if credentialEpoch != tx.store.credentialEpoch {
-			return node, authorityError(apierr.Unauthenticated, "credential epoch has ended")
+			return node, authorityError(hosterr.Unauthenticated, "credential epoch has ended")
 		}
 		if account == "" {
-			return node, authorityError(apierr.Unauthenticated, "session identity is unavailable")
+			return node, authorityError(hosterr.Unauthenticated, "session identity is unavailable")
 		}
 		c.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: account}
 		c.IssuedAt = time.Unix(0, created).UTC()
@@ -390,7 +392,7 @@ func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capabi
 
 	c := node.principal.Capability
 	if !capability.CredentialAlive(c, tx.now(ctx)) {
-		return node, authorityError(apierr.Unauthenticated, "authority has ended")
+		return node, authorityError(hosterr.Unauthenticated, "authority has ended")
 	}
 	if node.requirement != nil {
 		if err := checkAuthorityRequirementTx(ctx, tx, c.Team, *node.requirement); err != nil {
@@ -408,7 +410,7 @@ func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capabi
 			return node, err
 		}
 		if !role.Valid() {
-			return node, authorityError(apierr.Unauthenticated, "membership is unavailable")
+			return node, authorityError(hosterr.Unauthenticated, "membership is unavailable")
 		}
 		if c.Unit == "" {
 			allowed := ScopesForRole(role)
@@ -452,12 +454,12 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	var chain []authorityNode
 	for {
 		if seen[ref] {
-			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
+			return nil, authorityError(hosterr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
 		node, err := tx.operator.readAuthorityTx(ctx, tx, ref, false, ancestrySessionChild(ref, chain)...)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
+			return nil, authorityError(hosterr.Unauthenticated, "authority ancestry is unavailable")
 		}
 		if err != nil {
 			return nil, err
@@ -473,20 +475,20 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	for _, node := range chain {
 		c := node.principal.Capability
 		if !capability.CredentialAlive(c, now) {
-			return nil, authorityError(apierr.Unauthenticated, "authority expired while ancestry was locked")
+			return nil, authorityError(hosterr.Unauthenticated, "authority expired while ancestry was locked")
 		}
 	}
 	for i := len(chain) - 2; i >= 0; i-- {
 		child := &chain[i].principal.Capability
 		parent := chain[i+1].principal.Capability
 		if chain[i].principal.Class == capability.CredentialSession && (child.Team != parent.Team || child.Subject != parent.Subject || parent.Audience != capability.Controller || parent.Binding.Kind != capability.BindingNone || parent.Unit != "") {
-			return nil, authorityError(apierr.Unauthenticated, "session parent identity differs")
+			return nil, authorityError(hosterr.Unauthenticated, "session parent identity differs")
 		}
 		if child.Issuance == capability.Delegate {
 			child.Grants = capability.InheritedGrants(chain[i+1].principal, *child)
 		}
 		if child.Purpose == capability.PurposeHere && !slices.Contains(parent.Grants, capability.RunsWrite) {
-			return nil, authorityError(apierr.Unauthenticated, "here requester lost run authority")
+			return nil, authorityError(hosterr.Unauthenticated, "here requester lost run authority")
 		}
 	}
 	if len(chain) == 1 && localPeerRoot(chain[0].principal.Capability) {
@@ -506,12 +508,12 @@ func discoverAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.A
 	var chain []authorityNode
 	for {
 		if seen[ref] {
-			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
+			return nil, authorityError(hosterr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
 		node, err := tx.operator.readAuthorityNodeTx(ctx, tx, ref, ancestrySessionChild(ref, chain)...)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
+			return nil, authorityError(hosterr.Unauthenticated, "authority ancestry is unavailable")
 		}
 		if err != nil {
 			return nil, err
@@ -618,7 +620,7 @@ func teamPrincipal(p capability.Principal, err error) func(Team, teamAuthority) 
 
 func resolveActorTx(ctx context.Context, tx *storeTx, actor runstate.Actor) (capability.Principal, error) {
 	if (actor.Authority.Kind == capability.AuthoritySession && actor.CapabilityPrefix != "") || (actor.Authority.Kind == capability.AuthorityCapability && actor.CapabilityPrefix != "" && actor.CapabilityPrefix != actor.Authority.ID) {
-		return capability.Principal{}, authorityError(apierr.Forbidden, "actor authority and fence disagree")
+		return capability.Principal{}, authorityError(hosterr.Forbidden, "actor authority and fence disagree")
 	}
 	return resolveProvisionAuthorityTx(ctx, tx, actor.Authority, actor.ConsoleProof)
 }
@@ -634,14 +636,14 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor runstate.Actor, targ
 			return err
 		}
 		if p.Capability.Binding.Kind != capability.BindingNone {
-			return authorityError(apierr.Forbidden, "revocation requires unbound tenant authority")
+			return authorityError(hosterr.Forbidden, "revocation requires unbound tenant authority")
 		}
 		targetNode, err := tx.operator.readAuthorityTx(ctx, tx, target, true)
 		if err != nil {
 			return err
 		}
 		if targetNode.principal.Capability.Team != string(t.team) {
-			return authorityError(apierr.Forbidden, "revocation target belongs to another team")
+			return authorityError(hosterr.Forbidden, "revocation target belongs to another team")
 		}
 		if err := machineAdministrationTx(ctx, tx, p, targetNode.principal.Capability); err != nil {
 			return err
@@ -672,7 +674,7 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor runstate.Actor, ta
 			return err
 		}
 		if !(capability.DeploymentAuthority(p) && slices.Contains(p.Capability.Grants, capability.OperatorTokens)) && !(p.Class == capability.CredentialConsole && slices.Contains(p.Capability.Grants, capability.OperatorConsole)) {
-			return authorityError(apierr.Forbidden, "deployment token authority is required")
+			return authorityError(hosterr.Forbidden, "deployment token authority is required")
 		}
 		node, err := tx.operator.readAuthorityTx(ctx, tx, target, true)
 		if err != nil {
@@ -680,7 +682,7 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor runstate.Actor, ta
 		}
 		c := node.principal.Capability
 		if target.Kind != capability.AuthorityCapability || c.Parent != nil || c.Team != "" || (c.Subject.Kind != capability.SubjectService && c.Subject.Kind != capability.SubjectOperator) {
-			return authorityError(apierr.Forbidden, "target is not a deployment root")
+			return authorityError(hosterr.Forbidden, "target is not a deployment root")
 		}
 		if err := tx.operator.revokeAuthorityTx(ctx, tx, target); err != nil {
 			return err

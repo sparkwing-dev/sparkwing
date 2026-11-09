@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"testing"
@@ -135,7 +137,7 @@ func TestPlanSealRejectsInvalidArgumentsAndChangedDefaults(t *testing.T) {
 			var canonical *apierr.Error
 			want := apierr.InvalidArgs
 			if source == "default" || source == "injected" {
-				want = apierr.SpecDrift
+				want = hosterr.SpecDrift
 			}
 			if !errors.As(err, &canonical) || canonical.Code != want {
 				t.Fatalf("invalid argument accepted without canonical refusal: %v", err)

@@ -1,5 +1,7 @@
 package githubapp
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -38,20 +40,20 @@ func RepositoryID(ctx context.Context, remote, token string) (int64, error) {
 		if ctx.Err() != nil {
 			return 0, ctx.Err()
 		}
-		return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository identity lookup failed"}
+		return 0, &apierr.Error{Code: hosterr.Unavailable, Message: "GitHub repository identity lookup failed"}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		code := apierr.Unavailable
+		code := hosterr.Unavailable
 		switch response.StatusCode {
 		case http.StatusUnauthorized:
-			code = apierr.Unauthenticated
+			code = hosterr.Unauthenticated
 		case http.StatusForbidden:
-			code = apierr.Forbidden
+			code = hosterr.Forbidden
 		case http.StatusNotFound:
 			code = apierr.NotFound
 		case http.StatusTooManyRequests:
-			code = apierr.RateLimited
+			code = hosterr.RateLimited
 		}
 		return 0, &apierr.Error{Code: code, Message: fmt.Sprintf("GitHub repository identity lookup returned HTTP %d", response.StatusCode), Hint: "Private repositories require repository read access through a token or the controller GitHub App."}
 	}

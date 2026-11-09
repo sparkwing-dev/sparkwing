@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto"
@@ -149,11 +151,11 @@ func TestOIDCMintHTTPRefusals(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			b, f := oidcBoundary()
 			p := &b.snapshot.Authorities[0].Principal
-			want, calls := apierr.Forbidden, 0
+			want, calls := hosterr.Forbidden, 0
 			switch state {
 			case "anonymous":
 				b.raw = ""
-				want = apierr.Unauthenticated
+				want = hosterr.Unauthenticated
 			case "machine":
 				b = authorityMember()
 				b.snapshot.Authorities[0].Principal.Capability.Subject.Kind = capability.SubjectMachine
@@ -177,53 +179,53 @@ func TestOIDCMintHTTPRefusals(t *testing.T) {
 				p.Capability.Grants = nil
 			case "revoked":
 				p.Capability.RevokedAt = &b.snapshot.Now
-				want = apierr.Unauthenticated
+				want = hosterr.Unauthenticated
 			case "ancestor":
 				b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
-				want = apierr.Unauthenticated
+				want = hosterr.Unauthenticated
 			case "expired":
 				p.Capability.ExpiresAt = &b.snapshot.Now
-				want = apierr.Unauthenticated
+				want = hosterr.Unauthenticated
 			case "cancelled":
 				b.snapshot.Binding.RunCancelled = true
-				want = apierr.Unauthenticated
+				want = hosterr.Unauthenticated
 			case "ended":
 				b.snapshot.Binding.RunFinished = true
-				want = apierr.Unauthenticated
+				want = hosterr.Unauthenticated
 			case "binding":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "wrong run"}
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "wrong run"}
 			case "backend":
-				b.readErr = &apierr.Error{Code: apierr.Unavailable, Message: "unavailable"}
-				want = apierr.Unavailable
+				b.readErr = &apierr.Error{Code: hosterr.Unavailable, Message: "unavailable"}
+				want = hosterr.Unavailable
 			case "transaction":
-				f.err = &apierr.Error{Code: apierr.Unauthenticated, Message: "claim ended"}
-				want, calls = apierr.Unauthenticated, 1
+				f.err = &apierr.Error{Code: hosterr.Unauthenticated, Message: "claim ended"}
+				want, calls = hosterr.Unauthenticated, 1
 			case "race":
-				f.err = &apierr.Error{Code: apierr.LockHeld, Message: "claim fence changed"}
-				want, calls = apierr.LockHeld, 1
+				f.err = &apierr.Error{Code: hosterr.LockHeld, Message: "claim fence changed"}
+				want, calls = hosterr.LockHeld, 1
 			case "provider":
-				f.err = &apierr.Error{Code: apierr.Unavailable, Message: "identity unavailable"}
-				want, calls = apierr.Unavailable, 1
+				f.err = &apierr.Error{Code: hosterr.Unavailable, Message: "identity unavailable"}
+				want, calls = hosterr.Unavailable, 1
 			case "private":
 				f.err = errors.New("private-db-detail")
-				want, calls = apierr.Internal, 1
+				want, calls = hosterr.Internal, 1
 			case "tenant":
 				f.facts.Team = "foreign"
-				want, calls = apierr.Internal, 1
+				want, calls = hosterr.Internal, 1
 			case "run":
 				f.facts.RunID = "foreign"
-				want, calls = apierr.Internal, 1
+				want, calls = hosterr.Internal, 1
 			case "clock":
 				f.facts.Now = time.Time{}
-				want, calls = apierr.Internal, 1
+				want, calls = hosterr.Internal, 1
 			case "ceiling":
 				f.facts.NotAfter = f.facts.Now
-				want, calls = apierr.Internal, 1
+				want, calls = hosterr.Internal, 1
 			case "subject":
 				f.facts.Pipeline = "private:trigger:push"
 				want, calls = apierr.BadRequest, 1
 			case "missing reader":
-				want = apierr.PolicyMissing
+				want = hosterr.PolicyMissing
 			case "disabled":
 				want = apierr.NotFound
 			}
@@ -237,7 +239,7 @@ func TestOIDCMintHTTPRefusals(t *testing.T) {
 			}
 			h := oidcServer(t, b, reader, signing, nil).Handler()
 			w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
-			assertEngineError(t, w, apierr.Status(want), want)
+			assertEngineError(t, w, hosterr.Status(want), want)
 			if f.calls != calls || strings.Contains(w.Body.String(), "private") {
 				t.Fatalf("calls=%d body=%s", f.calls, w.Body.String())
 			}
@@ -259,7 +261,7 @@ func TestOIDCMintHTTPInputAndBudget(t *testing.T) {
 	}
 	for _, method := range []string{"GET", "HEAD", "PUT", "DELETE", "OPTIONS"} {
 		w := authorityHTTP(h, b, method, "/api/v1/runs/run/oidc-token", "")
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 	}
 	var previous string
 	for i := 0; i < 30; i++ {
@@ -271,7 +273,7 @@ func TestOIDCMintHTTPInputAndBudget(t *testing.T) {
 		previous = result.Token
 	}
 	w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
-	assertEngineError(t, w, 429, apierr.RateLimited)
+	assertEngineError(t, w, 429, hosterr.RateLimited)
 	for _, want := range []string{"30 tokens", "5 minutes", "current budget usage", "support@sparkwing.dev"} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("OIDC limit refusal omits %q: %s", want, w.Body.String())
@@ -371,7 +373,7 @@ func TestOIDCMintHTTPSubjectInjectionProperty(t *testing.T) {
 		fields := []*string{&f.facts.Pipeline, &f.facts.Trigger, &f.facts.RunnerKind, &f.facts.Ref}
 		*fields[field%uint8(len(fields))] = value
 		w := authorityHTTP(oidcServer(t, b, f, private, nil).Handler(), b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
-		var result apierr.Envelope
+		var result hosterr.Envelope
 		return w.Code == 400 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && result.Error.Code == apierr.BadRequest &&
 			!strings.Contains(w.Body.String(), "token") && !strings.Contains(w.Body.String(), value)
 	}

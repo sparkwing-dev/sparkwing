@@ -1,12 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // OIDCMint is the record of one signed ID token. Token is returned to the
@@ -33,7 +34,7 @@ func (t *Tenant) MintOIDCToken(ctx context.Context, supplied capability.Authoriz
 			return OIDCMint{}, err
 		}
 		if minted.Token == "" || minted.ID == "" || minted.Subject == "" || minted.ExpiresAt.IsZero() || minted.ExpiresAt.After(facts.NotAfter) {
-			return OIDCMint{}, authorityError(apierr.IntegrityFailure, "signed OIDC token does not match its issuance facts")
+			return OIDCMint{}, authorityError(hosterr.IntegrityFailure, "signed OIDC token does not match its issuance facts")
 		}
 		event := auditOIDCMint{RunID: supplied.Target.RunID, Node: digestAudit(supplied.Principal.Capability.Binding.NodeID), Audience: audience, TokenID: minted.ID, Subject: minted.Subject, ExpiresAt: minted.ExpiresAt.UTC().Unix()}
 		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(supplied.Principal)}, event); err != nil {
@@ -99,7 +100,7 @@ func (t *Tenant) oidcFactsTx(ctx context.Context, tx *storeTx, supplied capabili
 	}
 	facts.NotAfter = authorityNotAfter(chain, facts.NotAfter)
 	if !facts.NotAfter.After(facts.Now) {
-		return capability.OIDCFacts{}, authorityError(apierr.Unauthenticated, "claim issuance window has ended")
+		return capability.OIDCFacts{}, authorityError(hosterr.Unauthenticated, "claim issuance window has ended")
 	}
 	return facts, nil
 }
@@ -108,10 +109,10 @@ func (t *Tenant) oidcFactsTx(ctx context.Context, tx *storeTx, supplied capabili
 func oidcIdentity(team Team, run RunRow) (capability.OIDCFacts, error) {
 	provenance := run.Request.Provenance
 	if !provenance.Valid() {
-		return capability.OIDCFacts{}, authorityError(apierr.IntegrityFailure, "run has no sealed provenance")
+		return capability.OIDCFacts{}, authorityError(hosterr.IntegrityFailure, "run has no sealed provenance")
 	}
 	if provenance.ChildSourceRepository() != "" {
-		return capability.OIDCFacts{}, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "fetch-only child source access does not authorize OIDC")
+		return capability.OIDCFacts{}, hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "fetch-only child source access does not authorize OIDC")
 	}
 	facts := capability.OIDCFacts{Team: string(team), RunID: run.ID, Pipeline: provenance.Pipeline()}
 	facts.Trigger, facts.RepositoryID, facts.Ref, facts.SHA = provenance.OIDC()
@@ -133,7 +134,7 @@ func originalRequestTx(ctx context.Context, tx *storeTx, team Team, request runs
 			return request, nil
 		}
 		if seen[parent] {
-			return runspec.SealedRequest{}, authorityError(apierr.IntegrityFailure, "cyclic run identity lineage")
+			return runspec.SealedRequest{}, authorityError(hosterr.IntegrityFailure, "cyclic run identity lineage")
 		}
 		seen[parent] = true
 		run, err := readRunTx(ctx, tx, team, parent)

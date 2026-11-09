@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -45,7 +47,7 @@ func TestOwnerFinishesCancellationAfterACommittedPolicyResult(t *testing.T) {
 		default:
 		}
 		<-ctx.Done()
-		return ownerLayerResult{}, errors.Join(context.Cause(ctx), &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"})
+		return ownerLayerResult{}, errors.Join(context.Cause(ctx), &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"})
 	})
 	completion, err := host.Run(t.Context(), input)
 	if err != nil || completion.Outcome != "cancelled" || state.finished.Transition.RunID != "run" {
@@ -92,7 +94,7 @@ func TestCancellationReportsUseTheLiveClaimLifetime(t *testing.T) {
 					defer stop()
 					var err error
 					if setup {
-						err = claimSetupFailure(ctx, input, &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}, deps.Masker.Mask, reports.TransitionNode)
+						err = claimSetupFailure(ctx, input, &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}, deps.Masker.Mask, reports.TransitionNode)
 					} else {
 						host, createErr := NewNodeExecutor(deps)
 						if createErr != nil {

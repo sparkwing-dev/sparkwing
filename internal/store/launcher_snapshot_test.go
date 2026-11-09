@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -242,7 +244,7 @@ func TestLauncherSnapshotIsolatesIntegrityButRejectsStorageFailures(t *testing.T
 				}
 			} else {
 				var integrity *apierr.Error
-				if err != nil || len(rows) != 1 || !errors.As(rows[0].Failure, &integrity) || integrity.Code != apierr.IntegrityFailure || rows[0].Fence.ID == "" {
+				if err != nil || len(rows) != 1 || !errors.As(rows[0].Failure, &integrity) || integrity.Code != hosterr.IntegrityFailure || rows[0].Fence.ID == "" {
 					t.Fatalf("corrupt award lost its typed integrity failure or identity: %+v, %v", rows, err)
 				}
 			}

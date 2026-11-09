@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -96,7 +98,7 @@ func (c *nodeClaims) authenticate(ctx context.Context, owner capability.Principa
 }
 
 func nodeClaimMismatch() error {
-	return &apierr.Error{Code: apierr.LockHeld, Message: "local process requires its independently awarded current node authority"}
+	return &apierr.Error{Code: hosterr.LockHeld, Message: "local process requires its independently awarded current node authority"}
 }
 
 func (c *nodeClaims) delegate(ctx context.Context, node string, generation, attempt int64) (ProcessGrant, error) {

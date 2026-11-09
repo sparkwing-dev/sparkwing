@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -82,10 +84,10 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 		endpoint.Handle = func(w http.ResponseWriter, request *http.Request, auth capability.Authorized) error {
 			service, err := resolve(request.Context(), auth)
 			if err != nil {
-				code := apierr.Unavailable
+				code := hosterr.Unavailable
 				var failure *apierr.Error
 				if errors.As(err, &failure) {
-					for _, definition := range apierr.Codes {
+					for _, definition := range hosterr.Codes {
 						if failure.Code == definition.Code {
 							code = failure.Code
 							break
@@ -95,7 +97,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 				return executorError(code, "resolve process service failed")
 			}
 			if service == nil || service.Masks == nil || service.Masks.masker == nil || service.RunID != auth.Binding.RunID || auth.Binding.Kind != capability.BindingTrigger && service.Job.ID != auth.Binding.NodeID || service.RunID == "" || service.Job.ID == "" {
-				return executorError(apierr.SpecDrift, "service binding differs from its live process")
+				return executorError(hosterr.SpecDrift, "service binding differs from its live process")
 			}
 			if service.lifetime != nil {
 				ctx, cancel := context.WithCancel(request.Context())
@@ -134,9 +136,9 @@ func processServiceError(err error, masker *secrets.Masker) error {
 	if !errors.As(err, &canonical) {
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
-			err = errors.Join(executorError(apierr.DeadlineExceeded, "process service deadline exceeded"), err)
+			err = errors.Join(executorError(hosterr.DeadlineExceeded, "process service deadline exceeded"), err)
 		case errors.Is(err, context.Canceled):
-			err = errors.Join(executorError(apierr.Cancelled, "process service was cancelled"), err)
+			err = errors.Join(executorError(hosterr.Cancelled, "process service was cancelled"), err)
 		}
 	}
 	return maskHostError(err, masker)
@@ -183,7 +185,7 @@ func serviceEvidence(request *http.Request, pattern string) (capability.RequestE
 	}
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	if int64(len(body)) > limits.JSONRequestBytes {
-		return capability.RequestEvidence{}, executorError(apierr.PayloadTooLarge, "service request exceeds JSON envelope limit")
+		return capability.RequestEvidence{}, executorError(hosterr.PayloadTooLarge, "service request exceeds JSON envelope limit")
 	}
 	sum := sha256.Sum256(body)
 	evidence.ResultDigest = hex.EncodeToString(sum[:])
@@ -315,7 +317,7 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		body.Markdown = limits.Record(s.Masks.mask(body.Markdown))
 		return s.Summary(ctx, auth, body)
 	}
-	return executorError(apierr.UnsupportedRoute, "unknown process service")
+	return executorError(hosterr.UnsupportedRoute, "unknown process service")
 }
 
 func (s *ProcessServices) step(id string) error {

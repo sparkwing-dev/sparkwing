@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/hex"
@@ -164,7 +166,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	input.IdempotencyKey = "second"
 	_, err = control.Retry(t.Context(), "run", input)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.RateLimited {
+	if !errors.As(err, &failure) || failure.Code != hosterr.RateLimited {
 		t.Fatalf("retry past retrier's cap: %v", err)
 	}
 	runs, err := teststore.ForTeam(t, s.store, "a").ListRuns(t.Context(), store.RunFilter{Limit: 10})

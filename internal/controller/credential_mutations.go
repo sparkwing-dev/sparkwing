@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -38,7 +40,7 @@ func decodeCredentialRequest[T any](r *http.Request) (*T, error) {
 	if err := decoder.Decode(&body); err != nil {
 		var oversized *http.MaxBytesError
 		if errors.As(err, &oversized) {
-			return nil, &apierr.Error{Code: apierr.PayloadTooLarge, Message: "credential request exceeds the body limit"}
+			return nil, &apierr.Error{Code: hosterr.PayloadTooLarge, Message: "credential request exceeds the body limit"}
 		}
 		return nil, invalidEngineBody("invalid credential request")
 	}
@@ -51,11 +53,11 @@ func decodeCredentialRequest[T any](r *http.Request) (*T, error) {
 func credentialWriteError(err error) error {
 	switch {
 	case errors.Is(err, errBoundCipherRequired):
-		return &apierr.Error{Code: apierr.Unavailable, Message: "bound credential encryption is unavailable"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "bound credential encryption is unavailable"}
 	case errors.Is(err, secrets.ErrKeyRefused):
 		return &apierr.Error{Code: apierr.Conflict, Message: "the secrets key is outside this controller home", Hint: "point SPARKWING_SECRETS_KEY_FILE inside this home"}
 	case errors.Is(err, store.ErrSecretLimit):
-		return &apierr.Error{Code: apierr.PayloadTooLarge, Message: err.Error()}
+		return &apierr.Error{Code: hosterr.PayloadTooLarge, Message: err.Error()}
 	case errors.Is(err, store.ErrGitCredentialLimit):
 		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	case errors.Is(err, store.ErrFingerprintMismatch):

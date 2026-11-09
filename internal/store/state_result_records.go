@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
@@ -20,7 +22,7 @@ func attachNodeResultRecordsTx(ctx context.Context, tx *storeTx, team Team, row 
 		return authorityError(apierr.BadRequest, "record attachment requires a reported or published result")
 	}
 	if tx.store.resultRecords == nil {
-		return authorityError(apierr.Unavailable, "transactional result record attachment is not configured")
+		return authorityError(hosterr.Unavailable, "transactional result record attachment is not configured")
 	}
 	if err := tx.store.resultRecords.AttachResultRecords(ctx, tx, team, change.Actor, row, *result); err != nil {
 		return err

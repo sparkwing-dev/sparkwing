@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -53,5 +55,5 @@ func TestDataReadHTTPPresenceRequiresDeadlineAfterAuthentication(t *testing.T) {
 	assertEngineError(t, w, 400, apierr.BadRequest)
 	f.boundary.raw = ""
 	w = authorityHTTP(h, f.boundary, "POST", "/api/v1/data/has-many", body)
-	assertEngineError(t, w, 401, apierr.Unauthenticated)
+	assertEngineError(t, w, 401, hosterr.Unauthenticated)
 }

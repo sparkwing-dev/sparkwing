@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"errors"
@@ -87,7 +89,7 @@ func TestChildCannotPairAnotherRefWithItsOwnCommit(t *testing.T) {
 		attack := request
 		mutate(&attack)
 		var refusal *apierr.Error
-		if err := server.resolveChildRevisions(t.Context(), e.EngineController, a, &attack); !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+		if err := server.resolveChildRevisions(t.Context(), e.EngineController, a, &attack); !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden {
 			t.Fatalf("child with another %s was not refused: %v", name, err)
 		}
 	}

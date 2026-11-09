@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -77,12 +79,12 @@ func TestEngineVersionNoticesPreserveSignedWarningsAndFallback(t *testing.T) {
 }
 
 func TestEngineVersionNoticesKeepEnforcementVisibleOnStoredRuns(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.VersionRevoked, apierr.VersionUnsupported, apierr.Unavailable, apierr.IntegrityFailure} {
+	for _, code := range []apierr.Code{hosterr.VersionRevoked, hosterr.VersionUnsupported, hosterr.Unavailable, hosterr.IntegrityFailure} {
 		t.Run(string(code), func(t *testing.T) {
 			failure := &apierr.Error{Code: code, Message: "signed reason", Hint: engine.UpgradeCommand, Details: map[string]any{"private": "omitted"}}
 			fake := &engineVersionFake{evaluateErr: fmt.Errorf("evaluate: %w", failure)}
 			got, err := engineVersionPolicy(fake).notices(t.Context(), "v1.2.3")
-			if code == apierr.VersionRevoked || code == apierr.VersionUnsupported {
+			if code == hosterr.VersionRevoked || code == hosterr.VersionUnsupported {
 				want := []engineid.Notice{{Kind: engineid.NoticeEnforcement, Version: "v1.2.3", Reason: failure.Message, Hint: failure.Hint}}
 				if err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("enforcement notices=%+v err=%v", got, err)

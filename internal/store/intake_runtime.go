@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -103,7 +105,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		}
 	}
 	if tx.store.intakePolicy == nil {
-		return AdmissionResult{}, authorityError(apierr.Unavailable, "intake policy is not configured")
+		return AdmissionResult{}, authorityError(hosterr.Unavailable, "intake policy is not configured")
 	}
 	if snapshot.execution.Retry != nil {
 		if err := selectRetryTx(ctx, tx, team, snapshot.execution.Lineage.RetryOf, snapshot.execution.Retry); err != nil {
@@ -115,7 +117,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		return AdmissionResult{}, err
 	}
 	if policy.LogRetentionClass == "" || policy.LogRetentionDays <= 0 {
-		return AdmissionResult{}, authorityError(apierr.Unavailable, "intake log retention policy is missing")
+		return AdmissionResult{}, authorityError(hosterr.Unavailable, "intake log retention policy is missing")
 	}
 	id, err := newCreditID("run")
 	if err != nil {
@@ -157,11 +159,11 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 			}
 			charge = inherited
 			if charge.AdmissionSubject.Kind == "" {
-				return AdmissionResult{}, authorityError(apierr.IntegrityFailure, "parent run has no charged admission subject")
+				return AdmissionResult{}, authorityError(hosterr.IntegrityFailure, "parent run has no charged admission subject")
 			}
 		}
 		if input.Origin == runspec.OriginSchedule && tx.scheduleAdmission == nil {
-			return AdmissionResult{}, authorityError(apierr.Forbidden, "only a schedule firing starts a schedule run")
+			return AdmissionResult{}, authorityError(hosterr.Forbidden, "only a schedule firing starts a schedule run")
 		}
 		if err := checkActionsOwnerTx(ctx, tx, team, input); err != nil {
 			return AdmissionResult{}, err
@@ -217,7 +219,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err = enforceRunsPerHourTx(ctx, tx, team, id, charge.AdmissionSubject, now); err != nil {
 		var refused *ComputeLimitError
 		if errors.As(err, &refused) {
-			err = errors.Join(err, &apierr.Error{Code: apierr.RateLimited, Message: refused.Error(), Details: map[string]any{"reason": "compute_limit", "limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed, "scope": refused.Scope, "retry_after_ms": 5000}})
+			err = errors.Join(err, &apierr.Error{Code: hosterr.RateLimited, Message: refused.Error(), Details: map[string]any{"reason": "compute_limit", "limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed, "scope": refused.Scope, "retry_after_ms": 5000}})
 		}
 		return AdmissionResult{}, err
 	}
@@ -385,14 +387,14 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 	}
 	c := p.Capability
 	if c.Audience != capability.Controller || request.Request.Team != "" && request.Request.Team != string(team) || request.CapabilityPrefix != "" && request.CapabilityPrefix != c.Prefix {
-		return p, authorityError(apierr.Forbidden, "intake authority does not match the team")
+		return p, authorityError(hosterr.Forbidden, "intake authority does not match the team")
 	}
 	dispatch := request.Request.Dispatch
 	if dispatch == "" {
 		dispatch = SelectDispatch(request.Request)
 	}
 	if request.Request.LocalForeground && (request.Request.Mode != runspec.IntakeExecute || request.Request.Origin != runspec.OriginLocal || dispatch != runspec.DispatchHost || c.Subject.Kind != capability.SubjectLocal) {
-		return p, authorityError(apierr.Forbidden, "foreground reservation requires local host intake")
+		return p, authorityError(hosterr.Forbidden, "foreground reservation requires local host intake")
 	}
 	grant := capability.RunsWrite
 	if request.Request.Lineage.RetryOf != "" {
@@ -402,7 +404,7 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 		grant = capability.ChildrenStart
 	}
 	if !slices.Contains(c.Grants, grant) {
-		return p, authorityError(apierr.Forbidden, "intake authority lacks the required grant")
+		return p, authorityError(hosterr.Forbidden, "intake authority lacks the required grant")
 	}
 	if grant == capability.ChildrenStart {
 		if c.Binding.Kind != capability.BindingNode || c.Binding.RunID != request.Request.Lineage.ParentRunID || c.Binding.NodeID != request.Request.Lineage.ParentJobID || request.Request.Lineage.RetryOf != "" {
@@ -482,7 +484,7 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 			if placement == nodeproto.PlacementHere {
 				where = "--runner here"
 			}
-			return admittedSnapshot{}, authorityError(apierr.Forbidden, fmt.Sprintf("only %s can retry a %s run; start a new run instead", writer, where))
+			return admittedSnapshot{}, authorityError(hosterr.Forbidden, fmt.Sprintf("only %s can retry a %s run; start a new run instead", writer, where))
 		}
 	}
 	in := runspec.RetryInput{Request: source.Request, Plan: source.Plan, Retrier: runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}, SourceRunID: source.ID, Reason: request.Request.Lineage.RetryReason}
@@ -515,7 +517,7 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	}
 	input.Team, input.OriginMachine, input.Placement = string(team), "", nil
 	if policy.Options == nil {
-		return input, authorityError(apierr.Unavailable, "intake settings resolution is unavailable")
+		return input, authorityError(hosterr.Unavailable, "intake settings resolution is unavailable")
 	}
 	input.Options = *policy.Options
 	input.Actor = runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}
@@ -524,15 +526,15 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	if request.VerifiedDeliveryID != "" {
 		delivery := policy.Delivery
 		if delivery == nil || !delivery.Git.App.Set || delivery.Git.App.Value.DeliveryKey == "" || delivery.Git.App.Value.VerifiedAt.IsZero() {
-			return input, authorityError(apierr.Unauthenticated, "verified App delivery is unavailable")
+			return input, authorityError(hosterr.Unauthenticated, "verified App delivery is unavailable")
 		}
 		input.Git, input.Actor, input.PullRequest = delivery.Git, delivery.Actor, delivery.PullRequest
 		input.Origin = runspec.OriginApp
 	} else if input.Origin == runspec.OriginApp || policy.Delivery != nil {
-		return input, authorityError(apierr.Forbidden, "App intake requires a verified delivery")
+		return input, authorityError(hosterr.Forbidden, "App intake requires a verified delivery")
 	}
 	if input.PullRequest.Set && (input.PullRequest.Value.Fork || input.PullRequest.Value.HeadRepo != input.PullRequest.Value.BaseRepo) {
-		return input, authorityError(apierr.Forbidden, "fork pull requests cannot execute")
+		return input, authorityError(hosterr.Forbidden, "fork pull requests cannot execute")
 	}
 	if input.Git.Repository.Key == "" {
 		return input, authorityError(apierr.BadRequest, "repository identity is required")
@@ -540,7 +542,7 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	if policy.SourceLocation != nil {
 		input.Source.Location = *policy.SourceLocation
 	} else if input.Source.Location != (runspec.SourceLocation{}) {
-		return input, authorityError(apierr.Unavailable, "verified source location is unavailable")
+		return input, authorityError(hosterr.Unavailable, "verified source location is unavailable")
 	}
 	if input.Lineage.ParentRunID != "" {
 		input.Origin = runspec.OriginChild
@@ -630,7 +632,7 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 		return 0, admissionIdentity{}, nil
 	}
 	if !claim.AllowsChild(input.Pipeline, string(input.Git.Repository.Key)) {
-		return 0, admissionIdentity{}, authorityError(apierr.Forbidden, "child source is outside the parent claim's declared children; declare it on the parent job with StartsChildren (TypeScript: startsChildren), or StartsChildrenIn for another repository")
+		return 0, admissionIdentity{}, authorityError(hosterr.Forbidden, "child source is outside the parent claim's declared children; declare it on the parent job with StartsChildren (TypeScript: startsChildren), or StartsChildrenIn for another repository")
 	}
 	seen := map[string]bool{}
 	depth := 1
@@ -647,7 +649,7 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 		parent := ancestor.Request.Request
 		if id == input.Lineage.ParentRunID {
 			if input.Env.Digest != "" && (input.Env.Digest != parent.Env.Digest || !slices.Equal(input.Env.Names, parent.Env.Names) || input.EnvironmentSource != parent.EnvironmentSource) {
-				return 0, admissionIdentity{}, authorityError(apierr.SpecDrift, "child environment differs from its parent")
+				return 0, admissionIdentity{}, authorityError(hosterr.SpecDrift, "child environment differs from its parent")
 			}
 			input.Env, input.EnvironmentSource = parent.Env, parent.EnvironmentSource
 			admission = ancestor.admission

@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -79,13 +81,13 @@ func TestChildStartRefusals(t *testing.T) {
 		}
 		wantRefusal(t, askRoute(t, s, http.MethodPost, "/node/v1/children", admitService(t, s, service), body), http.StatusBadRequest, "bad_request")
 	}
-	for _, code := range []apierr.Code{apierr.PlanInvalid, apierr.Conflict, apierr.Unavailable} {
+	for _, code := range []apierr.Code{apierr.PlanInvalid, apierr.Conflict, hosterr.Unavailable} {
 		s := start(t)
 		service := newService(t)
 		service.StartChild = func(context.Context, capability.Authorized, ChildRequest) (string, error) {
 			return "", &apierr.Error{Code: code, Message: "admission refused"}
 		}
-		wantRefusal(t, askRoute(t, s, http.MethodPost, "/node/v1/children", admitService(t, s, service), `{"pipeline":"build"}`), apierr.Status(code), string(code))
+		wantRefusal(t, askRoute(t, s, http.MethodPost, "/node/v1/children", admitService(t, s, service), `{"pipeline":"build"}`), hosterr.Status(code), string(code))
 	}
 }
 
@@ -99,12 +101,12 @@ func TestAwaitRefusals(t *testing.T) {
 		}
 		wantRefusal(t, askRoute(t, s, http.MethodGet, "/node/v1/children/child/await?wait_ms="+wait, admitService(t, s, service), ""), http.StatusBadRequest, "bad_request")
 	}
-	for _, code := range []apierr.Code{apierr.NotFound, apierr.UnknownJob, apierr.Forbidden, apierr.Unavailable} {
+	for _, code := range []apierr.Code{apierr.NotFound, apierr.UnknownJob, hosterr.Forbidden, hosterr.Unavailable} {
 		s := start(t)
 		service := newService(t)
 		service.AwaitChild = func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error) {
 			return ProcessChildResult{}, &apierr.Error{Code: code, Message: "child refused"}
 		}
-		wantRefusal(t, askRoute(t, s, http.MethodGet, "/node/v1/children/child/await", admitService(t, s, service), ""), apierr.Status(code), string(code))
+		wantRefusal(t, askRoute(t, s, http.MethodGet, "/node/v1/children/child/await", admitService(t, s, service), ""), hosterr.Status(code), string(code))
 	}
 }

@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -210,7 +212,7 @@ func newClaimedHostStore(snapshot store.RunSnapshot, mode string) *claimedHostFi
 		beats := s.beats.Add(1)
 		switch {
 		case s.mode == "rejected" || s.mode == "lost_during_work" && beats > 1:
-			return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
+			return runstate.LeaseBeat{}, &apierr.Error{Code: hosterr.LockHeld}
 		case s.mode == "cancelled":
 			return runstate.LeaseBeat{CancelRequested: true, CancelReason: "operator requested stop"}, nil
 		case s.mode == "silent":

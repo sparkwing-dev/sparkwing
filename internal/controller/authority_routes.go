@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -146,7 +148,7 @@ func authorityMutationError(err error) error {
 		return &apierr.Error{Code: apierr.Conflict, Message: "a team must retain at least one owner"}
 	}
 	if errors.Is(err, store.ErrRoleAboveOwn) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "membership change refused", Details: map[string]any{"reason": apierr.ReasonMissingGrant}}
+		return &apierr.Error{Code: hosterr.Forbidden, Message: "membership change refused", Details: map[string]any{"reason": hosterr.ReasonMissingGrant}}
 	}
 	return engineLookupError(err)
 }

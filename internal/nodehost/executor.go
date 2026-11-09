@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -128,7 +130,7 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 	spec, row, job, err := h.accepted(ctx, input)
 	if err != nil {
 		var drift *apierr.Error
-		if errors.As(err, &drift) && (drift.Code == apierr.PlanDrift || drift.Code == apierr.SpecDrift) {
+		if errors.As(err, &drift) && (drift.Code == hosterr.PlanDrift || drift.Code == hosterr.SpecDrift) {
 			return h.report(ctx, input, h.failure(err), err)
 		}
 		return err
@@ -137,11 +139,11 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 		return h.report(ctx, input, h.failure(context.Cause(ctx)), context.Cause(ctx))
 	}
 	if row.CancelRequestedAt != nil {
-		return h.report(ctx, input, runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled)}, nil)
+		return h.report(ctx, input, runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(hosterr.ReasonCancelled)}, nil)
 	}
 	input, err = h.startExecution(ctx, input, spec)
 	var denied *apierr.Error
-	if errors.As(err, &denied) && denied.Code == apierr.Forbidden {
+	if errors.As(err, &denied) && denied.Code == hosterr.Forbidden {
 		// A refused start leaves the claim held, and an unstarted lease lapse requeues for free, so only a failure
 		// report stops the same refusal recurring on every award.
 		err = denied
@@ -200,50 +202,50 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 		return spec, row, job, errors.New("node execution lacks an accepted claim or source entry")
 	}
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
-		return spec, row, job, executorError(apierr.SpecDrift, "accepted run spec is malformed")
+		return spec, row, job, executorError(hosterr.SpecDrift, "accepted run spec is malformed")
 	}
 	if input.Accepted.SpecHash == "" || string(spec.Hash) != input.Accepted.SpecHash || string(spec.PlanHash) != input.Accepted.PlanHash {
-		return spec, row, job, executorError(apierr.SpecDrift, "accepted run seal does not match execution")
+		return spec, row, job, executorError(hosterr.SpecDrift, "accepted run seal does not match execution")
 	}
 	if !reflect.DeepEqual(spec.Resolved.Engine, input.Engine.Identity) || !reflect.DeepEqual(input.Entry.Engine.Identity, input.Engine.Identity) {
-		return spec, row, job, executorError(apierr.SpecDrift, "source and executor must use the sealed engine")
+		return spec, row, job, executorError(hosterr.SpecDrift, "source and executor must use the sealed engine")
 	}
 	if input.RouteBinding.RunID != input.Accepted.RunID || input.RouteBinding.JobID != input.NodeID {
-		return spec, row, job, executorError(apierr.SpecDrift, "process binding does not match the accepted job")
+		return spec, row, job, executorError(hosterr.SpecDrift, "process binding does not match the accepted job")
 	}
 	hash, err := runspec.CanonicalHash(input.Accepted.Plan)
 	if err != nil {
 		return spec, row, job, err
 	}
 	if string(hash) != input.Accepted.PlanHash {
-		return spec, row, job, executorError(apierr.PlanDrift, "accepted plan hash does not match its declarations")
+		return spec, row, job, executorError(hosterr.PlanDrift, "accepted plan hash does not match its declarations")
 	}
 	row, err = h.deps.Store.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if err != nil {
 		return spec, row, job, err
 	}
 	if row.Ref.RunID != runspec.RunID(input.Accepted.RunID) || row.Ref.NodeID != runspec.NodeID(input.NodeID) || row.Generation != input.Generation || row.Attempt != input.Attempt || row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix {
-		return spec, row, job, executorError(apierr.LockHeld, "node execution no longer holds the accepted claim")
+		return spec, row, job, executorError(hosterr.LockHeld, "node execution no longer holds the accepted claim")
 	}
 	constructed, err := NewNodeInput(input.Accepted, row, input.Engine, input.GrantedRunner)
 	if err != nil {
 		return spec, row, job, err
 	}
 	if constructed.SpecHash != input.SpecHash || !reflect.DeepEqual(constructed.Execution, input.Execution) || row.ApplicationRetries < 0 {
-		return spec, row, job, executorError(apierr.SpecDrift, "node settings do not match the accepted job")
+		return spec, row, job, executorError(hosterr.SpecDrift, "node settings do not match the accepted job")
 	}
 	if input.Execution.Retry.Value < 0 || input.Execution.RetryBackoff.Value < 0 || input.Execution.Timeout.Value < 0 || input.Execution.NoProgressTimeout.Value < 0 {
-		return spec, row, job, executorError(apierr.SpecDrift, "sealed execution settings contain a negative budget")
+		return spec, row, job, executorError(hosterr.SpecDrift, "sealed execution settings contain a negative budget")
 	}
 	if err = json.Unmarshal(row.Spec, &job); err != nil || job.ID != input.NodeID {
-		return spec, row, job, executorError(apierr.PlanDrift, "persisted job specification is invalid")
+		return spec, row, job, executorError(hosterr.PlanDrift, "persisted job specification is invalid")
 	}
 	hash, err = runspec.CanonicalHash(job)
 	if err != nil {
 		return spec, row, job, err
 	}
 	if string(hash) != row.SpecHash {
-		return spec, row, job, executorError(apierr.PlanDrift, "persisted job hash does not match its declarations")
+		return spec, row, job, executorError(hosterr.PlanDrift, "persisted job hash does not match its declarations")
 	}
 	return spec, row, job, nil
 }
@@ -389,8 +391,8 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runst
 				if row.Ref.NodeID == runspec.NodeID(input.NodeID) && row.Generation == input.Generation && row.Attempt == input.Attempt &&
 					row.ClaimedBy == input.Authority.Holder && row.CapabilityPrefix == input.Authority.CapabilityPrefix &&
 					(snapshot.Run.CancelRequestedAt != nil || row.CancelRequestedAt != nil) {
-					cancelled := &lease.CancelError{Reason: string(apierr.ReasonCancelled)}
-					result = runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled)}
+					cancelled := &lease.CancelError{Reason: string(hosterr.ReasonCancelled)}
+					result = runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(hosterr.ReasonCancelled)}
 					runErr = cancelled
 					break
 				}
@@ -405,7 +407,7 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runst
 		return errors.Join(runErr, err)
 	}
 	if ctx.Err() != nil {
-		result = runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Masker.Mask(context.Cause(ctx).Error()))}
+		result = runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(hosterr.ReasonCancelled), MaskedError: limits.Error(h.deps.Masker.Mask(context.Cause(ctx).Error()))}
 		var admission *admissionFailure
 		if errors.As(context.Cause(ctx), &admission) && admission.Outcome == runstate.NodeSuperseded {
 			result.Outcome, result.Reason = admission.Outcome, admission.Reason

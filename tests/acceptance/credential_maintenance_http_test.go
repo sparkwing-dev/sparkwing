@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -122,16 +124,16 @@ func TestCredentialMaintenanceHTTPRequiresLiveAuthority(t *testing.T) {
 			t.Run(route.path+"/"+identity, func(t *testing.T) {
 				b := authorityMember()
 				p := &b.snapshot.Authorities[0].Principal
-				code := apierr.Forbidden
+				code := hosterr.Forbidden
 				switch identity {
 				case "anonymous":
-					b.raw, code = "", apierr.Unauthenticated
+					b.raw, code = "", hosterr.Unauthenticated
 				case "revoked":
-					p.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "expired":
-					p.Capability.ExpiresAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.ExpiresAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "grant":
 					p.Capability.Grants = nil
 				case "machine":
@@ -146,10 +148,10 @@ func TestCredentialMaintenanceHTTPRequiresLiveAuthority(t *testing.T) {
 						b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
 					}
 				case "binding":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "outside team"}
+					b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "outside team"}
 				}
 				w := authorityHTTP(mutationServer(t, nil, nil, b), b, route.method, route.path, "")
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				if w.Header().Get("Cache-Control") != "no-store" {
 					t.Fatal("credential response is cacheable")
 				}
@@ -312,7 +314,7 @@ func TestCredentialRotationHTTPGitFailureCommitsNothing(t *testing.T) {
 		b := authorityMember()
 		f := &credentialMaintenance{team: "team", secrets: []store.Secret{{Name: "GOOD", Masked: true, Value: sealed}}, git: []store.GitCredential{row}}
 		w := authorityHTTP(maintenanceServer(t, b, f).WithSecretsCipher(rotating).Handler(), b, "POST", "/api/v1/secrets/rotate", "")
-		assertEngineError(t, w, 500, apierr.Internal)
+		assertEngineError(t, w, 500, hosterr.Internal)
 		if f.secrets[0].Value != sealed || f.git[0] != row {
 			t.Fatal("failed rotation changed a row")
 		}
@@ -326,29 +328,29 @@ func TestCredentialMaintenanceHTTPDependenciesAndTransactionRefusals(t *testing.
 			t.Run(route.path+"/"+failure, func(t *testing.T) {
 				b := authorityMember()
 				f := &credentialMaintenance{team: "team"}
-				code, calls := apierr.Internal, 0
+				code, calls := hosterr.Internal, 0
 				switch failure {
 				case "nil":
-					f.missing, code = true, apierr.PolicyMissing
+					f.missing, code = true, hosterr.PolicyMissing
 				case "foreign":
-					f.team, code = "foreign", apierr.PolicyMissing
+					f.team, code = "foreign", hosterr.PolicyMissing
 				case "resolver":
 					f.resolveErr = errors.New("private resolver diagnostic")
 				case "private":
 					f.err, calls = errors.New("private store diagnostic"), 1
 				case "revoked":
-					f.err, calls, code = &apierr.Error{Code: apierr.Unauthenticated, Message: "revoked before transaction"}, 1, apierr.Unauthenticated
+					f.err, calls, code = &apierr.Error{Code: hosterr.Unauthenticated, Message: "revoked before transaction"}, 1, hosterr.Unauthenticated
 				case "grant":
-					f.err, calls, code = &apierr.Error{Code: apierr.Forbidden, Message: "membership changed", Details: map[string]any{"reason": apierr.ReasonMissingGrant}}, 1, apierr.Forbidden
+					f.err, calls, code = &apierr.Error{Code: hosterr.Forbidden, Message: "membership changed", Details: map[string]any{"reason": hosterr.ReasonMissingGrant}}, 1, hosterr.Forbidden
 				case "default":
-					code = apierr.PolicyMissing
+					code = hosterr.PolicyMissing
 				}
 				s := maintenanceServer(t, b, f).WithSecretsCipher(cipher)
 				if failure == "default" {
 					bindTenantPort[controller.SourceAuditReader](bindTenantPort[controller.CredentialRotator](s, nil), nil)
 				}
 				w := authorityHTTP(s.Handler(), b, route.method, route.path, "")
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				if f.calls != calls || strings.Contains(w.Body.String(), "private") {
 					t.Fatalf("HTTP %d %s calls=%d", w.Code, w.Body.String(), f.calls)
 				}
@@ -373,14 +375,14 @@ func TestCredentialRotationHTTPBodyCipherAndCSRF(t *testing.T) {
 			body = `{"team":"foreign"}`
 		case "no key":
 			s.WithSecretsCipher(nil)
-			code = apierr.Unavailable
+			code = hosterr.Unavailable
 		case "no bound key":
 			s.WithSecretsCipher(plainCipher{})
-			code = apierr.Unavailable
+			code = hosterr.Unavailable
 		case "csrf":
 			p := &b.snapshot.Authorities[0].Principal
 			p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
-			code = apierr.Forbidden
+			code = hosterr.Forbidden
 		}
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/rotate", strings.NewReader(body))
 		if invalid == "csrf" {
@@ -390,7 +392,7 @@ func TestCredentialRotationHTTPBodyCipherAndCSRF(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
-		assertEngineError(t, w, apierr.Status(code), code)
+		assertEngineError(t, w, hosterr.Status(code), code)
 		if f.calls != 0 {
 			t.Fatal("invalid rotation reached transaction")
 		}
@@ -424,7 +426,7 @@ func TestCredentialAuditHTTPRefusesForeignRowsWithoutPartialList(t *testing.T) {
 	b := authorityMember()
 	f := &credentialMaintenance{team: "team", audits: []capability.SourceReleaseAudit{{Team: "team", Host: "partial.invalid"}, {Team: "foreign", Host: "foreign.invalid"}}}
 	w := authorityHTTP(maintenanceServer(t, b, f).Handler(), b, "GET", "/api/v1/team/git-credentials/releases", "")
-	assertEngineError(t, w, 500, apierr.Internal)
+	assertEngineError(t, w, 500, hosterr.Internal)
 	if strings.Contains(w.Body.String(), "invalid") {
 		t.Fatal("foreign audit returned a partial list")
 	}
@@ -504,7 +506,7 @@ func TestCredentialRotationHTTPCipherFailuresCommitNothing(t *testing.T) {
 			}
 			beforeSecrets, beforeGit := append([]store.Secret(nil), f.secrets...), append([]store.GitCredential(nil), f.git...)
 			cipher := rotationCipherFailure{Cipher: rotating}
-			code := apierr.Internal
+			code := hosterr.Internal
 			switch failure {
 			case "key location":
 				cipher.sealErr, code = secrets.ErrKeyRefused, apierr.Conflict
@@ -513,10 +515,10 @@ func TestCredentialRotationHTTPCipherFailuresCommitNothing(t *testing.T) {
 			case "provider":
 				cipher.sealErr = errors.New("private provider diagnostic")
 			case "provider API error":
-				cipher.sealErr = &apierr.Error{Code: apierr.Forbidden, Message: "private provider diagnostic", Hint: "private hint", Details: map[string]any{"private": "diagnostic"}}
+				cipher.sealErr = &apierr.Error{Code: hosterr.Forbidden, Message: "private provider diagnostic", Hint: "private hint", Details: map[string]any{"private": "diagnostic"}}
 			}
 			w := authorityHTTP(maintenanceServer(t, b, f).WithSecretsCipher(cipher).Handler(), b, "POST", "/api/v1/secrets/rotate", "")
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			if !reflect.DeepEqual(f.secrets, beforeSecrets) || !reflect.DeepEqual(f.git, beforeGit) || strings.Contains(w.Body.String(), "private") {
 				t.Fatalf("%s/%s HTTP %d %s", resource, failure, w.Code, w.Body.String())
 			}
@@ -540,7 +542,7 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		func(context.Context, store.Team) (controller.CredentialRotator, error) { return nil, nil }), func(context.Context, store.Team) (controller.SourceAuditReader, error) { return nil, nil }).Handler()
 	for _, route := range []struct{ method, path string }{{"POST", "/api/v1/secrets/rotate"}, {"GET", "/api/v1/team/git-credentials/releases"}} {
 		w := authorityHTTP(h, b, route.method, route.path, "")
-		assertEngineError(t, w, 500, apierr.PolicyMissing)
+		assertEngineError(t, w, 500, hosterr.PolicyMissing)
 	}
 	for _, team := range []store.Team{"team", "foreign"} {
 		tenant, err := s.ForTeam(t.Context(), team)

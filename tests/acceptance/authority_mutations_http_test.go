@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -63,26 +65,26 @@ func TestAuthorityMemberDirectoryHTTP(t *testing.T) {
 			case "empty":
 				f.members = nil
 			case "anonymous":
-				b.raw, code, reads = "", apierr.Unauthenticated, 0
+				b.raw, code, reads = "", hosterr.Unauthenticated, 0
 			case "no grant":
-				b.snapshot.Authorities[0].Principal.Capability.Grants, code, reads = nil, apierr.Forbidden, 0
+				b.snapshot.Authorities[0].Principal.Capability.Grants, code, reads = nil, hosterr.Forbidden, 0
 			case "machine root":
-				b.snapshot.Authorities[0].Principal.Capability.Subject.Kind, code, reads = capability.SubjectMachine, apierr.Forbidden, 0
+				b.snapshot.Authorities[0].Principal.Capability.Subject.Kind, code, reads = capability.SubjectMachine, hosterr.Forbidden, 0
 			case "bound claim":
 				b = newCredentialBoundary()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
-				code, reads = apierr.Forbidden, 0
+				code, reads = hosterr.Forbidden, 0
 			case "membership lost":
-				b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code, reads = &b.snapshot.Now, apierr.Unauthenticated, 0
+				b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code, reads = &b.snapshot.Now, hosterr.Unauthenticated, 0
 			case "private error":
-				f.readErr, code = errors.New("private credential"), apierr.Internal
+				f.readErr, code = errors.New("private credential"), hosterr.Internal
 			}
 			w := authorityHTTP(authorityServer(t, b, f), b, "GET", "/api/v1/team/members?team=foreign", "")
 			if f.memberReads != reads || f.writes != 0 {
 				t.Fatalf("reads %d, writes %d; HTTP %d %s", f.memberReads, f.writes, w.Code, w.Body.String())
 			}
 			if code != "" {
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				return
 			}
 			var page struct {
@@ -125,39 +127,39 @@ func TestAuthorityMutationHTTP(t *testing.T) {
 				status, code, writes := 204, apierr.Code(""), 1
 				switch name {
 				case "anonymous":
-					b.raw, status, code, writes = "", 401, apierr.Unauthenticated, 0
+					b.raw, status, code, writes = "", 401, hosterr.Unauthenticated, 0
 				case "revoked":
 					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-					status, code, writes = 401, apierr.Unauthenticated, 0
+					status, code, writes = 401, hosterr.Unauthenticated, 0
 				case "missing grant":
 					b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-					status, code, writes = 403, apierr.Forbidden, 0
+					status, code, writes = 403, hosterr.Forbidden, 0
 				case "wrong subject":
 					b.snapshot.Authorities[0].Principal.Capability.Subject.Kind = capability.SubjectMachine
-					status, code, writes = 403, apierr.Forbidden, 0
+					status, code, writes = 403, hosterr.Forbidden, 0
 				case "bound claim":
 					b = newCredentialBoundary()
 					b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead, capability.TeamAdmin, capability.OperatorTokens}
-					status, code, writes = 403, apierr.Forbidden, 0
+					status, code, writes = 403, hosterr.Forbidden, 0
 				case "wrong audience":
 					b = newCredentialBoundary()
 					b.snapshot.Authorities[0].Principal.Capability.Audience = capability.NodeHost
 					b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")
 					b.snapshot.Authorities[0].Principal.Capability.Digest = sha256.Sum256([]byte(b.raw))
 					b.snapshot.Binding.ProcessAlive = true
-					status, code, writes = 403, apierr.Forbidden, 0
+					status, code, writes = 403, hosterr.Forbidden, 0
 				case "binding refusal":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "resource does not belong to caller"}
-					status, code, writes = 403, apierr.Forbidden, 0
+					b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "resource does not belong to caller"}
+					status, code, writes = 403, hosterr.Forbidden, 0
 				case "transaction race":
-					f.err = &apierr.Error{Code: apierr.Unauthenticated, Message: "actor revoked before commit"}
-					status, code = 401, apierr.Unauthenticated
+					f.err = &apierr.Error{Code: hosterr.Unauthenticated, Message: "actor revoked before commit"}
+					status, code = 401, hosterr.Unauthenticated
 				case "missing target":
 					f.err = store.ErrNotFound
 					status, code = 404, apierr.NotFound
 				case "private error":
 					f.err = errors.New("private credential")
-					status, code = 500, apierr.Internal
+					status, code = 500, hosterr.Internal
 				}
 				w := authorityHTTP(authorityServer(t, b, f), b, route.method, route.path, route.body)
 				if f.writes != writes {
@@ -204,7 +206,7 @@ func TestAuthorityMutationHTTPMissingStoreFailsClosed(t *testing.T) {
 		}
 		s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
 		w := authorityHTTP(s.Handler(), b, "DELETE", path, "")
-		assertEngineError(t, w, 500, apierr.PolicyMissing)
+		assertEngineError(t, w, 500, hosterr.PolicyMissing)
 	}
 }
 
@@ -219,7 +221,7 @@ func TestAuthorityMutationHTTPUnsupportedMethods(t *testing.T) {
 			}
 			w := httptest.NewRecorder()
 			controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(w, httptest.NewRequest(method, route[0], nil))
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+			assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 			allowed := route[1]
 			if method == "HEAD" && strings.HasSuffix(route[0], "/tokens/target") {
 				allowed = "GET"
@@ -281,7 +283,7 @@ func TestAuthorityMutationHTTPRequiresCSRF(t *testing.T) {
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			authorityServer(t, b, f).ServeHTTP(w, r)
-			assertEngineError(t, w, 403, apierr.Forbidden)
+			assertEngineError(t, w, 403, hosterr.Forbidden)
 			if f.writes != 0 {
 				t.Fatal("missing CSRF proof reached transaction")
 			}
@@ -296,13 +298,13 @@ func TestAuthorityMutationHTTPStoreGuards(t *testing.T) {
 	}{
 		{store.ErrNotMember, apierr.NotFound},
 		{store.ErrLastOwner, apierr.Conflict},
-		{store.ErrRoleAboveOwn, apierr.Forbidden},
+		{store.ErrRoleAboveOwn, hosterr.Forbidden},
 	} {
 		for _, method := range []string{"PATCH", "DELETE"} {
 			t.Run(method+"/"+string(tc.code), func(t *testing.T) {
 				b, f := authorityMember(), &engineTransactions{err: tc.err}
 				w := authorityHTTP(authorityServer(t, b, f), b, method, "/api/v1/team/members/member", `{"role":"reader"}`)
-				assertEngineError(t, w, apierr.Status(tc.code), tc.code)
+				assertEngineError(t, w, hosterr.Status(tc.code), tc.code)
 				if f.writes != 1 {
 					t.Fatalf("transactions = %d", f.writes)
 				}
@@ -316,14 +318,14 @@ func TestAuthorityMutationHTTPKeepsAuthenticatedActorDuringBodyRace(t *testing.T
 	actor := b.snapshot.Authorities[0].Principal.Authority
 	body := &reportBody{Reader: strings.NewReader(`{"role":"reader"}`), beforeRead: func() {
 		b.snapshot.Authorities[0].Principal.Authority.ID = "replacement"
-		f.err = &apierr.Error{Code: apierr.Unauthenticated, Message: "actor revoked before commit"}
+		f.err = &apierr.Error{Code: hosterr.Unauthenticated, Message: "actor revoked before commit"}
 	}}
 	r := httptest.NewRequest(http.MethodPatch, "/api/v1/team/members/member", body)
 	r.Header.Set("Authorization", "Bearer "+b.raw)
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	authorityServer(t, b, f).ServeHTTP(w, r)
-	assertEngineError(t, w, 401, apierr.Unauthenticated)
+	assertEngineError(t, w, 401, hosterr.Unauthenticated)
 	if f.writes != 1 || f.authorityActor.Authority != actor {
 		t.Fatalf("transaction replaced authenticated actor: %+v", f.authorityActor)
 	}
@@ -356,7 +358,7 @@ func (d authorityDirectory) ReadAuthentication(ctx context.Context, lookup capab
 	if b := d[lookup.Digest]; b != nil {
 		return b.ReadAuthentication(ctx, lookup, evidence)
 	}
-	return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown credential"}
+	return capability.AuthenticationSnapshot{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "unknown credential"}
 }
 
 func TestAuthorityRevocationHTTPStopsDescendantsAcrossRouters(t *testing.T) {
@@ -452,7 +454,7 @@ func TestAuthorityRevocationHTTPStopsDescendantsAcrossRouters(t *testing.T) {
 			writes := f.writes
 			for _, router := range routers {
 				w := authorityHTTP(router, victim, victimMethod, victimPath, victimBody)
-				assertEngineError(t, w, 401, apierr.Unauthenticated)
+				assertEngineError(t, w, 401, hosterr.Unauthenticated)
 			}
 			if f.writes != writes {
 				t.Fatal("dead descendant reached a transaction")
@@ -476,7 +478,7 @@ func TestAuthorityMutationHTTPDeadTokensUseCanonicalRefusal(t *testing.T) {
 				b.raw = "garbage"
 			}
 			w := authorityHTTP(authorityServer(t, b, f), b, "DELETE", "/api/v1/tokens/target", "")
-			assertEngineError(t, w, 401, apierr.Unauthenticated)
+			assertEngineError(t, w, 401, hosterr.Unauthenticated)
 			if f.writes != 0 || w.Header().Get("Retry-After") != "" || strings.Contains(w.Body.String(), "token_state") {
 				t.Fatalf("dead credential response: %d %s, writes %d", w.Code, w.Body.String(), f.writes)
 			}

@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -16,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ClaimController claims through the shared queue and must honor context cancellation.
@@ -381,7 +382,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			} else {
 				transportSince = time.Time{}
 			}
-			if delay, ok := apierr.RetryDelay(outcome.err); ok {
+			if delay, ok := hosterr.RetryDelay(outcome.err); ok {
 				backoffUntil = time.Now().Add(max(delay, l.Config.PollInterval))
 				continue
 			}

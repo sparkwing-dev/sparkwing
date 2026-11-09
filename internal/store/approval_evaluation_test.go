@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -329,7 +331,7 @@ func TestGeneratorEvaluationCannotReadApprovalSecretsOrPipelineReferences(t *tes
 		}
 		err = s.AsOperator().CheckBinding(t.Context(), principal, rule, target)
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Details["reason"] != apierr.ReasonBinding {
+		if !errors.As(err, &refusal) || refusal.Details["reason"] != hosterr.ReasonBinding {
 			t.Fatalf("generator reached declaration lookup: target=%+v error=%v", target, err)
 		}
 	}

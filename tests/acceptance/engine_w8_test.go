@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -113,7 +115,7 @@ func TestEngineW8IndexFailureComponents(t *testing.T) {
 			}
 			_, err = empty.Index(t.Context(), now)
 			var problem *apierr.Error
-			if !errors.As(err, &problem) || problem.Code != apierr.Unavailable {
+			if !errors.As(err, &problem) || problem.Code != hosterr.Unavailable {
 				t.Fatalf("first use: %v", err)
 			}
 		})
@@ -185,7 +187,7 @@ func TestEngineW8FallbackHonorsSharedMachineRevocation(t *testing.T) {
 			}
 			_, err = engine.Evaluate(result.Index, "v0.10.0", refreshedAt)
 			var problem *apierr.Error
-			if !errors.As(err, &problem) || problem.Code != apierr.VersionRevoked {
+			if !errors.As(err, &problem) || problem.Code != hosterr.VersionRevoked {
 				t.Fatalf("newer cached revocation was lost: %v", err)
 			}
 			if _, err := engine.Evaluate(result.Index, "v0.20.0", refreshedAt); err != nil {
@@ -239,7 +241,7 @@ func TestEngineW8Components(t *testing.T) {
 		}
 		_, err = empty.Index(context.Background(), now)
 		var api *apierr.Error
-		if !errors.As(err, &api) || api.Code != apierr.Unavailable {
+		if !errors.As(err, &api) || api.Code != hosterr.Unavailable {
 			t.Fatalf("first use error: %v", err)
 		}
 	})
@@ -263,7 +265,7 @@ func TestEngineW8Components(t *testing.T) {
 		}
 		_, err = engine.Evaluate(verified, "v0.10.0", now)
 		var api *apierr.Error
-		if !errors.As(err, &api) || api.Code != apierr.VersionRevoked || api.Hint != "sparkwing pipeline upgrade" {
+		if !errors.As(err, &api) || api.Code != hosterr.VersionRevoked || api.Hint != "sparkwing pipeline upgrade" {
 			t.Fatalf("revocation error: %v", err)
 		}
 		_, err = engine.EvaluateRunner(verified, "v0.10.0", now)

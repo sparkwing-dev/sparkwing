@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -118,11 +120,11 @@ func dataAbsent(err error) bool {
 	if !errors.As(err, &failure) {
 		return false
 	}
-	if failure.Code == apierr.BlobMissing || failure.Code == apierr.NotFound {
+	if failure.Code == hosterr.BlobMissing || failure.Code == apierr.NotFound {
 		return true
 	}
 	reason := failure.Details["reason"]
-	return failure.Code == apierr.Forbidden && (reason == apierr.ReasonDigestNotReadable || reason == string(apierr.ReasonDigestNotReadable))
+	return failure.Code == hosterr.Forbidden && (reason == hosterr.ReasonDigestNotReadable || reason == string(hosterr.ReasonDigestNotReadable))
 }
 
 func dataBudgetError(err error, budget blob.Budget) error {

@@ -1,5 +1,7 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -287,7 +289,7 @@ func TestMetadataMissingStepDoesNotCreatePlaceholder(t *testing.T) {
 	}
 	err := f.tenant.RecordStep(t.Context(), store.StepReport{Actor: f.holder, Attempt: metadataAttempt(t, f), StepID: "missing", State: "running"})
 	var refused *apierr.Error
-	if !errors.As(err, &refused) || refused.Code != apierr.IllegalTransition {
+	if !errors.As(err, &refused) || refused.Code != hosterr.IllegalTransition {
 		t.Fatalf("reopened skipped step: %v", err)
 	}
 }
@@ -352,7 +354,7 @@ func TestMetadataAnnotationByteCapacityRollsBackTheRejectedAppend(t *testing.T) 
 					continue
 				}
 				var refused *apierr.Error
-				if !errors.As(err, &refused) || refused.Code != apierr.LimitExceeded {
+				if !errors.As(err, &refused) || refused.Code != hosterr.LimitExceeded {
 					t.Fatalf("byte refusal: %v", err)
 				}
 				for _, want := range []string{"run annotation byte limit is", "current usage is", "requested addition is", "support@sparkwing.dev"} {

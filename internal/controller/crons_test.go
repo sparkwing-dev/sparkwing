@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -218,7 +220,7 @@ func TestControllerCrons_BoundsEntriesBeforeResolvingSource(t *testing.T) {
 		entries[i] = map[string]any{"pipeline": fmt.Sprintf("job-%d", i), "cron": "0 3 * * *"}
 	}
 	body["schedules"] = entries
-	var refused apierr.Envelope
+	var refused hosterr.Envelope
 	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, body, http.StatusConflict, &refused)
 	if probe.calls != 0 || refused.Error == nil || refused.Error.Code != apierr.Conflict {
 		t.Fatalf("overfull declaration: refusal=%+v source calls=%d", refused, probe.calls)

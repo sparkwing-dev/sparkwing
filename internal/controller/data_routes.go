@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -106,15 +108,15 @@ func dataRouteError(err error) error {
 	var quota *store.DownloadCapError
 	switch {
 	case errors.Is(err, blob.ErrDigestNotReadable):
-		return &apierr.Error{Code: apierr.Forbidden, Message: "digest is not readable", Details: map[string]any{"reason": apierr.ReasonDigestNotReadable}}
+		return &apierr.Error{Code: hosterr.Forbidden, Message: "digest is not readable", Details: map[string]any{"reason": hosterr.ReasonDigestNotReadable}}
 	case errors.Is(err, blob.ErrIntegrity):
-		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "stored bytes do not match their declared digest or size"}
+		return &apierr.Error{Code: hosterr.IntegrityFailure, Message: "stored bytes do not match their declared digest or size"}
 	case errors.Is(err, blob.ErrNotFound), errors.Is(err, store.ErrNotFound):
-		return &apierr.Error{Code: apierr.BlobMissing, Message: "blob is absent or tombstoned"}
+		return &apierr.Error{Code: hosterr.BlobMissing, Message: "blob is absent or tombstoned"}
 	case errors.Is(err, blob.ErrBudget), errors.Is(err, context.DeadlineExceeded):
-		return &apierr.Error{Code: apierr.DeadlineExceeded, Message: "data query deadline exceeded"}
+		return &apierr.Error{Code: hosterr.DeadlineExceeded, Message: "data query deadline exceeded"}
 	case errors.As(err, &quota):
-		return &apierr.Error{Code: apierr.RateLimited, Message: quota.Error(), Details: map[string]any{"retry_after_ms": quota.RetryAfter.Milliseconds()}}
+		return &apierr.Error{Code: hosterr.RateLimited, Message: quota.Error(), Details: map[string]any{"retry_after_ms": quota.RetryAfter.Milliseconds()}}
 	default:
 		return engineLookupError(err)
 	}

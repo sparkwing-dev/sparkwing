@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -423,7 +425,7 @@ func (c capacityBackoffControl) Claim(context.Context, string, []string) (*Cloud
 	if !c.backoff {
 		return nil, nil
 	}
-	return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(240000)}}
+	return nil, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(240000)}}
 }
 
 // hack: an old controller's strict decoder refuses the ceiling field, so the real handler gets an

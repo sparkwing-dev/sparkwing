@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -115,7 +117,7 @@ func TestUpgradeReportPreservesOutputFailure(t *testing.T) {
 
 func TestUpgradePreservesPolicyAndVerificationFailures(t *testing.T) {
 	root := upgradeFixture(t, engineid.GoSDK)
-	for _, failure := range []error{&apierr.Error{Code: apierr.VersionRevoked, Message: "signed security reason", Hint: "sparkwing pipeline upgrade"}, errors.New("type checking failed")} {
+	for _, failure := range []error{&apierr.Error{Code: hosterr.VersionRevoked, Message: "signed security reason", Hint: "sparkwing pipeline upgrade"}, errors.New("type checking failed")} {
 		fake := &fakeUpgradeResolver{err: failure}
 		var out bytes.Buffer
 		command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, out: &out}
@@ -391,7 +393,7 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 		encoded := base64.StdEncoding.EncodeToString([]byte(secret))
 		for failAt := 0; failAt < 5; failAt++ {
 			calls := 0
-			failure := &apierr.Error{Code: apierr.Internal, Message: secret, Hint: encoded, Details: map[string]any{secret: []string{encoded, secret}}}
+			failure := &apierr.Error{Code: hosterr.Internal, Message: secret, Hint: encoded, Details: map[string]any{secret: []string{encoded, secret}}}
 			fail := func() error {
 				calls++
 				if calls == failAt+1 {
@@ -425,7 +427,7 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 				}
 				var out bytes.Buffer
 				encode := func(w io.Writer, failure *apierr.Error) error {
-					return json.NewEncoder(w).Encode(apierr.Envelope{Error: failure})
+					return json.NewEncoder(w).Encode(hosterr.Envelope{Error: failure})
 				}
 				if err := writeInvocationError(&out, &invocationError{inv: inv, cause: err}, encode); err != nil {
 					t.Fatal(err)

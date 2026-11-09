@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -422,7 +424,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 		}
 		forbidden := func(err error) bool {
 			var failure *apierr.Error
-			return errors.As(err, &failure) && failure.Code == apierr.Forbidden
+			return errors.As(err, &failure) && failure.Code == hosterr.Forbidden
 		}
 		for _, target := range []capability.Target{{Team: "b", RunID: "run", NodeID: "stamp"}, {Team: "a", RunID: "other", NodeID: "stamp"}} {
 			if _, err := host.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}, capability.RequestEvidence{Target: target}); !forbidden(err) {

@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -67,7 +69,7 @@ func TestRepositoryResolveUsesTeamsPrivateAppInstallation(t *testing.T) {
 		got, err := client.ResolveRepository(t.Context(), scoped, "git@github.com:acme/plans.git")
 		if scope == "gh:701" {
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
+			if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden {
 				t.Fatalf("outside scope: %+v %v", got, err)
 			}
 		} else if err != nil || got.Key != "gh:702" {
@@ -91,7 +93,7 @@ func TestRepositoryResolveUsesTeamsPrivateAppInstallation(t *testing.T) {
 	}
 	_, err = client.ResolveRepository(t.Context(), options, "https://github.com/acme/missing.git")
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
+	if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden {
 		t.Fatalf("uncovered repository: %v", err)
 	}
 }

@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -35,13 +37,13 @@ func TestEngineJobCancelHTTP(t *testing.T) {
 					b.snapshot.Binding.RunCancelled = true
 				case "missing grant":
 					b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-					status, code, writes = 403, apierr.Forbidden, 0
+					status, code, writes = 403, hosterr.Forbidden, 0
 				case "revoked":
 					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-					status, code, writes = 401, apierr.Unauthenticated, 0
+					status, code, writes = 401, hosterr.Unauthenticated, 0
 				case "foreign run":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "wrong run"}
-					status, code, writes = 403, apierr.Forbidden, 0
+					b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "wrong run"}
+					status, code, writes = 403, hosterr.Forbidden, 0
 				case "bad body":
 					body = `null`
 					status, code, writes = 400, apierr.BadRequest, 0
@@ -50,10 +52,10 @@ func TestEngineJobCancelHTTP(t *testing.T) {
 					status, code, writes = 400, apierr.BadRequest, 0
 				case "store race":
 					f.err = &store.ErrIllegalTransition{Reason: store.ReasonHolderRights}
-					status, code = 409, apierr.LockHeld
+					status, code = 409, hosterr.LockHeld
 				case "private error":
 					f.err = errors.New("private credential")
-					status, code = 500, apierr.Internal
+					status, code = 500, hosterr.Internal
 				}
 				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/cancel", body)
 				if f.writes != writes {
@@ -112,22 +114,22 @@ func TestEngineFailureHTTP(t *testing.T) {
 				status, code, reads = 400, apierr.BadRequest, 0
 			case "missing grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-				status, code, reads = 403, apierr.Forbidden, 0
+				status, code, reads = 403, hosterr.Forbidden, 0
 			case "revoked":
 				b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-				status, code, reads = 401, apierr.Unauthenticated, 0
+				status, code, reads = 401, hosterr.Unauthenticated, 0
 			case "cancelled":
 				b.snapshot.Binding.RunCancelled = true
-				status, code, reads = 401, apierr.Unauthenticated, 0
+				status, code, reads = 401, hosterr.Unauthenticated, 0
 			case "undeclared recovery":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "undeclared recovery"}
-				status, code, reads = 403, apierr.Forbidden, 0
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "undeclared recovery"}
+				status, code, reads = 403, hosterr.Forbidden, 0
 			case "store race":
 				f.readErr = &store.ErrIllegalTransition{Reason: store.ReasonStaleGeneration}
-				status, code = 409, apierr.LockHeld
+				status, code = 409, hosterr.LockHeld
 			case "private error":
 				f.readErr = errors.New("private credential")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			}
 			w := snapshotRequest(expansionServer(t, b, f), b, "GET", path)
 			if f.failureReads != reads || f.writes != 0 {
@@ -156,7 +158,7 @@ func TestEngineJobControlAuthenticatesBeforeDecodeErrors(t *testing.T) {
 	b.raw = ""
 	f := &engineTransactions{}
 	w := snapshotRequest(expansionServer(t, b, f), b, "GET", "/api/v1/runs/run/jobs/source/failure?generation=secret")
-	assertEngineError(t, w, 401, apierr.Unauthenticated)
+	assertEngineError(t, w, 401, hosterr.Unauthenticated)
 	if f.failureReads != 0 || f.writes != 0 {
 		t.Fatal("unauthenticated request reached transaction")
 	}
@@ -173,7 +175,7 @@ func TestEngineJobCancelBodyRace(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	expansionServer(t, b, f).ServeHTTP(w, r)
-	assertEngineError(t, w, 409, apierr.LockHeld)
+	assertEngineError(t, w, 409, hosterr.LockHeld)
 	change, ok := f.nodeChange.(store.CancelNode)
 	if !ok {
 		t.Fatalf("cancel command=%T", f.nodeChange)
@@ -194,7 +196,7 @@ func TestEngineJobControlMethods(t *testing.T) {
 			t.Run(tc.method+"/"+method, func(t *testing.T) {
 				b, f := newCredentialBoundary(), &engineTransactions{}
 				w := snapshotRequest(expansionServer(t, b, f), b, method, tc.path)
-				assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+				assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 				if w.Header().Get("Allow") != tc.method || f.writes != 0 || f.failureReads != 0 {
 					t.Fatalf("headers=%v", w.Header())
 				}

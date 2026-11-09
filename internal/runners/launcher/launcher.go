@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -157,7 +159,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 				cooldown = time.Now().Add(poll)
 				launched, err = l.claim(ctx)
 				failure, ok := err.(*apierr.Error) //nolint:errorlint // Joined faults must remain WARN.
-				startupRateLimit = firstClaim && !launched && ok && failure.Code == apierr.RateLimited
+				startupRateLimit = firstClaim && !launched && ok && failure.Code == hosterr.RateLimited
 				firstClaim = false
 			}
 			if err != nil {
@@ -203,7 +205,7 @@ func later(a, b time.Time) time.Time {
 }
 
 func retryWait(err error, poll time.Duration) time.Duration {
-	if delay, ok := apierr.RetryDelay(err); ok {
+	if delay, ok := hosterr.RetryDelay(err); ok {
 		return max(delay, poll)
 	}
 	return poll
@@ -255,7 +257,7 @@ func (l *Launcher) placeWaiting(ctx context.Context) error {
 		}
 		_, err := l.launch(ctx, award)
 		var failure *apierr.Error
-		if errors.Is(err, limits.ErrNoTime) || errors.As(err, &failure) && failure.Code == apierr.LockHeld {
+		if errors.Is(err, limits.ErrNoTime) || errors.As(err, &failure) && failure.Code == hosterr.LockHeld {
 			errs = append(errs, l.releaseCapacity(ctx, award.Binding))
 		}
 		if err != nil && err != ErrNoDedicatedNode { //nolint:errorlint // Retain faults joined with the expected wait.

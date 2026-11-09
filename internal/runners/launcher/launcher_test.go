@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -480,7 +482,7 @@ func (c *retryAfterControl) Claim(ctx context.Context, _ string, _ []string) (*C
 		c.stop()
 		return nil, nil
 	}
-	return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(7000)}}
+	return nil, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(7000)}}
 }
 
 func TestLauncherWaitsOutAControllerRetryAfter(t *testing.T) {

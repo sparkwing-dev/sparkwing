@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -195,7 +197,7 @@ func TestPipelineEngineSwitchRechecksPolicyInSelectedExecutable(t *testing.T) {
 	command, selected, output, calls := engineSwitchFixture(t, engineid.GoSDK)
 	command.current = selected.Executable
 	resolved := 0
-	denial := &apierr.Error{Code: apierr.VersionRevoked, Message: "signed security reason", Hint: engine.UpgradeCommand}
+	denial := &apierr.Error{Code: hosterr.VersionRevoked, Message: "signed security reason", Hint: engine.UpgradeCommand}
 	command.resolve = func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error) {
 		resolved++
 		if resolved == 1 {
@@ -215,7 +217,7 @@ func TestPipelineEngineSwitchRechecksPolicyInSelectedExecutable(t *testing.T) {
 }
 
 func TestPipelineEngineSwitchNeverFallsBackAfterResolverDenial(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.VersionRevoked, apierr.VersionUnsupported, apierr.Unavailable, apierr.IntegrityFailure} {
+	for _, code := range []apierr.Code{hosterr.VersionRevoked, hosterr.VersionUnsupported, hosterr.Unavailable, hosterr.IntegrityFailure} {
 		t.Run(string(code), func(t *testing.T) {
 			command, _, output, calls := engineSwitchFixture(t, engineid.GoSDK)
 			denial := &apierr.Error{Code: code, Message: "exact release unavailable", Hint: engine.UpgradeCommand}

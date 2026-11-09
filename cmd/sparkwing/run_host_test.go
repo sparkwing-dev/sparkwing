@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -992,7 +994,7 @@ func TestLocalRemoteCacheRequiresTheSealedOptIn(t *testing.T) {
 		deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 		err := runLocalCommand(t.Context(), "ci", flags, []string{"--password", "private-value"}, io.Discard, deps)
 		var unavailable *apierr.Error
-		if !errors.As(err, &unavailable) || unavailable.Code != apierr.Unavailable || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "close"}) {
+		if !errors.As(err, &unavailable) || unavailable.Code != hosterr.Unavailable || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "close"}) {
 			t.Fatalf("unbound storage reached intake: calls=%v error=%v", calls, err)
 		}
 	}

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -105,7 +107,7 @@ func TestRunCancellationRacesOwnerAwardProperty(t *testing.T) {
 			} else {
 				var denied *apierr.Error
 				var illegal *ErrIllegalTransition
-				if !errors.Is(claimErr, ErrNotFound) && (!errors.As(claimErr, &denied) || denied.Code != apierr.LockHeld && denied.Code != apierr.Forbidden) && (!errors.As(claimErr, &illegal) || illegal.Reason != ReasonHolderRights) {
+				if !errors.Is(claimErr, ErrNotFound) && (!errors.As(claimErr, &denied) || denied.Code != hosterr.LockHeld && denied.Code != hosterr.Forbidden) && (!errors.As(claimErr, &illegal) || illegal.Reason != ReasonHolderRights) {
 					t.Fatal(claimErr)
 				}
 				rewriteSchemaCount(t, s.db, "billing_awards", 0)

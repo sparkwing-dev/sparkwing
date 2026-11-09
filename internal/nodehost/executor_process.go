@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -75,7 +77,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		return h.failure(err), err
 	}
 	if !reflect.DeepEqual(resolved.Identity, spec.Resolved.Engine) {
-		err = executorError(apierr.SpecDrift, "engine resolution changed the sealed release")
+		err = executorError(hosterr.SpecDrift, "engine resolution changed the sealed release")
 		return h.failure(err), err
 	}
 	input.Engine = resolved
@@ -124,7 +126,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(readErr), readErr
 		}
 		if row.Ref != source || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeFailed {
-			err = executorError(apierr.SpecDrift, "recovery source is not a failed job")
+			err = executorError(hosterr.SpecDrift, "recovery source is not a failed job")
 			return h.failure(err), err
 		}
 		failure, readErr := h.deps.ReadFailure(ctx, source, int64(row.Generation))
@@ -132,7 +134,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(readErr), readErr
 		}
 		if failure == nil || failure.Job != job.OnFailureOf || failure.Error == nil {
-			err = executorError(apierr.SpecDrift, "recovery failure does not match its source")
+			err = executorError(hosterr.SpecDrift, "recovery failure does not match its source")
 			return h.failure(err), err
 		}
 		session.failure = failure
@@ -205,8 +207,8 @@ func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, i
 	after := nodewire.RunResult{Outcome: string(result.Outcome)}
 	if result.Outcome == runstate.NodeFailed {
 		code := apierr.SDKError
-		if result.Reason == string(apierr.DeadlineExceeded) {
-			code = apierr.DeadlineExceeded
+		if result.Reason == string(hosterr.DeadlineExceeded) {
+			code = hosterr.DeadlineExceeded
 		}
 		after.Error = &apierr.Error{Code: code, Message: result.MaskedError}
 	}

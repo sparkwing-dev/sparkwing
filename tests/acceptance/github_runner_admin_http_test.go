@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -90,17 +92,17 @@ func TestGitHubRunnerAdminHTTPRefusals(t *testing.T) {
 			t.Run(method+"/"+name, func(t *testing.T) {
 				b, f := authorityMember(), &githubRunnerRegistry{team: "team"}
 				p := &b.snapshot.Authorities[0].Principal
-				want := apierr.Forbidden
+				want := hosterr.Forbidden
 				calls := 0
 				switch name {
 				case "missing":
-					b.raw, want = "", apierr.Unauthenticated
+					b.raw, want = "", hosterr.Unauthenticated
 				case "revoked":
-					p.Capability.RevokedAt, want = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.RevokedAt, want = &b.snapshot.Now, hosterr.Unauthenticated
 				case "expiry":
-					p.Capability.ExpiresAt, want = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.ExpiresAt, want = &b.snapshot.Now, hosterr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, want = &b.snapshot.Now, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, want = &b.snapshot.Now, hosterr.Unauthenticated
 				case "grant":
 					p.Capability.Grants = nil
 				case "machine":
@@ -109,18 +111,18 @@ func TestGitHubRunnerAdminHTTPRefusals(t *testing.T) {
 					b = newCredentialBoundary()
 					b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.TeamAdmin, capability.RunsRead}
 				case "foreign":
-					f.team, want = "foreign", apierr.PolicyMissing
+					f.team, want = "foreign", hosterr.PolicyMissing
 				case "reader":
 					p.Capability.Grants = []capability.Grant{capability.RunsRead}
 					if method == "GET" {
 						want, calls = "", 1
 					}
 				case "race":
-					f.err, want, calls = &apierr.Error{Code: apierr.LockHeld, Message: "authority changed"}, apierr.LockHeld, 1
+					f.err, want, calls = &apierr.Error{Code: hosterr.LockHeld, Message: "authority changed"}, hosterr.LockHeld, 1
 				case "private":
-					f.err, want, calls = errors.New("private provider credential"), apierr.Internal, 1
+					f.err, want, calls = errors.New("private provider credential"), hosterr.Internal, 1
 				case "missing adapter":
-					want = apierr.PolicyMissing
+					want = hosterr.PolicyMissing
 				}
 				s := githubRunnerAdminServer(t, b, f)
 				if name == "missing adapter" {
@@ -136,7 +138,7 @@ func TestGitHubRunnerAdminHTTPRefusals(t *testing.T) {
 						t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 					}
 				} else {
-					assertEngineError(t, w, apierr.Status(want), want)
+					assertEngineError(t, w, hosterr.Status(want), want)
 				}
 				if f.reads+f.writes != calls || strings.Contains(w.Body.String(), "private") {
 					t.Fatalf("HTTP %d %s reads=%d writes=%d", w.Code, w.Body.String(), f.reads, f.writes)
@@ -156,7 +158,7 @@ func TestGitHubRunnerAdminHTTPInputAndMethods(t *testing.T) {
 		assertEngineError(t, authorityHTTP(h, b, "DELETE", "/api/v1/runners/github/"+url.PathEscape(id), ""), 400, apierr.BadRequest)
 	}
 	for _, path := range []string{"/api/v1/runners/github", "/api/v1/runners/github/42"} {
-		assertEngineError(t, authorityHTTP(h, b, "HEAD", path, ""), 405, apierr.MethodNotAllowed)
+		assertEngineError(t, authorityHTTP(h, b, "HEAD", path, ""), 405, hosterr.MethodNotAllowed)
 	}
 	for _, method := range []string{"GET", "POST", "DELETE"} {
 		path := "/api/v1/team/github-runners"
@@ -198,8 +200,8 @@ func TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter(t *testing.T) {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	h = bindTenantPort[controller.GitHubRunnerRegistry](controller.NewDeployment(st, deploymenttest.Local(t, "https://controller.invalid"), slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)), func(context.Context, store.Team) (controller.GitHubRunnerRegistry, error) { return nil, nil }).Handler()
-	assertEngineError(t, authorityHTTP(h, b, "POST", "/api/v1/runners/github", `{"repository":"acme/widgets","repository_id":43,"repository_owner_id":7}`), 500, apierr.PolicyMissing)
-	assertEngineError(t, authorityHTTP(h, b, "DELETE", "/api/v1/runners/github/42", ""), 500, apierr.PolicyMissing)
+	assertEngineError(t, authorityHTTP(h, b, "POST", "/api/v1/runners/github", `{"repository":"acme/widgets","repository_id":43,"repository_owner_id":7}`), 500, hosterr.PolicyMissing)
+	assertEngineError(t, authorityHTTP(h, b, "DELETE", "/api/v1/runners/github/42", ""), 500, hosterr.PolicyMissing)
 }
 
 func TestGitHubRunnerAdminHTTPInventoryMetadata(t *testing.T) {
@@ -214,7 +216,7 @@ func TestGitHubRunnerAdminHTTPInventoryMetadata(t *testing.T) {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	f.rows[0].Team = "foreign"
-	assertEngineError(t, authorityHTTP(githubRunnerAdminServer(t, b, f).Handler(), b, "GET", "/api/v1/runners/github", ""), 500, apierr.Internal)
+	assertEngineError(t, authorityHTTP(githubRunnerAdminServer(t, b, f).Handler(), b, "GET", "/api/v1/runners/github", ""), 500, hosterr.Internal)
 }
 
 func TestGitHubRunnerAdminHTTPSessionCSRF(t *testing.T) {
@@ -233,7 +235,7 @@ func TestGitHubRunnerAdminHTTPSessionCSRF(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		assertEngineError(t, w, 403, apierr.Forbidden)
+		assertEngineError(t, w, 403, hosterr.Forbidden)
 		if f.writes != 0 {
 			t.Fatal("missing CSRF reached transaction")
 		}

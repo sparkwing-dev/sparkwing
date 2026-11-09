@@ -13,7 +13,7 @@ import (
 type refusedRecords struct{ sdkserve.Services }
 
 func (refusedRecords) Emit(nodeproto.FrameLog) {
-	panic(&apierr.Error{Code: apierr.Forbidden, Message: "record write refused"})
+	panic(&apierr.Error{Code: apierr.Code("forbidden"), Message: "record write refused"})
 }
 
 func TestRecordWriteFailuresPreserveCanonicalErrors(t *testing.T) {
@@ -31,7 +31,7 @@ func TestRecordWriteFailuresPreserveCanonicalErrors(t *testing.T) {
 			ops := sdkOperations{}
 			ctx := ops.Context(t.Context(), nodeproto.RunContext{}, nodeproto.RunnerIdentity{}, refusedRecords{})
 			result, err := ops.RunStep(ctx, plan, nodeproto.Request{Job: "j", Step: "run", Attempt: 1, Settled: []string{}})
-			if err != nil || result.Outcome != "failed" || result.Error == nil || result.Error.Code != apierr.Forbidden {
+			if err != nil || result.Outcome != "failed" || result.Error == nil || result.Error.Code != apierr.Code("forbidden") {
 				t.Fatalf("body result: %+v, %v", result, err)
 			}
 		})

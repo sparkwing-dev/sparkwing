@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/base64"
@@ -33,10 +35,10 @@ func TestAuthenticationHereWindowAndSessionParent(t *testing.T) {
 	}
 	source, _ := LookupRoute("POST", "/api/v1/runs/{run}/source-credential")
 	_, err := a.Authenticate(t.Context(), p, source)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 	r.snapshot.Now = claimBy
 	_, err = a.Authenticate(t.Context(), p, route)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 	r.snapshot.Binding.HereClaimed = true
 	if _, err = a.Authenticate(t.Context(), p, route); err != nil {
 		t.Fatalf("reclaim restarted first-claim window: %v", err)
@@ -47,7 +49,7 @@ func TestAuthenticationHereWindowAndSessionParent(t *testing.T) {
 	}
 	parent.Capability.Grants = nil
 	_, err = a.Authenticate(t.Context(), p, route)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 }
 
 func TestHereClaimStaysNamedAcrossReclaim(t *testing.T) {
@@ -70,27 +72,27 @@ func TestHereClaimStaysNamedAcrossReclaim(t *testing.T) {
 			switch state {
 			case "initial expired":
 				r.snapshot.Now = claimBy
-				code = apierr.Unauthenticated
+				code = hosterr.Unauthenticated
 			case "reclaim":
 				r.snapshot.Now = claimBy.Add(time.Minute)
 				r.snapshot.Binding.HereClaimed = true
 			case "other run":
 				target.RunID = "other"
-				code = apierr.Forbidden
+				code = hosterr.Forbidden
 			case "queue scan":
 				path = "/api/v1/runners/claim"
 				target.RunID = ""
 				target.ClaimKinds = []UnitKind{UnitTrigger}
-				code = apierr.Forbidden
+				code = hosterr.Forbidden
 			case "requester lost runs.write":
 				parent.Capability.Grants = nil
-				code = apierr.Unauthenticated
+				code = hosterr.Unauthenticated
 			case "parent revoked":
 				parent.Capability.RevokedAt = &r.snapshot.Now
-				code = apierr.Unauthenticated
+				code = hosterr.Unauthenticated
 			case "expired":
 				c.ExpiresAt = &r.snapshot.Now
-				code = apierr.Unauthenticated
+				code = hosterr.Unauthenticated
 			}
 			route, ok := LookupRoute("POST", path)
 			if !ok {
@@ -131,7 +133,7 @@ func TestAuthenticationHereDescendantRetainsRequester(t *testing.T) {
 	}
 	chain[2].Principal.Capability.Grants = nil
 	_, err := ValidateAuthority(chain, r.snapshot.Now)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 }
 
 func TestAuthenticationExpansionUsesOwnLease(t *testing.T) {
@@ -166,7 +168,7 @@ func TestAuthenticationExpansionUsesOwnLease(t *testing.T) {
 			}
 			mutate(r)
 			_, err := a.Authenticate(t.Context(), p, route)
-			requireAuthenticationCode(t, err, apierr.Unauthenticated)
+			requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 		})
 	}
 }
@@ -184,10 +186,10 @@ func TestAuthenticationProcessExitAndAudience(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Authorize(t.Context(), allowAuthenticationBinding{}, route, auth, p.Evidence.Target)
-	requireAuthenticationCode(t, err, apierr.Forbidden)
+	requireAuthenticationCode(t, err, hosterr.Forbidden)
 	r.snapshot.Binding.ProcessAlive = false
 	_, err = a.Authenticate(t.Context(), p, route)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 }
 
 func TestAuthenticationRejectsMalformedPresentationsBeforeLookup(t *testing.T) {
@@ -196,7 +198,7 @@ func TestAuthenticationRejectsMalformedPresentationsBeforeLookup(t *testing.T) {
 			r, p, route := authenticationFixture()
 			p.Raw = raw
 			_, err := NewAuthenticator(r).Authenticate(t.Context(), p, route)
-			requireAuthenticationCode(t, err, apierr.Unauthenticated)
+			requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 			if r.reads != 0 {
 				t.Fatal("malformed credential reached persistence")
 			}
@@ -217,7 +219,7 @@ func TestAuthenticationPeerAndReadFailures(t *testing.T) {
 	}
 	p.Peer.ID = ""
 	_, err := a.Authenticate(t.Context(), p, route)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 	p.Peer = peer
 	r.err = errors.New("store unavailable")
 	_, err = a.Authenticate(t.Context(), p, route)

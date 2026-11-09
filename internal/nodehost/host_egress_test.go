@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -212,7 +214,7 @@ func TestPlanningFailureMasksCanonicalPayloads(t *testing.T) {
 		t.Fatal("lost canonical error")
 	}
 	raw, _ := json.Marshal(result)
-	if strings.Contains(string(raw), "private-default") || result.Code != apierr.Internal {
+	if strings.Contains(string(raw), "private-default") || result.Code != hosterr.Internal {
 		t.Fatalf("unmasked planning error: %s", raw)
 	}
 }

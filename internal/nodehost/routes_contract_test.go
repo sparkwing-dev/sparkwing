@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -63,9 +65,9 @@ func TestProductionRouterCanonicalRefusalsAndHardCut(t *testing.T) {
 		code               apierr.Code
 		reason             apierr.Reason
 	}{
-		{http.MethodGet, "/node/v1/secrets/undeclared", "", apierr.Forbidden, apierr.ReasonSecretUndeclared},
+		{http.MethodGet, "/node/v1/secrets/undeclared", "", hosterr.Forbidden, hosterr.ReasonSecretUndeclared},
 		{http.MethodGet, "/node/v1/nodes/job/output", "", apierr.NotFound, ""},
-		{http.MethodGet, "/node/v1/masks", "", apierr.MethodNotAllowed, ""},
+		{http.MethodGet, "/node/v1/masks", "", hosterr.MethodNotAllowed, ""},
 		{http.MethodGet, "/node/v1/pipelines/build/latest?node=build", "", apierr.BadRequest, ""},
 		{http.MethodPost, "/node/v1/masks", `{"value":"dynamic-credential"}`, "", ""},
 		{http.MethodPost, "/node/v1/annotations", `{"message":"line","step":"undeclared"}`, apierr.UnknownStep, ""},
@@ -78,8 +80,8 @@ func TestProductionRouterCanonicalRefusalsAndHardCut(t *testing.T) {
 			}
 			continue
 		}
-		var envelope apierr.Envelope
-		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope.Error == nil || envelope.Error.Code != test.code || response.Code != apierr.Status(test.code) {
+		var envelope hosterr.Envelope
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope.Error == nil || envelope.Error.Code != test.code || response.Code != hosterr.Status(test.code) {
 			t.Fatalf("%s %s: %d %s", test.method, test.path, response.Code, response.Body)
 		}
 		if test.reason != "" && envelope.Error.Details["reason"] != string(test.reason) {

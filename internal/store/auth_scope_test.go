@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -31,7 +33,7 @@ func TestCapabilitySessionRefusesDataScopeProperty(t *testing.T) {
 		authorityPersist(t, s, root)
 		raw, session, err := s.AsOperator().CreateCapabilitySession(t.Context(), root.Prefix, time.Hour)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || raw != "" || session != nil {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden || raw != "" || session != nil {
 			t.Fatalf("data-scoped credential signed in: session=%v err=%v", session != nil, err)
 		}
 	}

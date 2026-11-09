@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -90,7 +92,7 @@ func TestEngineStepReportReplaysExactBodyAndPreservesRefusals(t *testing.T) {
 		})
 		err := c.RecordStep(t.Context(), "run", "job", controllerwire.StepReportRequest{StepID: "verify", State: "failed", SourceAttempt: 2, MaskedError: "masked"})
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.LockHeld || calls != 2 {
+		if !errors.As(err, &failure) || failure.Code != hosterr.LockHeld || calls != 2 {
 			t.Fatalf("step refusal changed: %v calls=%d", err, calls)
 		}
 	})

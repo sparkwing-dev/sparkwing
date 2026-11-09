@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -169,7 +171,7 @@ func TestCapabilityManagementHTTPFiltersAndMethods(t *testing.T) {
 		}
 		for _, method := range []string{"HEAD", "PUT", "PATCH"} {
 			w := authorityHTTP(h, b, method, path+"/target", "")
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+			assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 		}
 	}
 }
@@ -180,25 +182,25 @@ func TestCapabilityManagementHTTPRefusals(t *testing.T) {
 			for _, fault := range []string{"absent", "unknown", "expired", "revoked", "ancestry", "membership", "grant", "machine", "binding", "transaction", "private", "missing"} {
 				b, f := managementFixture(operator)
 				p := &b.snapshot.Authorities[0].Principal
-				code, calls := apierr.Forbidden, 0
+				code, calls := hosterr.Forbidden, 0
 				switch fault {
 				case "absent":
-					b.raw, code = "", apierr.Unauthenticated
+					b.raw, code = "", hosterr.Unauthenticated
 				case "unknown":
-					b.raw, code = "swk_"+strings.Repeat("A", 43), apierr.Unauthenticated
+					b.raw, code = "swk_"+strings.Repeat("A", 43), hosterr.Unauthenticated
 				case "expired":
-					p.Capability.ExpiresAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.ExpiresAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "revoked":
-					p.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "ancestry":
 					parent := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "ended-root"}
 					p.Capability.Parent = &parent
 					root := *p
 					root.Authority, root.Capability.Prefix, root.Capability.Parent, root.Capability.RevokedAt = parent, parent.ID, nil, &b.snapshot.Now
 					b.snapshot.Authorities = append(b.snapshot.Authorities, capability.AuthorityState{Principal: root})
-					code = apierr.Unauthenticated
+					code = hosterr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "grant":
 					p.Capability.Grants = nil
 				case "machine":
@@ -206,9 +208,9 @@ func TestCapabilityManagementHTTPRefusals(t *testing.T) {
 				case "binding":
 					b.bindingErr = &apierr.Error{Code: code, Message: "binding refused"}
 				case "transaction":
-					f.err, code, calls = &apierr.Error{Code: apierr.Unauthenticated, Message: "authority ended before commit"}, apierr.Unauthenticated, 1
+					f.err, code, calls = &apierr.Error{Code: hosterr.Unauthenticated, Message: "authority ended before commit"}, hosterr.Unauthenticated, 1
 				case "private":
-					f.err, code, calls = errors.New("private credential diagnostic"), apierr.Internal, 1
+					f.err, code, calls = errors.New("private credential diagnostic"), hosterr.Internal, 1
 				case "missing":
 					f.err, code, calls = store.ErrNotFound, apierr.NotFound, 1
 				}
@@ -217,7 +219,7 @@ func TestCapabilityManagementHTTPRefusals(t *testing.T) {
 					method = "POST"
 				}
 				w := authorityHTTP(managementServer(b, f), b, method, managementPath(operator)+action, `{}`)
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				if f.calls != calls || strings.Contains(w.Body.String(), "new-private-bearer") || strings.Contains(w.Body.String(), "private credential") {
 					t.Fatalf("fault=%s calls=%d HTTP %d %s", fault, f.calls, w.Code, w.Body.String())
 				}
@@ -251,7 +253,7 @@ func TestCapabilityManagementHTTPScopeProperty(t *testing.T) {
 			method, suffix = "POST", "/target/rotate"
 		}
 		w := authorityHTTP(managementServer(b, f), b, method, managementPath(operator)+suffix, `{}`)
-		var result apierr.Envelope
+		var result hosterr.Envelope
 		return w.Code == 500 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && !strings.Contains(w.Body.String(), "new-private-bearer") && !strings.Contains(w.Body.String(), row.Subject.ID)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
@@ -342,11 +344,11 @@ func TestCapabilityManagementHTTPMissingAdaptersAndCSRF(t *testing.T) {
 			s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
 			path := managementPath(operator) + action
 			w := authorityHTTP(s.Handler(), b, method, path, `{}`)
-			assertEngineError(t, w, 500, apierr.PolicyMissing)
+			assertEngineError(t, w, 500, hosterr.PolicyMissing)
 			bindTenantPort[controller.CapabilityManager](s, func(context.Context, store.Team) (controller.CapabilityManager, error) { return f, nil })
 			f.team = "foreign"
 			w = authorityHTTP(s.Handler(), b, method, path, `{}`)
-			assertEngineError(t, w, 500, apierr.PolicyMissing)
+			assertEngineError(t, w, 500, hosterr.PolicyMissing)
 			if f.calls != 0 {
 				t.Fatal("foreign manager was invoked")
 			}
@@ -363,7 +365,7 @@ func TestCapabilityManagementHTTPMissingAdaptersAndCSRF(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		assertEngineError(t, w, 403, apierr.Forbidden)
+		assertEngineError(t, w, 403, hosterr.Forbidden)
 		if f.calls != 0 {
 			t.Fatal("rotation reached persistence without CSRF")
 		}

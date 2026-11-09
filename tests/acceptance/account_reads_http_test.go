@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
@@ -102,10 +104,10 @@ func TestAccountReadHTTPRefusesUnrelatedAuthority(t *testing.T) {
 			t.Run(path+"/"+kind, func(t *testing.T) {
 				b, f := accountReadBoundary(), &accountReads{}
 				p := &b.snapshot.Authorities[0].Principal
-				code := apierr.Unauthenticated
+				code := hosterr.Unauthenticated
 				switch kind {
 				case "unknown":
-					b.readErr = &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown credential"}
+					b.readErr = &apierr.Error{Code: hosterr.Unauthenticated, Message: "unknown credential"}
 				case "expired":
 					p.Capability.ExpiresAt = &b.snapshot.Now
 				case "revoked":
@@ -113,23 +115,23 @@ func TestAccountReadHTTPRefusesUnrelatedAuthority(t *testing.T) {
 				case "removed":
 					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
 				case "bearer":
-					p.Class, code = capability.CredentialBearer, apierr.Forbidden
+					p.Class, code = capability.CredentialBearer, hosterr.Forbidden
 					p.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: p.Capability.Prefix}
 				case "machine":
-					p.Capability.Subject.Kind, p.Class, code = capability.SubjectMachine, capability.CredentialBearer, apierr.Forbidden
+					p.Capability.Subject.Kind, p.Class, code = capability.SubjectMachine, capability.CredentialBearer, hosterr.Forbidden
 					p.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: p.Capability.Prefix}
 				case "claim":
-					b, code = newCredentialBoundary(), apierr.Forbidden
+					b, code = newCredentialBoundary(), hosterr.Forbidden
 				case "console":
-					b, code = consoleBoundary(), apierr.Forbidden
+					b, code = consoleBoundary(), hosterr.Forbidden
 				case "peer":
-					p.Class, p.Authority, code = capability.CredentialPeer, capability.AuthorityRef{}, apierr.Forbidden
+					p.Class, p.Authority, code = capability.CredentialPeer, capability.AuthorityRef{}, hosterr.Forbidden
 					p.Capability.Subject = capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}
 				case "backend":
-					f.err, code = errors.New("private-backend-diagnostic"), apierr.Internal
+					f.err, code = errors.New("private-backend-diagnostic"), hosterr.Internal
 				}
 				w := discoveryRequest(accountReadServer(b, f), b, "GET", path)
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				if kind != "backend" && len(f.ids) != 0 || strings.Contains(w.Body.String(), "private-") {
 					t.Fatalf("reads=%v body=%s", f.ids, w.Body.String())
 				}
@@ -161,7 +163,7 @@ func TestAccountReadHTTPDoesNotRenewOrSwitchSession(t *testing.T) {
 		}
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, f.request("HEAD", path, ""))
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 	}
 }
 
@@ -175,9 +177,9 @@ func TestCreditSettingsReadHTTP(t *testing.T) {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	b, reads := creditReadFixture()
-	b.readErr = &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown credential"}
+	b.readErr = &apierr.Error{Code: hosterr.Unauthenticated, Message: "unknown credential"}
 	w = discoveryRequest(creditReadServer(t, b, reads), b, "GET", "/api/v1/credits/settings")
-	assertEngineError(t, w, 401, apierr.Unauthenticated)
+	assertEngineError(t, w, 401, hosterr.Unauthenticated)
 	b = accountReadBoundary()
 	w = discoveryRequest(controller.New(nil, nil).WithAuthorization(consoleAuthorization(b)).Handler(), b, "GET", "/api/v1/credits/settings")
 	assertEngineError(t, w, 404, apierr.NotFound)
@@ -201,10 +203,10 @@ func TestSelfServiceAccountDeletionIsGoneProperty(t *testing.T) {
 		after, expiry := f.state(t)
 		var accountCount int
 		err = teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM accounts WHERE id='member'`).Scan(&accountCount)
-		var failure apierr.Envelope
+		var failure hosterr.Envelope
 		return err == nil && accountCount == 1 && count == after && expires == expiry &&
 			w.Code == 405 && w.Header().Get("Allow") == "GET" && json.Unmarshal(w.Body.Bytes(), &failure) == nil &&
-			failure.Error != nil && failure.Error.Code == apierr.MethodNotAllowed
+			failure.Error != nil && failure.Error.Code == hosterr.MethodNotAllowed
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
 		t.Fatal(err)

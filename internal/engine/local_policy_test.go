@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"net/http"
@@ -12,7 +14,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
@@ -50,7 +51,7 @@ func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
 		t.Fatalf("local policy accessed the network: %v", transport.requests)
 	}
 	_, err = r.Resolve(t.Context(), pin, target)
-	requireCode(t, err, apierr.Unavailable)
+	requireCode(t, err, hosterr.Unavailable)
 }
 
 func TestLocalPolicyPreservesVerifiedRestrictionsAndRunnerDenial(t *testing.T) {
@@ -72,7 +73,7 @@ func TestLocalPolicyPreservesVerifiedRestrictionsAndRunnerDenial(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Evaluate(index.Index, "v0.10.2", now)
-	requireCode(t, err, apierr.VersionRevoked)
+	requireCode(t, err, hosterr.VersionRevoked)
 	if len(transport.requests) != 0 {
 		t.Fatal("local cached policy refreshed from network")
 	}
@@ -87,7 +88,7 @@ func TestLocalPolicyPreservesVerifiedRestrictionsAndRunnerDenial(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = EvaluateRunner(index.Index, "v0.10.2", now)
-	requireCode(t, err, apierr.Unavailable)
+	requireCode(t, err, hosterr.Unavailable)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := empty.Index(ctx, now); err != context.Canceled {

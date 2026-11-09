@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -104,7 +106,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 			result, err := server.cancel(t.Context(), authorized, controllerwire.CancelRequest{Reason: "user_cancelled"})
 			if !current {
 				var refusal *apierr.Error
-				if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+				if !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated {
 					t.Fatalf("removed member cancellation: %+v, %v", result, err)
 				}
 			} else {

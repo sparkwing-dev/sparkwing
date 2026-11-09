@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -40,7 +42,7 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 		return err
 	}
 	if !request.Personal && !slices.Contains(a.Principal.Capability.Grants, capability.TeamAdmin) {
-		return apierr.Authorization(apierr.ReasonMissingGrant, "team runner enrollment requires team administration")
+		return hosterr.Authorization(hosterr.ReasonMissingGrant, "team runner enrollment requires team administration")
 	}
 	spec, err := runnerEnrollmentSpec(request, a.Principal.Authority, a.Target.Team)
 	if err != nil {
@@ -167,7 +169,7 @@ func (s *Server) issueRoot(ctx context.Context, spec capability.ProvisionSpec) (
 			return credentialResponse{}, &apierr.Error{Code: apierr.Conflict, Message: "an enrolled credential already uses this name"}
 		}
 		if errors.Is(err, store.ErrRunnerTokenLimit) {
-			return credentialResponse{}, &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
+			return credentialResponse{}, &apierr.Error{Code: hosterr.QuotaExceeded, Message: err.Error()}
 		}
 		return credentialResponse{}, engineLookupError(err)
 	}

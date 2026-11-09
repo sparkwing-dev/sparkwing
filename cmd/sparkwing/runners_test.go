@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -894,7 +896,7 @@ func TestRunnersRemovalDoesNotReportSuccessWhenRevocationFails(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	f.revokeErr = &apierr.Error{Code: apierr.Forbidden, Message: "revocation refused"}
+	f.revokeErr = &apierr.Error{Code: hosterr.Forbidden, Message: "revocation refused"}
 	var runErr error
 	out := captureStdout(t, func() { runErr = f.run([]string{"remove", "--profile", "prod", "--config", f.config, "--no-service"}) })
 	if !errors.Is(runErr, f.revokeErr) || out != "" || f.tokens[0].RevokedAt != nil {
@@ -907,7 +909,7 @@ func TestRunnersRemovalDoesNotReportSuccessWhenRevocationFails(t *testing.T) {
 
 func TestRunnersEnrollmentRefusesIssuanceWithoutWritingConfig(t *testing.T) {
 	f := newRunnersFixture(t)
-	f.mintErr = &apierr.Error{Code: apierr.Forbidden, Message: "enrollment refused"}
+	f.mintErr = &apierr.Error{Code: hosterr.Forbidden, Message: "enrollment refused"}
 	var runErr error
 	out := captureStdout(t, func() {
 		runErr = f.run([]string{"add", "--profile", "prod", "--runner", "desk", "--config", f.config, "--no-service"})

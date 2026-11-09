@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"errors"
@@ -84,7 +86,7 @@ func TestAuthorityAdaptersRefuseUnavailableAncestry(t *testing.T) {
 func assertUnavailableAuthority(t *testing.T, principal capability.Principal, err error) {
 	t.Helper()
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated || !reflect.DeepEqual(principal, capability.Principal{}) {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated || !reflect.DeepEqual(principal, capability.Principal{}) {
 		t.Fatalf("unavailable authority returned %+v, %v", principal, err)
 	}
 }

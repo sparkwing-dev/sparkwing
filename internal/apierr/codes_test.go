@@ -1,5 +1,7 @@
 package apierr_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -9,9 +11,9 @@ import (
 )
 
 func TestErrorEnvelope(t *testing.T) {
-	encoded, err := json.Marshal(apierr.Envelope{Error: &apierr.Error{
-		Code: apierr.Forbidden, Message: "digest is not readable",
-		Details: map[string]any{"reason": apierr.ReasonDigestNotReadable},
+	encoded, err := json.Marshal(hosterr.Envelope{Error: &apierr.Error{
+		Code: hosterr.Forbidden, Message: "digest is not readable",
+		Details: map[string]any{"reason": hosterr.ReasonDigestNotReadable},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +36,7 @@ func TestErrorEnvelope(t *testing.T) {
 
 func TestCodeRegistry(t *testing.T) {
 	seen := map[apierr.Code]bool{}
-	for _, definition := range apierr.Codes {
+	for _, definition := range hosterr.Codes {
 		if definition.Code == "" || seen[definition.Code] || definition.Purpose == "" {
 			t.Errorf("invalid or duplicate definition: %+v", definition)
 		}
@@ -44,13 +46,13 @@ func TestCodeRegistry(t *testing.T) {
 		}
 	}
 	for code, want := range map[apierr.Code]int{
-		apierr.Unauthenticated:   http.StatusUnauthorized,
-		apierr.Forbidden:         http.StatusForbidden,
-		apierr.LockHeld:          http.StatusConflict,
-		apierr.IllegalTransition: http.StatusConflict,
-		apierr.PolicyMissing:     http.StatusInternalServerError,
+		hosterr.Unauthenticated:   http.StatusUnauthorized,
+		hosterr.Forbidden:         http.StatusForbidden,
+		hosterr.LockHeld:          http.StatusConflict,
+		hosterr.IllegalTransition: http.StatusConflict,
+		hosterr.PolicyMissing:     http.StatusInternalServerError,
 	} {
-		if got := apierr.Status(code); got != want {
+		if got := hosterr.Status(code); got != want {
 			t.Errorf("%s status = %d, want %d", code, got, want)
 		}
 	}

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -46,7 +48,7 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 		func(a capability.Authorized) error {
 			_, err := c.ConsoleDeclineStandingRequest(t.Context(), a, "standing-x", "test")
 			var refusal *apierr.Error
-			if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden && refusal.Code != apierr.Unauthenticated {
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden && refusal.Code != hosterr.Unauthenticated {
 				return nil
 			}
 			return err
@@ -305,7 +307,7 @@ func TestConsoleNoFaultReleaseBelongsToTheOperatorWhoPlacedTheHold(t *testing.T)
 	}{{held.Disputes[0], bob}, {"", alice}, {"", bob}} {
 		_, err := c.ConsoleUnfreeze(ctx, release.who, release.hold, "forgive", true)
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+		if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden {
 			t.Fatalf("no-fault release of another operator's hold %q: %v", release.hold, err)
 		}
 	}

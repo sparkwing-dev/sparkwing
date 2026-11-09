@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -108,7 +110,7 @@ func TestRunLogsRejectInvalidUsageBeforeConnecting(t *testing.T) {
 
 func TestRunLogsPropagatesFailuresAndIncompleteFollow(t *testing.T) {
 	var out bytes.Buffer
-	failure := &apierr.Error{Code: apierr.Forbidden, Message: "revoked"}
+	failure := &apierr.Error{Code: hosterr.Forbidden, Message: "revoked"}
 	reader := fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
 		return controllerwire.LogPage{}, failure
 	}}

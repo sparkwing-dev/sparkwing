@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bufio"
 	"context"
@@ -582,13 +584,13 @@ func (s *protocolSession) watchProtocolProcess() {
 	case <-s.process.LeaderExited():
 		s.awaitProtocol(s.framesDone)
 		if s.protocolFailure() == nil {
-			s.failProtocol(protocolSessionError(apierr.SDKExited, "SDK process exited"))
+			s.failProtocol(protocolSessionError(hosterr.SDKExited, "SDK process exited"))
 		}
 	case <-s.framesDone:
 		if !s.awaitProtocol(s.process.LeaderExited()) {
-			s.failProtocol(protocolSessionError(apierr.FramesClosed, "SDK closed its frame pipe"))
+			s.failProtocol(protocolSessionError(hosterr.FramesClosed, "SDK closed its frame pipe"))
 		} else if s.protocolFailure() == nil {
-			s.failProtocol(protocolSessionError(apierr.SDKExited, "SDK process exited"))
+			s.failProtocol(protocolSessionError(hosterr.SDKExited, "SDK process exited"))
 		}
 	}
 	_ = s.requests.Close()

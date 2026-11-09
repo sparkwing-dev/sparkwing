@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -98,7 +100,7 @@ func TestSourceReleaseHTTPRefusalsNeverOpenCredential(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			b := newCredentialBoundary()
 			tx, cipher, h := sourceHTTPFixture(t, b)
-			status, code, body := 401, apierr.Unauthenticated, ""
+			status, code, body := 401, hosterr.Unauthenticated, ""
 			switch state {
 			case "missing":
 				b.raw = ""
@@ -114,19 +116,19 @@ func TestSourceReleaseHTTPRefusalsNeverOpenCredential(t *testing.T) {
 				b.snapshot.Binding.RunCancelled = true
 			case "missing grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.NodeReport}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "binding":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "binding refused"}
-				status, code = 403, apierr.Forbidden
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "binding refused"}
+				status, code = 403, hosterr.Forbidden
 			case "transaction":
-				tx.err = &apierr.Error{Code: apierr.Forbidden, Message: "source release refused"}
-				status, code = 403, apierr.Forbidden
+				tx.err = &apierr.Error{Code: hosterr.Forbidden, Message: "source release refused"}
+				status, code = 403, hosterr.Forbidden
 			case "audit":
 				tx.audit.ID = ""
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			case "cipher":
 				cipher.err = errors.New("private-decryption-error")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			case "body":
 				body = `{"host":"foreign"}`
 				status, code = 400, apierr.BadRequest
@@ -166,7 +168,7 @@ func FuzzSourceReleaseHTTPAuditCannotChangeCredentialScope(f *testing.F) {
 			tx.audit.Generation++
 		}
 		w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/source-credential", "")
-		assertEngineError(t, w, 500, apierr.Internal)
+		assertEngineError(t, w, 500, hosterr.Internal)
 		if cipher.opens != 0 || strings.Contains(w.Body.String(), "private-") {
 			t.Fatal("unbound audit opened or leaked a credential")
 		}

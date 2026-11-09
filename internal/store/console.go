@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -29,7 +31,7 @@ func (s *Store) AsConsole(allowed func(string) bool) *Console {
 func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorized, write func(*storeTx, auditActor) (T, error), discovery ...func(*storeTx, lockSet) lockSet) (T, error) {
 	var zero T
 	if c == nil || c.s == nil || c.allowed == nil || a.Principal.Class != capability.CredentialConsole || a.Principal.Capability.Subject.Kind != capability.SubjectAccount {
-		return zero, authorityError(apierr.Forbidden, "direct operator session required")
+		return zero, authorityError(hosterr.Forbidden, "direct operator session required")
 	}
 	var result T
 	err := c.s.inTx(ctx, func(tx *storeTx) error {
@@ -52,7 +54,7 @@ func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorize
 		}
 		now := tx.now(ctx)
 		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), now, 0) || p.Capability.Subject.ID != a.Principal.Capability.Subject.ID || c.s.consolePolicy != nil && !c.s.consolePolicy(p, now) {
-			return authorityError(apierr.Forbidden, "direct operator session required")
+			return authorityError(hosterr.Forbidden, "direct operator session required")
 		}
 		result, err = write(tx, auditPrincipalActor(p))
 		if err != nil {
@@ -60,7 +62,7 @@ func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorize
 		}
 		now = tx.now(ctx)
 		if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), now, 0) || c.s.consolePolicy != nil && !c.s.consolePolicy(p, now) {
-			return authorityError(apierr.Forbidden, "operator account was removed")
+			return authorityError(hosterr.Forbidden, "operator account was removed")
 		}
 		return nil
 	})

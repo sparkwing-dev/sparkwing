@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -85,11 +87,11 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 			continue
 		}
 		if tx.store.planSecretOpener == nil {
-			return nil, authorityError(apierr.Unavailable, "plan secret decryption is not configured")
+			return nil, authorityError(hosterr.Unavailable, "plan secret decryption is not configured")
 		}
 		value, err := tx.store.planSecretOpener.OpenPlanSecret(ctx, team, secret)
 		if err != nil {
-			return nil, authorityError(apierr.Unavailable, "plan secret decryption failed")
+			return nil, authorityError(hosterr.Unavailable, "plan secret decryption failed")
 		}
 		if err := values.Register(value); err != nil {
 			return nil, authorityError(apierr.PlanInvalid, err.Error())

@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -13,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // SDKEnvironment projects sealed runtime facts and persisted job declarations
@@ -51,7 +52,7 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 	}
 	var spec runspec.Spec
 	if err := json.Unmarshal(accepted.Spec, &spec); err != nil || accepted.SpecHash == "" || accepted.PlanHash == "" || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
-		return procenv.Env{}, procenv.Env{}, executorError(apierr.SpecDrift, "SDK environment differs from the accepted run")
+		return procenv.Env{}, procenv.Env{}, executorError(hosterr.SpecDrift, "SDK environment differs from the accepted run")
 	}
 	ref := runspec.NodeRef{RunID: runspec.RunID(accepted.RunID), NodeID: runspec.NodeID(nodeID)}
 	row, err := e.Store.ReadNode(ctx, ref)
@@ -59,11 +60,11 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 		return procenv.Env{}, procenv.Env{}, err
 	}
 	if row.Ref != ref || row.Generation != runspec.ClaimGeneration(generation) || row.SpecHash != specHash {
-		return procenv.Env{}, procenv.Env{}, executorError(apierr.SpecDrift, "SDK environment differs from the persisted job")
+		return procenv.Env{}, procenv.Env{}, executorError(hosterr.SpecDrift, "SDK environment differs from the persisted job")
 	}
 	var job nodewire.JobSpec
 	if err := json.Unmarshal(row.Spec, &job); err != nil || job.ID != nodeID {
-		return procenv.Env{}, procenv.Env{}, executorError(apierr.PlanDrift, "SDK environment has an invalid job declaration")
+		return procenv.Env{}, procenv.Env{}, executorError(hosterr.PlanDrift, "SDK environment has an invalid job declaration")
 	}
 	runtime := sdkRuntime(executorRunContext(spec), runner)
 	// safety: retry seals retain the source run ID; runtime identity belongs to the destination row.

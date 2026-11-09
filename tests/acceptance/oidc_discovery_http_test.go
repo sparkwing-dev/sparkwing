@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/rand"
 	"crypto/rsa"
@@ -84,7 +86,7 @@ func TestOIDCDiscoveryHTTPDisabledAndMethods(t *testing.T) {
 		for _, method := range []string{"HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"} {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest(method, path, nil))
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+			assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 			if w.Header().Get("Allow") != "GET" {
 				t.Fatalf("Allow = %q", w.Header().Get("Allow"))
 			}

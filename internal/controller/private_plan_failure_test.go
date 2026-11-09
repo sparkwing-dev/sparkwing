@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"database/sql"
@@ -35,7 +37,7 @@ func TestPrivatePlanFailureClosesPlanAndRunWithItsMaskedError(t *testing.T) {
 			e, tenant, raw := privatePlanFailureFixture(t)
 			message, reason := compiler, string(apierr.PlanFailed)
 			if outcome == runstate.RunCancelled {
-				message, reason = "cancellation requested", string(apierr.ReasonCancelled)
+				message, reason = "cancellation requested", string(hosterr.ReasonCancelled)
 				engineSQL(t, e.Store, `UPDATE runs SET cancel_requested_at=created_at,cancel_reason='cancel_requested' WHERE team='a' AND id='run'`)
 			}
 			oversized, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: runstate.RunFinish, MaskedError: strings.Repeat("x", int(limits.ErrorBytes)+1)})

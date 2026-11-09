@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"fmt"
@@ -55,7 +57,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 	p := a.Principal
 	if p.Class == capability.CredentialPeer && request.Data == nil {
 		if !peerClaimantRequest(request) {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "a local controller issues no member tokens; the CLI reaches it over its socket, and `sparkwing dashboard open` signs a browser in"}
+			return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "a local controller issues no member tokens; the CLI reaches it over its socket, and `sparkwing dashboard open` signs a browser in"}
 		}
 		limit := time.Now().UTC().Add(LocalClaimantLifetime)
 		if request.ExpiresAt == nil {

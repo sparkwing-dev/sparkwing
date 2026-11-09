@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -37,7 +39,7 @@ type engineClient struct {
 func (c *engineClient) request(ctx context.Context, method, pattern, path, key string, input, output any) error {
 	policy, ok := capability.LookupRoute(method, pattern)
 	if !ok {
-		return &apierr.Error{Code: apierr.PolicyMissing, Message: "controller route has no policy"}
+		return &apierr.Error{Code: hosterr.PolicyMissing, Message: "controller route has no policy"}
 	}
 	var body []byte
 	if input != nil {
@@ -187,7 +189,7 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 			}
 			failure.Details["request_id"] = id
 		}
-		retry := resp.StatusCode == http.StatusServiceUnavailable && failure.Code == apierr.Unavailable || resp.StatusCode == http.StatusTooManyRequests && failure.Code == apierr.RateLimited
+		retry := resp.StatusCode == http.StatusServiceUnavailable && failure.Code == hosterr.Unavailable || resp.StatusCode == http.StatusTooManyRequests && failure.Code == hosterr.RateLimited
 		return retry, failure
 	}
 	// safety: recovery carries a persisted inner error as part of its successful result.

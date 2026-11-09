@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -125,7 +127,7 @@ func TestTeamWriteHTTPAuthorityProperty(t *testing.T) {
 					writer.team = "foreign"
 					want = 500
 				case 2:
-					writer.err = &apierr.Error{Code: apierr.LockHeld, Message: "authority changed"}
+					writer.err = &apierr.Error{Code: hosterr.LockHeld, Message: "authority changed"}
 					want = 409
 				case 3:
 					writer.err = errors.New("private-database-password")
@@ -253,7 +255,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 				case 3:
 					want = 503
 				case 4:
-					writer.completeErr = &apierr.Error{Code: apierr.LockHeld, Message: "authority changed"}
+					writer.completeErr = &apierr.Error{Code: hosterr.LockHeld, Message: "authority changed"}
 					want = 409
 				}
 				w := f.call(t, "POST", "/api/v1/team/billing/"+tc.path+"?team=foreign&actor="+fmt.Sprintf("%x", selector), tc.body, "request-key", want, nil)

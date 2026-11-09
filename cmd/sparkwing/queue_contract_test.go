@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -99,7 +101,7 @@ func TestQueueCommandPreflight(t *testing.T) {
 }
 
 func TestQueueCommandKeepsFailureDistinctFromEmptyQueue(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.Unavailable, Message: "controller cannot be reached"}
+	failure := &apierr.Error{Code: hosterr.Unavailable, Message: "controller cannot be reached"}
 	for _, resolveFailure := range []bool{false, true} {
 		manager := &queueManagerFake{err: failure}
 		deps := queueDependenciesFor(t, manager, "")
@@ -244,7 +246,7 @@ func TestQueueRemoteRunPriorityRequiresAuthorizedRoute(t *testing.T) {
 	var out bytes.Buffer
 	err := runQueueCommandArgs(t.Context(), []string{"priority", "--profile", "prod", "--run", "r1", "--set", "3"}, &out, queueDependencies{})
 	var structured *apierr.Error
-	if !errors.As(err, &structured) || structured.Code != apierr.PolicyMissing || out.Len() != 0 {
+	if !errors.As(err, &structured) || structured.Code != hosterr.PolicyMissing || out.Len() != 0 {
 		t.Fatalf("remote priority guessed a route: %v %s", err, &out)
 	}
 }

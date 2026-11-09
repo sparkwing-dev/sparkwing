@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -233,5 +235,5 @@ func (s *Server) publicOrigin() (string, error) {
 	if origin, ok := s.deployment.PublicOrigin(); ok {
 		return origin, nil
 	}
-	return "", &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "this controller has no --external-url, so it cannot give a GitHub Actions workflow a controller to reach"}
+	return "", &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "this controller has no --external-url, so it cannot give a GitHub Actions workflow a controller to reach"}
 }

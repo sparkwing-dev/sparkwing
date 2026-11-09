@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -85,7 +87,7 @@ func TestEngineReportingTextBounds(t *testing.T) {
 				body := `{` + step + `"` + field + `":"` + strings.Repeat("x", size) + `"}`
 				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/"+suffix, body)
 				if size > int(limits.AnnotationBytes) {
-					assertEngineError(t, w, 413, apierr.PayloadTooLarge)
+					assertEngineError(t, w, 413, hosterr.PayloadTooLarge)
 					if f.writes != 0 {
 						t.Fatal("oversized text reached transaction")
 					}
@@ -104,7 +106,7 @@ func TestEngineStepReadsPublisherAttempts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := publisherBoundary()
 			f := &engineTransactions{node: runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}}}
-			status, code := 500, apierr.Internal
+			status, code := 500, hosterr.Internal
 			switch name {
 			case "missing":
 				f.readErr = store.ErrNotFound
@@ -112,7 +114,7 @@ func TestEngineStepReadsPublisherAttempts(t *testing.T) {
 			case "private error":
 				f.readErr = errors.New("private credential")
 			case "unstarted":
-				status, code = 409, apierr.IllegalTransition
+				status, code = 409, hosterr.IllegalTransition
 			}
 			w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"compile","state":"running","source_attempt":2}`)
 			assertEngineError(t, w, status, code)
@@ -130,7 +132,7 @@ func TestEngineReportingMethodsAndHardCut(t *testing.T) {
 			t.Run(method+"/"+operation.suffix, func(t *testing.T) {
 				w := httptest.NewRecorder()
 				handler.ServeHTTP(w, httptest.NewRequest(method, "/api/v1/runs/run/jobs/job/"+operation.suffix, nil))
-				assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+				assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 				if w.Header().Get("Allow") != "POST" {
 					t.Fatalf("Allow = %q", w.Header().Get("Allow"))
 				}
@@ -179,7 +181,7 @@ func TestEngineReportingAuthorities(t *testing.T) {
 				}
 				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/"+operation.suffix, body)
 				if authority == "owner" && strings.HasPrefix(operation.suffix, "steps/") {
-					assertEngineError(t, w, http.StatusForbidden, apierr.Forbidden)
+					assertEngineError(t, w, http.StatusForbidden, hosterr.Forbidden)
 					if f.writes != 0 {
 						t.Fatal("trigger owner reported a job step")
 					}
@@ -219,22 +221,22 @@ func TestEngineReportingRefusesDeadOrWrongAuthority(t *testing.T) {
 			t.Run(operation.suffix+"/"+name, func(t *testing.T) {
 				b, f := newCredentialBoundary(), &engineTransactions{}
 				path, body := "/api/v1/runs/run/jobs/job/"+operation.suffix, operation.body
-				status, code, writes := 401, apierr.Unauthenticated, 0
+				status, code, writes := 401, hosterr.Unauthenticated, 0
 				switch name {
 				case "revoked":
 					b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
 				case "missing grant":
 					b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "other job":
 					path = "/api/v1/runs/run/jobs/sibling/" + operation.suffix
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "body actor":
 					body = strings.TrimSuffix(body, "}") + `,"actor":"forged"}`
 					status, code = 400, apierr.BadRequest
 				case "transaction race":
 					f.err = &store.ErrIllegalTransition{Reason: store.ReasonHolderRights}
-					status, code, writes = 409, apierr.LockHeld, 1
+					status, code, writes = 409, hosterr.LockHeld, 1
 				}
 				w := engineHTTP(t, b, f, path, body)
 				assertEngineError(t, w, status, code)
@@ -272,7 +274,7 @@ func TestEngineReportingBodyRace(t *testing.T) {
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			expansionServer(t, b, f).ServeHTTP(w, r)
-			assertEngineError(t, w, 409, apierr.LockHeld)
+			assertEngineError(t, w, 409, hosterr.LockHeld)
 			if f.writes != 1 {
 				t.Fatalf("transaction calls = %d", f.writes)
 			}
@@ -353,7 +355,7 @@ func TestEngineAnnotationRefusals(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b, f := newCredentialBoundary(), &engineTransactions{}
 			path, body := "/api/v1/runs/run/jobs/job/annotations", `{"message":"masked"}`
-			status, code, writes := 401, apierr.Unauthenticated, 0
+			status, code, writes := 401, hosterr.Unauthenticated, 0
 			switch name {
 			case "anonymous":
 				b.raw = ""
@@ -367,17 +369,17 @@ func TestEngineAnnotationRefusals(t *testing.T) {
 				b.snapshot.Binding.Current.Holder = "replacement"
 			case "missing grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "claimless root":
 				b = intakeBoundary()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.NodeReport}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "other job":
 				path = "/api/v1/runs/run/jobs/sibling/annotations"
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "other run":
 				path = "/api/v1/runs/other/jobs/job/annotations"
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "body actor":
 				body = `{"message":"masked","actor":"forged"}`
 				status, code = 400, apierr.BadRequest
@@ -395,13 +397,13 @@ func TestEngineAnnotationRefusals(t *testing.T) {
 				status, code = 400, apierr.BadRequest
 			case "oversized":
 				body = `{"message":"` + strings.Repeat("x", int(limits.AnnotationBytes)+1) + `"}`
-				status, code = 413, apierr.PayloadTooLarge
+				status, code = 413, hosterr.PayloadTooLarge
 			case "transaction race":
 				f.err = &store.ErrIllegalTransition{Reason: store.ReasonStaleGeneration}
-				status, code, writes = 409, apierr.LockHeld, 1
+				status, code, writes = 409, hosterr.LockHeld, 1
 			case "private error":
 				f.err = errors.New("private credential")
-				status, code, writes = 500, apierr.Internal, 1
+				status, code, writes = 500, hosterr.Internal, 1
 			}
 			w := engineHTTP(t, b, f, path, body)
 			assertEngineError(t, w, status, code)

@@ -1,12 +1,13 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"testing"
 	"time"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestNodeExecutorRecordsVerifyTimeoutStage(t *testing.T) {
@@ -41,7 +42,7 @@ func TestNodeExecutorRecordsVerifyTimeoutStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := storage.changes[len(storage.changes)-1].Extra.Result
-	if result == nil || result.Failure == nil || result.Failure.Stage != "verify" || result.Failure.Job != input.NodeID || result.Failure.Error == nil || result.Failure.Error.Code != apierr.DeadlineExceeded {
+	if result == nil || result.Failure == nil || result.Failure.Stage != "verify" || result.Failure.Job != input.NodeID || result.Failure.Error == nil || result.Failure.Error.Code != hosterr.DeadlineExceeded {
 		t.Fatalf("verify timeout lost its persisted stage: %+v", result)
 	}
 }

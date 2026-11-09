@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -43,13 +45,13 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 		for _, origin := range []capability.AuthorityRef{derived, {Kind: capability.AuthorityCapability, ID: root.Prefix}} {
 			registration.Authority = &origin
 			issued, err := s.AsOperator().ProvisionCapability(t.Context(), registration)
-			if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || issued.Raw != "" {
+			if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden || issued.Raw != "" {
 				t.Fatalf("capability-derived %s machine provisioning: issued=%v err=%v", origin.Kind, issued.Raw != "", err)
 			}
 		}
 		spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Authority: &derived, Subject: root.Subject, Team: "a", Grants: root.Grants, Binding: root.Binding}
 		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
-		if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || issued.Raw != "" {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden || issued.Raw != "" {
 			t.Fatalf("capability-derived session member provisioning: issued=%v err=%v", issued.Raw != "", err)
 		}
 		spec.Authority = &owner.Authority
@@ -82,7 +84,7 @@ func TestMachineProvisionGrantsProperty(t *testing.T) {
 				}
 			} else {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || issued.Raw != "" {
+				if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden || issued.Raw != "" {
 					t.Fatalf("%s origin issued machine grant %s: %v", origin.Kind, grant, err)
 				}
 			}

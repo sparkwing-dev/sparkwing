@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -66,7 +68,7 @@ func TestPlanSubmissionBodyLimitPreservesCommittedPlan(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/plan", body, status)
-		var failure apierr.Envelope
+		var failure hosterr.Envelope
 		if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != code {
 			t.Fatalf("oversized plan: %s (%v)", w.Body, err)
 		}
@@ -85,7 +87,7 @@ func TestPlanSubmissionBodyLimitPreservesCommittedPlan(t *testing.T) {
 	if err != nil || committed.Spec == nil || len(committed.Plan) == 0 {
 		t.Fatalf("plan did not commit: %v", err)
 	}
-	refuse(oversized, http.StatusUnauthorized, apierr.Unauthenticated)
+	refuse(oversized, http.StatusUnauthorized, hosterr.Unauthenticated)
 }
 
 func TestComputeLimits_PlanInsertionRefusedPastThePerRunCap(t *testing.T) {
@@ -94,7 +96,7 @@ func TestComputeLimits_PlanInsertionRefusedPastThePerRunCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/plan", string(body), http.StatusUnprocessableEntity)
-	var failure apierr.Envelope
+	var failure hosterr.Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != apierr.PlanInvalid || !strings.Contains(w.Body.String(), store.ComputeLimitNodesPerRun) {
 		t.Fatalf("plan limit refusal: %s: %v", w.Body, err)
 	}

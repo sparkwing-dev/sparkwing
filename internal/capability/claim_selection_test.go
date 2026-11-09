@@ -1,9 +1,9 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestClaimSelectionRequiresEveryKind(t *testing.T) {
@@ -59,7 +59,7 @@ func TestClaimSelectionRequiresEveryKind(t *testing.T) {
 				}
 				return
 			}
-			requireCode(t, err, apierr.Forbidden)
+			requireCode(t, err, hosterr.Forbidden)
 		})
 	}
 }

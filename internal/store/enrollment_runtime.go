@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"fmt"
@@ -35,7 +37,7 @@ func machineAdministrationTx(ctx context.Context, tx *storeTx, p capability.Prin
 		return err
 	}
 	if !facts.Personal {
-		return authorityError(apierr.Forbidden, "shared runner management requires team administration")
+		return authorityError(hosterr.Forbidden, "shared runner management requires team administration")
 	}
 	return nil
 }
@@ -121,14 +123,14 @@ func enrolledClaimProfileTx(ctx context.Context, tx *storeTx, chain []authorityN
 	}
 	root := chain[len(chain)-1].principal
 	if root.Authority.Kind != capability.AuthorityCapability {
-		return match.Profile{}, authorityError(apierr.Unavailable, "claim enrollment is unavailable")
+		return match.Profile{}, authorityError(hosterr.Unavailable, "claim enrollment is unavailable")
 	}
 	record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Authority.ID)
 	if err != nil {
 		return match.Profile{}, err
 	}
 	if record.Origin == nil {
-		return match.Profile{}, authorityError(apierr.Unavailable, "claim registration is unavailable")
+		return match.Profile{}, authorityError(hosterr.Unavailable, "claim registration is unavailable")
 	}
 	var profile match.Profile
 	switch record.Origin.Kind {

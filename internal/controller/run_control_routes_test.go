@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -64,7 +66,7 @@ func TestRunControlHTTPAuthorityProperty(t *testing.T) {
 		f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
 		writer := &runControlWriterFake{team: store.DefaultTeam}
 		if fail {
-			writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "authority changed"}
+			writer.failure = &apierr.Error{Code: hosterr.Forbidden, Message: "authority changed"}
 		}
 		testOnlyTenantPort[runControlWriter](f.s, func(context.Context, store.Team) (runControlWriter, error) { return writer, nil })
 		key := "request-key"
@@ -144,7 +146,7 @@ func TestResumeDebugPauseWriterScopeAndErrors(t *testing.T) {
 	if writer.calls != 1 || writer.seen.Target.RunID != "run" || writer.seen.Target.NodeID != "job" {
 		t.Fatalf("resume=%+v calls=%d", writer.seen, writer.calls)
 	}
-	writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "authority changed"}
+	writer.failure = &apierr.Error{Code: hosterr.Forbidden, Message: "authority changed"}
 	f.call(t, "POST", "/api/v1/runs/run/jobs/job/resume", `{}`, "", 403, nil)
 	writer.team = "foreign"
 	f.call(t, "POST", "/api/v1/runs/run/jobs/job/resume", `{}`, "", 500, nil)

@@ -1,16 +1,17 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func acceptedDebug(accepted AcceptedRun) (bool, error) {
 	var spec runspec.Spec
 	if json.Unmarshal(accepted.Spec, &spec) != nil {
-		return false, executorError(apierr.SpecDrift, "log policy requires an accepted run")
+		return false, executorError(hosterr.SpecDrift, "log policy requires an accepted run")
 	}
 	return spec.Resolved.Settings.Options.Debug.Value, nil
 }

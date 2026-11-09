@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -69,7 +71,7 @@ func (s *executorStore) TransitionNode(_ context.Context, command store.NodeComm
 	c := captureNodeCommand(command)
 	s.changes = append(s.changes, c)
 	if c.Actor.Kind == runstate.ActorHolder && (c.SourceAttempt == nil || *c.SourceAttempt != s.row.Attempt) {
-		return runstate.Applied{}, executorError(apierr.LockHeld, "source attempt differs from current attempt")
+		return runstate.Applied{}, executorError(hosterr.LockHeld, "source attempt differs from current attempt")
 	}
 	if c.Cause == s.fail {
 		if s.failErr != nil {
@@ -440,7 +442,7 @@ func TestNodeExecutorTransitionRefusalStopsExecution(t *testing.T) {
 
 func TestNodeExecutorForbiddenStartFailsTheJob(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
-	s.fail, s.failErr = runstate.CauseStart, &apierr.Error{Code: apierr.Forbidden, Message: "resource is outside the authorized binding"}
+	s.fail, s.failErr = runstate.CauseStart, &apierr.Error{Code: hosterr.Forbidden, Message: "resource is outside the authorized binding"}
 	host, err := NewNodeExecutor(deps)
 	if err != nil {
 		t.Fatal(err)

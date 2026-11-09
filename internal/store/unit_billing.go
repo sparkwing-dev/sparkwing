@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -26,7 +28,7 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	var reservedSeconds int64
 	if c.Billing.Metered {
 		if selected == nil {
-			return authorityError(apierr.IntegrityFailure, "metered award is missing its selected size price")
+			return authorityError(hosterr.IntegrityFailure, "metered award is missing its selected size price")
 		}
 		price = *selected
 		l, err := lockLedgerTx(ctx, tx, Team(c.Team))

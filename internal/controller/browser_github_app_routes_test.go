@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -52,7 +54,7 @@ func (f *githubConnectFake) ConsumeGitHubConnect(_ context.Context, a capability
 		return f.consumeErr
 	}
 	if nonce == "" || expires.Before(time.Now()) || f.consumed[nonce] {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "connection state unavailable"}
+		return &apierr.Error{Code: hosterr.Forbidden, Message: "connection state unavailable"}
 	}
 	f.consumed[nonce] = true
 	return nil
@@ -342,7 +344,7 @@ func TestGitHubBrowserConnectionCommitRefusal(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
 	flow := f.start(t, false)
 	flow.Code, flow.InstallationID = "code", 7
-	f.writer.bindErr = &apierr.Error{Code: apierr.Forbidden, Message: "session authority changed"}
+	f.writer.bindErr = &apierr.Error{Code: hosterr.Forbidden, Message: "session authority changed"}
 	w := f.request("GET", githubAppCompletePath, nil, &flow, nil)
 	if w.Code != 403 || f.writer.binds != 1 || strings.Contains(w.Body.String(), "connected=") || strings.Contains(w.Body.String(), "provider-token") ||
 		strings.Contains(w.Body.String(), "GitHub did not prove") || !strings.Contains(w.Body.String(), "session authority changed") {

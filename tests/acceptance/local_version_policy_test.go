@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"net/http"
@@ -35,7 +37,7 @@ func TestLocalVersionPolicyDoesNotNeedNetwork(t *testing.T) {
 	}
 	_, err = engine.EvaluateRunner(index.Index, "v1.2.3", now)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable {
+	if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable {
 		t.Fatalf("runner accepted missing policy: %v", err)
 	}
 	config.LocalOnly = false
@@ -44,7 +46,7 @@ func TestLocalVersionPolicyDoesNotNeedNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = runner.Index(t.Context(), now)
-	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || transport.calls == 0 {
+	if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || transport.calls == 0 {
 		t.Fatalf("controller runner failed open: %v calls=%d", err, transport.calls)
 	}
 }

@@ -1,5 +1,7 @@
 package wingd
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -21,11 +23,11 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 		peer, verified := localhostwire.LocalPeer(r.Context())
 		owner, err := controllerPeerIdentity()
 		if !verifiedSocketPeer(r.Context()) || !verified || err != nil {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "controller lifecycle requires a verified local socket peer"})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: "controller lifecycle requires a verified local socket peer"})
 			return
 		}
 		if _, err := LocalSubject(peer, owner); err != nil {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: err.Error()})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: err.Error()})
 			return
 		}
 		path := strings.TrimPrefix(r.URL.Path, controllerHTTPPath)
@@ -35,7 +37,7 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 		}
 		if r.Method != method {
 			w.Header().Set("Allow", method)
-			writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "use " + method})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "use " + method})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -59,14 +61,14 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 			writeControllerHTTP(w, ack)
 		case "status":
 			if d.localControl == nil {
-				writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "controller runtime is unavailable"})
+				writeLoginFailure(w, &apierr.Error{Code: hosterr.Unavailable, Message: "controller runtime is unavailable"})
 				return
 			}
 			writeControllerHTTP(w, d.localControl())
 		case "dashboard":
 			// safety: a pre-step-5 CLI posts here to start the dashboard; name the cut instead of a bare 404.
 			writeLoginFailure(w, &apierr.Error{
-				Code:    apierr.UnsupportedRoute,
+				Code:    hosterr.UnsupportedRoute,
 				Message: "this local controller removed POST /api/v1/local/controller/dashboard; it serves the dashboard whenever it runs",
 				Hint:    "run sparkwing dashboard open from a current CLI: sparkwing update for the installed one, sparkwing pipeline upgrade for a repository pin",
 			})
@@ -84,7 +86,7 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 				d.shutdownWithReason("drain")
 			}()
 			if err != nil {
-				writeLoginFailure(w, &apierr.Error{Code: apierr.Internal, Message: err.Error()})
+				writeLoginFailure(w, &apierr.Error{Code: hosterr.Internal, Message: err.Error()})
 				return
 			}
 			writeControllerHTTP(w, wingwire.DrainAck{HoldersRemaining: remaining})

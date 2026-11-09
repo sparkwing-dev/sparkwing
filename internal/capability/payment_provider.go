@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -228,5 +230,5 @@ func (p *paymentProvider) read(ctx context.Context, collection, id, kind string,
 }
 
 func paymentProviderUnavailable() *apierr.Error {
-	return &apierr.Error{Code: apierr.Unavailable, Message: "payment provider is unavailable"}
+	return &apierr.Error{Code: hosterr.Unavailable, Message: "payment provider is unavailable"}
 }

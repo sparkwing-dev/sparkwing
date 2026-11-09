@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -22,7 +24,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 		server, root := newStoredRunnerW8(t, capability.UnitTrigger)
 		kinds := []capability.UnitKind{capability.UnitTrigger}
 		raw := root.Raw
-		want := apierr.Forbidden
+		want := hosterr.Forbidden
 		switch mode % 8 {
 		case 0:
 			want = ""
@@ -50,11 +52,11 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 			kinds = []capability.UnitKind{}
 		case 6:
 			raw += "changed"
-			want = apierr.Unauthenticated
+			want = hosterr.Unauthenticated
 		case 7:
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}
 			revokeStoredRunnerW8(t, server.Store, ref)
-			want = apierr.Unauthenticated
+			want = hosterr.Unauthenticated
 		}
 		queue, err := cloudStoreClientW8(t, server)(client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return raw, nil }})
 		if err != nil {

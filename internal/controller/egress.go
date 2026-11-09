@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -87,7 +89,7 @@ func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, clas
 	}
 	s.logger.Warn("egress refused", append(requestLogAttrs(r), "reason", reason, "class", string(class))...)
 	w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds(retryAfter), 10))
-	routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: message, Details: map[string]any{"reason": reason}})
+	routepolicy.WritePolicyError(w, &apierr.Error{Code: hosterr.RateLimited, Message: message, Details: map[string]any{"reason": reason}})
 }
 
 func retryAfterSeconds(d time.Duration) int64 {

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -82,7 +84,7 @@ func (s *Server) depthRefusal(team store.Team, key, source string, readDepth fun
 				"principal", key, "team", team, "source", source,
 				"reason", "team queue depth above the shed threshold",
 				"queue_depth", depth, "threshold", f.policy.ShedQueueDepth)
-			return &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("team queue depth limit is %d, current usage is %d pending runs; wait for queued work to start or ask the operator to raise the queue shed threshold", f.policy.ShedQueueDepth, depth), Details: map[string]any{"reason": "queue_depth_limit", "limit": f.policy.ShedQueueDepth, "usage": depth, "retry_after_ms": shedRetryAfter.Milliseconds()}}
+			return &apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("team queue depth limit is %d, current usage is %d pending runs; wait for queued work to start or ask the operator to raise the queue shed threshold", f.policy.ShedQueueDepth, depth), Details: map[string]any{"reason": "queue_depth_limit", "limit": f.policy.ShedQueueDepth, "usage": depth, "retry_after_ms": shedRetryAfter.Milliseconds()}}
 		}
 	}
 	return nil
@@ -90,7 +92,7 @@ func (s *Server) depthRefusal(team store.Team, key, source string, readDepth fun
 
 func publicQueueDepthRefusal(err error) *apierr.Error {
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || failure.Details["reason"] != "queue_depth_limit" {
+	if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || failure.Details["reason"] != "queue_depth_limit" {
 		return nil
 	}
 	limit, limitOK := failure.Details["limit"].(int)
@@ -99,7 +101,7 @@ func publicQueueDepthRefusal(err error) *apierr.Error {
 		return nil
 	}
 	return &apierr.Error{
-		Code:    apierr.Unavailable,
+		Code:    hosterr.Unavailable,
 		Message: fmt.Sprintf("team queue depth limit is %d, current usage is %d pending runs; wait for queued work to start or ask the operator to raise the queue shed threshold", limit, usage),
 		Details: map[string]any{"reason": "queue_depth_limit", "limit": limit, "usage": usage, "retry_after_ms": shedRetryAfter.Milliseconds()},
 	}
@@ -118,7 +120,7 @@ func (s *Server) runCapRefusal(key, source string) error {
 			s.logger.Warn("trigger shed",
 				"principal", key, "source", source, "reason", "hourly run cap reached",
 				"cap_per_hour", f.policy.RunsPerPrincipalHour, "retry_after", wait)
-			return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("principal run limit is %d per hour, current budget usage is at least %d runs; wait for Retry-After or ask the operator to raise the hourly run cap", f.policy.RunsPerPrincipalHour, f.policy.RunsPerPrincipalHour), Details: map[string]any{"retry_after_ms": wait.Milliseconds()}}
+			return &apierr.Error{Code: hosterr.RateLimited, Message: fmt.Sprintf("principal run limit is %d per hour, current budget usage is at least %d runs; wait for Retry-After or ask the operator to raise the hourly run cap", f.policy.RunsPerPrincipalHour, f.policy.RunsPerPrincipalHour), Details: map[string]any{"retry_after_ms": wait.Milliseconds()}}
 		}
 	}
 	return nil
@@ -183,7 +185,7 @@ func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.
 		return key, nil
 	}
 	if key == "" && (s.flood.runs != nil || s.flood.policy.ShedQueueDepth > 0) {
-		return "", &apierr.Error{Code: apierr.IntegrityFailure, Message: "parent run has no admission identity"}
+		return "", &apierr.Error{Code: hosterr.IntegrityFailure, Message: "parent run has no admission identity"}
 	}
 	if s.flood.policy.ShedQueueDepth > 0 {
 		team := store.Team(p.Capability.Team)

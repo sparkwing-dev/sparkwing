@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -78,7 +80,7 @@ func TestAuthenticationSnapshotRechecksAncestryAndMembership(t *testing.T) {
 			}
 			_, err := s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.Unauthenticated {
+			if !errors.As(err, &failure) || failure.Code != hosterr.Unauthenticated {
 				t.Fatalf("unavailable %s: %v", problem, err)
 			}
 		})

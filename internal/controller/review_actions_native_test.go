@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/base64"
@@ -91,7 +93,7 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 	exchange(token, 403)
 	_, err = e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: c.Team, RegistrationID: "github:42:7", Subject: c.Subject, Grants: c.Grants, Binding: c.Binding, Repositories: c.Repositories, ExpiresAt: c.ExpiresAt})
 	var refused *apierr.Error
-	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+	if !errors.As(err, &refused) || refused.Code != hosterr.Forbidden {
 		t.Fatalf("transaction accepted stale binding facts: %v", err)
 	}
 	var count int
@@ -123,7 +125,7 @@ func TestActionsExpiryFitsStoreClockProperty(t *testing.T) {
 				}
 				if !want.After(databaseNow) {
 					var refused *apierr.Error
-					return errors.As(err, &refused) && refused.Code == apierr.Forbidden
+					return errors.As(err, &refused) && refused.Code == hosterr.Forbidden
 				}
 				if err != nil || issued.Capability.ExpiresAt == nil || !issued.Capability.ExpiresAt.Equal(want) || !issued.Capability.IssuedAt.Equal(databaseNow) {
 					t.Logf("Actions lifetime: %+v, %v; want %s", issued.Capability, err, want)

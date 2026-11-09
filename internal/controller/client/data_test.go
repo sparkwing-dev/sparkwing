@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -134,14 +136,14 @@ func FuzzDataClientDefaultRefNeverChangesRecordSelectors(f *testing.F) {
 }
 
 func TestDataClientStructuredErrorsAndRetry(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.Unavailable, apierr.RateLimited, apierr.Forbidden, "future_data_error"} {
+	for _, code := range []apierr.Code{hosterr.Unavailable, hosterr.RateLimited, hosterr.Forbidden, "future_data_error"} {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				calls := 0
 				s, _ := testDataClient(t, func(*http.Request) (*http.Response, error) {
 					calls++
 					body := `{"error":{"code":"` + string(code) + `","message":"safe","hint":"retry","details":{"reason":"binding"},"future":true}}`
-					status := apierr.Status(code)
+					status := hosterr.Status(code)
 					resp := &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 					resp.Header.Set("Retry-After", "1")
 					return resp, nil
@@ -152,7 +154,7 @@ func TestDataClientStructuredErrorsAndRetry(t *testing.T) {
 					t.Fatalf("structured error lost: %v", err)
 				}
 				want := 1
-				if code == apierr.Unavailable || code == apierr.RateLimited {
+				if code == hosterr.Unavailable || code == hosterr.RateLimited {
 					want += unavailableRetries
 				}
 				if calls != want {

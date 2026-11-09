@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"reflect"
@@ -100,5 +102,5 @@ func principalMatches(unit controllerwire.ClaimedUnit, principal capability.Prin
 }
 
 func awardMismatch() error {
-	return &apierr.Error{Code: apierr.LockHeld, Message: "runner award differs from its authenticated claim"}
+	return &apierr.Error{Code: hosterr.LockHeld, Message: "runner award differs from its authenticated claim"}
 }

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"testing"
@@ -25,7 +27,7 @@ func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
 				authorityPersist(t, s, nodesOnly)
 				demand.CapabilityPrefix = nodesOnly.Prefix
 				demand.Kinds = []capability.UnitKind{capability.UnitNode, capability.UnitPlan}
-				want = apierr.Forbidden
+				want = hosterr.Forbidden
 				if problem == "named_unauthorized" {
 					demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
 				}

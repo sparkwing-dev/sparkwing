@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -113,7 +115,7 @@ func TestSDKPlanningValidatesFreshIdentifiersAgainstIssuedValues(t *testing.T) {
 		return json.RawMessage(`{"jobs":[{"id":"new-issued-token","steps":[{"id":"run"}]}]}`), nil
 	})
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+	if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier {
 		t.Fatalf("fresh plan validation = %v", err)
 	}
 }
@@ -218,7 +220,7 @@ func TestSDKPlanningDescribeTimeoutJoinsAndWithholdsUnknownSecrets(t *testing.T)
 		before := time.Now()
 		_, err := p.Prepare(t.Context(), input, f.input)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.DeadlineExceeded || strings.Contains(err.Error(), "private") {
+		if !errors.As(err, &failure) || failure.Code != hosterr.DeadlineExceeded || strings.Contains(err.Error(), "private") {
 			t.Fatalf("error = %v", err)
 		}
 		if time.Since(before) != 30*time.Second {
@@ -389,7 +391,7 @@ func TestSDKPlanningRefusesChangedEngineAndSDK(t *testing.T) {
 			if !errors.As(err, &failure) {
 				t.Fatalf("unstructured refusal: %v", err)
 			}
-			if mode == "engine" && (failure.Code != apierr.SpecDrift || len(*processes) != 0) {
+			if mode == "engine" && (failure.Code != hosterr.SpecDrift || len(*processes) != 0) {
 				t.Fatalf("engine drift started SDK code: %v", err)
 			}
 			if mode == "sdk" && (failure.Code != apierr.ProtocolMismatch || !strings.Contains(failure.Hint, "matching SDK")) {

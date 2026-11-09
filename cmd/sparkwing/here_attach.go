@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -56,7 +58,7 @@ func observeHereRun(ctx context.Context, run string, observe hereObservation, si
 		return nodehost.RunCompletion{}, incompleteHereHandoff(run, err)
 	}
 	if observe.host == nil || observe.follow == nil {
-		return nodehost.RunCompletion{}, incompleteHereHandoff(run, &apierr.Error{Code: apierr.Unavailable, Message: "here attachment requires a host and log reader"})
+		return nodehost.RunCompletion{}, incompleteHereHandoff(run, &apierr.Error{Code: hosterr.Unavailable, Message: "here attachment requires a host and log reader"})
 	}
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -76,7 +78,7 @@ func observeHereRun(ctx context.Context, run string, observe hereObservation, si
 	requestCancellation := func() {
 		requested = true
 		if observe.cancel == nil {
-			failures = append(failures, &apierr.Error{Code: apierr.Unavailable, Message: "here attachment has no cancellation client"})
+			failures = append(failures, &apierr.Error{Code: hosterr.Unavailable, Message: "here attachment has no cancellation client"})
 			stop()
 			return
 		}

@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -66,7 +68,7 @@ func (a *ProcessAuthorities) delegate(ctx context.Context, parent capability.Cre
 		return capability.Issued{}, nil, processUnauthenticated()
 	}
 	if parent.Audience != capability.Controller || spec.Audience != capability.NodeHost || services == nil || services.RunID == "" || services.Job.ID == "" || services.RunID != spec.Binding.RunID || services.Masks == nil || services.Masks.masker == nil {
-		return capability.Issued{}, nil, executorError(apierr.Forbidden, "process delegation requires its bound job and masker")
+		return capability.Issued{}, nil, executorError(hosterr.Forbidden, "process delegation requires its bound job and masker")
 	}
 	snapshot, err := a.deps.Parent.ReadAuthentication(ctx, parent, capability.RequestEvidence{})
 	if err != nil {
@@ -83,10 +85,10 @@ func (a *ProcessAuthorities) delegate(ctx context.Context, parent capability.Cre
 		return capability.Issued{}, nil, err
 	}
 	if principal.Capability.Unit == capability.UnitNode && !snapshot.Binding.StartPermitted {
-		return capability.Issued{}, nil, executorError(apierr.Forbidden, "job process requires committed admission under its execution award")
+		return capability.Issued{}, nil, executorError(hosterr.Forbidden, "job process requires committed admission under its execution award")
 	}
 	if (principal.Capability.Unit == capability.UnitTrigger || principal.Capability.Unit == capability.UnitEval) && services.SourceBindings == nil {
-		return capability.Issued{}, nil, executorError(apierr.Forbidden, "evaluation delegation requires its source relations")
+		return capability.Issued{}, nil, executorError(hosterr.Forbidden, "evaluation delegation requires its source relations")
 	}
 	if (spec.Binding.Kind == capability.BindingTrigger && principal.Capability.Unit == capability.UnitTrigger || spec.Binding.Kind == capability.BindingRun && principal.Capability.Unit == capability.UnitPlan) && spec.Binding.NodeID == "" {
 		target := capability.Target{Team: principal.Capability.Team, RunID: services.RunID, NodeID: services.Job.ID}
@@ -226,7 +228,7 @@ func (a *ProcessAuthorities) Resolve(ctx context.Context, authorized capability.
 		return nil, processUnauthenticated()
 	}
 	if !reflect.DeepEqual(authorized.Binding, entry.principal.Capability.Binding) || !reflect.DeepEqual(authorized.Principal, entry.principal) {
-		return nil, executorError(apierr.Forbidden, "process service fence differs from its delegation")
+		return nil, executorError(hosterr.Forbidden, "process service fence differs from its delegation")
 	}
 	return entry.services, nil
 }
@@ -270,7 +272,7 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 		}
 	case capability.BindDeclaredSecret:
 		if !executorContains(service.Secrets, target.SecretName) {
-			return &apierr.Error{Code: apierr.Forbidden, Message: "secret is not declared by the bound job", Details: map[string]any{"reason": apierr.ReasonSecretUndeclared}}
+			return &apierr.Error{Code: hosterr.Forbidden, Message: "secret is not declared by the bound job", Details: map[string]any{"reason": hosterr.ReasonSecretUndeclared}}
 		}
 	case capability.BindBodyNamesRun:
 		if target.BodyRunID != "" && target.BodyRunID != binding.RunID {
@@ -309,7 +311,7 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 }
 
 func processBindingDenied() error {
-	return &apierr.Error{Code: apierr.Forbidden, Message: "resource is outside the process binding", Details: map[string]any{"reason": apierr.ReasonBinding}}
+	return &apierr.Error{Code: hosterr.Forbidden, Message: "resource is outside the process binding", Details: map[string]any{"reason": hosterr.ReasonBinding}}
 }
 
 func copyProcessCapability(original capability.Capability) (capability.Capability, error) {
@@ -324,7 +326,7 @@ func copyProcessCapability(original capability.Capability) (capability.Capabilit
 }
 
 func processUnauthenticated() error {
-	return executorError(apierr.Unauthenticated, "process authority is not live")
+	return executorError(hosterr.Unauthenticated, "process authority is not live")
 }
 
 var _ capability.AuthenticationReader = (*ProcessAuthorities)(nil)

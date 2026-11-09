@@ -43,7 +43,7 @@ func (f *wireOperations) RunStep(ctx context.Context, _ any, _ nodeproto.Request
 	close(f.stepStarted)
 	<-ctx.Done()
 	close(f.stepStopped)
-	return nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.Cancelled, Message: "step cancelled"}}, nil
+	return nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.Code("cancelled"), Message: "step cancelled"}}, nil
 }
 
 func (f *wireOperations) Eval(context.Context, any, nodeproto.Request) (nodeproto.EvalResult, error) {

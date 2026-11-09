@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -149,5 +151,5 @@ func endedLauncherPreparation(err error) bool {
 		return true
 	}
 	var failure *apierr.Error
-	return errors.As(err, &failure) && (failure.Code == apierr.LockHeld || failure.Code == apierr.Unauthenticated || failure.Code == apierr.Forbidden)
+	return errors.As(err, &failure) && (failure.Code == hosterr.LockHeld || failure.Code == hosterr.Unauthenticated || failure.Code == hosterr.Forbidden)
 }

@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -61,31 +63,31 @@ func checkPolicyAlternative(t *testing.T, route capability.RoutePolicy, audience
 		copy := auth
 		copy.Principal.Capability.Audience = "other"
 		_, err := capability.Authorize(context.Background(), policyBinding{}, route, copy, target)
-		assertPolicyCode(t, err, apierr.Forbidden)
+		assertPolicyCode(t, err, hosterr.Forbidden)
 	})
 	t.Run("dead", func(t *testing.T) {
 		copy := auth
 		copy.Live = nil
 		_, err := capability.Authorize(context.Background(), policyBinding{}, route, copy, target)
-		assertPolicyCode(t, err, apierr.Unauthenticated)
+		assertPolicyCode(t, err, hosterr.Unauthenticated)
 	})
 	t.Run("binding refusal", func(t *testing.T) {
 		_, err := capability.Authorize(context.Background(), policyBinding{refuse: true}, route, auth, target)
-		assertPolicyCode(t, err, apierr.Forbidden)
+		assertPolicyCode(t, err, hosterr.Forbidden)
 	})
 	if parts[0] == "operator_console_session" {
 		t.Run("deployment bearer", func(t *testing.T) {
 			copy := auth
 			copy.Principal.Class = capability.CredentialBearer
 			_, err := capability.Authorize(context.Background(), policyBinding{}, route, copy, target)
-			assertPolicyCode(t, err, apierr.Forbidden)
+			assertPolicyCode(t, err, hosterr.Forbidden)
 		})
 		t.Run("local peer", func(t *testing.T) {
 			copy := auth
 			copy.Principal.Class = capability.CredentialPeer
 			copy.Principal.Capability.Subject.Kind = capability.SubjectLocal
 			_, err := capability.Authorize(context.Background(), policyBinding{}, route, copy, target)
-			assertPolicyCode(t, err, apierr.Forbidden)
+			assertPolicyCode(t, err, hosterr.Forbidden)
 		})
 	}
 	for i, grant := range grants {
@@ -93,7 +95,7 @@ func checkPolicyAlternative(t *testing.T, route capability.RoutePolicy, audience
 			copy := auth
 			copy.Principal.Capability.Grants = slices.Delete(slices.Clone(grants), i, i+1)
 			_, err := capability.Authorize(context.Background(), policyBinding{}, route, copy, target)
-			assertPolicyCode(t, err, apierr.Forbidden)
+			assertPolicyCode(t, err, hosterr.Forbidden)
 		})
 	}
 }
@@ -102,7 +104,7 @@ type policyBinding struct{ refuse bool }
 
 func (b policyBinding) CheckBinding(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {
 	if b.refuse {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "fixture relation refused", Details: map[string]any{"reason": "binding"}}
+		return &apierr.Error{Code: hosterr.Forbidden, Message: "fixture relation refused", Details: map[string]any{"reason": "binding"}}
 	}
 	return nil
 }

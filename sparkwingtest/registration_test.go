@@ -1,5 +1,7 @@
 package sparkwingtest
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/base64"
@@ -274,7 +276,7 @@ func TestGeneratorRefusesIssuedTokenInFreshIdentifier(t *testing.T) {
 	}
 	_, err := h.Eval(t.Context(), plan, "source", generator.ID(), nil)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+	if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier {
 		t.Fatalf("fresh generator acceptance = %v", err)
 	}
 }
@@ -300,7 +302,7 @@ func TestIssuedTokenExemptsOnlyExactAcceptedTopology(t *testing.T) {
 		sparkwing.Job(fresh, id, func(context.Context) error { return nil })
 		err := h.remember(fresh)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+		if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier {
 			t.Fatalf("fresh topology acceptance = %v", err)
 		}
 	}

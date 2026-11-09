@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -79,7 +81,7 @@ func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 
 func TestPlanUnitLosesLeaseBeforeAcquiring(t *testing.T) {
 	state, host, input := newOwnerFixture(t, false)
-	state.renewErr = &apierr.Error{Code: apierr.Forbidden, Message: "lease lost"}
+	state.renewErr = &apierr.Error{Code: hosterr.Forbidden, Message: "lease lost"}
 	_, err := host.Plan(t.Context(), input)
 	if err == nil || !reflect.DeepEqual(state.trace, []string{"renew"}) {
 		t.Fatalf("trace=%v error=%v", state.trace, err)

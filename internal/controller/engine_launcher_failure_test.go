@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -69,7 +71,7 @@ func TestLauncherSyncFailureIsVisibleToPendingRun(t *testing.T) {
 	if err != nil || len(view.Failures) != 0 {
 		t.Fatalf("non-Cloud runner changed the run: %+v, %v", view.Failures, err)
 	}
-	broken.fail, broken.failure = true, &apierr.Error{Code: apierr.Forbidden, Message: "binding refused"}
+	broken.fail, broken.failure = true, &apierr.Error{Code: hosterr.Forbidden, Message: "binding refused"}
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", `{}`, 403)
 	view, err = tenant.ReadRunView(t.Context(), "run")
 	if err != nil || len(view.Failures) != 0 {

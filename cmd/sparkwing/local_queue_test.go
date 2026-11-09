@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -221,7 +223,7 @@ func TestLocalQueuePeerCredentialOnlyClaimsAndRevokesThroughAPI(t *testing.T) {
 	} {
 		_, err := tokens.CreateToken(t.Context(), input)
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.CapabilityUnsupported {
+		if !errors.As(err, &refusal) || refusal.Code != hosterr.CapabilityUnsupported {
 			t.Fatalf("local peer non-queue credential refusal: %+v: %v", input, err)
 		}
 	}
@@ -278,7 +280,7 @@ func TestLocalQueuePeerCredentialExpires(t *testing.T) {
 		t.Fatalf("fresh queue credential could not poll: %v", err)
 	}
 	offset.Store(int64(controller.LocalClaimantLifetime + time.Minute))
-	if _, err := claimant.Claim(t.Context(), request); !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+	if _, err := claimant.Claim(t.Context(), request); !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated {
 		t.Fatalf("expired queue credential: %v", err)
 	}
 }

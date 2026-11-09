@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -291,7 +293,7 @@ func decodeEngineRequest(r *http.Request, body any) error {
 	if err := decoder.Decode(body); err != nil {
 		refusal := invalidEngineBody(engineDecodeMessage(err))
 		if field, ok := unknownEngineField(err); ok {
-			refusal.Details = map[string]any{apierr.DetailUnknownField: field}
+			refusal.Details = map[string]any{hosterr.DetailUnknownField: field}
 		}
 		return refusal
 	}
@@ -342,14 +344,14 @@ func engineLookupError(err error) error {
 	}
 	var quota *store.StorageQuotaError
 	if errors.As(err, &quota) {
-		return &apierr.Error{Code: apierr.QuotaExceeded, Message: quota.Error()}
+		return &apierr.Error{Code: hosterr.QuotaExceeded, Message: quota.Error()}
 	}
 	if errors.Is(err, store.ErrStorageQuota) {
-		return &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
+		return &apierr.Error{Code: hosterr.QuotaExceeded, Message: err.Error()}
 	}
 	var integrity *apierr.Error
-	if errors.As(err, &integrity) && integrity.Code == apierr.IntegrityFailure {
-		return errors.Join(&apierr.Error{Code: apierr.Internal, Message: "stored state is invalid"}, err)
+	if errors.As(err, &integrity) && integrity.Code == hosterr.IntegrityFailure {
+		return errors.Join(&apierr.Error{Code: hosterr.Internal, Message: "stored state is invalid"}, err)
 	}
 	var unpriced *store.UnpricedCPUClassError
 	if errors.As(err, &unpriced) {
@@ -359,14 +361,14 @@ func engineLookupError(err error) error {
 	if errors.As(err, &sqlErr) {
 		switch sqlErr.SQLState() {
 		case "40001", "40P01", "55P03":
-			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "transaction is temporarily unavailable", Details: map[string]any{"retry_after_ms": 1000}}, err)
+			return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "transaction is temporarily unavailable", Details: map[string]any{"retry_after_ms": 1000}}, err)
 		}
 	}
 	var transition *store.ErrIllegalTransition
 	if errors.As(err, &transition) {
-		code := apierr.IllegalTransition
+		code := hosterr.IllegalTransition
 		if transition.Reason == store.ReasonHolderRights || transition.Reason == store.ReasonStaleGeneration {
-			code = apierr.LockHeld
+			code = hosterr.LockHeld
 		}
 		return &apierr.Error{Code: code, Message: "state transition refused", Details: map[string]any{"reason": string(transition.Reason)}}
 	}

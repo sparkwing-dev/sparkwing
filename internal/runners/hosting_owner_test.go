@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -86,7 +88,7 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 								t.Error("owner renewal lost authority or current activity")
 							}
 							if renewals == 2 {
-								return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
+								return runstate.LeaseBeat{}, &apierr.Error{Code: hosterr.LockHeld}
 							}
 							return runstate.LeaseBeat{}, nil
 						},

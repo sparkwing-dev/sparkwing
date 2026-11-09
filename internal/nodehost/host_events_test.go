@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -284,7 +286,7 @@ func TestClaimedHostForeignAwards(t *testing.T) {
 			}
 			err = host.Execute(ctx, input)
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.LockHeld || observed || acquired || len(processes) != 0 {
+			if !errors.As(err, &failure) || failure.Code != hosterr.LockHeld || observed || acquired || len(processes) != 0 {
 				t.Fatalf("foreign award reached execution: renewed=%v acquired=%v processes=%d error=%v", observed, acquired, len(processes), err)
 			}
 			after, err := fixture.Tenant.ReadSnapshot(ctx, input.Accepted.RunID)

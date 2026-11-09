@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -44,7 +46,7 @@ func (s *Store) installLocalSecrets(ctx context.Context, tx *storeTx, team Team,
 		return nil, nil
 	}
 	if admitted.Request.RunID != admitted.RunID || len(values) == 0 {
-		return nil, authorityError(apierr.Unavailable, "requester local secrets must be resolved again; submit a new run")
+		return nil, authorityError(hosterr.Unavailable, "requester local secrets must be resolved again; submit a new run")
 	}
 	if err := validateLocalSecrets(names, values); err != nil {
 		return nil, err
@@ -56,10 +58,10 @@ func (s *Store) installLocalSecrets(ctx context.Context, tx *storeTx, team Team,
 	if admitted.Replayed {
 		previous, present := s.localSecrets.Load(key)
 		if !present {
-			return nil, authorityError(apierr.Unavailable, "requester local secrets are unavailable; submit a new run")
+			return nil, authorityError(hosterr.Unavailable, "requester local secrets are unavailable; submit a new run")
 		}
 		if !maps.Equal(previous.(*localRunSecrets).values, values) {
-			return nil, authorityError(apierr.SpecDrift, "local secret values differ from the original intake")
+			return nil, authorityError(hosterr.SpecDrift, "local secret values differ from the original intake")
 		}
 		return nil, nil
 	}
@@ -69,7 +71,7 @@ func (s *Store) installLocalSecrets(ctx context.Context, tx *storeTx, team Team,
 		return entry, nil
 	}
 	if !maps.Equal(previous.(*localRunSecrets).values, values) {
-		return nil, authorityError(apierr.SpecDrift, "local secret values differ from the original intake")
+		return nil, authorityError(hosterr.SpecDrift, "local secret values differ from the original intake")
 	}
 	return nil, nil
 }
@@ -81,7 +83,7 @@ func (s *Store) localSecret(team Team, run, name string) (string, error) {
 			return value, nil
 		}
 	}
-	return "", authorityError(apierr.Unavailable, "requester local secrets are unavailable; submit a new run")
+	return "", authorityError(hosterr.Unavailable, "requester local secrets are unavailable; submit a new run")
 }
 
 func localSecretDeclared(specNames, localNames []string) bool {
@@ -155,7 +157,7 @@ func (s *Store) uninstallLocalSecrets(key localSecretKey, installed **localRunSe
 }
 
 func localSecretsUnavailable() error {
-	return authorityError(apierr.Unavailable, "requester local secrets are unavailable; submit a new run")
+	return authorityError(hosterr.Unavailable, "requester local secrets are unavailable; submit a new run")
 }
 
 func durableLocalSecretsTx(ctx context.Context, tx *storeTx, team Team, run string) (map[string]string, error) {
@@ -190,7 +192,7 @@ func installDurableLocalSecretsTx(ctx context.Context, tx *storeTx, team Team, a
 			return err
 		}
 		if !maps.Equal(previous, values) {
-			return authorityError(apierr.SpecDrift, "local secret values differ from the original intake")
+			return authorityError(hosterr.SpecDrift, "local secret values differ from the original intake")
 		}
 		return nil
 	}

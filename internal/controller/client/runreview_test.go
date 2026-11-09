@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -90,7 +92,7 @@ func TestRunReviewPreservesForbiddenAndRejectsUnresolvedSuccess(t *testing.T) {
 	})
 	err := failure.AppendAnnotation(t.Context(), "r", "j", controllerwire.AnnotationWrite{Annotation: nodewire.Annotation{Level: "info", Message: "x"}})
 	var api *apierr.Error
-	if !errors.As(err, &api) || api.Code != apierr.Forbidden || api.Hint != "use an authorized credential" {
+	if !errors.As(err, &api) || api.Code != hosterr.Forbidden || api.Hint != "use an authorized credential" {
 		t.Fatalf("lost authorization failure: %v", err)
 	}
 	malformed := testEngine(t, func(*http.Request) (*http.Response, error) {

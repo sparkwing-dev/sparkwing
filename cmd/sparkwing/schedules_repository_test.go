@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -250,7 +252,7 @@ func TestLocalScheduleBindingsRefuseBeforeControllerOrMutationEffects(t *testing
 				err = runScheduleCommandArgs(t.Context(), args, &out, f.command)
 			}
 			var refusal *apierr.Error
-			if !errors.As(err, &refusal) || refusal.Code != apierr.PolicyMissing || out.Len() != 0 {
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.PolicyMissing || out.Len() != 0 {
 				t.Fatalf("missing binding: %v %s", err, out.String())
 			}
 			for _, call := range f.calls {

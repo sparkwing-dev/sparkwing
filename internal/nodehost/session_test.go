@@ -2,6 +2,8 @@
 
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -370,10 +372,10 @@ func TestSessionEndsWithHostCode(t *testing.T) {
 		code apierr.Code
 		msg  string
 	}{
-		{"exit", apierr.SDKExited, "exited"},
+		{"exit", hosterr.SDKExited, "exited"},
 		{"garbage", apierr.ProtocolError, "invalid SDK frame"},
 		{"unknown-reply", apierr.ProtocolError, "unsolicited reply"},
-		{"close-frames", apierr.FramesClosed, "frame pipe"},
+		{"close-frames", hosterr.FramesClosed, "frame pipe"},
 	} {
 		t.Run(tc.node, func(t *testing.T) {
 			s := startFake(t, context.Background(), &recorder{})

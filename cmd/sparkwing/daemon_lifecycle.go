@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -76,7 +78,7 @@ func runDaemonLifecycleCommandOn(ctx context.Context, inv clisurface.Invocation,
 		return err
 	}
 	if services.lifecycle == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "daemon requires local controller lifecycle"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "daemon requires local controller lifecycle"}
 	}
 	if inv.Command.Path == "sparkwing daemon install" || inv.Command.Path == "sparkwing daemon uninstall" {
 		result, err := installDaemonService(ctx, inv, services)
@@ -101,7 +103,7 @@ func runDaemonLifecycleCommandOn(ctx context.Context, inv clisurface.Invocation,
 func installDaemonService(ctx context.Context, inv clisurface.Invocation, services dashboardServices) (dashboardResult, error) {
 	action := strings.TrimPrefix(inv.Command.Path, "sparkwing daemon ")
 	if services.units == nil {
-		return dashboardResult{}, &apierr.Error{Code: apierr.Unavailable, Message: "daemon requires local controller managed units"}
+		return dashboardResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: "daemon requires local controller managed units"}
 	}
 	var status wingd.LocalStatus
 	var err error
@@ -130,7 +132,7 @@ func executeDaemonLifecycle(ctx context.Context, inv clisurface.Invocation, serv
 		return result, nil
 	}
 	if action == "restart" && services.options.Version == "" {
-		return result, &apierr.Error{Code: apierr.Unavailable, Message: "daemon restart requires the installed controller version"}
+		return result, &apierr.Error{Code: hosterr.Unavailable, Message: "daemon restart requires the installed controller version"}
 	}
 	if action == "stop" && services.retireRunner != nil {
 		if err := services.retireRunner(ctx); err != nil {

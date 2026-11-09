@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -74,7 +76,7 @@ func TestChildAwaitReturnsMidAwaitForbiddenImmediately(t *testing.T) {
 		started := time.Now()
 		var refusedAt time.Time
 		calls := 0
-		body, err := json.Marshal(map[string]any{"error": &apierr.Error{Code: apierr.Forbidden, Message: "parent attempt cancelled"}})
+		body, err := json.Marshal(map[string]any{"error": &apierr.Error{Code: hosterr.Forbidden, Message: "parent attempt cancelled"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +94,7 @@ func TestChildAwaitReturnsMidAwaitForbiddenImmediately(t *testing.T) {
 		})}
 		_, err = process.Child(t.Context(), "child", time.Minute)
 		var refused *apierr.Error
-		if !errors.As(err, &refused) || refused.Code != apierr.Forbidden || refused.Message != "parent attempt cancelled" {
+		if !errors.As(err, &refused) || refused.Code != hosterr.Forbidden || refused.Message != "parent attempt cancelled" {
 			t.Fatalf("child await lost controller refusal: %v", err)
 		}
 		if calls != 3 || !time.Now().Equal(refusedAt) || !refusedAt.After(started) {

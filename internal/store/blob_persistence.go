@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -92,13 +94,13 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 	c := p.Capability
 	if c.Data == nil || !slices.Contains(c.Grants, grant) ||
 		c.Delivery == capability.DeliveryBootstrap && grant != capability.SourceRead || grant == capability.SourceRead && c.Delivery != capability.DeliveryBootstrap {
-		return blobActor{}, authorityError(apierr.Forbidden, "blob grant and data scope are required")
+		return blobActor{}, authorityError(hosterr.Forbidden, "blob grant and data scope are required")
 	}
 	a := blobActor{capability: c}
 	a.authority = blob.Authority{CapabilityRef: c.Prefix, Principal: blob.Principal(c.Subject.ID), Repo: runspec.RepoKey(c.Data.RepositoryKey)}
 	if c.Data.Use == capability.DataRemoteCache {
 		if grant != capability.DataRead || !c.Data.VerifiedDefaultOnly || len(c.Data.ReadRefs) == 0 {
-			return a, authorityError(apierr.Forbidden, "remote cache permits verified default-branch reads only")
+			return a, authorityError(hosterr.Forbidden, "remote cache permits verified default-branch reads only")
 		}
 		return a, checkBlobAuthorityHints(input, a.authority)
 	}
@@ -118,7 +120,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		return a, holderRefusal()
 	}
 	if repo != string(a.authority.Repo) {
-		return a, authorityError(apierr.Forbidden, "data scope differs from sealed repository")
+		return a, authorityError(hosterr.Forbidden, "data scope differs from sealed repository")
 	}
 	var sealed runspec.SealedRequest
 	if err := json.Unmarshal(request, &sealed); err != nil {
@@ -222,7 +224,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 
 func checkBlobAuthorityHints(input, actual blob.Authority) error {
 	if (input.Principal != "" && input.Principal != actual.Principal) || (input.Repo != "" && input.Repo != actual.Repo) || (input.Attempt.Set && input.Attempt != actual.Attempt) || (input.Ref != (blob.RefFacts{}) && input.Ref != actual.Ref) || (input.Upload.Set && input.Upload != actual.Upload) {
-		return authorityError(apierr.Forbidden, "blob authority differs from persisted scope")
+		return authorityError(hosterr.Forbidden, "blob authority differs from persisted scope")
 	}
 	return nil
 }
@@ -375,7 +377,7 @@ func scopeAcceptsCopy(dest, source blob.RefScope) bool {
 func provenanceRefFacts(sealed runspec.SealedRequest) (blob.RefFacts, error) {
 	p := sealed.Provenance
 	if !p.Valid() {
-		return blob.RefFacts{}, authorityError(apierr.IntegrityFailure, "run has no sealed provenance")
+		return blob.RefFacts{}, authorityError(hosterr.IntegrityFailure, "run has no sealed provenance")
 	}
 	facts := blob.RefFacts{Scope: blob.ScopeFor(p), SHA: p.SHA()}
 	if p.DefaultBranch() != "" {

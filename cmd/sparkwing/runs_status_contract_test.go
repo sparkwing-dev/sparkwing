@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -109,7 +111,7 @@ func TestRunStatusFollowEmitsChangedStatesAndFinalOutcome(t *testing.T) {
 }
 
 func TestRunStatusIncompleteObservationsExitThree(t *testing.T) {
-	for _, failure := range []error{context.Canceled, context.DeadlineExceeded, &apierr.Error{Code: apierr.Unavailable, Message: "controller restarting"}} {
+	for _, failure := range []error{context.Canceled, context.DeadlineExceeded, &apierr.Error{Code: hosterr.Unavailable, Message: "controller restarting"}} {
 		r := &statusReader{err: failure}
 		err := observeRunStatus(t.Context(), statusInvocation(t, "--exit-zero"), r, io.Discard, nil)
 		if exitCodeFor(err) != 3 || !errors.Is(err, failure) {

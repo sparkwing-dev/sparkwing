@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -77,7 +79,7 @@ func TestPrivateStateReadsSurviveSixSecondControllerOutage(t *testing.T) {
 }
 
 func TestPrivateStateReadKeepsPermanentRefusalsFatal(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.Unauthenticated, apierr.Forbidden, apierr.ProtocolError, apierr.IntegrityFailure} {
+	for _, code := range []apierr.Code{hosterr.Unauthenticated, hosterr.Forbidden, apierr.ProtocolError, hosterr.IntegrityFailure} {
 		t.Run(string(code), func(t *testing.T) {
 			calls := 0
 			body, err := json.Marshal(map[string]any{"error": &apierr.Error{Code: code, Message: "refused"}})

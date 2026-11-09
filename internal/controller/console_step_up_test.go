@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -40,7 +42,7 @@ func TestConsoleWriteRefusalNamesReauthentication(t *testing.T) {
 	route, _ := capability.LookupRoute("PUT", "/api/v1/operator/credits/settings")
 	_, err := s.authorization.Authenticator.Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialSession, Raw: raw}, route)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || fmt.Sprint(failure.Details["reason"]) != string(apierr.ReasonReauthRequired) {
+	if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden || fmt.Sprint(failure.Details["reason"]) != string(hosterr.ReasonReauthRequired) {
 		t.Fatalf("stale console write: %v", err)
 	}
 }

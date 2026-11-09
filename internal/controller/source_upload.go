@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -25,7 +27,7 @@ func (s *Server) sourceUploadEndpoints() []controllerwire.Endpoint {
 
 func (s *Server) sourceUploadTenant(r *http.Request, a capability.Authorized) (*store.Tenant, error) {
 	if s.dataController == nil || s.dataController.Objects == nil || s.operator == nil {
-		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "source upload requires shared object storage"}
+		return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "source upload requires shared object storage"}
 	}
 	return s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 }

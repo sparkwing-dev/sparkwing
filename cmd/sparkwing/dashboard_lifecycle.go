@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -94,7 +96,7 @@ func stopLocalController(ctx context.Context, lifecycle wingd.LocalLifecycle) (w
 		return wingd.LocalStatus{}, err
 	}
 	if status.Running {
-		return wingd.LocalStatus{}, &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("controller %s still answers after drain", status.Version), Hint: "run sparkwing doctor"}
+		return wingd.LocalStatus{}, &apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("controller %s still answers after drain", status.Version), Hint: "run sparkwing doctor"}
 	}
 	return status, nil
 }
@@ -153,7 +155,7 @@ func openDashboard(ctx context.Context, services dashboardServices, host string,
 	}
 	if status.DashboardError != "" {
 		return &apierr.Error{
-			Code: apierr.Unavailable, Message: "the local controller serves no dashboard: " + status.DashboardError,
+			Code: hosterr.Unavailable, Message: "the local controller serves no dashboard: " + status.DashboardError,
 			Hint: "free the port or set dashboard.address in config.yaml, then run sparkwing daemon restart --force",
 		}
 	}

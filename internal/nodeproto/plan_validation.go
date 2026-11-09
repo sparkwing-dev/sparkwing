@@ -1,5 +1,7 @@
 package nodeproto
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"fmt"
@@ -37,7 +39,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (nodewire.Plan
 	}
 	checkSecret := func(value, path string) error {
 		if context.Secrets.ContainsSecret(value) {
-			return &apierr.Error{Code: apierr.SecretInIdentifier, Message: fmt.Sprintf("registered secret in identifier at %s", path), Details: map[string]any{"field": path}}
+			return &apierr.Error{Code: hosterr.SecretInIdentifier, Message: fmt.Sprintf("registered secret in identifier at %s", path), Details: map[string]any{"field": path}}
 		}
 		return nil
 	}
@@ -143,7 +145,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (nodewire.Plan
 func (v *planValidator) feature(feature planCapability, path string) error {
 	supported, known := v.capabilities[feature]
 	if !known || !supported {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: fmt.Sprintf("plan feature %s is unsupported at %s", feature, path), Details: map[string]any{"feature": feature, "placement": v.context.Placement}}
+		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: fmt.Sprintf("plan feature %s is unsupported at %s", feature, path), Details: map[string]any{"feature": feature, "placement": v.context.Placement}}
 	}
 	return nil
 }

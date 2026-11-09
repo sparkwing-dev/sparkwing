@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/base64"
@@ -63,7 +65,7 @@ func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *
 			return err != nil || request.Source.Location == parent.Request.Request.Source.Location
 		}
 		var refusal *apierr.Error
-		return errors.As(err, &refusal) && refusal.Code == apierr.Forbidden
+		return errors.As(err, &refusal) && refusal.Code == hosterr.Forbidden
 	}
 	if err := quick.Check(property, nil); err != nil {
 		t.Fatal(err)
@@ -89,7 +91,7 @@ func TestCrossRepositoryChildRefusesAnExplicitCommit(t *testing.T) {
 	request.Git = runspec.Git{Repository: other, Ref: "refs/heads/main", SHA: "9999999999999999999999999999999999999999"}
 	request.Source = runspec.Source{Ref: request.Git.SHA}
 	var refusal *apierr.Error
-	if err := e.Server.resolveChildRevisions(t.Context(), e.EngineController, a, &request); !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+	if err := e.Server.resolveChildRevisions(t.Context(), e.EngineController, a, &request); !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden {
 		t.Fatalf("cross-repository child at a chosen commit = %v, want a refusal", err)
 	}
 }
@@ -244,7 +246,7 @@ func TestUndeclaredChildSourceNamesDeclarationMethod(t *testing.T) {
 	a := capability.Authorized{Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
 	err = e.Server.resolveChildRevisions(t.Context(), e.EngineController, a, &request)
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || !strings.Contains(refusal.Message, "StartsChildren") {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden || !strings.Contains(refusal.Message, "StartsChildren") {
 		t.Fatalf("undeclared child refusal lacks declaration guidance: %v", err)
 	}
 }

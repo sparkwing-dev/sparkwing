@@ -1,6 +1,8 @@
 // Package lease keeps every claimed unit tied to the store's lease clock.
 package lease
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -127,7 +129,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 				}
 			}
 			var failure *apierr.Error
-			if errors.As(err, &failure) && failure != nil && (failure.Code == apierr.LockHeld || failure.Code == apierr.Unauthenticated || failure.Code == apierr.Forbidden) {
+			if errors.As(err, &failure) && failure != nil && (failure.Code == hosterr.LockHeld || failure.Code == hosterr.Unauthenticated || failure.Code == hosterr.Forbidden) {
 				hardCancel(ErrLeaseLost)
 				cancel(ErrLeaseLost)
 				return
@@ -155,7 +157,7 @@ func retryAfter(err error) time.Duration {
 	if !errors.As(err, &failure) || failure == nil {
 		return 0
 	}
-	if failure.Code != apierr.RateLimited && failure.Code != apierr.QuotaExceeded && failure.Code != apierr.Unavailable {
+	if failure.Code != hosterr.RateLimited && failure.Code != hosterr.QuotaExceeded && failure.Code != hosterr.Unavailable {
 		return 0
 	}
 	var milliseconds float64

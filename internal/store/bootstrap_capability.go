@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -47,7 +49,7 @@ func checkBootstrapGateTx(ctx context.Context, tx *storeTx) error {
 // EnsureBootstrapCapability commits the supplied first-administrator seed once.
 func (o *Operator) EnsureBootstrapCapability(ctx context.Context, spec capability.ProvisionSpec) (bool, error) {
 	if o.s == nil {
-		return false, authorityError(apierr.PolicyMissing, "bootstrap issuer is unavailable")
+		return false, authorityError(hosterr.PolicyMissing, "bootstrap issuer is unavailable")
 	}
 	if err := capability.ValidateProvisionSeed(spec); err != nil {
 		return false, err
@@ -116,7 +118,7 @@ func (op *Operator) hasDeploymentAdministratorTx(ctx context.Context, tx *storeT
 		for _, prefix := range prefixes {
 			next := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: prefix}})
 			var api *apierr.Error
-			if errors.As(next.err, &api) && api.Code == apierr.Unauthenticated {
+			if errors.As(next.err, &api) && api.Code == hosterr.Unauthenticated {
 				continue
 			}
 			if next.err != nil {
@@ -144,7 +146,7 @@ func (op *Operator) hasDeploymentAdministratorTx(ctx context.Context, tx *storeT
 			p, err = capability.ValidateAuthority(states, tx.now(ctx))
 		}
 		var api *apierr.Error
-		if errors.Is(err, sql.ErrNoRows) || errors.As(err, &api) && api.Code == apierr.Unauthenticated {
+		if errors.Is(err, sql.ErrNoRows) || errors.As(err, &api) && api.Code == hosterr.Unauthenticated {
 			continue
 		}
 		if err != nil {

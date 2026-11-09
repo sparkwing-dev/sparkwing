@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -28,7 +30,7 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 		return nil
 	}
 	if a.Target.RunID != request.Lineage.ParentRunID || a.Target.NodeID != request.Lineage.ParentJobID {
-		return apierr.Authorization(apierr.ReasonBinding, "child source requires its live parent job")
+		return hosterr.Authorization(hosterr.ReasonBinding, "child source requires its live parent job")
 	}
 	tenant, err := engine.runTransactions(ctx, a.Target.Team)
 	if err != nil {
@@ -40,13 +42,13 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	}
 	from := parent.Request.Request
 	if !a.Principal.Capability.AllowsChild(request.Pipeline, string(request.Git.Repository.Key)) {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's declared children; declare it on the parent job with StartsChildren (TypeScript: startsChildren), or StartsChildrenIn for another repository")
+		return hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's declared children; declare it on the parent job with StartsChildren (TypeScript: startsChildren), or StartsChildrenIn for another repository")
 	}
 	sameRepository := request.Git.Repository.Key == from.Git.Repository.Key
 	if request.Git.SHA != "" {
 		// safety: in another repository a caller-chosen commit could be any fetchable head, fork pulls included.
 		if !sameRepository || request.Git.SHA != from.Git.SHA || request.Git.Ref != from.Git.Ref || request.Source.Ref != from.Source.Ref {
-			return apierr.Authorization(apierr.ReasonBinding, "a child runs its parent's revision or a branch the controller resolves")
+			return hosterr.Authorization(hosterr.ReasonBinding, "a child runs its parent's revision or a branch the controller resolves")
 		}
 		return nil
 	}
@@ -150,7 +152,7 @@ func (a *intakeRevisionAccess) githubAppRepository(ctx context.Context, spec sou
 	_, slug, _ := strings.Cut(display, "/")
 	installation, repository, err := a.server.resolveGitHubAppRepository(ctx, tenant, strings.TrimSuffix(slug, ".git"))
 	if err == nil && runspec.RepoKey(fmt.Sprintf("gh:%d", repository.ID)) != runspec.RepoKey(spec.RepoKey) {
-		err = apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source repository identity changed")
+		err = hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "source repository identity changed")
 	}
 	return installation, repository, err
 }
@@ -172,11 +174,11 @@ func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, re
 	}
 	cipher, ok := s.secretsCipher.(BoundCipher)
 	if !ok || cipher == nil {
-		return source.Credential{}, &apierr.Error{Code: apierr.Unavailable, Message: "source credential cipher is unavailable"}
+		return source.Credential{}, &apierr.Error{Code: hosterr.Unavailable, Message: "source credential cipher is unavailable"}
 	}
 	plain, err := openSecret(cipher, gitCredentialBinding(credential), credential.Secret)
 	if err != nil || plain == "" {
-		return source.Credential{}, &apierr.Error{Code: apierr.Unavailable, Message: "source credential could not be opened"}
+		return source.Credential{}, &apierr.Error{Code: hosterr.Unavailable, Message: "source credential could not be opened"}
 	}
 	if err := requestMasker(ctx).Register(plain); err != nil {
 		return source.Credential{}, err

@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -74,7 +76,7 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	}
 	err = errors.Join(err, cacheErr)
 	if r.index.index.Format == 0 {
-		return IndexResult{}, &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("Cannot obtain a verified version policy: %v", err), Hint: "Check connectivity to sparkwing.dev and retry before running the pipeline."}
+		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("Cannot obtain a verified version policy: %v", err), Hint: "Check connectivity to sparkwing.dev and retry before running the pipeline."}
 	}
 	r.checkedAt = now
 	r.indexErr = err

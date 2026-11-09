@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -189,10 +191,10 @@ func TestDataRemoteCacheForcesVerifiedDefaultLookup(t *testing.T) {
 		t.Fatalf("lookup=%+v err=%v", f.lookup, err)
 	}
 	_, err = binding.Records.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: binding.Authority, Key: key, Digest: dataDigest()})
-	assertPolicyCode(t, err, apierr.Forbidden)
+	assertPolicyCode(t, err, hosterr.Forbidden)
 	key.Kind = blob.KindBinary
 	_, err = binding.Records.LookupRecord(t.Context(), blob.RecordLookup{Authority: binding.Authority, Key: key})
-	assertPolicyCode(t, err, apierr.Forbidden)
+	assertPolicyCode(t, err, hosterr.Forbidden)
 	key.Kind = blob.KindDepcache
 	for _, state := range []string{"verified", "manual", "unverified default", "missing delivery", "missing SHA", "foreign repo", "foreign team"} {
 		t.Run(state, func(t *testing.T) {
@@ -341,11 +343,11 @@ func TestDataHasManyHidesUnreadableAndMissingDigests(t *testing.T) {
 		t.Fatalf("expired budget: %v", err)
 	}
 	request.Budget.Deadline = time.Time{}
-	edges.err = &apierr.Error{Code: apierr.Forbidden, Message: "not readable", Details: map[string]any{"reason": apierr.ReasonDigestNotReadable}}
+	edges.err = &apierr.Error{Code: hosterr.Forbidden, Message: "not readable", Details: map[string]any{"reason": hosterr.ReasonDigestNotReadable}}
 	if got, err := binding.Signer.HasMany(t.Context(), request); err != nil || len(got.Present) != 0 {
 		t.Fatalf("typed unreadable reason: %+v %v", got, err)
 	}
-	edges.err = &apierr.Error{Code: apierr.Unauthenticated, Message: "revoked"}
+	edges.err = &apierr.Error{Code: hosterr.Unauthenticated, Message: "revoked"}
 	if _, err := binding.Signer.HasMany(t.Context(), request); err == nil {
 		t.Fatal("revoked authority returned absence")
 	}
@@ -381,7 +383,7 @@ func TestDataDownloadRequiresLiveExistenceAndReadAuthority(t *testing.T) {
 			}
 			if state == "scope changed" {
 				s.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) {
-					return blob.Authority{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "revoked"}
+					return blob.Authority{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "revoked"}
 				}
 			}
 			transfer, err := binding.Signer.Download(t.Context(), blob.GetRequest{Authority: binding.Authority, Digest: dataDigest()})
@@ -519,7 +521,7 @@ func TestDataAuthorityRefusesSubstitutedIdentityAndScope(t *testing.T) {
 			}
 			s := &controller.DataController{ResolveAuthority: func(context.Context, capability.Authorized) (blob.Authority, error) { return value, nil }}
 			_, err := s.DataAuthority(t.Context(), a)
-			assertPolicyCode(t, err, apierr.Forbidden)
+			assertPolicyCode(t, err, hosterr.Forbidden)
 		})
 	}
 }
@@ -570,7 +572,7 @@ func TestDataUploadAndCommitFailuresProduceNoReceipt(t *testing.T) {
 			case "ticket":
 				f.lookupErr = refusal
 			case "revoked before commit":
-				edges.err = &apierr.Error{Code: apierr.Unauthenticated, Message: "revoked"}
+				edges.err = &apierr.Error{Code: hosterr.Unauthenticated, Message: "revoked"}
 			case "foreign caller":
 				request.Authority.CapabilityRef = "other"
 			}
@@ -644,7 +646,7 @@ func TestDataOwnerAndPublicationUploadsHaveNoSyntheticAttempt(t *testing.T) {
 			}
 			key.Kind = blob.KindMemo
 			_, err = binding.Records.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: binding.Authority, Source: upload, Key: key, Digest: dataDigest()})
-			assertPolicyCode(t, err, apierr.Forbidden)
+			assertPolicyCode(t, err, hosterr.Forbidden)
 		})
 	}
 }
@@ -688,10 +690,10 @@ func TestDataCommitLosesAuthorityAfterVerification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	objects.onVerified = func() { f.settleErr = &apierr.Error{Code: apierr.LockHeld, Message: "generation changed"} }
+	objects.onVerified = func() { f.settleErr = &apierr.Error{Code: hosterr.LockHeld, Message: "generation changed"} }
 	*events = nil
 	receipt, err := binding.Signer.Commit(t.Context(), blob.CommitUpload{Authority: binding.Authority, TicketID: ticket.ID})
-	assertPolicyCode(t, err, apierr.LockHeld)
+	assertPolicyCode(t, err, hosterr.LockHeld)
 	if receipt.Digest != "" || slices.Contains(*events, "delete") || !slices.Contains(*events, "settle") {
 		t.Fatalf("receipt=%+v events=%v", receipt, *events)
 	}

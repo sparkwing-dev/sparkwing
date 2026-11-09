@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -31,7 +33,7 @@ func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, er
 			row.MaxConcurrent = agent.poll.MaxConcurrent
 		}
 		if row.LastSeen.After(out.Now) {
-			return capability.RunnerSnapshot{}, authorityError(apierr.IntegrityFailure, "runner observation is in the future")
+			return capability.RunnerSnapshot{}, authorityError(hosterr.IntegrityFailure, "runner observation is in the future")
 		}
 		indices[agent.CapabilityPrefix] = len(out.Runners)
 		out.Runners = append(out.Runners, row)
@@ -57,7 +59,7 @@ func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, er
 
 func unavailableRunner(err error) bool {
 	var denied *apierr.Error
-	return errors.As(err, &denied) && denied.Code == apierr.Unauthenticated
+	return errors.As(err, &denied) && denied.Code == hosterr.Unauthenticated
 }
 
 func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]string, error) {
@@ -91,7 +93,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 	}
 	c := chain[0].principal.Capability
 	if c.Billing == nil {
-		return authorityError(apierr.IntegrityFailure, "invalid runner award")
+		return authorityError(hosterr.IntegrityFailure, "invalid runner award")
 	}
 	key := c.Billing.ReservationID
 	for _, ancestor := range chain[1:] {
@@ -114,7 +116,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 		seen = time.Unix(0, at.Int64).UTC()
 	}
 	if seen.After(tx.now(ctx)) {
-		return authorityError(apierr.IntegrityFailure, "runner observation is in the future")
+		return authorityError(hosterr.IntegrityFailure, "runner observation is in the future")
 	}
 	i, found := indices[key]
 	if !found {

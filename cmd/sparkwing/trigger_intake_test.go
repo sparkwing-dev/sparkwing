@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -271,7 +273,7 @@ func FuzzInitialTriggerDiagnosticsExcludePrivateInputs(f *testing.F) {
 		if here {
 			response.HereBearer = bearer
 		}
-		failure := &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("failed with %s", argument), Hint: base64.StdEncoding.EncodeToString([]byte(argument)), Details: map[string]any{argument: bearer}}
+		failure := &apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("failed with %s", argument), Hint: base64.StdEncoding.EncodeToString([]byte(argument)), Details: map[string]any{argument: bearer}}
 		var out bytes.Buffer
 		err := submitTriggeredRun(t.Context(), request, false, "json", &out, triggerSubmission{
 			Controller: initialTriggerController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {

@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -36,7 +38,7 @@ func TestSizingResetRefusesBeforeHTTPWithoutPolicy(t *testing.T) {
 	})
 	_, err := c.ResetSizing(t.Context(), controllerwire.SizingReset{Pipeline: "check"})
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.PolicyMissing {
+	if !errors.As(err, &failure) || failure.Code != hosterr.PolicyMissing {
 		t.Fatalf("missing route: %v", err)
 	}
 }

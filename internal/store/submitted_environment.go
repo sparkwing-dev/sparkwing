@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -38,7 +40,7 @@ func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx,
 		return nil
 	}
 	if err := runspec.VerifyEnvironment(request.Env, values); err != nil {
-		return authorityError(apierr.SpecDrift, err.Error())
+		return authorityError(hosterr.SpecDrift, err.Error())
 	}
 	if err := procenv.CheckSubmitted(values, secrets.NewMasker()); err != nil {
 		return authorityError(apierr.BadRequest, "invalid submitted environment")
@@ -57,7 +59,7 @@ func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx,
 	}
 	cipher := t.s.runEnvCipher
 	if cipher == nil {
-		return authorityError(apierr.Unavailable, "submitted environment encryption is unavailable")
+		return authorityError(hosterr.Unavailable, "submitted environment encryption is unavailable")
 	}
 	encoded, err := json.Marshal(values)
 	if err != nil {
@@ -65,7 +67,7 @@ func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx,
 	}
 	envelope, err := cipher.SealBound(secrets.PurposeRunEnvironment, string(t.team), result.RunID, "run-environment", false, true, string(encoded))
 	if err != nil || !secrets.IsBound(envelope) {
-		return authorityError(apierr.Unavailable, "submitted environment encryption failed")
+		return authorityError(hosterr.Unavailable, "submitted environment encryption failed")
 	}
 	_, err = tx.execContext(ctx, `UPDATE runs SET submitted_env=? WHERE team=? AND id=?`, envelope, t.team, result.RunID)
 	return err
@@ -82,7 +84,7 @@ func (t *Tenant) readSubmittedEnvironmentTx(ctx context.Context, tx *storeTx, ru
 	}
 	if run.Request.Request.EnvironmentSource == runspec.EnvironmentCaptured {
 		if envelope != "" {
-			return nil, authorityError(apierr.Unavailable, "captured environment has unexpected submitted values")
+			return nil, authorityError(hosterr.Unavailable, "captured environment has unexpected submitted values")
 		}
 		return nil, nil
 	}
@@ -91,12 +93,12 @@ func (t *Tenant) readSubmittedEnvironmentTx(ctx context.Context, tx *storeTx, ru
 	}
 	cipher := t.s.runEnvCipher
 	if cipher == nil {
-		return nil, authorityError(apierr.Unavailable, "submitted environment encryption is unavailable")
+		return nil, authorityError(hosterr.Unavailable, "submitted environment encryption is unavailable")
 	}
 	plain, err := cipher.OpenBound(secrets.PurposeRunEnvironment, string(t.team), runID, "run-environment", false, true, envelope)
 	var values map[string][]byte
 	if err != nil || json.Unmarshal([]byte(plain), &values) != nil || runspec.VerifyEnvironment(run.Request.Request.Env, values) != nil {
-		return nil, authorityError(apierr.Unavailable, "submitted environment is unavailable or corrupt")
+		return nil, authorityError(hosterr.Unavailable, "submitted environment is unavailable or corrupt")
 	}
 	return values, nil
 }

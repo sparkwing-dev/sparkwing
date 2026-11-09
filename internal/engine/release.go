@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -61,7 +63,7 @@ const firstEngineRelease = "v0.68.0"
 
 func predatesEngine(version string, cause error) error {
 	return &apierr.Error{
-		Code:    apierr.VersionUnsupported,
+		Code:    hosterr.VersionUnsupported,
 		Message: fmt.Sprintf("SDK pin %s is older than %s, the oldest release this CLI can run as a pipeline engine; its release was not executed", version, firstEngineRelease),
 		Hint:    "Run `" + UpgradeCommand + "` in this repository to move the pin to the latest release, then fix the pipeline code it reports; see https://sparkwing.dev/docs/migration-guide/",
 		Details: map[string]any{"version": version, "minimum": firstEngineRelease, "cause": cause.Error()},

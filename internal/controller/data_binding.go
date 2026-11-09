@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -45,7 +47,7 @@ func (s *boundData) authorize(ctx context.Context, operation capability.DataOper
 	}
 	err := capability.AuthorizeData(ctx, s.controller.Access, s.authorized, target)
 	if errors.Is(err, blob.ErrDigestNotReadable) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "digest is not readable", Details: map[string]any{"reason": apierr.ReasonDigestNotReadable}}
+		return &apierr.Error{Code: hosterr.Forbidden, Message: "digest is not readable", Details: map[string]any{"reason": hosterr.ReasonDigestNotReadable}}
 	}
 	return err
 }

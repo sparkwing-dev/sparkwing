@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -39,7 +41,7 @@ func (s *Server) handleTeamBillingPortal(w http.ResponseWriter, r *http.Request,
 		return err
 	}
 	if s.checkout == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": checkoutUnavailableCode}}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": checkoutUnavailableCode}}
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -54,7 +56,7 @@ func (s *Server) handleTeamBillingPortal(w http.ResponseWriter, r *http.Request,
 	}
 	url, err := s.checkout.portal(r.Context(), s.paymentDeployment, a.Target.Team, spend.Card.Customer)
 	if err != nil {
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the card page could not be opened; try again"}, err)
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "the card page could not be opened; try again"}, err)
 	}
 	writeJSON(w, http.StatusOK, hostedPageJSON{URL: url})
 	return nil

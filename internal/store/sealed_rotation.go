@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -8,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const sealedRotationRunPage = 200
@@ -76,7 +77,7 @@ func scopeName(purpose secrets.Purpose, scope string) string {
 // Verify only counts, reporting how many rows still open under the previous key alone.
 func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SealedRotationCipher, verify bool) (SealedRotation, error) {
 	if cipher == nil {
-		return SealedRotation{}, authorityError(apierr.Unavailable, "bound secret encryption is unavailable")
+		return SealedRotation{}, authorityError(hosterr.Unavailable, "bound secret encryption is unavailable")
 	}
 	total := SealedRotation{Unreadable: []SealedRowName{}}
 	step := func(fn func(*sealedRotationTx) error, teams ...Team) error {

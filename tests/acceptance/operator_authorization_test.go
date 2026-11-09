@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -68,13 +70,13 @@ func consoleAuthorization(b *credentialBoundary) routepolicy.Authorization {
 			}
 			cookie, err := r.Cookie("console-session")
 			if err != nil {
-				return capability.Presentation{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "session required"}
+				return capability.Presentation{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "session required"}
 			}
 			return capability.Presentation{Raw: cookie.Value, Class: b.snapshot.Authorities[0].Principal.Class}, nil
 		},
 		CheckCSRF: func(r *http.Request, _ capability.Principal) error {
 			if r.Header.Get("X-CSRF-Token") != "session-csrf" {
-				return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+				return &apierr.Error{Code: hosterr.Forbidden, Message: "invalid CSRF token"}
 			}
 			return nil
 		},
@@ -90,14 +92,14 @@ func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 			t.Run(route[0]+" "+route[1]+"/"+name, func(t *testing.T) {
 				b := consoleBoundary()
 				p := &b.snapshot.Authorities[0].Principal
-				want := apierr.Forbidden
+				want := hosterr.Forbidden
 				r := httptest.NewRequest(route[0], route[1], strings.NewReader(`{}`))
 				r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
 				r.Header.Set("X-CSRF-Token", "session-csrf")
 				switch name {
 				case "anonymous":
 					r.Header.Del("Cookie")
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 				case "deployment bearer", "delegated bearer":
 					p.Capability.Subject.Kind = capability.SubjectOperator
 					p.Class, p.Authority.Kind, p.Authority.ID = capability.CredentialBearer, capability.AuthorityCapability, "deployment"
@@ -114,15 +116,15 @@ func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 					p.Capability.Digest = [32]byte{}
 				case "revoked session":
 					p.Capability.RevokedAt = &b.snapshot.Now
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 				case "expired session":
 					p.Capability.ExpiresAt = &b.snapshot.Now
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 				case "membership lost":
 					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 				case "wrong audience":
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 					p.Capability.Audience = capability.NodeHost
 					p.Capability.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "process", Generation: 1, Attempt: 1}
 					b.snapshot.Binding = capability.BindingState{Current: p.Capability.Binding, ProcessAlive: true}
@@ -159,11 +161,11 @@ func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 					}
 					return
 				}
-				var body apierr.Envelope
+				var body hosterr.Envelope
 				if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
 				}
-				if w.Code != apierr.Status(want) || body.Error == nil || body.Error.Code != want {
+				if w.Code != hosterr.Status(want) || body.Error == nil || body.Error.Code != want {
 					t.Fatalf("got %d %s, want %s", w.Code, w.Body.String(), want)
 				}
 			})

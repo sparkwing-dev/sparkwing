@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -69,7 +71,7 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 		return invalidEngineBody("source repository identity is invalid")
 	}
 	if key := request.Git.Repository.Key; key != "" && key != canonical.Key {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source does not match repository identity")
+		return hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "source does not match repository identity")
 	}
 	request.Git.Repository = canonical
 	return nil
@@ -77,7 +79,7 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 
 func sealDerivedDisplay(repository *runspec.Repository, display string) error {
 	if supplied := repository.Display; supplied != "" && !strings.EqualFold(supplied, display) {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source repository display does not match its identity")
+		return hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "source repository display does not match its identity")
 	}
 	repository.Display = display
 	return nil
@@ -236,7 +238,7 @@ func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID str
 		}
 		repositories, err := s.githubApp.client.InstallationRepositories(ctx, installation.InstallationID)
 		if err != nil {
-			return "", errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity could not be verified"}, err)
+			return "", errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "GitHub source identity could not be verified"}, err)
 		}
 		for _, repository := range repositories {
 			if canonical, valid := store.ParseGitHubRepo(repository.FullName); valid && repository.ID == id {
@@ -258,10 +260,10 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		}
 		_, repo, err := s.resolveGitHubAppRepository(ctx, tenant, slug)
 		if errors.Is(err, store.ErrNotFound) {
-			return 0, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "GitHub installation does not cover the source repository")
+			return 0, hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "GitHub installation does not cover the source repository")
 		}
 		if err != nil {
-			return 0, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity could not be verified"}, err)
+			return 0, errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "GitHub source identity could not be verified"}, err)
 		}
 		return repo.ID, nil
 	}
@@ -282,7 +284,7 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		return 0, err
 	}
 	if repository != "" && repository != "gh:"+strconv.FormatInt(id, 10) {
-		return 0, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source does not match repository identity")
+		return 0, hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "source does not match repository identity")
 	}
 	return id, nil
 }
@@ -326,7 +328,7 @@ func (s *Server) handleResolveRepository(w http.ResponseWriter, r *http.Request,
 	}
 	repository := request.Git.Repository
 	if !capability.RepositoryAllowed(a.Principal.Capability.Repositories, capability.RepositoryIdentity{Key: string(repository.Key), Display: repository.Display}) {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "repository is outside the credential scope")
+		return hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "repository is outside the credential scope")
 	}
 	writeJSON(w, http.StatusOK, repository)
 	return nil

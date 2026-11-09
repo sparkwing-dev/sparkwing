@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -9,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // rejectLauncherAwards fails only exact awards issued under the authenticated launcher's ancestry.
@@ -92,7 +93,7 @@ func (s *Store) failLauncherAwards(ctx context.Context, authority capability.Aut
 				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", tx.now(ctx))
 				if err == nil {
 					if capacity {
-						err = resolveExpansionFailureTx(ctx, tx, target, runstate.ExpansionFailed, &ExpansionFailure{Code: apierr.Unavailable, MaskedError: message}, tx.now(ctx))
+						err = resolveExpansionFailureTx(ctx, tx, target, runstate.ExpansionFailed, &ExpansionFailure{Code: hosterr.Unavailable, MaskedError: message}, tx.now(ctx))
 						if err == nil {
 							_, err = tx.execContext(ctx, `UPDATE nodes SET failure_reason=?,error=? WHERE team=? AND run_id=? AND node_id=? AND generation=?`, reason, message, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration)
 						}

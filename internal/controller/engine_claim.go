@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -32,7 +34,7 @@ type SignedRunnerAdmission struct {
 // CheckRunner applies runner release policy for configured release builds.
 func (p *SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error {
 	if p.Resolver == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "runner version policy is unavailable"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "runner version policy is unavailable"}
 	}
 	now := time.Now().UTC()
 	index, err := p.Resolver.Index(ctx, now)
@@ -46,7 +48,7 @@ func (p *SignedRunnerAdmission) CheckRunner(ctx context.Context, version string)
 // CheckRunner revalidates the claimant and selects version policy from its persisted subject.
 func (s *EngineController) CheckRunner(ctx context.Context, authority capability.AuthorityRef, version string) (capability.Principal, error) {
 	if s.authority == nil || s.RunnerPolicy == nil {
-		return capability.Principal{}, &apierr.Error{Code: apierr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
+		return capability.Principal{}, &apierr.Error{Code: hosterr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
 	}
 	principal, err := s.authority.ResolveAuthority(ctx, authority)
 	if err != nil {

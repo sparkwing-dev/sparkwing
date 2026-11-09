@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"errors"
@@ -253,7 +255,7 @@ func TestBindingUnknownRuleAndNodehostCleanupRefuse(t *testing.T) {
 	p := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}}
 	for _, rule := range []capability.BindingRule{"unknown", capability.BindOwnCleanup} {
 		var failure *apierr.Error
-		if err := s.AsOperator().CheckBinding(t.Context(), p, rule, capability.Target{Team: "a"}); !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
+		if err := s.AsOperator().CheckBinding(t.Context(), p, rule, capability.Target{Team: "a"}); !errors.As(err, &failure) || failure.Code != hosterr.Forbidden {
 			t.Fatalf("%s: %v", rule, err)
 		}
 	}
@@ -276,7 +278,7 @@ func TestBindingTokenRequiresTheAccountOwner(t *testing.T) {
 	for _, prefix := range []string{"mine", "theirs", "foreign", "missing"} {
 		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindOwnToken, capability.Target{Team: "a", TokenPrefix: prefix})
 		var failure *apierr.Error
-		if prefix == "mine" && err != nil || prefix != "mine" && (!errors.As(err, &failure) || failure.Code != apierr.Forbidden) {
+		if prefix == "mine" && err != nil || prefix != "mine" && (!errors.As(err, &failure) || failure.Code != hosterr.Forbidden) {
 			t.Fatalf("%s: %v", prefix, err)
 		}
 	}

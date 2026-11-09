@@ -1,5 +1,7 @@
 package nodeproto
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -42,7 +44,7 @@ func FuzzSecretIdentifierBoundary(f *testing.F) {
 		}
 		plan, err := ValidatePlan(raw, ctx)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || plan.Jobs != nil {
+		if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || plan.Jobs != nil {
 			t.Fatalf("secret-bearing identifier accepted or misclassified: %+v, %v", plan, err)
 		}
 		diagnostics := []string{failure.Message, failure.Hint}

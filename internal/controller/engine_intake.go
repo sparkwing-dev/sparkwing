@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -58,7 +60,7 @@ func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunReques
 		return store.IntakeRequest{}, routepolicy.MissingEndpointPolicy()
 	}
 	if body.Request.Team != "" && body.Request.Team != a.Target.Team {
-		return store.IntakeRequest{}, apierr.Authorization(apierr.ReasonTeam, "intake team does not match authority")
+		return store.IntakeRequest{}, hosterr.Authorization(hosterr.ReasonTeam, "intake team does not match authority")
 	}
 	request := body.Request
 	request.Team, request.Dispatch = a.Target.Team, ""
@@ -119,7 +121,7 @@ func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSub
 		return store.ExpansionSubmission{}, invalidEngineBody("source_generation must be positive")
 	}
 	if body.SourceGeneration != a.Target.UnitSourceGeneration || a.Binding.Generation != a.Target.UnitSourceGeneration {
-		return store.ExpansionSubmission{}, &apierr.Error{Code: apierr.LockHeld, Message: "expansion source generation changed"}
+		return store.ExpansionSubmission{}, &apierr.Error{Code: hosterr.LockHeld, Message: "expansion source generation changed"}
 	}
 	if (len(body.Body) > 0) == (body.Failure != nil) {
 		return store.ExpansionSubmission{}, invalidEngineBody("expansion requires exactly one body or failure")

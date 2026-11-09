@@ -1,5 +1,7 @@
 package runspec
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -81,7 +83,7 @@ func (g *DeclarationGate) IncompleteReason() string {
 		}
 		failed++
 		code := apierr.SDKError
-		if slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == pipeline.Error.Code }) {
+		if slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == pipeline.Error.Code }) {
 			code = pipeline.Error.Code
 		}
 		if !slices.Contains(codes, string(code)) {
@@ -246,7 +248,7 @@ func (g *DeclarationGate) Error(err error) error {
 	if !g.Complete() {
 		code := apierr.SDKError
 		var canonical *apierr.Error
-		if errors.As(err, &canonical) && slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == canonical.Code }) {
+		if errors.As(err, &canonical) && slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == canonical.Code }) {
 			code = canonical.Code
 		}
 		return &apierr.Error{Code: code, Message: "pipeline discovery failed (details withheld: secrets not yet known)"}

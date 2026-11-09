@@ -1,5 +1,7 @@
 package nodeproto
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"fmt"
@@ -215,7 +217,7 @@ func TestValidatePlanSecretsStayOutOfErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := ValidatePlan(json.RawMessage(raw), context)
 			failure, ok := err.(*apierr.Error)
-			if !ok || failure.Code != apierr.SecretInIdentifier {
+			if !ok || failure.Code != hosterr.SecretInIdentifier {
 				t.Fatalf("error = %v", err)
 			}
 			if strings.Contains(fmt.Sprint(failure), "sëcret") || strings.Contains(fmt.Sprint(failure.Details), "sëcret") {
@@ -261,7 +263,7 @@ func TestSecretIdentifiers(t *testing.T) {
 				return
 			}
 			failure, ok := err.(*apierr.Error)
-			if !ok || failure.Code != apierr.SecretInIdentifier || failure.Details["field"] != row.field {
+			if !ok || failure.Code != hosterr.SecretInIdentifier || failure.Details["field"] != row.field {
 				t.Fatalf("error = %v; want field %s", err, row.field)
 			}
 			serialized, _ := json.Marshal(failure)
@@ -276,7 +278,7 @@ func TestSecretIdentifiers(t *testing.T) {
 	expansion.SourceJob = "source"
 	_, err := ValidatePlan(json.RawMessage(`{"jobs":[{"id":"generated-hunter22","groups":["fanout"],"steps":[{"id":"run"}]}]}`), expansion)
 	failure, ok := err.(*apierr.Error)
-	if !ok || failure.Code != apierr.SecretInIdentifier || failure.Details["field"] != "jobs[0].id" {
+	if !ok || failure.Code != hosterr.SecretInIdentifier || failure.Details["field"] != "jobs[0].id" {
 		t.Fatalf("expansion error = %v", err)
 	}
 }

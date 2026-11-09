@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -136,7 +138,7 @@ func TestDataWriteHTTPRejectsAuthorityAndMalformedInput(t *testing.T) {
 				}
 				f.boundary.raw = ""
 				w = authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation, body)
-				assertEngineError(t, w, 401, apierr.Unauthenticated)
+				assertEngineError(t, w, 401, hosterr.Unauthenticated)
 			})
 		}
 	}
@@ -158,7 +160,7 @@ func FuzzDataWriteHTTPForeignEdgeNeverCommits(f *testing.F) {
 			t.Fatal(err)
 		}
 		w := authorityHTTP(fixture.handler(), fixture.boundary, "POST", "/api/v1/data/records", string(body))
-		assertEngineError(t, w, 403, apierr.Forbidden)
+		assertEngineError(t, w, 403, hosterr.Forbidden)
 		if slices.Contains(*fixture.events, "commit record") {
 			t.Fatal("unreadable edge reached committing transaction")
 		}
@@ -179,7 +181,7 @@ func TestDataWriteHTTPAuthenticationAndFailures(t *testing.T) {
 				}
 				return result, err
 			}
-			status, code := 401, apierr.Unauthenticated
+			status, code := 401, hosterr.Unauthenticated
 			p := &f.boundary.snapshot.Authorities[0].Principal
 			switch state {
 			case "missing":
@@ -198,33 +200,33 @@ func TestDataWriteHTTPAuthenticationAndFailures(t *testing.T) {
 				f.boundary.snapshot.Binding.LeaseExpiresAt = f.boundary.snapshot.Now
 			case "cancelled":
 				f.boundary.snapshot.Binding.RunCancelled = true
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "machine root":
 				p.Capability.Unit, p.Capability.Issuance, p.Capability.Parent = "", capability.Delegate, nil
 				p.Capability.Binding = capability.Binding{Kind: capability.BindingNone}
 				f.boundary.snapshot.Authorities = f.boundary.snapshot.Authorities[:1]
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "no grant":
 				p.Capability.Grants = []capability.Grant{capability.DataRead}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "scope refused":
 				f.edges.err = blob.ErrDigestNotReadable
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "resolver revoked":
 				f.data.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) {
-					return blob.Authority{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "revoked"}
+					return blob.Authority{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "revoked"}
 				}
 			case "no controller":
 				f.data = nil
-				status, code = 500, apierr.PolicyMissing
+				status, code = 500, hosterr.PolicyMissing
 			case "no backend":
 				f.data.Objects = nil
-				status, code = 500, apierr.PolicyMissing
+				status, code = 500, hosterr.PolicyMissing
 			case "quota":
-				status, code = 429, apierr.QuotaExceeded
+				status, code = 429, hosterr.QuotaExceeded
 			case "sign":
 				f.objects.signErr = errors.New("private-sign-error")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			case "integrity", "settlement revoked":
 			}
 			h := f.handler()
@@ -235,9 +237,9 @@ func TestDataWriteHTTPAuthenticationAndFailures(t *testing.T) {
 				}
 				if state == "integrity" {
 					f.objects.verifyErr = blob.ErrIntegrity
-					status, code = 422, apierr.IntegrityFailure
+					status, code = 422, hosterr.IntegrityFailure
 				} else {
-					f.objects.onVerified = func() { tx.settleErr = &apierr.Error{Code: apierr.Unauthenticated, Message: "revoked"} }
+					f.objects.onVerified = func() { tx.settleErr = &apierr.Error{Code: hosterr.Unauthenticated, Message: "revoked"} }
 				}
 				w = authorityHTTP(h, f.boundary, "POST", "/api/v1/data/commit", `{"upload_id":"`+tx.ticket.ID+`"}`)
 			}
@@ -331,10 +333,10 @@ func TestDataRecordHTTPRemoteCacheCannotBroadenReadOrWrite(t *testing.T) {
 	*events = nil
 	for _, operation := range []string{"upload", "commit", "records"} {
 		w = authorityHTTP(h, f.boundary, "POST", "/api/v1/data/"+operation, `{}`)
-		assertEngineError(t, w, 403, apierr.Forbidden)
+		assertEngineError(t, w, 403, hosterr.Forbidden)
 	}
 	w = authorityHTTP(h, f.boundary, "GET", "/api/v1/data/records?kind=binary&name=engine&ref=main", "")
-	assertEngineError(t, w, 403, apierr.Forbidden)
+	assertEngineError(t, w, 403, hosterr.Forbidden)
 	if len(*events) != 0 {
 		t.Fatalf("remote-cache write or binary read reached storage: %v", *events)
 	}

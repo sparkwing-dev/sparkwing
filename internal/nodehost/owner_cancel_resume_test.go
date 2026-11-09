@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"testing"
@@ -22,7 +24,7 @@ func (s cancelledReconciliation) ReconcileNode(context.Context, store.ReconcileR
 	if s.cancel != nil {
 		s.cancel()
 	}
-	return runstate.ReconciledNode{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}
+	return runstate.ReconciledNode{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}
 }
 
 func TestOwnerDrainsCancelledHoldersWithoutReconciliation(t *testing.T) {

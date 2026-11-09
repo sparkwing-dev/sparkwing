@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -73,7 +75,7 @@ func TestPoolsCommandsPreserveRulesAndResults(t *testing.T) {
 }
 
 func TestPoolsAuthorizationRefusalPreservesError(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.Forbidden, Message: "repository authority required", Details: map[string]any{"reason": "unverified_repo"}}
+	failure := &apierr.Error{Code: hosterr.Forbidden, Message: "repository authority required", Details: map[string]any{"reason": "unverified_repo"}}
 	inv, _ := clisurface.Parse("sparkwing", []string{"pools", "allow", "--pool", "prod", "--repo", "acme/api"})
 	var out bytes.Buffer
 	err := managePools(t.Context(), inv, &poolManager{err: failure}, &out)

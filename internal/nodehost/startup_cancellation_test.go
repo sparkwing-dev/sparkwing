@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -46,7 +48,7 @@ func TestStartupRefusalAfterCancellationReportsCancelledBeforeHeartbeat(t *testi
 				if !errors.As(err, &refused) || refused.Reason != store.ReasonHolderRights {
 					t.Fatalf("cancellation did not refuse startup authority: %v", err)
 				}
-				return &apierr.Error{Code: apierr.LockHeld, Message: "state transition refused"}
+				return &apierr.Error{Code: hosterr.LockHeld, Message: "state transition refused"}
 			}
 			if stage == "storage" {
 				deps.BindStorage = func(ctx context.Context, _ NodeInput) (StorageBinding, error) { return StorageBinding{}, refuse(ctx) }
@@ -60,7 +62,7 @@ func TestStartupRefusalAfterCancellationReportsCancelledBeforeHeartbeat(t *testi
 			err = host.Execute(t.Context(), input)
 			row, readErr := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 			var cancelled *lease.CancelError
-			if readErr != nil || row.Outcome != runstate.NodeCancelled || row.FailureReason != string(apierr.ReasonCancelled) || !errors.As(err, &cancelled) || len(*processes) != 0 {
+			if readErr != nil || row.Outcome != runstate.NodeCancelled || row.FailureReason != string(hosterr.ReasonCancelled) || !errors.As(err, &cancelled) || len(*processes) != 0 {
 				t.Fatalf("startup cancellation became a failure: outcome=%s reason=%s processes=%d error=%v read=%v", row.Outcome, row.FailureReason, len(*processes), err, readErr)
 			}
 		})
@@ -70,7 +72,7 @@ func TestStartupRefusalAfterCancellationReportsCancelledBeforeHeartbeat(t *testi
 func TestStartupStorageRefusalSealsEmptyAttemptLogs(t *testing.T) {
 	cfg, _ := nativeConfigFixture(t)
 	cfg.Storage = func(context.Context, capability.Principal) (StorageBinding, error) {
-		return StorageBinding{}, &apierr.Error{Code: apierr.LockHeld, Message: "state transition refused"}
+		return StorageBinding{}, &apierr.Error{Code: hosterr.LockHeld, Message: "state transition refused"}
 	}
 	records := &nativeLogRecords{}
 	cfg.Logs = func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {

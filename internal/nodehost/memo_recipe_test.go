@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -94,7 +96,7 @@ func TestMemoRecipeGoTypeScriptPipelinesUseExecutingHost(t *testing.T) {
 	}
 	for _, job := range []nodewire.JobSpec{goJob, ts.Jobs[0]} {
 		key, err := host.memoKey(t.Context(), session, input, job)
-		if key != "" || !errors.Is(err, os.ErrNotExist) || host.failure(err).Failure.Error.Code != apierr.Internal {
+		if key != "" || !errors.Is(err, os.ErrNotExist) || host.failure(err).Failure.Error.Code != hosterr.Internal {
 			t.Fatalf("filesystem error became key %q, %v", key, err)
 		}
 	}
@@ -179,7 +181,7 @@ func TestExecutorMemoRecipeErrorStopsBody(t *testing.T) {
 		t.Fatalf("missing start or failure report: %+v", state.changes)
 	}
 	result := state.changes[1].Extra.Result
-	if result.Failure == nil || result.Failure.Error.Code != apierr.Internal {
+	if result.Failure == nil || result.Failure.Error.Code != hosterr.Internal {
 		t.Fatalf("recipe failed as author code: %+v", result)
 	}
 	for _, process := range *processes {

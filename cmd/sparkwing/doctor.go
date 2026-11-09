@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -96,7 +98,7 @@ func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (d
 	}
 	services, err := deps.local(ctx)
 	if err == nil && services.lifecycle == nil {
-		err = &apierr.Error{Code: apierr.Unavailable, Message: "doctor requires local controller diagnostics", Hint: "the local controller integration is unavailable in this build"}
+		err = &apierr.Error{Code: hosterr.Unavailable, Message: "doctor requires local controller diagnostics", Hint: "the local controller integration is unavailable in this build"}
 	}
 	if err != nil {
 		report.ControllerError = err.Error()

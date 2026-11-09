@@ -1,5 +1,7 @@
 package wingd
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -73,17 +75,17 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 		peer, verified := localhostwire.LocalPeer(r.Context())
 		owner, err := controllerPeerIdentity()
 		if !verifiedSocketPeer(r.Context()) || !verified || err != nil {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "runner lifecycle requires a verified local socket peer"})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: "runner lifecycle requires a verified local socket peer"})
 			return
 		}
 		subject, err := LocalSubject(peer, owner)
 		if err != nil {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Forbidden, Message: err.Error()})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.Forbidden, Message: err.Error()})
 			return
 		}
 		registry, ok := d.cfg.Runs.(LocalRunnerStore)
 		if !ok {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "local runner persistence is unavailable"})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.Unavailable, Message: "local runner persistence is unavailable"})
 			return
 		}
 		if r.URL.Path == localRunnerPath && r.Method == http.MethodGet && r.URL.Query().Get("state") == "active" {
@@ -198,7 +200,7 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 	}
 }
 
-var errControllerStopping = &apierr.Error{Code: apierr.Unavailable, Message: "the local controller is stopping"}
+var errControllerStopping = &apierr.Error{Code: hosterr.Unavailable, Message: "the local controller is stopping"}
 
 func (d *Daemon) isDraining() bool {
 	d.mu.Lock()
@@ -245,7 +247,7 @@ func registerLocalRunnerHTTP(w http.ResponseWriter, r *http.Request, registry Lo
 		return instance, &apierr.Error{Code: apierr.BadRequest, Message: "runner registration requires one process identity and no lifecycle state"}
 	}
 	if err := verifyAdmissionProcess(peer, instance.PID, instance.ProcessBirth); err != nil {
-		return instance, &apierr.Error{Code: apierr.Forbidden, Message: "runner process identity cannot be verified"}
+		return instance, &apierr.Error{Code: hosterr.Forbidden, Message: "runner process identity cannot be verified"}
 	}
 	return registry.RegisterLocalRunner(r.Context(), subject, instance)
 }
@@ -275,7 +277,7 @@ func watchLocalRunnerHTTP(ctx context.Context, registry LocalRunnerStore, subjec
 func writeLocalRunnerFailure(w http.ResponseWriter, err error) {
 	var failure *apierr.Error
 	if !errors.As(err, &failure) {
-		failure = &apierr.Error{Code: apierr.Internal, Message: err.Error()}
+		failure = &apierr.Error{Code: hosterr.Internal, Message: err.Error()}
 	}
 	writeLoginFailure(w, failure)
 }

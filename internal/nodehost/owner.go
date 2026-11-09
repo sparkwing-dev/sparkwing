@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -364,7 +366,7 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 		if !errors.As(cause, &cancelled) {
 			return errors.Join(failure, cause)
 		}
-		reason = string(apierr.ReasonCancelled)
+		reason = string(hosterr.ReasonCancelled)
 		message = "cancellation requested"
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)

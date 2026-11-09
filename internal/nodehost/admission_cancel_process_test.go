@@ -2,6 +2,8 @@
 
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -14,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -176,7 +177,7 @@ func TestQueuedMachineCancellationReportsCancelledWithoutStarting(t *testing.T) 
 		t.Fatalf("queued=%t processes=%d changes=%+v error=%v", queued, len(*processes), state.changes, err)
 	}
 	result := state.changes[0].Extra.Result
-	if state.changes[0].Cause != runstate.CauseReport || result.Outcome != runstate.NodeCancelled || result.Reason != string(apierr.ReasonCancelled) || state.row.Attempt != 0 {
+	if state.changes[0].Cause != runstate.CauseReport || result.Outcome != runstate.NodeCancelled || result.Reason != string(hosterr.ReasonCancelled) || state.row.Attempt != 0 {
 		t.Fatalf("queued cancellation reported %s/%s attempt=%d: %v", result.Outcome, result.Reason, state.row.Attempt, err)
 	}
 }

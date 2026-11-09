@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -257,7 +259,7 @@ func reuseRefused(err error) bool {
 	case *ErrIllegalTransition:
 		return true
 	case *apierr.Error:
-		return slices.Contains([]apierr.Code{apierr.IllegalTransition, apierr.BadRequest, apierr.Forbidden, apierr.IntegrityFailure, apierr.SpecDrift}, cause.Code)
+		return slices.Contains([]apierr.Code{hosterr.IllegalTransition, apierr.BadRequest, hosterr.Forbidden, hosterr.IntegrityFailure, hosterr.SpecDrift}, cause.Code)
 	case interface{ Unwrap() error }:
 		return reuseRefused(cause.Unwrap())
 	default:

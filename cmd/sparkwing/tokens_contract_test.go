@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -104,7 +106,7 @@ func TestTokenValidationPrecedesCredentialResolution(t *testing.T) {
 			t.Fatalf("invalid invocation accepted: %v", args)
 		}
 	}
-	failure := &apierr.Error{Code: apierr.Forbidden, Message: "token owner required", Details: map[string]any{"reason": "not_owner"}}
+	failure := &apierr.Error{Code: hosterr.Forbidden, Message: "token owner required", Details: map[string]any{"reason": "not_owner"}}
 	f := &tokenManagerFake{err: failure}
 	inv, _ := clisurface.Parse("sparkwing", []string{"tokens", "revoke", "--token", "prefix", "-o", "json"})
 	var out bytes.Buffer

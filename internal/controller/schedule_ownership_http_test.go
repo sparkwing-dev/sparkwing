@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -50,7 +52,7 @@ func TestScheduleHTTPClientExplainsAppDeclarationRefusal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := mutate()
 			var refusal *apierr.Error
-			if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || !strings.Contains(refusal.Message, "edit the declaration in the repository") {
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden || !strings.Contains(refusal.Message, "edit the declaration in the repository") {
 				t.Errorf("App declaration refusal lacks repository remedy: %v", err)
 			}
 			after, err := f.writer.GetCronSchedule(t.Context(), row.ID)

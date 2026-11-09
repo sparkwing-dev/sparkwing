@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -283,7 +285,7 @@ func TestLocalHostPrivateTransportRejectsForeignCredentialProbesAndUnauthenticat
 	} {
 		_, err := host.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+		if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden {
 			t.Fatalf("foreign probe: %v", err)
 		}
 	}

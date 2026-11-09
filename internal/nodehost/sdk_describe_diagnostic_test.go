@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -24,9 +26,9 @@ func FuzzSDKDescribeFailureWithholdsDetailsAndNamesClass(f *testing.F) {
 		case 0:
 			cause = errors.New(secret)
 		case 1:
-			code, cause = apierr.DeadlineExceeded, fmt.Errorf("%s: %w", secret, context.DeadlineExceeded)
+			code, cause = hosterr.DeadlineExceeded, fmt.Errorf("%s: %w", secret, context.DeadlineExceeded)
 		case 2:
-			code = apierr.SDKExited
+			code = hosterr.SDKExited
 		case 3:
 			code = apierr.ProtocolMismatch
 		case 4:

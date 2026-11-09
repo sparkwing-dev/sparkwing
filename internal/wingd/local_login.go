@@ -1,5 +1,7 @@
 package wingd
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -105,12 +107,12 @@ func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 		}
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
-			writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "dashboard sign-in links are minted with POST"})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "dashboard sign-in links are minted with POST"})
 			return
 		}
 		peer, ok := localhostwire.LocalPeer(r.Context())
 		if !ok {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "dashboard sign-in links need a verified local peer"})
+			writeLoginFailure(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: "dashboard sign-in links need a verified local peer"})
 			return
 		}
 		login, failure := l.mint(peer, r.URL.Query().Get("host"))
@@ -129,12 +131,12 @@ func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity, host string) (DashboardLogin, *apierr.Error) {
 	token, err := randomToken()
 	if err != nil {
-		return DashboardLogin{}, &apierr.Error{Code: apierr.Internal, Message: "dashboard sign-in token: " + err.Error()}
+		return DashboardLogin{}, &apierr.Error{Code: hosterr.Internal, Message: "dashboard sign-in token: " + err.Error()}
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.origin == "" {
-		return DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard status to see why"}
+		return DashboardLogin{}, &apierr.Error{Code: hosterr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard status to see why"}
 	}
 	origin := l.origin
 	if host != "" {
@@ -335,7 +337,7 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "the local dashboard needs a signed-in browser", Hint: "run sparkwing dashboard open and visit the link it prints"})
+		writeLoginFailure(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: "the local dashboard needs a signed-in browser", Hint: "run sparkwing dashboard open and visit the link it prints"})
 	})
 }
 
@@ -353,7 +355,7 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "the dashboard page exchanges its sign-in code with POST"})
+		writeLoginFailure(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "the dashboard page exchanges its sign-in code with POST"})
 		return
 	}
 	if !l.sameDashboardOrigin(r) {
@@ -361,14 +363,14 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var exchange dashboardExchange
-	refused := &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired, already used or for another address", Hint: "run sparkwing dashboard open for a new link"}
+	refused := &apierr.Error{Code: hosterr.Unauthenticated, Message: "this sign-in link is invalid, expired, already used or for another address", Hint: "run sparkwing dashboard open for a new link"}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&exchange) != nil || exchange.Code == "" {
 		writeLoginFailure(w, refused)
 		return
 	}
 	session, err := randomToken()
 	if err != nil {
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Internal, Message: "dashboard session token: " + err.Error()})
+		writeLoginFailure(w, &apierr.Error{Code: hosterr.Internal, Message: "dashboard session token: " + err.Error()})
 		return
 	}
 	expires, ok := l.redeem(tokenDigest(exchange.Code), tokenDigest(session), l.requestOrigin(r))
@@ -386,7 +388,7 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "sign out with POST"})
+		writeLoginFailure(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "sign out with POST"})
 		return
 	}
 	if !l.sameDashboardOrigin(r) {
@@ -405,7 +407,7 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 		l.end(digest)
 	}
 	if !live {
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this browser is not signed in"})
+		writeLoginFailure(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: "this browser is not signed in"})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -48,11 +50,11 @@ func UploadSourceSnapshot(ctx context.Context, options EngineOptions, publicatio
 	}
 	body, err := (blob.TransferClient{Transport: c.http.Transport}).Transfer(ctx, transfer, f)
 	if err != nil {
-		return "", &apierr.Error{Code: apierr.Unavailable, Message: "source snapshot transfer failed"}
+		return "", &apierr.Error{Code: hosterr.Unavailable, Message: "source snapshot transfer failed"}
 	}
 	_, copyErr := io.Copy(io.Discard, body)
 	if err := errors.Join(copyErr, body.Close()); err != nil {
-		return "", &apierr.Error{Code: apierr.Unavailable, Message: "source snapshot transfer did not finish"}
+		return "", &apierr.Error{Code: hosterr.Unavailable, Message: "source snapshot transfer did not finish"}
 	}
 	var committed struct {
 		Digest blob.Digest `json:"digest"`

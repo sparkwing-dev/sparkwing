@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -358,7 +360,7 @@ type teamJSON struct {
 
 func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if !s.deployment.MultiTeam() {
-		return apierr.Authorization(apierr.ReasonMissingGrant, "creating a team requires a multi-team license")
+		return hosterr.Authorization(hosterr.ReasonMissingGrant, "creating a team requires a multi-team license")
 	}
 	var req createTeamReq
 	if err := decodeEngineRequest(r, &req); err != nil {

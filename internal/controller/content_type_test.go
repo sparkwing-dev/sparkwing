@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -37,7 +39,7 @@ func TestRoutes_RejectSimpleRequestContentTypes(t *testing.T) {
 						want = http.StatusBadRequest
 					}
 					w := f.serve(r)
-					var failure apierr.Envelope
+					var failure hosterr.Envelope
 					if w.Code != want || json.Unmarshal(w.Body.Bytes(), &failure) != nil {
 						t.Fatalf("HTTP %d: %s, want %d", w.Code, w.Body, want)
 					}
@@ -70,7 +72,7 @@ func TestRoutes_RejectUnknownJSONFields(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+f.token)
 		w := f.serve(r)
-		var failure apierr.Envelope
+		var failure hosterr.Envelope
 		if w.Code != http.StatusBadRequest || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error.Code != apierr.BadRequest || strings.Contains(w.Body.String(), "secret") {
 			t.Fatalf("unknown field refusal: HTTP %d %s", w.Code, w.Body)
 		}
@@ -100,7 +102,7 @@ func TestRoutesUnknownJSONFieldsProperty(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+f.token)
 		w := f.serve(r)
-		var failure apierr.Envelope
+		var failure hosterr.Envelope
 		return w.Code == http.StatusBadRequest && json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error.Code == apierr.BadRequest && !strings.Contains(w.Body.String(), private) && !strings.Contains(w.Body.String(), f.token) && credentialCounts(t, f) == before
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {

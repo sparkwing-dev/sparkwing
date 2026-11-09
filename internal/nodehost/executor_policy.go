@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -101,7 +103,7 @@ func (h *nodeExecutor) withProcess(ctx context.Context, input NodeInput, spec ru
 		return err
 	}
 	if !reflect.DeepEqual(resolved.Identity, spec.Resolved.Engine) {
-		return executorError(apierr.SpecDrift, "engine resolution changed the sealed release")
+		return executorError(hosterr.SpecDrift, "engine resolution changed the sealed release")
 	}
 	input.Engine = resolved
 	if h.deps.Bind != nil {

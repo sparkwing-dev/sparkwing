@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -60,7 +62,7 @@ func (h *nodeExecutor) memoKey(ctx context.Context, session *executorSession, in
 		}
 		value, err := memoInputValue(bounded, *job.Memo.Input, memoWorkspace(input), environment)
 		if err != nil {
-			return "", errors.Join(executorError(apierr.Internal, "memo input evaluation failed"), err)
+			return "", errors.Join(executorError(hosterr.Internal, "memo input evaluation failed"), err)
 		}
 		return memoValueKey(value)
 	}

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -121,7 +123,7 @@ func TestMetricsHTTPAuthorityProperty(t *testing.T) {
 					f.facts.snapshot.Authorities[0].Principal.Capability.Grants = nil
 					want = 403
 				case 2:
-					writer.err = &apierr.Error{Code: apierr.LockHeld, Message: "holder changed"}
+					writer.err = &apierr.Error{Code: hosterr.LockHeld, Message: "holder changed"}
 					want = 409
 				case 3:
 					writer.err = errors.New("private-backend-secret")

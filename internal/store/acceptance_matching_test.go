@@ -1,5 +1,7 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -162,7 +164,7 @@ func assertMatchingRefusal(t *testing.T, err error, named bool) {
 		if errors.As(err, &holder) && holder.Reason == store.ReasonHolderRights {
 			return
 		}
-		if !errors.As(err, &denied) || denied.Code != apierr.Forbidden && denied.Code != apierr.LockHeld {
+		if !errors.As(err, &denied) || denied.Code != hosterr.Forbidden && denied.Code != hosterr.LockHeld {
 			t.Fatalf("named claim failed outside matching: %v", err)
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {

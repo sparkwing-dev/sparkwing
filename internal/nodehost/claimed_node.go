@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -113,11 +115,11 @@ func (h *ClaimedNodeHost) execute(ctx context.Context, input NodeInput, spec sou
 		case entry == nil:
 			err = errors.New("source acquisition returned no entry")
 		case entry.Engine.Identity != *spec.Engine:
-			err = executorError(apierr.SpecDrift, "source engine differs from the accepted release")
+			err = executorError(hosterr.SpecDrift, "source engine differs from the accepted release")
 		case spec.SHA != "" && !strings.EqualFold(entry.SHA, spec.SHA):
-			err = executorError(apierr.SpecDrift, "source commit differs from the accepted commit")
+			err = executorError(hosterr.SpecDrift, "source commit differs from the accepted commit")
 		case entry.RepoKey != spec.RepoKey:
-			err = executorError(apierr.SpecDrift, "source repository differs from the accepted repository")
+			err = executorError(hosterr.SpecDrift, "source repository differs from the accepted repository")
 		}
 	}
 	if err != nil {
@@ -138,10 +140,10 @@ func (h *ClaimedNodeHost) sourceSpec(ctx context.Context, input NodeInput) (sour
 		return source.Spec{}, err
 	}
 	if !reflect.DeepEqual(accepted, input.Accepted) {
-		return source.Spec{}, executorError(apierr.SpecDrift, "job award differs from persisted acceptance")
+		return source.Spec{}, executorError(hosterr.SpecDrift, "job award differs from persisted acceptance")
 	}
 	if input.Engine.Identity != snapshot.Run.Spec.Resolved.Engine {
-		return source.Spec{}, executorError(apierr.SpecDrift, "job award differs from the accepted engine")
+		return source.Spec{}, executorError(hosterr.SpecDrift, "job award differs from the accepted engine")
 	}
 	ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
 	row, err := h.Store.ReadNode(ctx, ref)
@@ -149,14 +151,14 @@ func (h *ClaimedNodeHost) sourceSpec(ctx context.Context, input NodeInput) (sour
 		return source.Spec{}, err
 	}
 	if row.Ref != ref || row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix || row.Generation != input.Generation || row.Attempt != input.Attempt {
-		return source.Spec{}, executorError(apierr.LockHeld, "job award no longer holds the persisted claim")
+		return source.Spec{}, executorError(hosterr.LockHeld, "job award no longer holds the persisted claim")
 	}
 	constructed, err := NewNodeInput(accepted, row, input.Engine, input.GrantedRunner)
 	if err != nil {
 		return source.Spec{}, err
 	}
 	if constructed.SpecHash != input.SpecHash || !reflect.DeepEqual(constructed.Execution, input.Execution) {
-		return source.Spec{}, executorError(apierr.SpecDrift, "job award differs from persisted execution settings")
+		return source.Spec{}, executorError(hosterr.SpecDrift, "job award differs from persisted execution settings")
 	}
 	return source.ForExecution(*snapshot.Run.Spec)
 }
@@ -180,7 +182,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 			return errors.Join(failure, cause)
 		}
 	}
-	code := apierr.Internal
+	code := hosterr.Internal
 	var structured *apierr.Error
 	if errors.As(failure, &structured) {
 		code = structured.Code
@@ -191,7 +193,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 		result.Outcome, result.Reason = refused.Outcome, refused.Reason
 	}
 	if ctx.Err() != nil {
-		result.Outcome, result.Reason = runstate.NodeCancelled, string(apierr.ReasonCancelled)
+		result.Outcome, result.Reason = runstate.NodeCancelled, string(hosterr.ReasonCancelled)
 	}
 	result = recordNodeFailure(input.NodeID, result, mask)
 	reportCtx := lease.ExecutionContext(ctx)

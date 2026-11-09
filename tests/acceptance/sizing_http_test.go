@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -104,7 +106,7 @@ func TestSizingHTTPRefusals(t *testing.T) {
 	for _, state := range []string{"absent", "malformed", "revoked", "parent revoked", "membership lost", "lease expired", "stale generation", "wrong holder", "finished", "cancelled", "missing grant", "bare machine", "actions root", "bootstrap", "eval", "nodehost", "other pipeline", "foreign repo", "private store"} {
 		t.Run(state, func(t *testing.T) {
 			b, f := newCredentialBoundary(), &sizingStore{}
-			status, code := 401, apierr.Unauthenticated
+			status, code := 401, hosterr.Unauthenticated
 			switch state {
 			case "absent":
 				b.raw = ""
@@ -126,10 +128,10 @@ func TestSizingHTTPRefusals(t *testing.T) {
 				b.snapshot.Binding.FinishedAt = &b.snapshot.Now
 			case "cancelled":
 				b.snapshot.Binding.RunCancelled = true
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "missing grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "bare machine", "actions root":
 				b = authorityMember()
 				b.snapshot.Authorities[0].Principal.Capability.Subject.Kind = capability.SubjectMachine
@@ -138,10 +140,10 @@ func TestSizingHTTPRefusals(t *testing.T) {
 					p := &b.snapshot.Authorities[0].Principal.Capability
 					p.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "123", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 				}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "bootstrap":
 				b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "eval":
 				p := &b.snapshot.Authorities[0].Principal
 				p.Capability.Unit, p.Capability.Purpose = capability.UnitEval, capability.PurposeEval
@@ -150,19 +152,19 @@ func TestSizingHTTPRefusals(t *testing.T) {
 				expires := b.snapshot.Now.Add(time.Minute)
 				b.snapshot.Binding.FinishedAt = &b.snapshot.Now
 				b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *p.Capability.Binding.Expansion, ExpiresAt: expires}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "nodehost":
 				b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")
 				b.snapshot.Authorities[0].Principal.Capability.Digest = sha256.Sum256([]byte(b.raw))
 				b.snapshot.Authorities[0].Principal.Capability.Audience = capability.NodeHost
 				b.snapshot.Binding.ProcessAlive = true
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "other pipeline", "foreign repo":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "binding refused", Details: map[string]any{"reason": apierr.ReasonBinding}}
-				status, code = 403, apierr.Forbidden
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "binding refused", Details: map[string]any{"reason": hosterr.ReasonBinding}}
+				status, code = 403, hosterr.Forbidden
 			case "private store":
 				f.err = errors.New("private store data")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			}
 			w := sizingRequest(sizingServer(t, b, f), b, "GET", "/api/v1/pipelines/other/sizing", "")
 			assertEngineError(t, w, status, code)
@@ -182,7 +184,7 @@ func TestSizingHTTPMissingStoreAndMethods(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			b := newCredentialBoundary()
 			s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
-			code := apierr.PolicyMissing
+			code := hosterr.PolicyMissing
 			switch state {
 			case "nil store":
 				bindTenantPort[controller.TenantHandle](s, func(context.Context, store.Team) (controller.TenantHandle, error) { return nil, nil })
@@ -190,12 +192,12 @@ func TestSizingHTTPMissingStoreAndMethods(t *testing.T) {
 				bindTenantPort[controller.TenantHandle](s, func(context.Context, store.Team) (controller.TenantHandle, error) {
 					return nil, errors.New("private resolver")
 				})
-				code = apierr.Internal
+				code = hosterr.Internal
 			case "no policy":
 				s.WithAuthorization(routepolicy.Authorization{})
 			}
 			w := sizingRequest(s.Handler(), b, "GET", "/api/v1/pipelines/build/sizing", `{}`)
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			if strings.Contains(w.Body.String(), "private") {
 				t.Fatal(w.Body.String())
 			}
@@ -205,7 +207,7 @@ func TestSizingHTTPMissingStoreAndMethods(t *testing.T) {
 	h := sizingServer(t, b, f)
 	for _, method := range []string{"HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		w := sizingRequest(h, b, method, "/api/v1/pipelines/build/sizing", `{}`)
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 		if w.Header().Get("Allow") != "GET" {
 			t.Fatalf("Allow=%q want GET", w.Header().Get("Allow"))
 		}

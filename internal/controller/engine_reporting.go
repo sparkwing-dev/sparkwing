@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -64,7 +66,7 @@ func (s *EngineController) handleStep(w http.ResponseWriter, r *http.Request, a 
 		return err
 	}
 	if body.SourceAttempt != attempt.Attempt {
-		return &apierr.Error{Code: apierr.LockHeld, Message: "step report names another attempt"}
+		return &apierr.Error{Code: hosterr.LockHeld, Message: "step report names another attempt"}
 	}
 	report := store.StepReport{
 		Attempt: attempt, Actor: engineActor(a), StepID: body.StepID, State: body.State,
@@ -94,7 +96,7 @@ func reportingAttempt(ctx context.Context, tenant RunTransactions, a capability.
 		attempt.Attempt, attempt.Generation = int64(node.Attempt), int64(node.Generation)
 	}
 	if attempt.Attempt <= 0 || attempt.Generation <= 0 {
-		return attempt, &apierr.Error{Code: apierr.IllegalTransition, Message: "job has no reporting attempt"}
+		return attempt, &apierr.Error{Code: hosterr.IllegalTransition, Message: "job has no reporting attempt"}
 	}
 	return attempt, nil
 }
@@ -136,7 +138,7 @@ func reportingStep(r *http.Request, step string) error {
 
 func reportingText(text string) error {
 	if int64(len(text)) > limits.AnnotationBytes {
-		return &apierr.Error{Code: apierr.PayloadTooLarge, Message: "annotation or summary exceeds its byte limit", Details: map[string]any{"limit_bytes": limits.AnnotationBytes}}
+		return &apierr.Error{Code: hosterr.PayloadTooLarge, Message: "annotation or summary exceeds its byte limit", Details: map[string]any{"limit_bytes": limits.AnnotationBytes}}
 	}
 	return nil
 }

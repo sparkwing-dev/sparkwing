@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -33,7 +35,7 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 		if errors.As(err, &failure) {
 			return capability.AuthenticationSnapshot{}, err
 		}
-		return capability.AuthenticationSnapshot{}, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "authentication service unavailable"}, err)
+		return capability.AuthenticationSnapshot{}, errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "authentication service unavailable"}, err)
 	}
 	// The store omits expiry on revocation-only session ancestors of member tokens.
 	for i, authority := range snapshot.Authorities {
@@ -44,11 +46,11 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 	}
 	if console {
 		if len(snapshot.Authorities) != 1 || !reader.server.consoleAuthority(snapshot.Authorities[0].Principal, snapshot.Now) {
-			return capability.AuthenticationSnapshot{}, apierr.Authorization(apierr.ReasonMissingGrant, "operator console requires the operator's own signed-in account")
+			return capability.AuthenticationSnapshot{}, hosterr.Authorization(hosterr.ReasonMissingGrant, "operator console requires the operator's own signed-in account")
 		}
 		p := &snapshot.Authorities[0].Principal
 		if unsafeMethod(evidence.Method) && !recentSignIn(p.Capability.IssuedAt, snapshot.Now) {
-			return capability.AuthenticationSnapshot{}, apierr.Authorization(apierr.ReasonReauthRequired, "operator console changes need a sign-in from the last 10 minutes; sign out, sign in again and retry")
+			return capability.AuthenticationSnapshot{}, hosterr.Authorization(hosterr.ReasonReauthRequired, "operator console changes need a sign-in from the last 10 minutes; sign out, sign in again and retry")
 		}
 		p.Class, p.Capability.Team = capability.CredentialConsole, ""
 		p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
@@ -115,20 +117,20 @@ func (s *Server) checkSessionCSRF(r *http.Request, p capability.Principal) error
 	raw, err := s.sessionPresentation(r)
 	digest := sha256.Sum256([]byte(raw))
 	if err != nil || (p.Class != capability.CredentialSession && p.Class != capability.CredentialConsole) || p.Authority != (capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}) {
-		return &apierr.Error{Code: apierr.Unauthenticated, Message: "session identity changed"}
+		return &apierr.Error{Code: hosterr.Unauthenticated, Message: "session identity changed"}
 	}
 	session, err := s.operator.LookupSession(r.Context(), raw)
 	if errors.Is(err, store.ErrSessionBackend) {
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	if err != nil || p.Class != capability.CredentialConsole && session.Team != store.Team(p.Capability.Team) || session.AccountID != p.Capability.Subject.ID {
-		return &apierr.Error{Code: apierr.Unauthenticated, Message: "session is unavailable"}
+		return &apierr.Error{Code: hosterr.Unauthenticated, Message: "session is unavailable"}
 	}
 	if err := s.validateSessionFlow(session); err != nil {
 		return err
 	}
 	if !validAPIRequestCSRF(r, session.CSRFToken, s.cookiesSecure()) {
-		return apierr.Authorization(apierr.ReasonBinding, "invalid CSRF token")
+		return hosterr.Authorization(hosterr.ReasonBinding, "invalid CSRF token")
 	}
 	return nil
 }

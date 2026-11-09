@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -93,7 +95,7 @@ func TestDoctorCommandPreflightDoesNotResolveDependencies(t *testing.T) {
 }
 
 func TestDoctorCommandRetainsPartialFindingsAndFailure(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.Unavailable, Message: "controller did not answer", Hint: "sparkwing daemon restart"}
+	failure := &apierr.Error{Code: hosterr.Unavailable, Message: "controller did not answer", Hint: "sparkwing daemon restart"}
 	for _, resolveFailure := range []bool{false, true} {
 		local := &doctorLifecycleFake{err: failure, findings: []localhostwire.LocalDoctorFinding{{Code: "removed_timer_verb", Unit: "nightly", Message: "timer calls crons tick"}}}
 		deps := doctorTestDependencies(local)
@@ -118,7 +120,7 @@ func TestDoctorCommandNilLifecycleFailsLoudly(t *testing.T) {
 	var out bytes.Buffer
 	err := runDoctorCommandArgs(t.Context(), []string{"-o", "json"}, &out, deps)
 	var structured *apierr.Error
-	if !errors.As(err, &structured) || structured.Code != apierr.Unavailable || strings.Contains(out.String(), "healthy") {
+	if !errors.As(err, &structured) || structured.Code != hosterr.Unavailable || strings.Contains(out.String(), "healthy") {
 		t.Fatalf("%v %s", err, &out)
 	}
 }

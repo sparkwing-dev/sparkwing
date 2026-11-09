@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -25,7 +27,7 @@ func runOwnerSession(ctx context.Context, award controllerwire.ClaimedUnit, inpu
 		return completion, err
 	}
 	if session.host == nil || session.close == nil {
-		return completion, &apierr.Error{Code: apierr.Unavailable, Message: "run hosting requires a host and cleanup binding"}
+		return completion, &apierr.Error{Code: hosterr.Unavailable, Message: "run hosting requires a host and cleanup binding"}
 	}
 	input.Storage, input.Engines = session.input.Storage, session.input.Engines
 	input.Owner.Authority, input.Owner.CapabilityPrefix = session.input.Owner.Authority, session.input.Owner.CapabilityPrefix
