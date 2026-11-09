@@ -3,9 +3,13 @@ package nodehost
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -18,7 +22,35 @@ type commandSession struct{ job *procgroup.Job }
 // safety: distinguish host termination from a natural nonzero exit racing cancellation.
 const commandCancellationExitCode uint32 = 0x53574341
 
-func configureHostCommand(*exec.Cmd) {}
+// configureHostCommand scopes the Bash workaround to host execution and assumes
+// Windows environment inheritance. Helpers and cleanups keep their original argv.
+func configureHostCommand(cmd *exec.Cmd) {
+	if cmd.Err != nil || !strings.EqualFold(filepath.Base(cmd.Path), "bash.exe") {
+		return
+	}
+	path, err := filepath.Abs(cmd.Path)
+	if err != nil {
+		cmd.Err = fmt.Errorf("resolve Windows Bash program: %w", err)
+		return
+	}
+	if strings.EqualFold(path, filepath.Join(os.Getenv("SystemRoot"), "System32", "bash.exe")) {
+		cmd.Err = errors.New("WSL bash.exe is not supported for host commands; install Git Bash or call wsl explicitly")
+		return
+	}
+	if len(cmd.Args) != 3 || cmd.Args[1] != "-c" {
+		return
+	}
+	// bug: Git Bash truncates long -c arguments from Windows; the environment preserves the program and stdin.
+	const variable = "SPARKWING_BASH_PROGRAM"
+	const limit = 32767 - len(variable) - 2
+	program := cmd.Args[2]
+	if len(utf16.Encode([]rune(program))) > limit {
+		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
+		return
+	}
+	cmd.Args[2] = `: "${` + variable + `:?host Bash program is empty}"; eval 'unset ` + variable + `;' "$` + variable + `"`
+	cmd.Env = append(cmd.Environ(), variable+"="+program)
+}
 
 func execFormatError(error) bool { return false }
 

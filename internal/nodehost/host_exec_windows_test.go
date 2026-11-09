@@ -281,8 +281,62 @@ func TestWindowsHostCommandRejectsOversizedBashProgram(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := procenv.SDKCommand(os.Environ(), dir, tool, "-c", strings.Repeat("x", 32768))
+	configureHostCommand(cmd)
 	if cmd.Err == nil || !strings.Contains(cmd.Err.Error(), "exceeds environment limit") {
 		t.Fatalf("oversized Bash program error = %v", cmd.Err)
+	}
+}
+
+//sparkwing:critical
+func TestWindowsHostCommandRejectsWSLBash(t *testing.T) {
+	root := t.TempDir()
+	system32 := filepath.Join(root, "System32")
+	if err := os.Mkdir(system32, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tool := filepath.Join(system32, "bash.exe")
+	if err := os.WriteFile(tool, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SystemRoot", root)
+	for _, name := range []string{tool, strings.ToUpper(tool), `System32\bash.exe`} {
+		req := nodeproto.ExecRequest{ID: "wsl", Argv: []string{name, "-c", "printf unexpected"}, Dir: root, Env: os.Environ(), Capture: true}
+		done, session := runHostCommand(req, nil, nil, nil, func(string, []byte, bool) error { return nil }, nil)
+		if session != nil {
+			if err := endCommandSessions([]*commandSession{session}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if session != nil || done.StartError != "WSL bash.exe is not supported for host commands; install Git Bash or call wsl explicitly" {
+			t.Fatalf("WSL launcher not refused: %+v", done)
+		}
+	}
+}
+
+//sparkwing:critical
+func TestWindowsHostCommandBashRequiresProgram(t *testing.T) {
+	shell, err := exec.LookPath("bash.exe")
+	if err != nil {
+		t.Skip("Git Bash is unavailable")
+	}
+	for _, empty := range []bool{false, true} {
+		cmd := procenv.SDKCommand(os.Environ(), t.TempDir(), shell, "-c", "printf unexpected")
+		configureHostCommand(cmd)
+		filtered := cmd.Env[:0]
+		for _, entry := range cmd.Env {
+			key, _, _ := strings.Cut(entry, "=")
+			if !strings.EqualFold(key, "SPARKWING_BASH_PROGRAM") {
+				filtered = append(filtered, entry)
+			}
+		}
+		cmd.Env = filtered
+		if empty {
+			cmd.Env = append(cmd.Env, "SPARKWING_BASH_PROGRAM=")
+		}
+		output, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(output), "host Bash program is empty") || strings.Contains(string(output), "unexpected") {
+			t.Fatalf("empty=%v: missing Bash program succeeded: %v, output=%q", empty, err, output)
+		}
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"unicode/utf16"
 )
 
 // Command constructs a process with a policy-owned environment. The zero Env
@@ -42,25 +41,8 @@ func SDKCommandContext(ctx context.Context, environment []string, dir, name stri
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env, cmd.Dir = environment, dir
-	prepareSDKCommand(cmd)
 	refuseUnsafeBatch(cmd)
 	return cmd
-}
-
-func prepareSDKCommand(cmd *exec.Cmd) {
-	if runtime.GOOS != "windows" || len(cmd.Args) != 3 || cmd.Args[1] != "-c" || !strings.EqualFold(filepath.Base(cmd.Path), "bash.exe") {
-		return
-	}
-	// bug: Git Bash truncates long -c arguments from Windows; the environment preserves the program and stdin.
-	const variable = "SPARKWING_BASH_PROGRAM"
-	const limit = 32767 - len(variable) - 2
-	program := cmd.Args[2]
-	if len(utf16.Encode([]rune(program))) > limit {
-		cmd.Err = fmt.Errorf("windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
-		return
-	}
-	cmd.Args[2] = `eval 'unset ` + variable + `;' "$` + variable + `"`
-	cmd.Env = append(cmd.Environ(), variable+"="+program)
 }
 
 func refuseUnsafeBatch(cmd *exec.Cmd) {

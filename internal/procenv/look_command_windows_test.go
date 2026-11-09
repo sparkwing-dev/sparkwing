@@ -88,6 +88,25 @@ func TestSDKCommandWindowsRefusesBatchArguments(t *testing.T) {
 	}
 }
 
+func TestSDKCommandWindowsPreservesBashArgv(t *testing.T) {
+	dir := t.TempDir()
+	tool := filepath.Join(dir, "bash.exe")
+	if err := os.WriteFile(tool, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, program := range []string{"", "printf value", strings.Repeat(":\n", 17000)} {
+		for _, contextBound := range []bool{false, true} {
+			cmd := SDKCommand([]string{"SPARKWING_BASH_PROGRAM=caller-value"}, dir, tool, "-c", program)
+			if contextBound {
+				cmd = SDKCommandContext(t.Context(), []string{"SPARKWING_BASH_PROGRAM=caller-value"}, dir, tool, "-c", program)
+			}
+			if cmd.Err != nil || len(cmd.Args) != 3 || cmd.Args[2] != program || len(cmd.Env) != 1 || cmd.Env[0] != "SPARKWING_BASH_PROGRAM=caller-value" {
+				t.Fatalf("shared constructor changed Bash argv or environment: context=%v, err=%v", contextBound, cmd.Err)
+			}
+		}
+	}
+}
+
 //sparkwing:critical
 func TestLookupCommandWindowsIgnoresImplicitWorkingDirectory(t *testing.T) {
 	dir, bin := t.TempDir(), t.TempDir()
