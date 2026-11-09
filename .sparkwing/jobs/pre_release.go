@@ -216,11 +216,7 @@ func checkPreReleaseSparkwingPin(ctx context.Context) error {
 }
 
 func checkPreReleaseGofmt(ctx context.Context) error {
-	if err := sparkwing.Bash(ctx, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
-		MustBeEmpty("gofmt reported unformatted files"); err != nil {
-		return fmt.Errorf("gofmt: %w", err)
-	}
-	return nil
+	return runGofmt(ctx)
 }
 
 func checkPreReleaseStorePostgres(ctx context.Context) error {
