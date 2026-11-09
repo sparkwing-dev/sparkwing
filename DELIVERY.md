@@ -500,8 +500,8 @@ on self-hosted runners with `--runner label=deploy-kikd-prod --detach` and recor
 runner user's normal Bitwing ledger. The small staging and production smokes retain Cloud
 placement. The example and its weather-report children inherit that self-hosted route.
 Promotion does not wait for the full scan. All `deploy-scan` runs share the
-capacity-one `sparkwing-post-deploy` concurrency group, leaving the desktop runner's second
-slot for deploy jobs. Queued scans whose source is no longer main's tip stop before building
+capacity-one `sparkwing-post-deploy` concurrency group. The scan wrapper and labeled example
+jobs share the desktop runner's slots, so this route still needs capacity isolation before use. Queued scans whose source is no longer main's tip stop before building
 or running fixtures, so the newest waiting revision wins. The target team's existing example
 run history is the hourly receipt: an in-flight run or one that finished within the last hour
 at the same revision is observed again without starting another full example, including after
