@@ -138,11 +138,7 @@ func selectSDKRelease(ctx context.Context, repo, source string) (sdkReleaseDecis
 		if err != nil {
 			return sdkReleaseDecision{}, err
 		}
-		for _, line := range strings.Split(message, "\n") {
-			if value, ok := strings.CutPrefix(line, sdkDigestMarker); ok {
-				recorded = strings.TrimSpace(value)
-			}
-		}
+		recorded = recordedSDKDigest(message)
 		actual, err := sdkSourceDigest(ctx, repo, "refs/tags/"+tag)
 		if err != nil {
 			return sdkReleaseDecision{}, err
@@ -213,7 +209,7 @@ func (j *releaseSDKJob) run(ctx context.Context, dry bool) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			if existing != decision.Digest || !strings.Contains(message, sdkDigestMarker+decision.Digest) {
+			if existing != decision.Digest || recordedSDKDigest(message) != decision.Digest {
 				return "", fmt.Errorf("immutable SDK tag %s has different source", tag)
 			}
 		} else if _, err := runGitIn(ctx, j.RepoDir, "tag", "-a", tag, j.Source, "-m", "SDK "+decision.Version+"\n\n"+sdkDigestMarker+decision.Digest); err != nil {
@@ -278,4 +274,17 @@ func checkSDKReleaseSource(ctx context.Context, repo string) error {
 		return err
 	}
 	return run("-trimpath -modfile="+modfile, "go", "test", "-p", "1", "./sdk/typescript/test/nativehost", "-run", "TestNativeConformance")
+}
+
+func recordedSDKDigest(message string) string {
+	digest := ""
+	for _, line := range strings.Split(message, "\n") {
+		if value, ok := strings.CutPrefix(line, sdkDigestMarker); ok {
+			if digest != "" {
+				return ""
+			}
+			digest = strings.TrimSpace(value)
+		}
+	}
+	return digest
 }
