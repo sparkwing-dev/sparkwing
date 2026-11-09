@@ -23,9 +23,12 @@ func TestLocalPipelineBinaryBuildsOnceWithoutRemoteTransfers(t *testing.T) {
 	t.Setenv("BUILD_LOG", buildLog)
 	bin := filepath.Join(root, "go")
 	script := `#!/bin/sh
-if [ -e "$BUILD_LOG.broken" ]; then exit 1; fi
 if [ "$1" = list ]; then exit 0; fi
-if [ "$1" = env ]; then printf 'auto\ngo1.26.9\noff\n'; exit 0; fi
+if [ "$1" = env ]; then
+  if [ "$2" = -json ]; then printf '{"GOVERSION":"go1.26.9"}\n'; else printf 'auto\ngo1.26.9\noff\n'; fi
+  exit 0
+fi
+if [ -e "$BUILD_LOG.broken" ]; then exit 1; fi
 while [ $# -gt 0 ]; do
   if [ "$1" = -o ]; then
     shift
@@ -64,7 +67,7 @@ exit 1
 		if readErr != nil || releaseErr != nil || published != (wantSource == "compiled") || string(data) != "#!/bin/sh\nexit 0\n" {
 			t.Fatalf("local materialization: published=%t data=%q errors=%v,%v", published, data, readErr, releaseErr)
 		}
-		// safety: break go without replacing it, since the cache key follows the go executable's identity.
+		// safety: keep read-only input inspection available while refusing another build under the same tool identity.
 		if err := os.WriteFile(buildLog+".broken", nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
