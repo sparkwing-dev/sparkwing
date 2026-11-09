@@ -5648,6 +5648,8 @@ components:
           $ref: '#/components/schemas/internal.runspec.Lineage'
         pipeline:
           type: string
+        proof_eligible:
+          type: boolean
         pull_request:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.'
         reproducer:
@@ -5671,6 +5673,7 @@ components:
         trust_class:
           type: string
       required:
+        - proof_eligible
         - pipeline
         - requested_args
         - args

@@ -453,8 +453,6 @@ func TestMigrationIndexEscapesPipes(t *testing.T) {
 	}
 }
 
-// The cut refuses an [Unreleased] whose (Breaking) links name no section of the
-// guide it rolls, so this holds the tree to what the next release will accept.
 func TestRepositoryUnreleasedSectionRollsForTheNextRelease(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -479,8 +477,6 @@ func TestRepositoryUnreleasedSectionRollsForTheNextRelease(t *testing.T) {
 	}
 }
 
-// The cut's wire gate diffs the API and daemon protocol against the previous
-// tag, so this names a removal while the change that made it is still open.
 func TestRepositoryUnreleasedSectionDeclaresEveryWireCut(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {

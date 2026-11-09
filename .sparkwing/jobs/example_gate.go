@@ -22,7 +22,6 @@ import (
 
 type ExampleInputs struct {
 	PostDeploy    bool   `flag:"post-deploy" help:"Serialize scan jobs on the deploy runner"`
-	ScanReceipt   string `flag:"scan-receipt" help:"Controller URL marking a full post-deploy scan"`
 	SecretName    string `flag:"secret-name" default:"EXAMPLE_GATE_SECRET" enum:"EXAMPLE_GATE_SECRET" help:"Optional declared secret to resolve without logging its value"`
 	FailOnce      bool   `flag:"fail-once" help:"Exercise failed-only retry with a deterministic first-attempt failure"`
 	CLI           string `flag:"cli" default:"sparkwing" help:"CLI built from the same source as the running engine"`

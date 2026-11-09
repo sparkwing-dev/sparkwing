@@ -135,10 +135,7 @@ type releaseCutChecksJob struct{ sparkwing.Base }
 
 const releaseLintLockAllowance = 30 * time.Minute
 
-// perf: the release cut is the third check class. Build, the full linter and
-// the short test suite run in parallel under one budget; the race, Postgres,
-// chaos and browser suites are the heavier classes that hosted CI runs on
-// every pull request and every push to main.
+// perf: exact-source CI can replace these broad checks while release policy checks still run.
 func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.FailurePolicy(sparkwing.FailFast)
 	budget := newTierBudget("release cut", releaseCutBudget+releaseLintLockAllowance)
@@ -273,9 +270,7 @@ func (j *validateVersionJob) run(ctx context.Context) error {
 	return nil
 }
 
-// safety: the whole release precondition. A tag may be cut from any commit as
-// safety: long as its version outranks every published one, so nothing here
-// safety: reads a branch or a remote tip.
+// safety: published module tags are immutable, so every release must outrank the newest origin tag.
 func requireAheadOfNewestTag(version, newest string) error {
 	if newest == "" {
 		return nil
@@ -665,9 +660,7 @@ func (j *pushTagJob) dryRun(ctx context.Context) error {
 	return nil
 }
 
-// safety: the one release-tag grammar. bin/check-release-tag-order.sh and the
-// safety: workflow's own shape check carry the same expression, and a test
-// safety: pins all three, so no stage accepts a tag another stage refuses.
+// safety: tag discovery and publication must accept the same version grammar.
 var releaseTagGrammar = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$`)
 
 func isReleaseTagShape(v string) bool {

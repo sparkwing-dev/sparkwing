@@ -50,12 +50,8 @@ func runPipelineList(inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	output := inv.Output(color.IsInteractiveStdout())
+	format := inv.Output(color.IsInteractiveStdout())
 	includeHidden, query := inv.Bool("all"), inv.Value("search")
-	format, err := resolveOutputFormat(output, cmdPipelineList.Path)
-	if err != nil {
-		return err
-	}
 	if inv.Has("search") {
 		if strings.TrimSpace(query) == "" {
 			return errors.New("pipeline list: --search needs at least one token")
@@ -177,20 +173,16 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	output := inv.Output(color.IsInteractiveStdout())
+	format := inv.Output(color.IsInteractiveStdout())
 	pipelineName, secretsOnly := inv.Value("pipeline"), inv.Bool("secrets")
 	if pipelineName == "" {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
 		return errors.New("describe: --pipeline is required")
 	}
-	format, err := resolveOutputFormat(output, cmdPipelineDescribe.Path)
-	if err != nil {
-		return err
-	}
 	name := pipelineName
 	found := Pipeline{PipelinePresentation: runspec.PipelinePresentation{Name: name}}
 	var schema runspec.PipelinePresentation
-	err = withEntry(name, func(ctx context.Context, entry pipelineInspection, dir string) error {
+	err := withEntry(name, func(ctx context.Context, entry pipelineInspection, dir string) error {
 		cfg, err := projectconfig.Load(filepath.Join(dir, ".sparkwing", projectconfig.Filename))
 		if err != nil {
 			return err

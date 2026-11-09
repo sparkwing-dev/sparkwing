@@ -89,8 +89,7 @@ type Launcher struct {
 	mu       sync.Mutex
 	waiting  map[string]*CloudJobAward
 	identity string
-	// checked holds, per Job, the Pods already compared with their award; a Pod is checked once.
-	checked map[types.UID]map[types.UID]bool
+	checked  map[types.UID]map[types.UID]bool
 }
 
 func (l *Launcher) logger() *slog.Logger {

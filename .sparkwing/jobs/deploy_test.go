@@ -1361,7 +1361,6 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 	}
 }
 
-// Decision 87: the deploy credential reaches only the Sparkwing GitOps repository.
 func TestDeployWritesOnlySparkwingGitops(t *testing.T) {
 	cfg := defaultDeployConfig()
 	if cfg.GitopsURL != "git@github.com:sparkwing-dev/sparkwing-gitops.git" || cfg.Params.GitopsKey != "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key" {

@@ -94,7 +94,6 @@ func preparePipelineDependencies(ctx context.Context, dir string, options Compil
 	return runGo(ctx, dir, args, preparation)
 }
 
-// key returns the effective build-input key held by the lease.
 func (l *Lease) key() string { return l.entry.key }
 
 func (l *Lease) markUsed() {

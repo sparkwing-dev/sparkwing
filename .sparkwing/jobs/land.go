@@ -47,7 +47,7 @@ func (Land) Help() string {
 func (Land) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Preview the landing without pushing", Command: "sparkwing run land --sw-dry-run"},
-		{Comment: "Gate and review without pushing (the risk check still covers the skipped push)", Command: "sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod"},
+		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-stop-at verify"},
 		{Comment: "Land the branch on main", Command: "sparkwing run land --sw-allow-risk destructive,prod"},
 	}
 }

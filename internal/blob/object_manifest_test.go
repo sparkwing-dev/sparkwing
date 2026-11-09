@@ -159,6 +159,9 @@ func FuzzManifestVerificationMatchesSubmittedMembers(f *testing.F) {
 	f.Add("日本語", uint8(17))
 	f.Fuzz(func(t *testing.T, path string, padding uint8) {
 		path = strings.ToValidUTF8(path, "?")
+		if CheckManifestMembers("team", digest("manifest"), []Member{{Team: "team", ManifestDigest: digest("manifest"), Path: path, Digest: digest("file"), Size: 4}}) != nil {
+			return
+		}
 		entry := ManifestEntry{Path: path, Digest: digest("file"), Size: 4, Mode: uint32(padding)}
 		encoded, err := json.MarshalIndent(Manifest{Entries: []ManifestEntry{entry}}, "", "\t")
 		if err != nil {
@@ -250,5 +253,31 @@ func TestManifestAdmissionMemoryTracksSubmittedMetadata(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(1792103906))}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManifestAdmissionRejectsUnstageablePaths(t *testing.T) {
+	for _, paths := range [][]string{{"../outside"}, {"."}, {"/absolute"}, {"a", "a/b"}, {"a/b", "a"}, {"a", "a"}} {
+		t.Run(strings.Join(paths, ","), func(t *testing.T) {
+			manifest := Manifest{}
+			for _, path := range paths {
+				manifest.Entries = append(manifest.Entries, ManifestEntry{Path: path, Digest: digest("file"), Size: 4})
+			}
+			body, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			objects, want := manifestStreamObjects(t, string(body))
+			members := []Member{}
+			for _, entry := range manifest.Entries {
+				members = append(members, Member{Team: "team", ManifestDigest: want, Path: entry.Path, Digest: entry.Digest, Size: entry.Size})
+			}
+			if err := objects.VerifyManifest(t.Context(), "team", want, members); !errors.Is(err, ErrIntegrity) {
+				t.Errorf("unstageable manifest admitted: %v", err)
+			}
+			if _, err := objects.ReadManifest(t.Context(), "team", want); !errors.Is(err, ErrIntegrity) {
+				t.Errorf("unstageable manifest read: %v", err)
+			}
+		})
 	}
 }

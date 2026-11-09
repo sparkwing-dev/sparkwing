@@ -27,11 +27,8 @@ var changelogMD, changelogErr = func() (string, error) {
 	return CollectChangelog(releasedChangelogMD, sources)
 }()
 
-// ChangelogSlug is the synthetic topic under which the repo-root
-// CHANGELOG.md is surfaced by [Read], [List], [Search], and [All].
-// It is not part of the docs/ mirror: the embed pipeline copies
-// CHANGELOG.md into this package (bin/sync-docs.sh) so "what changed"
-// is answerable offline and version-locked to the running binary.
+// ChangelogSlug names the offline changelog topic exposed by [Read], [List],
+// [Search], and [All], combining CHANGELOG.md with embedded release fragments.
 const ChangelogSlug = "changelog"
 
 // Entry describes one doc topic. Slug is what the CLI takes via

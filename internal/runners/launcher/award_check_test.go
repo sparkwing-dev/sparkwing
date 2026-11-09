@@ -91,8 +91,7 @@ func TestAwardMismatchDeletesJobAndFailsAward(t *testing.T) {
 	}
 }
 
-// A Pod is compared with its award once, on the first pass that sees it;
-// admission keeps its spec immutable afterwards, so later passes skip it.
+// safety: admission keeps a checked Pod spec immutable, so subsequent reconciliations can skip validation.
 func TestEachPodIsCheckedAgainstItsAwardOnce(t *testing.T) {
 	l, p := requestedPod(t)
 	if _, err := l.LaunchOne(t.Context()); err != nil {
@@ -353,8 +352,7 @@ func TestUpgradedImagesFailUnstartedJobWithoutRetiringItsNode(t *testing.T) {
 	}
 }
 
-// Once a Job's Pod is checked, later passes only look for a replacement Pod,
-// so they read the API server's cache instead of making a quorum read.
+// perf: checked Pods need only replacement detection, which permits cached API reads.
 func TestACheckedJobIsListedFromTheCache(t *testing.T) {
 	l, p := requestedPod(t)
 	if _, err := l.LaunchOne(t.Context()); err != nil {

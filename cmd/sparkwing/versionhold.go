@@ -71,14 +71,6 @@ func normalizeHold(raw string) (string, error) {
 	return v, nil
 }
 
-func holdHasPatch(hold string) bool {
-	core := strings.TrimPrefix(hold, "v")
-	if i := strings.IndexAny(core, "-+"); i >= 0 {
-		core = core[:i]
-	}
-	return strings.Count(core, ".") >= 2
-}
-
 func exceedsHold(target, hold string) bool {
 	return sharedtoolchain.ExceedsHold(target, hold)
 }

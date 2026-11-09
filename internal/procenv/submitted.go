@@ -132,7 +132,7 @@ func WithSubmitted(base Base, values map[string][]byte, accept SubmitAccept) (Ba
 		if !hostSet[envKey(name)] {
 			base.Ambient = append(base.Ambient, name+"="+string(value))
 		}
-		// Independently allowed host values must remain available to installs.
+		// safety: independently allowed host values must remain available to installs.
 		if !hostSet[envKey(name)] || !submitAllowed(name, base.SubmitEnvAllow) {
 			base.Submitted = append(base.Submitted, name)
 		}

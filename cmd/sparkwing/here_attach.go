@@ -10,9 +10,11 @@ import (
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 type hereObservation struct {
@@ -23,10 +25,7 @@ type hereObservation struct {
 }
 
 func attachHereRun(ctx context.Context, options client.EngineOptions, run, output string, out io.Writer, host func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error) {
-	format, err := resolveTTYAwareOutput(output, "pipeline trigger")
-	if err != nil {
-		return nodehost.RunCompletion{}, err
-	}
+	format := clisurface.OutputFormat(output, color.IsInteractiveStdout())
 	controller, err := client.NewEngineClient(options)
 	if err != nil {
 		return nodehost.RunCompletion{}, incompleteHereHandoff(run, err)

@@ -211,8 +211,6 @@ func storeArtifactFile(ctx context.Context, data Data, root *os.Root, name strin
 	return digest, n, nil
 }
 
-// matches reports whether a slash-separated path or one of its parent directories
-// matches an artifact glob. A ** segment matches zero or more path segments.
 func matches(globs []string, rel string) bool {
 	segs := strings.Split(rel, "/")
 	for i := len(segs); i >= 1; i-- {

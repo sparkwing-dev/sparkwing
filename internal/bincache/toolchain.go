@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-// runGo executes Go with captured inputs and cancellation of its child processes.
 func runGo(ctx context.Context, dir string, args []string, options CompileOptions) error {
 	if options.Environment == nil || options.Diagnostics == nil {
 		return errors.New("Go execution requires a captured environment and diagnostic writer")

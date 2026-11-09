@@ -14,7 +14,7 @@ import (
 )
 
 func TestDeployScanPartialExampleCannotClearFindings(t *testing.T) {
-	for _, scenario := range []string{"partial", "running", "other-controller", "unavailable", "cannot-start"} {
+	for _, scenario := range []string{"partial", "marked-partial", "wrong-target", "not-post-deploy", "running", "other-controller", "unavailable", "cannot-start"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newFakeDeploy(t)
 			d := f.deployer(false)
@@ -44,10 +44,20 @@ func TestDeployScanPartialExampleCannotClearFindings(t *testing.T) {
 						return "", errors.New("detail unavailable")
 					}
 					marker := ""
+					if scenario == "marked-partial" || scenario == "wrong-target" || scenario == "not-post-deploy" {
+						marker = d.cfg.Production.ControllerURL
+					}
+					target, postDeploy, eligible := d.cfg.Production.ControllerURL, "true", false
+					if scenario == "wrong-target" {
+						target, eligible = d.cfg.Staging.ControllerURL, true
+					}
+					if scenario == "not-post-deploy" {
+						postDeploy, eligible = "false", true
+					}
 					if scenario == "other-controller" {
 						marker = d.cfg.Staging.ControllerURL
 					}
-					return fmt.Sprintf(`{"id":"manual-only-configure","status":"success","inputs":{"args":{"scan-receipt":%q}},"jobs":[{"id":"configure","outcome":"success"}]}`, marker), nil
+					return fmt.Sprintf(`{"id":"manual-only-configure","status":"success","inputs":{"proof_eligible":%t,"args":{"scan-receipt":%q,"api-controller":%q,"post-deploy":%q}},"jobs":[{"id":"configure","outcome":"success"}]}`, eligible, marker, target, postDeploy), nil
 				}
 				if filepath.Base(c.Name) == "bitwing" && len(c.Args) > 1 && c.Args[1] == "record" {
 					feedback = slices.Clone(c.Args)
