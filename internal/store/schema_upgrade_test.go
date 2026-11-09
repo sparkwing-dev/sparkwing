@@ -104,16 +104,118 @@ func TestSchemaUpgradeRemovesBuildTrustFromVersion36AndPreservesConfiguredInstal
 	}
 }
 
-func schema34Store(t *testing.T, target *storetest.Target) {
+func schema30Store(t *testing.T, target *storetest.Target) {
 	t.Helper()
+	st := target.Open(t)
+	dropActionsSchema(t, st)
+	for _, statement := range []string{
+		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
+		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('kept','TOKEN','sealed-configuration','fixture',1,1)`,
+		buildTrustSchema35,
+		`DROP INDEX idx_runs_live_children`,
+		`DROP TABLE local_runner_instances`,
+		`DROP TABLE local_run_secrets`,
+		`DROP TABLE local_machine_admission`,
+		`UPDATE sparkwing_schema_version SET version=30, baseline_digest='d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4'`,
+	} {
+		if _, err := st.DB().Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
+	target := storetest.New(t)
 	st := target.Open(t)
 	addSchema35BuildTrust(t, st)
 	dropActionsSchema(t, st)
-	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=34,baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`); err != nil {
+	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=33, baseline_digest='b4ac52448bafd4ea378d1ed2e1d9aec0c610d3a5e27df4a7a780c178f425a47b'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+}
+
+func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	addSchema35BuildTrust(t, st)
+	dropActionsSchema(t, st)
+	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=32, baseline_digest='8229dac48bd08544fb5b2cddfe2f9c9d0f0f3c41968eda4db1591aff9f247f61'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+}
+
+func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	addSchema35BuildTrust(t, st)
+	dropActionsSchema(t, st)
+	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`DROP TABLE local_run_secrets`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=31, baseline_digest='c09c6196b47e8c6561edd4f6274c105e5c8d00a8cbe9ec8925c5e0f23a68d236'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+}
+
+func TestSchemaUpgradeAddsMachineAdmissionToVersion30(t *testing.T) {
+	target := storetest.New(t)
+	schema30Store(t, target)
+	st := target.Open(t)
+	var secret string
+	if err := st.DB().QueryRow(`SELECT value FROM secrets WHERE team='kept' AND name='TOKEN'`).Scan(&secret); err != nil || secret != "sealed-configuration" {
+		t.Fatalf("configured secret after upgrade = %q, %v", secret, err)
+	}
+	if state, err := st.LoadMachineAdmission(t.Context()); err != nil || state != nil {
+		t.Fatalf("upgraded machine state = %s, %v; want absent", state, err)
+	}
+	if err := st.SaveMachineAdmission(t.Context(), []byte(`{"version":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, st), schemaShape(t, fresh); a != b {
+		t.Fatalf("upgraded schema differs from a fresh one:\n%s", shapeDiff(a, b))
 	}
 }
 
@@ -122,21 +224,18 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 		statement string
 		want      []string
 	}{
-		"unknown 34 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the schema 34 baseline`, "left the store unchanged", "open it once with Sparkwing schema 34"}},
-		"missing 34 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the schema 34 baseline`, "left the store unchanged"}},
+		"unknown 30 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the v0.69.2 baseline`, "left the store unchanged", "open it once with Sparkwing v0.69.2"}},
+		"missing 30 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the v0.69.2 baseline`, "left the store unchanged"}},
 		"unknown 35 digest": {`UPDATE sparkwing_schema_version SET version=35,baseline_digest='other'`, []string{`"other" is not the schema 35 baseline`, "left the store unchanged"}},
 		"missing 35 digest": {`UPDATE sparkwing_schema_version SET version=35,baseline_digest=''`, []string{`"<missing>" is not the schema 35 baseline`, "left the store unchanged"}},
 		"unknown 36 digest": {`UPDATE sparkwing_schema_version SET version=36,baseline_digest='other'`, []string{`"other" is not the schema 36 baseline`, "left the store unchanged"}},
 		"missing 36 digest": {`UPDATE sparkwing_schema_version SET version=36,baseline_digest=''`, []string{`"<missing>" is not the schema 36 baseline`, "left the store unchanged"}},
-		"retired schema 30": {`UPDATE sparkwing_schema_version SET version=30`, []string{"version 30 is older", "this build cannot upgrade it", "back up the store"}},
-		"retired schema 31": {`UPDATE sparkwing_schema_version SET version=31`, []string{"version 31 is older", "this build cannot upgrade it", "back up the store"}},
-		"retired schema 32": {`UPDATE sparkwing_schema_version SET version=32`, []string{"version 32 is older", "this build cannot upgrade it", "back up the store"}},
-		"retired schema 33": {`UPDATE sparkwing_schema_version SET version=33`, []string{"version 33 is older", "this build cannot upgrade it", "back up the store"}},
+		"older than 30":     {`UPDATE sparkwing_schema_version SET version=29`, []string{"version 29 is older", "this build cannot upgrade it", "back up the store"}},
 		"newer than binary": {fmt.Sprintf(`UPDATE sparkwing_schema_version SET version=%d`, store.ExpectedSchemaVersion()+1), []string{fmt.Sprintf("version %d is newer", store.ExpectedSchemaVersion()+1), "start a binary matching the store"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target := storetest.New(t)
-			schema34Store(t, target)
+			schema30Store(t, target)
 			location := target.Path()
 			dialect := store.DialectSQLite
 			if location == "" {
@@ -153,7 +252,7 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 					t.Errorf("refusal %q omits %q", err, want)
 				}
 			}
-			if store.ExecRawForTest(t.Context(), dialect, location, `SELECT receipt FROM github_actions_dispatches`) == nil {
+			if store.ExecRawForTest(t.Context(), dialect, location, `SELECT singleton FROM local_machine_admission`) == nil {
 				t.Fatal("a refused store was upgraded")
 			}
 		})
@@ -162,7 +261,7 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 
 func TestPostgresSchemaUpgradeRunsOnceUnderConcurrentOpens(t *testing.T) {
 	target := storetest.NewPostgres(t)
-	schema34Store(t, target)
+	schema30Store(t, target)
 	const openers = 8
 	errs := make([]error, openers)
 	var wg sync.WaitGroup

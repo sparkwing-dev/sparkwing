@@ -22,7 +22,9 @@ func TestSQLiteUpgradeKeepsABackupTheOlderBinaryCanOpen(t *testing.T) {
 	addSchema35BuildTrust(t, st)
 	dropActionsSchema(t, st)
 	for _, statement := range []string{
-		`UPDATE sparkwing_schema_version SET version=34, baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`,
+		`DROP TABLE local_runner_instances`,
+		`DROP INDEX idx_runs_live_children`,
+		`UPDATE sparkwing_schema_version SET version=32, baseline_digest='8229dac48bd08544fb5b2cddfe2f9c9d0f0f3c41968eda4db1591aff9f247f61'`,
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
 	} {
 		if _, err := st.DB().Exec(statement); err != nil {
@@ -39,9 +41,9 @@ func TestSQLiteUpgradeKeepsABackupTheOlderBinaryCanOpen(t *testing.T) {
 	if err := upgraded.Close(); err != nil {
 		t.Fatal(err)
 	}
-	backups, err := filepath.Glob(path + ".schema-34-*.bak")
+	backups, err := filepath.Glob(path + ".schema-32-*.bak")
 	if err != nil || len(backups) != 1 {
-		t.Fatalf("backups = %v, %v; want one schema 34 copy", backups, err)
+		t.Fatalf("backups = %v, %v; want one schema 32 copy", backups, err)
 	}
 	if leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".sparkwing-backup-*")); len(leftovers) != 0 {
 		t.Fatalf("partial backups left behind: %v", leftovers)
@@ -58,18 +60,18 @@ func TestSQLiteUpgradeKeepsABackupTheOlderBinaryCanOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	var version, teams, dispatches int
+	var version, teams, runners int
 	if err := db.QueryRow(`SELECT version FROM sparkwing_schema_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM teams WHERE name='kept'`).Scan(&teams); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='github_actions_dispatches'`).Scan(&dispatches); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='local_runner_instances'`).Scan(&runners); err != nil {
 		t.Fatal(err)
 	}
-	if version != 34 || teams != 1 || dispatches != 0 {
-		t.Fatalf("backup holds version %d, %d kept teams, %d dispatch tables; want the schema 34 store as it was", version, teams, dispatches)
+	if version != 32 || teams != 1 || runners != 0 {
+		t.Fatalf("backup holds version %d, %d kept teams, %d runner tables; want the schema 32 store as it was", version, teams, runners)
 	}
 
 	reopened, err := store.Open(path)
@@ -90,7 +92,7 @@ func TestSQLiteRefusedUpgradeTakesNoBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=34, baseline_digest='other'`); err != nil {
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=32, baseline_digest='other'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -114,10 +116,13 @@ func TestSQLiteUpgradePrunesBackupsOnlyAfterSuccess(t *testing.T) {
 				t.Fatal(err)
 			}
 			addSchema35BuildTrust(t, st)
+			dropActionsSchema(t, st)
 			if !fail {
-				dropActionsSchema(t, st)
+				if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=34, baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`); err != nil {
+			if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=33, baseline_digest='b4ac52448bafd4ea378d1ed2e1d9aec0c610d3a5e27df4a7a780c178f425a47b'`); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.Close(); err != nil {
@@ -141,7 +146,7 @@ func TestSQLiteUpgradePrunesBackupsOnlyAfterSuccess(t *testing.T) {
 			if fail {
 				if err == nil {
 					_ = upgraded.Close()
-					t.Fatal("upgrade with existing Actions tables succeeded")
+					t.Fatal("upgrade with an existing index succeeded")
 				}
 			} else {
 				if err != nil {

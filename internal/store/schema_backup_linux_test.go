@@ -30,7 +30,9 @@ func TestBackupWriteFailureRefusesUpgradeAndLeavesNothing(t *testing.T) {
 	for _, statement := range []string{
 		`DROP TABLE github_actions_dispatches`,
 		`DROP TABLE github_actions_approvals`,
-		`UPDATE sparkwing_schema_version SET version=34, baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`,
+		`DROP TABLE local_runner_instances`,
+		`DROP INDEX idx_runs_live_children`,
+		`UPDATE sparkwing_schema_version SET version=32, baseline_digest='8229dac48bd08544fb5b2cddfe2f9c9d0f0f3c41968eda4db1591aff9f247f61'`,
 		`CREATE TABLE backup_probe(data BLOB)`,
 		`INSERT INTO backup_probe VALUES(zeroblob(2097152))`,
 	} {
@@ -64,7 +66,7 @@ func TestBackupWriteFailureRefusesUpgradeAndLeavesNothing(t *testing.T) {
 	if err := ExecRawForTest(t.Context(), DialectSQLite, path, `SELECT data FROM backup_probe`); err != nil {
 		t.Fatalf("refused store lost data: %v", err)
 	}
-	if ExecRawForTest(t.Context(), DialectSQLite, path, `SELECT receipt FROM github_actions_dispatches`) == nil {
+	if ExecRawForTest(t.Context(), DialectSQLite, path, `SELECT id FROM local_runner_instances`) == nil {
 		t.Fatal("refused store was upgraded")
 	}
 	entries, err := os.ReadDir(filepath.Dir(path))

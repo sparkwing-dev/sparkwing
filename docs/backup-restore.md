@@ -432,9 +432,9 @@ reset remedy below. Stores without a digest are stamped only when every table,
 view and explicit index declared by the baseline exists; missing objects refuse
 startup without changing the store.
 
-Schemas 34 through 36 upgrade in place to schema 37 when their recorded baseline
+Schemas 30 through 36 upgrade in place to schema 37 when their recorded baseline
 digest matches. The open transaction holds PostgreSQL's migration advisory lock,
-so concurrent controllers apply each step once. Schema 34 is the oldest accepted
+so concurrent controllers apply each step once. Schema 30 is the oldest accepted
 baseline. Earlier versions are refused unchanged.
 
 A database reset must preserve secrets and their encryption keys, teams and
@@ -445,15 +445,15 @@ a verified recovery path.
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 33 is older than this binary (expects 37); back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+sparkwing: store schema version 29 is older than this binary (expects 37); back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
-sparkwing: store schema version 33 is older than this binary (expects 37); back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
+sparkwing: store schema version 29 is older than this binary (expects 37); back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
 
-sparkwing: store schema version 34 is older than this binary (expects 37); start the controller with this binary once to upgrade the schema 34 store in place, then run this again
+sparkwing: store schema version 30 is older than this binary (expects 37); start the controller with this binary once to upgrade the v0.69.2 store in place, then run this again
 
-sparkwing: store schema version 34 baseline digest "<recorded-digest>" is not the schema 34 baseline "187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012" this binary upgrades, so it left the store unchanged; open it once with Sparkwing schema 34 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+sparkwing: store schema version 30 baseline digest "<recorded-digest>" is not the v0.69.2 baseline "d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.69.2 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
-sparkwing: store schema version 34 baseline digest "<missing>" is not the schema 34 baseline "187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012" this binary upgrades, so it left the store unchanged; open it once with Sparkwing schema 34 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
+sparkwing: store schema version 30 baseline digest "<missing>" is not the v0.69.2 baseline "d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.69.2 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
 
 sparkwing: store schema version 38 is newer than this binary (expects 37); start a binary matching the store, or restore a backup matching this binary: stop the controller, move <path> and any <path>-wal and <path>-shm files aside, and copy the newest <path>.schema-37-*.bak to <path>; runs recorded since that backup are lost
 
