@@ -47,7 +47,11 @@ queue is empty; no queue process or text file needs restarting.
 All lands share one capacity-one run concurrency group, including ordinary
 full-gate lands. Admission and operator priority determine ordering. A failed
 entry releases its slot and leaves later entries eligible. Queued lands
-require an explicit brief, refuse a changed submission or dirty checkout,
+require a non-empty explicit brief, such as `--brief 'Describe the goal to review'`.
+Missing or whitespace-only briefs fail during planning before submission; the
+review uses the supplied goal rather than inferring one from the branch name.
+Ordinary interactive lands keep their objective fallback. Queued lands refuse
+a changed submission or dirty checkout,
 merge fetched `origin/main` before capturing HEAD, then run source policy and
 the full pre-push tier alongside review against that merged checkout. They
 push only when the branch, HEAD and checkout still match. If main moves again,

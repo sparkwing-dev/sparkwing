@@ -20,7 +20,7 @@ type Land struct{ sparkwing.Base }
 
 // LandArgs supplies the local review inputs.
 type LandArgs struct {
-	Queued        bool `flag:"queued" desc:"Queue a focused owned-hardware land: merge main, policy, pre-push/review, then push the unchanged commit. Use --sw-detached and --brief."`
+	Queued        bool `flag:"queued" desc:"Queue a focused owned-hardware land: merge main, policy, pre-push/review, then push the unchanged commit. Use --sw-detached; a non-empty --brief is required."`
 	PrePushReview bool `flag:"pre-push-review" desc:"Run the unchanged pre-push tier alongside review in one fail-fast job; intended for the focused queue."`
 	ReviewArgs
 }
@@ -31,7 +31,7 @@ func (Land) ShortHelp() string {
 
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
-		"All lands share one serial run slot. With --queued, require --brief, merge origin/main before checks, run policy and pre-push/review against the merged checkout, and push only the unchanged checked commit. Submit with --sw-detached; track its run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
+		"All lands share one serial run slot. With --queued, require a non-empty --brief (for example, --brief 'Short intent'), merge origin/main before checks, run policy and pre-push/review against the merged checkout, and push only the unchanged checked commit. Submit with --sw-detached; track its run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip). " +
@@ -71,7 +71,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 		return errors.New("land: no working directory; run this pipeline from a checkout with a .sparkwing directory")
 	}
 	if in.Queued && strings.TrimSpace(in.Brief) == "" {
-		return errors.New("land: --queued requires --brief with the goal to review")
+		return errors.New("land: --queued requires a non-empty --brief with the goal to review; for example: --brief 'BW" + "-1234: short intent'")
 	}
 	plan.Concurrency(sparkwing.NewConcurrencyGroup("sparkwing-land", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	branch, submitted := "", ""

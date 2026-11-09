@@ -61,9 +61,30 @@ func TestLandQueueSerializesOrdinaryAndFocusedLands(t *testing.T) {
 }
 
 func TestLandQueueRequiresGoal(t *testing.T) {
-	_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", map[string]string{"queued": "true"})
-	if err == nil || !strings.Contains(err.Error(), "requires --brief") {
-		t.Fatalf("err = %v", err)
+	for _, brief := range []string{"", " \t\n"} {
+		t.Run(brief, func(t *testing.T) {
+			_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", map[string]string{"queued": "true", "brief": brief})
+			if err == nil || !strings.Contains(err.Error(), "requires a non-empty --brief") || !strings.Contains(err.Error(), "--brief 'BW"+"-1234: short intent'") {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestLandQueueAcceptsExplicitGoal(t *testing.T) {
+	brief := "Review only the queued landing goal requirement"
+	_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", map[string]string{"queued": "true", "brief": brief})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx := newReviewFixture(t)
+	fx.def.replies = []string{`{"findings": []}`}
+	rec, _, err := runReview(t.Context(), fx.deps, testPolicy(t), reviewInputs{branch: "bw" + "-1234-unrelated-goal", brief: brief})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Objective.Source != "brief" || !strings.Contains(fx.def.calls[0].prompt, brief) || len(fx.tickets) != 0 {
+		t.Fatalf("explicit goal did not reach review: objective=%+v tickets=%v", rec.Objective, fx.tickets)
 	}
 }
 
