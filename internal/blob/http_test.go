@@ -95,7 +95,7 @@ func TestSignedTransferPreconditionRequiresReadableResponse(t *testing.T) {
 		client := TransferClient{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
 			body := io.NopCloser(strings.NewReader("already exists"))
 			if broken {
-				body = failingTransferBody{failure: errors.New("private signed URL")}
+				body = io.NopCloser(failingTransferBody{failure: errors.New("private signed URL")})
 			}
 			return &http.Response{StatusCode: http.StatusPreconditionFailed, Body: body, Header: make(http.Header)}, nil
 		})}
