@@ -9,9 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestStepCompletionUsesTheLiveClaimLifetime(t *testing.T) {
@@ -39,7 +39,7 @@ func TestStepCompletionUsesTheLiveClaimLifetime(t *testing.T) {
 						}
 						return nil
 					}}
-					deps.Log = func(ctx context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+					deps.Log = func(ctx context.Context, _ NodeInput, frame nodewire.FrameLog) error {
 						if sink == "diagnostic" && frame.Event == "step_end" {
 							return wait(ctx)
 						}

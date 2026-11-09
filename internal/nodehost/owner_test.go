@@ -14,7 +14,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -25,6 +24,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type ownerFixture struct {
@@ -346,7 +347,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	unit := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 4}}
 	f := &ownerFixture{changed: make(chan struct{}, 1), snapshot: store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run", State: runstate.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &unit}}}}
 	in := RunInput{RunID: "run", SealedRequest: raw, RequestHash: "request", Owner: runstate.Actor{Kind: runstate.ActorRunHost, Owner: unit}}
-	in.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
+	in.GrantedRunner = nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	selected := engine.Resolved{Identity: engineid.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}}
 	h := OwnerHost{
 		executionAdmission: ComposeStartGate(f, nil, false),

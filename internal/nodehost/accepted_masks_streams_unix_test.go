@@ -15,13 +15,13 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 //sparkwing:critical
@@ -32,8 +32,8 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 			t.Run(placement, func(t *testing.T) {
 				masks := NewMaskRegistry(secrets.NewMasker())
 				var mu sync.Mutex
-				var logs []nodeproto.FrameLog
-				sink := func(_ context.Context, frame nodeproto.FrameLog) error {
+				var logs []nodewire.FrameLog
+				sink := func(_ context.Context, frame nodewire.FrameLog) error {
 					mu.Lock()
 					defer mu.Unlock()
 					logs = append(logs, frame)
@@ -86,7 +86,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 					authorities, parent, lookup, delegation, services := processAuthorityFixture(t)
 					t.Cleanup(func() { _ = authorities.Close() })
 					config.Processes.Authorities, config.Processes.URL = authorities, "http://host"
-					config.Processes.Log = func(ctx context.Context, _, _ string, frame nodeproto.FrameLog) error { return sink(ctx, frame) }
+					config.Processes.Log = func(ctx context.Context, _, _ string, frame nodewire.FrameLog) error { return sink(ctx, frame) }
 					config.Processes.Session = ProtocolSessionConfig{Environments: sdkTestEnvironment(state), ParseFrame: protocolTestCodec}
 					config.Executor.Bind = func(ctx context.Context, in NodeInput) (ProcessGrant, error) {
 						delegation.Binding = capability.Binding{Kind: capability.BindingNode, RunID: in.Accepted.RunID, NodeID: in.NodeID, Holder: in.Authority.Holder, Generation: int64(in.Generation), Attempt: int64(in.Attempt)}
@@ -135,11 +135,11 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 							if err = executor.hello(ctx, session, input); err != nil {
 								return nil, err
 							}
-							reply, err := process.Request(ctx, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: input.NodeID, Step: "body", Attempt: int(input.Attempt), Settled: []string{}})
+							reply, err := process.Request(ctx, nodewire.Request{ID: "body", Op: nodewire.OpRunStep, Job: input.NodeID, Step: "body", Attempt: int(input.Attempt), Settled: []string{}})
 							if err != nil {
 								return nil, err
 							}
-							var result nodeproto.RunResult
+							var result nodewire.RunResult
 							if err = reply.Decode(&result); err != nil {
 								return nil, err
 							}
@@ -163,7 +163,7 @@ func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 					}
 				}
 				for _, prefix := range []string{"stdout:", "stderr:"} {
-					if !slices.ContainsFunc(logs, func(frame nodeproto.FrameLog) bool {
+					if !slices.ContainsFunc(logs, func(frame nodewire.FrameLog) bool {
 						return strings.HasPrefix(frame.Message, prefix) && strings.Contains(frame.Message, "***")
 					}) {
 						t.Fatalf("missing masked %s stream: %+v; failure %s", prefix, logs, failure)
@@ -193,30 +193,30 @@ func TestSealedMaskStreamChild(t *testing.T) {
 	writer := json.NewEncoder(frames)
 	scanner := bufio.NewScanner(requests)
 	for scanner.Scan() {
-		var request nodeproto.Request
+		var request nodewire.Request
 		if json.Unmarshal(scanner.Bytes(), &request) != nil {
 			os.Exit(2)
 		}
-		reply := nodeproto.Reply{ID: request.ID, OK: true}
+		reply := nodewire.Reply{ID: request.ID, OK: true}
 		var result any
 		switch request.Op {
-		case nodeproto.OpHello:
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: request.Engine.Version}}
-		case nodeproto.OpDescribe:
-			result = nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}}}}}
-		case nodeproto.OpPlan:
+		case nodewire.OpHello:
+			result = nodewire.HelloResult{Protocol: nodewire.Version, SDK: nodewire.SDKIdentity{Language: "go", Version: request.Engine.Version}}
+		case nodewire.OpDescribe:
+			result = nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "build", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true}}}}}
+		case nodewire.OpPlan:
 			if request.Run != nil && request.Run.Pipeline == "build" {
 				reply.OK = false
 				reply.Error = &apierr.Error{Code: apierr.SDKError, Message: value}
 			} else {
-				result = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
+				result = nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}}}
 			}
-		case nodeproto.OpRunStep:
-			result = nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: value}}
+		case nodewire.OpRunStep:
+			result = nodewire.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: value}}
 		default:
 			os.Exit(3)
 		}
-		if request.Op == nodeproto.OpPlan || request.Op == nodeproto.OpRunStep {
+		if request.Op == nodewire.OpPlan || request.Op == nodewire.OpRunStep {
 			fmt.Fprintln(os.Stdout, "stdout:"+value)
 			fmt.Fprintln(os.Stderr, "stderr:"+value)
 		}

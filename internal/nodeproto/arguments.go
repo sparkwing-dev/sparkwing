@@ -10,12 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/argvalue"
 )
 
 // ValidateArgument checks a supplied value and returns its canonical representation.
-func ValidateArgument(arg ArgumentDescription, value string) (string, error) {
+func ValidateArgument(arg nodewire.ArgumentDescription, value string) (string, error) {
 	if arg.Type == "[]string" {
 		value = strings.Join(argvalue.List(value), ",")
 	}
@@ -56,7 +57,7 @@ func ValidateArgument(arg ArgumentDescription, value string) (string, error) {
 }
 
 // ValidateArgumentDeclarations checks the SDK's language-neutral declarations.
-func ValidateArgumentDeclarations(args []ArgumentDescription) error {
+func ValidateArgumentDeclarations(args []nodewire.ArgumentDescription) error {
 	names, shorts := map[string]bool{}, map[string]bool{}
 	for _, arg := range args {
 		if arg.Name == "" || names[arg.Name] {
@@ -96,16 +97,16 @@ func ValidateArgumentDeclarations(args []ArgumentDescription) error {
 }
 
 // ResolveArguments applies declared defaults and validates host preparation inputs.
-func ResolveArguments(description PipelineDescription, raw map[string]string) (map[string]string, error) {
+func ResolveArguments(description nodewire.PipelineDescription, raw map[string]string) (map[string]string, error) {
 	return resolveArguments(description, raw, true)
 }
 
 // ArgumentDefaults prepares declared defaults for inspection before invocation values exist.
-func ArgumentDefaults(description PipelineDescription) (map[string]string, error) {
+func ArgumentDefaults(description nodewire.PipelineDescription) (map[string]string, error) {
 	return resolveArguments(description, nil, false)
 }
 
-func resolveArguments(description PipelineDescription, raw map[string]string, requireInputs bool) (map[string]string, error) {
+func resolveArguments(description nodewire.PipelineDescription, raw map[string]string, requireInputs bool) (map[string]string, error) {
 	out := ApplyArgumentDefaults(description.Args, raw)
 	names := map[string]bool{}
 	for _, arg := range description.Args {
@@ -134,7 +135,7 @@ func resolveArguments(description PipelineDescription, raw map[string]string, re
 }
 
 // ApplyArgumentDefaults copies supplied values and fills only nonempty defaults.
-func ApplyArgumentDefaults(arguments []ArgumentDescription, raw map[string]string) map[string]string {
+func ApplyArgumentDefaults(arguments []nodewire.ArgumentDescription, raw map[string]string) map[string]string {
 	out := maps.Clone(raw)
 	if out == nil {
 		out = map[string]string{}
@@ -148,11 +149,11 @@ func ApplyArgumentDefaults(arguments []ArgumentDescription, raw map[string]strin
 }
 
 // PrepareJobArguments prepares late declarations without rejecting other jobs' inputs.
-func PrepareJobArguments(arguments []ArgumentDescription, raw map[string]string) (map[string]string, error) {
+func PrepareJobArguments(arguments []nodewire.ArgumentDescription, raw map[string]string) (map[string]string, error) {
 	if err := ValidateArgumentDeclarations(arguments); err != nil {
 		return nil, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
 	}
-	args, err := ResolveArguments(PipelineDescription{Args: arguments, Extra: true}, raw)
+	args, err := ResolveArguments(nodewire.PipelineDescription{Args: arguments, Extra: true}, raw)
 	if err != nil {
 		return nil, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
 	}
@@ -160,7 +161,7 @@ func PrepareJobArguments(arguments []ArgumentDescription, raw map[string]string)
 }
 
 // ValidateInitialJobArguments refuses declarations absent from discovery.
-func ValidateInitialJobArguments(static []ArgumentDescription, jobs []JobSpec) error {
+func ValidateInitialJobArguments(static []nodewire.ArgumentDescription, jobs []nodewire.JobSpec) error {
 	if err := ValidateJobArgumentNamespace(static, jobs); err != nil {
 		return err
 	}
@@ -174,8 +175,8 @@ func ValidateInitialJobArguments(static []ArgumentDescription, jobs []JobSpec) e
 	return nil
 }
 
-func discoveredJobArgument(static []ArgumentDescription, argument ArgumentDescription) bool {
-	return slices.ContainsFunc(static, func(known ArgumentDescription) bool {
+func discoveredJobArgument(static []nodewire.ArgumentDescription, argument nodewire.ArgumentDescription) bool {
+	return slices.ContainsFunc(static, func(known nodewire.ArgumentDescription) bool {
 		if known.JobID == "" {
 			return false
 		}
@@ -186,9 +187,9 @@ func discoveredJobArgument(static []ArgumentDescription, argument ArgumentDescri
 }
 
 // ValidateJobArgumentNamespace keeps expansion declarations in the discovered flag namespace.
-func ValidateJobArgumentNamespace(static []ArgumentDescription, jobs []JobSpec) error {
+func ValidateJobArgumentNamespace(static []nodewire.ArgumentDescription, jobs []nodewire.JobSpec) error {
 	arguments := slices.Clone(static)
-	var jobArguments []ArgumentDescription
+	var jobArguments []nodewire.ArgumentDescription
 	for _, job := range jobs {
 		jobArguments = append(jobArguments, job.Arguments...)
 		for _, argument := range job.Arguments {

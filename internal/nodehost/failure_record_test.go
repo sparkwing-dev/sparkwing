@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestNodeExecutorRecordsVerifyTimeoutStage(t *testing.T) {
@@ -24,8 +24,8 @@ func TestNodeExecutorRecordsVerifyTimeoutStage(t *testing.T) {
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, activity)
 		process.(*executorProcess).plan = input.Accepted.Plan
-		process.(*executorProcess).answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpEval && request.Closure == "verify" {
+		process.(*executorProcess).answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpEval && request.Closure == "verify" {
 				expire(context.DeadlineExceeded)
 				return nil, context.Cause(ctx)
 			}

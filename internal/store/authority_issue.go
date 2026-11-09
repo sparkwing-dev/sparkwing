@@ -14,13 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // issue persists one capability within its intake, claim or exchange transaction.
@@ -546,15 +546,15 @@ func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Cap
 
 // awardChildrenTx seals the accepted plan's execution authority without widening
 // the claim's authority to read its own repository, secrets or data.
-func awardChildrenTx(ctx context.Context, tx *storeTx, row awardRow, unit capability.UnitKind) ([]nodeproto.ChildPipeline, error) {
+func awardChildrenTx(ctx context.Context, tx *storeTx, row awardRow, unit capability.UnitKind) ([]nodewire.ChildPipeline, error) {
 	if unit != capability.UnitNode {
 		return nil, nil
 	}
-	var spec nodeproto.JobSpec
+	var spec nodewire.JobSpec
 	if err := json.Unmarshal(row.spec, &spec); err != nil {
 		return nil, err
 	}
-	var children []nodeproto.ChildPipeline
+	var children []nodewire.ChildPipeline
 	var covered []string
 	coverageLoaded := false
 	for _, child := range spec.Children {

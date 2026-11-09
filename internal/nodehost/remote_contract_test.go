@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type ownerOperationWire struct {
@@ -42,7 +42,7 @@ func (f *ownerOperationWire) AcceptExpansion(_ context.Context, run, job string,
 
 func executionWireFixture() controllerwire.ExecutionJob {
 	now := time.Unix(1234, 0)
-	declaration := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	declaration := nodewire.JobSpec{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}}
 	spec, _ := json.Marshal(declaration)
 	return controllerwire.ExecutionJob{
 		JobDetail: controllerwire.JobDetail{ID: "job", Status: "pending", Generation: 4, Attempt: 0, StateSeq: 11, Expansion: "expected", StartedAt: &now},
@@ -186,7 +186,7 @@ func TestRemoteReconciliationDispatchesAfterPlacementChanges(t *testing.T) {
 func TestRemoteExpansionReplayRetainsCurrentJobStateAndEmptyBody(t *testing.T) {
 	job := executionWireFixture()
 	job.Status, job.Outcome = "done", "success"
-	var declaration nodeproto.JobSpec
+	var declaration nodewire.JobSpec
 	if err := json.Unmarshal(job.Spec, &declaration); err != nil {
 		t.Fatal(err)
 	}

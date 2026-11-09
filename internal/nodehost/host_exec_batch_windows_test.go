@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 //sparkwing:critical
@@ -24,7 +24,7 @@ func TestWindowsHostCommandBatchArguments(t *testing.T) {
 				continue
 			}
 			t.Run(fmt.Sprintf("%s/%q", extension, arg), func(t *testing.T) {
-				req := nodeproto.ExecRequest{ID: "batch", Argv: []string{tool, "safe", arg}, Dir: dir, Env: append(os.Environ(), "SW_BATCH_FIXTURE=fixture-only"), Capture: true}
+				req := nodewire.ExecRequest{ID: "batch", Argv: []string{tool, "safe", arg}, Dir: dir, Env: append(os.Environ(), "SW_BATCH_FIXTURE=fixture-only"), Capture: true}
 				if extension == ".cmd" {
 					req.Argv[0] = "batch"
 					req.Env = append(req.Env, "PATH="+dir, "PATHEXT=.cmd")
@@ -121,7 +121,7 @@ func TestWindowsHostCommandFinalBatchArgv(t *testing.T) {
 		if err := os.WriteFile(tool, []byte("@echo off\r\necho %0\r\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		req := nodeproto.ExecRequest{ID: "argv", Argv: []string{"tool", "plain"}, Dir: dir, Env: append(os.Environ(), "PATH="+bin, "PATHEXT=.cmd"), Capture: true}
+		req := nodewire.ExecRequest{ID: "argv", Argv: []string{"tool", "plain"}, Dir: dir, Env: append(os.Environ(), "PATH="+bin, "PATHEXT=.cmd"), Capture: true}
 		var output strings.Builder
 		done, session := runHostCommand(req, nil, nil, nil, func(_ string, data []byte, _ bool) error { output.Write(data); return nil }, nil)
 		if session != nil {
@@ -147,7 +147,7 @@ func TestWindowsHostCommandExecutableKeepsMetacharacters(t *testing.T) {
 		t.Fatal(err)
 	}
 	arg := "&|<>^%\"!()\r\n"
-	req := nodeproto.ExecRequest{ID: "literal", Argv: []string{executable, "-test.run=^TestWindowsHostCommandLiteralArgument$", "--", "--literal-argument", arg}, Dir: t.TempDir(), Env: os.Environ(), Capture: true}
+	req := nodewire.ExecRequest{ID: "literal", Argv: []string{executable, "-test.run=^TestWindowsHostCommandLiteralArgument$", "--", "--literal-argument", arg}, Dir: t.TempDir(), Env: os.Environ(), Capture: true}
 	done, session := runHostCommand(req, nil, nil, nil, func(string, []byte, bool) error { return nil }, nil)
 	if session != nil {
 		if err := endCommandSessions([]*commandSession{session}); err != nil {

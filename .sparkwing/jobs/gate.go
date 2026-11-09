@@ -332,7 +332,7 @@ func runScopedChecker(ctx context.Context, step string, plan func(context.Contex
 		return err
 	}
 	sparkwing.Info(ctx, "%s: %s", step, scope)
-	_, err = sparkwing.Bash(ctx, command).Env("GOWORK", "off").Run()
+	_, err = sparkwing.Bash(ctx, command).Env("GOWORK", "auto").Run()
 	return err
 }
 

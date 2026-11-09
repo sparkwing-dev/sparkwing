@@ -9,9 +9,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestOwnerHostGuardRefusalBypassesPlan(t *testing.T) {
@@ -82,8 +82,8 @@ func TestOwnerHostResolvesValidatedPlansBeforeAcceptance(t *testing.T) {
 			input.SealedRequest, _ = json.Marshal(request)
 			resolved := false
 			host.Prepare = func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
-				return OwnerPlanning{Planning: planning.input, Plan: functions, Resolve: func(plan nodeproto.PlanDoc) (runspec.Resolved, error) {
-					if !reflect.DeepEqual(plan, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "test", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}) {
+				return OwnerPlanning{Planning: planning.input, Plan: functions, Resolve: func(plan nodewire.PlanDoc) (runspec.Resolved, error) {
+					if !reflect.DeepEqual(plan, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "test", Steps: []nodewire.StepSpec{{ID: "body"}}}}}) {
 						t.Fatal("resolver did not receive the validated plan")
 					}
 					resolved = true
@@ -106,7 +106,7 @@ func TestOwnerHostResolutionFailureNeverAccepts(t *testing.T) {
 	failure := errors.New("settings exceed ceiling")
 	host.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
 		prepared, err := prepare(ctx, in, entry)
-		prepared.Resolve = func(nodeproto.PlanDoc) (runspec.Resolved, error) { return runspec.Resolved{}, failure }
+		prepared.Resolve = func(nodewire.PlanDoc) (runspec.Resolved, error) { return runspec.Resolved{}, failure }
 		return prepared, err
 	}
 	if _, err := host.Run(t.Context(), input); !errors.Is(err, failure) || f.accepted.RunID != "" || f.finished.Transition.RunID != "run" {

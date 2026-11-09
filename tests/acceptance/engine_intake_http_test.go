@@ -11,14 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func intakeBoundary() *credentialBoundary {
@@ -80,7 +79,7 @@ func TestEngineIntakeHTTP(t *testing.T) {
 			case "child", "wrong parent", "sibling parent job":
 				b = newCredentialBoundary()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.ChildrenStart}
-				b.snapshot.Authorities[0].Principal.Capability.Children = []nodeproto.ChildPipeline{{Pipeline: "build", Repository: "git:example.com/team/repo"}}
+				b.snapshot.Authorities[0].Principal.Capability.Children = []nodewire.ChildPipeline{{Pipeline: "build", Repository: "git:example.com/team/repo"}}
 				// A child runs from its parent's repository location and revision.
 				var from runspec.Request
 				if err := json.Unmarshal([]byte(`{`+sourceFields+`}`), &from); err != nil {

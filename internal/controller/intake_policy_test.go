@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestControllerIntakeSealsPersistedPolicyOnce(t *testing.T) {
@@ -133,7 +133,7 @@ func TestControllerIntakePublishesCapturedLocalHistory(t *testing.T) {
 	}
 	engineSQL(t, server.store, `UPDATE capabilities SET bind_kind='run',bind_run=?,repo_key=?,authority_json=? WHERE prefix='publisher'`, admitted.RunID, credential.Data.RepositoryKey, encoded)
 	timeout := int64(12 * time.Hour / time.Millisecond)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "historical", Inline: true, TimeoutMS: &timeout, Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "historical", Inline: true, TimeoutMS: &timeout, Steps: []nodewire.StepSpec{{ID: "run"}}}}}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
 	if err != nil {

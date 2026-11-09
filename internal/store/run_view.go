@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // RunView keeps status, attempt history and committed log identities in one snapshot.
@@ -37,7 +37,7 @@ type RunView struct {
 type JobResult struct {
 	JobID       string
 	Summary     string
-	Annotations []nodeproto.Annotation
+	Annotations []nodewire.Annotation
 }
 
 // RunFailure is a persisted masked error of the run (JobID empty) or one of its jobs,

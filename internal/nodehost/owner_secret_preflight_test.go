@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -16,6 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestCheckoutSecretOptionalitySurvivesPlanAcceptance(t *testing.T) {
@@ -31,13 +32,13 @@ func TestCheckoutSecretOptionalitySurvivesPlanAcceptance(t *testing.T) {
 				return &source.Entry{Engine: selected}, nil
 			}
 			f.Host.Planner = &SDKPlanner{
-				Masker: f.Host.Masker, Log: func(context.Context, nodeproto.FrameLog) error { return nil },
+				Masker: f.Host.Masker, Log: func(context.Context, nodewire.FrameLog) error { return nil },
 				EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return selected, nil
 				},
-				Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-					return newCheckoutSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, nodeproto.PipelineDescription{
-						Name: "build", Args: []nodeproto.ArgumentDescription{}, Secrets: []nodeproto.SecretDeclaration{{Name: "ABSENT", Optional: optional}},
+				Start: func(context.Context, PlanningProcessInput, func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
+					return newCheckoutSDK(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}}}}, nodewire.PipelineDescription{
+						Name: "build", Args: []nodewire.ArgumentDescription{}, Secrets: []nodewire.SecretDeclaration{{Name: "ABSENT", Optional: optional}},
 					}), nil
 				},
 			}
@@ -87,7 +88,7 @@ func TestOwnerHostMissingRequiredSecretFinishesUnacceptedRun(t *testing.T) {
 			Declarations: runspec.CheckoutDeclarations{Version: 1},
 			Planning:     PlanningInput{Validation: nodeproto.ValidationContext{Secrets: ownerSealSecrets{}, Placement: nodeproto.PlacementLocal}},
 			Plan:         func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil },
-			Resolve: func(plan nodeproto.PlanDoc) (runspec.Resolved, error) {
+			Resolve: func(plan nodewire.PlanDoc) (runspec.Resolved, error) {
 				resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: row.Request, Declarations: runspec.CheckoutDeclarations{Version: 1}, Plan: plan})
 				return runspec.Resolved{Engine: selected, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"BAR"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}, err
 			},

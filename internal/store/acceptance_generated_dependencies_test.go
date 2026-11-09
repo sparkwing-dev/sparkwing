@@ -9,12 +9,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func checkStoreGeneratedDependencies(t *testing.T) (err error) {
@@ -167,9 +167,9 @@ func acceptStoreGeneratedPlan(ctx context.Context, s *store.Store) (*store.Tenan
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	declaration := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "alpha", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"children", "empty"}}},
-		{ID: "beta", NeedsGenerated: []string{"children", "empty"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	declaration := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "alpha", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{Generate: []string{"children", "empty"}}},
+		{ID: "beta", NeedsGenerated: []string{"children", "empty"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}}
 	plan.Seal.Plan, err = json.Marshal(declaration)
 	if err != nil {

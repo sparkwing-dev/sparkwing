@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -22,6 +21,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func strictExpansionJobs(mode, closure string) json.RawMessage {
@@ -45,17 +46,17 @@ func strictExpansionJobs(mode, closure string) json.RawMessage {
 	if mode != "fan256" && mode != "fan257" {
 		return nil
 	}
-	jobs := []nodeproto.JobSpec{}
+	jobs := []nodewire.JobSpec{}
 	if closure == "first" {
 		count := 256
 		if mode == "fan257" {
 			count++
 		}
 		for i := range count {
-			jobs = append(jobs, nodeproto.JobSpec{ID: fmt.Sprintf("child-%d", i), Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+			jobs = append(jobs, nodewire.JobSpec{ID: fmt.Sprintf("child-%d", i), Groups: []string{"first"}, Steps: []nodewire.StepSpec{{ID: "body"}}})
 		}
 	}
-	raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+	raw, _ := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 	return raw
 }
 
@@ -66,11 +67,11 @@ func TestOwnerExpansion(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 9}}
-			job := nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "second"}}}
-			job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+			job := nodewire.JobSpec{ID: "source", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{Generate: []string{"first", "second"}}}
+			job.Concurrency = []nodewire.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}
+			plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}
 			if mode == "cycle" {
-				plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "consumer", Steps: []nodeproto.StepSpec{{ID: "body"}}, NeedsGenerated: []string{"first"}})
+				plan.Jobs = append(plan.Jobs, nodewire.JobSpec{ID: "consumer", Steps: []nodewire.StepSpec{{ID: "body"}}, NeedsGenerated: []string{"first"}})
 			}
 			planHash, _ := runspec.CanonicalHash(plan)
 			jobHash, _ := runspec.CanonicalHash(job)
@@ -122,7 +123,7 @@ func TestOwnerExpansion(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry := &source.Entry{Engine: resolved}
-			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
+			runner := nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 			host := OwnerHost{Masker: secrets.NewMasker(), Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(ctx context.Context, _ store.RunSnapshot) error {
 				select {
 				case <-changed:
@@ -168,7 +169,7 @@ func TestOwnerExpansion(t *testing.T) {
 				}
 				return
 			}
-			var expanded nodeproto.PlanDoc
+			var expanded nodewire.PlanDoc
 			if err := json.Unmarshal(s.submission.Body, &expanded); err != nil {
 				t.Fatal(err)
 			}

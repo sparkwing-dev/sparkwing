@@ -10,16 +10,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
-
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type Pipeline struct {
@@ -221,9 +218,9 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 	}
 }
 
-func describePipelineSecrets(name, format string, secrets []nodeproto.SecretDeclaration) error {
+func describePipelineSecrets(name, format string, secrets []nodewire.SecretDeclaration) error {
 	if secrets == nil {
-		secrets = []nodeproto.SecretDeclaration{}
+		secrets = []nodewire.SecretDeclaration{}
 	}
 	if format == "json" {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"pipeline": name, "secrets": secrets})

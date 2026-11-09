@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Error sanitizes author payloads before constructing a trusted error envelope.
@@ -33,7 +33,7 @@ func (m *Masker) Error(source *apierr.Error) *apierr.Error {
 }
 
 // Log sanitizes presentation payloads while retaining the protocol's field names.
-func (m *Masker) Log(frame nodeproto.FrameLog) nodeproto.FrameLog {
+func (m *Masker) Log(frame nodewire.FrameLog) nodewire.FrameLog {
 	frame.TS, frame.Level = m.Mask(frame.TS), m.Mask(frame.Level)
 	frame.Step, frame.Event = m.Mask(frame.Step), m.Mask(frame.Event)
 	frame.Message = m.Mask(frame.Message)

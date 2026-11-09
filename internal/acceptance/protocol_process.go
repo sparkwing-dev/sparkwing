@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/protofd"
 )
 
 // BuildGoSDKFixture builds the public SDK probe and returns its cleanup.
@@ -41,7 +41,7 @@ type GoSDKProcess struct {
 	command *exec.Cmd
 	request *os.File
 	frame   *os.File
-	frames  *nodeproto.Reader
+	frames  *nodewire.Reader
 	stdout  bytes.Buffer
 	stderr  bytes.Buffer
 }
@@ -59,7 +59,7 @@ func StartGoSDKProcess(ctx context.Context, bin string) (*GoSDKProcess, error) {
 		return nil, err
 	}
 	defer frameW.Close()
-	p := &GoSDKProcess{request: requestW, frame: frameR, frames: nodeproto.NewReader(frameR)}
+	p := &GoSDKProcess{request: requestW, frame: frameR, frames: nodewire.NewReader(frameR)}
 	var environment []string
 	for _, item := range os.Environ() {
 		if !strings.HasPrefix(item, "SPARKWING_") {

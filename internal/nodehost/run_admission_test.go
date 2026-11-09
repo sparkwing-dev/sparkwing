@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func (d *fakeDaemon) lease(runID string) *fakeLease {
@@ -14,14 +15,14 @@ func (d *fakeDaemon) lease(runID string) *fakeLease {
 	return d.leases[runID]
 }
 
-func planGrouped(scope, onLimit string, nodes ...string) nodeproto.PlanDoc {
-	concurrency := nodeproto.ConcurrencySpec{Group: "deploys", Scope: new(scope), Capacity: new(1)}
+func planGrouped(scope, onLimit string, nodes ...string) nodewire.PlanDoc {
+	concurrency := nodewire.ConcurrencySpec{Group: "deploys", Scope: new(scope), Capacity: new(1)}
 	if onLimit != "" {
 		concurrency.OnLimit = new(onLimit)
 	}
-	doc := nodeproto.PlanDoc{Concurrency: []nodeproto.ConcurrencySpec{concurrency}}
+	doc := nodewire.PlanDoc{Concurrency: []nodewire.ConcurrencySpec{concurrency}}
 	for _, id := range nodes {
-		doc.Jobs = append(doc.Jobs, nodeproto.JobSpec{ID: id, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+		doc.Jobs = append(doc.Jobs, nodewire.JobSpec{ID: id, Steps: []nodewire.StepSpec{{ID: "body"}}})
 	}
 	return doc
 }

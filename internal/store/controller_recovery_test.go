@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, PlanAcceptance, *time.Time) {
+func controllerPlanFixture(t *testing.T, plan nodewire.PlanDoc, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, PlanAcceptance, *time.Time) {
 	t.Helper()
 	tenant, request, now := planFixture(t, runspec.DispatchController)
 	var err error
@@ -65,7 +65,7 @@ func controllerJobActor(t *testing.T, tenant *Tenant, runID string, shape ...fun
 }
 
 func TestControllerReconcileResumesReports(t *testing.T) {
-	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
+	tenant, request, _ := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
 	actor := controllerJobActor(t, tenant, request.RunID)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}, To: runstate.NodeSuccess, Cause: runstate.CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
@@ -238,9 +238,9 @@ func TestControllerUnacceptedRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T
 }
 
 func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "job", Closures: nodeproto.ClosureSpec{Generate: []string{"group"}}},
-		{ID: "gate", Approval: &nodeproto.ApprovalSpec{}},
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "job", Closures: nodewire.ClosureSpec{Generate: []string{"group"}}},
+		{ID: "gate", Approval: &nodewire.ApprovalSpec{}},
 	}}
 	tenant, request, now := controllerPlanFixture(t, plan)
 	actor := controllerJobActor(t, tenant, request.RunID)
@@ -302,10 +302,10 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 func TestControllerReconcileRenewsOnlyContinuousCapacity(t *testing.T) {
 	for _, live := range []bool{true, false} {
 		t.Run(map[bool]string{true: "live", false: "expired"}[live], func(t *testing.T) {
-			group := nodeproto.ConcurrencySpec{Group: "capacity", Scope: new("global"), Capacity: new(1)}
-			tenant, request, now := controllerPlanFixture(t, nodeproto.PlanDoc{
-				Concurrency: []nodeproto.ConcurrencySpec{group},
-				Jobs:        []nodeproto.JobSpec{{ID: "job", Concurrency: []nodeproto.ConcurrencySpec{group}}},
+			group := nodewire.ConcurrencySpec{Group: "capacity", Scope: new("global"), Capacity: new(1)}
+			tenant, request, now := controllerPlanFixture(t, nodewire.PlanDoc{
+				Concurrency: []nodewire.ConcurrencySpec{group},
+				Jobs:        []nodewire.JobSpec{{ID: "job", Concurrency: []nodewire.ConcurrencySpec{group}}},
 			})
 			controllerJobActor(t, tenant, request.RunID)
 			expiry := *now

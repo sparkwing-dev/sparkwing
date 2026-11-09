@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestConcurrencyPreservesOmittedOptions(t *testing.T) {
@@ -30,16 +31,16 @@ func TestConcurrencyPreservesOmittedOptions(t *testing.T) {
 
 func TestCancelSelectorsAreExclusive(t *testing.T) {
 	for _, selector := range []string{`"job":"j"`, `"job":"j","step":"s"`, `"target":"eval-request"`} {
-		if _, err := ParseRequest([]byte(`{"id":"cancel","op":"cancel",` + selector + `}`)); err != nil {
+		if _, err := nodewire.ParseRequest([]byte(`{"id":"cancel","op":"cancel",` + selector + `}`)); err != nil {
 			t.Fatalf("selector %s: %v", selector, err)
 		}
 	}
 	for _, selector := range []string{`"job":""`, `"step":"s"`, `"target":""`, `"target":null`, `"target":"eval-request","job":"j"`, `"target":"eval-request","step":"s"`, `"target":"eval-request","job":""`, `"target":"","job":"j"`, `"job":"j","step":""`} {
-		if _, err := ParseRequest([]byte(`{"id":"cancel","op":"cancel",` + selector + `}`)); err == nil {
+		if _, err := nodewire.ParseRequest([]byte(`{"id":"cancel","op":"cancel",` + selector + `}`)); err == nil {
 			t.Fatalf("invalid selector accepted: %s", selector)
 		}
 	}
-	if _, err := ParseRequest([]byte(`{"id":"describe","op":"describe","target":"eval-request"}`)); err == nil {
+	if _, err := nodewire.ParseRequest([]byte(`{"id":"describe","op":"describe","target":"eval-request"}`)); err == nil {
 		t.Fatal("target accepted outside cancellation")
 	}
 }

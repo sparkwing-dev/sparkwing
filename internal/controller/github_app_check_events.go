@@ -9,9 +9,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type githubAppCheckPullRequest struct {
@@ -173,11 +172,11 @@ func githubAppRerunIntake(anchor *store.RunRow, user string) githubAppIntake {
 	} else {
 		env["GITHUB_REF_TYPE"] = "branch"
 	}
-	var pr *nodeproto.PullRequest
+	var pr *nodewire.PullRequest
 	var head int64
 	if request.PullRequest.Set {
 		p := request.PullRequest.Value
-		pr = &nodeproto.PullRequest{Number: int(p.Number), Action: p.Action, BaseRef: p.BaseRef, BaseSHA: p.BaseSHA, HeadRef: p.HeadRef, HeadSHA: p.HeadSHA}
+		pr = &nodewire.PullRequest{Number: int(p.Number), Action: p.Action, BaseRef: p.BaseRef, BaseSHA: p.BaseSHA, HeadRef: p.HeadRef, HeadSHA: p.HeadSHA}
 		branch, env["GITHUB_BASE_REF"] = p.HeadRef, p.BaseRef
 		if id, ok := strings.CutPrefix(string(p.HeadRepo), "gh:"); ok {
 			if parsed, err := strconv.ParseInt(id, 10, 64); err == nil {

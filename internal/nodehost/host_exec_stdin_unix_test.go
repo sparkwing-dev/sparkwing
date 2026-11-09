@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // A sink slower than the drain grace must still receive every byte the exited command wrote.
@@ -27,7 +27,7 @@ func TestHostCommandKeepsBufferedOutputPastASlowSink(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			req := nodeproto.ExecRequest{ID: "1", Argv: []string{"head", "-c", "12288", "/dev/zero"}, Dir: t.TempDir(), Env: []string{"PATH=" + os.Getenv("PATH")}}
+			req := nodewire.ExecRequest{ID: "1", Argv: []string{"head", "-c", "12288", "/dev/zero"}, Dir: t.TempDir(), Env: []string{"PATH=" + os.Getenv("PATH")}}
 			entered := make(chan struct{})
 			var once sync.Once
 			var got int
@@ -46,7 +46,7 @@ func TestHostCommandKeepsBufferedOutputPastASlowSink(t *testing.T) {
 				}
 				return nil
 			}
-			finished := make(chan nodeproto.ExecDone, 1)
+			finished := make(chan nodewire.ExecDone, 1)
 			go func() {
 				done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), sink, nil)
 				if err := endCommandSessions([]*commandSession{session}); err != nil {
@@ -84,7 +84,7 @@ func TestHostCommandKeepsBufferedOutputPastASlowSink(t *testing.T) {
 func TestHostCommandReturnsWhenABackgroundChildHoldsStdin(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := dir + "/held.pid"
-	req := nodeproto.ExecRequest{
+	req := nodewire.ExecRequest{
 		ID: "1", Argv: []string{"sh", "-c", `exec 3<&0; sleep 30 <&3 & echo $! > "$P"; exit 0`}, Dir: dir,
 		Env: []string{"PATH=" + os.Getenv("PATH"), "P=" + pidFile}, Stdin: bytes.Repeat([]byte("x"), 256<<10),
 	}

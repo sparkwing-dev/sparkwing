@@ -10,14 +10,14 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput, *executorStore, evaluationDependencies, *[]*executorProcess) {
+func policyFixture(t *testing.T, edit func(*nodewire.JobSpec)) (EvaluationInput, *executorStore, evaluationDependencies, *[]*executorProcess) {
 	t.Helper()
 	in, st, deps, _ := evaluationFixture(t)
 	job := in.Accepted.Plan.Jobs[0]
@@ -59,7 +59,7 @@ func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput
 	return in, st, deps, &processes
 }
 
-func executorPolicyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (NodeInput, *executorStore, ExecutorDependencies, *[]*executorProcess) {
+func executorPolicyFixture(t *testing.T, edit func(*nodewire.JobSpec)) (NodeInput, *executorStore, ExecutorDependencies, *[]*executorProcess) {
 	t.Helper()
 	in, st, deps, processes := executorFixture(t)
 	job := in.Accepted.Plan.Jobs[0]
@@ -77,7 +77,7 @@ func executorPolicyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (NodeInp
 	return in, st, deps, processes
 }
 
-func executorPolicyHost(t *testing.T, deps ExecutorDependencies, in NodeInput) (*nodeExecutor, runspec.Spec, nodeproto.JobSpec) {
+func executorPolicyHost(t *testing.T, deps ExecutorDependencies, in NodeInput) (*nodeExecutor, runspec.Spec, nodewire.JobSpec) {
 	t.Helper()
 	host, err := NewNodeExecutor(deps)
 	if err != nil {
@@ -90,7 +90,7 @@ func executorPolicyHost(t *testing.T, deps ExecutorDependencies, in NodeInput) (
 	return host.(*nodeExecutor), spec, in.Accepted.Plan.Jobs[0]
 }
 
-func executorPolicyMemoKey(ctx context.Context, host *nodeExecutor, in NodeInput, spec runspec.Spec, job nodeproto.JobSpec) (string, error) {
+func executorPolicyMemoKey(ctx context.Context, host *nodeExecutor, in NodeInput, spec runspec.Spec, job nodewire.JobSpec) (string, error) {
 	var key string
 	err := host.withProcess(ctx, in, spec, func(session *executorSession, code NodeInput) error {
 		var err error
@@ -102,7 +102,7 @@ func executorPolicyMemoKey(ctx context.Context, host *nodeExecutor, in NodeInput
 
 func TestExecutorPolicySkipTimeoutContinuesWithJoinedProcess(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
+		in, _, deps, processes := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
 			job.Closures.SkipIf = []string{"slow", "skip"}
 			budget := int64(7)
 			job.SkipIfBudgetMS = &budget
@@ -113,8 +113,8 @@ func TestExecutorPolicySkipTimeoutContinuesWithJoinedProcess(t *testing.T) {
 				t.Error("next predicate started before expired process joined")
 			}
 			p, err := start(ctx, input, activity)
-			p.(*executorProcess).answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-				if request.Op != nodeproto.OpEval {
+			p.(*executorProcess).answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+				if request.Op != nodewire.OpEval {
 					return nil, nil
 				}
 				if request.Closure == "slow" {
@@ -125,7 +125,7 @@ func TestExecutorPolicySkipTimeoutContinuesWithJoinedProcess(t *testing.T) {
 					<-ctx.Done()
 					return nil, context.Cause(ctx)
 				}
-				return nodeproto.EvalResult{Value: json.RawMessage("true")}, nil
+				return nodewire.EvalResult{Value: json.RawMessage("true")}, nil
 			}
 			return p, err
 		}
@@ -140,7 +140,7 @@ func TestExecutorPolicySkipTimeoutContinuesWithJoinedProcess(t *testing.T) {
 func TestExecutorPolicySkipFailuresPreventBody(t *testing.T) {
 	for _, mode := range []string{"null", "string", "sdk", "drift", "close", "cleanup", "cancel", "lease", "cancel_and_cleanup"} {
 		t.Run(mode, func(t *testing.T) {
-			in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
+			in, _, deps, processes := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
 				job.Closures.SkipIf = []string{"guard"}
 			})
 			ctx, cancel := context.WithCancelCause(t.Context())
@@ -151,7 +151,7 @@ func TestExecutorPolicySkipFailuresPreventBody(t *testing.T) {
 				p := process.(*executorProcess)
 				switch mode {
 				case "drift":
-					p.plan = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "changed"}}}
+					p.plan = nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "changed"}}}
 				case "close":
 					p.closeErr = errors.New("private close error")
 				case "cleanup":
@@ -159,11 +159,11 @@ func TestExecutorPolicySkipFailuresPreventBody(t *testing.T) {
 				case "cancel_and_cleanup":
 					p.cleanupErr = errors.New("private cleanup error")
 				}
-				p.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-					if request.Op != nodeproto.OpEval {
+				p.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+					if request.Op != nodewire.OpEval {
 						return nil, nil
 					}
-					result := nodeproto.EvalResult{Value: json.RawMessage("true")}
+					result := nodewire.EvalResult{Value: json.RawMessage("true")}
 					switch mode {
 					case "null":
 						result.Value = json.RawMessage("null")
@@ -196,15 +196,15 @@ func TestExecutorPolicySkipFailuresPreventBody(t *testing.T) {
 }
 
 func TestExecutorPolicySkipShortCircuitsBeforeBody(t *testing.T) {
-	in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
+	in, _, deps, processes := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
 		job.Closures.SkipIf = []string{"first", "second", "unreachable"}
 	})
 	var evaluated []string
 	start := deps.Start
 	deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, input, activity)
-		p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-			if request.Op != nodeproto.OpEval {
+		p.(*executorProcess).answer = func(_ context.Context, request nodewire.Request) (any, error) {
+			if request.Op != nodewire.OpEval {
 				return nil, nil
 			}
 			if request.Job != "" || request.Attempt != 0 {
@@ -215,7 +215,7 @@ func TestExecutorPolicySkipShortCircuitsBeforeBody(t *testing.T) {
 			if request.Closure == "second" {
 				value = json.RawMessage("true")
 			}
-			return nodeproto.EvalResult{Value: value}, nil
+			return nodewire.EvalResult{Value: value}, nil
 		}
 		return p, err
 	}
@@ -232,7 +232,7 @@ func TestExecutorPolicySkipShortCircuitsBeforeBody(t *testing.T) {
 			t.Fatal("predicate process leaked")
 		}
 		for _, request := range p.requests {
-			if request.Op == nodeproto.OpRunStep {
+			if request.Op == nodewire.OpRunStep {
 				t.Fatal("predicate evaluated a body")
 			}
 		}
@@ -242,22 +242,22 @@ func TestExecutorPolicySkipShortCircuitsBeforeBody(t *testing.T) {
 func TestExecutorPolicyMemoKeyHashesJSONOrBypassesNull(t *testing.T) {
 	for _, raw := range []string{`"key"`, `null`, `""`, `42`, `{}`, `false`, `failed_null`} {
 		t.Run(raw, func(t *testing.T) {
-			in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
-				job.Memo = &nodeproto.MemoSpec{}
+			in, _, deps, processes := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
+				job.Memo = &nodewire.MemoSpec{}
 				job.Closures.MemoKey = "memo"
 			})
 			start := deps.Start
 			deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 				p, err := start(ctx, input, activity)
-				p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpEval {
+				p.(*executorProcess).answer = func(_ context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpEval {
 						if request.Closure != "memo" || request.Attempt != 0 {
 							t.Error("memo changed closure or created an attempt")
 						}
 						if raw == "failed_null" {
-							return nodeproto.EvalResult{Value: json.RawMessage(`null`), Error: &apierr.Error{Code: apierr.SDKError, Message: "closure failed"}}, nil
+							return nodewire.EvalResult{Value: json.RawMessage(`null`), Error: &apierr.Error{Code: apierr.SDKError, Message: "closure failed"}}, nil
 						}
-						return nodeproto.EvalResult{Value: json.RawMessage(raw)}, nil
+						return nodewire.EvalResult{Value: json.RawMessage(raw)}, nil
 					}
 					return nil, nil
 				}
@@ -277,7 +277,7 @@ func TestExecutorPolicyMemoKeyHashesJSONOrBypassesNull(t *testing.T) {
 }
 
 func TestExecutorPolicyProcessesReceiveFreshRouteBindings(t *testing.T) {
-	in, _, deps, _ := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
+	in, _, deps, _ := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
 		job.Closures.SkipIf = []string{"first", "second"}
 	})
 	in.RouteBinding.Routes.Bearer = "parent"
@@ -295,12 +295,12 @@ func TestExecutorPolicyProcessesReceiveFreshRouteBindings(t *testing.T) {
 		if input.RouteBinding.Routes.Bearer != want {
 			t.Error("process adapter did not receive its delegated binding")
 		}
-		return &executorProcess{plan: input.Accepted.Plan, answer: func(_ context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpHello && request.Binding.Routes.Bearer != want {
+		return &executorProcess{plan: input.Accepted.Plan, answer: func(_ context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpHello && request.Binding.Routes.Bearer != want {
 				t.Error("hello reused an earlier process bearer")
 			}
-			if request.Op == nodeproto.OpEval {
-				return nodeproto.EvalResult{Value: json.RawMessage("false")}, nil
+			if request.Op == nodewire.OpEval {
+				return nodewire.EvalResult{Value: json.RawMessage("false")}, nil
 			}
 			return nil, nil
 		}}, nil
@@ -316,8 +316,8 @@ func TestExecutorPolicyMemoFailuresPreventBody(t *testing.T) {
 	for _, mode := range []string{"timeout", "cleanup", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				in, st, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
-					job.Memo = &nodeproto.MemoSpec{}
+				in, st, deps, processes := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
+					job.Memo = &nodewire.MemoSpec{}
 					job.Closures.MemoKey = "memo"
 				})
 				ctx, cancel := context.WithCancelCause(t.Context())
@@ -329,8 +329,8 @@ func TestExecutorPolicyMemoFailuresPreventBody(t *testing.T) {
 					if mode == "cleanup" {
 						p.cleanupErr = errors.New("private cleanup failure")
 					}
-					p.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-						if request.Op != nodeproto.OpEval {
+					p.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+						if request.Op != nodewire.OpEval {
 							return nil, nil
 						}
 						if mode == "timeout" {
@@ -340,7 +340,7 @@ func TestExecutorPolicyMemoFailuresPreventBody(t *testing.T) {
 						if mode == "cancel" {
 							cancel(lease.ErrLeaseLost)
 						}
-						return nodeproto.EvalResult{Value: json.RawMessage(`"private key"`)}, nil
+						return nodewire.EvalResult{Value: json.RawMessage(`"private key"`)}, nil
 					}
 					return p, err
 				}
@@ -365,7 +365,7 @@ func TestExecutorPolicyMemoFailuresPreventBody(t *testing.T) {
 					}
 				}
 				for _, request := range (*processes)[0].requests {
-					if request.Op == nodeproto.OpRunStep {
+					if request.Op == nodewire.OpRunStep {
 						t.Fatal("body ran after memo failure")
 					}
 				}
@@ -380,7 +380,7 @@ func TestExecutorPolicyMemoFailuresPreventBody(t *testing.T) {
 func TestExecutorPolicyRefusesChangedProcessAuthority(t *testing.T) {
 	for _, mode := range []string{"missing", "same_bearer", "empty_bearer", "run", "job"} {
 		t.Run(mode, func(t *testing.T) {
-			in, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
+			in, _, deps, processes := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
 				job.Closures.SkipIf = []string{"condition"}
 			})
 			in.RouteBinding.Routes.Bearer = "parent"

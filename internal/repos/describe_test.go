@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func fakeSDK(t *testing.T, body string) (bin, requests string) {
@@ -47,8 +47,8 @@ printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"demo","args":[{"n
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := nodeproto.ParseRequest([]byte(strings.TrimSpace(string(raw))))
-	if err != nil || req.Op != nodeproto.OpDescribe {
+	req, err := nodewire.ParseRequest([]byte(strings.TrimSpace(string(raw))))
+	if err != nil || req.Op != nodewire.OpDescribe {
 		t.Fatalf("request = %+v, %v", req, err)
 	}
 }

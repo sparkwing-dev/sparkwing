@@ -5,12 +5,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func selectionSkips(doc nodeproto.PlanDoc, options runspec.Options) (map[string]string, error) {
+func selectionSkips(doc nodewire.PlanDoc, options runspec.Options) (map[string]string, error) {
 	if err := validateStepRange(doc, options.StartAt.Value, options.StopAt.Value); err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func selectionSkips(doc nodeproto.PlanDoc, options runspec.Options) (map[string]
 
 // safety: steps outside the selection never run and need no allowance; the
 // executor still checks every step it starts, including generated jobs.
-func unapprovedRisk(doc nodeproto.PlanDoc, options runspec.Options, jobSkips map[string]string) error {
+func unapprovedRisk(doc nodewire.PlanDoc, options runspec.Options, jobSkips map[string]string) error {
 	if options.DryRun.Value {
 		return nil
 	}

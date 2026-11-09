@@ -8,14 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type optionalSecretServices struct {
@@ -68,7 +69,7 @@ func TestSecrets_OptionalUnavailableReadsAreMissing(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := sdkserve.DefaultOperations.Context(t.Context(), nodeproto.RunContext{RunID: run.ID}, nodeproto.RunnerIdentity{}, optionalSecretServices{manager: manager})
+			ctx := sdkserve.DefaultOperations.Context(t.Context(), nodewire.RunContext{RunID: run.ID}, nodewire.RunnerIdentity{}, optionalSecretServices{manager: manager})
 			if value, err := sparkwing.Secret(ctx, "TOKEN"); value != "" || !errors.Is(err, sparkwing.ErrSecretMissing) {
 				t.Fatalf("Go optional secret: value=%q error=%v", value, err)
 			}

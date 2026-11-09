@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type exitObservationProcess struct {
@@ -32,7 +32,7 @@ func TestNodeExecutorReportsExitBeforePublication(t *testing.T) {
 			}
 		}}, err
 	}
-	deps.PrepareCaches = func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	deps.PrepareCaches = func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error) {
 		return func(_ context.Context, _ NodeInput, _ *runstate.NodeResult) error {
 			if len(*processes) != 1 || (*processes)[0].closed != 1 {
 				t.Fatal("publication began before execution process joined")

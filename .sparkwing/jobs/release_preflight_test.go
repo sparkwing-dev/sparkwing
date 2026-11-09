@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func runReleaseStateCheck(t *testing.T, repo, name string) error {

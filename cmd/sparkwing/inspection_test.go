@@ -11,13 +11,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func inspectionCommand(command pipelineentry.Command, directory, pipeline string) (pipelineInspection, error) {
@@ -40,8 +40,8 @@ func inspectionCommand(command pipelineentry.Command, directory, pipeline string
 	return pipelineInspection{
 		planner: nodehost.SDKPlanner{Start: sessions.StartPlanning, Masker: base.Masker, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
-		}, Log: func(context.Context, nodeproto.FrameLog) error { return nil }},
-		input: nodehost.PlanningProcessInput{Environment: snapshot, Entry: &source.Entry{Directory: directory, Command: command, Engine: resolved}, Entrypoint: identity.Entrypoint, Run: nodeproto.RunContext{RunID: "inspection", Pipeline: pipeline}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
+		}, Log: func(context.Context, nodewire.FrameLog) error { return nil }},
+		input: nodehost.PlanningProcessInput{Environment: snapshot, Entry: &source.Entry{Directory: directory, Command: command, Engine: resolved}, Entrypoint: identity.Entrypoint, Run: nodewire.RunContext{RunID: "inspection", Pipeline: pipeline}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 	}, nil
 }
 

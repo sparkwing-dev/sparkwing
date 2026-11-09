@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRecoveryDependencies(t *testing.T) {
@@ -182,9 +182,9 @@ func TestSchedulingRecoveryWaitsForGeneratedGroup(t *testing.T) {
 	}
 }
 
-func scheduleFixture(t *testing.T, jobs ...nodeproto.JobSpec) RunSnapshot {
+func scheduleFixture(t *testing.T, jobs ...nodewire.JobSpec) RunSnapshot {
 	t.Helper()
-	plan, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+	plan, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,12 +205,12 @@ func scheduleFixture(t *testing.T, jobs ...nodeproto.JobSpec) RunSnapshot {
 
 func TestSchedulingProjectionRetainsDeclarations(t *testing.T) {
 	snapshot := scheduleFixture(t,
-		nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"empty", "members"}}},
-		nodeproto.JobSpec{ID: "after", NeedsGenerated: []string{"empty", "members"}},
+		nodewire.JobSpec{ID: "source", Closures: nodewire.ClosureSpec{Generate: []string{"empty", "members"}}},
+		nodewire.JobSpec{ID: "after", NeedsGenerated: []string{"empty", "members"}},
 	)
 	snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionAccepted
 	snapshot.Nodes[0].Generation = 7
-	child := scheduleFixture(t, nodeproto.JobSpec{ID: "child", Needs: []string{"source"}, Groups: []string{"members"}})
+	child := scheduleFixture(t, nodewire.JobSpec{ID: "child", Needs: []string{"source"}, Groups: []string{"members"}})
 	snapshot.Nodes = append(snapshot.Nodes, child.Nodes[0])
 	snapshot.Expansions = []runstate.AcceptedExpansionRow{{Source: snapshot.Nodes[0].Ref, SourceGeneration: 7, Body: child.Run.Plan}}
 	snapshot.Nodes[0], snapshot.Nodes[2] = snapshot.Nodes[2], snapshot.Nodes[0]
@@ -249,7 +249,7 @@ func TestSchedulingProjectionRejectsInconsistentState(t *testing.T) {
 		{"undeclared_generator", func(s *RunSnapshot) { s.Nodes[0].Expansion = runstate.ExpansionExpected }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			snapshot := scheduleFixture(t, nodeproto.JobSpec{ID: "one"})
+			snapshot := scheduleFixture(t, nodewire.JobSpec{ID: "one"})
 			test.mutate(&snapshot)
 			if _, err := snapshot.Scheduling(); err == nil {
 				t.Fatal("inconsistent projection succeeded")
@@ -259,7 +259,7 @@ func TestSchedulingProjectionRejectsInconsistentState(t *testing.T) {
 }
 
 func TestSchedulingProjectionDoesNotReapElapsedClaims(t *testing.T) {
-	snapshot := scheduleFixture(t, nodeproto.JobSpec{ID: "one"})
+	snapshot := scheduleFixture(t, nodewire.JobSpec{ID: "one"})
 	expired := time.Unix(1, 0)
 	snapshot.StoreNow = time.Unix(2, 0)
 	snapshot.Nodes[0].ClaimedBy, snapshot.Nodes[0].LeaseExpiresAt = "holder", &expired
@@ -288,7 +288,7 @@ func TestSchedulingProjectionRejectsInvalidExpansions(t *testing.T) {
 		{"undeclared_group", func(s *RunSnapshot) { s.Expansions[0].Body = []byte(`{"jobs":[{"id":"child","groups":["unknown"]}]}`) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			snapshot := scheduleFixture(t, nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"group"}}})
+			snapshot := scheduleFixture(t, nodewire.JobSpec{ID: "source", Closures: nodewire.ClosureSpec{Generate: []string{"group"}}})
 			snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionAccepted
 			snapshot.Expansions = []runstate.AcceptedExpansionRow{{Source: snapshot.Nodes[0].Ref, Body: []byte(`{"jobs":[]}`)}}
 			if _, err := snapshot.Scheduling(); err != nil {
@@ -305,13 +305,13 @@ func TestSchedulingProjectionRejectsInvalidExpansions(t *testing.T) {
 func TestSchedulingProjectionRejectsInvalidGraphs(t *testing.T) {
 	for _, test := range []struct {
 		name string
-		jobs []nodeproto.JobSpec
+		jobs []nodewire.JobSpec
 	}{
-		{"undeclared_dep", []nodeproto.JobSpec{{ID: "job", Needs: []string{"absent"}}}},
-		{"undeclared_recovery_parent", []nodeproto.JobSpec{{ID: "job", OnFailureOf: "absent"}}},
-		{"undeclared_generator", []nodeproto.JobSpec{{ID: "job", NeedsGenerated: []string{"absent"}}}},
-		{"cycle", []nodeproto.JobSpec{{ID: "one", Needs: []string{"two"}}, {ID: "two", Needs: []string{"one"}}}},
-		{"recovery_cycle", []nodeproto.JobSpec{{ID: "one", OnFailureOf: "two"}, {ID: "two", Needs: []string{"one"}}}},
+		{"undeclared_dep", []nodewire.JobSpec{{ID: "job", Needs: []string{"absent"}}}},
+		{"undeclared_recovery_parent", []nodewire.JobSpec{{ID: "job", OnFailureOf: "absent"}}},
+		{"undeclared_generator", []nodewire.JobSpec{{ID: "job", NeedsGenerated: []string{"absent"}}}},
+		{"cycle", []nodewire.JobSpec{{ID: "one", Needs: []string{"two"}}, {ID: "two", Needs: []string{"one"}}}},
+		{"recovery_cycle", []nodewire.JobSpec{{ID: "one", OnFailureOf: "two"}, {ID: "two", Needs: []string{"one"}}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := scheduleFixture(t, test.jobs...).Scheduling(); err == nil {
@@ -339,9 +339,9 @@ func TestSchedulingTerminalCascadeResolvesGenerator(t *testing.T) {
 }
 
 func TestSchedulingProjectionNestedExpansion(t *testing.T) {
-	snapshot := scheduleFixture(t, nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"first"}}})
-	child := scheduleFixture(t, nodeproto.JobSpec{ID: "child", Groups: []string{"first"}, Needs: []string{"source"}, Closures: nodeproto.ClosureSpec{Generate: []string{"second"}}})
-	grandchild := scheduleFixture(t, nodeproto.JobSpec{ID: "grandchild", Groups: []string{"second"}, Needs: []string{"child"}})
+	snapshot := scheduleFixture(t, nodewire.JobSpec{ID: "source", Closures: nodewire.ClosureSpec{Generate: []string{"first"}}})
+	child := scheduleFixture(t, nodewire.JobSpec{ID: "child", Groups: []string{"first"}, Needs: []string{"source"}, Closures: nodewire.ClosureSpec{Generate: []string{"second"}}})
+	grandchild := scheduleFixture(t, nodewire.JobSpec{ID: "grandchild", Groups: []string{"second"}, Needs: []string{"child"}})
 	snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionAccepted
 	child.Nodes[0].Status, child.Nodes[0].Outcome, child.Nodes[0].Expansion = runstate.StatusDone, runstate.NodeMemoized, runstate.ExpansionAccepted
 	snapshot.Nodes = append(snapshot.Nodes, child.Nodes[0], grandchild.Nodes[0])
@@ -372,8 +372,8 @@ func TestSchedulingMissingGeneratedWorkCannotContinue(t *testing.T) {
 
 func TestSchedulingProjectionAllowsStaticGroups(t *testing.T) {
 	snapshot := scheduleFixture(t,
-		nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"fanout"}}},
-		nodeproto.JobSpec{ID: "static", Groups: []string{"fanout", "display"}, Needs: []string{"source"}},
+		nodewire.JobSpec{ID: "source", Closures: nodewire.ClosureSpec{Generate: []string{"fanout"}}},
+		nodewire.JobSpec{ID: "static", Groups: []string{"fanout", "display"}, Needs: []string{"source"}},
 	)
 	got, err := snapshot.Scheduling()
 	if err != nil {

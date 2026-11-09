@@ -6,13 +6,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type planValidator struct {
 	context      ValidationContext
 	paths        map[string]string
-	jobs         map[string]JobSpec
+	jobs         map[string]nodewire.JobSpec
 	closures     map[string]string
 	generators   map[string]string
 	capabilities map[planCapability]bool
@@ -26,13 +27,13 @@ type concurrencyDefinition struct {
 	onLimit  string
 }
 
-func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, error) {
+func validatePlan(raw json.RawMessage, context ValidationContext) (nodewire.PlanDoc, error) {
 	if context.Secrets == nil {
-		return PlanDoc{}, planInvalid("plan", "secret matcher is required")
+		return nodewire.PlanDoc{}, planInvalid("plan", "secret matcher is required")
 	}
 	plan, err := strictPlanDecode(raw, context.Secrets)
 	if err != nil {
-		return PlanDoc{}, err
+		return nodewire.PlanDoc{}, err
 	}
 	checkSecret := func(value, path string) error {
 		if context.Secrets.ContainsSecret(value) {
@@ -41,40 +42,40 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 		return nil
 	}
 	if err := VisitPlanIdentifiers(plan, checkSecret); err != nil {
-		return PlanDoc{}, err
+		return nodewire.PlanDoc{}, err
 	}
 	if err := visitConcurrencyIdentifiers(context.ExistingConcurrency, "existing_concurrency", checkSecret); err != nil {
-		return PlanDoc{}, err
+		return nodewire.PlanDoc{}, err
 	}
 	for i, job := range context.ExistingJobs {
 		if err := visitRegisteredJobIdentifiers(job, fmt.Sprintf("existing_jobs[%d]", i), checkSecret); err != nil {
-			return PlanDoc{}, err
+			return nodewire.PlanDoc{}, err
 		}
 		if err := visitConcurrencyIdentifiers(job.Concurrency, fmt.Sprintf("existing_jobs[%d].concurrency", i), checkSecret); err != nil {
-			return PlanDoc{}, err
+			return nodewire.PlanDoc{}, err
 		}
 	}
 	if plan.Jobs == nil {
-		return PlanDoc{}, planInvalid("plan.jobs", "jobs array is required")
+		return nodewire.PlanDoc{}, planInvalid("plan.jobs", "jobs array is required")
 	}
 	if context.Expansion {
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(raw, &fields)
 		for key := range fields {
 			if key != "jobs" {
-				return PlanDoc{}, planInvalid("plan."+key, "expansion may declare jobs only")
+				return nodewire.PlanDoc{}, planInvalid("plan."+key, "expansion may declare jobs only")
 			}
 		}
 	}
 	v := &planValidator{
-		context: context, paths: map[string]string{}, jobs: map[string]JobSpec{},
+		context: context, paths: map[string]string{}, jobs: map[string]nodewire.JobSpec{},
 		closures: map[string]string{}, generators: map[string]string{},
 		capabilities: map[planCapability]bool{},
 		concurrency:  map[string]concurrencyDefinition{},
 	}
 	for _, row := range capabilityTable() {
 		if _, exists := v.capabilities[row.Feature]; exists {
-			return PlanDoc{}, planInvalid("plan", "duplicate capability row")
+			return nodewire.PlanDoc{}, planInvalid("plan", "duplicate capability row")
 		}
 		switch context.Placement {
 		case PlacementLocal:
@@ -90,19 +91,19 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 		case PlacementGitHubActions:
 			v.capabilities[row.Feature] = row.GitHubActions
 		default:
-			return PlanDoc{}, planInvalid("plan", "unknown placement")
+			return nodewire.PlanDoc{}, planInvalid("plan", "unknown placement")
 		}
 	}
 	if err := v.validatePlanConcurrency(context.ExistingConcurrency, "existing_concurrency"); err != nil {
-		return PlanDoc{}, err
+		return nodewire.PlanDoc{}, err
 	}
 	for i, job := range context.ExistingJobs {
 		path := fmt.Sprintf("existing_jobs[%d]", i)
 		if err := v.registerJob(job, path); err != nil {
-			return PlanDoc{}, err
+			return nodewire.PlanDoc{}, err
 		}
 		if err := v.validateConcurrency(job.Concurrency, path+".concurrency", "job"); err != nil {
-			return PlanDoc{}, err
+			return nodewire.PlanDoc{}, err
 		}
 	}
 	for i := range plan.Jobs {
@@ -112,29 +113,29 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 	}
 	for i, job := range plan.Jobs {
 		if err := v.registerJob(job, fmt.Sprintf("jobs[%d]", i)); err != nil {
-			return PlanDoc{}, err
+			return nodewire.PlanDoc{}, err
 		}
 		v.newJobs = append(v.newJobs, job.ID)
 	}
 	if context.Expansion {
 		source, ok := v.jobs[context.SourceJob]
 		if !ok || context.SourceJob == "" {
-			return PlanDoc{}, planInvalid("source_job", "expansion source is absent")
+			return nodewire.PlanDoc{}, planInvalid("source_job", "expansion source is absent")
 		}
 		if len(source.Closures.Generate) == 0 {
-			return PlanDoc{}, planInvalid("source_job", "expansion source has no generator")
+			return nodewire.PlanDoc{}, planInvalid("source_job", "expansion source has no generator")
 		}
 	}
 	if err := v.validatePlanSettings(plan); err != nil {
-		return PlanDoc{}, err
+		return nodewire.PlanDoc{}, err
 	}
 	for i, job := range plan.Jobs {
 		if err := v.validateJob(job, fmt.Sprintf("jobs[%d]", i)); err != nil {
-			return PlanDoc{}, err
+			return nodewire.PlanDoc{}, err
 		}
 	}
 	if err := v.validateGraph(); err != nil {
-		return PlanDoc{}, err
+		return nodewire.PlanDoc{}, err
 	}
 	return plan, nil
 }
@@ -186,7 +187,7 @@ func jobIdentifier(id, path string) error {
 	return nil
 }
 
-func (v *planValidator) registerJob(job JobSpec, path string) error {
+func (v *planValidator) registerJob(job nodewire.JobSpec, path string) error {
 	if err := v.identifier(job.ID, path+".id"); err != nil {
 		return err
 	}
@@ -208,7 +209,7 @@ func (v *planValidator) registerJob(job JobSpec, path string) error {
 	return nil
 }
 
-func (v *planValidator) registerClosures(c ClosureSpec, path, jobID string) error {
+func (v *planValidator) registerClosures(c nodewire.ClosureSpec, path, jobID string) error {
 	for _, entry := range []struct {
 		kind string
 		ids  []string
@@ -244,7 +245,7 @@ func (v *planValidator) registerClosures(c ClosureSpec, path, jobID string) erro
 	return nil
 }
 
-func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
+func (v *planValidator) validatePlanSettings(plan nodewire.PlanDoc) error {
 	if err := v.feature(capabilityJobs, "plan.jobs"); err != nil {
 		return err
 	}
@@ -284,7 +285,7 @@ func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
 	return nil
 }
 
-func (v *planValidator) validatePlanConcurrency(specs []ConcurrencySpec, path string) error {
+func (v *planValidator) validatePlanConcurrency(specs []nodewire.ConcurrencySpec, path string) error {
 	for i, spec := range specs {
 		if spec.Scope != nil && *spec.Scope == "box" {
 			return planInvalid(fmt.Sprintf("%s[%d].scope", path, i), fmt.Sprintf("run-level concurrency group %q cannot use box scope; use job-level box scope", spec.Group))
@@ -293,7 +294,7 @@ func (v *planValidator) validatePlanConcurrency(specs []ConcurrencySpec, path st
 	return v.validateConcurrency(specs, path, "plan")
 }
 
-func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path, level string) error {
+func (v *planValidator) validateConcurrency(specs []nodewire.ConcurrencySpec, path, level string) error {
 	for i, spec := range specs {
 		at := fmt.Sprintf("%s[%d]", path, i)
 		if err := v.identifier(spec.Group, at+".group"); err != nil {

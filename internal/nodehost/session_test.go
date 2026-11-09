@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: set, the test binary acts as an SDK process (or, as "sleep", as a
@@ -38,7 +38,7 @@ func runAsFakeProcess() {
 // answers only once N requests with that id are in flight together.
 func fakeSDK() {
 	requests, frames := os.NewFile(3, "requests"), os.NewFile(4, "frames")
-	w := nodeproto.NewWriter(frames)
+	w := nodewire.NewWriter(frames)
 	var mu sync.Mutex
 	cond := sync.NewCond(&mu)
 	arrived := map[string]int{}
@@ -61,20 +61,20 @@ func fakeSDK() {
 	}
 	ok := func(id string, result any) {
 		raw, _ := json.Marshal(result)
-		_ = w.Send(nodeproto.Reply{ID: id, OK: true, Result: raw})
+		_ = w.Send(nodewire.Reply{ID: id, OK: true, Result: raw})
 	}
 	log = func(step, msg string) {
-		_ = w.Send(nodeproto.FrameLog{TS: "2026-01-02T03:04:05Z", Step: step, Message: msg})
+		_ = w.Send(nodewire.FrameLog{TS: "2026-01-02T03:04:05Z", Step: step, Message: msg})
 	}
-	handle := func(req nodeproto.Request) {
+	handle := func(req nodewire.Request) {
 		switch {
-		case req.Op == nodeproto.OpHello:
-			ok(req.ID, nodeproto.HelloResult{Protocol: 2, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}})
-		case req.Op == nodeproto.OpDescribe:
+		case req.Op == nodewire.OpHello:
+			ok(req.ID, nodewire.HelloResult{Protocol: 2, SDK: nodewire.SDKIdentity{Language: "go", Version: "test"}})
+		case req.Op == nodewire.OpDescribe:
 			ok(req.ID, map[string]any{"pipelines": []any{}})
-		case req.Op == nodeproto.OpEval && barrier(req.Closure, ""):
+		case req.Op == nodewire.OpEval && barrier(req.Closure, ""):
 			ok(req.ID, map[string]any{"value": req.Closure})
-		case req.Op == nodeproto.OpRunStep && barrier(req.Step, req.Step):
+		case req.Op == nodewire.OpRunStep && barrier(req.Step, req.Step):
 			log(req.Step, "in "+req.Step)
 			ok(req.ID, map[string]any{"outcome": "success"})
 		case req.Job == "echo":
@@ -86,7 +86,7 @@ func fakeSDK() {
 			ok(req.ID, map[string]any{"outcome": "success"})
 		case req.Job == "exit":
 			os.Exit(3)
-		case req.Op == nodeproto.OpPlan:
+		case req.Op == nodewire.OpPlan:
 			node := map[string]any{"id": "reply-then-garbage", "steps": []any{map[string]any{"id": "body"}}}
 			ok(req.ID, map[string]any{"jobs": []any{node}})
 		case req.Job == "garbage":
@@ -105,7 +105,7 @@ func fakeSDK() {
 			log("", strconv.Itoa(child.Process.Pid))
 		}
 	}
-	r := nodeproto.NewReader(requests)
+	r := nodewire.NewReader(requests)
 	// safety: written once the host closes the request pipe, so the break lands while Close drains.
 	garbageAtEOF := false
 	replyAtEOF := ""
@@ -144,8 +144,8 @@ func fakeSDK() {
 type recorder struct {
 	mu      sync.Mutex
 	text    []string
-	records []nodeproto.FrameLog
-	notify  chan nodeproto.FrameLog
+	records []nodewire.FrameLog
+	notify  chan nodewire.FrameLog
 }
 
 func (r *recorder) Text(level, line string) {
@@ -154,7 +154,7 @@ func (r *recorder) Text(level, line string) {
 	r.text = append(r.text, level+" "+line)
 }
 
-func (r *recorder) Record(rec nodeproto.FrameLog) {
+func (r *recorder) Record(rec nodewire.FrameLog) {
 	r.mu.Lock()
 	r.records = append(r.records, rec)
 	r.mu.Unlock()
@@ -163,10 +163,10 @@ func (r *recorder) Record(rec nodeproto.FrameLog) {
 	}
 }
 
-func (r *recorder) snapshot() ([]string, []nodeproto.FrameLog) {
+func (r *recorder) snapshot() ([]string, []nodewire.FrameLog) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]string(nil), r.text...), append([]nodeproto.FrameLog(nil), r.records...)
+	return append([]string(nil), r.text...), append([]nodewire.FrameLog(nil), r.records...)
 }
 
 // safety: only pipes are compared, since other tests' connections may close
@@ -200,11 +200,11 @@ func startFake(t *testing.T, ctx context.Context, sink *recorder) *protocolSessi
 	before := openPipes(t)
 	s, err := startProtocolSession(ctx, ProtocolSessionConfig{
 		Command: []string{os.Args[0]}, Environment: testProcessEnv(t, append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0")...),
-		Log: func(_ context.Context, record nodeproto.FrameLog) error { sink.Record(record); return nil }, grace: 500 * time.Millisecond,
+		Log: func(_ context.Context, record nodewire.FrameLog) error { sink.Record(record); return nil }, grace: 500 * time.Millisecond,
 	})
 	if err == nil {
-		var hello nodeproto.HelloResult
-		err = ask(ctx, s, nodeproto.Request{Op: nodeproto.OpHello, Protocol: 2, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, &hello)
+		var hello nodewire.HelloResult
+		err = ask(ctx, s, nodewire.Request{Op: nodewire.OpHello, Protocol: 2, Engine: &nodewire.EngineIdentity{Version: "test"}, Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, &hello)
 	}
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -227,8 +227,8 @@ func callCtx(t *testing.T) context.Context {
 	return ctx
 }
 
-func runStep(node string) nodeproto.Request {
-	return nodeproto.Request{ID: "step-caller", Op: nodeproto.OpRunStep, Job: node, Step: "body", Attempt: 1, Settled: []string{}}
+func runStep(node string) nodewire.Request {
+	return nodewire.Request{ID: "step-caller", Op: nodewire.OpRunStep, Job: node, Step: "body", Attempt: 1, Settled: []string{}}
 }
 
 func hostCode(err error) apierr.Code {
@@ -244,7 +244,7 @@ func TestSessionRequestReply(t *testing.T) {
 	s := startFake(t, context.Background(), sink)
 	ctx := callCtx(t)
 
-	reply, err := s.Request(ctx, nodeproto.Request{ID: "describe-caller", Op: nodeproto.OpDescribe})
+	reply, err := s.Request(ctx, nodewire.Request{ID: "describe-caller", Op: nodewire.OpDescribe})
 	if err != nil || !reply.OK || reply.ID != "describe-caller" {
 		t.Fatalf("describe = %+v, %v", reply, err)
 	}
@@ -252,7 +252,7 @@ func TestSessionRequestReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run_step: %v", err)
 	}
-	var result nodeproto.RunResult
+	var result nodewire.RunResult
 	if err := reply.Decode(&result); err != nil || string(result.Output) != `{"node":"echo"}` {
 		t.Fatalf("run_step result = %+v, %v", result, err)
 	}
@@ -271,13 +271,13 @@ func TestSessionRequestReply(t *testing.T) {
 }
 
 func TestSessionConcurrentEvalsAndSteps(t *testing.T) {
-	sink := &recorder{notify: make(chan nodeproto.FrameLog, 64)}
+	sink := &recorder{notify: make(chan nodewire.FrameLog, 64)}
 	s := startFake(t, context.Background(), sink)
 	ctx := callCtx(t)
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 6)
-	send := func(req nodeproto.Request) {
+	send := func(req nodewire.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -289,20 +289,20 @@ func TestSessionConcurrentEvalsAndSteps(t *testing.T) {
 		}()
 	}
 	for range 3 {
-		send(nodeproto.Request{Op: nodeproto.OpEval, Closure: "barrier/3"})
+		send(nodewire.Request{Op: nodewire.OpEval, Closure: "barrier/3"})
 	}
 	for i := range 2 {
-		send(nodeproto.Request{Op: nodeproto.OpRunStep, Job: fmt.Sprint("n", i), Step: "barrier/3", Attempt: 1, Settled: []string{}})
+		send(nodewire.Request{Op: nodewire.OpRunStep, Job: fmt.Sprint("n", i), Step: "barrier/3", Attempt: 1, Settled: []string{}})
 	}
 	// safety: the steps' barrier needs a third step, so they stay in flight
 	// while the forbidden overlaps are tried.
 	waitArrivals(t, sink, "barrier/3", 2)
-	for _, req := range []nodeproto.Request{{Op: nodeproto.OpDescribe}} {
+	for _, req := range []nodewire.Request{{Op: nodewire.OpDescribe}} {
 		if _, err := s.Request(ctx, req); hostCode(err) != apierr.ProtocolError {
 			t.Errorf("%s during run_step = %v, want protocol_error", req.Op, err)
 		}
 	}
-	send(nodeproto.Request{Op: nodeproto.OpRunStep, Job: "n3", Step: "barrier/3", Attempt: 1, Settled: []string{}})
+	send(nodewire.Request{Op: nodewire.OpRunStep, Job: "n3", Step: "barrier/3", Attempt: 1, Settled: []string{}})
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -340,7 +340,7 @@ func TestSessionStdoutCannotForgeReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run_step: %v", err)
 	}
-	var result nodeproto.RunResult
+	var result nodewire.RunResult
 	if err := reply.Decode(&result); err != nil || result.Outcome != "success" {
 		t.Fatalf("result = %+v, %v; the stdout reply must not count", result, err)
 	}
@@ -381,7 +381,7 @@ func TestSessionEndsWithHostCode(t *testing.T) {
 			if hostCode(err) != tc.code || !strings.Contains(err.Error(), tc.msg) {
 				t.Fatalf("call = %v, want %s mentioning %q", err, tc.code, tc.msg)
 			}
-			if _, err := s.Request(callCtx(t), nodeproto.Request{Op: nodeproto.OpDescribe}); hostCode(err) != tc.code {
+			if _, err := s.Request(callCtx(t), nodewire.Request{Op: nodewire.OpDescribe}); hostCode(err) != tc.code {
 				t.Errorf("later call = %v, want the same %s", err, tc.code)
 			}
 			if err := s.Close(); hostCode(err) != tc.code {
@@ -392,7 +392,7 @@ func TestSessionEndsWithHostCode(t *testing.T) {
 }
 
 func TestSessionCancelKillsGrandchildren(t *testing.T) {
-	sink := &recorder{notify: make(chan nodeproto.FrameLog, 1)}
+	sink := &recorder{notify: make(chan nodewire.FrameLog, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s := startFake(t, ctx, sink)
@@ -402,7 +402,7 @@ func TestSessionCancelKillsGrandchildren(t *testing.T) {
 		_, err := s.Request(callCtx(t), runStep("grandchild"))
 		called <- err
 	}()
-	var rec nodeproto.FrameLog
+	var rec nodewire.FrameLog
 	select {
 	case rec = <-sink.notify:
 	case <-callCtx(t).Done():
@@ -445,7 +445,7 @@ func TestSessionStuckWriteHonorsDeadlines(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 			defer cancel()
-			if _, err := s.Request(ctx, nodeproto.Request{Op: nodeproto.OpEval, Closure: "c", Input: big}); err == nil {
+			if _, err := s.Request(ctx, nodewire.Request{Op: nodewire.OpEval, Closure: "c", Input: big}); err == nil {
 				t.Error("a call whose write never finished succeeded")
 			}
 		}()
@@ -457,7 +457,7 @@ func TestSessionStuckWriteHonorsDeadlines(t *testing.T) {
 }
 
 func TestSessionReplyAfterCancelIsNotSuccess(t *testing.T) {
-	sink := &recorder{notify: make(chan nodeproto.FrameLog, 2)}
+	sink := &recorder{notify: make(chan nodewire.FrameLog, 2)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s := startFake(t, ctx, sink)
@@ -508,7 +508,7 @@ func TestSessionReapsLeaderWhenCleanupTimesOut(t *testing.T) {
 	}
 }
 
-func ask(ctx context.Context, process ExecutorProcess, req nodeproto.Request, result any) error {
+func ask(ctx context.Context, process ExecutorProcess, req nodewire.Request, result any) error {
 	req.ID = "host"
 	reply, err := process.Request(ctx, req)
 	if err != nil {

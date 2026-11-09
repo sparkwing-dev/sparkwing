@@ -14,9 +14,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
@@ -52,15 +52,15 @@ func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
 				return nil, nil
 			}
 			var mu sync.Mutex
-			var annotations []nodeproto.AnnotationRequest
-			deps.Annotate = func(_ context.Context, _ NodeInput, body nodeproto.AnnotationRequest) error {
+			var annotations []nodewire.AnnotationRequest
+			deps.Annotate = func(_ context.Context, _ NodeInput, body nodewire.AnnotationRequest) error {
 				mu.Lock()
 				defer mu.Unlock()
 				annotations = append(annotations, body)
 				return nil
 			}
 			var logs strings.Builder
-			deps.Log = func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+			deps.Log = func(_ context.Context, _ NodeInput, frame nodewire.FrameLog) error {
 				mu.Lock()
 				defer mu.Unlock()
 				raw, _ := json.Marshal(frame)
@@ -112,7 +112,7 @@ func TestDynamicProcessMasksWithholdItsJobOutput(t *testing.T) {
 		t.Fatal("a dynamically masked job output was published")
 		return nil, nil
 	}
-	deps.Annotate = func(context.Context, NodeInput, nodeproto.AnnotationRequest) error { return nil }
+	deps.Annotate = func(context.Context, NodeInput, nodewire.AnnotationRequest) error { return nil }
 	host, err := NewNodeExecutor(deps)
 	if err != nil {
 		t.Fatal(err)

@@ -16,16 +16,16 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 var updateConsoleFixtures = flag.Bool("update-console-fixtures", false, "rewrite the console's wire fixtures")
@@ -129,12 +129,12 @@ func (c *consoleRun) seedRun(t *testing.T, id string, number int64, retryOf stri
 func (c *consoleRun) seedPlan(t *testing.T) {
 	t.Helper()
 	// hack: the plan and job declarations are seeded by SQL because plan acceptance needs a planning runner.
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
 		{ID: "lint"},
 		{ID: "build", Needs: []string{"lint"}},
-		{ID: "test", Needs: []string{"lint"}, Groups: []string{"checks"}, Retry: &nodeproto.RetrySpec{Attempts: 1}},
+		{ID: "test", Needs: []string{"lint"}, Groups: []string{"checks"}, Retry: &nodewire.RetrySpec{Attempts: 1}},
 		{ID: "notify", OnFailureOf: "build"},
-		{ID: "deploy", Needs: []string{"test"}, Groups: []string{"release"}, Approval: &nodeproto.ApprovalSpec{}},
+		{ID: "deploy", Needs: []string{"test"}, Groups: []string{"release"}, Approval: &nodewire.ApprovalSpec{}},
 	}}
 	retry := runspec.JobExecutionSettings{}
 	retry.Retry.Set, retry.Retry.Value = true, 1
@@ -210,7 +210,7 @@ func (c *consoleRun) step(t *testing.T, a capability.Authorized, attempt control
 	}
 }
 
-func (c *consoleRun) annotate(t *testing.T, a capability.Authorized, step string, annotation nodeproto.Annotation) {
+func (c *consoleRun) annotate(t *testing.T, a capability.Authorized, step string, annotation nodewire.Annotation) {
 	t.Helper()
 	body, err := json.Marshal(controllerwire.AnnotationWrite{Annotation: annotation, StepID: step})
 	if err != nil {
@@ -234,7 +234,7 @@ func (c *consoleRun) summarize(t *testing.T, a capability.Authorized, step, mark
 
 func (c *consoleRun) retriedTest(t *testing.T, a capability.Authorized, first controllerwire.Applied) controllerwire.Applied {
 	c.step(t, a, first, "unit", "running", "")
-	c.annotate(t, a, "unit", nodeproto.Annotation{Level: "error", Message: "TestCheckout timed out", File: "checkout_test.go", Line: 41})
+	c.annotate(t, a, "unit", nodewire.Annotation{Level: "error", Message: "TestCheckout timed out", File: "checkout_test.go", Line: 41})
 	c.summarize(t, a, "unit", "## Attempt 1\n41 passed, 1 failed")
 	c.step(t, a, first, "unit", "failed", "exit status 1")
 	c.clock.tick()
@@ -245,10 +245,10 @@ func (c *consoleRun) retriedTest(t *testing.T, a capability.Authorized, first co
 	c.step(t, a, second, "setup", "running", "")
 	c.step(t, a, second, "setup", "passed", "")
 	c.step(t, a, second, "unit", "running", "")
-	c.annotate(t, a, "unit", nodeproto.Annotation{Level: "info", Message: "42 tests", File: "checkout_test.go", Line: 7})
+	c.annotate(t, a, "unit", nodewire.Annotation{Level: "info", Message: "42 tests", File: "checkout_test.go", Line: 7})
 	c.summarize(t, a, "unit", "## Coverage\n91%")
 	c.step(t, a, second, "unit", "passed", "")
-	c.annotate(t, a, "", nodeproto.Annotation{Level: "warn", Message: "coverage fell 2%", File: "coverage.out", Line: 1, EndLine: 3, Column: 2})
+	c.annotate(t, a, "", nodewire.Annotation{Level: "warn", Message: "coverage fell 2%", File: "coverage.out", Line: 1, EndLine: 3, Column: 2})
 	c.summarize(t, a, "", "## Test report\n42 passed on the second attempt")
 	return second
 }

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/testhome"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testhome"
 )
 
 func TestDefaultPaths_FollowsHomeWithoutSparkwingHome(t *testing.T) {

@@ -12,12 +12,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
+func aliasProject(t *testing.T) (string, nodewire.PipelineDescription) {
 	t.Helper()
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	projectAt(t, "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n  - name: deploy-stage\n    entrypoint: Deploy\n")
@@ -26,14 +26,14 @@ func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 		t.Fatal(err)
 	}
 	writeRepoFile(t, filepath.Join(dir, "go.mod"), "module aliasfixture\n\ngo 1.26\n")
-	schema := nodeproto.PipelineDescription{
+	schema := nodewire.PipelineDescription{
 		Name: "Deploy", Short: "Deploy a service", Help: "Deploys the selected service.",
-		Args: []nodeproto.ArgumentDescription{
+		Args: []nodewire.ArgumentDescription{
 			{Name: "region", Short: "r", Type: "string", Required: true},
 			{Name: "image", Type: "string", Required: true, JobID: "rollout"},
 			{Name: "password", Type: "string", Secret: true},
 		},
-		Secrets: []nodeproto.SecretDeclaration{{Name: "DEPLOY_TOKEN"}},
+		Secrets: []nodewire.SecretDeclaration{{Name: "DEPLOY_TOKEN"}},
 		Risks:   []string{"prod"},
 	}
 	key, err := bincache.PipelineCacheKey(dir)
@@ -50,7 +50,7 @@ func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 
 func TestPipelineRiskGateUsesRegisteredDeclaration(t *testing.T) {
 	_, schema := aliasProject(t)
-	bound, err := boundPipelineSchema([]nodeproto.PipelineDescription{schema}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"})
+	bound, err := boundPipelineSchema([]nodewire.PipelineDescription{schema}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,9 +71,9 @@ func FuzzPipelineAliasMetadataIsolation(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		schemas := []nodeproto.PipelineDescription{
-			{Name: entry, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}, Risks: []string{"prod"}},
-			{Name: alias, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string"}}},
+		schemas := []nodewire.PipelineDescription{
+			{Name: entry, Args: []nodewire.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}, Risks: []string{"prod"}},
+			{Name: alias, Args: []nodewire.ArgumentDescription{{Name: "password", Type: "string"}}},
 		}
 		if reverse {
 			schemas[0], schemas[1] = schemas[1], schemas[0]
@@ -92,7 +92,7 @@ func FuzzPipelineAliasMetadataIsolation(f *testing.F) {
 
 func TestPipelineAliasResolvesFlagsAndHelp(t *testing.T) {
 	_, registered := aliasProject(t)
-	schema, err := boundPipelineSchema([]nodeproto.PipelineDescription{registered}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"})
+	schema, err := boundPipelineSchema([]nodewire.PipelineDescription{registered}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 	if err := storeDescribe(dir, key, presentationFixture(registered)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := boundPipelineSchema([]nodeproto.PipelineDescription{registered}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"}); err == nil || !strings.Contains(err.Error(), "deploy-prod") {
+	if _, err := boundPipelineSchema([]nodewire.PipelineDescription{registered}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"}); err == nil || !strings.Contains(err.Error(), "deploy-prod") {
 		t.Fatalf("missing registration used the Go type name: %v", err)
 	}
 	if _, err := pipelineFlagsFromCache(t.Context(), dir, "deploy-prod"); err == nil {

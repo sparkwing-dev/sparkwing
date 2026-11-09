@@ -9,21 +9,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestPlanningLogsFilterDebugBeforeBufferingAndAfterRelease(t *testing.T) {
 	for _, debug := range []bool{false, true} {
 		t.Run(fmt.Sprint(debug), func(t *testing.T) {
 			var levels []string
-			logs := planningLogs{debug: debug, masker: secrets.NewMasker(), sink: func(_ context.Context, record nodeproto.FrameLog) error {
+			logs := planningLogs{debug: debug, masker: secrets.NewMasker(), sink: func(_ context.Context, record nodewire.FrameLog) error {
 				levels = append(levels, record.Level)
 				return nil
 			}}
 			for _, level := range []string{"debug", "info"} {
-				if err := logs.write(t.Context(), nodeproto.FrameLog{Level: level, Message: "before"}); err != nil {
+				if err := logs.write(t.Context(), nodewire.FrameLog{Level: level, Message: "before"}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -38,7 +38,7 @@ func TestPlanningLogsFilterDebugBeforeBufferingAndAfterRelease(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, level := range []string{"debug", "info"} {
-				if err := logs.write(t.Context(), nodeproto.FrameLog{Level: level, Message: "after"}); err != nil {
+				if err := logs.write(t.Context(), nodewire.FrameLog{Level: level, Message: "after"}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -52,17 +52,17 @@ func TestPlanningLogsFilterDebugBeforeBufferingAndAfterRelease(t *testing.T) {
 
 func TestDisabledDebugDoesNotConsumePlanningBuffer(t *testing.T) {
 	var levels []string
-	logs := planningLogs{masker: secrets.NewMasker(), sink: func(_ context.Context, record nodeproto.FrameLog) error {
+	logs := planningLogs{masker: secrets.NewMasker(), sink: func(_ context.Context, record nodewire.FrameLog) error {
 		levels = append(levels, record.Level)
 		return nil
 	}}
-	if err := logs.write(t.Context(), nodeproto.FrameLog{Level: "debug", Message: strings.Repeat("x", planningLogBufferBytes)}); err != nil {
+	if err := logs.write(t.Context(), nodewire.FrameLog{Level: "debug", Message: strings.Repeat("x", planningLogBufferBytes)}); err != nil {
 		t.Fatal(err)
 	}
 	if logs.bytes != 0 || logs.dropped != 0 {
 		t.Fatal("disabled debug consumed buffer capacity")
 	}
-	if err := logs.write(t.Context(), nodeproto.FrameLog{Level: "info", Message: "visible"}); err != nil {
+	if err := logs.write(t.Context(), nodewire.FrameLog{Level: "info", Message: "visible"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := logs.release(t.Context()); err != nil {
@@ -93,7 +93,7 @@ func TestNativeLogIngressUsesAcceptedDebugPolicy(t *testing.T) {
 			}
 			var levels []string
 			processes.Session.Debug = !debug
-			processes.Log = func(_ context.Context, _, _ string, record nodeproto.FrameLog) error {
+			processes.Log = func(_ context.Context, _, _ string, record nodewire.FrameLog) error {
 				levels = append(levels, record.Level)
 				return nil
 			}
@@ -102,7 +102,7 @@ func TestNativeLogIngressUsesAcceptedDebugPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, level := range []string{"debug", "info"} {
-				if err := config.Log(t.Context(), nodeproto.FrameLog{Level: level}); err != nil {
+				if err := config.Log(t.Context(), nodewire.FrameLog{Level: level}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -123,13 +123,13 @@ func TestPlanningLogsFinishHonorsCancellationWithBlockedSink(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			entered, unblock, written := make(chan struct{}), make(chan struct{}), make(chan struct{})
-			logs := planningLogs{known: known, masker: secrets.NewMasker(), sink: func(context.Context, nodeproto.FrameLog) error {
+			logs := planningLogs{known: known, masker: secrets.NewMasker(), sink: func(context.Context, nodewire.FrameLog) error {
 				close(entered)
 				<-unblock
 				return nil
 			}}
 			if known {
-				go func() { defer close(written); _ = logs.write(t.Context(), nodeproto.FrameLog{Message: "hello"}) }()
+				go func() { defer close(written); _ = logs.write(t.Context(), nodewire.FrameLog{Message: "hello"}) }()
 				<-entered
 			} else {
 				if err := logs.text(t.Context(), "info", "unclassified", false); err != nil {
@@ -155,7 +155,7 @@ func TestPlanningLogsFinishHonorsCancellationWithBlockedSink(t *testing.T) {
 
 func TestPlanningLogsNoticeCountsRecords(t *testing.T) {
 	var notice string
-	logs := planningLogs{masker: secrets.NewMasker(), sink: func(_ context.Context, frame nodeproto.FrameLog) error { notice = frame.Message; return nil }}
+	logs := planningLogs{masker: secrets.NewMasker(), sink: func(_ context.Context, frame nodewire.FrameLog) error { notice = frame.Message; return nil }}
 	if err := logs.text(t.Context(), "info", strings.Repeat("line\n", 10), false); err != nil {
 		t.Fatal(err)
 	}

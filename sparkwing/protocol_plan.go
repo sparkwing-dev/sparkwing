@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func milliseconds(d time.Duration) *int64 {

@@ -446,7 +446,7 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 		"doc.go":                 "package sparkwing\n",
 		".sparkwing/go.mod":      fixturePipelinesGoMod,
 		".sparkwing/go.sum":      "",
-		".sparkwing/pipeline.go": "package pipelines\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n",
+		".sparkwing/pipeline.go": "package pipelines\n\nimport _ \"github.com/sparkwing-dev/sparkwing/sparkwing\"\n",
 		scaffoldFallbackRel:      "package scaffold\n\nconst FallbackSDKVersion = \"v0.18.0\"\n",
 		filepath.FromSlash(scaffoldAPISnapshotRel): "# pkg/scaffold\n\nconst FallbackSDKVersion = \"v0.18.0\"\n",
 		"bin/regen-api-snapshot.sh":                fixtureRegenAPISnapshot,
@@ -552,18 +552,18 @@ const fixturePipelinesGoMod = `module sparkwing-pipelines
 
 go 1.26.0
 
-require github.com/sparkwing-dev/sparkwing v0.1.0
+require github.com/sparkwing-dev/sparkwing/sparkwing v0.1.0
 
-replace github.com/sparkwing-dev/sparkwing => ..
+replace github.com/sparkwing-dev/sparkwing/sparkwing => ..
 `
 
 const fixtureKubernetesE2EPipelinesGoMod = `module sparkwing-k8s-e2e-pipelines
 
 go 1.26.0
 
-require github.com/sparkwing-dev/sparkwing v0.1.0
+require github.com/sparkwing-dev/sparkwing/sparkwing v0.1.0
 
-replace github.com/sparkwing-dev/sparkwing => ../../../..
+replace github.com/sparkwing-dev/sparkwing/sparkwing => ../../../..
 `
 
 const fixtureSyncDocs = `#!/bin/sh
@@ -626,14 +626,14 @@ func seedReleaseRepo(t *testing.T) string {
 	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n")
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), fixturePipelinesGoMod)
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.sum"), "")
-	writeFile(t, filepath.Join(repo, ".sparkwing", "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
+	writeFile(t, filepath.Join(repo, ".sparkwing", "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing/sparkwing\"\n\nfunc main() {}\n")
 	fixtureModuleDir := filepath.Join(repo, filepath.FromSlash(kubernetesE2EPipelineModuleRel))
 	if err := os.MkdirAll(fixtureModuleDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(fixtureModuleDir, "go.mod"), fixtureKubernetesE2EPipelinesGoMod)
 	writeFile(t, filepath.Join(fixtureModuleDir, "go.sum"), "")
-	writeFile(t, filepath.Join(fixtureModuleDir, "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
+	writeFile(t, filepath.Join(fixtureModuleDir, "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing/sparkwing\"\n\nfunc main() {}\n")
 	if err := os.MkdirAll(filepath.Join(repo, "pkg", "scaffold"), 0o755); err != nil {
 		t.Fatal(err)
 	}

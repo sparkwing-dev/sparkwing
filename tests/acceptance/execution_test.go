@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 type execution struct {
@@ -190,7 +191,7 @@ func TestExecutionRejectsSkippedFailedAndCleanupFailedCallbacks(t *testing.T) {
 				selection += "/^callback$/^absent$"
 			}
 			command := exec.Command(os.Args[0], "-test.v", "-test.run="+selection)
-			command.Env = append(testgit.Env(os.Environ()), "SPARKWING_EXECUTION_TEST="+mode, "SPARKWING_TESTLEAK_HOST=", "TMPDIR="+root, "TMP="+root, "TEMP="+root)
+			command.Env = append(gitcontrol.Env(os.Environ()), "SPARKWING_EXECUTION_TEST="+mode, "SPARKWING_TESTLEAK_HOST=", "TMPDIR="+root, "TMP="+root, "TEMP="+root)
 			output, err := command.CombinedOutput()
 			entries, readErr := os.ReadDir(root)
 			if readErr != nil || len(entries) != 0 {

@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestClosuresRunOnceAroundRetries(t *testing.T) {
@@ -18,7 +18,7 @@ func TestClosuresRunOnceAroundRetries(t *testing.T) {
 			input.Attempt, state.row.Attempt = 0, 0
 			executorRetryBudget(t, &input, state, 2)
 			job := input.Accepted.Plan.Jobs[0]
-			job.Closures = nodeproto.ClosureSpec{BeforeRun: []string{"before"}, Verify: "verify", AfterRun: []string{"after"}}
+			job.Closures = nodewire.ClosureSpec{BeforeRun: []string{"before"}, Verify: "verify", AfterRun: []string{"after"}}
 			executorChangeJob(t, &input, state, job)
 			var trace []string
 			start := deps.Start
@@ -27,22 +27,22 @@ func TestClosuresRunOnceAroundRetries(t *testing.T) {
 				p := process.(*executorProcess)
 				p.plan = input.Accepted.Plan
 				ordinal := len(*processes)
-				p.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpRunStep {
+				p.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpRunStep {
 						trace = append(trace, "body")
 						if mode == "retry-failure" || mode == "retry-success" && ordinal == 1 {
-							return nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "body refused"}}, nil
+							return nodewire.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "body refused"}}, nil
 						}
 					}
-					if request.Op != nodeproto.OpEval {
+					if request.Op != nodewire.OpEval {
 						return nil, nil
 					}
 					trace = append(trace, request.Closure)
 					if mode == "before-failure" && request.Closure == "before" || mode == "verify-failure" && request.Closure == "verify" {
-						return nodeproto.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "hook refused"}}, nil
+						return nodewire.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "hook refused"}}, nil
 					}
 					if request.Closure == "after" {
-						var result nodeproto.RunResult
+						var result nodewire.RunResult
 						if err := json.Unmarshal(request.Input, &result); err != nil {
 							t.Fatal(err)
 						}
@@ -50,7 +50,7 @@ func TestClosuresRunOnceAroundRetries(t *testing.T) {
 							t.Errorf("after_run input=%s", request.Input)
 						}
 					}
-					return nodeproto.EvalResult{Value: json.RawMessage("null")}, nil
+					return nodewire.EvalResult{Value: json.RawMessage("null")}, nil
 				}
 				return process, err
 			}

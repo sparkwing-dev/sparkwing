@@ -6,11 +6,11 @@ import (
 	"errors"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 // JobUpload carries server-derived job authority and its destination record key.
@@ -172,7 +172,7 @@ func readOutput(ctx context.Context, reader blob.VerifiedReader, readErr error) 
 	if reader == nil {
 		return nil, errors.New("output backend returned no reader")
 	}
-	value, err = io.ReadAll(io.LimitReader(reader, limits.NodeOutputBytes+1))
+	value, err = io.ReadAll(io.LimitReader(reader, protolimits.NodeOutputBytes+1))
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func readOutput(ctx context.Context, reader blob.VerifiedReader, readErr error) 
 }
 
 func checkOutput(value json.RawMessage) error {
-	if int64(len(value)) > limits.NodeOutputBytes {
+	if int64(len(value)) > protolimits.NodeOutputBytes {
 		return executorError(apierr.PayloadTooLarge, "job output exceeds its limit")
 	}
 	if !json.Valid(value) {

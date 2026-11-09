@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -44,9 +44,9 @@ func testGoSDKPlanErrorMasks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sendProtocolProbe(t, process, nodeproto.Request{
-				ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.PlanErrorName, Args: args,
-				Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.PlanErrorName},
+			sendProtocolProbe(t, process, nodewire.Request{
+				ID: "plan", Op: nodewire.OpPlan, Pipeline: protocolgo.PlanErrorName, Args: args,
+				Run: &nodewire.RunContext{RunID: "r", Pipeline: protocolgo.PlanErrorName},
 			})
 			reply := protocolProbeReply(t, process, "plan")
 			requireProtocolCode(t, reply, apierr.PlanFailed)

@@ -11,8 +11,8 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 type records struct {
@@ -211,7 +211,7 @@ func TestRemoteMemoVerifiesBeforeGrantingArtifacts(t *testing.T) {
 			defer cancel()
 			output := "result"
 			if fault == "output_limit" {
-				output = strings.Repeat("x", int(limits.NodeOutputBytes)+1)
+				output = strings.Repeat("x", int(protolimits.NodeOutputBytes)+1)
 			}
 			d := digest(output)
 			body := &remoteBody{Reader: strings.NewReader(output)}

@@ -7,7 +7,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 // ReadMemo verifies the output, manifest and every member through an authorized
@@ -22,7 +22,7 @@ func ReadMemo(ctx context.Context, get func(context.Context, Digest) (VerifiedRe
 		return nil, nil, ErrIntegrity
 	}
 	var output bytes.Buffer
-	if _, err := copyMemoBlob(ctx, get, hit.Output.Value, &output, limits.NodeOutputBytes); err != nil {
+	if _, err := copyMemoBlob(ctx, get, hit.Output.Value, &output, protolimits.NodeOutputBytes); err != nil {
 		return nil, nil, err
 	}
 	if !hit.Manifest.Set {

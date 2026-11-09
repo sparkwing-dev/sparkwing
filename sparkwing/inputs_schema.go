@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/argvalue"
 )
 
 // Pipeline is the canonical pipeline shape: every pipeline declares a

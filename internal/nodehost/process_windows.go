@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/protofd"
 )
 
 func startSDKProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, error) {

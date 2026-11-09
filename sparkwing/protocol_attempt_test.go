@@ -6,8 +6,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type attemptJob struct {

@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type executorStepStore struct {
@@ -41,7 +41,7 @@ func TestNodeExecutorUsesSealedStepWindow(t *testing.T) {
 		t.Run(tc.start+"/"+tc.stop, func(t *testing.T) {
 			input, state, deps, processes := executorFixture(t)
 			job := input.Accepted.Plan.Jobs[0]
-			job.Steps = []nodeproto.StepSpec{{ID: "first"}, {ID: "second", Needs: []string{"first"}}, {ID: "third", Needs: []string{"second"}}}
+			job.Steps = []nodewire.StepSpec{{ID: "first"}, {ID: "second", Needs: []string{"first"}}, {ID: "third", Needs: []string{"second"}}}
 			executorChangeJob(t, &input, state, job)
 			var spec runspec.Spec
 			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
@@ -72,7 +72,7 @@ func TestNodeExecutorUsesSealedStepWindow(t *testing.T) {
 			}
 			var ran []string
 			for _, request := range (*processes)[0].requests {
-				if request.Op == nodeproto.OpRunStep {
+				if request.Op == nodewire.OpRunStep {
 					ran = append(ran, request.Step)
 				}
 			}
@@ -117,8 +117,8 @@ func FuzzExecutorStepRecordFenceAndMask(f *testing.F) {
 		masker := secrets.NewMasker()
 		masker.Register(secret)
 		deps.Masker = masker
-		var diagnostics []nodeproto.FrameLog
-		deps.Log = func(_ context.Context, _ NodeInput, log nodeproto.FrameLog) error {
+		var diagnostics []nodewire.FrameLog
+		deps.Log = func(_ context.Context, _ NodeInput, log nodewire.FrameLog) error {
 			diagnostics = append(diagnostics, log)
 			var attrs any
 			if err := json.Unmarshal(log.Attrs, &attrs); err != nil {
@@ -140,7 +140,7 @@ func FuzzExecutorStepRecordFenceAndMask(f *testing.F) {
 		start := deps.Start
 		deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 			p, err := start(ctx, in, activity)
-			p.(*executorProcess).result = nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "failure:" + forms[int(ordinal)%len(forms)]}}
+			p.(*executorProcess).result = nodewire.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "failure:" + forms[int(ordinal)%len(forms)]}}
 			return p, err
 		}
 		host, err := NewNodeExecutor(deps)
@@ -184,7 +184,7 @@ func TestNodeExecutorPersistsStepStatesAndFences(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			input, st, deps, _ := executorFixture(t)
 			job := input.Accepted.Plan.Jobs[0]
-			job.Steps = []nodeproto.StepSpec{{ID: "first"}, {ID: "second", Needs: []string{"first"}}}
+			job.Steps = []nodewire.StepSpec{{ID: "first"}, {ID: "second", Needs: []string{"first"}}}
 			job.FailurePolicy = "collect_all"
 			job.Steps[0].Optional = mode == "optional"
 			if mode == "skipped" {
@@ -208,11 +208,11 @@ func TestNodeExecutorPersistsStepStatesAndFences(t *testing.T) {
 			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 				p, err := start(ctx, in, activity)
 				p.(*executorProcess).plan = input.Accepted.Plan
-				p.(*executorProcess).answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-					if r.Op == nodeproto.OpEval {
-						return nodeproto.EvalResult{Value: json.RawMessage("true")}, nil
+				p.(*executorProcess).answer = func(_ context.Context, r nodewire.Request) (any, error) {
+					if r.Op == nodewire.OpEval {
+						return nodewire.EvalResult{Value: json.RawMessage("true")}, nil
 					}
-					if r.Op != nodeproto.OpRunStep {
+					if r.Op != nodewire.OpRunStep {
 						return nil, nil
 					}
 					if mode == "dry_run" || mode == "skipped" && r.Step == "first" {
@@ -228,9 +228,9 @@ func TestNodeExecutorPersistsStepStatesAndFences(t *testing.T) {
 						t.Error("body ran before its running record committed")
 					}
 					if r.Step == "first" && (mode == "failed" || mode == "optional" || mode == "retry" && in.Attempt == input.Attempt+1) {
-						return nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "private failure"}}, nil
+						return nodewire.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "private failure"}}, nil
 					}
-					return nodeproto.RunResult{Outcome: "success"}, nil
+					return nodewire.RunResult{Outcome: "success"}, nil
 				}
 				return p, err
 			}
@@ -279,7 +279,7 @@ func TestNodeExecutorStepWriteRefusalPreventsSuccessAndJoinsWork(t *testing.T) {
 			defer cancel()
 			input, st, deps, processes := executorFixture(t)
 			job := input.Accepted.Plan.Jobs[0]
-			job.Steps = []nodeproto.StepSpec{{ID: "first", Optional: true}, {ID: "second", Needs: []string{"first"}}}
+			job.Steps = []nodewire.StepSpec{{ID: "first", Optional: true}, {ID: "second", Needs: []string{"first"}}}
 			job.FailurePolicy = "collect_all"
 			executorChangeJob(t, &input, st, job)
 			executorRetryBudget(t, &input, st, 2)
@@ -296,7 +296,7 @@ func TestNodeExecutorStepWriteRefusalPreventsSuccessAndJoinsWork(t *testing.T) {
 				p, err := start(ctx, in, activity)
 				p.(*executorProcess).plan = input.Accepted.Plan
 				if state == "cancelled" || state == "failed" {
-					p.(*executorProcess).result = nodeproto.RunResult{Outcome: "failed"}
+					p.(*executorProcess).result = nodewire.RunResult{Outcome: "failed"}
 				}
 				return p, err
 			}
@@ -313,7 +313,7 @@ func TestNodeExecutorStepWriteRefusalPreventsSuccessAndJoinsWork(t *testing.T) {
 			}
 			if state == "running" {
 				for _, r := range (*processes)[0].requests {
-					if r.Op == nodeproto.OpRunStep {
+					if r.Op == nodewire.OpRunStep {
 						t.Fatal("refused running record reached a body")
 					}
 				}
@@ -329,7 +329,7 @@ func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
 			defer cancel()
 			input, st, deps, processes := executorFixture(t)
 			job := input.Accepted.Plan.Jobs[0]
-			job.Steps = []nodeproto.StepSpec{{ID: "slow"}, {ID: "refuse"}, {ID: "cleanup", Needs: []string{"slow", "refuse"}, Finally: true}}
+			job.Steps = []nodewire.StepSpec{{ID: "slow"}, {ID: "refuse"}, {ID: "cleanup", Needs: []string{"slow", "refuse"}, Finally: true}}
 			executorChangeJob(t, &input, st, job)
 			if sink == "window" {
 				var spec runspec.Spec
@@ -365,7 +365,7 @@ func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
 			}}
 			deps.Store = records
 			if sink == "diagnostic" {
-				deps.Log = func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+				deps.Log = func(_ context.Context, _ NodeInput, frame nodewire.FrameLog) error {
 					if frame.Step == "refuse" && frame.Event == "step_end" {
 						return refused
 					}
@@ -376,8 +376,8 @@ func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
 			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 				p, err := start(ctx, in, activity)
 				p.(*executorProcess).plan = input.Accepted.Plan
-				p.(*executorProcess).answer = func(ctx context.Context, r nodeproto.Request) (any, error) {
-					if r.Op != nodeproto.OpRunStep {
+				p.(*executorProcess).answer = func(ctx context.Context, r nodewire.Request) (any, error) {
+					if r.Op != nodewire.OpRunStep {
 						return nil, nil
 					}
 					if r.Step == "cleanup" {
@@ -392,7 +392,7 @@ func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
 						<-ctx.Done()
 						return nil, context.Cause(ctx)
 					}
-					return nodeproto.RunResult{Outcome: "success"}, nil
+					return nodewire.RunResult{Outcome: "success"}, nil
 				}
 				return p, err
 			}

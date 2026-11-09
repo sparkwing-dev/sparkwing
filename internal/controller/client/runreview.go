@@ -5,8 +5,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 var _ controllerwire.RunReview = (*engineClient)(nil)
@@ -56,7 +58,7 @@ func (c *engineClient) AppendAnnotation(ctx context.Context, run, job string, in
 	if input.Level == "" {
 		input.Level = "info"
 	}
-	if err := input.Validate(); err != nil {
+	if err := nodeproto.ValidateAnnotation(input.Annotation); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	suffix := "/annotations"

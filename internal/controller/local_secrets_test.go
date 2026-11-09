@@ -15,12 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
@@ -96,7 +96,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "run"}}}}}
 	body, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	if secrets.Maskable(value) {
 		badPlan := plan
-		badPlan.Jobs = append([]nodeproto.JobSpec{}, plan.Jobs...)
+		badPlan.Jobs = append([]nodewire.JobSpec{}, plan.Jobs...)
 		badPlan.Jobs[0].ID = value
 		badBody, err := json.Marshal(badPlan)
 		if err != nil {

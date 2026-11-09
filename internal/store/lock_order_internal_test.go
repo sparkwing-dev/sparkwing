@@ -9,16 +9,16 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestConcurrencyFirstArrivalLocksEntryBeforeHolders(t *testing.T) {
 	s, recorder := newRecordingStore(t)
 	tenant, request, _ := planFixtureWithInput(t, runspec.DispatchController, nil, s)
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Concurrency: []nodeproto.ConcurrencySpec{{Group: "new", Scope: new("global"), Capacity: new(1)}}}}}
+	doc := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Concurrency: []nodewire.ConcurrencySpec{{Group: "new", Scope: new("global"), Capacity: new(1)}}}}}
 	var err error
 	request.Seal.Plan, err = json.Marshal(testBodyPlan(doc))
 	if err != nil {

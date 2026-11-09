@@ -10,10 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPublishedProtocolSchemasMatchFinalWireTypes(t *testing.T) {
@@ -102,7 +103,7 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 	}
 	checked := 0
 	for _, block := range blocks {
-		if block.file != "node-protocol.md" {
+		if block.file != "node-nodewire.md" {
 			continue
 		}
 		for _, line := range strings.Split(block.body, "\n") {
@@ -147,20 +148,20 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					frame, err := nodeproto.ParseFrame(body)
+					frame, err := nodewire.ParseFrame(body)
 					if err != nil {
 						t.Fatal(err)
 					}
-					var generated nodeproto.EvalResult
+					var generated nodewire.EvalResult
 					if err := frame.Reply.Decode(&generated); err != nil {
 						t.Fatal(err)
 					}
-					if err := generated.ValidateValue("generate"); err != nil {
+					if err := nodeproto.ValidateEvalValue(generated, "generate"); err != nil {
 						t.Fatal(err)
 					}
 					context := nodeproto.ValidationContext{
 						Expansion: true, Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker(), SourceJob: "build",
-						ExistingJobs: []nodeproto.JobSpec{{ID: "build", Closures: nodeproto.ClosureSpec{Generate: []string{"build/generate/0"}}}},
+						ExistingJobs: []nodewire.JobSpec{{ID: "build", Closures: nodewire.ClosureSpec{Generate: []string{"build/generate/0"}}}},
 					}
 					if _, err := nodeproto.ValidatePlan(generated.Value, context); err != nil {
 						t.Fatal(err)
@@ -183,7 +184,7 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 }
 
 func TestPublishedProtocolGuideMatchesWireFields(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "node-protocol.md"))
+	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "node-nodewire.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,10 +205,10 @@ func TestPublishedProtocolGuideMatchesWireFields(t *testing.T) {
 }
 
 func protocolGuideFieldsMatch(body string) bool {
-	results := map[nodeproto.Op]reflect.Type{
-		nodeproto.OpHello: reflect.TypeFor[nodeproto.HelloResult](), nodeproto.OpDescribe: reflect.TypeFor[nodeproto.DescribeDoc](),
-		nodeproto.OpPlan: reflect.TypeFor[nodeproto.PlanDoc](), nodeproto.OpRunStep: reflect.TypeFor[nodeproto.RunResult](),
-		nodeproto.OpEval: reflect.TypeFor[nodeproto.EvalResult](), nodeproto.OpCancel: nil,
+	results := map[nodewire.Op]reflect.Type{
+		nodewire.OpHello: reflect.TypeFor[nodewire.HelloResult](), nodewire.OpDescribe: reflect.TypeFor[nodewire.DescribeDoc](),
+		nodewire.OpPlan: reflect.TypeFor[nodewire.PlanDoc](), nodewire.OpRunStep: reflect.TypeFor[nodewire.RunResult](),
+		nodewire.OpEval: reflect.TypeFor[nodewire.EvalResult](), nodewire.OpCancel: nil,
 	}
 	quoted := regexp.MustCompile("`([a-z_]+)`")
 	fields := func(cell string) []string {
@@ -218,13 +219,13 @@ func protocolGuideFieldsMatch(body string) bool {
 		slices.Sort(names)
 		return names
 	}
-	seen := map[nodeproto.Op]bool{}
+	seen := map[nodewire.Op]bool{}
 	for _, line := range strings.Split(body, "\n") {
 		cells := strings.Split(line, "|")
 		if len(cells) != 5 {
 			continue
 		}
-		op := nodeproto.Op(strings.Trim(strings.TrimSpace(cells[1]), "`"))
+		op := nodewire.Op(strings.Trim(strings.TrimSpace(cells[1]), "`"))
 		result, found := results[op]
 		if !found {
 			continue
@@ -233,7 +234,7 @@ func protocolGuideFieldsMatch(body string) bool {
 			return false
 		}
 		seen[op] = true
-		request := nodeproto.RequestFields(op).Allowed
+		request := nodewire.RequestFields(op).Allowed
 		slices.Sort(request)
 		if !slices.Equal(fields(cells[2]), request) {
 			return false
@@ -254,7 +255,7 @@ func protocolGuideFieldsMatch(body string) bool {
 
 // The published request schema and the host's decoder judge the same requests alike.
 func TestRequestSchemaAgreesWithTheDecoder(t *testing.T) {
-	schema, err := conformance.LoadSchema(filepath.Join("..", "..", "docs", "schemas", "node-protocol.schema.json"))
+	schema, err := conformance.LoadSchema(filepath.Join("..", "..", "docs", "schemas", "node-nodewire.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +273,7 @@ func TestRequestSchemaAgreesWithTheDecoder(t *testing.T) {
 		if err := json.Unmarshal([]byte(request), &value); err != nil {
 			t.Fatal(err)
 		}
-		_, decodeErr := nodeproto.ParseRequest([]byte(request))
+		_, decodeErr := nodewire.ParseRequest([]byte(request))
 		if failures := schema.Validate(shape, value, "request"); (len(failures) == 0) != valid || (decodeErr == nil) != valid {
 			t.Errorf("%s: schema failures %v, decoder %v; want valid=%v", request, failures, decodeErr, valid)
 		}

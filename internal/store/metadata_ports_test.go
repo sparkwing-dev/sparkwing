@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func metadataAttempt(t *testing.T, f *storeRecoveryFixture) runspec.AttemptIdentity {
@@ -98,7 +98,7 @@ func checkConcurrentMetadata(t *testing.T, f *storeRecoveryFixture) {
 			wg.Go(func() {
 				for n := range each {
 					msg := fmt.Sprintf("%d/%d", worker, n)
-					if err := f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodeproto.Annotation{Level: "info", Message: msg}}); err != nil {
+					if err := f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodewire.Annotation{Level: "info", Message: msg}}); err != nil {
 						t.Error(err)
 						return
 					}
@@ -149,7 +149,7 @@ func TestMetadataBoundsRefuseWithoutWriting(t *testing.T) {
 		t.Run(step, func(t *testing.T) {
 			f := newStoreRecoveryFixture(t, true)
 			metadataStep(t, f, "body", "running")
-			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodeproto.Annotation{Message: strings.Repeat("x", int(limits.AnnotationBytes)+1)}}
+			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodewire.Annotation{Message: strings.Repeat("x", int(limits.AnnotationBytes)+1)}}
 			assertQuota(t, f.tenant.WriteAnnotation(t.Context(), write), "byte limit is")
 			assertQuota(t, f.tenant.WriteSummary(t.Context(), store.SummaryWrite{Ref: f.ref, Actor: f.holder, StepID: step, Markdown: write.Message}), "result text byte limit is")
 			write.Message = "last"
@@ -196,7 +196,7 @@ func TestMetadataWritesCannotCrossClaimFencesProperty(t *testing.T) {
 			actor.Authority.ID = fmt.Sprintf("foreign-%x", random.Uint64())
 		}
 		for _, step := range []string{"", "body"} {
-			if err := f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: ref, Actor: actor, StepID: step, Annotation: nodeproto.Annotation{Message: "forged"}}); err == nil {
+			if err := f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: ref, Actor: actor, StepID: step, Annotation: nodewire.Annotation{Message: "forged"}}); err == nil {
 				t.Fatal("forged annotation accepted")
 			}
 			if err := f.tenant.WriteSummary(t.Context(), store.SummaryWrite{Ref: ref, Actor: actor, StepID: step, Markdown: "forged"}); err == nil {
@@ -272,7 +272,7 @@ func TestMetadataMissingStepDoesNotCreatePlaceholder(t *testing.T) {
 	f := newStoreRecoveryFixture(t, true)
 	for _, write := range []func() error{
 		func() error {
-			return f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: "missing", Annotation: nodeproto.Annotation{Message: "early"}})
+			return f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: "missing", Annotation: nodewire.Annotation{Message: "early"}})
 		},
 		func() error {
 			return f.tenant.WriteSummary(t.Context(), store.SummaryWrite{Ref: f.ref, Actor: f.holder, StepID: "missing", Markdown: "early"})
@@ -343,7 +343,7 @@ func TestMetadataAnnotationByteCapacityRollsBackTheRejectedAppend(t *testing.T) 
 		t.Run(step, func(t *testing.T) {
 			f := newStoreRecoveryFixture(t, true)
 			metadataStep(t, f, "body", "running")
-			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodeproto.Annotation{Message: strings.Repeat("x", int(limits.AnnotationBytes)-len(`{"level":"","message":""}`))}}
+			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodewire.Annotation{Message: strings.Repeat("x", int(limits.AnnotationBytes)-len(`{"level":"","message":""}`))}}
 			accepted := 0
 			for {
 				err := f.tenant.WriteAnnotation(t.Context(), write)

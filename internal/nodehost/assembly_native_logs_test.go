@@ -17,13 +17,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type completingUnitStore struct {
@@ -102,7 +102,7 @@ func FuzzLocalNativeLogsPreserveAuthorityAndMasking(f *testing.F) {
 			run = "other"
 		}
 		attrs, _ := json.Marshal(map[string]string{secret: secret})
-		err := logs.write(t.Context(), run, "", nodeproto.FrameLog{Message: secret, Attrs: attrs})
+		err := logs.write(t.Context(), run, "", nodewire.FrameLog{Message: secret, Attrs: attrs})
 		if foreign {
 			if err == nil || len(logs.streams) != 0 {
 				t.Fatal("refused authority reached storage")
@@ -159,14 +159,14 @@ func TestLogSpoolFailureRemainsVisible(t *testing.T) {
 			}}
 			spoolDir := t.TempDir()
 			t.Setenv("TMPDIR", spoolDir+"/missing")
-			if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "discarded"}); err != nil {
+			if err := logs.write(t.Context(), "run", "", nodewire.FrameLog{Message: "discarded"}); err != nil {
 				t.Fatal(err)
 			}
 			wantObjects := 0
 			if recovery == "recovered" {
 				wantObjects = 1
 				t.Setenv("TMPDIR", spoolDir)
-				if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "retained"}); err != nil {
+				if err := logs.write(t.Context(), "run", "", nodewire.FrameLog{Message: "retained"}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -191,7 +191,7 @@ func TestLogUploaderInitializationPreservesBufferedBytes(t *testing.T) {
 			return records, nil
 		}}
 		for _, message := range []string{"first", "second"} {
-			if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: message}); err != nil {
+			if err := logs.write(t.Context(), "run", "", nodewire.FrameLog{Message: message}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -303,7 +303,7 @@ func TestNativeLogsUseCommittedAttemptWithoutMetadataReads(t *testing.T) {
 	}
 	refreshFailed = true
 	logs := services.Config.Store.(logHostStore).logs
-	if err := logs.write(t.Context(), "run", "job", nodeproto.FrameLog{Message: "successful work"}); err != nil {
+	if err := logs.write(t.Context(), "run", "job", nodewire.FrameLog{Message: "successful work"}); err != nil {
 		t.Fatalf("logging-only metadata failure escaped: %v", err)
 	}
 	<-logs.finish(t.Context(), "")
@@ -345,12 +345,12 @@ func TestLogUploadsDoNotHoldOtherJobs(t *testing.T) {
 			logs.bind(capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitNode, Binding: capability.Binding{RunID: "run", NodeID: node, Generation: 1}}}, 1)
 		}
 		before := time.Now()
-		if err := logs.write(t.Context(), "run", "slow", nodeproto.FrameLog{Message: "work"}); err != nil {
+		if err := logs.write(t.Context(), "run", "slow", nodewire.FrameLog{Message: "work"}); err != nil {
 			t.Fatal(err)
 		}
 		done := logs.finish(t.Context(), "slow")
 		synctest.Wait()
-		if err := logs.write(t.Context(), "run", "healthy", nodeproto.FrameLog{Message: "work"}); err != nil {
+		if err := logs.write(t.Context(), "run", "healthy", nodewire.FrameLog{Message: "work"}); err != nil {
 			t.Fatal(err)
 		}
 		if time.Now() != before {
@@ -364,7 +364,7 @@ func TestLogUploadsDoNotHoldOtherJobs(t *testing.T) {
 func TestStalledLogUploaderInitializationDoesNotDelayAnotherJobsReport(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		now := time.Now()
-		f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "healthy", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
+		f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "slow", Steps: []nodewire.StepSpec{{ID: "body"}}}, {ID: "healthy", Steps: []nodewire.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
 		actors := map[string]runstate.Actor{}
 		for _, node := range []string{"slow", "healthy"} {
 			ref := runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(node)}
@@ -396,7 +396,7 @@ func TestStalledLogUploaderInitializationDoesNotDelayAnotherJobsReport(t *testin
 		wrote := make(chan struct{})
 		go func() {
 			defer close(wrote)
-			if err := logs.write(t.Context(), f.Accepted.RunID, "slow", nodeproto.FrameLog{Message: "work"}); err != nil {
+			if err := logs.write(t.Context(), f.Accepted.RunID, "slow", nodewire.FrameLog{Message: "work"}); err != nil {
 				t.Error(err)
 			}
 			<-logs.finish(t.Context(), "slow")
@@ -451,7 +451,7 @@ func TestNativeServiceCloseJoinsLogsAfterTerminalCommit(t *testing.T) {
 			t.Fatal(err)
 		}
 		logs := services.Config.Store.(logHostStore).logs
-		if err := logs.write(t.Context(), "run", "job", nodeproto.FrameLog{Message: "work"}); err != nil {
+		if err := logs.write(t.Context(), "run", "job", nodewire.FrameLog{Message: "work"}); err != nil {
 			t.Fatal(err)
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
@@ -517,7 +517,7 @@ func TestLogShutdownEffortEndsAtTailBudget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		up := &cancelledLogUploader{}
 		logs := &localLogs{run: "run", masker: secrets.NewMasker(), principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitPlan, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) { return up, nil }}
-		if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "buffered work"}); err != nil {
+		if err := logs.write(t.Context(), "run", "", nodewire.FrameLog{Message: "buffered work"}); err != nil {
 			t.Fatal(err)
 		}
 		before := time.Now()
@@ -546,7 +546,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				now := time.Now()
-				f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
+				f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Retry: &nodewire.RetrySpec{Attempts: 3}, Steps: []nodewire.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
 				input := storedExecutionInput(t, f, &ClaimedNodeHost{})
 				ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"}
 				actor := executorActor(input)
@@ -585,7 +585,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 					t.Fatalf("started attempt has no persisted stream before output: %+v %v", view.Logs, err)
 				}
 				logs.bind(principal, int64(started.Attempt))
-				if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodeproto.FrameLog{Message: "attempt output"}); err != nil {
+				if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodewire.FrameLog{Message: "attempt output"}); err != nil {
 					t.Fatal(err)
 				}
 				state := logHostStore{NativeHostStore: f.Tenant, logs: logs}
@@ -683,11 +683,11 @@ func TestNativeLogsSealFiftyMillionPayloadBytes(t *testing.T) {
 	}}
 	logs.bind(capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitNode, Binding: capability.Binding{RunID: "run", NodeID: "job", Generation: 1}}}, 1)
 	for range 1000 {
-		if err := logs.write(t.Context(), "run", "job", nodeproto.FrameLog{Message: strings.Repeat("x", 50_000)}); err != nil {
+		if err := logs.write(t.Context(), "run", "job", nodewire.FrameLog{Message: strings.Repeat("x", 50_000)}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := logs.write(t.Context(), "run", "job", nodeproto.FrameLog{Message: "EMIT_DONE"}); err != nil {
+	if err := logs.write(t.Context(), "run", "job", nodewire.FrameLog{Message: "EMIT_DONE"}); err != nil {
 		t.Fatal(err)
 	}
 	<-logs.finish(t.Context(), "")
@@ -701,7 +701,7 @@ func TestNativeLogsSealFiftyMillionPayloadBytes(t *testing.T) {
 func TestRetrySealsPreviousAttemptBeforeFenceAdvances(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		now := time.Now()
-		f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
+		f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Retry: &nodewire.RetrySpec{Attempts: 3}, Steps: []nodewire.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
 		input := storedExecutionInput(t, f, &ClaimedNodeHost{})
 		ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"}
 		actor := executorActor(input)
@@ -725,7 +725,7 @@ func TestRetrySealsPreviousAttemptBeforeFenceAdvances(t *testing.T) {
 		}}
 		t.Cleanup(logs.flushes.Wait)
 		logs.bind(principal, int64(started.Attempt))
-		if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodeproto.FrameLog{Message: "attempt one output"}); err != nil {
+		if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodewire.FrameLog{Message: "attempt one output"}); err != nil {
 			t.Fatal(err)
 		}
 		state := logHostStore{NativeHostStore: f.Tenant, logs: logs}

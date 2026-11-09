@@ -9,11 +9,12 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type sdkCode struct {
@@ -24,7 +25,7 @@ type sdkCode struct {
 
 func (h *sdkCode) readResult(ctx context.Context, row runstate.NodeRow, storage StorageBinding) (json.RawMessage, error) {
 	if storage.Bytes != nil || storage.Records != nil {
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return nil, executorError(apierr.PlanDrift, "generator source declaration is invalid")
 		}
@@ -44,13 +45,13 @@ type executorSession struct {
 	rawArgs     map[string]string
 	jobArgs     map[string]map[string]string
 	closureArgs map[string]map[string]string
-	arguments   []nodeproto.ArgumentDescription
+	arguments   []nodewire.ArgumentDescription
 	process     ExecutorProcess
 	sequence    atomic.Int64
-	failure     *nodeproto.JobFailure
+	failure     *nodewire.JobFailure
 }
 
-func checkProcessBinding(parent, child nodeproto.ProcessBinding) error {
+func checkProcessBinding(parent, child nodewire.ProcessBinding) error {
 	if child.RunID != parent.RunID || child.JobID != parent.JobID {
 		return executorError(apierr.SpecDrift, "process binding changed its accepted job")
 	}
@@ -60,37 +61,37 @@ func checkProcessBinding(parent, child nodeproto.ProcessBinding) error {
 	return nil
 }
 
-func (s *executorSession) call(ctx context.Context, request nodeproto.Request, result any, kind string) error {
+func (s *executorSession) call(ctx context.Context, request nodewire.Request, result any, kind string) error {
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
 	validDestination := false
 	switch request.Op {
-	case nodeproto.OpHello:
-		_, validDestination = result.(*nodeproto.HelloResult)
-	case nodeproto.OpPlan, nodeproto.OpDescribe:
+	case nodewire.OpHello:
+		_, validDestination = result.(*nodewire.HelloResult)
+	case nodewire.OpPlan, nodewire.OpDescribe:
 		_, validDestination = result.(*json.RawMessage)
-	case nodeproto.OpEval:
-		_, validDestination = result.(*nodeproto.EvalResult)
-	case nodeproto.OpRunStep:
-		_, validDestination = result.(*nodeproto.RunResult)
-	case nodeproto.OpCancel:
+	case nodewire.OpEval:
+		_, validDestination = result.(*nodewire.EvalResult)
+	case nodewire.OpRunStep:
+		_, validDestination = result.(*nodewire.RunResult)
+	case nodewire.OpCancel:
 		_, validDestination = result.(*json.RawMessage)
 	}
-	if request.Op == nodeproto.OpEval && !slices.Contains([]string{"skip_if", "memo_key", "before_run", "after_run", "verify", "generate"}, kind) {
+	if request.Op == nodewire.OpEval && !slices.Contains([]string{"skip_if", "memo_key", "before_run", "after_run", "verify", "generate"}, kind) {
 		return executorError(apierr.ProtocolError, "SDK eval requires an accepted closure kind")
 	}
 	if !validDestination {
 		return executorError(apierr.ProtocolError, "SDK result destination does not match the operation")
 	}
-	if request.Op == nodeproto.OpRunStep {
+	if request.Op == nodewire.OpRunStep {
 		request.Args = s.jobArgs[request.Job]
 	}
-	if request.Op == nodeproto.OpEval {
+	if request.Op == nodewire.OpEval {
 		request.Args = s.closureArgs[request.Closure]
 	}
 	request.ID = strconv.FormatInt(s.sequence.Add(1), 10)
-	if request.Op == nodeproto.OpRunStep {
+	if request.Op == nodewire.OpRunStep {
 		request.Failure = s.failure
 	}
 	reply, err := s.process.Request(ctx, request)
@@ -101,13 +102,13 @@ func (s *executorSession) call(ctx context.Context, request nodeproto.Request, r
 		return executorError(apierr.ProtocolError, "SDK returned an invalid reply ID")
 	}
 	if err = reply.Decode(result); err != nil {
-		if errors.Is(err, nodeproto.ErrMalformed) {
+		if errors.Is(err, nodewire.ErrMalformed) {
 			return executorError(apierr.ProtocolError, "SDK reply has an invalid result")
 		}
 		return err
 	}
-	if request.Op == nodeproto.OpEval {
-		if err := result.(*nodeproto.EvalResult).ValidateValue(kind); err != nil {
+	if request.Op == nodewire.OpEval {
+		if err := nodeproto.ValidateEvalValue(*result.(*nodewire.EvalResult), kind); err != nil {
 			return executorError(apierr.ProtocolError, "SDK closure returned an invalid value")
 		}
 	}
@@ -118,13 +119,13 @@ func (h *sdkCode) hello(ctx context.Context, session *executorSession, input Nod
 	return sdkHello(ctx, session, input.Engine.Identity, input.GrantedRunner, &input.RouteBinding)
 }
 
-func sdkHello(ctx context.Context, session *executorSession, identity engineid.Identity, runner nodeproto.RunnerIdentity, binding *nodeproto.ProcessBinding) error {
-	var hello nodeproto.HelloResult
-	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello, "")
+func sdkHello(ctx context.Context, session *executorSession, identity engineid.Identity, runner nodewire.RunnerIdentity, binding *nodewire.ProcessBinding) error {
+	var hello nodewire.HelloResult
+	err := session.call(ctx, nodewire.Request{Op: nodewire.OpHello, Protocol: nodewire.Version, Engine: &nodewire.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello, "")
 	if err != nil {
 		return err
 	}
-	if hello.Protocol != nodeproto.Version || hello.SDK.Language != string(identity.Pin.SDK) || identity.Pin.Replacement == "" && strings.TrimPrefix(hello.SDK.Version, "v") != strings.TrimPrefix(identity.Pin.Version, "v") {
+	if hello.Protocol != nodewire.Version || hello.SDK.Language != string(identity.Pin.SDK) || identity.Pin.Replacement == "" && strings.TrimPrefix(hello.SDK.Version, "v") != strings.TrimPrefix(identity.Pin.Version, "v") {
 		return executorError(apierr.ProtocolMismatch, "SDK hello does not match the sealed engine and SDK pin")
 	}
 	return nil
@@ -146,7 +147,7 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 		entrypoint = spec.Request.Request.Pipeline
 	}
 	var raw json.RawMessage
-	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: entrypoint, Args: args, Run: &run}, &raw, "")
+	err := session.call(ctx, nodewire.Request{Op: nodewire.OpPlan, Pipeline: entrypoint, Args: args, Run: &run}, &raw, "")
 	if err != nil {
 		return err
 	}
@@ -161,7 +162,7 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 	if string(hash) != input.Accepted.PlanHash {
 		return executorError(apierr.PlanDrift, "SDK plan differs from the accepted plan")
 	}
-	if len(input.Replay) == 0 && !slices.ContainsFunc(plan.Jobs, func(job nodeproto.JobSpec) bool { return job.ID == input.NodeID }) {
+	if len(input.Replay) == 0 && !slices.ContainsFunc(plan.Jobs, func(job nodewire.JobSpec) bool { return job.ID == input.NodeID }) {
 		input.Replay, err = h.recordedReplay(ctx, input, plan.Jobs)
 		if err != nil {
 			return err
@@ -188,13 +189,13 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 }
 
 func (h *sdkCode) eval(ctx context.Context, session *executorSession, input NodeInput, closure, kind string, payload json.RawMessage, settled []string) (json.RawMessage, error) {
-	var result nodeproto.EvalResult
+	var result nodewire.EvalResult
 	if kind == "generate" {
 		if gate, ok := session.process.(declarationProcess); ok {
 			gate.gateDeclarations()
 		}
 	}
-	request := nodeproto.Request{Op: nodeproto.OpEval, Closure: closure, Input: payload}
+	request := nodewire.Request{Op: nodewire.OpEval, Closure: closure, Input: payload}
 	if settled != nil {
 		request.Attempt, request.Settled = int(input.Attempt), settled
 	}
@@ -216,18 +217,18 @@ func (h *sdkCode) eval(ctx context.Context, session *executorSession, input Node
 	return evalValue(result, kind)
 }
 
-func executorRunContext(spec runspec.Spec) nodeproto.RunContext {
+func executorRunContext(spec runspec.Spec) nodewire.RunContext {
 	request := spec.Request.Request
 	git := request.Git
-	context := nodeproto.RunContext{RunID: spec.Request.RunID, Pipeline: request.Pipeline, StartedAt: spec.Request.AdmittedAt, NoMemo: spec.Resolved.Settings.Options.NoMemo.Value, DryRun: spec.Resolved.Settings.Options.DryRun.Value, Git: &nodeproto.Git{SHA: git.SHA, Branch: git.Ref, DefaultBranch: spec.Resolved.DefaultBranch.Value, Repo: git.Repository.Display}, Trigger: &nodeproto.Trigger{Source: string(request.Origin), User: request.Actor.Display}}
+	context := nodewire.RunContext{RunID: spec.Request.RunID, Pipeline: request.Pipeline, StartedAt: spec.Request.AdmittedAt, NoMemo: spec.Resolved.Settings.Options.NoMemo.Value, DryRun: spec.Resolved.Settings.Options.DryRun.Value, Git: &nodewire.Git{SHA: git.SHA, Branch: git.Ref, DefaultBranch: spec.Resolved.DefaultBranch.Value, Repo: git.Repository.Display}, Trigger: &nodewire.Trigger{Source: string(request.Origin), User: request.Actor.Display}}
 	if request.PullRequest.Set {
 		pr := request.PullRequest.Value
-		context.Trigger.PullRequest = &nodeproto.PullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
+		context.Trigger.PullRequest = &nodewire.PullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
 	}
 	return context
 }
 
-func (s *executorSession) prepareArguments(job nodeproto.JobSpec) error {
+func (s *executorSession) prepareArguments(job nodewire.JobSpec) error {
 	args, err := nodeproto.PrepareJobArguments(job.Arguments, s.rawArgs)
 	if err != nil {
 		return err

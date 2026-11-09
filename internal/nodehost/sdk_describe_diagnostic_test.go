@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func FuzzSDKDescribeFailureWithholdsDetailsAndNamesClass(f *testing.F) {
@@ -35,7 +35,7 @@ func FuzzSDKDescribeFailureWithholdsDetailsAndNamesClass(f *testing.F) {
 		if cause == nil {
 			cause = &apierr.Error{Code: code, Message: secret, Hint: secret, Details: map[string]any{secret: secret}}
 		}
-		p.Start = func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		p.Start = func(context.Context, PlanningProcessInput, func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 			return nil, cause
 		}
 		_, err := p.Prepare(t.Context(), input, fixture.input)

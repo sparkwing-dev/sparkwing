@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type selectedOutputRecords struct {
@@ -37,7 +37,7 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 			state.row.OutputRecord = &key
 			if missing {
 				state.row.OutputRecord = nil
-				var job nodeproto.JobSpec
+				var job nodewire.JobSpec
 				if err := json.Unmarshal(state.row.Spec, &job); err != nil {
 					t.Fatal(err)
 				}
@@ -52,12 +52,12 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 			}}
 			input.Storage = StorageBinding{Bytes: data, Records: records, Authority: records.authority}
 			deps.ReadOutput = nil
-			process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-				if request.Op == nodeproto.OpEval {
+			process.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+				if request.Op == nodewire.OpEval {
 					if string(request.Input) != `{"count":2}` {
 						t.Fatalf("generator lost copied output: %s", request.Input)
 					}
-					return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
+					return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 				}
 				return nil, nil
 			}
@@ -78,12 +78,12 @@ func TestOwnerEvaluationGivesAnUntypedSourceANullResult(t *testing.T) {
 	state.row.OutputRecord = nil
 	input.Storage = StorageBinding{Bytes: &scriptedStorage{}, Records: &selectedOutputRecords{t: t}, Authority: blob.Authority{CapabilityRef: "owner"}}
 	deps.ReadOutput = nil
-	process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-		if request.Op == nodeproto.OpEval {
+	process.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+		if request.Op == nodewire.OpEval {
 			if string(request.Input) != `null` {
 				t.Fatalf("untyped source evaluated with %s", request.Input)
 			}
-			return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
+			return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 		}
 		return nil, nil
 	}

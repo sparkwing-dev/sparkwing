@@ -5,24 +5,24 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCapacityLevelsBreakOpposingPlanJobCycle(t *testing.T) {
 	for name, open := range map[string]func(*testing.T) *storetest.Target{"sqlite": storetest.NewSQLite, "postgres": storetest.NewPostgres} {
 		t.Run(name, func(t *testing.T) {
 			target := open(t)
-			group := func(name string) nodeproto.ConcurrencySpec {
-				return nodeproto.ConcurrencySpec{Group: name, Capacity: new(1), Cost: new(1), Scope: new("global"), OnLimit: new("queue")}
+			group := func(name string) nodewire.ConcurrencySpec {
+				return nodewire.ConcurrencySpec{Group: name, Capacity: new(1), Cost: new(1), Scope: new("global"), OnLimit: new("queue")}
 			}
-			f := newStoreRecoveryFixtureAt(t, false, target, func(doc *nodeproto.PlanDoc) {
-				doc.Concurrency = []nodeproto.ConcurrencySpec{group("X")}
-				doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group("Y")}
+			f := newStoreRecoveryFixtureAt(t, false, target, func(doc *nodewire.PlanDoc) {
+				doc.Concurrency = []nodewire.ConcurrencySpec{group("X")}
+				doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{group("Y")}
 			})
 			ctx := t.Context()
 			admitted, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
@@ -35,11 +35,11 @@ func TestCapacityLevelsBreakOpposingPlanJobCycle(t *testing.T) {
 			}
 			request := f.plan
 			request.RunID, request.Actor, request.Seal.Request = admitted.RunID, owner, admitted.Request
-			var doc nodeproto.PlanDoc
+			var doc nodewire.PlanDoc
 			if err := json.Unmarshal(request.Seal.Plan, &doc); err != nil {
 				t.Fatal(err)
 			}
-			doc.Concurrency, doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group("Y")}, []nodeproto.ConcurrencySpec{group("X")}
+			doc.Concurrency, doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{group("Y")}, []nodewire.ConcurrencySpec{group("X")}
 			request.Seal.Plan, err = json.Marshal(doc)
 			if err != nil {
 				t.Fatal(err)

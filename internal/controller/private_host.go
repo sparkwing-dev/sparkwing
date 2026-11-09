@@ -9,15 +9,15 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (s *Server) localHostEndpoints() []controllerwire.Endpoint {
@@ -53,7 +53,7 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 	}
 	for _, node := range snapshot.Nodes {
 		if node.Ref.NodeID == runspec.NodeID(a.Target.NodeID) {
-			var job nodeproto.JobSpec
+			var job nodewire.JobSpec
 			if err := json.Unmarshal(node.Spec, &job); err != nil {
 				return err
 			}
@@ -63,7 +63,7 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 				if string(source.Ref.NodeID) == job.OnFailureOf {
 					recovery = &runstate.NodeRow{Ref: source.Ref, Status: source.Status, Outcome: source.Outcome, Generation: source.Generation}
 				}
-				if source.Ref == node.Ref || source.Status != runstate.StatusDone || source.ManifestRecord == nil || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return runspec.NodeID(edge.Producer) == source.Ref.NodeID }) {
+				if source.Ref == node.Ref || source.Status != runstate.StatusDone || source.ManifestRecord == nil || !slices.ContainsFunc(job.Consumes, func(edge nodewire.ArtifactInput) bool { return runspec.NodeID(edge.Producer) == source.Ref.NodeID }) {
 					continue
 				}
 				sources[string(source.Ref.NodeID)] = *source.ManifestRecord
@@ -80,7 +80,7 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 func generatorSources(expansions []runstate.AcceptedExpansionRow, id string) map[string]bool {
 	parents := map[string]string{}
 	for _, expansion := range expansions {
-		var plan nodeproto.PlanDoc
+		var plan nodewire.PlanDoc
 		if json.Unmarshal(expansion.Body, &plan) != nil {
 			continue
 		}

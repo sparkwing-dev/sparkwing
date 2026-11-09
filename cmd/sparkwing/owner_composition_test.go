@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -25,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type cliOwnerStore struct {
@@ -206,10 +206,10 @@ func cliNativeOwner(t *testing.T, state nodehost.NativeHostStore, owner nodehost
 	host, _, _, err := nodehost.NewNativeHost(nodehost.NativeHostConfig{
 		Store: state, Lease: owner.Lease, Owner: nodehost.OwnerOperations{Renew: owner.Renew, Wait: owner.Wait, WaitNode: owner.WaitNode, Local: owner.Local, Acquire: owner.Acquire, Prepare: owner.Prepare, AdoptClaim: owner.AdoptClaim, Expand: owner.Expand, Delegator: owner.Delegator},
 		Source: source.Options{Engines: boundary}, Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), Router: router,
-		Processes: &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error {
+		Processes: &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodewire.FrameLog) error {
 			return errors.New("unexpected execution log")
 		}},
-		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return errors.New("unexpected planning log") },
+		PlanningLog: func(context.Context, nodewire.FrameLog) error { return errors.New("unexpected planning log") },
 		Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 			return nodehost.ProcessGrant{}, errors.New("unexpected execution delegation")
 		}},

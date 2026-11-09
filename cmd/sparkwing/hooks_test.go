@@ -12,9 +12,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type fakeGit struct {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNodeExecutorRevokesBindingBeforeJoinAndCleanup(t *testing.T) {
@@ -51,7 +51,7 @@ func TestNodeExecutorRevokesBindingBeforeJoinAndCleanup(t *testing.T) {
 					return p, errors.New("startup interrupted")
 				}
 				if mode == "hello_error" {
-					p.(*executorProcess).answer = func(context.Context, nodeproto.Request) (any, error) {
+					p.(*executorProcess).answer = func(context.Context, nodewire.Request) (any, error) {
 						return nil, errors.New("hello refused")
 					}
 				}
@@ -81,8 +81,8 @@ func TestNodeExecutorRevokesBindingBeforeJoinAndCleanup(t *testing.T) {
 func TestExecutorPolicyRevokesBindingOnRejectedStartup(t *testing.T) {
 	for _, mode := range []string{"binding", "bind_error", "start_error", "nil_process", "revoke_error", "success"} {
 		t.Run(mode, func(t *testing.T) {
-			input, _, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
-				job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
+			input, _, deps, processes := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
+				job.Approval, job.Steps = &nodewire.ApprovalSpec{Message: "ship?"}, nil
 				job.Closures.SkipIf = []string{"condition"}
 			})
 			input.RouteBinding.Routes.Bearer = "parent"
@@ -119,9 +119,9 @@ func TestExecutorPolicyRevokesBindingOnRejectedStartup(t *testing.T) {
 					return nil, nil
 				}
 				p, err := start(ctx, in, activity)
-				p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpEval {
-						return nodeproto.EvalResult{Value: []byte("false")}, nil
+				p.(*executorProcess).answer = func(_ context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpEval {
+						return nodewire.EvalResult{Value: []byte("false")}, nil
 					}
 					return nil, nil
 				}
@@ -148,7 +148,7 @@ func FuzzExecutorBindingRevocation(f *testing.F) {
 		input.RouteBinding.Routes.Bearer = "parent"
 		revoked := false
 		deps.Bind = func(context.Context, NodeInput) (ProcessGrant, error) {
-			grant := ProcessGrant{Binding: nodeproto.ProcessBinding{RunID: run, JobID: job, Routes: nodeproto.ProcessRoutes{Bearer: bearer}}, Revoke: func() error { revoked = true; return nil }}
+			grant := ProcessGrant{Binding: nodewire.ProcessBinding{RunID: run, JobID: job, Routes: nodewire.ProcessRoutes{Bearer: bearer}}, Revoke: func() error { revoked = true; return nil }}
 			if bindError {
 				return grant, errors.New("binding failed")
 			}
@@ -174,14 +174,14 @@ func FuzzOwnerBindingRevocation(f *testing.F) {
 	f.Add("run", "build", "", false)
 	f.Add("run", "build", "child", true)
 	f.Fuzz(func(t *testing.T, run, job, bearer string, bindError bool) {
-		input, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
-			job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
+		input, _, deps, processes := policyFixture(t, func(job *nodewire.JobSpec) {
+			job.Approval, job.Steps = &nodewire.ApprovalSpec{Message: "ship?"}, nil
 			job.Closures.SkipIf = []string{"condition"}
 		})
 		input.RouteBinding.Routes.Bearer = "parent"
 		revoked := false
 		deps.Bind = func(context.Context, EvaluationInput) (ProcessGrant, error) {
-			grant := ProcessGrant{Binding: nodeproto.ProcessBinding{RunID: run, JobID: job, Routes: nodeproto.ProcessRoutes{Bearer: bearer}}, Revoke: func() error { revoked = true; return nil }}
+			grant := ProcessGrant{Binding: nodewire.ProcessBinding{RunID: run, JobID: job, Routes: nodewire.ProcessRoutes{Bearer: bearer}}, Revoke: func() error { revoked = true; return nil }}
 			if bindError {
 				return grant, errors.New("binding failed")
 			}
@@ -190,9 +190,9 @@ func FuzzOwnerBindingRevocation(f *testing.F) {
 		start := deps.Start
 		deps.Start = func(ctx context.Context, in EvaluationInput) (ExecutorProcess, error) {
 			p, err := start(ctx, in)
-			p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-				if request.Op == nodeproto.OpEval {
-					return nodeproto.EvalResult{Value: []byte("false")}, nil
+			p.(*executorProcess).answer = func(_ context.Context, request nodewire.Request) (any, error) {
+				if request.Op == nodewire.OpEval {
+					return nodewire.EvalResult{Value: []byte("false")}, nil
 				}
 				return nil, nil
 			}

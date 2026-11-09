@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -21,13 +20,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func executionHostFixture(t *testing.T, mode string, trace *[]string, processes *[]*scriptedSDK, configure ...func(*ExecutorDependencies)) (NodeInput, *executionHostFixtureState, *ClaimedNodeHost) {
 	t.Helper()
-	job := nodeproto.JobSpec{
-		ID: "job", Steps: []nodeproto.StepSpec{{ID: "body", Risks: []string{"prod"}}},
-		Closures: nodeproto.ClosureSpec{BeforeRun: []string{"before"}, AfterRun: []string{"after"}},
+	job := nodewire.JobSpec{
+		ID: "job", Steps: []nodewire.StepSpec{{ID: "body", Risks: []string{"prod"}}},
+		Closures: nodewire.ClosureSpec{BeforeRun: []string{"before"}, AfterRun: []string{"after"}},
 	}
 	if mode == "verify_refused" {
 		job.Closures.Verify = "verify"
@@ -39,22 +40,22 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 		job.Steps[0].Closures.SkipIf = []string{"step_guard"}
 	}
 	if mode == "step_failed" {
-		job.Steps = append(job.Steps, nodeproto.StepSpec{ID: "blocked", Needs: []string{"body"}}, nodeproto.StepSpec{ID: "cleanup", Needs: []string{"blocked"}, Finally: true})
-		job.Retry = &nodeproto.RetrySpec{Attempts: 0}
+		job.Steps = append(job.Steps, nodewire.StepSpec{ID: "blocked", Needs: []string{"body"}}, nodewire.StepSpec{ID: "cleanup", Needs: []string{"blocked"}, Finally: true})
+		job.Retry = &nodewire.RetrySpec{Attempts: 0}
 	}
 	if mode == "artifact_retry" {
 		job.Needs = []string{"producer"}
-		job.Consumes = []nodeproto.ArtifactInput{{Producer: "producer"}}
+		job.Consumes = []nodewire.ArtifactInput{{Producer: "producer"}}
 	}
 	if strings.HasPrefix(mode, "artifact_publish_") {
 		job.Artifacts = []string{"dist/**"}
 	}
 	if strings.HasPrefix(mode, "cache_") {
-		job.Caches = []nodeproto.CacheSpec{{Name: "dependencies", Path: "vendor", KeyFiles: []string{"lockfile"}}}
+		job.Caches = []nodewire.CacheSpec{{Name: "dependencies", Path: "vendor", KeyFiles: []string{"lockfile"}}}
 	}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}
 	if mode == "artifact_retry" {
-		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "producer", Artifacts: []string{"bin/program"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+		plan.Jobs = append(plan.Jobs, nodewire.JobSpec{ID: "producer", Artifacts: []string{"bin/program"}, Steps: []nodewire.StepSpec{{ID: "body"}}})
 	}
 	planHash, _ := runspec.CanonicalHash(plan)
 	jobHash, _ := runspec.CanonicalHash(job)
@@ -88,7 +89,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	if mode == "result_refused" {
 		s.reject = runstate.CauseReport
 	}
-	input, err := NewNodeInput(AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: string(planHash), Plan: plan}, row, resolved, nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
+	input, err := NewNodeInput(AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: string(planHash), Plan: plan}, row, resolved, nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +104,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 		Start: func(_ context.Context, in NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
 			process := newExecutionSDK(plan, in, mode, trace)
 			if mode == "drift" {
-				process.plan.Jobs = []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "changed"}}}}
+				process.plan.Jobs = []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "changed"}}}}
 			}
 			*processes = append(*processes, process)
 			return process, nil
@@ -123,7 +124,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 			Secrets:   noV2Secrets{},
 		},
 	}
-	setTestExecutor(&dependencies, func(_ context.Context, layer testPolicyName, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&dependencies, func(_ context.Context, layer testPolicyName, _ NodeInput, _ nodewire.JobSpec) (ExecutorFinalizer, error) {
 		*trace = append(*trace, layer.Name+":in")
 		return func(context.Context, NodeInput, *runstate.NodeResult) error {
 			*trace = append(*trace, layer.Name+":out")

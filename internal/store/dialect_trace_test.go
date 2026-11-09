@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type dialectCommand struct {
@@ -84,8 +84,8 @@ func replayDialectTrace(t *testing.T, target *storetest.Target, commands []diale
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	s.SetTestClock(t, func() time.Time { return now })
 	// A named owner award seeds the lifecycle; queue selection has its own reference model.
-	tenant, plan, err := storePlanSealRequestFor(t.Context(), s, string(acceptanceTeam), true, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-		doc.Concurrency = []nodeproto.ConcurrencySpec{admissionGroup(1, 1)}
+	tenant, plan, err := storePlanSealRequestFor(t.Context(), s, string(acceptanceTeam), true, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
+		doc.Concurrency = []nodewire.ConcurrencySpec{admissionGroup(1, 1)}
 		tenant, err := s.ForTeam(t.Context(), acceptanceTeam)
 		if err != nil {
 			t.Fatal(err)

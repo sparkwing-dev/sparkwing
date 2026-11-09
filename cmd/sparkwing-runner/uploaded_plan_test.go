@@ -15,15 +15,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
-
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 type uploadedBundle []byte
@@ -64,7 +64,7 @@ func TestUploadedGoPipelinePlansThroughRunner(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("go.mod", "module uploaded-pipeline\ngo 1.26\nrequire github.com/sparkwing-dev/sparkwing v0.68.2\nreplace github.com/sparkwing-dev/sparkwing => "+filepath.ToSlash(repo)+"\n")
+	write("go.mod", "module uploaded-pipeline\ngo 1.26\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.68.2\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => "+filepath.ToSlash(filepath.Join(repo, "sparkwing"))+"\n")
 	write("main.go", `package main
 import("context"; "github.com/sparkwing-dev/sparkwing/sparkwing")
 type pipeline struct { sparkwing.Base }
@@ -100,7 +100,7 @@ func main(){sparkwing.Register[inputs]("gate",func() sparkwing.Pipeline[inputs]{
 		t.Fatal(err)
 	}
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
-	base := procenv.Base{Local: true, Captured: testgit.Env(os.Environ())}
+	base := procenv.Base{Local: true, Captured: gitcontrol.Env(os.Environ())}
 	entry, err := source.Acquire(t.Context(), source.Spec{RepoKey: "git:example.test/team/repo", RemoteURL: "https://example.test/team/repo", SHA: sha, BundleDigest: hex.EncodeToString(digest[:])}, source.Options{Access: uploadedBundle(body), BundleTransport: uploadedBundle(body), Workspace: filepath.Join(root, "workspaces"), Engines: resolver, Target: target, Base: base})
 	if err != nil {
 		t.Fatalf("uploaded Go pipeline acquisition through sparkwing-runner: %v", err)
@@ -111,8 +111,8 @@ func main(){sparkwing.Register[inputs]("gate",func() sparkwing.Pipeline[inputs]{
 		}
 	}()
 	config := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{}}
-	planner := nodehost.SDKPlanner{Start: config.StartPlanning, EnsureEngine: resolver.Ensure, Masker: secrets.NewMasker(), Log: func(context.Context, nodeproto.FrameLog) error { return nil }}
-	prepared, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{Entry: entry, Runner: nodeproto.RunnerIdentity{Name: "cloud", Type: "cloud", Labels: []string{}}, Entrypoint: "gate", Run: nodeproto.RunContext{RunID: "uploaded-run", Pipeline: "gate"}}, nodehost.PlanningInput{})
+	planner := nodehost.SDKPlanner{Start: config.StartPlanning, EnsureEngine: resolver.Ensure, Masker: secrets.NewMasker(), Log: func(context.Context, nodewire.FrameLog) error { return nil }}
+	prepared, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{Entry: entry, Runner: nodewire.RunnerIdentity{Name: "cloud", Type: "cloud", Labels: []string{}}, Entrypoint: "gate", Run: nodewire.RunContext{RunID: "uploaded-run", Pipeline: "gate"}}, nodehost.PlanningInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func main(){sparkwing.Register[inputs]("gate",func() sparkwing.Pipeline[inputs]{
 	if err != nil {
 		t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		t.Fatal(err)
 	}

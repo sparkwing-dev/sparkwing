@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
@@ -81,7 +81,7 @@ func TestAcceptedPlanUsesSharedStrictValidator(t *testing.T) {
 		`{"jobs":[{"id":"job","children":[{"pipeline":"deploy","repository":"github.com/acme/repo"}]}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
+			tenant, request := sharedSettingsPlan(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}})
 			request.Seal.Plan = []byte(body)
 			if _, err := tenant.AcceptPlan(t.Context(), request); err == nil {
 				t.Fatal("invalid plan accepted")
@@ -102,16 +102,16 @@ func TestAcceptedPlanIdentifierSecretsProperty(t *testing.T) {
 		if random.IntN(4) == 0 {
 			secret = "xxxx"
 		}
-		tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
+		tenant, request := sharedSettingsPlan(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}})
 		request.Seal.Resolved.Args["secret"] = secret
-		request.Seal.Resolved.ArgumentDeclarations = []nodeproto.ArgumentDescription{{Name: "secret", Type: "string", Secret: true, Default: &secret}}
+		request.Seal.Resolved.ArgumentDeclarations = []nodewire.ArgumentDescription{{Name: "secret", Type: "string", Secret: true, Default: &secret}}
 		request.Seal.Resolved.SecretArgs = []string{"message", "secret"}
-		for _, job := range []nodeproto.JobSpec{
-			{ID: "job-" + secret, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-			{ID: "job", Groups: []string{"group-" + secret}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-			{ID: "job", Steps: []nodeproto.StepSpec{{ID: "step-" + secret}}},
+		for _, job := range []nodewire.JobSpec{
+			{ID: "job-" + secret, Steps: []nodewire.StepSpec{{ID: "body"}}},
+			{ID: "job", Groups: []string{"group-" + secret}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+			{ID: "job", Steps: []nodewire.StepSpec{{ID: "step-" + secret}}},
 		} {
-			body, err := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
+			body, err := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
 			if err != nil {
 				t.Fatal(err)
 			}

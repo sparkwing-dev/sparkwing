@@ -3,15 +3,17 @@ package acceptance_test
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 	"reflect"
 	"strings"
 	"testing"
 	"testing/synctest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func testGoSDKFakeHostAttributeMasks(t *testing.T) {
@@ -33,7 +35,7 @@ func testGoSDKFakeHostAttributeMasks(t *testing.T) {
 				"TOKEN": {Value: test.secret, Masked: true},
 			}})
 			t.Cleanup(func() { _ = host.Close() })
-			sdkserve.ServicesFrom(host.Context(t.Context())).Emit(nodeproto.FrameLog{
+			sdkserve.ServicesFrom(host.Context(t.Context())).Emit(nodewire.FrameLog{
 				Message: "visible", Attrs: json.RawMessage(test.attrs),
 			})
 			records := host.Records()

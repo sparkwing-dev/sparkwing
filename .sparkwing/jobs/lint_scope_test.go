@@ -8,7 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 var productDirs = []string{"cmd", "internal", "pkg", "sparkwing"}

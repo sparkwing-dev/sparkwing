@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 // OutputData binds job outputs to their exact uploader and authorized records.
@@ -29,8 +29,8 @@ func (d OutputData) Put(ctx context.Context, body []byte) (Record, error) {
 	if d.Bytes == nil || d.Records == nil {
 		return Record{}, fmt.Errorf("output requires records and bytes")
 	}
-	if int64(len(body)) > limits.NodeOutputBytes {
-		return Record{}, fmt.Errorf("output exceeds %d bytes", limits.NodeOutputBytes)
+	if int64(len(body)) > protolimits.NodeOutputBytes {
+		return Record{}, fmt.Errorf("output exceeds %d bytes", protolimits.NodeOutputBytes)
 	}
 	if err := AuthorizeUpload(d.Authority, d.Identity, KindOutput); err != nil {
 		return Record{}, err

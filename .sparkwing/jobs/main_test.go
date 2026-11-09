@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 // safety: a pipeline node hands its children the machine's sparkwing home, so
@@ -14,7 +14,7 @@ import (
 // runs store. Filesystem fixtures choose a test-scoped home, while this
 // fallback protects helpers started without a filesystem fixture.
 func TestMain(m *testing.M) {
-	if err := testgit.Unbind(); err != nil {
+	if err := gitcontrol.Unbind(); err != nil {
 		fmt.Fprintln(os.Stderr, "jobs test: scrub Git environment:", err)
 		os.Exit(1)
 	}

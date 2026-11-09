@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
@@ -26,8 +26,8 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			s.SetTestClock(t, func() time.Time { return now })
 			job := fmt.Sprintf("job-%x", random.Uint64())
 			label := fmt.Sprintf("tool-%x", random.Uint64())
-			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-				doc.Jobs = []nodeproto.JobSpec{{ID: job, Requires: []string{label}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
+			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
+				doc.Jobs = []nodewire.JobSpec{{ID: job, Requires: []string{label}, Steps: []nodewire.StepSpec{{ID: "body"}}}}
 			})
 			if err != nil {
 				t.Fatal(err)

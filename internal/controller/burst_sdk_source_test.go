@@ -20,12 +20,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
@@ -42,7 +42,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 	t.Setenv("GOPROXY", "off")
 	t.Setenv("TOKEN", "ambient-requester-value-never-forward")
 	repo, sha, engines, selected := burstSDKSourceFixture(t, "")
-	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
+	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodewire.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
 		t.Fatal(err)
 	}

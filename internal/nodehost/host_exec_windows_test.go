@@ -15,19 +15,18 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/windows"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"golang.org/x/sys/windows"
 )
 
-func windowsHostRequest(t *testing.T, mode string) nodeproto.ExecRequest {
+func windowsHostRequest(t *testing.T, mode string) nodewire.ExecRequest {
 	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return nodeproto.ExecRequest{ID: "windows", Argv: []string{executable, "-test.run=^TestWindowsHostCommandHelper$", "--", "--host-command", mode}, Dir: t.TempDir(), Env: os.Environ()}
+	return nodewire.ExecRequest{ID: "windows", Argv: []string{executable, "-test.run=^TestWindowsHostCommandHelper$", "--", "--host-command", mode}, Dir: t.TempDir(), Env: os.Environ()}
 }
 
 func TestWindowsHostCommandHelper(t *testing.T) {
@@ -115,7 +114,7 @@ func TestWindowsHostCommandCancellationKillsTree(t *testing.T) {
 				}
 				return nil
 			}
-			finished := make(chan nodeproto.ExecDone, 1)
+			finished := make(chan nodewire.ExecDone, 1)
 			go func() {
 				done, session := runHostCommand(req, nil, kill, closed, sink, nil)
 				if session != nil {
@@ -283,7 +282,7 @@ func TestWindowsHostCommandAcceptsGitBash(t *testing.T) {
 func TestWindowsHostCommandLongBashProgram(t *testing.T) {
 	shell := windowsGitBash(t)
 	for _, program := range []string{`read -r value; printf '%s' "$value"; bash -c 'test -z "${SPARKWING_BASH_PROGRAM+x}"'`, strings.Repeat(":\n", 6000) + `printf 'input with spaces'`} {
-		req := nodeproto.ExecRequest{ID: "bash", Argv: []string{shell, "-c", program}, Dir: t.TempDir(), Env: append(os.Environ(), "SPARKWING_BASH_PROGRAM=exit 42"), Stdin: []byte("input with spaces\n"), Capture: true}
+		req := nodewire.ExecRequest{ID: "bash", Argv: []string{shell, "-c", program}, Dir: t.TempDir(), Env: append(os.Environ(), "SPARKWING_BASH_PROGRAM=exit 42"), Stdin: []byte("input with spaces\n"), Capture: true}
 		var output, diagnostic strings.Builder
 		done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), func(stream string, chunk []byte, _ bool) error {
 			if stream == "stdout" {
@@ -330,7 +329,7 @@ func TestWindowsHostCommandRejectsWSLBash(t *testing.T) {
 	}
 	t.Setenv("SystemRoot", root)
 	for _, name := range []string{tool, strings.ToUpper(tool), `System32\bash.exe`} {
-		req := nodeproto.ExecRequest{ID: "wsl", Argv: []string{name, "-c", "printf unexpected"}, Dir: root, Env: os.Environ(), Capture: true}
+		req := nodewire.ExecRequest{ID: "wsl", Argv: []string{name, "-c", "printf unexpected"}, Dir: root, Env: os.Environ(), Capture: true}
 		done, session := runHostCommand(req, nil, nil, nil, func(string, []byte, bool) error { return nil }, nil)
 		if session != nil {
 			if err := endCommandSessions([]*commandSession{session}); err != nil {
@@ -385,7 +384,7 @@ func TestWindowsCapturedEnvironmentIgnoresDriveMetadata(t *testing.T) {
 func TestWindowsHostCommandFiltersEngineCredentials(t *testing.T) {
 	t.Setenv("SPARKWING_NODE_TOKEN", "fixture-only")
 	for _, explicit := range []bool{false, true} {
-		req := nodeproto.ExecRequest{ID: "credentials", Argv: []string{"cmd", "/c", "if defined SPARKWING_NODE_TOKEN (exit 23) else (echo filtered)"}, Dir: t.TempDir(), Env: os.Environ(), Capture: true}
+		req := nodewire.ExecRequest{ID: "credentials", Argv: []string{"cmd", "/c", "if defined SPARKWING_NODE_TOKEN (exit 23) else (echo filtered)"}, Dir: t.TempDir(), Env: os.Environ(), Capture: true}
 		if explicit {
 			req.Env = append(req.Env, "SPARKWING_NODE_TOKEN=fixture-override")
 		}
@@ -426,7 +425,7 @@ func TestWindowsHostCommandUsesCommandPath(t *testing.T) {
 		{`.\host-tool`, t.TempDir()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := nodeproto.ExecRequest{ID: "lookup", Argv: []string{tc.name, "/c", "echo resolved"}, Dir: directory, Env: append(os.Environ(), "PATH="+tc.path, "PATHEXT=.EXE"), Capture: true}
+			req := nodewire.ExecRequest{ID: "lookup", Argv: []string{tc.name, "/c", "echo resolved"}, Dir: directory, Env: append(os.Environ(), "PATH="+tc.path, "PATHEXT=.EXE"), Capture: true}
 			var output strings.Builder
 			done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), func(stream string, chunk []byte, _ bool) error {
 				if stream == "stdout" {

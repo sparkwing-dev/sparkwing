@@ -2,9 +2,10 @@ module sparkwing-k8s-e2e-pipelines
 
 go 1.26.0
 
-toolchain go1.26.10
-
-require github.com/sparkwing-dev/sparkwing v0.71.0
+require (
+	github.com/sparkwing-dev/sparkwing v0.71.0
+	github.com/sparkwing-dev/sparkwing/sparkwing v0.71.0
+)
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
@@ -45,5 +46,7 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 )
 
-// Exercise the checkout SDK while release tooling keeps the require pin coherent.
 replace github.com/sparkwing-dev/sparkwing => ../../../..
+
+// Exercise the checkout SDK while release tooling keeps the require pin coherent.
+replace github.com/sparkwing-dev/sparkwing/sparkwing => ../../../../sparkwing

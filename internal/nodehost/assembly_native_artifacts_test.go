@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeServicesPublishesAndConsumesArtifacts(t *testing.T) {
@@ -36,12 +36,12 @@ func TestNativeServicesPublishesAndConsumesArtifacts(t *testing.T) {
 				t.Fatal("production native host has no artifact adapter")
 			}
 			input, backend := nativeArtifactInput(t)
-			job := nodeproto.JobSpec{ID: "job", Artifacts: []string{"result.txt"}}
+			job := nodewire.JobSpec{ID: "job", Artifacts: []string{"result.txt"}}
 			if consume {
 				key := blob.ResultRecordKey(runspec.AttemptIdentity{Team: "default", RunID: "run", NodeID: "producer", Generation: 4, Attempt: 2}, input.Storage.Authority.Repo, input.Storage.Authority.Ref.Scope, "burst", blob.KindManifest)
 				state.node = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "producer"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: 4, Attempt: 2, ManifestRecord: &key}
 				job.Artifacts = nil
-				job.Consumes = []nodeproto.ArtifactInput{{Producer: "producer", Into: "received"}}
+				job.Consumes = []nodewire.ArtifactInput{{Producer: "producer", Into: "received"}}
 				_, err = prepare(t.Context(), input, job)
 				if !errors.Is(err, backend.failure) || backend.lookup.Key != key || backend.lookup.Authority != input.Storage.Authority {
 					t.Fatalf("native artifact consumption bypassed authenticated records: %+v %v", backend.lookup, err)
@@ -111,7 +111,7 @@ func TestNativeServicesRefusesCacheWithoutStorage(t *testing.T) {
 	})
 	input, _ := nativeArtifactInput(t)
 	input.Storage = StorageBinding{}
-	_, err = services.Config.Executor.PrepareCaches(t.Context(), input, nodeproto.JobSpec{ID: "job", Caches: []nodeproto.CacheSpec{{Name: "modules", Path: "modules"}}})
+	_, err = services.Config.Executor.PrepareCaches(t.Context(), input, nodewire.JobSpec{ID: "job", Caches: []nodewire.CacheSpec{{Name: "modules", Path: "modules"}}})
 	if err == nil {
 		t.Fatal("artifact wiring silently skipped a declared dependency cache")
 	}
@@ -159,7 +159,7 @@ func FuzzNativeArtifactPublicationKeepsAwardScope(f *testing.F) {
 				t.Fatal(err)
 			}
 		}
-		finish, err := services.Config.Executor.PrepareArtifacts(t.Context(), input, nodeproto.JobSpec{ID: input.NodeID, Artifacts: []string{"result.txt"}})
+		finish, err := services.Config.Executor.PrepareArtifacts(t.Context(), input, nodewire.JobSpec{ID: input.NodeID, Artifacts: []string{"result.txt"}})
 		if err != nil || finish == nil {
 			t.Fatalf("prepare artifacts: %v", err)
 		}

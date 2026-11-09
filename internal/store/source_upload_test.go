@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ChildSourceBundleRegressions checks uploaded-source inheritance in the supplied store dialect.
@@ -99,15 +99,15 @@ func childSourceBundleFixture(t *testing.T, s *Store, crossRepository bool) (*Te
 	s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 	})
-	children := []nodeproto.ChildPipeline{{Pipeline: "child", Repository: "gh:1"}}
+	children := []nodewire.ChildPipeline{{Pipeline: "child", Repository: "gh:1"}}
 	if crossRepository {
-		children = append(children, nodeproto.ChildPipeline{Pipeline: "child", Repository: "gh:2"})
+		children = append(children, nodewire.ChildPipeline{Pipeline: "child", Repository: "gh:2"})
 	}
 	authority := sourceBundleChildJob(t, s, "run", children)
 	return tenant, IntakeRequest{Authority: authority, IdempotencyKey: "invocation", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "child", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: parent.Request.Request.Git, Source: parent.Request.Request.Source, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}}}
 }
 
-func sourceBundleChildJob(t *testing.T, s *Store, run string, children []nodeproto.ChildPipeline) capability.AuthorityRef {
+func sourceBundleChildJob(t *testing.T, s *Store, run string, children []nodewire.ChildPipeline) capability.AuthorityRef {
 	t.Helper()
 	claim := authorityRoot("claim-"+run, "a")
 	claim.Grants = []capability.Grant{capability.ChildrenStart}
@@ -149,7 +149,7 @@ func childSourceBundleGrandchild(t *testing.T, open func(*testing.T) *Store) {
 		t.Fatal(err)
 	}
 	tenant.s.testOnlyExec(t, `DELETE FROM blob_records WHERE team='a' AND run_id='run' AND kind='source_bundle'`)
-	request.Authority = sourceBundleChildJob(t, tenant.s, child.RunID, []nodeproto.ChildPipeline{{Pipeline: "grandchild", Repository: "gh:1"}})
+	request.Authority = sourceBundleChildJob(t, tenant.s, child.RunID, []nodewire.ChildPipeline{{Pipeline: "grandchild", Repository: "gh:1"}})
 	request.Request.Pipeline = "grandchild"
 	request.Request.Lineage = runspec.Lineage{ParentRunID: child.RunID, ParentJobID: "job"}
 	grandchild, err := tenant.AdmitRun(t.Context(), request)

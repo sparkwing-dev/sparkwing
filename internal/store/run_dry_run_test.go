@@ -3,18 +3,18 @@ package store_test
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRunCompletionRecordsDryRun(t *testing.T) {
 	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
-	tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+	tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(input *store.IntakeRequest, doc *nodewire.PlanDoc) {
 		input.Request.Options.DryRun = runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "dry_run"}}
-		doc.Jobs = []nodeproto.JobSpec{}
+		doc.Jobs = []nodewire.JobSpec{}
 	})
 	if err != nil {
 		t.Fatal(err)

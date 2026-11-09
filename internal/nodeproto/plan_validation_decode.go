@@ -8,25 +8,26 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func planInvalid(path, reason string) error {
 	return &apierr.Error{Code: apierr.PlanInvalid, Message: fmt.Sprintf("invalid plan at %s: %s", path, reason)}
 }
 
-func strictPlanDecode(raw json.RawMessage, secrets SecretMatcher) (PlanDoc, error) {
-	var plan PlanDoc
+func strictPlanDecode(raw json.RawMessage, secrets SecretMatcher) (nodewire.PlanDoc, error) {
+	var plan nodewire.PlanDoc
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := checkPlanValue(decoder, reflect.TypeOf(plan), "plan", secrets); err != nil {
-		return PlanDoc{}, err
+		return nodewire.PlanDoc{}, err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
-		return PlanDoc{}, planInvalid("plan", "trailing JSON or malformed document")
+		return nodewire.PlanDoc{}, planInvalid("plan", "trailing JSON or malformed document")
 	}
 	if err := json.Unmarshal(raw, &plan); err != nil {
-		return PlanDoc{}, planInvalid("plan", "field has an invalid type or number")
+		return nodewire.PlanDoc{}, planInvalid("plan", "field has an invalid type or number")
 	}
 	return plan, nil
 }
@@ -77,7 +78,7 @@ func checkPlanValue(decoder *json.Decoder, kind reflect.Type, path string, secre
 				childType = kind.Elem()
 			} else {
 				var found bool
-				childType, found = planFieldType(kind, key)
+				childType, found = nodewire.JSONFieldType(kind, key)
 				if !found {
 					return &apierr.Error{Code: apierr.PlanInvalid, Message: fmt.Sprintf("invalid plan at %s: unknown field", childPath), Hint: fmt.Sprintf("Upgrade the SDK or remove %s", childPath)}
 				}
@@ -120,14 +121,4 @@ func checkPlanValue(decoder *json.Decoder, kind reflect.Type, path string, secre
 		return planInvalid(path, "malformed JSON")
 	}
 	return nil
-}
-
-func planFieldType(kind reflect.Type, key string) (reflect.Type, bool) {
-	for i := 0; i < kind.NumField(); i++ {
-		field := kind.Field(i)
-		if strings.Split(field.Tag.Get("json"), ",")[0] == key {
-			return field.Type, true
-		}
-	}
-	return nil, false
 }

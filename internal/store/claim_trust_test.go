@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // Reserved secrets require launcher enrollment; trust stays on the root credential.
@@ -48,8 +48,8 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 	t.Helper()
 	ctx := t.Context()
 	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
-	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-		doc.Jobs = []nodeproto.JobSpec{{ID: "job", Requires: []string{"pool=prod"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
+	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
+		doc.Jobs = []nodewire.JobSpec{{ID: "job", Requires: []string{"pool=prod"}, Steps: []nodewire.StepSpec{{ID: "body"}}}}
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 func TestRunnerTrustIsAnAdminSetCredentialFact(t *testing.T) {
 	ctx := t.Context()
 	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
-	_, plan, err := storePlanSealRequestWith(ctx, s, func(*store.IntakeRequest, *nodeproto.PlanDoc) {})
+	_, plan, err := storePlanSealRequestWith(ctx, s, func(*store.IntakeRequest, *nodewire.PlanDoc) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,8 +161,8 @@ func TestVerifiedWorkOnAPersistentHostWritesItsHostScope(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
 			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
-			tenant, plan, err := storePlanSealRequestWith(ctx, s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-				doc.Jobs = []nodeproto.JobSpec{{ID: "job", Requires: []string{"pool=prod"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
+			tenant, plan, err := storePlanSealRequestWith(ctx, s, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
+				doc.Jobs = []nodewire.JobSpec{{ID: "job", Requires: []string{"pool=prod"}, Steps: []nodewire.StepSpec{{ID: "body"}}}}
 			})
 			if err != nil {
 				t.Fatal(err)

@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	strictjson "sigs.k8s.io/json"
 )
@@ -158,7 +158,7 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 	if output != nil {
 		resultType = reflect.TypeOf(output).Elem()
 	}
-	if resultType == reflect.TypeFor[*nodeproto.JobFailure]() {
+	if resultType == reflect.TypeFor[*nodewire.JobFailure]() {
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 && bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 			return false, json.Unmarshal(data, output)
 		}
@@ -191,7 +191,7 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 		return retry, failure
 	}
 	// safety: recovery carries a persisted inner error as part of its successful result.
-	if _, exists := fields["error"]; exists && resultType != reflect.TypeFor[nodeproto.JobFailure]() {
+	if _, exists := fields["error"]; exists && resultType != reflect.TypeFor[nodewire.JobFailure]() {
 		return false, fmt.Errorf("successful controller response contains an error")
 	}
 	if output == nil {

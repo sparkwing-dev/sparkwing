@@ -9,17 +9,17 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func approvalReaperFixture(t *testing.T, policy string) (*Tenant, runspec.NodeRef, *time.Time, nodeTransition) {
 	t.Helper()
 	timeout := int64(1000)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "gate", Approval: &nodeproto.ApprovalSpec{TimeoutMS: &timeout, OnTimeout: policy}},
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "gate", Approval: &nodewire.ApprovalSpec{TimeoutMS: &timeout, OnTimeout: policy}},
 		{ID: "after", Needs: []string{"gate"}},
 	}}
 	tenant, request, now := planFixture(t, runspec.DispatchController)

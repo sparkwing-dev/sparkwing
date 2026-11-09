@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestHoldLeavesWorkUnchangedUntilRenewal(t *testing.T) {
@@ -173,7 +173,7 @@ func TestHoldRollbackRestoresRunningAward(t *testing.T) {
 func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 	for _, refusal := range []string{"balance", "hold"} {
 		t.Run(refusal, func(t *testing.T) {
-			tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+			tenant, request := sharedSettingsPlan(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
 				{ID: "cloud"}, {ID: "customer"}, {ID: "next", Needs: []string{"customer"}}, {ID: "blocked", Needs: []string{"cloud"}},
 			}})
 			s := tenant.s

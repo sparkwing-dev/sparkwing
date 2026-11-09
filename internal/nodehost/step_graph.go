@@ -9,15 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type stepGraph struct {
-	job      nodeproto.JobSpec
+	job      nodewire.JobSpec
 	skips    map[string]string
-	step     func(context.Context, nodeproto.StepSpec, []string) (json.RawMessage, string, string, error)
+	step     func(context.Context, nodewire.StepSpec, []string) (json.RawMessage, string, string, error)
 	record   func(context.Context, string, string, string, *time.Time, error) error
 	cancel   func(context.Context, string) error
 	failFast func(context.Context, string, []string, time.Duration) error
@@ -38,7 +38,7 @@ func (g stepGraph) run(ctx, parent context.Context) (json.RawMessage, error) {
 	if len(job.Steps) == 0 {
 		return nil, executorError(apierr.PlanInvalid, "executable job has no steps")
 	}
-	steps := make(map[string]nodeproto.StepSpec, len(job.Steps))
+	steps := make(map[string]nodewire.StepSpec, len(job.Steps))
 	pending := make(map[string]bool, len(job.Steps))
 	finished := make(map[string]bool, len(job.Steps))
 	failed := make(map[string]bool, len(job.Steps))

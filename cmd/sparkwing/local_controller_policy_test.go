@@ -15,19 +15,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
@@ -35,6 +32,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type policyListener struct {
@@ -261,7 +260,7 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if _, err := host.Principal(ctx); err != nil {
 		t.Fatal("owner refresh:", err)
 	}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Inline: true, Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Inline: true, Steps: []nodewire.StepSpec{{ID: "run"}}}}}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: award.Claim.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
 	if err != nil {

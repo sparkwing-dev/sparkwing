@@ -4,12 +4,12 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestConcurrentClassificationNeverShrinksTheIntakeSeal(t *testing.T) {
-	tenant, request := sharedSettingsPlan(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
+	tenant, request := sharedSettingsPlan(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}})
 	classified := request
 	classified.Seal.Resolved.SecretArgs = []string{"message"}
 	unclassified := request

@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -23,7 +24,7 @@ func schemaDefinition(t *testing.T, b *schemaBuilder, value schema) schema {
 
 func TestSchemasDescribeSharedJSONInsteadOfStoreRows(t *testing.T) {
 	for _, example := range []any{
-		wire.AnnotationWrite{Annotation: nodeproto.Annotation{Level: "error", Message: "failed"}, StepID: "test"},
+		wire.AnnotationWrite{Annotation: nodewire.Annotation{Level: "error", Message: "failed"}, StepID: "test"},
 		wire.QueuePriorityResult{RunID: "run"},
 		wire.RunDetail{},
 		wire.ScheduleJob{},

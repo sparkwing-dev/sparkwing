@@ -6,16 +6,16 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPlanUnitAcceptsWithoutSchedulingOrFinishingRun(t *testing.T) {
@@ -90,7 +90,7 @@ func TestEvalUnitApprovalPredicateHasNoJobCapacityOrCompute(t *testing.T) {
 	for _, skip := range []bool{false, true} {
 		t.Run(map[bool]string{false: "open", true: "skip"}[skip], func(t *testing.T) {
 			state, host, input := newOwnerFixture(t, true)
-			job := nodeproto.JobSpec{ID: "approval", Approval: &nodeproto.ApprovalSpec{Message: "ship?"}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"guard"}}}
+			job := nodewire.JobSpec{ID: "approval", Approval: &nodewire.ApprovalSpec{Message: "ship?"}, Closures: nodewire.ClosureSpec{SkipIf: []string{"guard"}}}
 			spec, _ := json.Marshal(job)
 			row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "approval"}, Spec: spec, SpecHash: "approval-hash", Status: runstate.StatusPending}
 			state.snapshot.Nodes = []runstate.NodeRow{row}

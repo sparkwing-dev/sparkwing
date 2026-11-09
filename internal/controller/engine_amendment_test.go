@@ -11,16 +11,16 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type runnerAdmissionFunc func(context.Context, string) error
@@ -162,7 +162,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 func TestEngineReadFailureUsesAuthorizedSourceGeneration(t *testing.T) {
 	server, _ := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
-	failure := nodeproto.JobFailure{Job: "source", Stage: "verify", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked error"}}
+	failure := nodewire.JobFailure{Job: "source", Stage: "verify", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked error"}}
 	raw, err := json.Marshal(failure)
 	if err != nil {
 		t.Fatal(err)

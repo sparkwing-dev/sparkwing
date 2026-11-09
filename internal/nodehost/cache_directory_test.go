@@ -9,10 +9,10 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestDirectoryCacheKeyMatchesSDK(t *testing.T) {
@@ -26,7 +26,7 @@ func TestDirectoryCacheKeyMatchesSDK(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := directoryCacheKey(t.Context(), workspace, nodeproto.CacheSpec{Name: name, Path: name, KeyScope: name, KeyFiles: []string{"missing", "lock"}})
+		got, err := directoryCacheKey(t.Context(), workspace, nodewire.CacheSpec{Name: name, Path: name, KeyScope: name, KeyFiles: []string{"missing", "lock"}})
 		return err == nil && got == want
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
@@ -44,10 +44,10 @@ func TestCacheDirectoryOnASharedHostIgnoresTheJobsEnvironment(t *testing.T) {
 			if resolver == "npm" {
 				name = "npm_config_cache"
 			}
-			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{name: {Value: "/etc/sparkwing/credentials"}}}
+			job := nodewire.JobSpec{ID: input.NodeID, Env: map[string]nodewire.EnvValue{name: {Value: "/etc/sparkwing/credentials"}}}
 			state.row.Spec, _ = json.Marshal(job)
 			environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{name + "=" + host, "PATH="}, SubmitEnvAllow: []string{name}, Masker: secrets.NewMasker()}}
-			got, err := environments.cacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
+			got, err := environments.cacheDirectory(t.Context(), input, nodewire.CacheSpec{Resolver: resolver})
 			if err != nil || got != host {
 				t.Fatalf("resolved cache=%q, %v", got, err)
 			}
@@ -61,7 +61,7 @@ func TestCacheDirectoryDefaultsUseCapturedHome(t *testing.T) {
 	home := t.TempDir()
 	environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{"HOME=" + home, "USERPROFILE=" + home, "PATH="}, Masker: secrets.NewMasker()}}
 	for _, resolver := range []string{"go-modules", "npm"} {
-		got, err := environments.cacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
+		got, err := environments.cacheDirectory(t.Context(), input, nodewire.CacheSpec{Resolver: resolver})
 		want := filepath.Join(home, "go", "pkg", "mod")
 		if resolver == "npm" {
 			want = filepath.Join(home, ".npm")

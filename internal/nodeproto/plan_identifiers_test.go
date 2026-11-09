@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestVisitPlanIdentifiersCoversValidatorFields(t *testing.T) {
-	closure := ClosureSpec{SkipIf: []string{"skip"}, BeforeRun: []string{"before"}, AfterRun: []string{"after"}, Generate: []string{"generate"}, Verify: "verify", MemoKey: "memo"}
-	job := JobSpec{Children: []ChildPipeline{{Pipeline: "child", Repository: "git:host/org/repo"}}, ID: "job", Needs: []string{"dep"}, NeedsIfPresent: []string{"maybe"}, NeedsGenerated: []string{"generated"}, Groups: []string{"group"}, Requires: []string{"require"}, Prefers: []string{"prefer"}, Artifacts: []string{"artifact"}, OnFailureOf: "failure", ResultStep: "result", Caches: []CacheSpec{{Name: "cache", Path: "excluded", Resolver: "excluded", KeyScope: "excluded", KeyFiles: []string{"excluded"}}}, Consumes: []ArtifactInput{{Producer: "producer", Into: "excluded"}}, References: []PipelineReference{{Pipeline: "pipeline", Job: "reference"}}, Env: map[string]EnvValue{"ENV": {Value: "excluded"}}, Concurrency: []ConcurrencySpec{{Group: "job-concurrency"}}, Closures: closure, Steps: []StepSpec{{ID: "step", Needs: []string{"step-dep"}, Groups: []string{"step-group"}, Risks: []string{"excluded"}, Closures: closure}}}
-	plan := PlanDoc{Jobs: []JobSpec{job}, Concurrency: []ConcurrencySpec{{Group: "plan-concurrency"}}}
+	closure := nodewire.ClosureSpec{SkipIf: []string{"skip"}, BeforeRun: []string{"before"}, AfterRun: []string{"after"}, Generate: []string{"generate"}, Verify: "verify", MemoKey: "memo"}
+	job := nodewire.JobSpec{Children: []nodewire.ChildPipeline{{Pipeline: "child", Repository: "git:host/org/repo"}}, ID: "job", Needs: []string{"dep"}, NeedsIfPresent: []string{"maybe"}, NeedsGenerated: []string{"generated"}, Groups: []string{"group"}, Requires: []string{"require"}, Prefers: []string{"prefer"}, Artifacts: []string{"artifact"}, OnFailureOf: "failure", ResultStep: "result", Caches: []nodewire.CacheSpec{{Name: "cache", Path: "excluded", Resolver: "excluded", KeyScope: "excluded", KeyFiles: []string{"excluded"}}}, Consumes: []nodewire.ArtifactInput{{Producer: "producer", Into: "excluded"}}, References: []nodewire.PipelineReference{{Pipeline: "pipeline", Job: "reference"}}, Env: map[string]nodewire.EnvValue{"ENV": {Value: "excluded"}}, Concurrency: []nodewire.ConcurrencySpec{{Group: "job-concurrency"}}, Closures: closure, Steps: []nodewire.StepSpec{{ID: "step", Needs: []string{"step-dep"}, Groups: []string{"step-group"}, Risks: []string{"excluded"}, Closures: closure}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}, Concurrency: []nodewire.ConcurrencySpec{{Group: "plan-concurrency"}}}
 	want := map[string]string{"jobs[0].children[0].pipeline": "child", "plan.concurrency[0].group": "plan-concurrency", "jobs[0].id": "job", "jobs[0].deps[0]": "dep", "jobs[0].deps_if_present[0]": "maybe", "jobs[0].needs_generated[0]": "generated", "jobs[0].groups[0]": "group", "jobs[0].requires[0]": "require", "jobs[0].prefers[0]": "prefer", "jobs[0].artifacts[0]": "artifact", "jobs[0].on_failure_of": "failure", "jobs[0].result_step": "result", "jobs[0].caches[0].name": "cache", "jobs[0].consumes[0].producer": "producer", "jobs[0].pipeline_refs[0].pipeline": "pipeline", "jobs[0].pipeline_refs[0].job": "reference", "jobs[0].env": "ENV", "jobs[0].concurrency[0].group": "job-concurrency", "jobs[0].steps[0].id": "step", "jobs[0].steps[0].needs[0]": "step-dep", "jobs[0].steps[0].groups[0]": "step-group"}
 	for _, prefix := range []string{"jobs[0].closures.", "jobs[0].steps[0].closures."} {
 		for field, value := range map[string]string{"skip_if": "skip", "before_run": "before", "after_run": "after", "generate": "generate", "verify": "verify", "memo_key": "memo"} {
@@ -36,13 +38,13 @@ func FuzzVisitPlanIdentifiers(f *testing.F) {
 	}
 	f.Add("", uint8(24))
 	f.Fuzz(func(t *testing.T, value string, field uint8) {
-		plan := PlanDoc{Jobs: []JobSpec{secretIdentifierJob(value, field%35%26)}}
+		plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{secretIdentifierJob(value, field%35%26)}}
 		if field%35 >= 26 {
-			plan.Jobs = []JobSpec{{ID: "job", Steps: []StepSpec{{ID: "run"}}}}
+			plan.Jobs = []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "run"}}}}
 		}
 		switch field % 35 {
 		case 26:
-			plan.Concurrency = []ConcurrencySpec{{Group: value}}
+			plan.Concurrency = []nodewire.ConcurrencySpec{{Group: value}}
 		case 27:
 			plan.Jobs[0].Steps[0].Closures.SkipIf = []string{value}
 		case 28:
@@ -56,9 +58,9 @@ func FuzzVisitPlanIdentifiers(f *testing.F) {
 		case 32:
 			plan.Jobs[0].Steps[0].Closures.Generate = []string{value}
 		case 33:
-			plan.Jobs[0].Caches = []CacheSpec{{Name: value}}
+			plan.Jobs[0].Caches = []nodewire.CacheSpec{{Name: value}}
 		case 34:
-			plan.Jobs[0].References = []PipelineReference{{Pipeline: value, Job: value}}
+			plan.Jobs[0].References = []nodewire.PipelineReference{{Pipeline: value, Job: value}}
 		}
 		found := false
 		sentinel := errors.New("visitor stopped")

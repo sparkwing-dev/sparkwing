@@ -3,6 +3,8 @@ package nodeproto
 import (
 	"encoding/json"
 	"testing"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestEvalValueKinds(t *testing.T) {
@@ -21,12 +23,12 @@ func TestEvalValueKinds(t *testing.T) {
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			for _, raw := range tc.valid {
-				if err := (EvalResult{Value: json.RawMessage(raw)}).ValidateValue(tc.kind); err != nil {
+				if err := ValidateEvalValue(nodewire.EvalResult{Value: json.RawMessage(raw)}, tc.kind); err != nil {
 					t.Errorf("valid value %s: %v", raw, err)
 				}
 			}
 			for _, raw := range append(tc.invalid, "", "null null") {
-				if err := (EvalResult{Value: json.RawMessage(raw)}).ValidateValue(tc.kind); err == nil {
+				if err := ValidateEvalValue(nodewire.EvalResult{Value: json.RawMessage(raw)}, tc.kind); err == nil {
 					t.Errorf("accepted invalid value %s", raw)
 				}
 			}

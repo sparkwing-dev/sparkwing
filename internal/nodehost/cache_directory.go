@@ -11,15 +11,15 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // cacheDirectory resolves package-manager caches: from the persisted job environment on
 // the run owner's own machine, and from the host's own environment everywhere else.
-func (e SDKEnvironment) cacheDirectory(ctx context.Context, input NodeInput, cache nodeproto.CacheSpec) (string, error) {
-	if cache.Resolver != nodeproto.CacheResolverGoModules && cache.Resolver != nodeproto.CacheResolverNpm || input.Entry == nil || input.Entry.Directory == "" {
+func (e SDKEnvironment) cacheDirectory(ctx context.Context, input NodeInput, cache nodewire.CacheSpec) (string, error) {
+	if cache.Resolver != nodewire.CacheResolverGoModules && cache.Resolver != nodewire.CacheResolverNpm || input.Entry == nil || input.Entry.Directory == "" {
 		return "", errors.New("cache resolution requires a known resolver and workspace")
 	}
 	var env procenv.Env
@@ -36,7 +36,7 @@ func (e SDKEnvironment) cacheDirectory(ctx context.Context, input NodeInput, cac
 	}
 	lookup := env.Lookup
 	variable := "GOMODCACHE"
-	if cache.Resolver == nodeproto.CacheResolverNpm {
+	if cache.Resolver == nodewire.CacheResolverNpm {
 		variable = "npm_config_cache"
 	}
 	if dir := lookup(variable); dir != "" {
@@ -50,7 +50,7 @@ func (e SDKEnvironment) cacheDirectory(ctx context.Context, input NodeInput, cac
 		return cacheToolPath(name, lookup("PATH"), lookup("PATHEXT"), workdir)
 	}
 	var command *exec.Cmd
-	if cache.Resolver == nodeproto.CacheResolverNpm {
+	if cache.Resolver == nodewire.CacheResolverNpm {
 		command, err = pipelineentry.NPMCommand(ctx, env, runtime.GOOS, lookPath, "config", "get", "cache")
 	} else {
 		var executable string
@@ -107,7 +107,7 @@ func cacheToolPath(name, path, extensions, workdir string) (string, error) {
 func defaultCacheDirectory(resolver string, lookup func(string) string) (string, error) {
 	home := lookup("HOME")
 	if runtime.GOOS == "windows" {
-		if resolver == nodeproto.CacheResolverNpm && lookup("LOCALAPPDATA") != "" {
+		if resolver == nodewire.CacheResolverNpm && lookup("LOCALAPPDATA") != "" {
 			return filepath.Join(lookup("LOCALAPPDATA"), "npm-cache"), nil
 		}
 		if profile := lookup("USERPROFILE"); profile != "" {
@@ -117,7 +117,7 @@ func defaultCacheDirectory(resolver string, lookup func(string) string) (string,
 	if home == "" {
 		return "", errors.New("cache resolver environment has no home directory")
 	}
-	if resolver == nodeproto.CacheResolverGoModules {
+	if resolver == nodewire.CacheResolverGoModules {
 		return filepath.Join(home, "go", "pkg", "mod"), nil
 	}
 	if runtime.GOOS == "windows" {

@@ -3,11 +3,11 @@ package capability
 import (
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // ReadsJobOutput reports the declared same-run output edge between two jobs.
-func ReadsJobOutput(reader, output nodeproto.JobSpec) bool {
+func ReadsJobOutput(reader, output nodewire.JobSpec) bool {
 	if output.ID == "" {
 		return false
 	}
@@ -23,6 +23,6 @@ func ReadsJobOutput(reader, output nodeproto.JobSpec) bool {
 }
 
 // EvaluationReadsDeclarations separates approval predicates from source-only generators.
-func EvaluationReadsDeclarations(job nodeproto.JobSpec) bool {
+func EvaluationReadsDeclarations(job nodewire.JobSpec) bool {
 	return job.Approval != nil && len(job.Closures.SkipIf) > 0
 }

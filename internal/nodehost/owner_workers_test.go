@@ -7,10 +7,10 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestOwnerHostWorkersBoundLocalExecution(t *testing.T) {
@@ -21,7 +21,7 @@ func TestOwnerHostWorkersBoundLocalExecution(t *testing.T) {
 				state.snapshot.Run.Spec.Resolved.Settings.Options.Workers.Value = limit
 				input.Accepted.Spec, _ = json.Marshal(state.snapshot.Run.Spec)
 				for _, id := range []string{"one", "two", "three"} {
-					state.snapshot.Nodes = append(state.snapshot.Nodes, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Spec: marshalEventFixture(t, nodeproto.JobSpec{ID: id}), Status: runstate.StatusPending, SpecHash: "job"})
+					state.snapshot.Nodes = append(state.snapshot.Nodes, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Spec: marshalEventFixture(t, nodewire.JobSpec{ID: id}), Status: runstate.StatusPending, SpecHash: "job"})
 				}
 				host.Decide = store.Decide
 				host.Local = func(runstate.NodeRow) bool { return true }

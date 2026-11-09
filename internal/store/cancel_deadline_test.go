@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestIgnoredCancellationCannotRenewBeyondDrain(t *testing.T) {
@@ -126,7 +126,7 @@ func TestLeaseBoundReferenceModel(t *testing.T) {
 }
 
 func TestControllerOwnerCannotRenewPastCancellationDrain(t *testing.T) {
-	tenant, request, now := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
+	tenant, request, now := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}})
 	controllerJobActor(t, tenant, request.RunID)
 	row, err := tenant.ReadRun(t.Context(), request.RunID)
 	if err != nil || row.Owner == nil {

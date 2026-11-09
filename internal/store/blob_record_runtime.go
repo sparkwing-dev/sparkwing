@@ -9,12 +9,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 // BlobManifestReader separates bounded admission verification from admitted-member reads.
@@ -168,7 +169,7 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 			if err != nil {
 				return blob.Record{}, err
 			}
-			if size > limits.NodeOutputBytes {
+			if size > protolimits.NodeOutputBytes {
 				return blob.Record{}, authorityError(apierr.PayloadTooLarge, "output exceeds the byte limit")
 			}
 		}

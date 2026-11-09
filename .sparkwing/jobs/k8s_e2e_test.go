@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 func TestKubernetesE2EPipelineIsRegisteredAndBounded(t *testing.T) {
@@ -48,7 +49,7 @@ func TestKubernetesE2EUploadedFixtureBuildsWithoutCallerCheckout(t *testing.T) {
 	}
 	cmd = exec.Command("go", "test", "-mod=readonly", "./...")
 	cmd.Dir = filepath.Join(checkout, ".sparkwing")
-	cmd.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false", "GOPROXY=off", "GOSUMDB=off")
+	cmd.Env = append(gitcontrol.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false", "GOPROXY=off", "GOSUMDB=off")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("uploaded Kubernetes fixture: %v\n%s", err, output)
 	}
@@ -779,7 +780,7 @@ func kubernetesTestEnv(t *testing.T, extra ...string) []string {
 	if err := os.WriteFile(license, []byte("offline license fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := append(append([]string{}, testgit.Env(os.Environ())...), "SPARKWING_K8S_E2E_LICENSE_FILE="+filepath.ToSlash(license))
+	env := append(append([]string{}, gitcontrol.Env(os.Environ())...), "SPARKWING_K8S_E2E_LICENSE_FILE="+filepath.ToSlash(license))
 	for _, entry := range extra {
 		name, value, ok := strings.Cut(entry, "=")
 		if runtime.GOOS == "windows" && ok && (strings.HasSuffix(name, "_FILE") || strings.HasSuffix(name, "_DIR") || name == "CALL_RECORD" || name == "artifact_dir") {

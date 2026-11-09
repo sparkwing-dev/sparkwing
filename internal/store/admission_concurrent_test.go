@@ -7,11 +7,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
@@ -29,9 +29,9 @@ func runConcurrentAdmissionSuite(t *testing.T, target func(*testing.T) *storetes
 	for _, seed := range fuzzSeeds(t) {
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
 			capacity := 1 + int(uint64(seed)%3)
-			f := newStoreRecoveryFixtureAt(t, false, target(t), func(doc *nodeproto.PlanDoc) {
+			f := newStoreRecoveryFixtureAt(t, false, target(t), func(doc *nodewire.PlanDoc) {
 				for _, key := range []string{"first", "second"} {
-					doc.Jobs[0].Concurrency = append(doc.Jobs[0].Concurrency, nodeproto.ConcurrencySpec{Group: key, Scope: new("global"), Capacity: new(capacity), Cost: new(1), OnLimit: new("queue")})
+					doc.Jobs[0].Concurrency = append(doc.Jobs[0].Concurrency, nodewire.ConcurrencySpec{Group: key, Scope: new("global"), Capacity: new(capacity), Cost: new(1), OnLimit: new("queue")})
 				}
 			})
 			type contender struct {

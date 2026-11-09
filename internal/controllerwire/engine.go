@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // CreateRunRequest carries user input; authenticated authority and App facts are server-derived.
@@ -92,7 +92,7 @@ type ClaimedUnit struct {
 	JobID                  string                        `json:"job_id,omitempty"`
 	Binding                capability.Binding            `json:"binding"`
 	Capability             string                        `json:"capability"`
-	Runner                 nodeproto.RunnerIdentity      `json:"runner"`
+	Runner                 nodewire.RunnerIdentity       `json:"runner"`
 	Request                runspec.SealedRequest         `json:"request"`
 	Accepted               *PlanAccepted                 `json:"accepted,omitempty"`
 	Execution              *runspec.JobExecutionSettings `json:"execution,omitempty"`
@@ -165,13 +165,13 @@ type RenewalResponse struct {
 
 // JobResult references authorized records, so a raw digest cannot grant reachability.
 type JobResult struct {
-	MaskedError string                `json:"masked_error,omitempty"`
-	Outcome     string                `json:"outcome"`
-	Reason      string                `json:"reason,omitempty"`
-	Failure     *nodeproto.JobFailure `json:"failure,omitempty"`
-	ExitCode    *int                  `json:"exit_code,omitempty"`
-	Output      *blob.RecordKey       `json:"output,omitempty"`
-	Manifest    *blob.RecordKey       `json:"manifest,omitempty"`
+	MaskedError string               `json:"masked_error,omitempty"`
+	Outcome     string               `json:"outcome"`
+	Reason      string               `json:"reason,omitempty"`
+	Failure     *nodewire.JobFailure `json:"failure,omitempty"`
+	ExitCode    *int                 `json:"exit_code,omitempty"`
+	Output      *blob.RecordKey      `json:"output,omitempty"`
+	Manifest    *blob.RecordKey      `json:"manifest,omitempty"`
 }
 
 // JobTransitionRequest carries a transition and the observed source attempt without caller authority.
@@ -203,7 +203,7 @@ type ExpansionSubmission struct {
 }
 
 type ExpandedJob struct {
-	Job       nodeproto.JobSpec            `json:"job"`
+	Job       nodewire.JobSpec             `json:"job"`
 	SpecHash  string                       `json:"spec_hash"`
 	Execution runspec.JobExecutionSettings `json:"execution"`
 	Current   ExecutionJob                 `json:"current"`
@@ -311,20 +311,20 @@ func (r RetryRequest) Validate() error {
 
 // JobDetail is a safe status view, not execution authority or a raw job declaration.
 type JobDetail struct {
-	Reason            string                 `json:"reason,omitempty"`
-	Annotations       []nodeproto.Annotation `json:"annotations,omitempty"`
-	ID                string                 `json:"id"`
-	Status            string                 `json:"status"`
-	Outcome           string                 `json:"outcome,omitempty"`
-	StatusDetail      string                 `json:"status_detail,omitempty"`
-	Error             string                 `json:"error,omitempty"`
-	Generation        int64                  `json:"generation"`
-	Attempt           int64                  `json:"attempt"`
-	StateSeq          int64                  `json:"state_seq"`
-	Expansion         string                 `json:"expansion"`
-	StartedAt         *time.Time             `json:"started_at,omitempty"`
-	FinishedAt        *time.Time             `json:"finished_at,omitempty"`
-	CancelRequestedAt *time.Time             `json:"cancel_requested_at,omitempty"`
+	Reason            string                `json:"reason,omitempty"`
+	Annotations       []nodewire.Annotation `json:"annotations,omitempty"`
+	ID                string                `json:"id"`
+	Status            string                `json:"status"`
+	Outcome           string                `json:"outcome,omitempty"`
+	StatusDetail      string                `json:"status_detail,omitempty"`
+	Error             string                `json:"error,omitempty"`
+	Generation        int64                 `json:"generation"`
+	Attempt           int64                 `json:"attempt"`
+	StateSeq          int64                 `json:"state_seq"`
+	Expansion         string                `json:"expansion"`
+	StartedAt         *time.Time            `json:"started_at,omitempty"`
+	FinishedAt        *time.Time            `json:"finished_at,omitempty"`
+	CancelRequestedAt *time.Time            `json:"cancel_requested_at,omitempty"`
 	// Needs, Groups, OnFailureOf and Approval come from the job's declaration; only run detail fills them.
 	Needs       []string `json:"needs,omitempty"`
 	Groups      []string `json:"groups,omitempty"`
@@ -392,9 +392,9 @@ type ScheduleSnapshot struct {
 
 type ScheduleJob struct {
 	JobDetail
-	Declaration nodeproto.JobSpec `json:"declaration"`
-	Ready       bool              `json:"ready"`
-	Claimed     bool              `json:"claimed"`
+	Declaration nodewire.JobSpec `json:"declaration"`
+	Ready       bool             `json:"ready"`
+	Claimed     bool             `json:"claimed"`
 }
 
 type ScheduleGenerator struct {
@@ -421,6 +421,6 @@ type Controller interface {
 	Finish(context.Context, string, FinishRequest) (Applied, error)
 	Cancel(context.Context, string, CancelRequest) (Applied, error)
 	CancelJob(context.Context, string, string, CancelRequest) (Applied, error)
-	ReadFailure(context.Context, string, string, int64) (*nodeproto.JobFailure, error)
+	ReadFailure(context.Context, string, string, int64) (*nodewire.JobFailure, error)
 	Retry(context.Context, string, RetryRequest) (CreateRunResponse, error)
 }

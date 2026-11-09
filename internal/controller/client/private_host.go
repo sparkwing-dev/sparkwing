@@ -7,13 +7,13 @@ import (
 	"net/url"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // LocalHostClient binds private host state and authority reads to one awarded run.
@@ -167,7 +167,7 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref runspec.NodeRef) (ru
 }
 
 // ReadFailure reads the persisted recovery source under the host's current award.
-func (c *LocalHostClient) ReadFailure(ctx context.Context, source runspec.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+func (c *LocalHostClient) ReadFailure(ctx context.Context, source runspec.NodeRef, generation int64) (*nodewire.JobFailure, error) {
 	if source.RunID != runspec.RunID(c.run) {
 		return nil, localHostClientRefusal()
 	}

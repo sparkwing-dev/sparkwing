@@ -6,18 +6,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestControllerRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 	for _, missing := range []string{"", "records", "run", "node"} {
 		t.Run("missing="+missing, func(t *testing.T) {
-			tenant, plan, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
+			tenant, plan, _ := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
 			s := tenant.s
 			records := &blobRecords{manifests: fakeBlobManifests{}}
 			s.resultRecords, s.materializations = records, records
@@ -123,9 +123,9 @@ type retrySource struct {
 }
 
 // safety: a fresh Cloud host writes each result in the scope a retry reads; the last job fails.
-func retrySourceFixture(t *testing.T, jobs []nodeproto.JobSpec, artifacts bool) retrySource {
+func retrySourceFixture(t *testing.T, jobs []nodewire.JobSpec, artifacts bool) retrySource {
 	t.Helper()
-	tenant, plan, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: jobs})
+	tenant, plan, _ := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: jobs})
 	source := retrySource{tenant: tenant, runID: plan.RunID, reads: fakeBlobManifests{}}
 	records := &blobRecords{manifests: source.reads}
 	tenant.s.resultRecords, tenant.s.materializations = records, records
@@ -210,10 +210,10 @@ func (source retrySource) retry(t *testing.T, mode string) string {
 // Each reused level adds a deferred read round, so reuse that waits for its
 // dependencies must still finish a chain longer than the store's read retries.
 func TestControllerRetryReusesAChainOfStoredResults(t *testing.T) {
-	chain := []nodeproto.JobSpec{{ID: "a"}, {ID: "b", Needs: []string{"a"}}, {ID: "c", Needs: []string{"b"}}, {ID: "d", Needs: []string{"c"}}, {ID: "failed", Needs: []string{"d"}}}
-	pair := []nodeproto.JobSpec{{ID: "a"}, {ID: "b", Needs: []string{"a"}}, {ID: "failed", Needs: []string{"b"}}}
+	chain := []nodewire.JobSpec{{ID: "a"}, {ID: "b", Needs: []string{"a"}}, {ID: "c", Needs: []string{"b"}}, {ID: "d", Needs: []string{"c"}}, {ID: "failed", Needs: []string{"d"}}}
+	pair := []nodewire.JobSpec{{ID: "a"}, {ID: "b", Needs: []string{"a"}}, {ID: "failed", Needs: []string{"b"}}}
 	for name, shape := range map[string]struct {
-		jobs      []nodeproto.JobSpec
+		jobs      []nodewire.JobSpec
 		artifacts bool
 	}{"four outputs": {chain, false}, "two artifact manifests": {pair, true}} {
 		t.Run(name, func(t *testing.T) {
@@ -244,7 +244,7 @@ func TestControllerRetryReusesAChainOfStoredResults(t *testing.T) {
 // A refused source must not stop the controller sweep, which would hold every
 // run after it, so the job runs again instead.
 func TestControllerRetryRunsARefusedReuseAgainAndKeepsSweeping(t *testing.T) {
-	source := retrySourceFixture(t, []nodeproto.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)
+	source := retrySourceFixture(t, []nodewire.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)
 	refused := source.retry(t, "failed")
 	other := source.retry(t, "all")
 	rewriteSchemaExec(t, source.tenant.s.db, `UPDATE nodes SET spec_hash='changed' WHERE team='a' AND run_id=? AND node_id='a'`, source.runID)
@@ -275,7 +275,7 @@ func TestControllerRetryWaitsOutATransientReuseFailure(t *testing.T) {
 		"refusal past its deadline": errors.Join(authorityError(apierr.IllegalTransition, "refused"), context.DeadlineExceeded),
 	} {
 		t.Run(name, func(t *testing.T) {
-			source := retrySourceFixture(t, []nodeproto.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)
+			source := retrySourceFixture(t, []nodewire.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)
 			runID := source.retry(t, "failed")
 			s := source.tenant.s
 			healthy := s.materializations
@@ -300,7 +300,7 @@ func TestControllerRetryWaitsOutATransientReuseFailure(t *testing.T) {
 }
 
 func TestSavepointRollbackForgetsLocksTakenAfterIt(t *testing.T) {
-	source := retrySourceFixture(t, []nodeproto.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)
+	source := retrySourceFixture(t, []nodewire.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)
 	s := source.tenant.s
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		before := len(tx.workLocks)

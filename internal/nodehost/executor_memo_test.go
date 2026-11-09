@@ -12,13 +12,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func executorMemoFixture(t *testing.T, value []byte) (*nodeExecutor, NodeInput, runspec.Spec, nodeproto.JobSpec, *executorSession, *memoBackendFixture) {
+func executorMemoFixture(t *testing.T, value []byte) (*nodeExecutor, NodeInput, runspec.Spec, nodewire.JobSpec, *executorSession, *memoBackendFixture) {
 	t.Helper()
 	input, _, deps, _ := executorFixture(t)
 	var spec runspec.Spec
@@ -31,17 +31,17 @@ func executorMemoFixture(t *testing.T, value []byte) (*nodeExecutor, NodeInput, 
 	input.Storage.Authority = blob.Authority{CapabilityRef: "attempt-storage", Principal: "executor", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}, Repo: "repo", Ref: blob.RefFacts{Scope: blob.RefScope{Writer: "executor"}}}
 	backend := newMemoBackend(blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: outputDigest(value)}}, map[blob.Digest][]byte{outputDigest(value): value})
 	input.Storage.Bytes, input.Storage.Records = backend, backend
-	process := &executorProcess{answer: func(_ context.Context, request nodeproto.Request) (any, error) {
-		if request.Op != nodeproto.OpEval || request.Closure != "memo" {
+	process := &executorProcess{answer: func(_ context.Context, request nodewire.Request) (any, error) {
+		if request.Op != nodewire.OpEval || request.Closure != "memo" {
 			t.Fatal("unexpected memo request:", request)
 		}
-		return nodeproto.EvalResult{Value: json.RawMessage(`"key"`)}, nil
+		return nodewire.EvalResult{Value: json.RawMessage(`"key"`)}, nil
 	}}
 	host, err := NewNodeExecutor(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return host.(*nodeExecutor), input, spec, nodeproto.JobSpec{ID: input.NodeID, Memo: &nodeproto.MemoSpec{}, Closures: nodeproto.ClosureSpec{MemoKey: "memo"}}, &executorSession{process: process}, backend
+	return host.(*nodeExecutor), input, spec, nodewire.JobSpec{ID: input.NodeID, Memo: &nodewire.MemoSpec{}, Closures: nodewire.ClosureSpec{MemoKey: "memo"}}, &executorSession{process: process}, backend
 }
 
 func TestExecutorMemoCopiesVerifiedHitToAwardedAttempt(t *testing.T) {
@@ -277,7 +277,7 @@ func TestMemoPublicationAndWarningFailurePreserveJobResult(t *testing.T) {
 		t.Run(fmt.Sprint(requiredOutput), func(t *testing.T) {
 			input, state, deps, _ := executorFixture(t)
 			job := &input.Accepted.Plan.Jobs[0]
-			job.Memo = &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "const", Value: "key"}}
+			job.Memo = &nodewire.MemoSpec{Input: &nodewire.MemoInput{Kind: "const", Value: "key"}}
 			if requiredOutput {
 				job.ResultStep = "body"
 			}
@@ -293,14 +293,14 @@ func TestMemoPublicationAndWarningFailurePreserveJobResult(t *testing.T) {
 			input.Accepted.Spec, _ = json.Marshal(spec)
 			state.accepted = &input.Accepted
 			deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
-				return &executorProcess{plan: input.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"output"`)}}, nil
+				return &executorProcess{plan: input.Accepted.Plan, result: nodewire.RunResult{Outcome: "success", Output: json.RawMessage(`"output"`)}}, nil
 			}
 			logs := &localLogs{run: input.Accepted.RunID, masker: deps.Masker, principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitTrigger, Binding: capability.Binding{RunID: input.Accepted.RunID, Generation: 1}}}, upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
 				return nil, errors.New("warning persistence failed")
 			}}
 			t.Cleanup(func() { <-logs.finish(t.Context(), "") })
 			warned := false
-			deps.Log = func(ctx context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+			deps.Log = func(ctx context.Context, _ NodeInput, frame nodewire.FrameLog) error {
 				warned = warned || frame.Event == "memo_publish"
 				return logs.write(ctx, input.Accepted.RunID, "", frame)
 			}

@@ -14,11 +14,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestTriggerInspectionUsesRetainedBuildPolicy(t *testing.T) {
@@ -127,8 +127,8 @@ func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Ma
 				t.Fatal(err)
 			}
 			sessions := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base, Snapshots: snapshots}}
-			planner := nodehost.SDKPlanner{Start: sessions.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker, Log: func(_ context.Context, frame nodeproto.FrameLog) error { t.Log(frame.Message); return nil }}
-			prepared, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{Entry: entry, Entrypoint: "ci", Environment: env, Args: map[string]string{"region": "west"}, Run: nodeproto.RunContext{RunID: "retry", Pipeline: "ci"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, nodehost.PlanningInput{})
+			planner := nodehost.SDKPlanner{Start: sessions.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker, Log: func(_ context.Context, frame nodewire.FrameLog) error { t.Log(frame.Message); return nil }}
+			prepared, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{Entry: entry, Entrypoint: "ci", Environment: env, Args: map[string]string{"region": "west"}, Run: nodewire.RunContext{RunID: "retry", Pipeline: "ci"}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, nodehost.PlanningInput{})
 			if err != nil || prepared.Description.Help != tc.want {
 				t.Fatalf("retry changed build policy: %+v: %v", prepared.Description, err)
 			}

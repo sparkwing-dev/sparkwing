@@ -15,12 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestStartGateSeededRecovery(t *testing.T) {
@@ -36,10 +36,10 @@ func TestStartGateSeededRecovery(t *testing.T) {
 func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 	t.Helper()
 	plan := planGrouped("global", "queue", "released")
-	fresh := []nodeproto.JobSpec{
-		{ID: "ready", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "approval", Approval: &nodeproto.ApprovalSpec{Message: "ship?"}},
-		{ID: "expansion", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"children"}}},
+	fresh := []nodewire.JobSpec{
+		{ID: "ready", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "approval", Approval: &nodewire.ApprovalSpec{Message: "ship?"}},
+		{ID: "expansion", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{Generate: []string{"children"}}},
 	}
 	for _, i := range random.Perm(len(fresh)) {
 		plan.Jobs = append(plan.Jobs, fresh[i])
@@ -229,8 +229,8 @@ func TestNativePredicateAdmissionSkipKeepsOutcomeKnownWS12J(t *testing.T) {
 						if row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix || row.Attempt != input.Attempt || row.Status != runstate.StatusRunning {
 							return nil, errors.New("predicate lacks actual running job award")
 						}
-						return &executorProcess{plan: plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
-							if request.Op != nodeproto.OpEval {
+						return &executorProcess{plan: plan, answer: func(ctx context.Context, request nodewire.Request) (any, error) {
+							if request.Op != nodewire.OpEval {
 								return nil, nil
 							}
 							if request.Closure != "guard" {
@@ -249,10 +249,10 @@ func TestNativePredicateAdmissionSkipKeepsOutcomeKnownWS12J(t *testing.T) {
 								return nil, fmt.Errorf("predicate compute=%d want %d", live, want)
 							}
 							evaluated++
-							return nodeproto.EvalResult{Value: json.RawMessage("true")}, nil
+							return nodewire.EvalResult{Value: json.RawMessage("true")}, nil
 						}}, nil
 					}
-					deps.PrepareArtifacts = func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+					deps.PrepareArtifacts = func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error) {
 						t.Error("skip prepared artifacts")
 						return nil, errors.New("skip entered body layers")
 					}

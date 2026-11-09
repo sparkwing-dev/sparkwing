@@ -7,13 +7,13 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type delayedCancellationReport struct {
@@ -24,7 +24,7 @@ type delayedCancellationReport struct {
 
 func TestOwnerFinishesCancellationAfterACommittedPolicyResult(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
-	state.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, Spec: marshalEventFixture(t, nodeproto.JobSpec{ID: "job"})}}
+	state.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, Spec: marshalEventFixture(t, nodewire.JobSpec{ID: "job"})}}
 	host.Decide = store.Decide
 	project := host.Project
 	host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {

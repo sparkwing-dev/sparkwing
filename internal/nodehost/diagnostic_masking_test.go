@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets/masktest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestHostDiagnosticsMaskingConformance(t *testing.T) {
@@ -51,7 +51,7 @@ func TestHostDiagnosticsMaskingConformance(t *testing.T) {
 			} else if result.Details["nested"].([]any)[0] != v.Want {
 				t.Fatal("error details bypassed shared masker")
 			}
-			host := nodeExecutor{deps: ExecutorDependencies{Masker: masker, Log: func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+			host := nodeExecutor{deps: ExecutorDependencies{Masker: masker, Log: func(_ context.Context, _ NodeInput, frame nodewire.FrameLog) error {
 				var attrs any
 				if err := json.Unmarshal(frame.Attrs, &attrs); err != nil {
 					t.Fatal(err)
@@ -87,7 +87,7 @@ func FuzzExecutorDiagnosticSinks(f *testing.F) {
 			}
 			return
 		}
-		host := nodeExecutor{deps: ExecutorDependencies{Masker: masker, Log: func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+		host := nodeExecutor{deps: ExecutorDependencies{Masker: masker, Log: func(_ context.Context, _ NodeInput, frame nodewire.FrameLog) error {
 			if masker.ContainsSecret(frame.Step) || masker.ContainsSecret(frame.Message) || masker.ContainsSecret(string(frame.Attrs)) {
 				t.Fatal("executor exposed a registered diagnostic value")
 			}

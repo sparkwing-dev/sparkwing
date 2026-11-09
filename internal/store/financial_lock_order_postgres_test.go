@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func blockFinancialLedger(t *testing.T, ctx context.Context, s *store.Store, team store.Team) *runBlocker {
@@ -81,8 +81,8 @@ func TestPostgresOwnerReaperAndClaimerLockTeamBeforeOwner(t *testing.T) {
 }
 
 func TestPostgresConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
-	f := newStoreRecoveryFixtureAt(t, true, storetest.NewPostgres(t), func(plan *nodeproto.PlanDoc) {
-		plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "key", Scope: new("global"), Capacity: new(1)}}
+	f := newStoreRecoveryFixtureAt(t, true, storetest.NewPostgres(t), func(plan *nodewire.PlanDoc) {
+		plan.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "key", Scope: new("global"), Capacity: new(1)}}
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()

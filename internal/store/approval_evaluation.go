@@ -7,13 +7,13 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func pendingApprovalPredicate(row runstate.NodeRow) bool {
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	return row.Status == runstate.StatusPending && row.ReadyAt == nil && row.ClaimedBy == "" && json.Unmarshal(row.Spec, &job) == nil && capability.EvaluationReadsDeclarations(job)
 }
 

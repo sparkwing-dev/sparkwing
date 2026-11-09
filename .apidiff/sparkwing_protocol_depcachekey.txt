@@ -1,0 +1,4 @@
+# sparkwing/protocol/depcachekey
+
+func Bytes(name, scope string, data []byte) (string, error)
+func Files(workdir, name, scope string, files []string) (string, error)

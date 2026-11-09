@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/protofd"
 )
 
 var describeJobs atomic.Uint64

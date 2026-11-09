@@ -7,16 +7,16 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func runCompletionFixture(t *testing.T, s *store.Store) (*store.Tenant, runstate.FinishRunRequest) {
 	t.Helper()
-	tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) { doc.Jobs = []nodeproto.JobSpec{} })
+	tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) { doc.Jobs = []nodewire.JobSpec{} })
 	if err != nil {
 		t.Fatal(err)
 	}

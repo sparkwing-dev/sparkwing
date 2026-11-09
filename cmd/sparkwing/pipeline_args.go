@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
@@ -21,7 +21,7 @@ func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
 	return clisurface.ResolvePipeline(cfg, name)
 }
 
-func boundPipelineSchema(schemas []nodeproto.PipelineDescription, identity clisurface.PipelineIdentity) (nodeproto.PipelineDescription, error) {
+func boundPipelineSchema(schemas []nodewire.PipelineDescription, identity clisurface.PipelineIdentity) (nodewire.PipelineDescription, error) {
 	schema, err := findPipelineSchema(schemas, identity.Entrypoint)
 	if err != nil {
 		return schema, fmt.Errorf("pipeline %q: %w", identity.Name, err)
@@ -30,19 +30,19 @@ func boundPipelineSchema(schemas []nodeproto.PipelineDescription, identity clisu
 	return schema, nil
 }
 
-func findPipelineSchema(schemas []nodeproto.PipelineDescription, pipelineName string) (nodeproto.PipelineDescription, error) {
-	if schema, found := (nodeproto.DescribeDoc{Pipelines: schemas}).Pipeline(pipelineName); found {
+func findPipelineSchema(schemas []nodewire.PipelineDescription, pipelineName string) (nodewire.PipelineDescription, error) {
+	if schema, found := (nodewire.DescribeDoc{Pipelines: schemas}).Pipeline(pipelineName); found {
 		if schema.Error != nil {
-			return nodeproto.PipelineDescription{}, schema.Error
+			return nodewire.PipelineDescription{}, schema.Error
 		}
 		return schema, nil
 	}
-	return nodeproto.PipelineDescription{}, fmt.Errorf("SDK describe does not declare the requested pipeline")
+	return nodewire.PipelineDescription{}, fmt.Errorf("SDK describe does not declare the requested pipeline")
 }
 
-func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map[string]string, error) {
-	byName := map[string]nodeproto.ArgumentDescription{}
-	byShort := map[string]nodeproto.ArgumentDescription{}
+func parsePipelineArgs(schema nodewire.PipelineDescription, args []string) (map[string]string, error) {
+	byName := map[string]nodewire.ArgumentDescription{}
+	byShort := map[string]nodewire.ArgumentDescription{}
 	for _, a := range schema.Args {
 		byName[a.Name] = a
 		if a.Short != "" {
@@ -154,7 +154,7 @@ func printPipelineHelp(w io.Writer, schema runspec.PipelinePresentation) {
 	fmt.Fprintln(w, "\nSee `sparkwing run --help` for prose explanations of each sparkwing flag.")
 }
 
-func pipelineFlagLine(a nodeproto.ArgumentDescription) string {
+func pipelineFlagLine(a nodewire.ArgumentDescription) string {
 	tag := "[optional]"
 	if a.Required {
 		tag = "[required]"

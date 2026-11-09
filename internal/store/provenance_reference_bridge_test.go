@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -360,7 +360,7 @@ func admitReferenceChild(t *testing.T, s *Store, parent runspec.Provenance, pare
 	expiry := now.Add(time.Hour)
 	claim := authorityRoot("child-parent", "a")
 	claim.Grants = []capability.Grant{capability.ChildrenStart}
-	claim.Children = []nodeproto.ChildPipeline{{Pipeline: "deploy", Repository: "gh:1"}, {Pipeline: "deploy", Repository: "gh:2"}}
+	claim.Children = []nodewire.ChildPipeline{{Pipeline: "deploy", Repository: "gh:1"}, {Pipeline: "deploy", Repository: "gh:2"}}
 	claim.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}
 	claim.ExpiresAt = &expiry
 	authorityPersist(t, s, claim)

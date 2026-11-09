@@ -11,11 +11,11 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRawStdoutCountsAsProgress(t *testing.T) {
@@ -26,8 +26,8 @@ func TestRawStdoutCountsAsProgress(t *testing.T) {
 	defer r.Close()
 	defer w.Close()
 	var progress int
-	var output []nodeproto.FrameLog
-	logs := &planningLogs{known: true, masker: secrets.NewMasker(), sink: func(_ context.Context, frame nodeproto.FrameLog) error { output = append(output, frame); return nil }}
+	var output []nodewire.FrameLog
+	logs := &planningLogs{known: true, masker: secrets.NewMasker(), sink: func(_ context.Context, frame nodewire.FrameLog) error { output = append(output, frame); return nil }}
 	session := &protocolSession{logCtx: t.Context(), cfg: ProtocolSessionConfig{output: logs, Activity: ExecutorActivity{Progress: func() { progress++ }}}}
 	session.streams.Add(1)
 	go session.readProtocolText(r, "info")
@@ -52,8 +52,8 @@ func TestIdleOutputFlushesOnlySafePartialLines(t *testing.T) {
 		if err := masker.Register("private-token"); err != nil {
 			t.Fatal(err)
 		}
-		var frames []nodeproto.FrameLog
-		logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodeproto.FrameLog) error { frames = append(frames, frame); return nil }}
+		var frames []nodewire.FrameLog
+		logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodewire.FrameLog) error { frames = append(frames, frame); return nil }}
 		if err := logs.text(t.Context(), "info", "safe pri", false); err != nil {
 			t.Fatal(err)
 		}
@@ -81,7 +81,7 @@ func TestHostMasksBytesBeforeLineSplitting(t *testing.T) {
 	}
 	for _, gated := range []bool{false, true} {
 		var output []string
-		logs := planningLogs{known: !gated, masker: masker, sink: func(_ context.Context, frame nodeproto.FrameLog) error {
+		logs := planningLogs{known: !gated, masker: masker, sink: func(_ context.Context, frame nodewire.FrameLog) error {
 			output = append(output, frame.Message)
 			return nil
 		}}
@@ -110,7 +110,7 @@ func TestHostMasksBytesBeforeLineSplitting(t *testing.T) {
 
 func TestHostStreamSinkFailureStopsOutput(t *testing.T) {
 	failure := errors.New("log sink failed")
-	logs := planningLogs{known: true, masker: secrets.NewMasker(), sink: func(context.Context, nodeproto.FrameLog) error { return failure }}
+	logs := planningLogs{known: true, masker: secrets.NewMasker(), sink: func(context.Context, nodewire.FrameLog) error { return failure }}
 	if err := logs.text(t.Context(), "info", "line\n", false); !errors.Is(err, failure) {
 		t.Fatalf("lost sink failure: %v", err)
 	}
@@ -122,14 +122,14 @@ func TestHostStreamSinkFailureStopsOutput(t *testing.T) {
 func TestGeneratedDeclarationsRegisterRawDefaultsAndListItemsBeforeRelease(t *testing.T) {
 	masker := secrets.NewMasker()
 	var output strings.Builder
-	logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodeproto.FrameLog) error { output.WriteString(frame.Message); return nil }}
+	logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodewire.FrameLog) error { output.WriteString(frame.Message); return nil }}
 	session := protocolSession{cfg: ProtocolSessionConfig{output: &logs, Masks: NewMaskRegistry(masker)}}
 	raw := " first-private , second-private "
 	spec := runspec.Spec{Request: runspec.SealedRequest{Request: runspec.Request{RequestedArgs: map[string]string{"later": raw}}}, Resolved: runspec.Resolved{Args: map[string]string{"later": "first-private,second-private"}}}
 	def := "abc, default-first, default-second"
-	result := nodeproto.EvalResult{DeclarationsKnown: true, Arguments: []nodeproto.ArgumentDescription{{Name: "later", Type: "[]string", Secret: true, Default: &def}}}
+	result := nodewire.EvalResult{DeclarationsKnown: true, Arguments: []nodewire.ArgumentDescription{{Name: "later", Type: "[]string", Secret: true, Default: &def}}}
 	session.gateDeclarations()
-	if err := logs.write(t.Context(), nodeproto.FrameLog{Message: raw + def + " first-private second-private"}); err != nil {
+	if err := logs.write(t.Context(), nodewire.FrameLog{Message: raw + def + " first-private second-private"}); err != nil {
 		t.Fatal(err)
 	}
 	if output.Len() != 0 {
@@ -162,13 +162,13 @@ func TestGeneratedDeclarationsRegisterRawDefaultsAndListItemsBeforeRelease(t *te
 func TestFailedGeneratorWithholdsUnclassifiedOutputAndError(t *testing.T) {
 	var output strings.Builder
 	masker := secrets.NewMasker()
-	logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodeproto.FrameLog) error { output.WriteString(frame.Message); return nil }}
+	logs := planningLogs{known: true, masker: masker, sink: func(_ context.Context, frame nodewire.FrameLog) error { output.WriteString(frame.Message); return nil }}
 	session := protocolSession{cfg: ProtocolSessionConfig{output: &logs, Masks: NewMaskRegistry(masker)}}
 	session.gateDeclarations()
 	if err := logs.text(t.Context(), "info", "unknown-private-value\n", false); err != nil {
 		t.Fatal(err)
 	}
-	err := session.releaseDeclarations(t.Context(), runspec.Spec{}, nodeproto.EvalResult{})
+	err := session.releaseDeclarations(t.Context(), runspec.Spec{}, nodewire.EvalResult{})
 	if err == nil || !strings.Contains(err.Error(), "withheld") {
 		t.Fatal("failed generator did not withhold error details")
 	}
@@ -220,13 +220,13 @@ func TestPlanningFailureMasksCanonicalPayloads(t *testing.T) {
 func TestPlanningCannotProceedWithUnknownPipelineDeclarations(t *testing.T) {
 	planner, input, fixture, processes := sdkPlanningFixture(t)
 	start := planner.Start
-	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 		process, err := start(ctx, in, log)
 		proc := process.(*executorProcess)
 		answer := proc.answer
-		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpDescribe {
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: input.Entrypoint, Args: []nodeproto.ArgumentDescription{}}, {Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "unknown-private"}}}}, nil
+		proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpDescribe {
+				return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: input.Entrypoint, Args: []nodewire.ArgumentDescription{}}, {Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "unknown-private"}}}}, nil
 			}
 			return answer(ctx, request)
 		}
@@ -245,13 +245,13 @@ func TestPlanningUnknownPipelineNamesTheEntrypointToRegister(t *testing.T) {
 	planner, input, fixture, _ := sdkPlanningFixture(t)
 	input.Entrypoint = "Build"
 	start := planner.Start
-	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 		process, err := start(ctx, in, log)
 		proc := process.(*executorProcess)
 		answer := proc.answer
-		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpDescribe {
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "registered-by-yaml-name", Args: []nodeproto.ArgumentDescription{}}}}, nil
+		proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpDescribe {
+				return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "registered-by-yaml-name", Args: []nodewire.ArgumentDescription{}}}}, nil
 			}
 			return answer(ctx, request)
 		}
@@ -274,13 +274,13 @@ func TestPlanningUnknownPipelineWithholdsNamesWhileDiscoveryIsIncomplete(t *test
 	planner, input, fixture, _ := sdkPlanningFixture(t)
 	input.Entrypoint = "Build"
 	start := planner.Start
-	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 		process, err := start(ctx, in, log)
 		proc := process.(*executorProcess)
 		answer := proc.answer
-		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpDescribe {
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "private-name", Args: []nodeproto.ArgumentDescription{}}, {Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "unknown-private"}}}}, nil
+		proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpDescribe {
+				return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "private-name", Args: []nodewire.ArgumentDescription{}}, {Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "unknown-private"}}}}, nil
 			}
 			return answer(ctx, request)
 		}

@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func checkStorePlanSeals(t *testing.T) (err error) {
@@ -89,11 +89,11 @@ func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, s
 	return storePlanSealRequestWith(ctx, s, nil)
 }
 
-func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
+func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure func(*store.IntakeRequest, *nodewire.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
 	return storePlanSealRequestFor(ctx, s, string(acceptanceTeam), false, configure)
 }
 
-func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity string, metered bool, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
+func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity string, metered bool, configure func(*store.IntakeRequest, *nodewire.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
 	team := store.Team(identity)
 	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile(identity, identity+"@example.test"), store.SignUpConditions{})
 	if err != nil {
@@ -123,7 +123,7 @@ func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity strin
 	}
 	input := store.IntakeRequest{Authority: authority, Request: runspec.Request{Version: 1, Team: string(team), Pipeline: "fixture", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{"message": "sealed"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "owner_execution_timeout"}}}}}
 	input.FetchedRepository = store.FetchedRepository{ID: 1, Name: "acme/repo"}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "alpha", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "beta", Needs: []string{"alpha"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "alpha", Steps: []nodewire.StepSpec{{ID: "body"}}}, {ID: "beta", Needs: []string{"alpha"}, Steps: []nodewire.StepSpec{{ID: "body"}}}}}
 	if configure != nil {
 		configure(&input, &plan)
 	}

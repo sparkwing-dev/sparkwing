@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestAdmissionDeterministicSimulation(t *testing.T) {
@@ -68,13 +68,13 @@ type admissionSimulation struct {
 }
 
 func simulateAdmission(t *testing.T, seed uint64, target *storetest.Target) {
-	group := func(name, scope string, capacity int) nodeproto.ConcurrencySpec {
-		return nodeproto.ConcurrencySpec{Group: name, Scope: new(scope), Capacity: new(capacity), Cost: new(1), OnLimit: new("queue")}
+	group := func(name, scope string, capacity int) nodewire.ConcurrencySpec {
+		return nodewire.ConcurrencySpec{Group: name, Scope: new(scope), Capacity: new(capacity), Cost: new(1), OnLimit: new("queue")}
 	}
 	planCapacity := 1 + int(seed%2)
-	f := newStoreRecoveryFixtureAt(t, false, target, func(doc *nodeproto.PlanDoc) {
-		doc.Concurrency = []nodeproto.ConcurrencySpec{group("shared", "global", planCapacity), group("local", "run", 1)}
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group("box-shared", "box", 1), group("shared", "global", 1), group("local", "run", 1)}
+	f := newStoreRecoveryFixtureAt(t, false, target, func(doc *nodewire.PlanDoc) {
+		doc.Concurrency = []nodewire.ConcurrencySpec{group("shared", "global", planCapacity), group("local", "run", 1)}
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{group("box-shared", "box", 1), group("shared", "global", 1), group("local", "run", 1)}
 	})
 	now, err := f.s.TestOnlyDatabaseTime(t.Context())
 	if err != nil {

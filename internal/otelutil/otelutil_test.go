@@ -17,7 +17,7 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/sparkwing-dev/sparkwing/internal/testleak"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
 )
 
 func TestResolveSampler_Default(t *testing.T) {

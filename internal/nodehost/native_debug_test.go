@@ -14,11 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeForegroundOwnerPersistsDebugPauseUntilReleased(t *testing.T) {
@@ -31,7 +31,7 @@ func TestNativeForegroundOwnerPersistsDebugPauseUntilReleased(t *testing.T) {
 					options := debugOptions(reason)
 					options.PauseTimeout.Set, options.PauseTimeout.Value, options.PauseTimeout.Origin = true, time.Second, options.Pause.Origin
 					request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Options: options}
-					f := newStoreHostFixtureForRequest(t, openStore(t, teststore.WithClock(time.Now)), nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, request)
+					f := newStoreHostFixtureForRequest(t, openStore(t, teststore.WithClock(time.Now)), nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}}}, request)
 					objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 					if err != nil {
 						t.Fatal(err)

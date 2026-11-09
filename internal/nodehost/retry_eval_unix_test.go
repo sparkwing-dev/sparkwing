@@ -12,7 +12,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -23,12 +22,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func retryGeneratedJobs() []nodeproto.JobSpec {
-	return []nodeproto.JobSpec{
-		{ID: "good", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "bad", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+func retryGeneratedJobs() []nodewire.JobSpec {
+	return []nodewire.JobSpec{
+		{ID: "good", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "bad", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}
 }
 
@@ -105,7 +106,7 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 		return f.report(ctx, input, runstate.NodeSuccess)
 	})
 	f.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
-		body, err := json.Marshal(nodeproto.PlanDoc{Jobs: retryGeneratedJobs()})
+		body, err := json.Marshal(nodewire.PlanDoc{Jobs: retryGeneratedJobs()})
 		return body, runspec.SecretRegistration{Version: 1}, nil, err
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
@@ -123,8 +124,8 @@ func TestMaterializedGeneratorEvaluationKeepsTheJobTimeout(t *testing.T) {
 		state.row.Outcome = runstate.NodeMemoized
 		state.row.Execution.Timeout.Value = 400 * time.Millisecond
 		deps.ChildContext = nil
-		process.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op != nodeproto.OpEval {
+		process.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op != nodewire.OpEval {
 				return nil, nil
 			}
 			deadline, ok := ctx.Deadline()
@@ -161,14 +162,14 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 		t.Fatal(err)
 	}
 	process := &executorProcess{plan: f.Accepted.Plan}
-	process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-		if request.Op != nodeproto.OpEval {
+	process.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+		if request.Op != nodewire.OpEval {
 			return nil, nil
 		}
 		jobs := retryGeneratedJobs()
 		jobs[0].Steps[0].ID = "changed"
-		raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
-		return nodeproto.EvalResult{Value: raw}, err
+		raw, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
+		return nodewire.EvalResult{Value: raw}, err
 	}
 	host, err := NewNodeExecutor(ExecutorDependencies{
 		Store: f.State,
@@ -195,7 +196,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 		t.Fatalf("changed generator error=%v, want plan_drift", err)
 	}
 	for _, request := range process.requests {
-		if request.Op == nodeproto.OpRunStep {
+		if request.Op == nodewire.OpRunStep {
 			t.Fatal("changed generated code executed a body")
 		}
 	}

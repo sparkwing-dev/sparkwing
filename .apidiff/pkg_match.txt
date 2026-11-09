@@ -67,7 +67,7 @@ type Resources struct {
 func SelfAsserted(labels []string) []string
 func TermSatisfied(p Profile, term string) bool
 func ToolLabels(names []string) []string
-const ToolPrefix = "tool:"
+const ToolPrefix = labels.ToolPrefix
 func ValidateCloudSizeLabels(selector []string) error
 type Verdict struct {
 	Reason Reason

@@ -13,10 +13,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type routeResolver func(context.Context, string) (string, bool, error)
@@ -156,7 +155,7 @@ func FuzzProductionRouterBindsImplicitSelectors(f *testing.F) {
 				t.Fatalf("callback escaped its process: %+v", auth)
 			}
 		}
-		service.Summary = func(_ context.Context, auth capability.Authorized, _ nodeproto.SummaryRequest) error {
+		service.Summary = func(_ context.Context, auth capability.Authorized, _ nodewire.SummaryRequest) error {
 			check(auth)
 			return nil
 		}

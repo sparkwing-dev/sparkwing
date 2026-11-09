@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func operatorPick[T any](in OperatorInputs, key string, field func(OperatorValues) *T, fallback *T) (*T, Origin) {
@@ -72,7 +72,7 @@ func ControllerCeilings(in OperatorInputs) (OperatorValues, error) {
 	if listAllowedAdmissionClasses != nil {
 		out.AllowedAdmissionClasses = slices.Clone(*listAllowedAdmissionClasses)
 	}
-	listAllowedSources, origin := operatorPick(in, "operator.allowed_sources", func(v OperatorValues) *[]nodeproto.SourceSpec {
+	listAllowedSources, origin := operatorPick(in, "operator.allowed_sources", func(v OperatorValues) *[]nodewire.SourceSpec {
 		if v.AllowedSources == nil {
 			return nil
 		}

@@ -7,12 +7,12 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type scriptedHostStore struct {
@@ -264,7 +264,7 @@ func newExpansionHostStore(row store.RunRow, node runstate.NodeRow) *expansionHo
 		if in.Failure != nil {
 			s.node.Expansion = runstate.ExpansionFailed
 		} else {
-			var plan nodeproto.PlanDoc
+			var plan nodewire.PlanDoc
 			if err := json.Unmarshal(in.Body, &plan); err != nil {
 				return store.AcceptedExpansion{}, err
 			}

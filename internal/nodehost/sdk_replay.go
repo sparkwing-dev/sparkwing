@@ -7,14 +7,15 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial []nodeproto.JobSpec) ([]GeneratorReplay, error) {
+func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial []nodewire.JobSpec) ([]GeneratorReplay, error) {
 	if h.ReadOutput == nil && (input.Storage.Bytes == nil || input.Storage.Records == nil) {
 		return nil, executorError(apierr.PlanDrift, "generated reconstruction requires authorized ancestor outputs")
 	}
@@ -25,13 +26,13 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 	if snapshot.Run.ID != input.Accepted.RunID {
 		return nil, executorError(apierr.PlanDrift, "generator ancestry belongs to another run")
 	}
-	declarations := map[string]nodeproto.JobSpec{}
+	declarations := map[string]nodewire.JobSpec{}
 	for _, job := range initial {
 		declarations[job.ID] = job
 	}
 	parents := map[string]runstate.AcceptedExpansionRow{}
 	for _, expansion := range snapshot.Expansions {
-		var plan nodeproto.PlanDoc
+		var plan nodewire.PlanDoc
 		if expansion.Source.RunID != runspec.RunID(input.Accepted.RunID) || expansion.Source.NodeID == "" || expansion.SourceGeneration < 0 || json.Unmarshal(expansion.Body, &plan) != nil || plan.Jobs == nil {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry has an invalid accepted expansion")
 		}
@@ -102,8 +103,8 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 	return replay, nil
 }
 
-func (h *sdkCode) replay(ctx context.Context, session *executorSession, input NodeInput, initial []nodeproto.JobSpec) ([]nodeproto.JobSpec, error) {
-	jobs := append([]nodeproto.JobSpec(nil), initial...)
+func (h *sdkCode) replay(ctx context.Context, session *executorSession, input NodeInput, initial []nodewire.JobSpec) ([]nodewire.JobSpec, error) {
+	jobs := append([]nodewire.JobSpec(nil), initial...)
 	if len(input.Replay) == 0 {
 		return jobs, nil
 	}
@@ -126,7 +127,7 @@ func (h *sdkCode) replay(ctx context.Context, session *executorSession, input No
 	}
 	completed := map[string]bool{}
 	for _, replay := range input.Replay {
-		var source *nodeproto.JobSpec
+		var source *nodewire.JobSpec
 		for i := range jobs {
 			if jobs[i].ID == replay.SourceJob {
 				source = &jobs[i]
@@ -149,7 +150,7 @@ func (h *sdkCode) replay(ctx context.Context, session *executorSession, input No
 	return jobs, nil
 }
 
-func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, input NodeInput, source nodeproto.JobSpec, replay GeneratorReplay, snapshot store.RunSnapshot, existing []nodeproto.JobSpec) ([]nodeproto.JobSpec, error) {
+func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, input NodeInput, source nodewire.JobSpec, replay GeneratorReplay, snapshot store.RunSnapshot, existing []nodewire.JobSpec) ([]nodewire.JobSpec, error) {
 	expected, err := h.replayMembers(snapshot, replay)
 	if err != nil {
 		return nil, err
@@ -209,8 +210,8 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 	return expansion.Jobs, nil
 }
 
-func replayTopology(reconstructed []nodeproto.JobSpec, snapshot store.RunSnapshot, replacing map[string]bool) ([]nodeproto.JobSpec, error) {
-	jobs := append([]nodeproto.JobSpec(nil), reconstructed...)
+func replayTopology(reconstructed []nodewire.JobSpec, snapshot store.RunSnapshot, replacing map[string]bool) ([]nodewire.JobSpec, error) {
+	jobs := append([]nodewire.JobSpec(nil), reconstructed...)
 	seen := map[string]bool{}
 	for _, job := range jobs {
 		seen[job.ID] = true
@@ -222,7 +223,7 @@ func replayTopology(reconstructed []nodeproto.JobSpec, snapshot store.RunSnapsho
 		if replacing[string(row.Ref.NodeID)] || seen[string(row.Ref.NodeID)] {
 			continue
 		}
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil || runspec.NodeID(job.ID) != row.Ref.NodeID {
 			return nil, executorError(apierr.PlanDrift, "replay snapshot has an invalid job declaration")
 		}
@@ -237,7 +238,7 @@ func (h *sdkCode) replayMembers(snapshot store.RunSnapshot, replay GeneratorRepl
 		if accepted.Source.RunID != runspec.RunID(snapshot.Run.ID) || accepted.Source.NodeID != runspec.NodeID(replay.SourceJob) || accepted.SourceGeneration != replay.SourceGeneration {
 			continue
 		}
-		var plan nodeproto.PlanDoc
+		var plan nodewire.PlanDoc
 		if err := json.Unmarshal(accepted.Body, &plan); err != nil {
 			return nil, executorError(apierr.PlanDrift, "accepted expansion is malformed")
 		}

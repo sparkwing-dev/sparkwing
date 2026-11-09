@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -18,6 +17,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestGeneratorReplay(t *testing.T) {
@@ -34,18 +35,18 @@ func TestGeneratorReplay(t *testing.T) {
 			if mode == "recovery_ancestry" {
 				job.OnFailureOf = "peer"
 			}
-			peer := nodeproto.JobSpec{ID: "peer", Groups: []string{"peers"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
-			sourceJob := nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"target", "peers", "empty"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+			peer := nodewire.JobSpec{ID: "peer", Groups: []string{"peers"}, Steps: []nodewire.StepSpec{{ID: "body"}}}
+			sourceJob := nodewire.JobSpec{ID: "source", Closures: nodewire.ClosureSpec{Generate: []string{"target", "peers", "empty"}}, Steps: []nodewire.StepSpec{{ID: "body"}}}
 			if crossSource {
 				sourceJob.Closures.Generate = []string{"target", "empty"}
 			}
-			input.Accepted.Plan = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{sourceJob}}
+			input.Accepted.Plan = nodewire.PlanDoc{Jobs: []nodewire.JobSpec{sourceJob}}
 			if crossSource {
-				input.Accepted.Plan.Jobs = append(input.Accepted.Plan.Jobs, nodeproto.JobSpec{ID: "other-source", Closures: nodeproto.ClosureSpec{Generate: []string{"peers"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+				input.Accepted.Plan.Jobs = append(input.Accepted.Plan.Jobs, nodewire.JobSpec{ID: "other-source", Closures: nodewire.ClosureSpec{Generate: []string{"peers"}}, Steps: []nodewire.StepSpec{{ID: "body"}}})
 			}
 			if mode == "nested" {
 				sourceJob.Groups = []string{"ancestors"}
-				input.Accepted.Plan.Jobs = []nodeproto.JobSpec{{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestors"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
+				input.Accepted.Plan.Jobs = []nodewire.JobSpec{{ID: "root", Closures: nodewire.ClosureSpec{Generate: []string{"ancestors"}}, Steps: []nodewire.StepSpec{{ID: "body"}}}}
 			}
 			planHash, _ := runspec.CanonicalHash(input.Accepted.Plan)
 			input.Accepted.PlanHash = string(planHash)
@@ -57,7 +58,7 @@ func TestGeneratorReplay(t *testing.T) {
 			input.SpecHash = string(jobHash)
 			persisted.snapshot.Nodes[0].SpecHash = input.SpecHash
 			persisted.snapshot.Nodes[0].Spec, _ = json.Marshal(job)
-			accepted := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job, peer}}
+			accepted := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job, peer}}
 			if crossSource {
 				accepted.Jobs = accepted.Jobs[:1]
 			}
@@ -77,7 +78,7 @@ func TestGeneratorReplay(t *testing.T) {
 			}
 			input.Replay = []GeneratorReplay{{SourceJob: "source", SourceGeneration: 0, GeneratorID: "target", Output: json.RawMessage(`{"value":7}`)}}
 			if crossSource {
-				body := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{peer}}
+				body := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{peer}}
 				raw, _ := json.Marshal(body)
 				hash, _ := runspec.CanonicalHash(body)
 				persisted.snapshot.Expansions = append(persisted.snapshot.Expansions, runstate.AcceptedExpansionRow{Source: runspec.NodeRef{RunID: "run", NodeID: "other-source"}, SourceGeneration: 2, Body: raw, BodyHash: string(hash)})
@@ -85,7 +86,7 @@ func TestGeneratorReplay(t *testing.T) {
 				input.Replay = append(input.Replay, GeneratorReplay{SourceJob: "other-source", SourceGeneration: 2, GeneratorID: "peers", Output: json.RawMessage(`{"value":7}`)})
 			}
 			if mode == "nested" {
-				expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{sourceJob}}
+				expansion := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{sourceJob}}
 				raw, _ := json.Marshal(expansion)
 				hash, _ := runspec.CanonicalHash(expansion)
 				persisted.snapshot.Expansions = append(persisted.snapshot.Expansions, runstate.AcceptedExpansionRow{Source: runspec.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 2, Body: raw, BodyHash: string(hash)})
@@ -95,12 +96,12 @@ func TestGeneratorReplay(t *testing.T) {
 				persisted.snapshot.Nodes = append(persisted.snapshot.Nodes, s.nodes["source"], s.nodes["peer"])
 				input.Replay = append([]GeneratorReplay{{SourceJob: "root", SourceGeneration: 2, GeneratorID: "ancestors", Output: json.RawMessage(`{"value":7}`)}}, input.Replay...)
 			}
-			var recovery *nodeproto.JobFailure
+			var recovery *nodewire.JobFailure
 			if mode == "recovery_ancestry" {
 				row := s.nodes["peer"]
 				row.Status, row.Outcome = runstate.StatusDone, runstate.NodeFailed
 				s.nodes["peer"] = row
-				recovery = &nodeproto.JobFailure{Job: "peer", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
+				recovery = &nodewire.JobFailure{Job: "peer", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
 			}
 			if mode == "conflicting_source" {
 				input.Replay = append(input.Replay, GeneratorReplay{SourceJob: "source", SourceGeneration: 1, GeneratorID: "peers", Output: json.RawMessage(`{"value":7}`)})
@@ -121,12 +122,12 @@ func TestGeneratorReplay(t *testing.T) {
 			}
 			var calls []string
 			sdk := newExecutionSDK(input.Accepted.Plan, input, "success", &trace)
-			process := replaySDK(sdk, recovery, func(request nodeproto.Request) (json.RawMessage, error) {
+			process := replaySDK(sdk, recovery, func(request nodewire.Request) (json.RawMessage, error) {
 				calls = append(calls, request.Closure)
 				if request.Job != "" || string(request.Input) != `{"value":7}` {
 					return nil, errors.New("replay lost recorded source output")
 				}
-				jobs := []nodeproto.JobSpec{}
+				jobs := []nodewire.JobSpec{}
 				switch request.Closure {
 				case "ancestors":
 					jobs = append(jobs, sourceJob)
@@ -149,7 +150,7 @@ func TestGeneratorReplay(t *testing.T) {
 				default:
 					return nil, errors.New("unexpected generator")
 				}
-				return json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+				return json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 			})
 			executor, err := NewNodeExecutor(ExecutorDependencies{
 				Store: s, Start: func(_ context.Context, in NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
@@ -160,7 +161,7 @@ func TestGeneratorReplay(t *testing.T) {
 					return input.Engine, nil
 				},
 				Masker: secrets.NewMasker(),
-				ReadFailure: func(_ context.Context, ref runspec.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+				ReadFailure: func(_ context.Context, ref runspec.NodeRef, generation int64) (*nodewire.JobFailure, error) {
 					if recovery == nil || ref != s.nodes["peer"].Ref || runspec.ClaimGeneration(generation) != s.nodes["peer"].Generation {
 						return nil, errors.New("undeclared recovery read")
 					}

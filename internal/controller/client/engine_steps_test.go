@@ -8,8 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func FuzzEngineStepReportKeepsRouteAndAttempt(f *testing.F) {

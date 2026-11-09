@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testhome"
 )
 
 func TestDetectToolsAdvertisesOnlyKnownToolsOnPath(t *testing.T) {

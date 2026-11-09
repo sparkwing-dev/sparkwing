@@ -34,50 +34,69 @@ func main() {
 	if err != nil {
 		die("discover public packages: %v", err)
 	}
+	written := make(map[string]bool, len(packagePaths))
 	for _, p := range packagePaths {
 		snap, err := snapshotPackage(filepath.Join(root, p), p)
 		if err != nil {
 			die("%s: %v", p, err)
 		}
 		outName := strings.ReplaceAll(p, "/", "_") + ".txt"
+		written[outName] = true
 		// #nosec G703 -- a build-time tool reading paths the operator names
 		if err := os.WriteFile(filepath.Join(outDir, outName), []byte(snap), 0o644); err != nil {
 			die("write %s: %v", outName, err)
 		}
 	}
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		die("read snapshots: %v", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".txt") && !written[entry.Name()] {
+			if err := os.Remove(filepath.Join(outDir, entry.Name())); err != nil {
+				die("remove stale snapshot: %v", err)
+			}
+		}
+	}
+
 }
 
 func discoverPackagePaths(root string) ([]string, error) {
 	packages := map[string]struct{}{"sparkwing": {}}
-	pkgRoot := filepath.Join(root, "pkg")
-	err := filepath.WalkDir(pkgRoot, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+	for _, tree := range []string{"pkg", "sparkwing", "sparkwingtest"} {
+		pkgRoot := filepath.Join(root, tree)
+		if _, err := os.Stat(pkgRoot); os.IsNotExist(err) {
+			continue
 		}
-		if entry.IsDir() {
-			if entry.Name() == "testdata" {
-				return filepath.SkipDir
+		err := filepath.WalkDir(pkgRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
+			if entry.IsDir() {
+				if entry.Name() == "testdata" || entry.Name() == "testsupport" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				return nil
+			}
+			rel, err := filepath.Rel(root, filepath.Dir(path))
+			if err != nil {
+				return err
+			}
+			importPath := filepath.ToSlash(rel)
+			if importPath == "internal" || strings.Contains(importPath, "/internal/") ||
+				strings.HasSuffix(importPath, "/internal") {
+				return nil
+			}
+			packages[importPath] = struct{}{}
 			return nil
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, filepath.Dir(path))
+		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		importPath := filepath.ToSlash(rel)
-		if importPath == "internal" || strings.Contains(importPath, "/internal/") ||
-			strings.HasSuffix(importPath, "/internal") {
-			return nil
-		}
-		packages[importPath] = struct{}{}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	paths := make([]string, 0, len(packages))
 	for path := range packages {

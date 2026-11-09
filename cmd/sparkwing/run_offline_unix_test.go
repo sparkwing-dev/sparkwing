@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -374,7 +375,7 @@ func offlineMarkerLines(t *testing.T, marker string) []string {
 func offlineRunCLI(cli, dir string, env []string, args ...string) (string, error) {
 	cmd := exec.Command(cli, args...)
 	cmd.Dir = dir
-	cmd.Env = testgit.Env(env)
+	cmd.Env = gitcontrol.Env(env)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -382,7 +383,7 @@ func offlineRunCLI(cli, dir string, env []string, args ...string) (string, error
 func offlineRunTool(tool, dir string, env []string, args ...string) (string, error) {
 	cmd := testgit.Command(tool, args...)
 	cmd.Dir = dir
-	cmd.Env = testgit.Env(env)
+	cmd.Env = gitcontrol.Env(env)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -431,8 +432,8 @@ func offlineWriteFixture(t *testing.T, gitBin, toolPath, fixtureHome string) (re
 		"package offlinespark\n\nconst Greeting = \""+offlineSparkGreeting+"\"\n")
 
 	writeFile(t, filepath.Join(sparkwingDir, "go.mod"), fmt.Sprintf(
-		"module %s\n\ngo 1.26.0\n\nrequire (\n\t%s v0.1.0\n\tgithub.com/sparkwing-dev/sparkwing v0.0.0\n)\n\n"+
-			"replace %s => %s\n\nreplace github.com/sparkwing-dev/sparkwing => %s\n",
+		"module %s\n\ngo 1.26.0\n\nrequire (\n\t%s v0.1.0\n\tgithub.com/sparkwing-dev/sparkwing/sparkwing v0.0.0\n)\n\n"+
+			"replace %s => %s\n\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %s\n",
 		offlineFixtureModule, offlineSparkModule, offlineSparkModule, sparkDir, sdkFixtureModuleRoot(t)))
 	writeFile(t, filepath.Join(sparkwingDir, "sparkwing.yaml"), fmt.Sprintf(
 		"pipelines:\n  - name: offline\n    entrypoint: offline\n    description: Runs with no network once its modules are on disk\n\n"+

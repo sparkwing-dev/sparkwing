@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // PlanSelectionSkips excludes jobs outside the selected dependency closure.
-func PlanSelectionSkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map[string]string, error) {
+func PlanSelectionSkips(doc nodewire.PlanDoc, pattern, start, stop string) (map[string]string, error) {
 	if pattern == "" {
 		return nil, nil
 	}

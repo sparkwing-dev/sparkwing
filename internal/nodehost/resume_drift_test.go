@@ -6,16 +6,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "held", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "lost", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "build", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "held", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "lost", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "build", Optional: true, Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}})
 	claimedFixtureNode(t, f, "held")
 	if err := f.report(t.Context(), claimedFixtureNode(t, f, "lost"), runstate.NodeFailed); err != nil {

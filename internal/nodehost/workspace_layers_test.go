@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func acquiredLayerEntry(t *testing.T, depth uint8) *source.Entry {
@@ -51,7 +51,7 @@ func FuzzArtifactLayerUsesExecutionWorkspace(f *testing.F) {
 		name := "output-" + hex.EncodeToString(path)
 		writePublishedFile(t, root, name, value, 0o600)
 		writePublishedFile(t, input.Entry.Directory, name, "SDK-directory decoy", 0o600)
-		finish, err := adapter.Prepare(t.Context(), input, nodeproto.JobSpec{Artifacts: []string{name}})
+		finish, err := adapter.Prepare(t.Context(), input, nodewire.JobSpec{Artifacts: []string{name}})
 		if err != nil || finish == nil {
 			t.Fatalf("prepare: %v", err)
 		}
@@ -60,7 +60,7 @@ func FuzzArtifactLayerUsesExecutionWorkspace(f *testing.F) {
 			t.Fatal(err)
 		}
 		adapter.Producer = func(context.Context, NodeInput, string) (blob.RecordKey, error) { return backend.upload.Key, nil }
-		if _, err := adapter.Prepare(t.Context(), input, nodeproto.JobSpec{Consumes: []nodeproto.ArtifactInput{{Producer: backend.upload.Key.Scope.Job, Into: "received"}}}); err != nil {
+		if _, err := adapter.Prepare(t.Context(), input, nodewire.JobSpec{Consumes: []nodewire.ArtifactInput{{Producer: backend.upload.Key.Scope.Job, Into: "received"}}}); err != nil {
 			t.Fatal(err)
 		}
 		body, err := os.ReadFile(filepath.Join(root, "received", name))

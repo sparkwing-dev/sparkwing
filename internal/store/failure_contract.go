@@ -5,21 +5,21 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ReadFailure returns the persisted masked failure and stage for a declared recovery source.
 // The transaction checks the reader's recovery edge and exact source generation.
 // A terminal status without recorded failure is not a synthetic SDK failure.
-func (t *Tenant) ReadFailure(ctx context.Context, source runspec.NodeRef, generation int64, actor runstate.Actor) (*nodeproto.JobFailure, error) {
+func (t *Tenant) ReadFailure(ctx context.Context, source runspec.NodeRef, generation int64, actor runstate.Actor) (*nodewire.JobFailure, error) {
 	if source.RunID == "" || source.NodeID == "" || generation < 0 {
 		return nil, authorityError(apierr.BadRequest, "failure read requires a source generation")
 	}
-	var failure *nodeproto.JobFailure
+	var failure *nodewire.JobFailure
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		principal, err := resolveTeamActorTx(ctx, tx, t.team, actor, sameTeam)
 		if err != nil {
@@ -60,7 +60,7 @@ func (t *Tenant) ReadFailure(ctx context.Context, source runspec.NodeRef, genera
 			if actor.Kind == runstate.ActorHolder && row.Ref.NodeID != runspec.NodeID(c.Binding.NodeID) {
 				continue
 			}
-			var job nodeproto.JobSpec
+			var job nodewire.JobSpec
 			if err := json.Unmarshal(row.Spec, &job); err != nil {
 				return err
 			}

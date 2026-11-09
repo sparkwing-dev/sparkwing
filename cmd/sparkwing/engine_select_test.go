@@ -14,11 +14,11 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestReplacementPinWarnsAndKeepsInstalledCLI(t *testing.T) {
@@ -124,7 +124,7 @@ func TestPipelineEnginePinComesFromPipelineDirectoryProperty(t *testing.T) {
 			root := t.TempDir()
 			pipeline := filepath.Join(root, ".sparkwing")
 			manifest := "go.mod"
-			body := "module pipeline\nrequire github.com/sparkwing-dev/sparkwing v1.2.3\n"
+			body := "module pipeline\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n"
 			if sdk == engineid.TypeScriptSDK {
 				manifest, body = "package.json", `{"dependencies":{"@sparkwing/sdk":"1.2.3"}}`
 				writeRepoFile(t, filepath.Join(pipeline, "package-lock.json"), `{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"1.2.3"}},"node_modules/@sparkwing/sdk":{"version":"1.2.3"}}}`)
@@ -142,7 +142,7 @@ func TestPipelineEnginePinComesFromPipelineDirectoryProperty(t *testing.T) {
 						t.Fatal(err)
 					}
 				case 1:
-					parentBody := fmt.Sprintf("module parent\nrequire github.com/sparkwing-dev/sparkwing v1.%d.0\n", minor)
+					parentBody := fmt.Sprintf("module parent\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.%d.0\n", minor)
 					if sdk == engineid.TypeScriptSDK {
 						parentBody = fmt.Sprintf(`{"dependencies":{"@sparkwing/sdk":"1.%d.0"}}`, minor)
 						writeRepoFile(t, filepath.Join(root, "package-lock.json"), fmt.Sprintf(`{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"1.%d.0"}},"node_modules/@sparkwing/sdk":{"version":"1.%d.0"}}}`, minor, minor))
@@ -175,7 +175,7 @@ func TestSDKPinInspectionRetainsManifestAndLockfileSizes(t *testing.T) {
 		t.Run(string(sdk), func(t *testing.T) {
 			dir := t.TempDir()
 			if sdk == engineid.GoSDK {
-				body := "module pipeline\nrequire github.com/sparkwing-dev/sparkwing v1.2.3\n//"
+				body := "module pipeline\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n//"
 				body += strings.Repeat("x", maxMetadataBytes-len(body))
 				writeRepoFile(t, filepath.Join(dir, "go.mod"), body)
 				writeRepoFile(t, filepath.Join(dir, "go.sum"), strings.Repeat("x", maxMetadataBytes+1))

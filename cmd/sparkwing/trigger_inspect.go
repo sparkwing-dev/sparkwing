@@ -10,11 +10,11 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, captured []string, options source.Options) (declarations *runspec.DeclarationGate, resultErr error) {
@@ -57,7 +57,7 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base}}
 	planner := nodehost.SDKPlanner{
 		Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: masker,
-		Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
+		Log: func(ctx context.Context, frame nodewire.FrameLog) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -67,8 +67,8 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 	}
 	prepared, err := planner.Inspect(ctx, nodehost.PlanningProcessInput{
 		Entry: entry, Entrypoint: selection.source.Entrypoint, Environment: environment, Args: map[string]string{},
-		Run:    nodeproto.RunContext{RunID: rand.Text(), Pipeline: selection.pipeline},
-		Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+		Run:    nodewire.RunContext{RunID: rand.Text(), Pipeline: selection.pipeline},
+		Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})
 	if err != nil {
 		return nil, err

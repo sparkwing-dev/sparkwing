@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // perf: 80-byte lines make bulk output exercise the masked line presenter the way build logs do.
@@ -158,7 +158,7 @@ func TestHostExecBenchmark(t *testing.T) {
 	logs := bufio.NewWriterSize(logFile, 256<<10)
 	var logMu sync.Mutex
 	var logLines, logBytes int64
-	sink := func(_ context.Context, log nodeproto.FrameLog) error {
+	sink := func(_ context.Context, log nodewire.FrameLog) error {
 		line, err := json.Marshal(log)
 		if err != nil {
 			return err
@@ -176,8 +176,8 @@ func TestHostExecBenchmark(t *testing.T) {
 		"HOSTEXEC_BENCH_CONC="+strconv.Itoa(spec.Conc), "HOSTEXEC_BENCH_BYTES="+strconv.FormatInt(spec.Bytes, 10))
 	hostCPU := processCPU()
 	began := time.Now()
-	var run nodeproto.RunResult
-	if err := h.call(t, nodeproto.Request{Op: nodeproto.OpRunStep, Job: "bench", Step: "run", Attempt: 1, Settled: []string{}}).Decode(&run); err != nil {
+	var run nodewire.RunResult
+	if err := h.call(t, nodewire.Request{Op: nodewire.OpRunStep, Job: "bench", Step: "run", Attempt: 1, Settled: []string{}}).Decode(&run); err != nil {
 		t.Fatal(err)
 	}
 	stepNS, hostCPUNS := time.Since(began).Nanoseconds(), processCPU()-hostCPU

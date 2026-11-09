@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/testhome"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testhome"
 )
 
 func TestStandaloneRunClosesUnusedClientDialBeforeControllerDrain(t *testing.T) {

@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCheckoutPlanning(t *testing.T) {
@@ -88,12 +89,12 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 	var processes []*scriptedSDK
 	defaultArg, secretArg := "provided-by-sdk", "private-default"
 	planner := SDKPlanner{
-		Masker: secrets.NewMasker(), Log: func(context.Context, nodeproto.FrameLog) error { return nil },
+		Masker: secrets.NewMasker(), Log: func(context.Context, nodewire.FrameLog) error { return nil },
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return entry.Engine, nil
 		},
-		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			process := newCheckoutSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nodeproto.PipelineDescription{Name: entrypoint, Extra: true, Args: []nodeproto.ArgumentDescription{{Name: "sdk", Type: "string", Default: &defaultArg}, {Name: "secret", Type: "string", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}})
+		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
+			process := newCheckoutSDK(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}}, nodewire.PipelineDescription{Name: entrypoint, Extra: true, Args: []nodewire.ArgumentDescription{{Name: "sdk", Type: "string", Default: &defaultArg}, {Name: "secret", Type: "string", Secret: true, Default: &secretArg}}, Secrets: []nodewire.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}})
 			processes = append(processes, process)
 			return process, nil
 		},
@@ -102,7 +103,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		Masker: planner.Masker, Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) { return entry, nil },
 		Prepare: func(ctx context.Context, _ RunInput, e *source.Entry) (OwnerPlanning, error) {
-			return planner.PrepareCheckout(ctx, CheckoutPlanningInput{Request: sealed, Entry: e, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Project: project, ProjectFile: "sparkwing.yaml", Planning: PlanningInput{Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal}}})
+			return planner.PrepareCheckout(ctx, CheckoutPlanningInput{Request: sealed, Entry: e, Runner: nodewire.RunnerIdentity{Name: "granted", Type: "local"}, Project: project, ProjectFile: "sparkwing.yaml", Planning: PlanningInput{Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal}}})
 		},
 		Wait: func(context.Context, store.RunSnapshot) error { return errors.New("unexpected graph wait") },
 	}
@@ -141,7 +142,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		if len(processes) != 2 || processes[1].requests[len(processes[1].requests)-1].Args["sdk"] != defaultArg || processes[1].requests[len(processes[1].requests)-1].Run.Git.DefaultBranch != resolved.DefaultBranch.Value || processes[1].requests[len(processes[1].requests)-1].Run.RunID != "run" || processes[1].requests[len(processes[1].requests)-1].Run.Pipeline != request.Pipeline || processes[1].requests[len(processes[1].requests)-1].Pipeline != entrypoint || resolved.Entrypoint != entrypoint {
 			t.Fatal("planner did not receive resolved arguments and run facts")
 		}
-		wantPR := &nodeproto.PullRequest{Number: 42, Action: "opened", BaseRef: "trunk", BaseSHA: "base-sha", HeadRef: "feature", HeadSHA: "head-sha"}
+		wantPR := &nodewire.PullRequest{Number: 42, Action: "opened", BaseRef: "trunk", BaseSHA: "base-sha", HeadRef: "feature", HeadSHA: "head-sha"}
 		if !reflect.DeepEqual(processes[1].requests[len(processes[1].requests)-1].Run.Trigger.PullRequest, wantPR) {
 			t.Fatal("planning discarded sealed pull-request facts")
 		}
@@ -168,12 +169,12 @@ func checkCheckoutGuardMask(t *testing.T, value string) {
 	resolved := engine.Resolved{Identity: engineid.Identity{Version: "v1.0.0", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}}
 	masker := secrets.NewMasker()
 	planner := SDKPlanner{
-		Masker: masker, Log: func(context.Context, nodeproto.FrameLog) error { return nil },
+		Masker: masker, Log: func(context.Context, nodewire.FrameLog) error { return nil },
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			return newCheckoutSDK(nodeproto.PlanDoc{}, nodeproto.PipelineDescription{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Default: &secret, Secret: true}}}), nil
+		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
+			return newCheckoutSDK(nodewire.PlanDoc{}, nodewire.PipelineDescription{Name: "build", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Default: &secret, Secret: true}}}), nil
 		},
 	}
 	prepared, err := planner.PrepareCheckout(t.Context(), CheckoutPlanningInput{Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build", ExecutionLocation: "local"}}, Entry: &source.Entry{Engine: resolved}, Project: project, ProjectFile: "sparkwing.yaml"})

@@ -14,17 +14,17 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type childSourceEngine struct{ executable string }
@@ -44,7 +44,7 @@ func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Children: []nodeproto.ChildPipeline{{Pipeline: parent.Request.Request.Pipeline, Repository: string(parent.Request.Request.Git.Repository.Key)}}}}, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
+	a := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Children: []nodewire.ChildPipeline{{Pipeline: parent.Request.Request.Pipeline, Repository: string(parent.Request.Request.Git.Repository.Key)}}}}, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
 	property := func(value []byte, mutation uint8) bool {
 		request := parent.Request.Request
 		request.Git.SHA, request.Git.Ref = "", "deploy"
@@ -83,7 +83,7 @@ func TestCrossRepositoryChildRefusesAnExplicitCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := runspec.Repository{Key: "gh:77", Display: "github.com/acme/other"}
-	a := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Children: []nodeproto.ChildPipeline{{Pipeline: "deploy", Repository: string(other.Key)}}}}, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
+	a := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Children: []nodewire.ChildPipeline{{Pipeline: "deploy", Repository: string(other.Key)}}}}, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
 	request := parent.Request.Request
 	request.Pipeline, request.Lineage = "deploy", runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}
 	request.Git = runspec.Git{Repository: other, Ref: "refs/heads/main", SHA: "9999999999999999999999999999999999999999"}
@@ -115,7 +115,7 @@ func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 	sourcetest.Remote(t, map[string]string{remote: repo})
 	sourcetest.Git(t, repo, "checkout", "-qb", "deploy")
 	sourcetest.Write(t, filepath.Join(repo, ".sparkwing", "pipeline.go"), "package main // selected child\n")
-	sourcetest.Write(t, filepath.Join(repo, ".sparkwing", "go.mod"), "module pipeline\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing v1.2.3\n")
+	sourcetest.Write(t, filepath.Join(repo, ".sparkwing", "go.mod"), "module pipeline\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n")
 	sourcetest.Git(t, repo, "add", ".")
 	sourcetest.Git(t, repo, "commit", "-qm", "child")
 	selected := sourcetest.Git(t, repo, "rev-parse", "HEAD")

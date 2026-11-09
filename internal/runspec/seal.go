@@ -8,7 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // SealRequest snapshots authorized intake values without resolving their precedence.

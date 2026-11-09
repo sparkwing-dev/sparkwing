@@ -8,9 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type dependencyOutputPipeline struct{}
@@ -59,7 +60,7 @@ func init() {
 	sparkwing.Register[sparkwing.NoInputs]("optional-output-fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return optionalOutputPipeline{} })
 }
 
-func proveGoDependencyOutput(t *testing.T, binding nodeproto.ProcessBinding, pipeline, want string) {
+func proveGoDependencyOutput(t *testing.T, binding nodewire.ProcessBinding, pipeline, want string) {
 	t.Helper()
 	input, requests := io.Pipe()
 	replies, output := io.Pipe()
@@ -73,15 +74,15 @@ func proveGoDependencyOutput(t *testing.T, binding nodeproto.ProcessBinding, pip
 		}
 	})
 	encode, decode := json.NewEncoder(requests), json.NewDecoder(replies)
-	for _, request := range []nodeproto.Request{
-		{ID: "hello", Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}, Binding: &binding},
-		{ID: "plan", Op: nodeproto.OpPlan, Pipeline: pipeline, Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "run", Pipeline: pipeline}},
-		{ID: "read", Op: nodeproto.OpRunStep, Job: "job", Step: "read", Attempt: 1, Settled: []string{}},
+	for _, request := range []nodewire.Request{
+		{ID: "hello", Op: nodewire.OpHello, Protocol: nodewire.Version, Engine: &nodewire.EngineIdentity{Version: "test"}, Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}, Binding: &binding},
+		{ID: "plan", Op: nodewire.OpPlan, Pipeline: pipeline, Args: map[string]string{}, Run: &nodewire.RunContext{RunID: "run", Pipeline: pipeline}},
+		{ID: "read", Op: nodewire.OpRunStep, Job: "job", Step: "read", Attempt: 1, Settled: []string{}},
 	} {
 		if err := encode.Encode(request); err != nil {
 			t.Fatal(err)
 		}
-		var reply nodeproto.Reply
+		var reply nodewire.Reply
 		for reply.ID == "" {
 			if err := decode.Decode(&reply); err != nil {
 				t.Fatal(err)
@@ -91,7 +92,7 @@ func proveGoDependencyOutput(t *testing.T, binding nodeproto.ProcessBinding, pip
 			t.Fatalf("Go SDK %s: %+v", request.ID, reply)
 		}
 		if request.ID == "read" {
-			var result nodeproto.RunResult
+			var result nodewire.RunResult
 			err := json.Unmarshal(reply.Result, &result)
 			if failure, failed := strings.CutPrefix(want, "failed: "); failed {
 				if err != nil || result.Outcome != "failed" || result.Error == nil || !strings.Contains(result.Error.Message, failure) {

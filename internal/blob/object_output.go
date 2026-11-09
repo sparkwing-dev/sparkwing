@@ -6,7 +6,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 // ReadOutput consumes and verifies a controller-authorized output object.
@@ -25,12 +25,12 @@ func readObjectOutput(r *verifiedReader, err error, object Blob) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-	body, err := io.ReadAll(io.LimitReader(r, limits.NodeOutputBytes+1))
+	body, err := io.ReadAll(io.LimitReader(r, protolimits.NodeOutputBytes+1))
 	err = errors.Join(err, r.Close(), r.ctx.Err())
 	if err != nil {
 		return nil, err
 	}
-	if !r.Verified() || int64(len(body)) != object.Size || object.Size > limits.NodeOutputBytes || !json.Valid(body) {
+	if !r.Verified() || int64(len(body)) != object.Size || object.Size > protolimits.NodeOutputBytes || !json.Valid(body) {
 		return nil, ErrIntegrity
 	}
 	return body, nil

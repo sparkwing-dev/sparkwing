@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestExecutionStartRequiresAwardBoundAdmission(t *testing.T) {
@@ -77,8 +77,8 @@ func TestJobAdmissionPolicyCommitsTerminalOutcome(t *testing.T) {
 		t.Run(dialect.name, func(t *testing.T) {
 			for _, policy := range []string{"skip", "fail"} {
 				t.Run(policy, func(t *testing.T) {
-					f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodeproto.PlanDoc) {
-						doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new(policy)}}
+					f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodewire.PlanDoc) {
+						doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new(policy)}}
 					})
 					blockerBinding, blocker := admissionPolicyBlocker(t, f)
 					if result, err := f.tenant.MayStart(t.Context(), blockerBinding, blocker); err != nil || result.Kind != runstate.AcquireGranted {
@@ -120,7 +120,7 @@ func TestJobAdmissionPolicyCommitsTerminalOutcome(t *testing.T) {
 	}
 }
 
-func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (store.PlanAcceptance, runstate.Actor) {
+func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodewire.PlanDoc)) (store.PlanAcceptance, runstate.Actor) {
 	t.Helper()
 	ctx := t.Context()
 	intake, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
@@ -133,7 +133,7 @@ func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(
 	}
 	plan := f.plan
 	plan.RunID, plan.Actor, plan.Seal.Request = intake.RunID, owner, intake.Request
-	var doc nodeproto.PlanDoc
+	var doc nodewire.PlanDoc
 	if err := json.Unmarshal(plan.Seal.Plan, &doc); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(
 	return plan, owner
 }
 
-func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (runstate.CapacityBinding, runstate.Actor) {
+func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodewire.PlanDoc)) (runstate.CapacityBinding, runstate.Actor) {
 	t.Helper()
 	ctx := t.Context()
 	plan, owner := admissionAcceptedPlan(t, f, edits...)
@@ -187,8 +187,8 @@ func TestPlanAdmissionPolicyCommitsTerminalOutcome(t *testing.T) {
 		t.Run(dialect.name, func(t *testing.T) {
 			for _, policy := range []string{"skip", "fail"} {
 				t.Run(policy, func(t *testing.T) {
-					f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodeproto.PlanDoc) {
-						doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new(policy)}}
+					f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodewire.PlanDoc) {
+						doc.Concurrency = []nodewire.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new(policy)}}
 					})
 					plan, owner := admissionAcceptedPlan(t, f)
 					result, err := f.tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: plan.RunID, Generation: int64(owner.Owner.Generation)}, owner)

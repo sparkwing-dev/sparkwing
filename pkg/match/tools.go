@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/build"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/labels"
 )
 
 // KnownTools is every tool an agent detects on its PATH and advertises as a
@@ -30,9 +31,6 @@ func parseToolManifest(manifest string) []string {
 	return tools
 }
 
-// ToolPrefix starts every tool label.
-const ToolPrefix = "tool:"
-
 // DefaultClaimWait is how long a ready node waits for an agent to claim it
 // before the controller fails it as unclaimable. A pipeline may set its own.
 const DefaultClaimWait = 24 * time.Hour
@@ -51,7 +49,7 @@ func IsKnownTool(name string) bool {
 func ToolLabels(names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		out = append(out, ToolPrefix+name)
+		out = append(out, labels.ToolPrefix+name)
 	}
 	return out
 }

@@ -9,9 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestPersonalRunnerClaimsControllerPlanRunSelector(t *testing.T) {
@@ -69,7 +69,7 @@ func TestPersonalRunnerClaimsControllerPlanRunSelector(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				acceptCapacityDocument(t, server, tenant, owner, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "where", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+				acceptCapacityDocument(t, server, tenant, owner, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "where", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 				other, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:desktop", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 				if err != nil {
 					t.Fatal(err)

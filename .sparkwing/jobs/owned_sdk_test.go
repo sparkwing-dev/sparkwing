@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func TestOwnedSDKUpdatesInAnEnvironmentAndUsesTheReposLandFlow(t *testing.T) {
@@ -28,7 +28,7 @@ func TestOwnedSDKUpdatesInAnEnvironmentAndUsesTheReposLandFlow(t *testing.T) {
 			}
 			writeFile(t, filepath.Join(mod, "go.mod"), "module fixture\n\ngo 1.26.0\n\n"+require)
 			writeFile(t, filepath.Join(mod, "go.sum"), "")
-			writeFile(t, filepath.Join(mod, "main.go"), "package main\nimport _ \""+sdkModulePath+"/sparkwing\"\nfunc main() {}\n")
+			writeFile(t, filepath.Join(mod, "main.go"), "package main\nimport _ \""+sdkModulePath+"\"\nfunc main() {}\n")
 			gitRun(t, repo, "add", ".sparkwing")
 			gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
 				"-c", "core.hooksPath=/dev/null", "commit", "-m", "pipeline fixture")
@@ -123,7 +123,7 @@ func ownedSDKProxy(t *testing.T, version string) {
 		t.Fatal(err)
 	}
 	writer := zip.NewWriter(file)
-	for path, body := range map[string]string{"go.mod": mod, "sparkwing/sdk.go": "package sparkwing\n"} {
+	for path, body := range map[string]string{"go.mod": mod, "sdk.go": "package sparkwing\n"} {
 		entry, err := writer.Create(sdkModulePath + "@" + version + "/" + path)
 		if err != nil {
 			t.Fatal(err)

@@ -8,12 +8,13 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAcceptance) error {
@@ -175,7 +176,7 @@ func validateResolvedIntake(input *runspec.SealInput) error {
 	if err != nil {
 		return err
 	}
-	args, err := nodeproto.ResolveArguments(nodeproto.PipelineDescription{Args: input.Resolved.ArgumentDeclarations, Extra: true}, raw)
+	args, err := nodeproto.ResolveArguments(nodewire.PipelineDescription{Args: input.Resolved.ArgumentDeclarations, Extra: true}, raw)
 	if err != nil {
 		return authorityError(apierr.InvalidArgs, err.Error())
 	}

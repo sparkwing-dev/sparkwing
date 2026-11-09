@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func testGoSDKRefusesEmptyOIDCToken(t *testing.T) {

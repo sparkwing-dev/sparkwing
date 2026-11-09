@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 var _ controllerwire.Controller = (*engineClient)(nil)
@@ -113,11 +113,11 @@ func (c *engineClient) CancelJob(ctx context.Context, run, job string, input con
 	return result, err
 }
 
-func (c *engineClient) ReadFailure(ctx context.Context, run, job string, generation int64) (*nodeproto.JobFailure, error) {
+func (c *engineClient) ReadFailure(ctx context.Context, run, job string, generation int64) (*nodewire.JobFailure, error) {
 	if !validSelector(run) || !validSelector(job) || generation <= 0 {
 		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "failure read requires valid run, job and source generation"}
 	}
-	var result *nodeproto.JobFailure
+	var result *nodewire.JobFailure
 	err := c.request(ctx, "GET", "/api/v1/runs/{run}/jobs/{job}/failure", "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/failure?generation="+strconv.FormatInt(generation, 10), "", nil, &result)
 	if err != nil {
 		return nil, err

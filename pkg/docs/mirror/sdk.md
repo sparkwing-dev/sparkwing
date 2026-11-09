@@ -9,6 +9,16 @@ callbacks the host selects.
 import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 ```
 
+The Go SDK is its own module, `github.com/sparkwing-dev/sparkwing/sparkwing`,
+with a Go 1.25 minimum. It has no host-module dependency. SDK releases use
+`sparkwing/v0.x.y` tags and advance only when SDK source changes. Engine releases
+have their own versions.
+
+For source development, the repository workspace joins the host, SDK and pipeline
+modules. Run SDK tests explicitly with `GOWORK=off go -C sparkwing test ./...`.
+Root `go test ./...` does not traverse the nested module. The root manifest has
+no replacement directives so versioned `go install` remains supported.
+
 ## Pipeline registration
 
 Implement `Pipeline[T]`, register a factory and call `sw.Main()` from the pipeline
@@ -571,7 +581,7 @@ the registration. Import the `sparkwing/cleanup` subpackage for this helper.
 
 ## Testing author code
 
-Import `github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest` to exercise
+Import `github.com/sparkwing-dev/sparkwing/sparkwingtest` to exercise
 author code with an isolated fake host. `Options` supplies runner and run
 context, classified secrets, job outputs and callbacks for OIDC, latest output
 and child runs.

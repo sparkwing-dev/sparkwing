@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (s *EngineController) handleSummary(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -102,7 +104,7 @@ func (s *EngineController) handleAnnotation(w http.ResponseWriter, r *http.Reque
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	if err := body.Validate(); err != nil {
+	if err := nodeproto.ValidateAnnotation(body.Annotation); err != nil {
 		return invalidEngineBody(err.Error())
 	}
 	if err := reportingStep(r, body.StepID); err != nil {

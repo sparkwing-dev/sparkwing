@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestReleasedJobAdmissionDoesNotReacquirePlan(t *testing.T) {
@@ -50,9 +50,9 @@ func TestReleasedJobAdmissionDoesNotReacquirePlan(t *testing.T) {
 func TestAdmissionGroupSetIsAtomicAndUsesOneArrival(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
 	ctx := t.Context()
-	blocker, award := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) {
+	blocker, award := admissionPolicyBlocker(t, f, func(doc *nodewire.PlanDoc) {
 		doc.Concurrency = nil
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "node", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "node", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
 	})
 	admissionWant(t, f, blocker, award, runstate.AcquireGranted)
 	binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
@@ -95,8 +95,8 @@ func TestAdmissionQueueTimeoutOnlyAppliesWhileWaiting(t *testing.T) {
 		t.Run(dialect.name, func(t *testing.T) {
 			for _, queued := range []bool{false, true} {
 				t.Run(map[bool]string{false: "granted", true: "waiting"}[queued], func(t *testing.T) {
-					f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodeproto.PlanDoc) {
-						doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), OnLimit: new("queue"), QueueTimeoutMS: new(int64(1000))}}
+					f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodewire.PlanDoc) {
+						doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), OnLimit: new("queue"), QueueTimeoutMS: new(int64(1000))}}
 					})
 					now, err := f.s.TestOnlyDatabaseTime(t.Context())
 					if err != nil {
@@ -188,8 +188,8 @@ func TestClaimedAdmissionRetainsPlanThroughOwnerRecovery(t *testing.T) {
 }
 
 func TestJobBoxScopeUsesExecutingAward(t *testing.T) {
-	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t), func(doc *nodeproto.PlanDoc) {
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("box"), Capacity: new(1), OnLimit: new("queue")}}
+	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t), func(doc *nodewire.PlanDoc) {
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "deploy", Scope: new("box"), Capacity: new(1), OnLimit: new("queue")}}
 	})
 	owner, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.owner.Authority)
 	if err != nil {
@@ -219,17 +219,17 @@ func TestJobBoxScopeUsesExecutingAward(t *testing.T) {
 }
 
 func TestWaitingGroupSetDoesNotPreemptEarlierGroup(t *testing.T) {
-	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t), func(doc *nodeproto.PlanDoc) {
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{
+	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t), func(doc *nodewire.PlanDoc) {
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{
 			{Group: "a-cancel", Scope: new("global"), Capacity: new(1), OnLimit: new("cancel_others")},
 			{Group: "z-block", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")},
 		}
 	})
 	var competitor string
 	for _, group := range []string{"a-cancel", "z-block"} {
-		blocker, award := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) {
+		blocker, award := admissionPolicyBlocker(t, f, func(doc *nodewire.PlanDoc) {
 			doc.Concurrency = nil
-			doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: group, Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
+			doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: group, Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
 		})
 		if group == "a-cancel" {
 			competitor = blocker.RunID
@@ -256,9 +256,9 @@ func TestAdmissionReapsCapacityWhenClaimAndOwnerBothEnd(t *testing.T) {
 		target func(*testing.T) *storetest.Target
 	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
 		t.Run(dialect.name, func(t *testing.T) {
-			f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodeproto.PlanDoc) {
-				doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "plan", Scope: new("global"), Capacity: new(1)}}
-				doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "job", Scope: new("global"), Capacity: new(1)}}
+			f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodewire.PlanDoc) {
+				doc.Concurrency = []nodewire.ConcurrencySpec{{Group: "plan", Scope: new("global"), Capacity: new(1)}}
+				doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "job", Scope: new("global"), Capacity: new(1)}}
 			})
 			binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 			if result, err := f.tenant.MayStart(t.Context(), binding, f.holder); err != nil || result.Kind != runstate.AcquireGranted {

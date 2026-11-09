@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestSDKEnvironmentProjection(t *testing.T) {
@@ -23,7 +23,7 @@ func TestSDKEnvironmentProjection(t *testing.T) {
 			var processes []*scriptedSDK
 			input, s, _ := executionHostFixture(t, "success", &trace, &processes)
 			input.Entry = &source.Entry{Command: []string{"unreachable-sdk"}}
-			input.GrantedRunner = nodeproto.RunnerIdentity{Name: "awarded", Type: "cloud", Labels: []string{"pool=team"}}
+			input.GrantedRunner = nodewire.RunnerIdentity{Name: "awarded", Type: "cloud", Labels: []string{"pool=team"}}
 			var spec runspec.Spec
 			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 				t.Fatal(err)
@@ -35,7 +35,7 @@ func TestSDKEnvironmentProjection(t *testing.T) {
 				spec.Request.RunID = "source-run"
 			}
 			input.Accepted.Spec, _ = json.Marshal(spec)
-			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{"BODY": {Value: "after plan"}, "STARTUP": {Value: "before exec", Startup: true}}}
+			job := nodewire.JobSpec{ID: input.NodeID, Env: map[string]nodewire.EnvValue{"BODY": {Value: "after plan"}, "STARTUP": {Value: "before exec", Startup: true}}}
 			s.snapshot.Nodes[0].Spec, _ = json.Marshal(job)
 			kind := map[string]procenv.Kind{"plan": procenv.Plan, "attempt": procenv.Attempt, "eval": procenv.Eval}[operation]
 			boundary := errors.New("environment boundary refused startup")
@@ -67,7 +67,7 @@ func TestSDKEnvironmentProjection(t *testing.T) {
 			var err error
 			switch operation {
 			case "plan":
-				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Environment: spec.Request.Request.Env, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build", DryRun: true}}, func(context.Context, nodeproto.FrameLog) error { return nil })
+				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Environment: spec.Request.Request.Env, Run: nodewire.RunContext{RunID: input.Accepted.RunID, Pipeline: "build", DryRun: true}}, func(context.Context, nodewire.FrameLog) error { return nil })
 			case "attempt":
 				process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 			case "eval":

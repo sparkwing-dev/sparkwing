@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func runRunsLogs(ctx context.Context, inv clisurface.Invocation) error {
@@ -234,7 +234,7 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 	if record.Event != "" {
 		line = eventDetail(record.Line)
 	} else {
-		var frame nodeproto.FrameLog
+		var frame nodewire.FrameLog
 		if json.Unmarshal([]byte(line), &frame) == nil {
 			_, timestampError := time.Parse(time.RFC3339Nano, frame.TS)
 			if timestampError == nil || (frame.Message != "" || frame.Event != "") && (frame.Level != "" || frame.Event != "" || frame.Step != "" || len(frame.Attrs) > 0) {

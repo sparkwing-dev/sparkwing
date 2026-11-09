@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -38,7 +39,7 @@ func pushedAndLocalCommits(t *testing.T) (work, pushed, local string) {
 func TestTriggerPreflightSeesOnlyPushedCommits(t *testing.T) {
 	work, pushed, local := pushedAndLocalCommits(t)
 	check := func(directory, sha string) error {
-		selected := preparedTriggerSource{git: runspec.Git{SHA: sha}, source: runspec.Source{Ref: sha}, checkout: triggerCheckout{directory: directory, environment: testgit.Env(os.Environ())}}
+		selected := preparedTriggerSource{git: runspec.Git{SHA: sha}, source: runspec.Source{Ref: sha}, checkout: triggerCheckout{directory: directory, environment: gitcontrol.Env(os.Environ())}}
 		return selected.checkReachable(t.Context())
 	}
 	if err := check(work, pushed); err != nil {
@@ -54,7 +55,7 @@ func TestTriggerPreflightSeesOnlyPushedCommits(t *testing.T) {
 func TestTriggerPreflightRejectsCommitOnlyOnAnotherRemote(t *testing.T) {
 	work, _, local := pushedAndLocalCommits(t)
 	gitInRepo(t, work, "update-ref", "refs/remotes/upstream/main", local)
-	selection := preparedTriggerSource{git: runspec.Git{SHA: local}, source: runspec.Source{Ref: local}, checkout: triggerCheckout{directory: work, environment: testgit.Env(os.Environ())}}
+	selection := preparedTriggerSource{git: runspec.Git{SHA: local}, source: runspec.Source{Ref: local}, checkout: triggerCheckout{directory: work, environment: gitcontrol.Env(os.Environ())}}
 	if err := selection.checkReachable(t.Context()); err == nil || !strings.Contains(err.Error(), "not on origin") {
 		t.Fatalf("preflight accepted an unpushed origin commit: %v", err)
 	}

@@ -10,11 +10,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func bindRunnerIdentityW8(unit *controllerwire.ClaimedUnit) {
@@ -23,7 +23,7 @@ func bindRunnerIdentityW8(unit *controllerwire.ClaimedUnit) {
 	unit.Request = runspec.SealedRequest{RunID: unit.RunID, Hash: "request-hash", Request: runspec.Request{Team: "team"}}
 	unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", Resolved: runspec.Resolved{Engine: identity}}, Plan: []byte(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
 	unit.Execution = &runspec.JobExecutionSettings{}
-	unit.Runner = nodeproto.RunnerIdentity{Name: "granted-runner", Type: "runner", Labels: []string{"pool=granted", "linux"}}
+	unit.Runner = nodewire.RunnerIdentity{Name: "granted-runner", Type: "runner", Labels: []string{"pool=granted", "linux"}}
 }
 
 func TestCloudWorkUsesRunnerExecutionIdentityW8(t *testing.T) {

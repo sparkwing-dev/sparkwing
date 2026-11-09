@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestSourceMetadataUsesOwnerLeaseWithoutWorkAttempt(t *testing.T) {
 	tenant, _, request := expansionFixture(t)
-	if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: request.Source, Actor: request.Actor, Annotation: nodeproto.Annotation{Message: "source note"}}); err != nil {
+	if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: request.Source, Actor: request.Actor, Annotation: nodewire.Annotation{Message: "source note"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: request.Source, Actor: request.Actor, Markdown: "source summary"}); err != nil {
@@ -71,7 +71,7 @@ func FuzzSourceMetadataCannotEscapeItsLease(f *testing.F) {
 		if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: request.Source, Actor: request.Actor, Markdown: "escaped"}); err == nil {
 			t.Fatalf("changed source authority %d accepted", change%9)
 		}
-		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: request.Source, Actor: request.Actor, Annotation: nodeproto.Annotation{Message: "escaped"}}); err == nil {
+		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: request.Source, Actor: request.Actor, Annotation: nodewire.Annotation{Message: "escaped"}}); err == nil {
 			t.Fatalf("changed source authority %d accepted annotation", change%9)
 		}
 	})

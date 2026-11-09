@@ -3,8 +3,9 @@ package sparkwing
 import (
 	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/depcachekey"
 )
 
 // DirCache declares files restored and saved by the host around a job attempt.

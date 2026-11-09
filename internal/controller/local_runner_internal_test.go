@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestLocalRunnerListsTheMachineWithItsLabelsAndCurrentLastSeen(t *testing.T) {
@@ -15,9 +15,9 @@ func TestLocalRunnerListsTheMachineWithItsLabelsAndCurrentLastSeen(t *testing.T)
 	team := string(store.DefaultTeam)
 	stale := now.Add(-3 * time.Hour)
 	snapshot := capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{
-		{ID: "award:old", Team: team, Runner: nodeproto.RunnerIdentity{Name: "holder-1", Type: "local"}, Location: "local", LastSeen: stale, ActiveJobs: []string{"run-b/build"}},
-		{ID: "award:new", Team: team, Runner: nodeproto.RunnerIdentity{Name: "holder-2", Type: "local"}, Location: "local", LastSeen: stale, ActiveJobs: []string{"run-a/test"}},
-		{ID: "machine:p", Team: team, Runner: nodeproto.RunnerIdentity{Name: "box", Type: "runner"}, LastSeen: stale, ActiveJobs: []string{}},
+		{ID: "award:old", Team: team, Runner: nodewire.RunnerIdentity{Name: "holder-1", Type: "local"}, Location: "local", LastSeen: stale, ActiveJobs: []string{"run-b/build"}},
+		{ID: "award:new", Team: team, Runner: nodewire.RunnerIdentity{Name: "holder-2", Type: "local"}, Location: "local", LastSeen: stale, ActiveJobs: []string{"run-a/test"}},
+		{ID: "machine:p", Team: team, Runner: nodewire.RunnerIdentity{Name: "box", Type: "runner"}, LastSeen: stale, ActiveJobs: []string{}},
 	}}
 	got := mergeLocalRunner(snapshot, team, &LocalRunner{Name: "laptop", Labels: []string{"gpu"}})
 	if len(got.Runners) != 2 {

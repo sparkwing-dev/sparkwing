@@ -7,8 +7,8 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type cleanupBudgetProcess struct {
@@ -37,9 +37,9 @@ func TestLifecycleCleanupCommandsHaveIndependentBudgets(t *testing.T) {
 				var process *cleanupBudgetProcess
 				if owner {
 					input, _, deps, base := evaluationFixture(t)
-					base.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-						if request.Op == nodeproto.OpEval {
-							return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
+					base.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+						if request.Op == nodewire.OpEval {
+							return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 						}
 						return nil, nil
 					}
@@ -79,24 +79,24 @@ func TestLifecycleCleanupCommandsHaveIndependentBudgets(t *testing.T) {
 
 func TestSDKBoundaryRejectsMalformedResults(t *testing.T) {
 	for _, tc := range []struct {
-		op   nodeproto.Op
+		op   nodewire.Op
 		raw  string
 		kind string
 	}{
-		{nodeproto.OpRunStep, `{"outcome":"failed","error":{"code":"","message":"bad"}}`, ""},
-		{nodeproto.OpEval, `{"value":null,"error":{"code":"","message":"bad"}}`, "verify"},
-		{nodeproto.OpEval, `{"value":false}`, "verify"},
-		{nodeproto.OpEval, `{"value":null}`, ""},
+		{nodewire.OpRunStep, `{"outcome":"failed","error":{"code":"","message":"bad"}}`, ""},
+		{nodewire.OpEval, `{"value":null,"error":{"code":"","message":"bad"}}`, "verify"},
+		{nodewire.OpEval, `{"value":false}`, "verify"},
+		{nodewire.OpEval, `{"value":null}`, ""},
 	} {
 		t.Run(string(tc.op)+tc.raw+tc.kind, func(t *testing.T) {
-			process := &executorProcess{answer: func(context.Context, nodeproto.Request) (any, error) { return json.RawMessage(tc.raw), nil }}
+			process := &executorProcess{answer: func(context.Context, nodewire.Request) (any, error) { return json.RawMessage(tc.raw), nil }}
 			session := &executorSession{process: process}
 			var err error
-			if tc.op == nodeproto.OpEval {
+			if tc.op == nodewire.OpEval {
 				_, err = (&sdkCode{}).eval(t.Context(), session, NodeInput{}, "closure", tc.kind, nil, nil)
 			} else {
-				var result nodeproto.RunResult
-				err = session.call(t.Context(), nodeproto.Request{Op: tc.op}, &result, "")
+				var result nodewire.RunResult
+				err = session.call(t.Context(), nodewire.Request{Op: tc.op}, &result, "")
 			}
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError {
@@ -107,13 +107,13 @@ func TestSDKBoundaryRejectsMalformedResults(t *testing.T) {
 }
 
 func TestSDKBoundaryRejectsMissingClosureKindBeforeTransport(t *testing.T) {
-	process := &executorProcess{answer: func(context.Context, nodeproto.Request) (any, error) {
+	process := &executorProcess{answer: func(context.Context, nodewire.Request) (any, error) {
 		t.Fatal("eval reached transport without a closure kind")
 		return nil, nil
 	}}
 	session := &executorSession{process: process}
-	var result nodeproto.EvalResult
-	if err := session.call(t.Context(), nodeproto.Request{Op: nodeproto.OpEval, Closure: "verify"}, &result, ""); err == nil {
+	var result nodewire.EvalResult
+	if err := session.call(t.Context(), nodewire.Request{Op: nodewire.OpEval, Closure: "verify"}, &result, ""); err == nil {
 		t.Fatal("missing kind was accepted")
 	}
 }

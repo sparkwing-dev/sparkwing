@@ -1,0 +1,382 @@
+# sparkwing/protocol
+
+type Annotation struct {
+	Level   string
+	Message string
+	File    string
+	Line    int
+	EndLine int
+	Column  int
+}
+type AnnotationRequest struct {
+	Annotation
+	Step string
+}
+type ApprovalSpec struct {
+	Message   string
+	TimeoutMS *int64
+	OnTimeout string
+}
+type ArgumentDescription struct {
+	Name        string
+	Short       string
+	Type        string
+	Required    bool
+	Description string
+	Default     *string
+	Enum        []string
+	Secret      bool
+	JobID       string
+}
+type ArtifactInput struct {
+	Producer string
+	Into     string
+}
+const CacheResolverGoModules = "go-modules"
+const CacheResolverNpm = "npm"
+type CacheSpec struct {
+	Name     string
+	Path     string
+	Resolver string
+	KeyScope string
+	KeyFiles []string
+}
+type ChildPipeline struct {
+	Pipeline   string
+	Repository string
+}
+type ClosureSpec struct {
+	SkipIf    []string
+	BeforeRun []string
+	Verify    string
+	AfterRun  []string
+	MemoKey   string
+	Generate  []string
+}
+type ConcurrencySpec struct {
+	Group          string
+	Scope          *string
+	Capacity       *int
+	Cost           *int
+	OnLimit        *string
+	QueueTimeoutMS *int64
+}
+type DescribeDoc struct {
+	Pipelines []PipelineDescription
+}
+func (d DescribeDoc) Pipeline(entrypoint string) (PipelineDescription, bool)
+type EngineIdentity struct {
+	Version string
+}
+type EnvValue struct {
+	Value   string
+	Startup bool
+}
+type EnvironmentDescription struct {
+	Name        string
+	Description string
+	Default     *string
+}
+var ErrMalformed = errors.New("nodeproto: malformed line")
+type EvalResult struct {
+	Arguments         []ArgumentDescription
+	DeclarationsKnown bool
+	Value             json.RawMessage
+	Error             *apierr.Error
+}
+type ExecCancel struct {
+	ID string
+}
+type ExecDone struct {
+	ID         string
+	ExitCode   int
+	Signaled   bool
+	StartError string
+	NotFound   bool
+	Stdout     []byte
+	Stderr     []byte
+}
+type ExecOutput struct {
+	ID     string
+	Stream string
+	Data   []byte
+}
+type ExecRequest struct {
+	ID      string
+	Step    string
+	Argv    []string
+	Dir     string
+	Env     []string
+	Capture bool
+	Stdin   []byte
+}
+const ExecTailBytes = 64 << 10
+type Frame struct {
+	Reply      *Reply
+	Log        *FrameLog
+	Exec       *ExecRequest
+	ExecCancel *ExecCancel
+}
+type FrameLog struct {
+	Stream     string
+	StreamData string
+	StreamEnd  bool
+	TS         string
+	Level      string
+	Step       string
+	Event      string
+	Message    string
+	Attrs      json.RawMessage
+}
+type Git struct {
+	SHA           string
+	Branch        string
+	DefaultBranch string
+	Repo          string
+	RepoURL       string
+}
+type HelloResult struct {
+	Protocol int
+	SDK      SDKIdentity
+}
+type HelperRequest struct {
+	Step      string
+	Operation string
+	Dir       string
+	Env       []string
+	Args      json.RawMessage
+}
+type HelperResponse struct {
+	Result json.RawMessage
+	Error  string
+	Code   string
+}
+type HostLine struct {
+	Output *ExecOutput
+	Done   *ExecDone
+}
+func JSONFieldType(kind reflect.Type, key string) (reflect.Type, bool)
+type JobFailure struct {
+	Job   string
+	Stage string
+	Error *apierr.Error
+}
+type JobSpec struct {
+	Arguments      []ArgumentDescription
+	ID             string
+	Needs          []string
+	NeedsIfPresent []string
+	NeedsGenerated []string
+	Groups         []string
+	Env            map[string]EnvValue
+	Artifacts      []string
+	Consumes       []ArtifactInput
+	References     []PipelineReference
+
+	Children            []ChildPipeline
+	Approval            *ApprovalSpec
+	OnFailureOf         string
+	Retry               *RetrySpec
+	TimeoutMS           *int64
+	NoProgressTimeoutMS *int64
+
+	Cores           *float64
+	Requires        []string
+	Prefers         []string
+	Inline          bool
+	Optional        bool
+	ContinueOnError bool
+	Memo            *MemoSpec
+	Caches          []CacheSpec
+	Concurrency     []ConcurrencySpec
+	Closures        ClosureSpec
+	SkipIfBudgetMS  *int64
+	Steps           []StepSpec
+	ResultStep      string
+	FailurePolicy   string
+}
+type MaskRequest struct {
+	Value string
+}
+const MaxLineBytes = int(protolimits.NodeOutputBytes + protolimits.ProtocolEnvelopeBytes)
+type MemoInput struct {
+	Kind     string
+	Value    string
+	Patterns []string
+	Root     string
+	Names    []string
+	Parts    []any
+	Inputs   []MemoInput
+}
+func (input *MemoInput) UnmarshalJSON(raw []byte) error
+type MemoSpec struct {
+	TTLMS *int64
+	Input *MemoInput
+}
+const MinJobCores = 0.25
+func NewReader(r io.Reader) *Reader
+func NewWriter(w io.Writer) *Writer
+type Op string
+const OpCancel Op = "cancel"
+const OpDescribe Op = "describe"
+const OpEval Op = "eval"
+const OpHello Op = "hello"
+const OpPlan Op = "plan"
+const OpRunStep Op = "run_step"
+type OperationFields struct{ Required, Allowed []string }
+func ParseFrame(line []byte) (Frame, error)
+func ParseHostLine(line []byte) (HostLine, bool, error)
+func ParseRequest(line []byte) (Request, error)
+type PipelineDescription struct {
+	Name        string
+	Error       *apierr.Error
+	Short       string
+	Help        string
+	Examples    []UsageExample
+	Args        []ArgumentDescription
+	EnvVars     []EnvironmentDescription
+	Extra       bool
+	Risks       []string
+	RisksByStep []StepRisks
+	Secrets     []SecretDeclaration
+}
+type PipelineReference struct {
+	Pipeline   string
+	Job        string
+	FromAnyRun bool
+
+	FromProvenRun bool
+}
+type PlanDoc struct {
+	Jobs           []JobSpec
+	Concurrency    []ConcurrencySpec
+	Priority       *int
+	ClaimWaitMS    *int64
+	AdmissionClass *string
+	Source         *SourceSpec
+}
+type ProcessBinding struct {
+	RunID  string
+	JobID  string
+	Routes ProcessRoutes
+}
+type ProcessRoutes struct {
+	URL    string
+	Bearer string
+}
+type PullRequest struct {
+	Number  int
+	Action  string
+	BaseRef string
+	BaseSHA string
+	HeadRef string
+	HeadSHA string
+}
+type Reader struct {
+}
+func (r *Reader) Next() (Frame, error)
+func (r *Reader) NextRequest() (Request, error)
+func (r *Reader) ReadLine() ([]byte, error)
+type Reply struct {
+	ID     string
+	OK     bool
+	Result json.RawMessage
+	Error  *apierr.Error
+}
+func (r Reply) Decode(result any) error
+type Request struct {
+	ID       string
+	Op       Op
+	Protocol int
+	Engine   *EngineIdentity
+	Runner   *RunnerIdentity
+	Binding  *ProcessBinding
+	Pipeline string
+	Args     map[string]string
+	Run      *RunContext
+	Job      string
+	Step     string
+	Attempt  int
+	Settled  []string
+	Failure  *JobFailure
+	Closure  string
+	Input    json.RawMessage
+
+	Target string
+}
+func (r Request) Validate() error
+func RequestFieldNames() []string
+func RequestFields(op Op) OperationFields
+type RetrySpec struct {
+	Attempts  int
+	BackoffMS *int64
+}
+type RunContext struct {
+	RunID     string
+	Pipeline  string
+	Git       *Git
+	Trigger   *Trigger
+	StartedAt time.Time
+	NoMemo    bool
+	DryRun    bool
+}
+type RunResult struct {
+	Outcome string
+	Error   *apierr.Error
+	Output  json.RawMessage
+}
+type RunnerIdentity struct {
+	Name   string
+	Type   string
+	Labels []string
+}
+type SDKIdentity struct {
+	Language string
+	Version  string
+}
+type SecretDeclaration struct {
+	Name     string
+	Optional bool
+}
+type ServiceAcknowledged struct{}
+type SourceSpec struct {
+	FullHistory *bool
+	Depth       *int
+	Tags        *bool
+	Submodules  *bool
+	LFS         *bool
+}
+type StepRisks struct {
+	JobID  string
+	StepID string
+	Labels []string
+}
+type StepSpec struct {
+	ID                string
+	Needs             []string
+	Groups            []string
+	Finally           bool
+	Risks             []string
+	Optional          bool
+	ContinueOnError   bool
+	HasDryRun         bool
+	SafeWithoutDryRun bool
+	Closures          ClosureSpec
+}
+type SummaryRequest struct {
+	Markdown string
+	Step     string
+}
+type Trigger struct {
+	Source      string
+	User        string
+	PullRequest *PullRequest
+}
+type UsageExample struct {
+	Comment string
+	Command string
+}
+const Version = 2
+type Writer struct {
+}
+func (w *Writer) Send(v any) error

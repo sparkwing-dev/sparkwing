@@ -35,6 +35,4 @@ const (
 	// archive Sparkwing Cloud keeps out of the team's storage quota; bytes past
 	// it count as usual.
 	PreparedPipelineBytes int64 = 256 << 20
-	// ProtocolEnvelopeBytes bounds envelope allowance beyond a typed output payload.
-	ProtocolEnvelopeBytes int64 = 1 << 20
 )

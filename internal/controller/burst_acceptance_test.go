@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -30,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestBurstAcceptanceLocalOwnerPersonalWorkerAndCancellation(t *testing.T) {
@@ -60,7 +60,7 @@ func burstAcceptanceFlow(t *testing.T, localIneligible bool, placement string) {
 type BurstExecutionProof struct {
 	Secret        string
 	Pipeline      string
-	Plan          nodeproto.PlanDoc
+	Plan          nodewire.PlanDoc
 	Engine        engineid.Identity
 	Source        func(*testing.T) (string, string)
 	Execute       func(client.EngineOptions, controllerwire.ClaimedUnit, controllerwire.Controller)
@@ -163,7 +163,7 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 		t.Fatal("the requester's here award is not marked as the owner's machine")
 	}
 	owner := newClient(claimed.Claim.Capability, false)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Requires: []string{"worker"}, Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Requires: []string{"worker"}, Steps: []nodewire.StepSpec{{ID: "run"}}}}}
 	if proof != nil {
 		plan = proof.Plan
 	}

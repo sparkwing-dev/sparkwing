@@ -11,13 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // sessionTimeout bounds one conversation with a pipeline binary, from start
@@ -26,8 +27,8 @@ const sessionTimeout = 30 * time.Second
 
 // session is one pipeline process answering requests in turn.
 type session struct {
-	requests *nodeproto.Writer
-	frames   *nodeproto.Reader
+	requests *nodewire.Writer
+	frames   *nodewire.Reader
 	next     int
 	broken   error
 	masker   *secrets.Masker
@@ -37,7 +38,7 @@ type session struct {
 // call sends req with the next request id and decodes the reply's result into
 // result. A failed reply returns its [*apierr.Error]; the process stays up
 // for the next request.
-func (s *session) call(req nodeproto.Request, result any) error {
+func (s *session) call(req nodewire.Request, result any) error {
 	if s.broken != nil {
 		return s.broken
 	}
@@ -53,8 +54,8 @@ func (s *session) call(req nodeproto.Request, result any) error {
 
 // describe sends describe after the session's protocol handshake.
 func (s *session) describe() (*runspec.DeclarationGate, error) {
-	var doc nodeproto.DescribeDoc
-	err := s.call(nodeproto.Request{Op: nodeproto.OpDescribe}, &doc)
+	var doc nodewire.DescribeDoc
+	err := s.call(nodewire.Request{Op: nodewire.OpDescribe}, &doc)
 	if err != nil {
 		return nil, err
 	}
@@ -126,12 +127,12 @@ func converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 		close(killed)
 	})
 
-	s = &session{requests: nodeproto.NewWriter(reqW), frames: nodeproto.NewReader(frameR), masker: masker}
-	var hello nodeproto.HelloResult
-	talkErr := s.call(nodeproto.Request{
-		Op: nodeproto.OpHello, Protocol: nodeproto.Version,
-		Engine: &nodeproto.EngineIdentity{Version: buildinfo.Read("sparkwing", "").Version},
-		Runner: &nodeproto.RunnerIdentity{Name: "describe", Type: "local", Labels: []string{}},
+	s = &session{requests: nodewire.NewWriter(reqW), frames: nodewire.NewReader(frameR), masker: masker}
+	var hello nodewire.HelloResult
+	talkErr := s.call(nodewire.Request{
+		Op: nodewire.OpHello, Protocol: nodewire.Version,
+		Engine: &nodewire.EngineIdentity{Version: buildinfo.Read("sparkwing", "").Version},
+		Runner: &nodewire.RunnerIdentity{Name: "describe", Type: "local", Labels: []string{}},
 	}, &hello)
 	if talkErr == nil {
 		talkErr = talk(s)
@@ -159,22 +160,22 @@ func converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 	return talkErr
 }
 
-func exchange(requests *nodeproto.Writer, r *nodeproto.Reader, req nodeproto.Request) (nodeproto.Reply, error) {
+func exchange(requests *nodewire.Writer, r *nodewire.Reader, req nodewire.Request) (nodewire.Reply, error) {
 	if err := requests.Send(req); err != nil {
-		return nodeproto.Reply{}, err
+		return nodewire.Reply{}, err
 	}
 	for {
 		f, err := r.Next()
 		switch {
 		case errors.Is(err, io.EOF):
-			return nodeproto.Reply{}, fmt.Errorf("pipeline entry exited without answering %s; rebuild .sparkwing against a matching SDK", req.Op)
+			return nodewire.Reply{}, fmt.Errorf("pipeline entry exited without answering %s; rebuild .sparkwing against a matching SDK", req.Op)
 		case err != nil:
-			return nodeproto.Reply{}, &apierr.Error{Code: apierr.ProtocolError, Message: err.Error()}
+			return nodewire.Reply{}, &apierr.Error{Code: apierr.ProtocolError, Message: err.Error()}
 		case f.Reply == nil:
 			continue
 		case f.Reply.ID != req.ID:
 			msg := fmt.Sprintf("%v: %s", nodeproto.ErrUnknownReply, f.Reply.ID)
-			return nodeproto.Reply{}, &apierr.Error{Code: apierr.ProtocolError, Message: msg}
+			return nodewire.Reply{}, &apierr.Error{Code: apierr.ProtocolError, Message: msg}
 		}
 		return *f.Reply, nil
 	}

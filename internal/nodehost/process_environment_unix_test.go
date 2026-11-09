@@ -15,11 +15,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
@@ -60,11 +60,11 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 					return procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: want}, procenv.Runtime{})
 				}
 				revoked := 0
-				cfg := ProtocolSessionConfig{Environments: policy, Environment: testProcessEnv(t, "UNBUILT=unsafe"), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked++; return nil }}
+				cfg := ProtocolSessionConfig{Environments: policy, Environment: testProcessEnv(t, "UNBUILT=unsafe"), ParseFrame: protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil }, Revoke: func() error { revoked++; return nil }}
 				var process ExecutorProcess
 				switch kind {
 				case procenv.Plan:
-					process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci"}}, func(context.Context, nodeproto.FrameLog) error { return nil })
+					process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Run: nodewire.RunContext{RunID: "run", Pipeline: "ci"}}, func(context.Context, nodewire.FrameLog) error { return nil })
 				case procenv.Attempt:
 					process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 				case procenv.Eval:
@@ -85,7 +85,7 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 				t.Cleanup(func() { _ = process.Close() })
 				session := process.(*protocolSession)
 				protocolTestHello(t, session)
-				reply, err := session.Request(t.Context(), nodeproto.Request{ID: "env", Op: nodeproto.OpDescribe})
+				reply, err := session.Request(t.Context(), nodewire.Request{ID: "env", Op: nodewire.OpDescribe})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -138,14 +138,14 @@ func TestNativeSDKStartsLoadCapturedValuesBeforeSharedEnvironmentPolicy(t *testi
 			revocations := 0
 			cfg := ProtocolSessionConfig{
 				Environments: SDKEnvironment{Snapshots: snapshots, Store: st, Base: procenv.Base{Local: true, Captured: []string{"CAPTURED=changed"}, Ambient: []string{"AMBIENT=daemon"}}},
-				ParseFrame:   protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
+				ParseFrame:   protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil },
 				Revoke: func() error { revocations++; return nil },
 			}
 			var process ExecutorProcess
 			kind := strings.TrimPrefix(placement, "retry_")
 			switch kind {
 			case "plan":
-				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Environment: seal, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build"}}, func(context.Context, nodeproto.FrameLog) error { return nil })
+				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Environment: seal, Run: nodewire.RunContext{RunID: input.Accepted.RunID, Pipeline: "build"}}, func(context.Context, nodewire.FrameLog) error { return nil })
 			case "attempt":
 				process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 			case "eval":
@@ -156,7 +156,7 @@ func TestNativeSDKStartsLoadCapturedValuesBeforeSharedEnvironmentPolicy(t *testi
 			}
 			t.Cleanup(func() { _ = process.Close() })
 			protocolTestHello(t, process.(*protocolSession))
-			reply, err := process.Request(t.Context(), nodeproto.Request{ID: "environment", Op: nodeproto.OpDescribe})
+			reply, err := process.Request(t.Context(), nodewire.Request{ID: "environment", Op: nodewire.OpDescribe})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -183,8 +183,8 @@ func TestNativeSDKStartsLoadCapturedValuesBeforeSharedEnvironmentPolicy(t *testi
 	}
 }
 
-func sdkStartupJob(value string) nodeproto.JobSpec {
-	return nodeproto.JobSpec{ID: "build", Env: map[string]nodeproto.EnvValue{"NODE_OPTIONS": {Value: value}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+func sdkStartupJob(value string) nodewire.JobSpec {
+	return nodewire.JobSpec{ID: "build", Env: map[string]nodewire.EnvValue{"NODE_OPTIONS": {Value: value}}, Steps: []nodewire.StepSpec{{ID: "body"}}}
 }
 
 func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
@@ -192,7 +192,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			input, st, deps, _ := executorFixture(t)
 			job := sdkStartupJob(value)
-			input.Accepted.Plan.Jobs = []nodeproto.JobSpec{job}
+			input.Accepted.Plan.Jobs = []nodewire.JobSpec{job}
 			planHash, _ := runspec.CanonicalHash(input.Accepted.Plan)
 			input.Accepted.PlanHash = string(planHash)
 			var spec runspec.Spec
@@ -221,9 +221,9 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 			}
 			body, revoked, cleaned := false, false, false
 			cfg := ProtocolSessionConfig{
-				Environments: policy, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
+				Environments: policy, ParseFrame: protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil },
 				Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context, CleanupScope) error { cleaned = true; return nil },
-				Log: func(_ context.Context, log nodeproto.FrameLog) error {
+				Log: func(_ context.Context, log nodewire.FrameLog) error {
 					body = body || log.Message == "body entered"
 					return nil
 				},
@@ -254,7 +254,7 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 		t.Run(map[procenv.Kind]string{procenv.Attempt: "attempt", procenv.Eval: "eval"}[kind], func(t *testing.T) {
 			input, st, _, _ := executorFixture(t)
 			input.Entry.Directory = t.TempDir()
-			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{
+			job := nodewire.JobSpec{ID: input.NodeID, Env: map[string]nodewire.EnvValue{
 				"GOMAXPROCS": {Value: "2"}, "NODE_OPTIONS": {Value: "--no-warnings"},
 				"DOCKER_HOST": {Value: "tcp://declared:2375"}, "BODY": {Value: "after-plan"},
 			}}
@@ -278,7 +278,7 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 			revoked, cleaned := false, false
 			cfg := ProtocolSessionConfig{
 				Environments: SDKEnvironment{Base: procenv.Base{Local: true, Captured: captured}, Store: st},
-				ParseFrame:   protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
+				ParseFrame:   protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil },
 				Revoke: func() error { revoked = true; return nil },
 				RunCleanups: func(ctx context.Context, scope CleanupScope) error {
 					cleaned = true
@@ -308,7 +308,7 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 			t.Cleanup(func() { _ = process.Close() })
 			session := process.(*protocolSession)
 			protocolTestHello(t, session)
-			reply, err := session.Request(t.Context(), nodeproto.Request{ID: "environment", Op: nodeproto.OpDescribe})
+			reply, err := session.Request(t.Context(), nodewire.Request{ID: "environment", Op: nodewire.OpDescribe})
 			if err != nil {
 				t.Fatal(err)
 			}

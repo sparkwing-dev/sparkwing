@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestTeamBoundary_ANodeCannotAdoptAnotherTeamsAttemptHistory(t *testing.T) {
@@ -27,7 +27,7 @@ func TestTeamBoundary_ANodeCannotAdoptAnotherTeamsAttemptHistory(t *testing.T) {
 			t.Fatalf("owner attempt = %d: %s", code, body)
 		}
 		admitted, claim := tenantRunClaim(t, f)
-		plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "n1", Steps: []nodeproto.StepSpec{{ID: "work"}}}}}
+		plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "n1", Steps: []nodewire.StepSpec{{ID: "work"}}}}}
 		declarations := runspec.CheckoutDeclarations{Version: 1}
 		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: claim.Request, Declarations: declarations, Plan: plan})
 		if err != nil {

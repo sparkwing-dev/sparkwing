@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type hostCommand struct {
@@ -33,8 +33,8 @@ const commandDrainGrace = 500 * time.Millisecond
 const commandMeasureDelay = time.Second
 
 // safety: the frame reader must keep draining log frames while the command runs, so this never blocks it.
-func (s *protocolSession) startExec(req nodeproto.ExecRequest) {
-	step := s.attributeProtocolLog(nodeproto.FrameLog{Step: req.Step}).Step
+func (s *protocolSession) startExec(req nodewire.ExecRequest) {
+	step := s.attributeProtocolLog(nodewire.FrameLog{Step: req.Step}).Step
 	command := &hostCommand{kill: make(chan struct{})}
 	s.mu.Lock()
 	if s.failure != nil {
@@ -62,14 +62,14 @@ func (s *protocolSession) startExec(req nodeproto.ExecRequest) {
 				if eof {
 					return nil
 				}
-				return s.writeHostLine(nodeproto.ExecOutput{ID: req.ID, Stream: stream, Data: chunk})
+				return s.writeHostLine(nodewire.ExecOutput{ID: req.ID, Stream: stream, Data: chunk})
 			}
 		} else {
 			sink = func(stream string, chunk []byte, eof bool) error {
 				if s.cfg.Activity.Progress != nil {
 					s.cfg.Activity.Progress()
 				}
-				base := nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Step: step, Event: "exec_line"}
+				base := nodewire.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Step: step, Event: "exec_line"}
 				return s.cfg.output.stream(s.logCtx, key+stream, base, chunk, eof)
 			}
 		}
@@ -125,8 +125,8 @@ var commandBuffers = sync.Pool{New: func() any { return new([64 << 10]byte) }}
 
 // safety: a normal exit returns the session alive; the end of the SDK session kills what it left running.
 // measure, when set, adds a command still running after commandMeasureDelay to the job's machine measurement.
-func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error, measure func(pid int, birth string)) (nodeproto.ExecDone, *commandSession) {
-	done := nodeproto.ExecDone{ID: req.ID, ExitCode: -1}
+func runHostCommand(req nodewire.ExecRequest, masker *secrets.Masker, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error, measure func(pid int, birth string)) (nodewire.ExecDone, *commandSession) {
+	done := nodewire.ExecDone{ID: req.ID, ExitCode: -1}
 	if info, err := os.Stat(req.Dir); err != nil {
 		done.StartError = fmt.Sprintf("dir %q: %v", req.Dir, err)
 		return done, nil
@@ -302,8 +302,8 @@ func (t *commandTail) add(chunk []byte) {
 		chunk = []byte(t.mask.Mask(string(chunk)))
 	}
 	t.data = append(t.data, chunk...)
-	if len(t.data) > 2*nodeproto.ExecTailBytes {
-		t.data = append(t.data[:0], t.data[len(t.data)-nodeproto.ExecTailBytes:]...)
+	if len(t.data) > 2*nodewire.ExecTailBytes {
+		t.data = append(t.data[:0], t.data[len(t.data)-nodewire.ExecTailBytes:]...)
 	}
 }
 
@@ -313,8 +313,8 @@ func (t *commandTail) bytes() []byte {
 		t.mask = nil
 		t.add([]byte(final))
 	}
-	if len(t.data) > nodeproto.ExecTailBytes {
-		return t.data[len(t.data)-nodeproto.ExecTailBytes:]
+	if len(t.data) > nodewire.ExecTailBytes {
+		return t.data[len(t.data)-nodewire.ExecTailBytes:]
 	}
 	return t.data
 }
@@ -344,7 +344,7 @@ func NewLocalCommands(masker *secrets.Masker) *LocalCommands {
 // Execute runs a command while retaining its background children until Close.
 //
 //nolint:contextcheck // Cancellation travels through the joined command channels.
-func (c *LocalCommands) Execute(ctx context.Context, req nodeproto.ExecRequest, sink func(string, []byte, bool) error) nodeproto.ExecDone {
+func (c *LocalCommands) Execute(ctx context.Context, req nodewire.ExecRequest, sink func(string, []byte, bool) error) nodewire.ExecDone {
 	done, session := runHostCommand(req, c.masker, ctx.Done(), ctx.Done(), sink, nil)
 	if session != nil {
 		c.mu.Lock()
@@ -366,7 +366,7 @@ func (c *LocalCommands) Close() error {
 // ExecuteCommand runs a command for an in-process SDK host and joins its process tree.
 //
 //nolint:contextcheck // Session cleanup bounds its own process-table read.
-func ExecuteCommand(ctx context.Context, req nodeproto.ExecRequest, sink func(string, []byte, bool) error) nodeproto.ExecDone {
+func ExecuteCommand(ctx context.Context, req nodewire.ExecRequest, sink func(string, []byte, bool) error) nodewire.ExecDone {
 	commands := NewLocalCommands(nil)
 	done := commands.Execute(ctx, req, sink)
 	if err := commands.Close(); err != nil {

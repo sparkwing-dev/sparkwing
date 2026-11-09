@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -32,7 +32,7 @@ type predicateEvaluator struct {
 	process      func(context.Context, func(*executorSession, NodeInput) error) error
 }
 
-func (h predicateEvaluator) skipIf(ctx context.Context, job nodeproto.JobSpec) (skipEvaluation, error) {
+func (h predicateEvaluator) skipIf(ctx context.Context, job nodewire.JobSpec) (skipEvaluation, error) {
 	var err error
 	budget := defaultSkipBudget
 	if job.SkipIfBudgetMS != nil {
@@ -74,7 +74,7 @@ func (h predicateEvaluator) skipIf(ctx context.Context, job nodeproto.JobSpec) (
 	return result, nil
 }
 
-func (h *nodeExecutor) skipIf(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec) (skipEvaluation, error) {
+func (h *nodeExecutor) skipIf(ctx context.Context, input NodeInput, spec runspec.Spec, job nodewire.JobSpec) (skipEvaluation, error) {
 	evaluator := predicateEvaluator{code: &h.sdkCode, childContext: h.deps.ChildContext, process: func(ctx context.Context, evaluate func(*executorSession, NodeInput) error) error {
 		return h.withProcess(ctx, input, spec, evaluate)
 	}}

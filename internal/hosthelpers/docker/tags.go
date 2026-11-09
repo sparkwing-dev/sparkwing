@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers/git"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // ImageTag holds the deterministic image-tag components for a single

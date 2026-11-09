@@ -3,15 +3,15 @@ package nodehost
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func capacityPlan(policy string, timeout int64, ids ...string) nodeproto.PlanDoc {
-	doc := nodeproto.PlanDoc{}
+func capacityPlan(policy string, timeout int64, ids ...string) nodewire.PlanDoc {
+	doc := nodewire.PlanDoc{}
 	for _, id := range ids {
-		doc.Jobs = append(doc.Jobs, nodeproto.JobSpec{ID: id, Steps: []nodeproto.StepSpec{{ID: "body"}}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "db", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new(policy), QueueTimeoutMS: new(timeout)}}})
+		doc.Jobs = append(doc.Jobs, nodewire.JobSpec{ID: id, Steps: []nodewire.StepSpec{{ID: "body"}}, Concurrency: []nodewire.ConcurrencySpec{{Group: "db", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new(policy), QueueTimeoutMS: new(timeout)}}})
 	}
 	return doc
 }

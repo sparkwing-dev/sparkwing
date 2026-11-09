@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestApprovalConcurrencyRefusedInEachDialect(t *testing.T) {
@@ -21,8 +21,8 @@ func TestApprovalConcurrencyRefusedInEachDialect(t *testing.T) {
 	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
 		t.Run(dialect.name, func(t *testing.T) {
 			s := dialect.target(t).Open(t, store.WithPolicies(sealStorePolicies))
-			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-				doc.Jobs = []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "deploy"}}}}
+			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
+				doc.Jobs = []nodewire.JobSpec{{ID: "gate", Approval: &nodewire.ApprovalSpec{}, Concurrency: []nodewire.ConcurrencySpec{{Group: "deploy"}}}}
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -49,8 +49,8 @@ func TestControllerApprovalEvaluationCommitsInEachDialect(t *testing.T) {
 			for _, policy := range []string{"open", "skip", "fail"} {
 				t.Run(policy, func(t *testing.T) {
 					s := dialect.target(t).Open(t, store.WithPolicies(sealStorePolicies))
-					tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-						doc.Jobs = []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"guard"}}}}
+					tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
+						doc.Jobs = []nodewire.JobSpec{{ID: "gate", Approval: &nodewire.ApprovalSpec{}, Closures: nodewire.ClosureSpec{SkipIf: []string{"guard"}}}}
 					})
 					if err != nil {
 						t.Fatal(err)

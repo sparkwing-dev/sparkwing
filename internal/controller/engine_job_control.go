@@ -7,10 +7,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // cancelJob records cancellation intent while preserving held jobs and their result rights.
@@ -29,7 +29,7 @@ func (s *EngineController) cancelJob(ctx context.Context, a capability.Authorize
 
 // readFailure checks the declared recovery edge and immutable source generation
 // transactionally. An absent recorded failure remains absent.
-func (s *EngineController) readFailure(ctx context.Context, a capability.Authorized) (*nodeproto.JobFailure, error) {
+func (s *EngineController) readFailure(ctx context.Context, a capability.Authorized) (*nodewire.JobFailure, error) {
 	if a.Target.SourceGeneration <= 0 {
 		return nil, invalidEngineBody("generation must be positive")
 	}

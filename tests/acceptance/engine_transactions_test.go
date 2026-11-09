@@ -14,15 +14,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type engineTransactions struct {
@@ -54,7 +54,7 @@ type engineTransactions struct {
 	err               error
 	readErr           error
 	runReadErr        error
-	failure           *nodeproto.JobFailure
+	failure           *nodewire.JobFailure
 	failureRef        runspec.NodeRef
 	failureGeneration int64
 	failureActor      runstate.Actor
@@ -65,7 +65,7 @@ func (f *engineTransactions) ReconcileNode(context.Context, store.ReconcileReque
 	return runstate.ReconciledNode{}, f.err
 }
 
-func (f *engineTransactions) ReadFailure(_ context.Context, source runspec.NodeRef, generation int64, actor runstate.Actor) (*nodeproto.JobFailure, error) {
+func (f *engineTransactions) ReadFailure(_ context.Context, source runspec.NodeRef, generation int64, actor runstate.Actor) (*nodewire.JobFailure, error) {
 	f.failureRef, f.failureGeneration, f.failureActor = source, generation, actor
 	f.failureReads++
 	return f.failure, f.readErr

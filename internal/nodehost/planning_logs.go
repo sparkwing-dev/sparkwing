@@ -7,26 +7,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 const planningLogBufferBytes = 8 << 20
 
 type planningOutput struct {
-	frame       *nodeproto.FrameLog
+	frame       *nodewire.FrameLog
 	level, text string
 	timestamp   string
 	eof         bool
 	// perf: a host-read byte stream skips the base64 round trip SDK frames take.
 	key  string
-	base nodeproto.FrameLog
+	base nodewire.FrameLog
 }
 
 type planningLogs struct {
 	mu             sync.Mutex
 	masker         *secrets.Masker
-	sink           func(context.Context, nodeproto.FrameLog) error
+	sink           func(context.Context, nodewire.FrameLog) error
 	fail           func(error)
 	known, debug   bool
 	buffer         []planningOutput
@@ -38,7 +38,7 @@ type planningLogs struct {
 	withheld       string
 }
 
-func (l *planningLogs) write(ctx context.Context, record nodeproto.FrameLog) error {
+func (l *planningLogs) write(ctx context.Context, record nodewire.FrameLog) error {
 	if record.Level == "debug" && !l.debug {
 		return nil
 	}
@@ -50,7 +50,7 @@ func (l *planningLogs) text(ctx context.Context, level, text string, eof bool) e
 	return l.output(ctx, planningOutput{level: level, text: text, timestamp: time.Now().UTC().Format(time.RFC3339Nano), eof: eof}, len(text)+64)
 }
 
-func (l *planningLogs) stream(ctx context.Context, key string, base nodeproto.FrameLog, chunk []byte, eof bool) error {
+func (l *planningLogs) stream(ctx context.Context, key string, base nodewire.FrameLog, chunk []byte, eof bool) error {
 	return l.output(ctx, planningOutput{key: key, base: base, text: string(chunk), eof: eof}, len(chunk)+len(base.Step)+128)
 }
 
@@ -99,7 +99,7 @@ func (l *planningLogs) release(ctx context.Context) error {
 	}
 	l.buffer, l.bytes = nil, 0
 	if l.err == nil && l.dropped > 0 {
-		l.err = l.sink(ctx, l.masker.Log(nodeproto.FrameLog{Level: "warn", Message: fmt.Sprintf("sparkwing: %d log records dropped before describe completed", l.dropped)}))
+		l.err = l.sink(ctx, l.masker.Log(nodewire.FrameLog{Level: "warn", Message: fmt.Sprintf("sparkwing: %d log records dropped before describe completed", l.dropped)}))
 	}
 	l.dropped = 0
 	return l.err
@@ -133,7 +133,7 @@ func (l *planningLogs) finishOutput(ctx context.Context) error {
 		if l.withheld != "" {
 			message += ": " + l.withheld
 		}
-		l.err = l.sink(ctx, l.masker.Log(nodeproto.FrameLog{Level: "warn", Message: message}))
+		l.err = l.sink(ctx, l.masker.Log(nodewire.FrameLog{Level: "warn", Message: message}))
 	}
 	if l.known && l.err == nil && l.presenter != nil {
 		for _, frame := range l.presenter.Flush() {
@@ -150,7 +150,7 @@ func (l *planningLogs) emit(ctx context.Context, output planningOutput) error {
 	if l.presenter == nil {
 		l.presenter = secrets.NewLogStreams(l.masker)
 	}
-	var frames []nodeproto.FrameLog
+	var frames []nodewire.FrameLog
 	if output.frame != nil {
 		var err error
 		frames, err = l.presenter.Push(*output.frame)
@@ -161,7 +161,7 @@ func (l *planningLogs) emit(ctx context.Context, output planningOutput) error {
 	} else if output.key != "" {
 		frames = l.presenter.Text(output.key, output.base, output.text, output.eof)
 	} else {
-		frames = l.presenter.Text("raw:"+output.level, nodeproto.FrameLog{Level: output.level, TS: output.timestamp}, output.text, output.eof)
+		frames = l.presenter.Text("raw:"+output.level, nodewire.FrameLog{Level: output.level, TS: output.timestamp}, output.text, output.eof)
 	}
 	for _, frame := range frames {
 		if l.err = l.sink(ctx, frame); l.err != nil {

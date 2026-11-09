@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestDynamicChildLimitExplainsTheFix(t *testing.T) {
@@ -43,7 +43,7 @@ func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 	parent := authorityRoot("child-parent", "a")
 	parent.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: actor.Holder, Generation: int64(actor.Generation)}
 	parent.Grants = []capability.Grant{capability.ChildrenStart}
-	parent.Children = []nodeproto.ChildPipeline{{Pipeline: "child", Repository: "gh:1"}}
+	parent.Children = []nodewire.ChildPipeline{{Pipeline: "child", Repository: "gh:1"}}
 	authorityPersist(t, tenant.s, parent)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET capability_prefix='child-parent'`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE teams SET next_run_number=2 WHERE name='a'`)

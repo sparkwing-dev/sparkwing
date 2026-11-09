@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -27,11 +26,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
-	job := nodeproto.JobSpec{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "ship?"}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"guard"}}}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+	job := nodewire.JobSpec{ID: "gate", Approval: &nodewire.ApprovalSpec{Message: "ship?"}, Closures: nodewire.ClosureSpec{SkipIf: []string{"guard"}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}
 	f := newStoreHostFixture(t, plan)
 	ctx := t.Context()
 	var spec runspec.Spec
@@ -55,9 +56,9 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 			if live, granted, released := daemon.counts(); live != 0 || granted != 0 || released != 0 {
 				t.Errorf("approval predicate acquired compute: %d/%d/%d", live, granted, released)
 			}
-			process = &executorProcess{plan: plan, answer: func(_ context.Context, request nodeproto.Request) (any, error) {
-				if request.Op == nodeproto.OpEval {
-					return nodeproto.EvalResult{Value: json.RawMessage("true")}, nil
+			process = &executorProcess{plan: plan, answer: func(_ context.Context, request nodewire.Request) (any, error) {
+				if request.Op == nodewire.OpEval {
+					return nodewire.EvalResult{Value: json.RawMessage("true")}, nil
 				}
 				return nil, nil
 			}}
@@ -74,7 +75,7 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 	}
 	f.Host.executionAdmission = ComposeStartGate(f.Tenant, &LocalAdmission{Daemon: daemon}, false)
 	f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
-		return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
+		return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodewire.FrameLog) error { return nil })
 	}
 	result, err := f.Host.Run(ctx, f.Input)
 	if err != nil || result.Outcome != "success" {
@@ -99,8 +100,8 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testing.T) {
 	for _, mode := range []string{"open", "skip", "fail"} {
 		t.Run(mode, func(t *testing.T) {
-			job := nodeproto.JobSpec{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "ship?"}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"guard"}}}
-			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
+			job := nodewire.JobSpec{ID: "gate", Approval: &nodewire.ApprovalSpec{Message: "ship?"}, Closures: nodewire.ClosureSpec{SkipIf: []string{"guard"}}}
+			f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			if _, err := teststore.SQL(t, f.Store).ExecContext(ctx, `UPDATE runs SET dispatch='controller' WHERE id=?`, f.Input.RunID); err != nil {
@@ -131,14 +132,14 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 				if state, err := f.Tenant.GetConcurrencyState(ctx, "job:global:approval"); !errors.Is(err, store.ErrNotFound) && (err != nil || len(state.Holders) != 0) {
 					t.Fatalf("approval evaluator held job capacity: %+v error=%v", state, err)
 				}
-				process = &executorProcess{plan: f.Accepted.Plan, answer: func(_ context.Context, request nodeproto.Request) (any, error) {
-					if request.Op != nodeproto.OpEval {
+				process = &executorProcess{plan: f.Accepted.Plan, answer: func(_ context.Context, request nodewire.Request) (any, error) {
+					if request.Op != nodewire.OpEval {
 						return nil, nil
 					}
 					if mode == "fail" {
-						return nodeproto.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "predicate failed"}}, nil
+						return nodewire.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "predicate failed"}}, nil
 					}
-					return nodeproto.EvalResult{Value: json.RawMessage(map[bool]string{false: "false", true: "true"}[mode == "skip"])}, nil
+					return nodewire.EvalResult{Value: json.RawMessage(map[bool]string{false: "false", true: "true"}[mode == "skip"])}, nil
 				}}
 				return process, nil
 			}})
@@ -146,7 +147,7 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 				t.Fatal(err)
 			}
 			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
-				return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
+				return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodewire.FrameLog) error { return nil })
 			}
 			f.Host.executionAdmission.compute = &LocalAdmission{Daemon: admissionAcquireFunc(func(context.Context, wingwire.AdmissionRequest, func(wingwire.Queued)) (Lease, error) {
 				t.Fatal("approval evaluator acquired compute")
@@ -186,8 +187,8 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	bin := buildNativeSDKFixture(t, ctx, fixture)
-	runner := nodeproto.RunnerIdentity{Name: "host", Type: "local", Labels: []string{}}
-	hello, plan := planNativeSDKFixture(t, ctx, bin, "p", map[string]string{}, nodeproto.RunContext{RunID: "describe", Pipeline: "p"}, runner)
+	runner := nodewire.RunnerIdentity{Name: "host", Type: "local", Labels: []string{}}
+	hello, plan := planNativeSDKFixture(t, ctx, bin, "p", map[string]string{}, nodewire.RunContext{RunID: "describe", Pipeline: "p"}, runner)
 	selected := engine.Resolved{Identity: engineid.Identity{Version: "fixture", ManifestDigest: "fixture", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: hello.SDK.Version}}}
 	for _, placement := range []string{"host", "controller"} {
 		t.Run(placement, func(t *testing.T) {
@@ -232,7 +233,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 			defer server.Close()
 			processes := &NativeProcesses{Authorities: authorities, Masks: NewMaskRegistry(secrets.NewMasker()), URL: server.URL}
 			var reads atomic.Int32
-			claims := &nodeClaims{processes: processes, readNode: f.Tenant.ReadNode, current: func(context.Context) (capability.Principal, error) { return principal, nil }, services: func(ctx context.Context, p capability.Principal, job nodeproto.JobSpec) (ProcessServices, error) {
+			claims := &nodeClaims{processes: processes, readNode: f.Tenant.ReadNode, current: func(context.Context) (capability.Principal, error) { return principal, nil }, services: func(ctx context.Context, p capability.Principal, job nodewire.JobSpec) (ProcessServices, error) {
 				service, err := completeServiceFixture(ctx, p, job)
 				service.Output = func(_ context.Context, auth capability.Authorized, job string) (json.RawMessage, error) {
 					if job != "build" || !reflect.DeepEqual(auth.Binding, principal.Capability.Binding) {
@@ -260,7 +261,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 				t.Fatal(err)
 			}
 			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
-				return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
+				return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodewire.FrameLog) error { return nil })
 			}
 			if placement == "controller" {
 				if err := f.Host.Evaluate(ctx, input, "gate", 0, *principal.Capability.Binding.Expansion); err != nil {

@@ -9,11 +9,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
@@ -34,7 +36,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	generated := map[string]map[string][]nodeproto.JobSpec{}
+	generated := map[string]map[string][]nodewire.JobSpec{}
 	for sdk, command := range map[string]*exec.Cmd{
 		"go":         exec.CommandContext(t.Context(), binary, "--generated"),
 		"typescript": exec.CommandContext(t.Context(), node, "../../sdk/typescript/test/fixtures/arguments-describe.mjs", "--generated"),
@@ -43,7 +45,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s generated declarations: %v: %s", sdk, err, output)
 		}
-		var jobs map[string][]nodeproto.JobSpec
+		var jobs map[string][]nodewire.JobSpec
 		if err := json.Unmarshal(output, &jobs); err != nil {
 			t.Fatal(err)
 		}
@@ -51,7 +53,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 	}
 	documents := map[string][]byte{"go": goDoc, "typescript": tsDoc}
 	for sdk, raw := range documents {
-		var doc nodeproto.DescribeDoc
+		var doc nodewire.DescribeDoc
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			t.Fatal(err)
 		}
@@ -71,8 +73,8 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 				t.Fatalf("conditional declarations: %v: %s", err, output)
 			}
 			var conditional struct {
-				Description json.RawMessage   `json:"description"`
-				Plan        nodeproto.PlanDoc `json:"plan"`
+				Description json.RawMessage  `json:"description"`
+				Plan        nodewire.PlanDoc `json:"plan"`
 			}
 			if err := json.Unmarshal(output, &conditional); err != nil {
 				t.Fatal(err)
@@ -81,7 +83,7 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 			input.Entrypoint = "conditional"
 			input.Args = map[string]string{"enable": "true"}
 			start := planner.Start
-			planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, input, log)
 				if err != nil {
 					return nil, err
@@ -89,11 +91,11 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 				p := process.(*executorProcess)
 				answer := p.answer
 				p.plan = conditional.Plan
-				p.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpDescribe {
+				p.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpDescribe {
 						return conditional.Description, nil
 					}
-					if request.Op == nodeproto.OpRunStep || request.Op == nodeproto.OpEval {
+					if request.Op == nodewire.OpRunStep || request.Op == nodewire.OpEval {
 						t.Fatal("undiscovered arguments reached execution")
 					}
 					return answer(ctx, request)
@@ -167,15 +169,15 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 			}
 		})
 	}
-	static := []nodeproto.ArgumentDescription{{Name: "taken", Type: "string"}, {Name: "known", Type: "string", JobID: "child"}}
-	changed := []nodeproto.JobSpec{{ID: "child", Arguments: []nodeproto.ArgumentDescription{{Name: "taken", Type: "string", JobID: "child"}}}}
+	static := []nodewire.ArgumentDescription{{Name: "taken", Type: "string"}, {Name: "known", Type: "string", JobID: "child"}}
+	changed := []nodewire.JobSpec{{ID: "child", Arguments: []nodewire.ArgumentDescription{{Name: "taken", Type: "string", JobID: "child"}}}}
 	if err := nodeproto.ValidateJobArgumentNamespace(static, changed); err == nil {
 		t.Fatal("changed described job escaped the shared argument namespace")
 	}
 	for sdk, plans := range generated {
 		job := plans["args"][0]
-		for _, static := range [][]nodeproto.ArgumentDescription{nil, {{Name: "text", Type: "string"}}} {
-			jobs := []nodeproto.JobSpec{job}
+		for _, static := range [][]nodewire.ArgumentDescription{nil, {{Name: "text", Type: "string"}}} {
+			jobs := []nodewire.JobSpec{job}
 			if static == nil {
 				sibling := job
 				sibling.ID = "sibling"
@@ -207,8 +209,8 @@ func TestHostArgumentRulesAgreeForBothSDKs(t *testing.T) {
 }
 
 func TestHostRefusesInvalidSecretDeclarationsAfterDescribe(t *testing.T) {
-	for _, declarations := range [][]nodeproto.SecretDeclaration{{{Name: ""}}, {{Name: "TOKEN"}, {Name: "TOKEN"}}} {
-		raw, err := json.Marshal(nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "pipeline", Args: []nodeproto.ArgumentDescription{}, Secrets: declarations}}})
+	for _, declarations := range [][]nodewire.SecretDeclaration{{{Name: ""}}, {{Name: "TOKEN"}, {Name: "TOKEN"}}} {
+		raw, err := json.Marshal(nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "pipeline", Args: []nodewire.ArgumentDescription{}, Secrets: declarations}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -233,13 +235,13 @@ func TestHostAnnotationRulesAgreeForBothSDKs(t *testing.T) {
 	if err := json.Unmarshal(raw, &tsBodies); err != nil {
 		t.Fatal(err)
 	}
-	annotations := []nodeproto.AnnotationRequest{{Annotation: nodeproto.Annotation{Message: "range", Line: 5, EndLine: 4}}, {Annotation: nodeproto.Annotation{Message: "level", Level: "warning"}}, {Annotation: nodeproto.Annotation{Message: "negative", Line: -1}}}
+	annotations := []nodewire.AnnotationRequest{{Annotation: nodewire.Annotation{Message: "range", Line: 5, EndLine: 4}}, {Annotation: nodewire.Annotation{Message: "level", Level: "warning"}}, {Annotation: nodewire.Annotation{Message: "negative", Line: -1}}}
 	if len(tsBodies) != len(annotations) {
 		t.Fatalf("TypeScript rejected invalid annotations before host: %s", raw)
 	}
 	routes, service, auth := serviceFixture(t)
 	calls := 0
-	service.Annotation = func(_ context.Context, _ capability.Authorized, _ nodeproto.AnnotationRequest) error {
+	service.Annotation = func(_ context.Context, _ capability.Authorized, _ nodewire.AnnotationRequest) error {
 		calls++
 		return nil
 	}

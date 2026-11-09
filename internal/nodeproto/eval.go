@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-// ValidateValue checks the result against the kind declared by the accepted plan.
+// ValidateEvalValue checks the result against the kind declared by the accepted plan.
 // Generated jobs still need ValidatePlan with the host's expansion context.
-func (r EvalResult) ValidateValue(kind string) error {
-	bad := func() error { return fmt.Errorf("%w: invalid %s eval result", ErrMalformed, kind) }
+func ValidateEvalValue(r nodewire.EvalResult, kind string) error {
+	bad := func() error { return fmt.Errorf("%w: invalid %s eval result", nodewire.ErrMalformed, kind) }
 	if !planOneOf(kind, "skip_if", "memo_key", "before_run", "after_run", "verify", "generate") || !json.Valid(r.Value) {
 		return bad()
 	}
@@ -42,7 +44,7 @@ func (r EvalResult) ValidateValue(kind string) error {
 			return bad()
 		}
 		for _, job := range document.Jobs {
-			if !isObject(job) {
+			if len(bytes.TrimSpace(job)) == 0 || bytes.TrimSpace(job)[0] != '{' {
 				return bad()
 			}
 		}

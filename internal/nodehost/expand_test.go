@@ -8,21 +8,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const testGenerator = "targets/generate/0"
 
-func fanOutDoc() nodeproto.PlanDoc {
-	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "targets", Closures: nodeproto.ClosureSpec{Generate: []string{testGenerator}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "summary", Needs: deps("lint"), NeedsGenerated: []string{testGenerator}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "lint", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+func fanOutDoc() nodewire.PlanDoc {
+	return nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "targets", Closures: nodewire.ClosureSpec{Generate: []string{testGenerator}}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "summary", Needs: deps("lint"), NeedsGenerated: []string{testGenerator}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "lint", Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}}
 }
 
@@ -31,15 +32,15 @@ func evaluateExpansionBytes(t *testing.T, groups map[string]string) (json.RawMes
 	input, state, dependencies, process := evaluationFixture(t)
 
 	dependencies.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}
-	process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-		if request.Op != nodeproto.OpEval {
+	process.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+		if request.Op != nodewire.OpEval {
 			return nil, nil
 		}
 		raw, ok := groups[request.Closure]
 		if !ok {
 			raw = `{"jobs":[]}`
 		}
-		return nodeproto.EvalResult{Value: json.RawMessage(raw)}, nil
+		return nodewire.EvalResult{Value: json.RawMessage(raw)}, nil
 	}
 	evaluator, err := newOwnerEvaluator(dependencies)
 	if err != nil {
@@ -94,7 +95,7 @@ func TestOwnerExpansionValidatesSourceBatchesTogether(t *testing.T) {
 					t.Fatalf("cyclic body=%s failure=%+v", body, failure)
 				}
 			} else {
-				var plan nodeproto.PlanDoc
+				var plan nodewire.PlanDoc
 				if failure != nil || json.Unmarshal(body, &plan) != nil || len(plan.Jobs) != 2 {
 					t.Fatalf("body=%s failure=%+v", body, failure)
 				}
@@ -106,17 +107,17 @@ func TestOwnerExpansionValidatesSourceBatchesTogether(t *testing.T) {
 func TestOwnerExpansionFanOutBoundary(t *testing.T) {
 	for _, count := range []int{256, 257} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
-			jobs := make([]nodeproto.JobSpec, count)
+			jobs := make([]nodewire.JobSpec, count)
 			for i := range jobs {
-				jobs[i] = nodeproto.JobSpec{ID: fmt.Sprintf("child-%d", i), Needs: []string{"build"}, Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+				jobs[i] = nodewire.JobSpec{ID: fmt.Sprintf("child-%d", i), Needs: []string{"build"}, Groups: []string{"first"}, Steps: []nodewire.StepSpec{{ID: "body"}}}
 			}
-			raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+			raw, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 			if err != nil {
 				t.Fatal(err)
 			}
 			body, failure := evaluateExpansionBytes(t, map[string]string{"first": string(raw)})
 			if count == 256 {
-				var plan nodeproto.PlanDoc
+				var plan nodewire.PlanDoc
 				if failure != nil || json.Unmarshal(body, &plan) != nil || len(plan.Jobs) != count {
 					t.Fatalf("count=%d body=%s failure=%+v", count, body, failure)
 				}
@@ -134,14 +135,14 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 	f.Add("sibling", false, true, false)
 	f.Add("sibling", false, false, true)
 	f.Fuzz(func(t *testing.T, siblingID string, optional, add, partial bool) {
-		source := nodeproto.JobSpec{ID: "targets", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{testGenerator}}}
-		jobs := []nodeproto.JobSpec{
-			{ID: "leaf", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-			{ID: "sibling", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		source := nodewire.JobSpec{ID: "targets", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{Generate: []string{testGenerator}}}
+		jobs := []nodewire.JobSpec{
+			{ID: "leaf", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+			{ID: "sibling", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
 		}
 		state := &executorStore{nodes: map[string]runstate.NodeRow{}}
 		snapshot := store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run"}}}
-		for _, job := range append([]nodeproto.JobSpec{source}, jobs...) {
+		for _, job := range append([]nodewire.JobSpec{source}, jobs...) {
 			raw, err := json.Marshal(job)
 			if err != nil {
 				t.Fatal(err)
@@ -154,11 +155,11 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			state.nodes[job.ID] = row
 			snapshot.Nodes = append(snapshot.Nodes, row)
 		}
-		body, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+		body, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 		if err != nil {
 			t.Fatal(err)
 		}
-		hash, err := runspec.CanonicalHash(nodeproto.PlanDoc{Jobs: jobs})
+		hash, err := runspec.CanonicalHash(nodewire.PlanDoc{Jobs: jobs})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -169,14 +170,14 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 		stored := len(state.nodes)
 		jobs[1].ID, jobs[1].Optional = siblingID, optional
 		if add {
-			jobs = append(jobs, nodeproto.JobSpec{ID: "extra", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+			jobs = append(jobs, nodewire.JobSpec{ID: "extra", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "body"}}})
 		}
-		process := &executorProcess{answer: func(context.Context, nodeproto.Request) (any, error) {
-			raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
-			return nodeproto.EvalResult{Value: raw}, err
+		process := &executorProcess{answer: func(context.Context, nodewire.Request) (any, error) {
+			raw, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
+			return nodewire.EvalResult{Value: raw}, err
 		}}
 		code := sdkCode{Store: state, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-		replayed, err := code.replaySource(t.Context(), &executorSession{process: process}, NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: json.RawMessage(`{}`)}}, source, GeneratorReplay{SourceJob: "targets", SourceGeneration: 1, GeneratorID: testGenerator, Output: json.RawMessage("null")}, snapshot, []nodeproto.JobSpec{source})
+		replayed, err := code.replaySource(t.Context(), &executorSession{process: process}, NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: json.RawMessage(`{}`)}}, source, GeneratorReplay{SourceJob: "targets", SourceGeneration: 1, GeneratorID: testGenerator, Output: json.RawMessage("null")}, snapshot, []nodewire.JobSpec{source})
 		unchanged := siblingID == "sibling" && !optional && !add && !partial
 		if unchanged != (err == nil) || !unchanged && replayed != nil || len(state.nodes) != stored || len(state.changes) != 0 {
 			t.Fatalf("generator replay changed accepted membership or a sibling declaration: %v", err)
@@ -186,12 +187,12 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 
 func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 	fixture := newStoreHostFixture(t, fanOutDoc())
-	children := make([]nodeproto.JobSpec, 5)
+	children := make([]nodewire.JobSpec, 5)
 	for i := range children {
-		children[i] = nodeproto.JobSpec{ID: fmt.Sprintf("test-%d", i), Needs: []string{"targets"}, Groups: []string{testGenerator}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+		children[i] = nodewire.JobSpec{ID: fmt.Sprintf("test-%d", i), Needs: []string{"targets"}, Groups: []string{testGenerator}, Steps: []nodewire.StepSpec{{ID: "body"}}}
 	}
 	fixture.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
-		raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: children})
+		raw, err := json.Marshal(nodewire.PlanDoc{Jobs: children})
 		return raw, runspec.SecretRegistration{Version: 1}, nil, err
 	}
 	fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {

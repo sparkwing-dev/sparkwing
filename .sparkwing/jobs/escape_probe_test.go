@@ -18,7 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

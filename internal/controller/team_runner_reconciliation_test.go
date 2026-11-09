@@ -14,12 +14,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type tenantRunnerPolicy struct{}
@@ -103,7 +103,7 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		admitted, claim := tenantRunClaim(t, f)
 		path := "/api/v1/runs/" + admitted.RunID
-		plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
+		plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}}
 		declarations := runspec.CheckoutDeclarations{Version: 1}
 		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: claim.Request, Declarations: declarations, Plan: plan})
 		if err != nil {

@@ -25,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeExecutorSteps(t *testing.T) {
@@ -33,16 +34,16 @@ func TestNativeExecutorSteps(t *testing.T) {
 	defer cancel()
 	bin := buildNativeSDKFixture(t, ctx, "stepsfixture")
 	cfg := ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH")), Revoke: func() error { return nil }}
-	runner := nodeproto.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}
-	var hello nodeproto.HelloResult
-	plans := map[bool]nodeproto.PlanDoc{}
+	runner := nodewire.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}
+	var hello nodewire.HelloResult
+	plans := map[bool]nodewire.PlanDoc{}
 	for _, dry := range []bool{false, true} {
 		args := map[string]string{}
 		if dry {
 			args["set"] = "dry"
 		}
-		var plan nodeproto.PlanDoc
-		hello, plan = planNativeSDKFixture(t, ctx, bin, "steps", args, nodeproto.RunContext{RunID: "run", Pipeline: "steps", DryRun: dry}, runner)
+		var plan nodewire.PlanDoc
+		hello, plan = planNativeSDKFixture(t, ctx, bin, "steps", args, nodewire.RunContext{RunID: "run", Pipeline: "steps", DryRun: dry}, runner)
 		plans[dry] = plan
 	}
 	for _, id := range []string{"order", "parallel", "failfast", "finally-chain", "collect", "continue", "optional", "skips", "window", "skippanic", "panics", "dry"} {
@@ -63,7 +64,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			deps.Store = records
 			row := &st.snapshot.Nodes[0]
 			plan := plans[id == "dry"]
-			var job nodeproto.JobSpec
+			var job nodewire.JobSpec
 			for _, declared := range plan.Jobs {
 				if declared.ID == jobID {
 					job = declared
@@ -125,7 +126,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			revoked := false
 			deps.Bind = func(_ context.Context, in NodeInput) (ProcessGrant, error) {
 				binding := in.RouteBinding
-				binding.Routes = nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "process-fixture"}
+				binding.Routes = nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "process-fixture"}
 				return ProcessGrant{Binding: binding, Revoke: func() error { revoked = true; return nil }}, nil
 			}
 			deps.EnsureEngine = func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
@@ -134,15 +135,15 @@ func TestNativeExecutorSteps(t *testing.T) {
 			var child *scriptedSDK
 			var logMu sync.Mutex
 			var messages []string
-			var diagnostics []nodeproto.FrameLog
-			deps.Log = func(_ context.Context, in NodeInput, frame nodeproto.FrameLog) error {
+			var diagnostics []nodewire.FrameLog
+			deps.Log = func(_ context.Context, in NodeInput, frame nodewire.FrameLog) error {
 				if in.NodeID != jobID || in.Attempt != input.Attempt+1 || in.Generation != input.Generation {
 					t.Fatal("native diagnostic lost its attempt attribution")
 				}
 				diagnostics = append(diagnostics, frame)
 				return nil
 			}
-			cfg.Log = func(_ context.Context, frame nodeproto.FrameLog) error {
+			cfg.Log = func(_ context.Context, frame nodewire.FrameLog) error {
 				logMu.Lock()
 				defer logMu.Unlock()
 				messages = append(messages, frame.Message)
@@ -191,7 +192,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			}
 			if id == "window" {
 				for _, request := range child.requests {
-					if request.Op == nodeproto.OpEval || request.Op == nodeproto.OpRunStep && request.Step == "a" {
+					if request.Op == nodewire.OpEval || request.Op == nodewire.OpRunStep && request.Step == "a" {
 						t.Fatal("excluded step invoked a predicate or body")
 					}
 				}
@@ -306,7 +307,7 @@ func buildNativeSDKFixture(t *testing.T, ctx context.Context, name string) strin
 	return bin
 }
 
-func planNativeSDKFixture(t *testing.T, ctx context.Context, bin, pipeline string, args map[string]string, run nodeproto.RunContext, runner nodeproto.RunnerIdentity) (nodeproto.HelloResult, nodeproto.PlanDoc) {
+func planNativeSDKFixture(t *testing.T, ctx context.Context, bin, pipeline string, args map[string]string, run nodewire.RunContext, runner nodewire.RunnerIdentity) (nodewire.HelloResult, nodewire.PlanDoc) {
 	t.Helper()
 	process, err := startProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH"))})
 	if err != nil {
@@ -317,18 +318,18 @@ func planNativeSDKFixture(t *testing.T, ctx context.Context, bin, pipeline strin
 			t.Error(err)
 		}
 	}()
-	var hello nodeproto.HelloResult
-	if err := nativeStepCall(ctx, process, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &runner}, &hello); err != nil {
+	var hello nodewire.HelloResult
+	if err := nativeStepCall(ctx, process, nodewire.Request{Op: nodewire.OpHello, Protocol: nodewire.Version, Engine: &nodewire.EngineIdentity{Version: "fixture"}, Runner: &runner}, &hello); err != nil {
 		t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
-	if err := nativeStepCall(ctx, process, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: args, Run: &run}, &plan); err != nil {
+	var plan nodewire.PlanDoc
+	if err := nativeStepCall(ctx, process, nodewire.Request{Op: nodewire.OpPlan, Pipeline: pipeline, Args: args, Run: &run}, &plan); err != nil {
 		t.Fatal(err)
 	}
 	return hello, plan
 }
 
-func nativeStepCall(ctx context.Context, process ExecutorProcess, request nodeproto.Request, result any) error {
+func nativeStepCall(ctx context.Context, process ExecutorProcess, request nodewire.Request, result any) error {
 	request.ID = string(request.Op)
 	reply, err := process.Request(ctx, request)
 	if err != nil {

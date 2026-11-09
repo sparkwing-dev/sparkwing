@@ -11,14 +11,15 @@ import (
 	"syscall"
 	"testing"
 
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestBurstSDKNativeChild(t *testing.T) {
@@ -65,7 +66,7 @@ func burstNativeSDKSecretAcceptance(t *testing.T, serve func(*testing.T, http.Ha
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
+	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodewire.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func clonePointer[T any](value *T) *T {
@@ -15,11 +15,11 @@ func clonePointer[T any](value *T) *T {
 	return pointer(*value)
 }
 
-func cloneSource(source nodeproto.SourceSpec) nodeproto.SourceSpec {
-	return nodeproto.SourceSpec{FullHistory: clonePointer(source.FullHistory), Depth: clonePointer(source.Depth), Tags: clonePointer(source.Tags), Submodules: clonePointer(source.Submodules), LFS: clonePointer(source.LFS)}
+func cloneSource(source nodewire.SourceSpec) nodewire.SourceSpec {
+	return nodewire.SourceSpec{FullHistory: clonePointer(source.FullHistory), Depth: clonePointer(source.Depth), Tags: clonePointer(source.Tags), Submodules: clonePointer(source.Submodules), LFS: clonePointer(source.LFS)}
 }
 
-func validateSource(source nodeproto.SourceSpec, complete bool) error {
+func validateSource(source nodewire.SourceSpec, complete bool) error {
 	if complete && (source.FullHistory == nil || source.Depth == nil || source.Tags == nil || source.Submodules == nil || source.LFS == nil) {
 		return fmt.Errorf("source policy must specify all fields")
 	}
@@ -32,7 +32,7 @@ func validateSource(source nodeproto.SourceSpec, complete bool) error {
 	return nil
 }
 
-func sourceField[T any](in Inputs, key string, field func(nodeproto.SourceSpec) *T, fallback T) (*T, runspec.SettingOrigin) {
+func sourceField[T any](in Inputs, key string, field func(nodewire.SourceSpec) *T, fallback T) (*T, runspec.SettingOrigin) {
 	for _, source := range sources(in, "source") {
 		setting := in.options(source).Checkout
 		if value := field(setting.Value.Policy); setting.Set && value != nil {
@@ -55,11 +55,11 @@ func checkoutSetting(in Inputs) (runspec.Setting[runspec.CheckoutPolicy], error)
 		}
 	}
 	out := runspec.CheckoutPolicy{Origins: map[string]runspec.SettingOrigin{}}
-	out.Policy.FullHistory, out.Origins["full_history"] = sourceField(in, "full_history", func(v nodeproto.SourceSpec) *bool { return v.FullHistory }, false)
-	out.Policy.Depth, out.Origins["depth"] = sourceField(in, "depth", func(v nodeproto.SourceSpec) *int { return v.Depth }, 1)
-	out.Policy.Tags, out.Origins["tags"] = sourceField(in, "tags", func(v nodeproto.SourceSpec) *bool { return v.Tags }, false)
-	out.Policy.Submodules, out.Origins["submodules"] = sourceField(in, "submodules", func(v nodeproto.SourceSpec) *bool { return v.Submodules }, false)
-	out.Policy.LFS, out.Origins["lfs"] = sourceField(in, "lfs", func(v nodeproto.SourceSpec) *bool { return v.LFS }, false)
+	out.Policy.FullHistory, out.Origins["full_history"] = sourceField(in, "full_history", func(v nodewire.SourceSpec) *bool { return v.FullHistory }, false)
+	out.Policy.Depth, out.Origins["depth"] = sourceField(in, "depth", func(v nodewire.SourceSpec) *int { return v.Depth }, 1)
+	out.Policy.Tags, out.Origins["tags"] = sourceField(in, "tags", func(v nodewire.SourceSpec) *bool { return v.Tags }, false)
+	out.Policy.Submodules, out.Origins["submodules"] = sourceField(in, "submodules", func(v nodewire.SourceSpec) *bool { return v.Submodules }, false)
+	out.Policy.LFS, out.Origins["lfs"] = sourceField(in, "lfs", func(v nodewire.SourceSpec) *bool { return v.LFS }, false)
 	origin := runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "source"}
 	for _, source := range sources(in, "source") {
 		if setting := in.options(source).Checkout; setting.Set {
@@ -101,7 +101,7 @@ func checkoutSetting(in Inputs) (runspec.Setting[runspec.CheckoutPolicy], error)
 	return result, nil
 }
 
-func sourceSetting(source nodeproto.SourceSpec, origin Origin) runspec.Setting[runspec.CheckoutPolicy] {
+func sourceSetting(source nodewire.SourceSpec, origin Origin) runspec.Setting[runspec.CheckoutPolicy] {
 	out := runspec.CheckoutPolicy{Policy: cloneSource(source), Origins: map[string]runspec.SettingOrigin{}}
 	projected := runspec.SettingOrigin{Layer: originLayers[origin.Source], File: origin.File, Key: origin.Key, Line: origin.Line}
 	fields := map[string]bool{"full_history": source.FullHistory != nil, "depth": source.Depth != nil, "tags": source.Tags != nil, "submodules": source.Submodules != nil, "lfs": source.LFS != nil}

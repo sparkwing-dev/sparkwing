@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestAdmissionRefusesForeignAuthorityBeforePersistence(t *testing.T) {
@@ -96,7 +96,7 @@ func planFixtureWithInput(t *testing.T, dispatch runspec.Dispatch, change func(*
 	}
 	persistPlanOwner(t, tenant.s, owner)
 	seedTriggerClaim(t, tenant.s, admitted.RunID, "host", "planner", 1, now.Add(time.Hour))
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}}
 	raw, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +278,7 @@ func TestPlanSealPersistsReplayAndExecutionSettings(t *testing.T) {
 func TestAcceptedPlanAndSnapshotReturnIndependentValues(t *testing.T) {
 	tenant, request, _ := planFixture(t, runspec.DispatchHost)
 	request.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"step"}],"requires":["linux"]}]}`)
-	var proposed nodeproto.PlanDoc
+	var proposed nodewire.PlanDoc
 	if err := json.Unmarshal(request.Seal.Plan, &proposed); err != nil {
 		t.Fatal(err)
 	}
@@ -308,8 +308,8 @@ func TestAcceptedPlanAndSnapshotReturnIndependentValues(t *testing.T) {
 	if again.Run.Request.Request.RequestedArgs["message"] != "hello" || again.Run.Spec.Resolved.Args["message"] != "hello" || again.Run.Spec.Hash != wantHash || !reflect.DeepEqual(again.Nodes[0].Execution.Requires.Value, []string{"linux"}) {
 		t.Fatalf("returned values changed persisted inputs: %+v", again)
 	}
-	var plan nodeproto.PlanDoc
-	var job nodeproto.JobSpec
+	var plan nodewire.PlanDoc
+	var job nodewire.JobSpec
 	if err := json.Unmarshal(again.Run.Plan, &plan); err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestPlanClassificationNeverShrinks(t *testing.T) {
 	root.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}
 	persistPlanOwner(t, tenant.s, root)
 	seedTriggerClaim(t, tenant.s, admitted.RunID, "host", "planner", 1, tenant.s.now().Add(time.Hour))
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}}
 	resolved, _ := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
 	request := PlanAcceptance{RunID: admitted.RunID, Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
 	accepted, err := tenant.AcceptPlan(t.Context(), request)
@@ -600,8 +600,8 @@ func TestPlanPublishRequiresRunBoundPublisher(t *testing.T) {
 			if mode == "revoked" {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='publisher'`)
 			}
-			jobs := []nodeproto.JobSpec{{ID: "imported"}}
-			plan := nodeproto.PlanDoc{Jobs: jobs}
+			jobs := []nodewire.JobSpec{{ID: "imported"}}
+			plan := nodewire.PlanDoc{Jobs: jobs}
 			resolved, err := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
 			if err != nil {
 				t.Fatal(err)
@@ -902,11 +902,11 @@ func TestAdmissionSealsServerResolvedOptionsAndCeilings(t *testing.T) {
 	}
 }
 
-func testBodyPlan(plan nodeproto.PlanDoc) nodeproto.PlanDoc {
+func testBodyPlan(plan nodewire.PlanDoc) nodewire.PlanDoc {
 	for i := range plan.Jobs {
 		job := &plan.Jobs[i]
 		if job.Approval == nil && len(job.Children) == 0 && len(job.Steps) == 0 {
-			job.Steps = []nodeproto.StepSpec{{ID: "step"}}
+			job.Steps = []nodewire.StepSpec{{ID: "step"}}
 		}
 	}
 	return plan

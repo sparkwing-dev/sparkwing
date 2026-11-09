@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const kubernetesEnrollmentRefusal = "this runner runs in a Kubernetes pod, but its credential was not enrolled as Kubernetes capacity; enroll it with `sparkwing runners add --platform kubernetes --no-service` and put the new credential in the runner's token Secret"

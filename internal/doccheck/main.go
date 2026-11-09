@@ -289,7 +289,7 @@ func moduleGoMod(repoRoot string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve repo root %q: %w", repoRoot, err)
 	}
-	return fmt.Sprintf("module doccheck\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing v0.0.0\n\nreplace github.com/sparkwing-dev/sparkwing => %s\n", abs), nil
+	return fmt.Sprintf("module doccheck\n\ngo 1.25.0\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.0.0\n\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %s\n", filepath.Join(abs, "sparkwing")), nil
 }
 
 func indent(s string) string {

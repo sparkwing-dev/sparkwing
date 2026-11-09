@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type admissionAcquireFunc func(context.Context, wingwire.AdmissionRequest, func(wingwire.Queued)) (Lease, error)
@@ -25,19 +25,19 @@ func (f admissionAcquireFunc) Acquire(ctx context.Context, request wingwire.Admi
 }
 
 func TestApprovalSkipPolicyPreservesSkip(t *testing.T) {
-	in, _, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
-		job.Approval = &nodeproto.ApprovalSpec{}
+	in, _, deps, _ := policyFixture(t, func(job *nodewire.JobSpec) {
+		job.Approval = &nodewire.ApprovalSpec{}
 		job.Steps = nil
 		job.Closures.SkipIf = []string{"bypass"}
 	})
 	start := deps.Start
 	deps.Start = func(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
 		p, err := start(ctx, input)
-		p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-			if request.Op != nodeproto.OpEval {
+		p.(*executorProcess).answer = func(_ context.Context, request nodewire.Request) (any, error) {
+			if request.Op != nodewire.OpEval {
 				return nil, nil
 			}
-			return nodeproto.EvalResult{Value: []byte("true")}, nil
+			return nodewire.EvalResult{Value: []byte("true")}, nil
 		}
 		return p, err
 	}
@@ -46,10 +46,10 @@ func TestApprovalSkipPolicyPreservesSkip(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := in.Accepted.Plan
-	plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "dependent", Needs: []string{in.NodeID}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+	plan.Jobs = append(plan.Jobs, nodewire.JobSpec{ID: "dependent", Needs: []string{in.NodeID}, Steps: []nodewire.StepSpec{{ID: "body"}}})
 	f := newStoreHostFixture(t, plan)
 	row := capacityRow(t, f, in.NodeID)
-	result, err := evaluator.skipLayer(t.Context(), in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
+	result, err := evaluator.skipLayer(t.Context(), in, row, func(context.Context, string, string, nodewire.FrameLog) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestApprovalSkipPolicyPreservesSkip(t *testing.T) {
 func TestOwnerDrainsPendingSupersessionIntent(t *testing.T) {
 	for _, ready := range []bool{false, true} {
 		t.Run(fmt.Sprint(ready), func(t *testing.T) {
-			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "old", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+			f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "old", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 			if ready {
 				row := capacityRow(t, f, "old")
 				if _, err := f.State.TransitionNode(t.Context(), store.ReadyNode{Ref: row.Ref, Actor: f.Actor}); err != nil {
@@ -112,7 +112,7 @@ func TestOwnerDrainsPendingSupersessionIntent(t *testing.T) {
 }
 
 func TestOwnerExecutionCancellationKeepsIndependentFailure(t *testing.T) {
-	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	fixture := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 	row := capacityRow(t, fixture, "job")
 	if _, err := fixture.State.TransitionNode(t.Context(), store.ReadyNode{Ref: row.Ref, Actor: fixture.Actor}); err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestOwnerCannotAssertAdmissionOutcomes(t *testing.T) {
 	for _, kind := range []string{"admission_skip", "admission_fail", "admission_queue_timeout"} {
 		for _, level := range []string{"job", "run"} {
 			t.Run(kind+"/"+level, func(t *testing.T) {
-				fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+				fixture := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 				row := capacityRow(t, fixture, "job")
 				before, err := fixture.Tenant.ReadSnapshot(t.Context(), fixture.Input.RunID)
 				if err != nil {
@@ -190,7 +190,7 @@ func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
 	f.Add(int64(0), int64(0), string(runstate.PolicyApprovalBypass), false)
 	f.Add(int64(0), int64(0), "admission_fail", true)
 	f.Fuzz(func(t *testing.T, ownerDelta, generation int64, kind string, released bool) {
-		fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+		fixture := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 		row := capacityRow(t, fixture, "job")
 		if released {
 			if _, err := fixture.Tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: row.Ref, Actor: fixture.Actor}); err != nil {

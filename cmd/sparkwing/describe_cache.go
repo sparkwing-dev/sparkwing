@@ -12,10 +12,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func describeCachePath(key string) string {
@@ -98,7 +98,7 @@ func readDescribeFile(path string) []runspec.PipelinePresentation {
 		return nil
 	}
 	var doc runspec.DescribePresentation
-	if err := (nodeproto.Reply{ID: "cache", OK: true, Result: raw}).Decode(&doc); err != nil || doc.Pipelines == nil {
+	if err := (nodewire.Reply{ID: "cache", OK: true, Result: raw}).Decode(&doc); err != nil || doc.Pipelines == nil {
 		return nil
 	}
 	return doc.Pipelines
@@ -140,7 +140,7 @@ func storeDescribe(sparkwingDir, key string, doc runspec.DescribePresentation) e
 	return nil
 }
 
-func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName string) ([]nodeproto.ArgumentDescription, error) {
+func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName string) ([]nodewire.ArgumentDescription, error) {
 	identity, err := pipelineIdentityAt(sparkwingDir, pipelineName)
 	if err != nil {
 		return nil, err

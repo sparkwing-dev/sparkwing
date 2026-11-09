@@ -7,8 +7,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -28,11 +29,11 @@ func testGoSDKAdditiveFieldsAndChildHandles(t *testing.T) {
 			"routes": map[string]any{"url": "http://127.0.0.1:1", "bearer": "child-bearer-sentinel", "future": "route"},
 		},
 	})
-	var hello nodeproto.HelloResult
+	var hello nodewire.HelloResult
 	if err := protocolProbeReply(t, process, "hello").Decode(&hello); err != nil {
 		t.Fatal(err)
 	}
-	if hello.Protocol != nodeproto.Version {
+	if hello.Protocol != nodewire.Version {
 		t.Fatalf("additive hello = %+v", hello)
 	}
 
@@ -41,7 +42,7 @@ func testGoSDKAdditiveFieldsAndChildHandles(t *testing.T) {
 		"args": map[string]string{"name": "child"}, "run": map[string]any{"run_id": "r", "pipeline": "invoked-child", "future": true},
 		"future": map[string]any{"nested": nil},
 	})
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := protocolProbeReply(t, process, "plan").Decode(&plan); err != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "child" {
 		t.Fatalf("additive plan request = %+v, %v", plan, err)
 	}
@@ -49,7 +50,7 @@ func testGoSDKAdditiveFieldsAndChildHandles(t *testing.T) {
 		"id": "child", "op": "run_step", "job": "child", "step": "run", "attempt": 1, "settled": []string{}, "future": []any{false, nil},
 	})
 	requireEnvelopeLog(t, process, "child-exited")
-	var result nodeproto.RunResult
+	var result nodewire.RunResult
 	if err := protocolProbeReply(t, process, "child").Decode(&result); err != nil || result.Outcome != "success" || result.Error != nil {
 		t.Fatalf("child body = %+v, %v", result, err)
 	}
@@ -65,8 +66,8 @@ func testGoSDKAdditiveFieldsAndChildHandles(t *testing.T) {
 			t.Fatal("child inherited a credential or removed protocol transport")
 		}
 	}
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "after-child", Op: nodeproto.OpDescribe})
-	var description nodeproto.DescribeDoc
+	sendProtocolProbe(t, process, nodewire.Request{ID: "after-child", Op: nodewire.OpDescribe})
+	var description nodewire.DescribeDoc
 	if err := protocolProbeReply(t, process, "after-child").Decode(&description); err != nil || len(description.Pipelines) == 0 {
 		t.Fatalf("protocol stopped after child exit: %+v, %v", description, err)
 	}
@@ -93,7 +94,7 @@ func testProtocolAdditiveFrames(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			recordLeaf(t)
-			frame, err := nodeproto.ParseFrame([]byte(raw))
+			frame, err := nodewire.ParseFrame([]byte(raw))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -103,7 +104,7 @@ func testProtocolAdditiveFrames(t *testing.T) {
 				}
 				return
 			}
-			var hello nodeproto.HelloResult
+			var hello nodewire.HelloResult
 			if frame.Reply == nil {
 				t.Fatal("reply lost its discriminator")
 			}
@@ -112,7 +113,7 @@ func testProtocolAdditiveFrames(t *testing.T) {
 			}
 		})
 	}
-	if _, err := nodeproto.ParseFrame([]byte(`{"ts":"2026-10-14T00:00:00Z","level":"info","msg":"visible","job":"untrusted"}`)); !errors.Is(err, nodeproto.ErrMalformed) {
+	if _, err := nodewire.ParseFrame([]byte(`{"ts":"2026-10-14T00:00:00Z","level":"info","msg":"visible","job":"untrusted"}`)); !errors.Is(err, nodewire.ErrMalformed) {
 		t.Fatalf("SDK job attribution accepted as an additive field: %v", err)
 	}
 }

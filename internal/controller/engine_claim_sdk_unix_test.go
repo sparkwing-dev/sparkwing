@@ -17,15 +17,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -37,6 +34,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
@@ -47,7 +47,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	directory := filepath.Join(root, ".sparkwing")
 	binary := filepath.Join(t.TempDir(), "pipeline")
 	build := exec.CommandContext(t.Context(), "go", "-C", directory, "build", "-o", binary, ".")
-	build.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+	build.Env = append(gitcontrol.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build repository SDK: %v: %s", err, output)
 	}
@@ -56,7 +56,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 		t.Fatalf("plain describe: %v", err)
 	}
 	pipeline, found := doc.Declarations().Pipeline("Example")
-	if !found || !slices.ContainsFunc(pipeline.Args, func(arg nodeproto.ArgumentDescription) bool {
+	if !found || !slices.ContainsFunc(pipeline.Args, func(arg nodewire.ArgumentDescription) bool {
 		return arg.Name == "fail-once" && arg.Type == "bool" && !arg.Required
 	}) {
 		t.Fatalf("repository example must declare the optional retry probe: %+v", pipeline)
@@ -77,17 +77,17 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	}
 	selected := engine.Resolved{Identity: engineid.Identity{Pin: pin, Version: "development"}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
 	masker := secrets.NewMasker()
-	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Captured: testgit.Env(os.Environ()), Masker: masker}}}
+	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Captured: gitcontrol.Env(os.Environ()), Masker: masker}}}
 	planner := nodehost.SDKPlanner{
 		Start: processes.StartPlanning, Masker: masker,
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return selected, nil
 		},
-		Log: func(_ context.Context, frame nodeproto.FrameLog) error { t.Log(frame.Message); return nil },
+		Log: func(_ context.Context, frame nodewire.FrameLog) error { t.Log(frame.Message); return nil },
 	}
 	prepared, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{
 		Entry: &source.Entry{Command: []string{binary}, Directory: root, Engine: selected}, Entrypoint: "Example",
-		Runner: input.GrantedRunner, Run: nodeproto.RunContext{RunID: input.RunID, Pipeline: "example"}, Args: map[string]string{},
+		Runner: input.GrantedRunner, Run: nodewire.RunContext{RunID: input.RunID, Pipeline: "example"}, Args: map[string]string{},
 	}, nodehost.PlanningInput{})
 	if err != nil {
 		t.Fatalf("run-path describe: %v", err)
@@ -99,8 +99,8 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run-path plan: %v", err)
 	}
-	var plan nodeproto.PlanDoc
-	if err := json.Unmarshal(raw, &plan); err != nil || !slices.ContainsFunc(plan.Jobs, func(job nodeproto.JobSpec) bool { return job.ID == "configure" }) {
+	var plan nodewire.PlanDoc
+	if err := json.Unmarshal(raw, &plan); err != nil || !slices.ContainsFunc(plan.Jobs, func(job nodewire.JobSpec) bool { return job.ID == "configure" }) {
 		t.Fatalf("repository example plan: %s: %v", raw, err)
 	}
 	acceptLocalExample(t, root, raw, selected)
@@ -175,7 +175,7 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		t.Fatal(err)
 	}

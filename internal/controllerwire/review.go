@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // AnnotationWrite addresses a job or one of its steps; authority comes from C2.
 type AnnotationWrite struct {
-	nodeproto.Annotation
+	nodewire.Annotation
 	StepID string `json:"step_id,omitempty"`
 }
 

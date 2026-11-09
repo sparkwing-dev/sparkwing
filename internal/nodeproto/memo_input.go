@@ -1,13 +1,13 @@
 package nodeproto
 
 import (
-	"bytes"
-	"encoding/json"
 	"slices"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // A recipe cannot smuggle fields which another host might interpret differently.
-func validMemoInputFields(input MemoInput) bool {
+func validMemoInputFields(input nodewire.MemoInput) bool {
 	fields := []string{}
 	if input.Value != "" {
 		fields = append(fields, "value")
@@ -32,7 +32,7 @@ func validMemoInputFields(input MemoInput) bool {
 	return ok && (len(fields) == 0 || slices.Equal(fields, []string{field}))
 }
 
-func validateMemoInput(input MemoInput, path string) error {
+func validateMemoInput(input nodewire.MemoInput, path string) error {
 	if !validMemoInputFields(input) {
 		return planInvalid(path, "invalid memo input kind or fields")
 	}
@@ -48,12 +48,4 @@ func validateMemoInput(input MemoInput, path string) error {
 		}
 	}
 	return nil
-}
-
-// UnmarshalJSON preserves literal numbers through plan persistence and replay.
-func (input *MemoInput) UnmarshalJSON(raw []byte) error {
-	type wire MemoInput
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	return decoder.Decode((*wire)(input))
 }

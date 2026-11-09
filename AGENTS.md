@@ -9,7 +9,14 @@ Sparkwing is standalone. Do not assume any other local service or machine-specif
 - Treat the README, embedded docs, CLI help, and tests as product truth. Run the relevant pipeline with `sparkwing run <name>`.
 - Before selecting checks or changing hook behavior, read [DELIVERY.md](DELIVERY.md) for tier membership, budgets, coverage limits, and measured costs. `sparkwing pipeline hooks status` verifies which hooks are armed in this checkout.
 - Read `DELIVERY.md` before landing a change; it names the cheap checks and the decisions that must not be skipped.
-- `go.work` is gitignored, so it is whatever the developer left in the tree. One sitting above a worktree -- the main checkout's own, which `.claude/worktrees/` sits under -- lists that checkout's modules, not the worktree's, and every plain `go` command in the worktree fails with "does not contain modules listed in go.work". Run `GOWORK=off go -C <worktree> build ./...`: `-C` on its own still fails, because go reads the workspace from the directory it lands in, so `GOWORK=off` has to travel with it. `sparkwing info --for-agent` prints that line with the paths filled in whenever it applies, and the check scripts inherit the same requirement.
+- The committed `go.work` joins the host, Go SDK and pipeline modules. Use this
+  worktree's workspace for source builds (`GOWORK=auto` from the worktree).
+  Root `go test ./...` skips the nested SDK module, so run
+  `GOWORK=off go -C <worktree>/sparkwing test ./...` separately. Workspace-off
+  host builds resolve the published SDK requirement. Before the first nested
+  SDK tag is published, use a scratch modfile with a local SDK replacement for
+  that check. Keep the root manifest free of replacements so versioned
+  `go install` works.
 - Lint the way the gate does: `GOWORK=off golangci-lint run --allow-serial-runners ./...` from each committed module, with `GOLANGCI_LINT_CACHE` pointing inside the worktree. `.golangci.yml` judges only code new since `origin/main`, so a checkout that cannot resolve that ref reports the whole tree. A run that exits 4 saying "Timeout exceeded" stopped at `run.timeout` with packages unjudged: raise the budget and run again rather than fixing what printed.
 - For release notes, add a unique `docs/changes/<slug>.md` fragment and any breaking guide in `docs/migrations/unreleased/<slug>.md`; read `CHANGELOG-STYLE.md` for the formats. Run `bash bin/sync-docs.sh` and commit the matching fragment mirrors.
 - Update source documentation and its drift check when behavior changes.

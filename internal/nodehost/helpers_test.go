@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/testshell"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 func TestHostHelpersUsePipelineDirectoryAndEnvironment(t *testing.T) {
@@ -24,7 +24,7 @@ func TestHostHelpersUsePipelineDirectoryAndEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	routes, _, auth := serviceFixture(t)
-	request := nodeproto.HelperRequest{Operation: "git.FilesetHash", Dir: dir, Env: testgit.Env(os.Environ()), Args: json.RawMessage(`["."]`)}
+	request := nodewire.HelperRequest{Operation: "git.FilesetHash", Dir: dir, Env: gitcontrol.Env(os.Environ()), Args: json.RawMessage(`["."]`)}
 	body, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestHostHelpersUsePipelineDirectoryAndEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result nodeproto.HelperResponse
+	var result nodewire.HelperResponse
 	if err = json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -62,17 +62,17 @@ case "$1" in
 esac
 `)
 	record := filepath.Join(dir, "commands")
-	environment := append(testgit.Env(os.Environ()), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_RECORD="+record, "SPARKWING_API_TOKEN=engine-private")
+	environment := append(gitcontrol.Env(os.Environ()), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_RECORD="+record, "SPARKWING_API_TOKEN=engine-private")
 	routes, service, auth := serviceFixture(t)
 	service.Cleanups = &ProcessCleanups{}
-	invoke := func(operation, args string) nodeproto.HelperResponse {
+	invoke := func(operation, args string) nodewire.HelperResponse {
 		t.Helper()
-		body, _ := json.Marshal(nodeproto.HelperRequest{Operation: operation, Dir: dir, Env: environment, Args: json.RawMessage(args)})
+		body, _ := json.Marshal(nodewire.HelperRequest{Operation: operation, Dir: dir, Env: environment, Args: json.RawMessage(args)})
 		out, err := callService(t, routes, auth, "/node/v1/helpers", string(body))
 		if err != nil {
 			t.Fatal(err)
 		}
-		var response nodeproto.HelperResponse
+		var response nodewire.HelperResponse
 		if err = json.Unmarshal(out.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)
 		}
@@ -119,8 +119,8 @@ func TestHostHelperMasksCompleteOutputBeforeLogLimits(t *testing.T) {
 	if err := service.Masks.registerValue(secret); err != nil {
 		t.Fatal(err)
 	}
-	var records []nodeproto.FrameLog
-	logs := &planningLogs{known: true, masker: service.Masks.masker, sink: func(_ context.Context, record nodeproto.FrameLog) error {
+	var records []nodewire.FrameLog
+	logs := &planningLogs{known: true, masker: service.Masks.masker, sink: func(_ context.Context, record nodewire.FrameLog) error {
 		records = append(records, record)
 		return nil
 	}}
@@ -129,8 +129,8 @@ func TestHostHelperMasksCompleteOutputBeforeLogLimits(t *testing.T) {
 	testshell.Install(t, filepath.Join(dir, "docker"), "#!/bin/sh\ncase \"$1\" in start) printf '%s' \"$HELPER_BYTES\";; esac\n")
 	service.Cleanups = &ProcessCleanups{}
 	output := strings.Repeat("x", (64<<10)-3) + secret + "\n"
-	env := append(testgit.Env(os.Environ()), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_BYTES="+output)
-	body, _ := json.Marshal(nodeproto.HelperRequest{Step: "container", Operation: "docker.Run", Dir: dir, Env: env, Args: json.RawMessage(`[{"image":"fixture"}]`)})
+	env := append(gitcontrol.Env(os.Environ()), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_BYTES="+output)
+	body, _ := json.Marshal(nodewire.HelperRequest{Step: "container", Operation: "docker.Run", Dir: dir, Env: env, Args: json.RawMessage(`[{"image":"fixture"}]`)})
 	response, err := callService(t, routes, auth, "/node/v1/helpers", string(body))
 	if err != nil {
 		t.Fatal(err)

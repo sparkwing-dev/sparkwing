@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestNodeExecutorThrowingStepPredicateCannotRunBody(t *testing.T) {
@@ -33,9 +33,9 @@ func TestNodeExecutorThrowingStepPredicateCannotRunBody(t *testing.T) {
 		proc := process.(*executorProcess)
 		proc.plan = input.Accepted.Plan
 		proc.onRun = func(context.Context) { bodies++ }
-		proc.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpEval {
-				return nodeproto.EvalResult{Value: json.RawMessage(`null`), Error: &apierr.Error{Code: apierr.SDKError, Message: "throwing predicate"}}, nil
+		proc.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpEval {
+				return nodewire.EvalResult{Value: json.RawMessage(`null`), Error: &apierr.Error{Code: apierr.SDKError, Message: "throwing predicate"}}, nil
 			}
 			return nil, nil
 		}

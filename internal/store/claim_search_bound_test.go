@@ -14,9 +14,9 @@ import (
 
 	"modernc.org/sqlite"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), contextVisits ...*atomic.Int64) *claimBenchmarkTrace {

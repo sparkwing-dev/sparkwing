@@ -16,33 +16,33 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func protocolTestCodec(line []byte) (nodeproto.Frame, error) {
+func protocolTestCodec(line []byte) (nodewire.Frame, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(line, &fields); err != nil {
-		return nodeproto.Frame{}, err
+		return nodewire.Frame{}, err
 	}
 	if _, ok := fields["reply"]; ok {
-		var reply nodeproto.Reply
+		var reply nodewire.Reply
 		if err := json.Unmarshal(line, &reply); err != nil {
-			return nodeproto.Frame{}, err
+			return nodewire.Frame{}, err
 		}
-		return nodeproto.Frame{Reply: &reply}, nil
+		return nodewire.Frame{Reply: &reply}, nil
 	}
-	var log nodeproto.FrameLog
+	var log nodewire.FrameLog
 	if err := json.Unmarshal(line, &log); err != nil {
-		return nodeproto.Frame{}, err
+		return nodewire.Frame{}, err
 	}
-	return nodeproto.Frame{Log: &log}, nil
+	return nodewire.Frame{Log: &log}, nil
 }
 
 func protocolTestSession(t *testing.T, mode string, edit func(*ProtocolSessionConfig)) *protocolSession {
@@ -51,7 +51,7 @@ func protocolTestSession(t *testing.T, mode string, edit func(*ProtocolSessionCo
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := ProtocolSessionConfig{Command: []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}, Environment: testProcessEnv(t, "GORACE=atexit_sleep_ms=0"), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { return nil }}
+	cfg := ProtocolSessionConfig{Command: []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}, Environment: testProcessEnv(t, "GORACE=atexit_sleep_ms=0"), ParseFrame: protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil }, Revoke: func() error { return nil }}
 	if edit != nil {
 		edit(&cfg)
 	}
@@ -65,7 +65,7 @@ func protocolTestSession(t *testing.T, mode string, edit func(*ProtocolSessionCo
 
 func protocolTestHello(t *testing.T, session *protocolSession) {
 	t.Helper()
-	reply, err := session.Request(t.Context(), nodeproto.Request{ID: "caller-hello", Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Binding: &nodeproto.ProcessBinding{RunID: "r", JobID: "job", Routes: nodeproto.ProcessRoutes{URL: "http://host", Bearer: "private-test-bearer"}}})
+	reply, err := session.Request(t.Context(), nodewire.Request{ID: "caller-hello", Op: nodewire.OpHello, Protocol: nodewire.Version, Engine: &nodewire.EngineIdentity{Version: "test"}, Runner: &nodewire.RunnerIdentity{Name: "granted", Type: "local"}, Binding: &nodewire.ProcessBinding{RunID: "r", JobID: "job", Routes: nodewire.ProcessRoutes{URL: "http://host", Bearer: "private-test-bearer"}}})
 	if err != nil || !reply.OK || reply.ID != "caller-hello" {
 		t.Fatalf("hello = %#v, %v", reply, err)
 	}
@@ -73,11 +73,11 @@ func protocolTestHello(t *testing.T, session *protocolSession) {
 
 func TestProtocolSessionConcurrentRepliesAndAttribution(t *testing.T) {
 	var mu sync.Mutex
-	var logs []nodeproto.FrameLog
+	var logs []nodewire.FrameLog
 	var progress atomic.Int64
 	session := protocolTestSession(t, "concurrent", func(cfg *ProtocolSessionConfig) {
 		cfg.Activity.Progress = func() { progress.Add(1) }
-		cfg.Log = func(_ context.Context, log nodeproto.FrameLog) error {
+		cfg.Log = func(_ context.Context, log nodewire.FrameLog) error {
 			mu.Lock()
 			defer mu.Unlock()
 			logs = append(logs, log)
@@ -85,11 +85,11 @@ func TestProtocolSessionConcurrentRepliesAndAttribution(t *testing.T) {
 		}
 	})
 	protocolTestHello(t, session)
-	replies := make(chan nodeproto.Reply, 2)
+	replies := make(chan nodewire.Reply, 2)
 	errs := make(chan error, 2)
 	for _, step := range []string{"first", "second"} {
 		go func() {
-			reply, err := session.Request(t.Context(), nodeproto.Request{ID: step, Op: nodeproto.OpRunStep, Job: "job", Step: step, Attempt: 1})
+			reply, err := session.Request(t.Context(), nodewire.Request{ID: step, Op: nodewire.OpRunStep, Job: "job", Step: step, Attempt: 1})
 			replies <- reply
 			errs <- err
 		}()
@@ -123,7 +123,7 @@ func TestProtocolSessionConcurrentRepliesAndAttribution(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	for _, want := range []struct{ message, step, level string }{{"active", "first", "info"}, {"forged", "", "info"}, {"late", "", "info"}, {"plain stdout", "", "info"}, {"plain stderr", "", "warn"}} {
-		if !slices.ContainsFunc(logs, func(log nodeproto.FrameLog) bool {
+		if !slices.ContainsFunc(logs, func(log nodewire.FrameLog) bool {
 			return log.Message == want.message && log.Step == want.step && log.Level == want.level
 		}) {
 			t.Errorf("missing %v in %#v", want, logs)
@@ -139,7 +139,7 @@ func TestProtocolSessionCancelPreservesSessionForCleanup(t *testing.T) {
 	cancelSeen, releaseJoin := make(chan struct{}), make(chan struct{})
 	var bodyJoined atomic.Bool
 	session := protocolTestSession(t, "cancel", func(cfg *ProtocolSessionConfig) {
-		cfg.Log = func(_ context.Context, log nodeproto.FrameLog) error {
+		cfg.Log = func(_ context.Context, log nodewire.FrameLog) error {
 			if log.Message == "entered" {
 				close(entered)
 			}
@@ -157,14 +157,14 @@ func TestProtocolSessionCancelPreservesSessionForCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	result := make(chan error, 1)
 	go func() {
-		_, err := session.Request(ctx, nodeproto.Request{ID: "step", Op: nodeproto.OpRunStep, Job: "job", Step: "body", Attempt: 1})
+		_, err := session.Request(ctx, nodewire.Request{ID: "step", Op: nodewire.OpRunStep, Job: "job", Step: "body", Attempt: 1})
 		result <- err
 	}()
 	<-entered
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpRunStep, Job: "job", Step: "body", Attempt: 1}); err == nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpRunStep, Job: "job", Step: "body", Attempt: 1}); err == nil {
 		t.Fatal("accepted duplicate active step")
 	}
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpPlan}); err == nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpPlan}); err == nil {
 		t.Fatal("accepted plan while body is active")
 	}
 	cancel()
@@ -182,11 +182,11 @@ func TestProtocolSessionCancelPreservesSessionForCleanup(t *testing.T) {
 	if !bodyJoined.Load() {
 		t.Fatal("request returned before original body joined")
 	}
-	reply, err := session.Request(t.Context(), nodeproto.Request{ID: "cleanup", Op: nodeproto.OpEval, Job: "job", Closure: "finally"})
+	reply, err := session.Request(t.Context(), nodewire.Request{ID: "cleanup", Op: nodewire.OpEval, Job: "job", Closure: "finally"})
 	if err != nil || !reply.OK {
 		t.Fatalf("cleanup = %#v, %v", reply, err)
 	}
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpPlan}); err != nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpPlan}); err != nil {
 		t.Fatal("refused plan consumed plan chance:", err)
 	}
 	if err = session.Close(); err != nil {
@@ -199,7 +199,7 @@ func TestProtocolSessionRejectsDuplicateAndUnknownReplies(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			session := protocolTestSession(t, mode, nil)
 			protocolTestHello(t, session)
-			_, _ = session.Request(t.Context(), nodeproto.Request{ID: "describe", Op: nodeproto.OpDescribe})
+			_, _ = session.Request(t.Context(), nodewire.Request{ID: "describe", Op: nodewire.OpDescribe})
 			err := session.Close()
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError {
@@ -213,7 +213,7 @@ func TestProtocolSessionCancelledEvalJoinsTargetAndKeepsSession(t *testing.T) {
 	entered := make(chan struct{})
 	var cancelSeen, cleaned atomic.Bool
 	session := protocolTestSession(t, "eval_cancel", func(cfg *ProtocolSessionConfig) {
-		cfg.Log = func(_ context.Context, log nodeproto.FrameLog) error {
+		cfg.Log = func(_ context.Context, log nodewire.FrameLog) error {
 			if log.Message == "entered" {
 				close(entered)
 			}
@@ -229,7 +229,7 @@ func TestProtocolSessionCancelledEvalJoinsTargetAndKeepsSession(t *testing.T) {
 	defer cancel(nil)
 	result := make(chan error, 1)
 	go func() {
-		_, err := session.Request(ctx, nodeproto.Request{ID: "caller-eval", Op: nodeproto.OpEval, Closure: "before_run"})
+		_, err := session.Request(ctx, nodewire.Request{ID: "caller-eval", Op: nodewire.OpEval, Closure: "before_run"})
 		result <- err
 	}()
 	<-entered
@@ -242,7 +242,7 @@ func TestProtocolSessionCancelledEvalJoinsTargetAndKeepsSession(t *testing.T) {
 	if !cancelSeen.Load() {
 		t.Fatal("eval cancellation did not target and join its private request")
 	}
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpDescribe}); err != nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpDescribe}); err != nil {
 		t.Fatalf("session unavailable after eval cancellation: %v", err)
 	}
 	if err := session.Close(); err != nil {
@@ -255,17 +255,17 @@ func TestProtocolSessionCancelledEvalJoinsTargetAndKeepsSession(t *testing.T) {
 
 func TestProtocolSessionHelloEnforced(t *testing.T) {
 	session := protocolTestSession(t, "normal", nil)
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpDescribe}); err == nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpDescribe}); err == nil {
 		t.Fatal("accepted request before hello")
 	}
 	protocolTestHello(t, session)
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpHello}); err == nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpHello}); err == nil {
 		t.Fatal("accepted second hello")
 	}
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpPlan}); err != nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpPlan}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpPlan}); err == nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpPlan}); err == nil {
 		t.Fatal("accepted second plan")
 	}
 	if err := session.Close(); err != nil {
@@ -277,7 +277,7 @@ func TestProtocolSessionNegotiationFailureIsActionable(t *testing.T) {
 	for _, mode := range []string{"mismatch", "old"} {
 		t.Run(mode, func(t *testing.T) {
 			session := protocolTestSession(t, mode, nil)
-			_, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpHello})
+			_, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpHello})
 			var failure *apierr.Error
 			if !errors.As(err, &failure) || failure.Code != apierr.ProtocolMismatch || !strings.Contains(strings.ToLower(err.Error()+failure.Hint), "rebuild") {
 				t.Fatalf("hello error = %v", err)
@@ -314,7 +314,7 @@ func TestProtocolSessionCloseRevokesAndJoinsBeforeCleanup(t *testing.T) {
 	if err := session.Cleanup(t.Context()); err != nil || !cleaned.Load() {
 		t.Fatal(err)
 	}
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpDescribe}); err == nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpDescribe}); err == nil {
 		t.Fatal("request after Close succeeded")
 	}
 }
@@ -322,9 +322,9 @@ func TestProtocolSessionCloseRevokesAndJoinsBeforeCleanup(t *testing.T) {
 func TestProtocolSessionValidationStopsUnsentRequests(t *testing.T) {
 	sentinel := errors.New("contract rejected request")
 	session := protocolTestSession(t, "normal", func(cfg *ProtocolSessionConfig) {
-		cfg.ValidateRequest = func(nodeproto.Request) error { return sentinel }
+		cfg.ValidateRequest = func(nodewire.Request) error { return sentinel }
 	})
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpHello}); !errors.Is(err, sentinel) {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpHello}); !errors.Is(err, sentinel) {
 		t.Fatal(err)
 	}
 	if err := session.Close(); err != nil {
@@ -334,11 +334,11 @@ func TestProtocolSessionValidationStopsUnsentRequests(t *testing.T) {
 
 func TestProtocolSessionBoundHelloRequiresRevocation(t *testing.T) {
 	session := protocolTestSession(t, "normal", func(cfg *ProtocolSessionConfig) { cfg.Revoke = nil })
-	_, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpHello, Binding: &nodeproto.ProcessBinding{Routes: nodeproto.ProcessRoutes{Bearer: "bound"}}})
+	_, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpHello, Binding: &nodewire.ProcessBinding{Routes: nodewire.ProcessRoutes{Bearer: "bound"}}})
 	if err == nil || !strings.Contains(err.Error(), "revocation") {
 		t.Fatalf("bound hello without revocation = %v", err)
 	}
-	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpHello}); err != nil {
+	if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpHello}); err != nil {
 		t.Fatal(err)
 	}
 	if err := session.Close(); err != nil {
@@ -349,8 +349,8 @@ func TestProtocolSessionBoundHelloRequiresRevocation(t *testing.T) {
 func TestProtocolSessionCancelledWriteReapsBlockedProcess(t *testing.T) {
 	validated := make(chan struct{})
 	session := protocolTestSession(t, "blocked", func(cfg *ProtocolSessionConfig) {
-		cfg.ValidateRequest = func(request nodeproto.Request) error {
-			if request.Op == nodeproto.OpEval {
+		cfg.ValidateRequest = func(request nodewire.Request) error {
+			if request.Op == nodewire.OpEval {
 				close(validated)
 			}
 			return nil
@@ -360,7 +360,7 @@ func TestProtocolSessionCancelledWriteReapsBlockedProcess(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	result := make(chan error, 1)
 	go func() {
-		_, err := session.Request(ctx, nodeproto.Request{Op: nodeproto.OpEval, Job: "job", Closure: "blocked", Input: json.RawMessage(`"` + strings.Repeat("x", 1<<20) + `"`)})
+		_, err := session.Request(ctx, nodewire.Request{Op: nodewire.OpEval, Job: "job", Closure: "blocked", Input: json.RawMessage(`"` + strings.Repeat("x", 1<<20) + `"`)})
 		result <- err
 	}()
 	<-validated
@@ -391,29 +391,29 @@ func TestProtocolSessionChild(t *testing.T) {
 			os.Exit(2)
 		}
 	}
-	reply := func(request nodeproto.Request, result any) {
+	reply := func(request nodewire.Request, result any) {
 		data, _ := json.Marshal(result)
-		send(nodeproto.Reply{ID: request.ID, OK: true, Result: data})
+		send(nodewire.Reply{ID: request.ID, OK: true, Result: data})
 	}
-	var held []nodeproto.Request
-	var cleanup *nodeproto.Request
+	var held []nodewire.Request
+	var cleanup *nodewire.Request
 	scanner := bufio.NewScanner(requests)
 	for scanner.Scan() {
-		var request nodeproto.Request
+		var request nodewire.Request
 		if json.Unmarshal(scanner.Bytes(), &request) != nil {
 			os.Exit(3)
 		}
-		if request.Op == nodeproto.OpHello {
+		if request.Op == nodewire.OpHello {
 			for _, value := range append(os.Environ(), os.Args...) {
 				if strings.Contains(value, "private-test-bearer") {
 					os.Exit(4)
 				}
 			}
 			if mode == "old" {
-				send(nodeproto.Reply{ID: request.ID, Error: &apierr.Error{Code: apierr.UnknownOp, Message: "unknown op"}})
+				send(nodewire.Reply{ID: request.ID, Error: &apierr.Error{Code: apierr.UnknownOp, Message: "unknown op"}})
 				continue
 			}
-			version := nodeproto.Version
+			version := nodewire.Version
 			if mode == "mismatch" {
 				version++
 			}
@@ -424,7 +424,7 @@ func TestProtocolSessionChild(t *testing.T) {
 			if mode == "planner" && request.Binding != nil {
 				os.Exit(8)
 			}
-			reply(request, nodeproto.HelloResult{Protocol: version, SDK: nodeproto.SDKIdentity{Language: "go", Version: sdkVersion}})
+			reply(request, nodewire.HelloResult{Protocol: version, SDK: nodewire.SDKIdentity{Language: "go", Version: sdkVersion}})
 			if mode == "blocked" {
 				reader, writer, err := os.Pipe()
 				if err != nil {
@@ -440,20 +440,20 @@ func TestProtocolSessionChild(t *testing.T) {
 		case "partial_output":
 			fmt.Fprint(os.Stdout, "starting")
 		case "log_policy":
-			send(nodeproto.FrameLog{Level: "debug", Message: "debug detail"})
-			send(nodeproto.FrameLog{Level: "info", Message: "normal detail"})
+			send(nodewire.FrameLog{Level: "debug", Message: "debug detail"})
+			send(nodewire.FrameLog{Level: "info", Message: "normal detail"})
 			reply(request, map[string]bool{})
 		case "startup_stable", "startup_change":
 			switch request.Op {
-			case nodeproto.OpPlan:
+			case nodewire.OpPlan:
 				job := sdkStartupJob(strings.TrimPrefix(mode, "startup_"))
 				if os.Getenv("NODE_OPTIONS") == "change" {
 					job.Steps[0].ID = "changed"
 				}
-				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
-			case nodeproto.OpRunStep:
-				send(nodeproto.FrameLog{Message: "body entered"})
-				reply(request, nodeproto.RunResult{Outcome: "success"})
+				reply(request, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
+			case nodewire.OpRunStep:
+				send(nodewire.FrameLog{Message: "body entered"})
+				reply(request, nodewire.RunResult{Outcome: "success"})
 			default:
 				os.Exit(12)
 			}
@@ -461,19 +461,19 @@ func TestProtocolSessionChild(t *testing.T) {
 			reply(request, os.Environ())
 		case "claimed_node", "claimed_node_hold":
 			switch request.Op {
-			case nodeproto.OpPlan:
-				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
-			case nodeproto.OpRunStep:
+			case nodewire.OpPlan:
+				reply(request, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
+			case nodewire.OpRunStep:
 				if mode == "claimed_node_hold" {
 					held = append(held, request)
-					send(nodeproto.FrameLog{Level: "info", Message: "entered"})
+					send(nodewire.FrameLog{Level: "info", Message: "entered"})
 				} else {
-					reply(request, nodeproto.RunResult{Outcome: "success"})
+					reply(request, nodewire.RunResult{Outcome: "success"})
 				}
-			case nodeproto.OpCancel:
+			case nodewire.OpCancel:
 				reply(request, map[string]bool{"cancelled": true})
 				for _, pending := range held {
-					reply(pending, nodeproto.RunResult{Outcome: "cancelled"})
+					reply(pending, nodewire.RunResult{Outcome: "cancelled"})
 				}
 				held = nil
 			default:
@@ -481,69 +481,69 @@ func TestProtocolSessionChild(t *testing.T) {
 			}
 		case "planner":
 			switch request.Op {
-			case nodeproto.OpDescribe:
+			case nodewire.OpDescribe:
 				secret := "private-plan-default"
-				send(nodeproto.FrameLog{Level: "info", Message: secret, Attrs: json.RawMessage(`{"escaped":"private-plan-def\u0061ult"}`)})
+				send(nodewire.FrameLog{Level: "info", Message: secret, Attrs: json.RawMessage(`{"escaped":"private-plan-def\u0061ult"}`)})
 				fmt.Fprintln(os.Stdout, secret)
 				fmt.Fprintln(os.Stderr, secret)
-				reply(request, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &secret}}}}})
-			case nodeproto.OpPlan:
+				reply(request, nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "build", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &secret}}}}})
+			case nodewire.OpPlan:
 				if request.Args["token"] != "private-plan-default" || request.Run.RunID != "run" {
 					os.Exit(9)
 				}
-				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+				reply(request, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 			default:
 				os.Exit(10)
 			}
 		case "owner_policy":
 			switch request.Op {
-			case nodeproto.OpPlan:
-				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{ownerPolicyJob()}})
-			case nodeproto.OpEval:
+			case nodewire.OpPlan:
+				reply(request, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{ownerPolicyJob()}})
+			case nodewire.OpEval:
 				if request.Closure == "slow" {
 					held = append(held, request)
-					send(nodeproto.FrameLog{Level: "info", Message: "slow entered"})
+					send(nodewire.FrameLog{Level: "info", Message: "slow entered"})
 				} else {
-					reply(request, nodeproto.EvalResult{Value: json.RawMessage("true")})
+					reply(request, nodewire.EvalResult{Value: json.RawMessage("true")})
 				}
-			case nodeproto.OpCancel:
+			case nodewire.OpCancel:
 				if len(held) != 1 || request.Target != held[0].ID || request.Job != "" || request.Step != "" {
 					os.Exit(13)
 				}
-				reply(held[0], nodeproto.EvalResult{Value: json.RawMessage("null")})
+				reply(held[0], nodewire.EvalResult{Value: json.RawMessage("null")})
 				held = nil
-				reply(request, nodeproto.ServiceAcknowledged{})
+				reply(request, nodewire.ServiceAcknowledged{})
 			default:
 				os.Exit(7)
 			}
 		case "owner_expand":
 			switch request.Op {
-			case nodeproto.OpPlan:
-				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "empty", "last"}}}}})
-			case nodeproto.OpEval:
+			case nodewire.OpPlan:
+				reply(request, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{Generate: []string{"first", "empty", "last"}}}}})
+			case nodewire.OpEval:
 				if request.Job != "" || string(request.Input) != `{"count":2}` {
 					os.Exit(6)
 				}
-				raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
-				reply(request, nodeproto.EvalResult{Value: raw, DeclarationsKnown: true})
+				raw, _ := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}, Steps: []nodewire.StepSpec{{ID: "body"}}}}})
+				reply(request, nodewire.EvalResult{Value: raw, DeclarationsKnown: true})
 			default:
 				os.Exit(7)
 			}
 		case "eval_cancel":
-			if request.Op == nodeproto.OpEval {
+			if request.Op == nodewire.OpEval {
 				held = append(held, request)
-				send(nodeproto.FrameLog{TS: "now", Message: "entered"})
+				send(nodewire.FrameLog{TS: "now", Message: "entered"})
 				continue
 			}
-			if request.Op == nodeproto.OpCancel {
+			if request.Op == nodewire.OpCancel {
 				if len(held) != 1 || request.Target != held[0].ID || request.Target == "caller-eval" || request.Job != "" || request.Step != "" {
 					os.Exit(13)
 				}
-				send(nodeproto.FrameLog{Message: "cancel_seen"})
+				send(nodewire.FrameLog{Message: "cancel_seen"})
 			}
 			reply(request, map[string]bool{})
 			for _, pending := range held {
-				reply(pending, nodeproto.EvalResult{Value: json.RawMessage("null")})
+				reply(pending, nodewire.EvalResult{Value: json.RawMessage("null")})
 			}
 			held = nil
 		case "concurrent":
@@ -553,37 +553,37 @@ func TestProtocolSessionChild(t *testing.T) {
 			}
 			fmt.Fprintln(os.Stdout, "plain stdout")
 			fmt.Fprintln(os.Stderr, "plain stderr")
-			send(nodeproto.FrameLog{TS: "now", Level: "info", Step: "first", Message: "active"})
-			send(nodeproto.FrameLog{TS: "now", Level: "info", Step: "unknown", Message: "forged"})
+			send(nodewire.FrameLog{TS: "now", Level: "info", Step: "first", Message: "active"})
+			send(nodewire.FrameLog{TS: "now", Level: "info", Step: "unknown", Message: "forged"})
 			for i := len(held) - 1; i >= 0; i-- {
 				reply(held[i], map[string]string{"step": held[i].Step, "wire_id": held[i].ID})
 			}
-			send(nodeproto.FrameLog{TS: "now", Level: "info", Step: "first", Message: "late"})
+			send(nodewire.FrameLog{TS: "now", Level: "info", Step: "first", Message: "late"})
 		case "cancel":
-			if request.Op == nodeproto.OpRunStep {
+			if request.Op == nodewire.OpRunStep {
 				held = append(held, request)
-				send(nodeproto.FrameLog{TS: "now", Message: "entered"})
+				send(nodewire.FrameLog{TS: "now", Message: "entered"})
 				continue
 			}
-			if request.Op == nodeproto.OpCancel {
+			if request.Op == nodewire.OpCancel {
 				reply(request, map[string]bool{"cancelled": true})
-				send(nodeproto.FrameLog{TS: "now", Message: "cancel_received"})
-				send(nodeproto.FrameLog{TS: "now", Message: "body_joined"})
+				send(nodewire.FrameLog{TS: "now", Message: "cancel_received"})
+				send(nodewire.FrameLog{TS: "now", Message: "body_joined"})
 				for _, pending := range held {
-					reply(pending, nodeproto.RunResult{Outcome: "failed"})
+					reply(pending, nodewire.RunResult{Outcome: "failed"})
 				}
 				held = nil
 				if cleanup != nil {
-					reply(*cleanup, nodeproto.EvalResult{Value: json.RawMessage("null")})
+					reply(*cleanup, nodewire.EvalResult{Value: json.RawMessage("null")})
 					cleanup = nil
 				}
 				continue
 			}
-			if request.Op == nodeproto.OpEval && len(held) != 0 {
+			if request.Op == nodewire.OpEval && len(held) != 0 {
 				cleanup = &request
 				continue
 			}
-			reply(request, nodeproto.EvalResult{Value: json.RawMessage("null")})
+			reply(request, nodewire.EvalResult{Value: json.RawMessage("null")})
 		case "duplicate":
 			reply(request, map[string]bool{})
 			reply(request, map[string]bool{})
@@ -610,8 +610,8 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime(t *testing.T) {
 		return input.Entry.Engine, nil
 	}
 	var mu sync.Mutex
-	var logs []nodeproto.FrameLog
-	p.Log = func(_ context.Context, record nodeproto.FrameLog) error {
+	var logs []nodewire.FrameLog
+	p.Log = func(_ context.Context, record nodewire.FrameLog) error {
 		mu.Lock()
 		defer mu.Unlock()
 		logs = append(logs, record)
@@ -619,8 +619,8 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime(t *testing.T) {
 	}
 	var sessions []*protocolSession
 	cleaned := 0
-	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(nil), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context, CleanupScope) error { cleaned++; return nil }}
-	p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(nil), ParseFrame: protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil }, RunCleanups: func(context.Context, CleanupScope) error { cleaned++; return nil }}
+	p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 		process, err := cfg.StartPlanning(ctx, input, log)
 		if process != nil {
 			sessions = append(sessions, process.(*protocolSession))
@@ -693,8 +693,8 @@ func TestProtocolSessionFailedStartupRevokesDelegatedRoute(t *testing.T) {
 	}
 }
 
-func ownerPolicyJob() nodeproto.JobSpec {
-	return nodeproto.JobSpec{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"slow", "skip"}}}
+func ownerPolicyJob() nodewire.JobSpec {
+	return nodewire.JobSpec{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{SkipIf: []string{"slow", "skip"}}}
 }
 
 func TestExecutorPolicyNativeSkipTimeoutJoinsAndContinues(t *testing.T) {
@@ -705,7 +705,7 @@ func TestExecutorPolicyNativeSkipTimeoutJoinsAndContinues(t *testing.T) {
 
 func executorPolicyNativeSkip(t *testing.T, mode string) {
 	t.Helper()
-	in, st, deps, _ := executorPolicyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
+	in, st, deps, _ := executorPolicyFixture(t, func(job *nodewire.JobSpec) { *job = ownerPolicyJob() })
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -720,8 +720,8 @@ func executorPolicyNativeSkip(t *testing.T, mode string) {
 	var revoked, cleaned int
 	cfg := ProtocolSessionConfig{
 		Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec,
-		ValidateRequest: func(nodeproto.Request) error { return nil },
-		Log: func(_ context.Context, record nodeproto.FrameLog) error {
+		ValidateRequest: func(nodewire.Request) error { return nil },
+		Log: func(_ context.Context, record nodewire.FrameLog) error {
 			if record.Message == "slow entered" {
 				(<-deadlines)(context.DeadlineExceeded)
 			}
@@ -763,7 +763,7 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	in.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "owner_expand"}
-	in.RouteBinding.Routes = nodeproto.ProcessRoutes{URL: "http://host", Bearer: "private-test-bearer"}
+	in.RouteBinding.Routes = nodewire.ProcessRoutes{URL: "http://host", Bearer: "private-test-bearer"}
 	revoked, cleaned := false, false
 	deps.Bind = func(_ context.Context, in EvaluationInput) (ProcessGrant, error) {
 		binding := in.RouteBinding
@@ -771,7 +771,7 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 		return ProcessGrant{Binding: binding, Revoke: func() error { revoked = true; return nil }}, nil
 	}
 	deps.Masks = NewMaskRegistry(deps.Masker)
-	cfg := ProtocolSessionConfig{Masks: deps.Masks, Log: func(context.Context, nodeproto.FrameLog) error { return nil }, Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context, CleanupScope) error {
+	cfg := ProtocolSessionConfig{Masks: deps.Masks, Log: func(context.Context, nodewire.FrameLog) error { return nil }, Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil }, RunCleanups: func(context.Context, CleanupScope) error {
 		if !revoked {
 			return errors.New("routes still live during cleanup")
 		}
@@ -787,7 +787,7 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 	if err != nil || failure != nil {
 		t.Fatalf("failure = %+v, error = %v", failure, err)
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(body, &plan); err != nil {
 		t.Fatal(err)
 	}
@@ -819,7 +819,7 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 				input.Entry.Command = command
 				var mu sync.Mutex
 				var levels []string
-				log := func(_ context.Context, record nodeproto.FrameLog) error {
+				log := func(_ context.Context, record nodewire.FrameLog) error {
 					mu.Lock()
 					defer mu.Unlock()
 					if strings.HasSuffix(record.Message, " detail") {
@@ -827,7 +827,7 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 					}
 					return nil
 				}
-				cfg := ProtocolSessionConfig{Command: command, Environment: testProcessEnv(t, "GORACE=atexit_sleep_ms=0"), Environments: sdkTestEnvironment(state), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Log: log, Debug: !debug, Revoke: func() error { return nil }}
+				cfg := ProtocolSessionConfig{Command: command, Environment: testProcessEnv(t, "GORACE=atexit_sleep_ms=0"), Environments: sdkTestEnvironment(state), ParseFrame: protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil }, Log: log, Debug: !debug, Revoke: func() error { return nil }}
 				var process ExecutorProcess
 				switch adapter {
 				case "direct":
@@ -838,7 +838,7 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 				case "evaluation":
 					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
 				case "planning":
-					process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci"}, Debug: debug}, log)
+					process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Run: nodewire.RunContext{RunID: "run", Pipeline: "ci"}, Debug: debug}, log)
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -846,7 +846,7 @@ func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
 				t.Cleanup(func() { _ = process.Close() })
 				session := process.(*protocolSession)
 				protocolTestHello(t, session)
-				if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpDescribe}); err != nil {
+				if _, err := session.Request(t.Context(), nodewire.Request{Op: nodewire.OpDescribe}); err != nil {
 					t.Fatal(err)
 				}
 				if err := session.Close(); err != nil {
@@ -874,12 +874,12 @@ func TestProtocolSessionIdleSinkFailureStopsAuthor(t *testing.T) {
 				if registered {
 					cfg.Masks = NewMaskRegistry(secrets.NewMasker())
 				}
-				cfg.Log = func(context.Context, nodeproto.FrameLog) error { return failure }
+				cfg.Log = func(context.Context, nodewire.FrameLog) error { return failure }
 			})
 			protocolTestHello(t, session)
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			_, err := session.Request(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: "job", Step: "body", Attempt: 1})
+			_, err := session.Request(ctx, nodewire.Request{Op: nodewire.OpRunStep, Job: "job", Step: "body", Attempt: 1})
 			if !errors.Is(err, failure) {
 				t.Fatalf("idle flush did not fail the live request: %v", err)
 			}
@@ -904,7 +904,7 @@ func TestProtocolSessionObservesExitBeforeOutputAcknowledgement(t *testing.T) {
 	defer cancel()
 	session := protocolTestSession(t, "normal", func(cfg *ProtocolSessionConfig) {
 		cfg.exitedAt = &exited
-		cfg.output = &planningLogs{masker: secrets.NewMasker(), buffer: []planningOutput{{text: "pending output"}}, sink: func(context.Context, nodeproto.FrameLog) error {
+		cfg.output = &planningLogs{masker: secrets.NewMasker(), buffer: []planningOutput{{text: "pending output"}}, sink: func(context.Context, nodewire.FrameLog) error {
 			close(finishing)
 			<-acknowledge
 			return nil

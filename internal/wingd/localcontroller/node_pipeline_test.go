@@ -26,7 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -35,12 +34,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func localAwardPlan() nodeproto.PlanDoc {
-	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "first", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}, Artifacts: []string{"result.txt"}},
-		{ID: "second", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}, Needs: []string{"first"}, Consumes: []nodeproto.ArtifactInput{{Producer: "first", Into: "received"}}},
+func localAwardPlan() nodewire.PlanDoc {
+	return nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "first", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}, Artifacts: []string{"result.txt"}},
+		{ID: "second", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}, Needs: []string{"first"}, Consumes: []nodewire.ArtifactInput{{Producer: "first", Into: "received"}}},
 	}}
 }
 
@@ -50,23 +50,23 @@ func TestLocalAwardProcess(t *testing.T) {
 	}
 	requests := bufio.NewScanner(os.NewFile(3, "requests"))
 	frames := json.NewEncoder(os.NewFile(4, "frames"))
-	var binding *nodeproto.ProcessBinding
+	var binding *nodewire.ProcessBinding
 	for requests.Scan() {
-		var request nodeproto.Request
+		var request nodewire.Request
 		if err := json.Unmarshal(requests.Bytes(), &request); err != nil {
 			t.Fatal(err)
 		}
 		var result any = map[string]any{}
 		switch request.Op {
-		case nodeproto.OpHello:
+		case nodewire.OpHello:
 			binding = request.Binding
 			if binding == nil || binding.JobID == "" || !strings.HasPrefix(binding.Routes.Bearer, capability.NodeHostPrefix) {
 				t.Fatal("process did not receive its node-host credential")
 			}
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.2.3"}}
-		case nodeproto.OpPlan:
+			result = nodewire.HelloResult{Protocol: nodewire.Version, SDK: nodewire.SDKIdentity{Language: "go", Version: "v1.2.3"}}
+		case nodewire.OpPlan:
 			result = localAwardPlan()
-		case nodeproto.OpRunStep:
+		case nodewire.OpRunStep:
 			if binding == nil || request.Job != binding.JobID {
 				t.Fatal("process executed another job")
 			}
@@ -325,7 +325,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion, err := host.Run(ctx, nodehost.RunInput{RunID: admitted.RunID, Owner: actor, RequestHash: string(admitted.Request.Hash), SealedRequest: requestBody, Storage: services.Storage, GrantedRunner: nodeproto.RunnerIdentity{Name: principal.Capability.Subject.ID, Type: "coordinator", Labels: []string{}}})
+	completion, err := host.Run(ctx, nodehost.RunInput{RunID: admitted.RunID, Owner: actor, RequestHash: string(admitted.Request.Hash), SealedRequest: requestBody, Storage: services.Storage, GrantedRunner: nodewire.RunnerIdentity{Name: principal.Capability.Subject.ID, Type: "coordinator", Labels: []string{}}})
 	if err != nil || completion.Outcome != "success" {
 		rows, readErr := b.Tenant.ReadSnapshot(ctx, admitted.RunID)
 		for _, row := range rows.Nodes {

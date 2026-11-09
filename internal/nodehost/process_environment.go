@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // SDKEnvironment projects sealed runtime facts and persisted job declarations
@@ -37,12 +37,12 @@ func (e SDKEnvironment) planning(ctx context.Context, input PlanningProcessInput
 	return e.build(ctx, procenv.Plan, input.Environment, sdkRuntime(input.Run, input.Runner))
 }
 
-func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity) (procenv.Env, error) {
+func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodewire.RunnerIdentity) (procenv.Env, error) {
 	env, _, err := e.jobEnvironments(ctx, kind, accepted, nodeID, generation, specHash, runner, false)
 	return env, err
 }
 
-func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity, cleanup bool) (procenv.Env, procenv.Env, error) {
+func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodewire.RunnerIdentity, cleanup bool) (procenv.Env, procenv.Env, error) {
 	if err := context.Cause(ctx); err != nil {
 		return procenv.Env{}, procenv.Env{}, err
 	}
@@ -61,7 +61,7 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 	if row.Ref != ref || row.Generation != runspec.ClaimGeneration(generation) || row.SpecHash != specHash {
 		return procenv.Env{}, procenv.Env{}, executorError(apierr.SpecDrift, "SDK environment differs from the persisted job")
 	}
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	if err := json.Unmarshal(row.Spec, &job); err != nil || job.ID != nodeID {
 		return procenv.Env{}, procenv.Env{}, executorError(apierr.PlanDrift, "SDK environment has an invalid job declaration")
 	}
@@ -77,7 +77,7 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 	})
 }
 
-func projectJobEnvironment(kind procenv.Kind, env map[string]nodeproto.EnvValue, runtime procenv.Runtime, cleanup bool, split func([]procenv.Assignment) (procenv.JobEnv, error), build func(procenv.Kind, procenv.Runtime) (procenv.Env, error)) (procenv.Env, procenv.Env, error) {
+func projectJobEnvironment(kind procenv.Kind, env map[string]nodewire.EnvValue, runtime procenv.Runtime, cleanup bool, split func([]procenv.Assignment) (procenv.JobEnv, error), build func(procenv.Kind, procenv.Runtime) (procenv.Env, error)) (procenv.Env, procenv.Env, error) {
 	assignments := make([]procenv.Assignment, 0, len(env))
 	for name, value := range env {
 		assignments = append(assignments, procenv.Assignment{Name: name, Value: value.Value, Startup: value.Startup})
@@ -150,7 +150,7 @@ func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runsp
 	return env, nil
 }
 
-func sdkRuntime(run nodeproto.RunContext, runner nodeproto.RunnerIdentity) procenv.Runtime {
+func sdkRuntime(run nodewire.RunContext, runner nodewire.RunnerIdentity) procenv.Runtime {
 	runtime := procenv.Runtime{
 		RunID: run.RunID, DryRun: run.DryRun,
 		Runner:        procenv.RunnerInfo{Name: runner.Name, Type: runner.Type, Labels: slices.Clone(runner.Labels)},

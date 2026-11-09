@@ -13,11 +13,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type secretManagerFake struct {
@@ -352,7 +352,7 @@ func TestLocalSecretIntakeDoesNotWarnOrChangeValue(t *testing.T) {
 	original := os.Stderr
 	os.Stderr = file
 	defer func() { os.Stderr = original }()
-	values, err := resolveBurstSecrets(t.Context(), []string{"TOKEN"}, []nodeproto.SecretDeclaration{{Name: "TOKEN"}}, map[string]string{"TOKEN": "abc"})
+	values, err := resolveBurstSecrets(t.Context(), []string{"TOKEN"}, []nodewire.SecretDeclaration{{Name: "TOKEN"}}, map[string]string{"TOKEN": "abc"})
 	if err != nil || values["TOKEN"] != "abc" {
 		t.Fatalf("local secret refused: %v %v", values, err)
 	}

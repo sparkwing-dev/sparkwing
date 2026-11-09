@@ -8,10 +8,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func publicationFixture(t *testing.T) (*Tenant, *time.Time, nodeTransition) {
@@ -33,7 +33,7 @@ func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*T
 	publisher.Data = &capability.DataScope{Use: capability.DataPublish, RunID: admitted.RunID, RepositoryKey: "gh:1"}
 	authorityPersist(t, tenant.s, publisher)
 	actor := runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: publisher.Prefix}, CapabilityPrefix: publisher.Prefix}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "imported"}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "imported"}}}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
 	if err != nil {
 		t.Fatal(err)

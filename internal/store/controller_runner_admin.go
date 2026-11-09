@@ -3,9 +3,9 @@ package store
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor) (capability.Principal, error) {

@@ -11,20 +11,20 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	f := newPlanningFixture(t)
 	resolved := engine.Resolved{Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("a", 64)}}
-	var logs []nodeproto.FrameLog
+	var logs []nodewire.FrameLog
 	var processes []*executorProcess
 	defaultValue, supplied := "sdk-private-default", "explicit-private-value"
 	empty, fallback := "", "public-default"
@@ -33,49 +33,49 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		Log: func(_ context.Context, record nodeproto.FrameLog) error { logs = append(logs, record); return nil },
+		Log: func(_ context.Context, record nodewire.FrameLog) error { logs = append(logs, record); return nil },
 	}
-	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 		if planner.Masker.Mask(input.Args["label"]) != "***" {
 			t.Fatal("intake secret classification was not registered before describe")
 		}
 		if input.Entry.Engine.Identity != resolved.Identity {
 			t.Fatal("planning changed its selected engine")
 		}
-		process := &executorProcess{plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}}
-		process.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+		process := &executorProcess{plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}}}
+		process.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
 			switch request.Op {
-			case nodeproto.OpHello:
+			case nodewire.OpHello:
 				if request.Binding != nil || !reflect.DeepEqual(request.Runner, &input.Runner) {
 					t.Fatal("planning hello gained route authority or lost granted runner identity")
 				}
-				return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}}, nil
-			case nodeproto.OpDescribe:
-				if err := log(ctx, nodeproto.FrameLog{Message: defaultValue + " " + supplied, Attrs: json.RawMessage(`{"sdk-private-def\u0061ult":"public"}`)}); err != nil {
+				return nodewire.HelloResult{Protocol: nodewire.Version, SDK: nodewire.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}}, nil
+			case nodewire.OpDescribe:
+				if err := log(ctx, nodewire.FrameLog{Message: defaultValue + " " + supplied, Attrs: json.RawMessage(`{"sdk-private-def\u0061ult":"public"}`)}); err != nil {
 					return nil, err
 				}
 				if len(logs) != 0 {
 					t.Fatal("describe output escaped before secret classification")
 				}
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-					{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "other-secret", Type: "string", Secret: true, Default: &defaultValue}}},
-					{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}, {Name: "empty", Type: "string", Default: &empty}, {Name: "label", Type: "string", Default: &fallback}}},
+				return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+					{Name: "other", Args: []nodewire.ArgumentDescription{{Name: "other-secret", Type: "string", Secret: true, Default: &defaultValue}}},
+					{Name: "build", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true}, {Name: "empty", Type: "string", Default: &empty}, {Name: "label", Type: "string", Default: &fallback}}},
 				}}, nil
-			case nodeproto.OpPlan:
+			case nodewire.OpPlan:
 				if request.Args["token"] != supplied || request.Args["empty"] != "" || request.Args["label"] != "explicit" || request.Run.RunID != "run" {
 					t.Fatalf("planning inputs changed: %+v", request)
 				}
 				if _, ok := request.Args["empty"]; ok {
 					t.Fatal("empty default became a supplied argument")
 				}
-				return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}, nil
+				return nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}}, nil
 			}
 			return nil, nil
 		}
 		processes = append(processes, process)
 		return process, nil
 	}
-	input := PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Run: nodeproto.RunContext{RunID: "run", Pipeline: "build"}, Args: map[string]string{"token": supplied, "label": "explicit"}, SecretArgs: []string{"label"}}
+	input := PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Runner: nodewire.RunnerIdentity{Name: "granted", Type: "local"}, Run: nodewire.RunContext{RunID: "run", Pipeline: "build"}, Args: map[string]string{"token": supplied, "label": "explicit"}, SecretArgs: []string{"label"}}
 	prepared, err := planner.Prepare(t.Context(), input, f.input)
 	if err != nil {
 		t.Fatal(err)
@@ -123,20 +123,20 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 	f := newPlanningFixture(t)
 	resolved := engine.Resolved{Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("a", 64)}}
 	processes := &[]*executorProcess{}
-	input := PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Run: nodeproto.RunContext{RunID: "run", Pipeline: "build"}}
+	input := PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Runner: nodewire.RunnerIdentity{Name: "granted", Type: "local"}, Run: nodewire.RunContext{RunID: "run", Pipeline: "build"}}
 	p := SDKPlanner{
-		Masker: secrets.NewMasker(), Log: func(context.Context, nodeproto.FrameLog) error { return nil },
+		Masker: secrets.NewMasker(), Log: func(context.Context, nodewire.FrameLog) error { return nil },
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		Start: func(_ context.Context, _ PlanningProcessInput, _ func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-			process := &executorProcess{plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}}
-			process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
+		Start: func(_ context.Context, _ PlanningProcessInput, _ func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
+			process := &executorProcess{plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}}}}}
+			process.answer = func(_ context.Context, request nodewire.Request) (any, error) {
 				switch request.Op {
-				case nodeproto.OpHello:
-					return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}}, nil
-				case nodeproto.OpDescribe:
-					return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Extra: true, Args: []nodeproto.ArgumentDescription{}}}}, nil
+				case nodewire.OpHello:
+					return nodewire.HelloResult{Protocol: nodewire.Version, SDK: nodewire.SDKIdentity{Language: string(resolved.Identity.Pin.SDK), Version: resolved.Identity.Pin.Version}}, nil
+				case nodewire.OpDescribe:
+					return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "build", Extra: true, Args: []nodewire.ArgumentDescription{}}}}, nil
 				}
 				return nil, nil
 			}
@@ -151,20 +151,20 @@ func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
 	planner, input, fixture, processes := sdkPlanningFixture(t)
 	input.Run.StartedAt = time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	input.Run.DryRun, input.Run.NoMemo = true, true
-	input.Run.Git = &nodeproto.Git{SHA: strings.Repeat("a", 40), Branch: "feature", DefaultBranch: "main", Repo: "acme/repo", RepoURL: "https://example.com/acme/repo.git"}
-	input.Run.Trigger = &nodeproto.Trigger{Source: "webhook", User: "octocat", PullRequest: &nodeproto.PullRequest{Number: 42, Action: "synchronize", BaseRef: "main", HeadRef: "feature"}}
+	input.Run.Git = &nodewire.Git{SHA: strings.Repeat("a", 40), Branch: "feature", DefaultBranch: "main", Repo: "acme/repo", RepoURL: "https://example.com/acme/repo.git"}
+	input.Run.Trigger = &nodewire.Trigger{Source: "webhook", User: "octocat", PullRequest: &nodewire.PullRequest{Number: 42, Action: "synchronize", BaseRef: "main", HeadRef: "feature"}}
 	sealed, err := json.Marshal(input.Run)
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := planner.Start
 	planned := false
-	planner.Start = func(ctx context.Context, processInput PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+	planner.Start = func(ctx context.Context, processInput PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 		process, err := start(ctx, processInput, log)
 		p := process.(*executorProcess)
 		answer := p.answer
-		p.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpPlan {
+		p.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpPlan {
 				planned = true
 				actual, marshalErr := json.Marshal(request.Run)
 				if marshalErr != nil || string(actual) != string(sealed) {
@@ -196,16 +196,16 @@ func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
 func TestSDKPlanningDescribeTimeoutJoinsAndWithholdsUnknownSecrets(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p, input, f, processes := sdkPlanningFixture(t)
-		var logs []nodeproto.FrameLog
-		p.Log = func(_ context.Context, record nodeproto.FrameLog) error { logs = append(logs, record); return nil }
+		var logs []nodewire.FrameLog
+		p.Log = func(_ context.Context, record nodewire.FrameLog) error { logs = append(logs, record); return nil }
 		start := p.Start
-		p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 			process, err := start(ctx, input, log)
 			proc := process.(*executorProcess)
 			answer := proc.answer
-			proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-				if request.Op == nodeproto.OpDescribe {
-					if err := log(ctx, nodeproto.FrameLog{Message: "unknown-private-default"}); err != nil {
+			proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+				if request.Op == nodewire.OpDescribe {
+					if err := log(ctx, nodewire.FrameLog{Message: "unknown-private-default"}); err != nil {
 						return nil, err
 					}
 					<-ctx.Done()
@@ -243,12 +243,12 @@ func TestSDKPlanningRejectsIncompleteDescriptionsAndCleansUp(t *testing.T) {
 		t.Run(raw, func(t *testing.T) {
 			p, input, f, processes := sdkPlanningFixture(t)
 			start := p.Start
-			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, in, log)
 				proc := process.(*executorProcess)
 				answer := proc.answer
-				proc.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
-					if req.Op == nodeproto.OpDescribe {
+				proc.answer = func(ctx context.Context, req nodewire.Request) (any, error) {
+					if req.Op == nodewire.OpDescribe {
 						return json.RawMessage(raw), nil
 					}
 					return answer(ctx, req)
@@ -273,19 +273,19 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 			p.Masker.Register(secret)
 			failure := errors.New(secret)
 			start := p.Start
-			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, in, log)
 				proc := process.(*executorProcess)
 				answer := proc.answer
-				proc.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
-					if stage == "validate" && req.Op == nodeproto.OpPlan {
-						return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: secret}}}, nil
+				proc.answer = func(ctx context.Context, req nodewire.Request) (any, error) {
+					if stage == "validate" && req.Op == nodewire.OpPlan {
+						return nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: secret}}}, nil
 					}
 					if string(req.Op) == stage {
 						return nil, failure
 					}
-					if stage == "log" && req.Op == nodeproto.OpDescribe {
-						if err := log(ctx, nodeproto.FrameLog{Message: secret}); err != nil {
+					if stage == "log" && req.Op == nodewire.OpDescribe {
+						if err := log(ctx, nodewire.FrameLog{Message: secret}); err != nil {
 							return nil, err
 						}
 					}
@@ -303,7 +303,7 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 				return process, err
 			}
 			if stage == "log" {
-				p.Log = func(context.Context, nodeproto.FrameLog) error { return failure }
+				p.Log = func(context.Context, nodewire.FrameLog) error { return failure }
 			}
 			prepared, err := p.Prepare(t.Context(), input, f.input)
 			var result plannedInitial
@@ -323,17 +323,17 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 }
 
 func TestSDKPlanningCancellationDiscardsSuccessfulReplies(t *testing.T) {
-	for _, op := range []nodeproto.Op{nodeproto.OpDescribe, nodeproto.OpPlan} {
+	for _, op := range []nodewire.Op{nodewire.OpDescribe, nodewire.OpPlan} {
 		t.Run(string(op), func(t *testing.T) {
 			p, input, f, processes := sdkPlanningFixture(t)
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(context.Canceled)
 			start := p.Start
-			p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, input, log)
 				proc := process.(*executorProcess)
 				answer := proc.answer
-				proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+				proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
 					value, err := answer(ctx, request)
 					if request.Op == op {
 						cancel(lease.ErrLeaseLost)
@@ -343,7 +343,7 @@ func TestSDKPlanningCancellationDiscardsSuccessfulReplies(t *testing.T) {
 				return process, err
 			}
 			prepared, err := p.Prepare(ctx, input, f.input)
-			if op == nodeproto.OpPlan {
+			if op == nodewire.OpPlan {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -375,11 +375,11 @@ func TestSDKPlanningRefusesChangedEngineAndSDK(t *testing.T) {
 				}
 			} else {
 				start := p.Start
-				p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+				p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 					process, err := start(ctx, input, log)
 					proc := process.(*executorProcess)
-					proc.answer = func(context.Context, nodeproto.Request) (any, error) {
-						return nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "other"}}, nil
+					proc.answer = func(context.Context, nodewire.Request) (any, error) {
+						return nodewire.HelloResult{Protocol: nodewire.Version, SDK: nodewire.SDKIdentity{Language: "go", Version: "other"}}, nil
 					}
 					return process, err
 				}
@@ -408,19 +408,19 @@ func TestSDKPlanningReportsBufferedLogLoss(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprint(fail), func(t *testing.T) {
 			p, input, f, _ := sdkPlanningFixture(t)
-			var logs []nodeproto.FrameLog
-			p.Log = func(_ context.Context, record nodeproto.FrameLog) error { logs = append(logs, record); return nil }
+			var logs []nodewire.FrameLog
+			p.Log = func(_ context.Context, record nodewire.FrameLog) error { logs = append(logs, record); return nil }
 			start := p.Start
-			p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, input, log)
 				proc := process.(*executorProcess)
 				answer := proc.answer
-				proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpDescribe {
-						if err := log(ctx, nodeproto.FrameLog{Message: strings.Repeat("x", 8<<20)}); err != nil {
+				proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpDescribe {
+						if err := log(ctx, nodewire.FrameLog{Message: strings.Repeat("x", 8<<20)}); err != nil {
 							return nil, err
 						}
-						if err := log(ctx, nodeproto.FrameLog{Message: "kept"}); err != nil {
+						if err := log(ctx, nodewire.FrameLog{Message: "kept"}); err != nil {
 							return nil, err
 						}
 						if fail {
@@ -457,21 +457,21 @@ func TestSDKPlanningArgumentFailuresRespectRegistration(t *testing.T) {
 			if short {
 				input.Args["short"] = "bad"
 			}
-			var logs []nodeproto.FrameLog
-			planner.Log = func(_ context.Context, frame nodeproto.FrameLog) error { logs = append(logs, frame); return nil }
+			var logs []nodewire.FrameLog
+			planner.Log = func(_ context.Context, frame nodewire.FrameLog) error { logs = append(logs, frame); return nil }
 			start := planner.Start
-			planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, in, log)
 				child := process.(*executorProcess)
 				answer := child.answer
-				child.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
-					if req.Op != nodeproto.OpDescribe {
+				child.answer = func(ctx context.Context, req nodewire.Request) (any, error) {
+					if req.Op != nodewire.OpDescribe {
 						return answer(ctx, req)
 					}
-					if err := log(ctx, nodeproto.FrameLog{Message: value}); err != nil {
+					if err := log(ctx, nodewire.FrameLog{Message: value}); err != nil {
 						return nil, err
 					}
-					return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true}, {Name: "short", Type: "string", Secret: true}}}}}, nil
+					return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "build", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true}, {Name: "short", Type: "string", Secret: true}}}}}, nil
 				}
 				return process, err
 			}

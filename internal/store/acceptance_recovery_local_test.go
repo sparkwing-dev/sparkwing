@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestStoreRecoveryLocalOrphans(t *testing.T) {
@@ -27,9 +27,9 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			f.tenant, f.plan, err = storePlanSealRequestWith(ctx, f.s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+			f.tenant, f.plan, err = storePlanSealRequestWith(ctx, f.s, func(input *store.IntakeRequest, doc *nodewire.PlanDoc) {
 				input.Request.Origin = runspec.OriginLocal
-				doc.Jobs = []nodeproto.JobSpec{}
+				doc.Jobs = []nodewire.JobSpec{}
 			})
 			if err != nil {
 				t.Fatal(err)

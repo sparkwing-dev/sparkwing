@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -23,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type hostIntakePolicy struct{}
@@ -99,22 +99,22 @@ type storeHostFixture struct {
 	Host        OwnerHost
 }
 
-func newStoreHostFixture(t *testing.T, plan nodeproto.PlanDoc, opts ...store.Option) *storeHostFixture {
+func newStoreHostFixture(t *testing.T, plan nodewire.PlanDoc, opts ...store.Option) *storeHostFixture {
 	t.Helper()
 	return newStoreHostFixtureOn(t, openStore(t, opts...), plan, runspec.Options{})
 }
 
-func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, options runspec.Options) *storeHostFixture {
+func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodewire.PlanDoc, options runspec.Options) *storeHostFixture {
 	t.Helper()
 	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Options: options}
 	return newStoreHostFixtureForRequest(t, database, plan, request)
 }
 
-func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request) *storeHostFixture {
+func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nodewire.PlanDoc, request runspec.Request) *storeHostFixture {
 	return newStoreHostFixtureForEngine(t, database, plan, request, engineid.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}})
 }
 
-func newStoreHostFixtureForEngine(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request, selected engineid.Identity) *storeHostFixture {
+func newStoreHostFixtureForEngine(t *testing.T, database *store.Store, plan nodewire.PlanDoc, request runspec.Request, selected engineid.Identity) *storeHostFixture {
 	t.Helper()
 	f := newStoreOwnerFixture(t, database, request)
 	ctx, tenant, actor := t.Context(), f.Tenant, f.Actor
@@ -208,7 +208,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 		t.Fatal(err)
 	}
 	f := &storeHostFixture{OwnerBearer: claim.Bearer, Store: database, Tenant: tenant, Actor: actor, Control: runstate.Actor{Kind: runstate.ActorOperator, Authority: authority, CapabilityPrefix: root}}
-	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
+	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), GrantedRunner: nodewire.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
 
 	f.State = &hostState{Tenant: tenant}
 	f.Host = OwnerHost{executionAdmission: ComposeStartGate(tenant, nil, false), Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: secrets.NewMasker(), Renew: func(ctx context.Context, actor runstate.Actor, executing bool) (runstate.LeaseBeat, error) {

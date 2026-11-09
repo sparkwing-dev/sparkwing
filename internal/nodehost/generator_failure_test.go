@@ -5,17 +5,17 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestGeneratorFailureWithholdsUnknownSecretDetails(t *testing.T) {
 	for _, transport := range []bool{false, true} {
-		process := &executorProcess{answer: func(context.Context, nodeproto.Request) (any, error) {
+		process := &executorProcess{answer: func(context.Context, nodewire.Request) (any, error) {
 			if transport {
 				return nil, errors.New("unknown-generator-secret")
 			}
-			return nodeproto.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "unknown-generator-secret"}}, nil
+			return nodewire.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "unknown-generator-secret"}}, nil
 		}}
 		session := &executorSession{process: process}
 		value, err := (&sdkCode{}).eval(t.Context(), session, NodeInput{}, "generate-closure", "generate", nil, nil)

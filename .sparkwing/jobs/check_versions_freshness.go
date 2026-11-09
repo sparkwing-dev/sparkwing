@@ -17,7 +17,7 @@ import (
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
-const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
+const sdkModulePath = "github.com/sparkwing-dev/sparkwing/sparkwing"
 
 const scaffoldFallbackRel = "pkg/scaffold/version.go"
 
@@ -213,6 +213,7 @@ var watchedModulePrefixes = []string{
 
 var maxAllowedMajor = map[string]int{
 	"github.com/sparkwing-dev/sparkwing": 0,
+	sdkModulePath:                        0,
 }
 
 func isWatchedModule(path string) bool {

@@ -7,9 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestV2Declarations(t *testing.T) {
@@ -102,30 +100,5 @@ func TestGeneratedCodeExecutesAndReplays(t *testing.T) {
 	result, err = ops.RunStep(context.Background(), p, nodeproto.Request{Job: "grandchild", Step: "run", Attempt: 1, Settled: []string{}})
 	if err != nil || result.Outcome != "success" {
 		t.Fatalf("nested body: %+v %v", result, err)
-	}
-}
-
-func TestGeneratedSettingsReachHostValidation(t *testing.T) {
-	p := NewPlan()
-	n := Job(p, "source", func(context.Context) error { return nil })
-	g := n.Generate(func(_ context.Context, p *Plan) error { p.Priority(0); return nil })
-	result, err := (sdkOperations{}).Eval(t.Context(), p, nodeproto.Request{Job: n.ID(), Closure: g.ID()})
-	if err != nil || result.Error != nil {
-		t.Fatalf("generation=%+v error=%v", result, err)
-	}
-	if _, err := nodeproto.ValidatePlan(result.Value, nodeproto.ValidationContext{Expansion: true, Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()}); err == nil {
-		t.Fatal("host accepted generated settings")
-	}
-}
-
-func TestNegativeDurationDoesNotBecomeZero(t *testing.T) {
-	p := NewPlan()
-	Job(p, "job", func(context.Context) error { return nil }).Timeout(-time.Nanosecond)
-	raw, err := json.Marshal(planDocument(p))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()}); err == nil {
-		t.Fatal("negative duration became an allowed zero")
 	}
 }

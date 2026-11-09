@@ -1,5 +1,7 @@
 package main
 
+import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,13 +11,12 @@ import (
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	var req nodeproto.ExecRequest
+	var req nodewire.ExecRequest
 	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
 		panic(err)
 	}
@@ -27,7 +28,7 @@ func main() {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		return encoder.Encode(nodeproto.ExecOutput{ID: req.ID, Stream: stream, Data: data})
+		return encoder.Encode(nodewire.ExecOutput{ID: req.ID, Stream: stream, Data: data})
 	})
 	if err := encoder.Encode(done); err != nil {
 		panic(err)

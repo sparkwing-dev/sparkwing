@@ -3,8 +3,8 @@ package nodehost
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type testPolicyName struct{ Name string }
@@ -18,11 +18,11 @@ func setTestPolicies(h *OwnerHost, f func(context.Context, testPolicyName, Evalu
 	h.DebugPolicy, h.SkipPolicy = bind("debug"), bind("skip_if")
 }
 
-func setTestExecutor(d *ExecutorDependencies, f func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)) {
-	d.PrepareArtifacts = func(ctx context.Context, in NodeInput, j nodeproto.JobSpec) (ExecutorFinalizer, error) {
+func setTestExecutor(d *ExecutorDependencies, f func(context.Context, testPolicyName, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)) {
+	d.PrepareArtifacts = func(ctx context.Context, in NodeInput, j nodewire.JobSpec) (ExecutorFinalizer, error) {
 		return f(ctx, testPolicyName{"artifacts"}, in, j)
 	}
-	d.PrepareCaches = func(ctx context.Context, in NodeInput, j nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	d.PrepareCaches = func(ctx context.Context, in NodeInput, j nodewire.JobSpec) (ExecutorFinalizer, error) {
 		return f(ctx, testPolicyName{"caches"}, in, j)
 	}
 }

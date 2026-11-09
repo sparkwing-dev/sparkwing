@@ -12,13 +12,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Logical node states use the terminal outcome as the terminal state name.
@@ -420,7 +420,7 @@ func validateSourceAttempt(change nodeTransition) error {
 	return nil
 }
 
-func validateRecordedFailure(ref runspec.NodeRef, failure *nodeproto.JobFailure) error {
+func validateRecordedFailure(ref runspec.NodeRef, failure *nodewire.JobFailure) error {
 	if runspec.NodeID(failure.Job) != ref.NodeID || failure.Stage == "" || failure.Error == nil {
 		return authorityError(apierr.BadRequest, "failure requires its job, stage and structured error")
 	}
@@ -765,7 +765,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 			return err
 		}
 	case runstate.NodeApprovalPending:
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return err
 		}

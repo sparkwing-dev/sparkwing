@@ -3,10 +3,10 @@ package controller
 import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func reconcileSourceForStore(source controllerwire.ReuseSource) runstate.MaterializeSource {
@@ -26,7 +26,7 @@ func engineReuseSource(source runstate.MaterializeSource) controllerwire.ReuseSo
 }
 
 func engineReconciledClaim(c capability.Capability, result runstate.ReconciledNode, run store.RunRow) *controllerwire.ClaimedUnit {
-	claim := &controllerwire.ClaimedUnit{Unit: c.Unit, Purpose: c.Purpose, Delivery: c.Delivery, UnitID: c.UnitID, RunID: string(result.Node.Ref.RunID), JobID: string(result.Node.Ref.NodeID), Binding: c.Binding, Capability: string(result.Bearer), Request: run.Request, Execution: &result.Node.Execution, LeaseExpiresAt: result.Claim.LeaseExpiresAt, OwnerDeadline: c.Binding.Deadline, Runner: nodeproto.RunnerIdentity{Name: result.Claim.Holder, Labels: []string{}}}
+	claim := &controllerwire.ClaimedUnit{Unit: c.Unit, Purpose: c.Purpose, Delivery: c.Delivery, UnitID: c.UnitID, RunID: string(result.Node.Ref.RunID), JobID: string(result.Node.Ref.NodeID), Binding: c.Binding, Capability: string(result.Bearer), Request: run.Request, Execution: &result.Node.Execution, LeaseExpiresAt: result.Claim.LeaseExpiresAt, OwnerDeadline: c.Binding.Deadline, Runner: nodewire.RunnerIdentity{Name: result.Claim.Holder, Labels: []string{}}}
 	if c.Billing != nil {
 		claim.Runner.Type = c.Billing.ExecutorClass
 	}

@@ -3,7 +3,7 @@ package capability
 import (
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // RunnerHeadroom carries accepted capacity and its store-owned observation time.
@@ -18,7 +18,7 @@ type RunnerHeadroom struct {
 type RunnerObservation struct {
 	ID            string
 	Team          string
-	Runner        nodeproto.RunnerIdentity
+	Runner        nodewire.RunnerIdentity
 	Location      string
 	LastSeen      time.Time
 	ActiveJobs    []string

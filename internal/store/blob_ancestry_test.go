@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func FuzzBlobAncestryStaysWithinTenantAndSealedDependencies(f *testing.F) {
@@ -24,7 +24,7 @@ func FuzzBlobAncestryStaysWithinTenantAndSealedDependencies(f *testing.F) {
 		}
 		bit := uint(0)
 		for i := range names {
-			spec := nodeproto.JobSpec{ID: names[i], Groups: []string{"group-" + names[i]}}
+			spec := nodewire.JobSpec{ID: names[i], Groups: []string{"group-" + names[i]}}
 			for j := 0; j < i; j++ {
 				present := graph&(1<<bit) != 0
 				bit++
@@ -38,7 +38,7 @@ func FuzzBlobAncestryStaysWithinTenantAndSealedDependencies(f *testing.F) {
 				case 1:
 					spec.NeedsIfPresent = append(spec.NeedsIfPresent, names[j])
 				case 2:
-					spec.Consumes = append(spec.Consumes, nodeproto.ArtifactInput{Producer: names[j]})
+					spec.Consumes = append(spec.Consumes, nodewire.ArtifactInput{Producer: names[j]})
 				case 3:
 					spec.NeedsGenerated = append(spec.NeedsGenerated, "group-"+names[j])
 				}

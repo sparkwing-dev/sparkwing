@@ -5,15 +5,15 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // NewNodeInput constructs execution from an authenticated row, selected engine and granted runner.
-func NewNodeInput(accepted AcceptedRun, row runstate.NodeRow, selected engine.Resolved, granted nodeproto.RunnerIdentity) (NodeInput, error) {
+func NewNodeInput(accepted AcceptedRun, row runstate.NodeRow, selected engine.Resolved, granted nodewire.RunnerIdentity) (NodeInput, error) {
 	var spec runspec.Spec
 	if accepted.RunID == "" || accepted.SpecHash == "" || accepted.PlanHash == "" || json.Unmarshal(accepted.Spec, &spec) != nil || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
 		return NodeInput{}, executorError(apierr.SpecDrift, "execution requires the accepted run seal")
@@ -41,6 +41,6 @@ func NewNodeInput(accepted AcceptedRun, row runstate.NodeRow, selected engine.Re
 		Accepted: accepted, NodeID: string(row.Ref.NodeID), Engine: selected, GrantedRunner: granted,
 		Generation: row.Generation, Attempt: row.Attempt, SpecHash: row.SpecHash, Execution: row.Execution,
 		Authority:    ClaimAuthority{Holder: row.ClaimedBy, CapabilityPrefix: row.CapabilityPrefix},
-		RouteBinding: nodeproto.ProcessBinding{RunID: accepted.RunID, JobID: string(row.Ref.NodeID)},
+		RouteBinding: nodewire.ProcessBinding{RunID: accepted.RunID, JobID: string(row.Ref.NodeID)},
 	}, nil
 }

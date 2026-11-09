@@ -11,9 +11,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestPipelineAliasSourceUsesTheInvokingCheckoutBinding(t *testing.T) {
@@ -55,11 +54,11 @@ func TestPipelineInspectionSelectsRegisteredNameInV2Request(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var req nodeproto.Request
+		var req nodewire.Request
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
 			t.Fatal(err)
 		}
-		if req.Op == nodeproto.OpPlan {
+		if req.Op == nodewire.OpPlan {
 			if req.Pipeline != "Deploy" || req.Run == nil || req.Run.Pipeline != "deploy-prod" || req.Args["region"] != "us-east" || req.Args["image"] != "release" {
 				t.Fatalf("selected identity lost: %+v", req)
 			}

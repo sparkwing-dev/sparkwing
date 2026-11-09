@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -44,7 +44,7 @@ func TestAdmissionClassInferenceAtPlanSeal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := ResolvePlan(PlanInputs{Request: request, Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{AdmissionClass: tc.code}, Context: Context{Local: true}})
+			got, err := ResolvePlan(PlanInputs{Request: request, Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodewire.PlanDoc{AdmissionClass: tc.code}, Context: Context{Local: true}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -73,7 +73,7 @@ func TestRequestOverridesSurvivePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := nodeproto.PlanDoc{Priority: ptr(7), Jobs: []nodeproto.JobSpec{{ID: "test", Requires: []string{"go"}, TimeoutMS: ptr(int64(1000))}}}
+	plan := nodewire.PlanDoc{Priority: ptr(7), Jobs: []nodewire.JobSpec{{ID: "test", Requires: []string{"go"}, TimeoutMS: ptr(int64(1000))}}}
 	result, err := ResolvePlan(PlanInputs{Request: runspec.SealedRequest{Request: runspec.Request{Options: request}}, Declarations: declarations, Plan: plan, Context: Context{Local: true}})
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +128,7 @@ func TestNativeCompoundSettingsRetainParentAndLeafOrigins(t *testing.T) {
 }
 
 func TestPlanWithEmptySealedCeilingsUsesShippedOwnerBound(t *testing.T) {
-	resolved, err := ResolvePlan(PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: ptr(int64(60000))}}}})
+	resolved, err := ResolvePlan(PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", TimeoutMS: ptr(int64(60000))}}}})
 	if err != nil || resolved.Jobs["job"].Timeout.Value != time.Minute {
 		t.Fatalf("empty sealed ceilings rejected a bounded job: %+v, %v", resolved, err)
 	}
@@ -139,14 +139,14 @@ func TestDefaultsApplyWithoutPipelineAndExpansionUsesSameLayers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := ResolvePlan(PlanInputs{Declarations: d, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "first", Requires: []string{"go"}}}}, Context: Context{Local: true}})
+	result, err := ResolvePlan(PlanInputs{Declarations: d, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "first", Requires: []string{"go"}}}}, Context: Context{Local: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(result.Jobs["first"].Requires.Value, []string{"linux", "go"}) {
 		t.Fatalf("requires: %+v", result.Jobs)
 	}
-	generated, err := ResolveExpansion(ExpansionInputs{Spec: runspec.Spec{Declarations: d, Resolved: runspec.Resolved{Settings: result}}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated", Requires: []string{"docker"}}}}, Context: Context{Local: true}})
+	generated, err := ResolveExpansion(ExpansionInputs{Spec: runspec.Spec{Declarations: d, Resolved: runspec.Resolved{Settings: result}}, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "generated", Requires: []string{"docker"}}}}, Context: Context{Local: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestSealedHostIgnoresAmbientPreferences(t *testing.T) {
 }
 
 func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
-	in := Inputs{Context: Context{Local: true}, Sealed: Values{Options: runspec.Options{OwnerExecutionTimeout: present(12 * time.Hour), Priority: present(9), ClaimWait: present(2 * time.Hour), AdmissionClass: present("batch"), Checkout: sourceSetting(nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(1), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Timeout: present(8 * time.Hour)}}}, Operator: OperatorInputs{Flags: OperatorValues{OwnerExecution: ptr(time.Hour), MaxPriority: ptr(1), MaxClaimWait: ptr(time.Minute), MaxCores: ptr(1.0), AllowedAdmissionClasses: []string{}, AllowedSources: []nodeproto.SourceSpec{}}}}
+	in := Inputs{Context: Context{Local: true}, Sealed: Values{Options: runspec.Options{OwnerExecutionTimeout: present(12 * time.Hour), Priority: present(9), ClaimWait: present(2 * time.Hour), AdmissionClass: present("batch"), Checkout: sourceSetting(nodewire.SourceSpec{FullHistory: ptr(false), Depth: ptr(1), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Timeout: present(8 * time.Hour)}}}, Operator: OperatorInputs{Flags: OperatorValues{OwnerExecution: ptr(time.Hour), MaxPriority: ptr(1), MaxClaimWait: ptr(time.Minute), MaxCores: ptr(1.0), AllowedAdmissionClasses: []string{}, AllowedSources: []nodewire.SourceSpec{}}}}
 	if v, _, err := OwnerExecution(in); err != nil || v != 12*time.Hour {
 		t.Fatalf("owner %v: %v", v, err)
 	}
@@ -191,7 +191,7 @@ func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
 }
 
 func TestIntakePreservesExplicitRequestSettings(t *testing.T) {
-	values := Values{Options: runspec.Options{ClaimWait: present(time.Hour), AdmissionClass: present("batch"), Checkout: sourceSetting(nodeproto.SourceSpec{Tags: ptr(true)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Retry: present(0), Timeout: present(time.Minute), MemoTTL: present(time.Hour), ApprovalWait: present(time.Duration(0)), NoProgressTimeout: present(time.Duration(0)), RetryBackoff: present(time.Duration(0))}}}
+	values := Values{Options: runspec.Options{ClaimWait: present(time.Hour), AdmissionClass: present("batch"), Checkout: sourceSetting(nodewire.SourceSpec{Tags: ptr(true)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Retry: present(0), Timeout: present(time.Minute), MemoTTL: present(time.Hour), ApprovalWait: present(time.Duration(0)), NoProgressTimeout: present(time.Duration(0)), RetryBackoff: present(time.Duration(0))}}}
 	options, err := ResolveRequest(Inputs{Context: Context{Submitter: true, NumCPU: 4, Local: true}, Sealed: values})
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestRetryBackoffRefusesValuesAboveExecutionBound(t *testing.T) {
 func TestRunnerLabelsNormalizeAcrossRunAndJobSources(t *testing.T) {
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
 	request := runspec.SealedRequest{Request: runspec.Request{Options: runspec.Options{Requires: present([]string{"", " gpu ", "gpu"}), Prefers: present([]string{"", " fast ", "fast"})}}}
-	result, err := ResolvePlan(PlanInputs{Request: request, Declarations: declarations, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Requires: []string{"", " gpu ", "os=linux, os=macos"}}}}, Context: Context{Local: true}})
+	result, err := ResolvePlan(PlanInputs{Request: request, Declarations: declarations, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Requires: []string{"", " gpu ", "os=linux, os=macos"}}}}, Context: Context{Local: true}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,12 +4,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNodeExecutorCarriesConstructedIdentityThroughHello(t *testing.T) {
 	input, state, deps, processes := executorFixture(t)
-	runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{"name=granted", "os=linux"}}
+	runner := nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{"name=granted", "os=linux"}}
 	constructed, err := NewNodeInput(input.Accepted, state.row, input.Engine, runner)
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +30,7 @@ func TestNodeExecutorCarriesConstructedIdentityThroughHello(t *testing.T) {
 		t.Fatal("execution sent no hello")
 	}
 	hello := (*processes)[0].requests[0]
-	if hello.Op != nodeproto.OpHello || hello.Engine == nil || hello.Engine.Version != input.Engine.Identity.Version || !reflect.DeepEqual(hello.Runner, &runner) || !reflect.DeepEqual(hello.Binding, &constructed.RouteBinding) {
+	if hello.Op != nodewire.OpHello || hello.Engine == nil || hello.Engine.Version != input.Engine.Identity.Version || !reflect.DeepEqual(hello.Runner, &runner) || !reflect.DeepEqual(hello.Binding, &constructed.RouteBinding) {
 		t.Fatalf("hello changed the execution identity: %+v", hello)
 	}
 }
@@ -41,7 +41,7 @@ func TestNewNodeInputUsesPersistedAward(t *testing.T) {
 	t.Setenv("SPARKWING_RUNNER_TYPE", "cloud")
 	t.Setenv("SPARKWING_RUNNER_LABELS", "pool=forged")
 	t.Setenv("SPARKWING_TOOLCHAIN", "forged")
-	runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{"pool=ci", "os=linux"}}
+	runner := nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{"pool=ci", "os=linux"}}
 	got, err := NewNodeInput(input.Accepted, state.row, input.Engine, runner)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestNewNodeInputRefusesIncompleteOrChangedAwards(t *testing.T) {
 	for _, mode := range []string{"run", "version", "manifest", "sdk", "claim", "holder", "generation", "attempt", "terminal", "hash", "settings", "runner_name", "runner_type", "runner_labels"} {
 		t.Run(mode, func(t *testing.T) {
 			input, state, _, _ := executorFixture(t)
-			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
+			runner := nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 			switch mode {
 			case "run":
 				state.row.Ref.RunID = "other"
@@ -109,7 +109,7 @@ func FuzzExecutionInputKeepsSealedEngine(f *testing.F) {
 		if input.Engine.Identity == original {
 			return
 		}
-		runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
+		runner := nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 		if _, err := NewNodeInput(input.Accepted, state.row, input.Engine, runner); err == nil {
 			t.Fatal("execution replaced the sealed engine")
 		}

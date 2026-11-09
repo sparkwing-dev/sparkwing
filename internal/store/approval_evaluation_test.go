@@ -8,17 +8,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func approvalEvaluationFixture(t *testing.T, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, runspec.NodeRef, UnitClaim) {
 	t.Helper()
-	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"skip"}}}, {ID: "next", Needs: []string{"gate"}}}}, prepare...)
+	tenant, request, _ := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "gate", Approval: &nodewire.ApprovalSpec{}, Closures: nodewire.ClosureSpec{SkipIf: []string{"skip"}}}, {ID: "next", Needs: []string{"gate"}}}}, prepare...)
 	root := authorityRoot("approval-evaluator", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim}
 	authorityPersist(t, tenant.s, root)
@@ -175,7 +175,7 @@ func TestControllerApprovalPredicateSettlesExhaustedEvaluator(t *testing.T) {
 
 func TestApprovalEvaluationReadsOnlyDeclaredDependencyOutputs(t *testing.T) {
 	tenant, ref, claim := approvalEvaluationFixture(t)
-	var gate nodeproto.JobSpec
+	var gate nodewire.JobSpec
 	row, err := tenant.ReadNode(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestApprovalEvaluationReadsOnlyDeclaredDependencyOutputs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		spec, err := json.Marshal(nodeproto.JobSpec{ID: id})
+		spec, err := json.Marshal(nodewire.JobSpec{ID: id})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -252,11 +252,11 @@ func TestApprovalEvaluationSecretAndReferenceReadsRequireDeclaredLiveAuthority(t
 	for _, change := range []string{"live", "undeclared_secret", "undeclared_reference", "eval_holder", "eval_generation", "source_generation", "eval_expiry"} {
 		t.Run(change, func(t *testing.T) {
 			tenant, ref, claim := approvalEvaluationFixture(t, func(tenant *Tenant, request *PlanAcceptance) {
-				var plan nodeproto.PlanDoc
+				var plan nodewire.PlanDoc
 				if err := json.Unmarshal(request.Seal.Plan, &plan); err != nil {
 					t.Fatal(err)
 				}
-				plan.Jobs[0].References = []nodeproto.PipelineReference{{Pipeline: "upstream", Job: "artifact"}}
+				plan.Jobs[0].References = []nodewire.PipelineReference{{Pipeline: "upstream", Job: "artifact"}}
 				var err error
 				request.Seal.Plan, err = json.Marshal(plan)
 				if err != nil {
@@ -336,7 +336,7 @@ func TestGeneratorEvaluationCannotReadApprovalSecretsOrPipelineReferences(t *tes
 }
 
 func TestApprovalEvaluationQueuedClaimUsesPendingSource(t *testing.T) {
-	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"skip"}}}}})
+	tenant, request, _ := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "gate", Approval: &nodewire.ApprovalSpec{}, Closures: nodewire.ClosureSpec{SkipIf: []string{"skip"}}}}})
 	root := authorityRoot("queued-approval-evaluator", "a")
 	authorityPersist(t, tenant.s, root)
 	fundUnitClaim(t, tenant.s)

@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestBundleHistoryPolicyPreservesUnpushedExecutionAndCode(t *testing.T) {
@@ -38,7 +38,7 @@ func TestBundleHistoryPolicyPreservesUnpushedExecutionAndCode(t *testing.T) {
 	for _, local := range []bool{false, true} {
 		for _, depth := range []int{1, 2, 0} {
 			t.Run(fmt.Sprintf("local=%v/depth=%d", local, depth), func(t *testing.T) {
-				spec := source.Spec{RepoKey: "git:example.test/acme/repo", RemoteURL: "https://example.test/acme/repo", SHA: execution, PipelineSHA: code, BundleDigest: hex.EncodeToString(digest[:]), DefaultBranch: "trunk", CommittedCheckout: true, Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{Depth: new(depth)}}}
+				spec := source.Spec{RepoKey: "git:example.test/acme/repo", RemoteURL: "https://example.test/acme/repo", SHA: execution, PipelineSHA: code, BundleDigest: hex.EncodeToString(digest[:]), DefaultBranch: "trunk", CommittedCheckout: true, Checkout: runspec.CheckoutPolicy{Policy: nodewire.SourceSpec{Depth: new(depth)}}}
 				options := source.Options{Workspace: t.TempDir(), Access: &freshBundleAccess{}, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BundleTransport: bundleResponse(func() io.ReadCloser { return io.NopCloser(bytes.NewReader(body)) })}
 				if local {
 					spec.RemoteURL, spec.LocalCheckout, spec.BundleDigest = "", owner, ""

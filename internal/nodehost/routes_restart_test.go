@@ -15,11 +15,12 @@ import (
 	"testing"
 	"time"
 
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestSDKChildAwaitReconnectsThroughParentAuthorization(t *testing.T) {
@@ -100,7 +101,7 @@ func TestSDKChildAwaitReconnectsThroughParentAuthorization(t *testing.T) {
 	go func() {
 		done <- sdkserve.Serve(ctx, input, &frames, sdkserve.Config{SDKVersion: "v1", Operations: operations})
 	}()
-	hello := map[string]any{"id": "hello", "op": "hello", "protocol": 2, "engine": map[string]string{"version": "v1"}, "runner": map[string]any{"name": "local", "type": "local", "labels": []string{}}, "binding": nodeproto.ProcessBinding{RunID: service.RunID, JobID: service.Job.ID, Routes: nodeproto.ProcessRoutes{URL: host.URL, Bearer: bearer}}}
+	hello := map[string]any{"id": "hello", "op": "hello", "protocol": 2, "engine": map[string]string{"version": "v1"}, "runner": map[string]any{"name": "local", "type": "local", "labels": []string{}}, "binding": nodewire.ProcessBinding{RunID: service.RunID, JobID: service.Job.ID, Routes: nodewire.ProcessRoutes{URL: host.URL, Bearer: bearer}}}
 	if err := json.NewEncoder(writer).Encode(hello); err != nil {
 		t.Fatal(err)
 	}

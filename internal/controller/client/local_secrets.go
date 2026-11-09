@@ -3,13 +3,13 @@ package client
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ResolveLocalSecrets resolves declared requester inputs without exposing provider failures.
-func ResolveLocalSecrets(ctx context.Context, declarations []nodeproto.SecretDeclaration, lookup func(context.Context, string) (string, bool, error)) (map[string]string, error) {
+func ResolveLocalSecrets(ctx context.Context, declarations []nodewire.SecretDeclaration, lookup func(context.Context, string) (string, bool, error)) (map[string]string, error) {
 	seen := map[string]bool{}
 	for _, declaration := range declarations {
 		if secretname.Validate(declaration.Name) != nil || seen[declaration.Name] {

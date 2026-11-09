@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type textStream struct {
@@ -68,19 +68,19 @@ type LogStreams struct {
 
 type logStream struct {
 	lines *textStream
-	frame nodeproto.FrameLog
+	frame nodewire.FrameLog
 }
 
 func NewLogStreams(masker *Masker) *LogStreams {
 	return &LogStreams{masker: masker, streams: map[string]*logStream{}}
 }
 
-func (s *LogStreams) Push(frame nodeproto.FrameLog) ([]nodeproto.FrameLog, error) {
+func (s *LogStreams) Push(frame nodewire.FrameLog) ([]nodewire.FrameLog, error) {
 	if frame.Stream == "" {
 		if frame.StreamData != "" || frame.StreamEnd {
 			return nil, errors.New("log stream data requires a stream identity")
 		}
-		return []nodeproto.FrameLog{s.masker.Log(frame)}, nil
+		return []nodewire.FrameLog{s.masker.Log(frame)}, nil
 	}
 	if frame.Message != "" || len(frame.Attrs) > 0 {
 		return nil, errors.New("log stream cannot contain a presentation payload")
@@ -92,7 +92,7 @@ func (s *LogStreams) Push(frame nodeproto.FrameLog) ([]nodeproto.FrameLog, error
 	return s.Text("sdk:"+frame.Stream, frame, string(data), frame.StreamEnd), nil
 }
 
-func (s *LogStreams) Text(key string, frame nodeproto.FrameLog, chunk string, eof bool) []nodeproto.FrameLog {
+func (s *LogStreams) Text(key string, frame nodewire.FrameLog, chunk string, eof bool) []nodewire.FrameLog {
 	stream := s.streams[key]
 	if stream == nil {
 		frame.Stream, frame.StreamData, frame.StreamEnd = "", "", false
@@ -103,7 +103,7 @@ func (s *LogStreams) Text(key string, frame nodeproto.FrameLog, chunk string, eo
 		stream.frame.TS = frame.TS
 	}
 	lines := stream.lines.push(chunk, eof)
-	frames := make([]nodeproto.FrameLog, 0, len(lines))
+	frames := make([]nodewire.FrameLog, 0, len(lines))
 	for _, line := range lines {
 		record := stream.frame
 		record.Message = line
@@ -115,8 +115,8 @@ func (s *LogStreams) Text(key string, frame nodeproto.FrameLog, chunk string, eo
 	return frames
 }
 
-func (s *LogStreams) Flush() []nodeproto.FrameLog {
-	var frames []nodeproto.FrameLog
+func (s *LogStreams) Flush() []nodewire.FrameLog {
+	var frames []nodewire.FrameLog
 	for key, stream := range s.streams {
 		frames = append(frames, s.Text(key, stream.frame, "", true)...)
 	}
@@ -134,8 +134,8 @@ func (s *LogStreams) Buffered() bool {
 }
 
 // Idle flushes safe partial lines without ending a byte stream.
-func (s *LogStreams) Idle() []nodeproto.FrameLog {
-	var frames []nodeproto.FrameLog
+func (s *LogStreams) Idle() []nodewire.FrameLog {
+	var frames []nodewire.FrameLog
 	for _, stream := range s.streams {
 		if text := stream.lines.idle(); text != "" {
 			frame := stream.frame

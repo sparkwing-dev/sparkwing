@@ -7,11 +7,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // AcceptedRun carries the immutable seal shared by planning, resume and execution.
@@ -21,7 +21,7 @@ type AcceptedRun struct {
 	RunID    string
 	Spec     json.RawMessage
 	SpecHash string
-	Plan     nodeproto.PlanDoc
+	Plan     nodewire.PlanDoc
 	PlanHash string
 }
 
@@ -31,7 +31,7 @@ type AcceptedRun struct {
 type RunInput struct {
 	Storage       StorageBinding
 	Engines       *engine.Resolver
-	GrantedRunner nodeproto.RunnerIdentity
+	GrantedRunner nodewire.RunnerIdentity
 	RunID         string
 	SealedRequest json.RawMessage
 	RequestHash   string
@@ -88,8 +88,8 @@ type NodeInput struct {
 	Attempt       runspec.AttemptOrdinal
 	Entry         *source.Entry
 	Authority     ClaimAuthority
-	GrantedRunner nodeproto.RunnerIdentity
-	RouteBinding  nodeproto.ProcessBinding
+	GrantedRunner nodewire.RunnerIdentity
+	RouteBinding  nodewire.ProcessBinding
 	Replay        []GeneratorReplay
 }
 

@@ -11,16 +11,16 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
-	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/depcachekey"
 )
 
 // DepcacheRecords restores and saves declared directories through bound storage.
 type DepcacheRecords struct {
 	Bind    func(context.Context, NodeInput, blob.DepcacheKey) (JobUpload, error)
-	Resolve func(context.Context, NodeInput, nodeproto.CacheSpec) (string, error)
+	Resolve func(context.Context, NodeInput, nodewire.CacheSpec) (string, error)
 	Budget  blob.Budget
 	Warn    func(string)
 }
@@ -34,7 +34,7 @@ type directoryCache struct {
 }
 
 // Prepare restores caches once and saves successful cold directories after retries.
-func (d DepcacheRecords) Prepare(ctx context.Context, input NodeInput, job nodeproto.JobSpec) (ExecutorFinalizer, error) {
+func (d DepcacheRecords) Prepare(ctx context.Context, input NodeInput, job nodewire.JobSpec) (ExecutorFinalizer, error) {
 	if len(job.Caches) == 0 {
 		return nil, nil
 	}
@@ -68,7 +68,7 @@ func (d DepcacheRecords) Prepare(ctx context.Context, input NodeInput, job nodep
 	}, nil
 }
 
-func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declaration nodeproto.CacheSpec) (directoryCache, error) {
+func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declaration nodewire.CacheSpec) (directoryCache, error) {
 	key, err := directoryCacheKey(ctx, sdkWorkingDirectory(input.Entry), declaration)
 	if err != nil {
 		return directoryCache{}, err
@@ -107,7 +107,7 @@ func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declarati
 	return cache, nil
 }
 
-func directoryCacheKey(ctx context.Context, workspace string, declaration nodeproto.CacheSpec) (key string, err error) {
+func directoryCacheKey(ctx context.Context, workspace string, declaration nodewire.CacheSpec) (key string, err error) {
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
 		return "", err

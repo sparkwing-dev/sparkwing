@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func advanceDeployMain(t *testing.T, f *fakeDeploy) string {

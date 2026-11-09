@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"

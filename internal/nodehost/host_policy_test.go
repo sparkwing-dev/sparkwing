@@ -16,14 +16,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestOwnerApprovalPolicies(t *testing.T) {
 	t.Helper()
 	for _, mode := range []string{"skip", "wait", "predicate_error", "malformed"} {
 		t.Run(mode, func(t *testing.T) {
-			job := nodeproto.JobSpec{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"condition"}}}
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+			job := nodewire.JobSpec{ID: "gate", Approval: &nodewire.ApprovalSpec{}, Closures: nodewire.ClosureSpec{SkipIf: []string{"condition"}}}
+			plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}
 			planHash, _ := runspec.CanonicalHash(plan)
 			jobHash, _ := runspec.CanonicalHash(job)
 			identity := engineid.Identity{Version: "v1.0.0", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}
@@ -63,7 +64,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 			result, err := host.approvalSkipIf(t.Context(), EvaluationInput{
 				Accepted: AcceptedRun{RunID: "run", Spec: rawSpec, SpecHash: "spec", Plan: plan, PlanHash: string(planHash)},
 				Engine:   resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "gate", SpecHash: string(jobHash),
-				RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "gate"},
+				RouteBinding: nodewire.ProcessBinding{RunID: "run", JobID: "gate"},
 			})
 			failed := mode == "predicate_error" || mode == "malformed"
 			if (err != nil) != failed || result.Skip != (mode == "skip") || len(result.TimedOut) != 0 {

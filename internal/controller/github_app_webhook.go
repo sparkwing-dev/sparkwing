@@ -15,15 +15,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -330,7 +330,7 @@ type githubAppIntake struct {
 	sha    string
 	env    map[string]string
 	at     time.Time
-	prInfo *nodeproto.PullRequest
+	prInfo *nodewire.PullRequest
 	// headRepo is GitHub's ID for the repository a pull request's head lives in.
 	headRepo int64
 }
@@ -526,12 +526,12 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 }
 
 // pullRequestForTrigger projects authenticated trigger metadata into the SDK run context.
-func pullRequestForTrigger(env map[string]string) *nodeproto.PullRequest {
+func pullRequestForTrigger(env map[string]string) *nodewire.PullRequest {
 	if env["GITHUB_EVENT_NAME"] != "pull_request" {
 		return nil
 	}
 	number, _ := strconv.Atoi(env["GITHUB_PR_NUMBER"])
-	return &nodeproto.PullRequest{
+	return &nodewire.PullRequest{
 		Number: number, Action: env["GITHUB_PR_ACTION"],
 		BaseRef: env["GITHUB_BASE_REF"], BaseSHA: env["GITHUB_BASE_SHA"],
 		HeadRef: env["GITHUB_HEAD_REF"], HeadSHA: env["GITHUB_HEAD_SHA"],

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -20,7 +21,7 @@ import (
 func TestSDKGateIndexReachesCheckingTools(t *testing.T) {
 	if os.Getenv("W6_GATE_CONSUMER") == "1" {
 		command := testgit.Command("git", "ls-files")
-		command.Env = testgit.Env(os.Environ())
+		command.Env = gitcontrol.Env(os.Environ())
 		if index := gitenv.GateIndex(); index != "" {
 			command.Env = append(command.Env, "GIT_INDEX_FILE="+index)
 		}

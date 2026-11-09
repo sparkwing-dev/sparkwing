@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (t *Tenant) teamMutationTx(ctx context.Context, a capability.Authorized, operation, subject string, write func(*storeTx, capability.Principal) error) error {

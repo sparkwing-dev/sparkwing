@@ -12,8 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
@@ -24,7 +24,7 @@ func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 		purpose = capability.PurposeWork
 	}
 	unit := controllerwire.ClaimedUnit{Unit: kind, Purpose: purpose, Delivery: capability.DeliveryDirect, UnitID: "unit", RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: "award-secret", LeaseExpiresAt: time.Now().Add(time.Minute)}
-	unit.Runner = nodeproto.RunnerIdentity{Name: "granted-runner", Type: "runner", Labels: []string{"granted"}}
+	unit.Runner = nodewire.RunnerIdentity{Name: "granted-runner", Type: "runner", Labels: []string{"granted"}}
 	unit.Request = runspec.SealedRequest{RunID: unit.RunID, Hash: "request-hash", Request: runspec.Request{Team: "team"}}
 	if kind == capability.UnitNode {
 		unit.Engine = &engineid.Identity{Version: "v0.20.0"}

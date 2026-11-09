@@ -3,14 +3,16 @@ package nodehost
 import (
 	"bytes"
 	"encoding/json"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 func TestSDKZeroValueServiceRequestsConformToHostDecoder(t *testing.T) {
@@ -19,9 +21,9 @@ func TestSDKZeroValueServiceRequestsConformToHostDecoder(t *testing.T) {
 		body   any
 		target any
 	}{
-		{"mask", nodeproto.MaskRequest{}, &nodeproto.MaskRequest{}},
-		{"annotation", nodeproto.AnnotationRequest{}, &nodeproto.AnnotationRequest{}},
-		{"summary", nodeproto.SummaryRequest{}, &nodeproto.SummaryRequest{}},
+		{"mask", nodewire.MaskRequest{}, &nodewire.MaskRequest{}},
+		{"annotation", nodewire.AnnotationRequest{}, &nodewire.AnnotationRequest{}},
+		{"summary", nodewire.SummaryRequest{}, &nodewire.SummaryRequest{}},
 		{"oidc", map[string]string{"audience": ""}, &processOIDCRequest{}},
 		{"child", sdkserve.ChildRequest{}, &ChildRequest{}},
 		{"detached child", sdkserve.ChildRequest{Pipeline: "scan", Detached: true}, &ChildRequest{}},
@@ -75,9 +77,9 @@ func TestTypeScriptZeroValueServiceRequestsConformToHostDecoder(t *testing.T) {
 		t.Fatal(err)
 	}
 	targets := map[string]any{
-		"/node/v1/masks":       &nodeproto.MaskRequest{},
-		"/node/v1/annotations": &nodeproto.AnnotationRequest{},
-		"/node/v1/summary":     &nodeproto.SummaryRequest{},
+		"/node/v1/masks":       &nodewire.MaskRequest{},
+		"/node/v1/annotations": &nodewire.AnnotationRequest{},
+		"/node/v1/summary":     &nodewire.SummaryRequest{},
 		"/node/v1/oidc-token":  &processOIDCRequest{},
 		"/node/v1/children":    &ChildRequest{},
 		"/node/v1/cleanups":    &processCleanupRequest{},

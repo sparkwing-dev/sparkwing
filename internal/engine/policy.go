@@ -13,10 +13,10 @@ import (
 	"golang.org/x/mod/semver"
 	strictjson "sigs.k8s.io/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // VerifyIndex checks signature and policy invariants before accepting authority.

@@ -14,16 +14,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type publicationLogReader struct {
@@ -116,7 +116,7 @@ func profilePublication(t *testing.T, outcome string, logs publicationLogReader,
 	})
 	options := client.EngineOptions{URL: "https://controller.test", HTTP: &http.Client{Transport: transport}, Bearer: func(context.Context) (string, error) { return root.Capability, nil }}
 	now := time.Now().UTC()
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Inline: true, Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Inline: true, Steps: []nodewire.StepSpec{{ID: "run"}}}}}
 	raw, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func profilePublication(t *testing.T, outcome string, logs publicationLogReader,
 	}
 	terminal := runstate.NodeResult{Outcome: runstate.NodeState(outcome), Reason: "local-result", MaskedError: masked, ExitCode: &exit}
 	if outcome == "failed" {
-		terminal.Failure = &nodeproto.JobFailure{Job: "job", Stage: "action", Error: &apierr.Error{Code: apierr.BadRequest, Message: masked}}
+		terminal.Failure = &nodewire.JobFailure{Job: "job", Stage: "action", Error: &apierr.Error{Code: apierr.BadRequest, Message: masked}}
 	}
 	state.Results = map[string]runstate.NodeResult{"job": terminal}
 	content := map[blob.Digest][]byte{}
@@ -272,7 +272,7 @@ func profileCacheRead(t *testing.T, state *store.Store, options client.EngineOpt
 	}
 }
 
-func rawJob(t *testing.T, job nodeproto.JobSpec) json.RawMessage {
+func rawJob(t *testing.T, job nodewire.JobSpec) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(job)
 	if err != nil {

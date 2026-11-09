@@ -6,8 +6,8 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *testing.T) {
@@ -15,9 +15,9 @@ func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *t
 	for range 16 {
 		tenant, request := successfulExpansionFixture(t)
 		id := fmt.Sprintf("generated-%x", random.Uint64())
-		refs := []nodeproto.PipelineReference{{Pipeline: fmt.Sprintf("pipeline-%x", random.Uint64()), Job: "result"}}
-		job := nodeproto.JobSpec{ID: id, Steps: []nodeproto.StepSpec{{ID: "step"}}, Groups: []string{"group"}, Needs: []string{"job"}, References: refs}
-		body, err := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
+		refs := []nodewire.PipelineReference{{Pipeline: fmt.Sprintf("pipeline-%x", random.Uint64()), Job: "result"}}
+		job := nodewire.JobSpec{ID: id, Steps: []nodewire.StepSpec{{ID: "step"}}, Groups: []string{"group"}, Needs: []string{"job"}, References: refs}
+		body, err := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -34,7 +34,7 @@ func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *t
 		if err != nil || row.SpecHash != string(hash) {
 			t.Fatalf("generated spec hash=%q want %q, %v", row.SpecHash, hash, err)
 		}
-		var persisted nodeproto.JobSpec
+		var persisted nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &persisted); err != nil {
 			t.Fatal(err)
 		}
@@ -42,7 +42,7 @@ func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *t
 			t.Fatalf("persisted references=%+v", persisted.References)
 		}
 		job.References[0].Pipeline = "undeclared"
-		body, err = json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
+		body, err = json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
 		if err != nil {
 			t.Fatal(err)
 		}

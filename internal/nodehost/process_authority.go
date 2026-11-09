@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ProcessAuthorityDependencies supplies fresh parent snapshots and persisted parent relation checks.
@@ -125,7 +125,7 @@ func (a *ProcessAuthorities) issue(ctx context.Context, parent capability.Creden
 		return capability.Issued{}, nil, err
 	}
 	bound := *services
-	bound.Job = nodeproto.JobSpec{}
+	bound.Job = nodewire.JobSpec{}
 	job, err := json.Marshal(services.Job)
 	if err != nil {
 		return capability.Issued{}, nil, err

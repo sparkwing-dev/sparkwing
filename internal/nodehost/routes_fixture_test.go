@@ -12,10 +12,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type routeParent struct {
@@ -59,12 +58,12 @@ type server struct {
 
 func newService(t testing.TB) *ProcessServices {
 	t.Helper()
-	return &ProcessServices{RunID: "run-1", Job: nodeproto.JobSpec{ID: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}}, Masks: NewMaskRegistry(secrets.NewMasker())}
+	return &ProcessServices{RunID: "run-1", Job: nodewire.JobSpec{ID: "deploy", Steps: []nodewire.StepSpec{{ID: "body"}}}, Masks: NewMaskRegistry(secrets.NewMasker())}
 }
 
 type routeNode struct {
 	RunID, NodeID string
-	Job           nodeproto.JobSpec
+	Job           nodewire.JobSpec
 	Secrets       []string
 	Resolver      interface {
 		Resolve(context.Context, string) (string, bool, error)

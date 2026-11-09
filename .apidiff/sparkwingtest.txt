@@ -1,0 +1,53 @@
+# sparkwingtest
+
+type Host interface {
+	Context(context.Context) context.Context
+	Plan(context.Context, string, map[string]string) (nodewire.PlanDoc, error)
+	RunStep(context.Context, *sparkwing.Plan, string, string) (json.RawMessage, error)
+	Eval(ctx context.Context, plan *sparkwing.Plan, jobID, closureID string, input json.RawMessage) (json.RawMessage, error)
+
+	Records() []sparkwing.LogRecord
+	Masks() []string
+
+	Close() error
+}
+func New(opts Options) Host
+type Options struct {
+	Runner      sparkwing.RunnerInfo
+	Run         sparkwing.RunContext
+	Secrets     map[string]Secret
+	Outputs     map[string]json.RawMessage
+	OIDCToken   func(context.Context, string) (string, error)
+	Latest      func(context.Context, string, string) (json.RawMessage, error)
+	RunPipeline func(context.Context, string, map[string]string) (json.RawMessage, error)
+	StartChild  func(context.Context, string, map[string]string) (string, error)
+	AwaitChild  func(context.Context, string) (string, error)
+}
+type Secret struct {
+	Value  string
+	Masked bool
+}
+
+# methods on un-declared receiver types (likely a bug)
+func (s boundServices) ContainsSecret(value string) bool
+func (s boundServices) Emit(frame nodewire.FrameLog)
+func (s boundServices) Helper(ctx context.Context, request nodewire.HelperRequest, out any) error
+func (write helperWriter) Write(data []byte) (int, error)
+func (h *host) AwaitChild(ctx context.Context, run string) (string, error)
+func (h *host) Close() error
+func (h *host) ContainsSecret(id string) bool
+func (h *host) Context(ctx context.Context) context.Context
+func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string, input json.RawMessage) (json.RawMessage, error)
+func (h *host) Latest(ctx context.Context, p, j string, _ time.Duration, _, _ bool) (json.RawMessage, error)
+func (h *host) Mask(ctx context.Context, value string) error
+func (h *host) Masks() []string
+func (h *host) OIDC(ctx context.Context, a string) (string, error)
+func (h *host) Output(ctx context.Context, job string) (json.RawMessage, error)
+func (h *host) Plan(ctx context.Context, name string, args map[string]string) (nodewire.PlanDoc, error)
+func (h *host) Records() []sparkwing.LogRecord
+func (h *host) RegisterCleanup(context.Context, []string, string) (string, error)
+func (h *host) ReleaseCleanup(context.Context, string) error
+func (h *host) RunPipeline(ctx context.Context, r sdkserve.ChildRequest) (json.RawMessage, error)
+func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string) (json.RawMessage, error)
+func (h *host) Secret(ctx context.Context, name string) (string, bool, error)
+func (h *host) StartChild(ctx context.Context, r sdkserve.ChildRequest) (string, error)

@@ -16,8 +16,8 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // VerifyRelease authenticates bytes and inspects their build identity without executing them.
@@ -37,7 +37,7 @@ func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBun
 	for _, setting := range info.Settings {
 		settings[setting.Key] = setting.Value
 	}
-	if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != GoModule+"/cmd/"+string(target.Binary) {
+	if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != HostModule+"/cmd/"+string(target.Binary) {
 		return VerifiedRelease{}, integrity(fmt.Errorf("executable binary or platform does not match release target"))
 	}
 	embedded, err := executableVersion(info)

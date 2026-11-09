@@ -12,10 +12,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRunBuildPolicyReachesRealPreparationAndRetainedSource(t *testing.T) {
@@ -136,11 +136,11 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 				}
 			}()
 			processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base}}
-			planner := nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker, Log: func(_ context.Context, frame nodeproto.FrameLog) error { t.Log(frame.Message); return nil }}
+			planner := nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker, Log: func(_ context.Context, frame nodewire.FrameLog) error { t.Log(frame.Message); return nil }}
 			description, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{
 				Entry: entry, Entrypoint: "ci", Environment: prepared.environment,
-				Run:    nodeproto.RunContext{RunID: "retained", Pipeline: "ci"},
-				Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+				Run:    nodewire.RunContext{RunID: "retained", Pipeline: "ci"},
+				Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 			}, nodehost.PlanningInput{})
 			if err != nil {
 				t.Fatal(err)

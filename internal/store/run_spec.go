@@ -8,13 +8,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // FetchedRepository is a GitHub repository id and the owner/name the App
@@ -427,7 +427,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 }
 
 func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string, spec runspec.Spec, body json.RawMessage, generation int64) error {
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(body, &plan); err != nil {
 		return err
 	}

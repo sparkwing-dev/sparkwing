@@ -15,6 +15,4 @@ const (
 	ClaimWindow time.Duration = 10 * time.Minute
 	// HeartbeatTimeout bounds shared heartbeat RPC timeout.
 	HeartbeatTimeout time.Duration = 2 * time.Second
-	// ChildAwait bounds child await request budget.
-	ChildAwait time.Duration = 60 * time.Second
 )

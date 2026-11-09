@@ -8,12 +8,12 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type executorCleanupProcess struct {
@@ -103,7 +103,7 @@ func TestNodeExecutorCleanupDoesNotConsumeAttemptBudget(t *testing.T) {
 func TestNodeExecutorTimeoutRunsFinallyAndAfterRun(t *testing.T) {
 	input, s, deps, _ := executorFixture(t)
 	job := input.Accepted.Plan.Jobs[0]
-	job.Steps = append(job.Steps, nodeproto.StepSpec{ID: "finally", Needs: []string{"body"}, Finally: true})
+	job.Steps = append(job.Steps, nodewire.StepSpec{ID: "finally", Needs: []string{"body"}, Finally: true})
 	job.Closures.AfterRun = []string{"after"}
 	executorChangeJob(t, &input, s, job)
 	var expire context.CancelCauseFunc
@@ -114,14 +114,14 @@ func TestNodeExecutorTimeoutRunsFinallyAndAfterRun(t *testing.T) {
 	}
 	finally, after := false, false
 	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
-		return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
+		return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodewire.Request) (any, error) {
 			switch {
-			case request.Op == nodeproto.OpRunStep && request.Step == "body":
+			case request.Op == nodewire.OpRunStep && request.Step == "body":
 				expire(context.DeadlineExceeded)
 				return nil, context.Cause(ctx)
-			case request.Op == nodeproto.OpRunStep && request.Step == "finally":
+			case request.Op == nodewire.OpRunStep && request.Step == "finally":
 				finally = true
-			case request.Op == nodeproto.OpEval && request.Closure == "after":
+			case request.Op == nodewire.OpEval && request.Closure == "after":
 				after = true
 			default:
 				return nil, nil
@@ -130,10 +130,10 @@ func TestNodeExecutorTimeoutRunsFinallyAndAfterRun(t *testing.T) {
 			if ctx.Err() != nil || !bounded {
 				t.Errorf("cleanup callback has invalid context: error=%v deadline=%v", ctx.Err(), deadline)
 			}
-			if request.Op == nodeproto.OpEval {
-				return nodeproto.EvalResult{Value: []byte("null")}, nil
+			if request.Op == nodewire.OpEval {
+				return nodewire.EvalResult{Value: []byte("null")}, nil
 			}
-			return nodeproto.RunResult{Outcome: "success"}, nil
+			return nodewire.RunResult{Outcome: "success"}, nil
 		}}, nil
 	}
 	host, err := NewNodeExecutor(deps)
@@ -190,8 +190,8 @@ func TestNodeExecutorAwaitsHoldNoProgressUntilLastResume(t *testing.T) {
 		start := time.Now()
 		deps.Masker = secrets.NewMasker()
 		deps.Start = func(_ context.Context, _ NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-			return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
-				if request.Op != nodeproto.OpRunStep {
+			return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodewire.Request) (any, error) {
+				if request.Op != nodewire.OpRunStep {
 					return nil, nil
 				}
 				first, second := activity.Await(), activity.Await()
@@ -231,8 +231,8 @@ func TestNodeExecutorAwaitCannotHoldExecutionDeadline(t *testing.T) {
 		executorRetryBudget(t, &input, s, 0)
 		started := time.Now()
 		deps.Start = func(_ context.Context, _ NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-			return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
-				if request.Op != nodeproto.OpRunStep {
+			return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodewire.Request) (any, error) {
+				if request.Op != nodewire.OpRunStep {
 					return nil, nil
 				}
 				defer activity.Await()()
@@ -256,20 +256,20 @@ func TestNodeExecutorAwaitCannotHoldExecutionDeadline(t *testing.T) {
 func TestNodeExecutorLeaseLossStopsAwaitAndSDKCleanup(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	job := input.Accepted.Plan.Jobs[0]
-	job.Steps = append(job.Steps, nodeproto.StepSpec{ID: "finally", Needs: []string{"body"}, Finally: true})
+	job.Steps = append(job.Steps, nodewire.StepSpec{ID: "finally", Needs: []string{"body"}, Finally: true})
 	job.Closures.AfterRun = []string{"after"}
 	executorChangeJob(t, &input, s, job)
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	deps.Start = func(_ context.Context, _ NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-		process := &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpRunStep && request.Step == "body" {
+		process := &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpRunStep && request.Step == "body" {
 				defer activity.Await()()
 				cancel(lease.ErrLeaseLost)
 				<-ctx.Done()
 				return nil, context.Cause(ctx)
 			}
-			if request.Op == nodeproto.OpRunStep || request.Op == nodeproto.OpEval {
+			if request.Op == nodewire.OpRunStep || request.Op == nodewire.OpEval {
 				t.Errorf("SDK cleanup ran after loss of authority: %+v", request)
 			}
 			return nil, nil
@@ -295,7 +295,7 @@ func TestNodeExecutorTimeoutDoesNotHideSDKCleanupFailure(t *testing.T) {
 			input, s, deps, processes := executorFixture(t)
 			job := input.Accepted.Plan.Jobs[0]
 			if stage == "finally" {
-				job.Steps = append(job.Steps, nodeproto.StepSpec{ID: "finally", Needs: []string{"body"}, Finally: true})
+				job.Steps = append(job.Steps, nodewire.StepSpec{ID: "finally", Needs: []string{"body"}, Finally: true})
 				executorRetryBudget(t, &input, s, 1)
 			} else {
 				job.Closures.AfterRun = []string{"after"}
@@ -309,12 +309,12 @@ func TestNodeExecutorTimeoutDoesNotHideSDKCleanupFailure(t *testing.T) {
 			}
 			cleanupErr := errors.New("SDK cleanup failed")
 			deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
-				process := &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpRunStep && request.Step == "body" {
+				process := &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpRunStep && request.Step == "body" {
 						expire(context.DeadlineExceeded)
 						return nil, context.Cause(ctx)
 					}
-					if request.Op == nodeproto.OpRunStep || request.Op == nodeproto.OpEval {
+					if request.Op == nodewire.OpRunStep || request.Op == nodewire.OpEval {
 						return nil, cleanupErr
 					}
 					return nil, nil
@@ -342,11 +342,11 @@ func TestNodeExecutorTimeoutBoundsFinally(t *testing.T) {
 		input.Execution.Timeout.Value = time.Second
 		executorRetryBudget(t, &input, s, 0)
 		job := input.Accepted.Plan.Jobs[0]
-		job.Steps = append(job.Steps, nodeproto.StepSpec{ID: "finally", Needs: []string{"body"}, Finally: true})
+		job.Steps = append(job.Steps, nodewire.StepSpec{ID: "finally", Needs: []string{"body"}, Finally: true})
 		executorChangeJob(t, &input, s, job)
 		deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
-			return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
-				if request.Op == nodeproto.OpRunStep {
+			return &executorProcess{plan: input.Accepted.Plan, answer: func(ctx context.Context, request nodewire.Request) (any, error) {
+				if request.Op == nodewire.OpRunStep {
 					<-ctx.Done()
 					return nil, context.Cause(ctx)
 				}
@@ -388,8 +388,8 @@ func TestNodeExecutorClosureTimeoutRunsAfterRun(t *testing.T) {
 			}
 			afterCalls := 0
 			deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
-				return &executorProcess{plan: input.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success"}, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
-					if request.Op != nodeproto.OpEval {
+				return &executorProcess{plan: input.Accepted.Plan, result: nodewire.RunResult{Outcome: "success"}, answer: func(ctx context.Context, request nodewire.Request) (any, error) {
+					if request.Op != nodewire.OpEval {
 						return nil, nil
 					}
 					if request.Closure == "timeout" {
@@ -397,14 +397,14 @@ func TestNodeExecutorClosureTimeoutRunsAfterRun(t *testing.T) {
 						return nil, context.Cause(ctx)
 					}
 					afterCalls++
-					var result nodeproto.RunResult
+					var result nodewire.RunResult
 					if err := json.Unmarshal(request.Input, &result); err != nil || result.Outcome != "failed" || result.Error == nil || result.Error.Code != apierr.DeadlineExceeded {
 						t.Errorf("after_run input=%s error=%v", request.Input, err)
 					}
 					if ctx.Err() != nil {
 						t.Errorf("after_run context=%v", ctx.Err())
 					}
-					return nodeproto.EvalResult{Value: []byte("null")}, nil
+					return nodewire.EvalResult{Value: []byte("null")}, nil
 				}}, nil
 			}
 			host, err := NewNodeExecutor(deps)

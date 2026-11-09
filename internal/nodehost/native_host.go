@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // NativeHostStore supplies the persisted state shared by owner and claimed execution.
@@ -39,7 +40,7 @@ type NativeHostConfig struct {
 	Executor    ExecutionOperations
 	Evaluation  EvaluationOperations
 	ReadOutput  func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error)
-	PlanningLog func(context.Context, nodeproto.FrameLog) error
+	PlanningLog func(context.Context, nodewire.FrameLog) error
 	Admission   StartGate
 }
 
@@ -67,7 +68,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		}
 		attrs, err := json.Marshal(timing)
 		if err == nil {
-			err = config.PlanningLog(ctx, config.Masks.masker.Log(nodeproto.FrameLog{
+			err = config.PlanningLog(ctx, config.Masks.masker.Log(nodewire.FrameLog{
 				TS:    timing.StartedAt.Add(time.Duration(timing.DurationMS) * time.Millisecond).Format(time.RFC3339Nano),
 				Level: "info", Event: "preparation", Message: "source preparation", Attrs: attrs,
 			}))
@@ -86,7 +87,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	validation.Secrets = config.Masks.replayMasks
 	execution := ExecutorDependencies{Log: config.Executor.Log, BindStorage: config.Executor.BindStorage, Bind: config.Executor.Bind, ChildContext: config.Executor.ChildContext, PrepareArtifacts: config.Executor.PrepareArtifacts, PrepareCaches: config.Executor.PrepareCaches, PublishOutput: config.Executor.PublishOutput, Annotate: config.Executor.Annotate, ReadFailure: config.Executor.ReadFailure, ReadOutput: config.ReadOutput}
 	if execution.Log == nil {
-		execution.Log = func(ctx context.Context, input NodeInput, frame nodeproto.FrameLog) error {
+		execution.Log = func(ctx context.Context, input NodeInput, frame nodewire.FrameLog) error {
 			return processes.Log(ctx, input.Accepted.RunID, input.NodeID, frame)
 		}
 	}
@@ -123,7 +124,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.Planning.Validation = validation
 	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		var spec runspec.Spec
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if json.Unmarshal(input.Accepted.Spec, &spec) != nil || json.Unmarshal(row.Spec, &job) != nil {
 			return ownerLayerResult{}, errors.New("debug policy requires accepted run and job declarations")
 		}
@@ -171,15 +172,15 @@ type OwnerOperations struct {
 
 // ExecutionOperations supplies placement callbacks without shared host state.
 type ExecutionOperations struct {
-	Log              func(context.Context, NodeInput, nodeproto.FrameLog) error
+	Log              func(context.Context, NodeInput, nodewire.FrameLog) error
 	BindStorage      func(context.Context, NodeInput) (StorageBinding, error)
 	Bind             func(context.Context, NodeInput) (ProcessGrant, error)
 	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
-	PrepareArtifacts func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
-	PrepareCaches    func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
+	PrepareArtifacts func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
+	PrepareCaches    func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
 	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
-	Annotate         func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
-	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodeproto.JobFailure, error)
+	Annotate         func(context.Context, NodeInput, nodewire.AnnotationRequest) error
+	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodewire.JobFailure, error)
 }
 
 // EvaluationOperations supplies placement callbacks without shared host state.

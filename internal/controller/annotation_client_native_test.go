@@ -12,8 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestAnnotationClientAcknowledgesCommittedNativeWrite(t *testing.T) {
@@ -32,13 +32,13 @@ func TestAnnotationClientAcknowledgesCommittedNativeWrite(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			annotation := nodeproto.Annotation{Level: "info", Message: "recorded once", File: "source.go", Line: 7}
+			annotation := nodewire.Annotation{Level: "info", Message: "recorded once", File: "source.go", Line: 7}
 			writeErr := review.AppendAnnotation(t.Context(), selector, "job", controllerwire.AnnotationWrite{Annotation: annotation})
 			var body []byte
 			if err := teststore.SQL(t, engine.Store).QueryRow(`SELECT annotations_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&body); err != nil {
 				t.Fatal(err)
 			}
-			var annotations []nodeproto.Annotation
+			var annotations []nodewire.Annotation
 			if err := json.Unmarshal(body, &annotations); err != nil || len(annotations) != 1 || annotations[0] != annotation {
 				t.Fatalf("committed annotations: %s %v", body, err)
 			}
@@ -127,11 +127,11 @@ func TestNativeProcessReportingCommitsJobAndStepMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, step := range []string{"", "compile"} {
-		annotation := nodeproto.AnnotationRequest{Step: step, Annotation: nodeproto.Annotation{Level: "info", Message: "masked note", File: "source.go", Line: 7}}
+		annotation := nodewire.AnnotationRequest{Step: step, Annotation: nodewire.Annotation{Level: "info", Message: "masked note", File: "source.go", Line: 7}}
 		if err := process.Annotation(t.Context(), annotation); err != nil {
 			t.Fatal(err)
 		}
-		if err := process.Summary(t.Context(), nodeproto.SummaryRequest{Markdown: "masked summary", Step: step}); err != nil {
+		if err := process.Summary(t.Context(), nodewire.SummaryRequest{Markdown: "masked summary", Step: step}); err != nil {
 			t.Fatal(err)
 		}
 		query := `SELECT annotations_json,summary FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`
@@ -143,7 +143,7 @@ func TestNativeProcessReportingCommitsJobAndStepMetadata(t *testing.T) {
 		if err := teststore.SQL(t, engine.Store).QueryRow(query).Scan(&body, &summary); err != nil {
 			t.Fatal(err)
 		}
-		var annotations []nodeproto.Annotation
+		var annotations []nodewire.Annotation
 		if err := json.Unmarshal(body, &annotations); err != nil || len(annotations) != 1 || annotations[0].Message != annotation.Message || annotations[0].Line != annotation.Line || annotations[0].File != annotation.File || summary != "masked summary" {
 			t.Fatalf("metadata step %q: %s %q %v", step, body, summary, err)
 		}

@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
@@ -25,9 +25,9 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 			defer cancel()
 			original := newStoreHostFixtureOn(t, openStore(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 				return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil
-			})), nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-				{ID: "setup", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "broken", Needs: []string{"setup"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			})), nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+				{ID: "setup", Steps: []nodewire.StepSpec{{ID: "body"}}},
+				{ID: "broken", Needs: []string{"setup"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
 			}}, runspec.Options{})
 			original.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				outcome := runstate.NodeSuccess

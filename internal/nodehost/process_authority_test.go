@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type processParent struct {
@@ -87,7 +87,7 @@ func processAuthorityFixture(t *testing.T) (*ProcessAuthorities, *processParent,
 	}
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}
 	spec := capability.DelegateSpec{Parent: principal.Authority, Audience: capability.NodeHost, Binding: binding, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: &expires, Repositories: []string{"repo"}}
-	service := &ProcessServices{RunID: "run", Job: nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "step"}}}, Masks: NewMaskRegistry(secrets.NewMasker())}
+	service := &ProcessServices{RunID: "run", Job: nodewire.JobSpec{ID: "job", Steps: []nodewire.StepSpec{{ID: "step"}}}, Masks: NewMaskRegistry(secrets.NewMasker())}
 	return registry, parent, lookup, spec, service
 }
 
@@ -338,7 +338,7 @@ func TestProcessAuthoritySnapshotsCannotMutateStoredAuthority(t *testing.T) {
 func TestProcessAuthorityRevokesInflightServiceBeforeAcknowledgement(t *testing.T) {
 	registry, _, lookup, spec, service := processAuthorityFixture(t)
 	entered := make(chan struct{})
-	service.Summary = func(ctx context.Context, _ capability.Authorized, _ nodeproto.SummaryRequest) error {
+	service.Summary = func(ctx context.Context, _ capability.Authorized, _ nodewire.SummaryRequest) error {
 		close(entered)
 		<-ctx.Done()
 		return nil

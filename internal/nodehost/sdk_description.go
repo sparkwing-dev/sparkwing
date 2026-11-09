@@ -3,14 +3,15 @@ package nodehost
 import (
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput, declarationsOnly bool) (PreparedPlanning, bool, error) {
-	var doc nodeproto.DescribeDoc
+	var doc nodewire.DescribeDoc
 	if err := json.Unmarshal(raw, &doc); err != nil || doc.Pipelines == nil {
 		return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe requires a pipelines array")
 	}

@@ -27,7 +27,7 @@ jobs:
     permissions:
       contents: read
     env:
-      GOWORK: "off"
+      GOWORK: "auto"
       SPARKWING_REQUIRE_PG: "1"
       SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
       # The backup drill takes its client from here rather than PATH, because

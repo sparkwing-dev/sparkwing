@@ -1,0 +1,5 @@
+# sparkwing/protocol/limits
+
+const ChildAwait time.Duration = 60 * time.Second
+const NodeOutputBytes int64 = 16 << 20
+const ProtocolEnvelopeBytes int64 = 1 << 20

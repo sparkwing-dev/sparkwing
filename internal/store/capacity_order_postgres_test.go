@@ -6,18 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(t *testing.T) {
 	for _, held := range []string{"group", "foreign_run"} {
 		t.Run(held, func(t *testing.T) {
-			f := newStoreRecoveryFixtureAt(t, true, storetest.NewPostgres(t), func(plan *nodeproto.PlanDoc) {
+			f := newStoreRecoveryFixtureAt(t, true, storetest.NewPostgres(t), func(plan *nodewire.PlanDoc) {
 				scope, capacity, cost, policy := "global", 1, 1, "queue"
-				plan.Concurrency = []nodeproto.ConcurrencySpec{{Group: "plan", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}
+				plan.Concurrency = []nodewire.ConcurrencySpec{{Group: "plan", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 			defer cancel()
@@ -79,8 +79,8 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 }
 
 func TestPostgresConcurrencyMaintenanceDefersBusyAdmission(t *testing.T) {
-	f := newStoreRecoveryFixtureAt(t, false, storetest.NewPostgres(t), func(plan *nodeproto.PlanDoc) {
-		plan.Concurrency = []nodeproto.ConcurrencySpec{{Group: "first"}, {Group: "second"}}
+	f := newStoreRecoveryFixtureAt(t, false, storetest.NewPostgres(t), func(plan *nodewire.PlanDoc) {
+		plan.Concurrency = []nodewire.ConcurrencySpec{{Group: "first"}, {Group: "second"}}
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()

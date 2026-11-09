@@ -20,12 +20,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 const featureVersion = "commit-feature-e2e"
@@ -247,7 +247,7 @@ func (f *featureController) await(what string, condition func() bool) {
 	}
 }
 
-func (f *featureController) plan(request runspec.Request, jobs []nodeproto.JobSpec) string {
+func (f *featureController) plan(request runspec.Request, jobs []nodewire.JobSpec) string {
 	f.t.Helper()
 	if request.Version == 0 {
 		request.Version = 1
@@ -275,7 +275,7 @@ func (f *featureController) plan(request runspec.Request, jobs []nodeproto.JobSp
 	return created.RunID
 }
 
-func (f *featureController) accept(run string, jobs []nodeproto.JobSpec) {
+func (f *featureController) accept(run string, jobs []nodewire.JobSpec) {
 	f.t.Helper()
 	var award *controllerwire.ClaimedUnit
 	f.await("planning award", func() bool {
@@ -290,9 +290,9 @@ func (f *featureController) accept(run string, jobs []nodeproto.JobSpec) {
 		f.t.Fatalf("planner took run %s, want %s", award.RunID, run)
 	}
 	for i := range jobs {
-		jobs[i].Steps = []nodeproto.StepSpec{{ID: "body"}}
+		jobs[i].Steps = []nodewire.StepSpec{{ID: "body"}}
 	}
-	doc := nodeproto.PlanDoc{Jobs: jobs}
+	doc := nodewire.PlanDoc{Jobs: jobs}
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		f.t.Fatal(err)

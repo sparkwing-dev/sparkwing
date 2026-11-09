@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 var (
@@ -88,7 +88,7 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		if err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
@@ -407,7 +407,7 @@ func releaseEvaluationTx(ctx context.Context, tx *storeTx, team Team, ref runspe
 	}
 	kind := "job_expansion_ready"
 	if row.Status == runstate.StatusPending && row.ReadyAt == nil && row.ClaimedBy == "" {
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return result, err
 		}

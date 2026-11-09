@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 // StartChild submits a same-repository, same-revision child and returns its run ID

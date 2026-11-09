@@ -4,23 +4,23 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCommittedCheckoutHistoryAndTagsHaveLocalRemoteParity(t *testing.T) {
 	for _, test := range []struct {
 		name          string
-		policy        nodeproto.SourceSpec
+		policy        nodewire.SourceSpec
 		commits, tags string
 	}{
-		{"default", nodeproto.SourceSpec{}, "1", ""},
-		{"shallow without tags", nodeproto.SourceSpec{Depth: new(1), Tags: new(false)}, "1", ""},
-		{"depth two", nodeproto.SourceSpec{Depth: new(2)}, "2", ""},
-		{"full history with tags", nodeproto.SourceSpec{FullHistory: new(true), Tags: new(true)}, "3", "v1"},
+		{"default", nodewire.SourceSpec{}, "1", ""},
+		{"shallow without tags", nodewire.SourceSpec{Depth: new(1), Tags: new(false)}, "1", ""},
+		{"depth two", nodewire.SourceSpec{Depth: new(2)}, "2", ""},
+		{"full history with tags", nodewire.SourceSpec{FullHistory: new(true), Tags: new(true)}, "3", "v1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			owner, _ := sourcetest.Repository(t)

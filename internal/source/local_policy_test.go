@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCommittedCheckoutPolicyHasLocalRemoteParity(t *testing.T) {
@@ -34,7 +34,7 @@ func TestCommittedCheckoutPolicyHasLocalRemoteParity(t *testing.T) {
 					sourcetest.Git(t, parent, "commit", "-qm", "execution commit")
 					sha := sourcetest.Git(t, parent, "rev-parse", "HEAD")
 					sourcetest.Remote(t, map[string]string{remote: parent, childRemote: child}, remote+".git/info/lfs")
-					spec := source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, PipelineSHA: codeSHA, DefaultBranch: "trunk", CommittedCheckout: true, Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{Submodules: &submodules, LFS: &lfs}}}
+					spec := source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, PipelineSHA: codeSHA, DefaultBranch: "trunk", CommittedCheckout: true, Checkout: runspec.CheckoutPolicy{Policy: nodewire.SourceSpec{Submodules: &submodules, LFS: &lfs}}}
 					if local {
 						spec.RemoteURL, spec.LocalCheckout = "", parent
 					}

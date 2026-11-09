@@ -51,7 +51,7 @@ const versionLatestURL = "https://github.com/sparkwing-dev/sparkwing/releases/la
 
 const versionFetchTimeout = 3 * time.Second
 
-const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
+const sdkModulePath = "github.com/sparkwing-dev/sparkwing/sparkwing"
 
 func runVersion(inv clisurface.Invocation) error {
 	output := inv.Output(color.IsInteractiveStdout())

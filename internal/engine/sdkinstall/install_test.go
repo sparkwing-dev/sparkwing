@@ -29,7 +29,7 @@ func main(){
  }
  if len(os.Args)>1 && os.Args[1]=="env" { if len(os.Args)>2 && os.Args[2]=="-json" { fmt.Print("{\"GOVERSION\":\"go1.26.9\"}") } else { fmt.Print("auto\ngo1.26.9\noff\n") };return }
  if len(os.Args)>1 && os.Args[1]=="mod" { return }
- if len(os.Args)>1 && os.Args[1]=="list" { fmt.Print("{\"Path\":\"github.com/sparkwing-dev/sparkwing\",\"Version\":\"v0.20.0\"}");return }
+ if len(os.Args)>1 && os.Args[1]=="list" { fmt.Print("{\"Path\":\"github.com/sparkwing-dev/sparkwing/sparkwing\",\"Version\":\"v0.20.0\"}");return }
  for i,arg:=range os.Args { if arg=="-o" && i+1<len(os.Args) { if os.WriteFile(os.Args[i+1],[]byte("locally-built-fixture"),0700)!=nil { os.Exit(12) };fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));return } }
  os.Exit(13)
 }`

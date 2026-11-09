@@ -14,10 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+
 	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -31,10 +33,10 @@ type ProcessServices struct {
 	activity       *nativeProcessActivity
 	SourceBindings capability.BindingChecker
 	RunID          string
-	Job            nodeproto.JobSpec
+	Job            nodewire.JobSpec
 	Masks          *MaskRegistry
-	Annotation     func(context.Context, capability.Authorized, nodeproto.AnnotationRequest) error
-	Summary        func(context.Context, capability.Authorized, nodeproto.SummaryRequest) error
+	Annotation     func(context.Context, capability.Authorized, nodewire.AnnotationRequest) error
+	Summary        func(context.Context, capability.Authorized, nodewire.SummaryRequest) error
 	Secrets        []string
 	Secret         func(context.Context, capability.Authorized, string) (string, bool, error)
 	Output         func(context.Context, capability.Authorized, string) (json.RawMessage, error)
@@ -43,7 +45,7 @@ type ProcessServices struct {
 	StartChild     func(context.Context, capability.Authorized, ChildRequest) (string, error)
 	AwaitChild     func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error)
 	Cleanups       *ProcessCleanups
-	HelperStream   func(context.Context, string, nodeproto.FrameLog, []byte, bool) error
+	HelperStream   func(context.Context, string, nodewire.FrameLog, []byte, bool) error
 }
 
 var helperSequence atomic.Uint64
@@ -191,7 +193,7 @@ func serviceEvidence(request *http.Request, pattern string) (capability.RequestE
 func (s *ProcessServices) serve(request *http.Request, auth capability.Authorized, path string) (any, int, error) {
 	switch path {
 	case "/node/v1/helpers":
-		var body nodeproto.HelperRequest
+		var body nodewire.HelperRequest
 		if err := decodeService(request, &body); err != nil {
 			return nil, 0, err
 		}
@@ -222,7 +224,7 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 				key := fmt.Sprintf("helper:%d:", helperSequence.Add(1))
 				writer := func(stream string) helperOutputWriter {
 					return func(chunk []byte) (int, error) {
-						base := nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Step: body.Step, Event: "exec_line"}
+						base := nodewire.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Step: body.Step, Event: "exec_line"}
 						err := s.HelperStream(ctx, key+stream, base, chunk, false)
 						return len(chunk), err
 					}
@@ -230,7 +232,7 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 				ctx = helperruntime.WithOutput(ctx, writer("stdout"), writer("stderr"))
 				finishOutput = func() error {
 					for _, stream := range []string{"stdout", "stderr"} {
-						if err := s.HelperStream(ctx, key+stream, nodeproto.FrameLog{Level: "info", Step: body.Step, Event: "exec_line"}, nil, true); err != nil {
+						if err := s.HelperStream(ctx, key+stream, nodewire.FrameLog{Level: "info", Step: body.Step, Event: "exec_line"}, nil, true); err != nil {
 							return err
 						}
 					}
@@ -247,7 +249,7 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 		response.Error = s.Masks.mask(response.Error)
 		return response, http.StatusOK, nil
 	case "/node/v1/masks", "/node/v1/annotations", "/node/v1/summary":
-		return nodeproto.ServiceAcknowledged{}, http.StatusOK, s.write(request, auth, path)
+		return nodewire.ServiceAcknowledged{}, http.StatusOK, s.write(request, auth, path)
 	case "/node/v1/cleanups":
 		if s.Cleanups == nil {
 			return nil, 0, serviceUnavailable()
@@ -274,20 +276,20 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 	ctx := request.Context()
 	switch path {
 	case "/node/v1/masks":
-		var body nodeproto.MaskRequest
+		var body nodewire.MaskRequest
 		if err := decodeService(request, &body); err != nil {
 			return err
 		}
 		return s.Masks.registerValue(body.Value)
 	case "/node/v1/annotations":
-		var body nodeproto.AnnotationRequest
+		var body nodewire.AnnotationRequest
 		if err := decodeService(request, &body); err != nil {
 			return err
 		}
 		if body.Level == "" {
 			body.Level = "info"
 		}
-		if err := body.Validate(); err != nil {
+		if err := nodeproto.ValidateAnnotation(body.Annotation); err != nil {
 			return executorError(apierr.BadRequest, err.Error())
 		}
 		if err := s.step(body.Step); err != nil {
@@ -300,7 +302,7 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		body.File = s.Masks.mask(body.File)
 		return s.Annotation(ctx, auth, body)
 	case "/node/v1/summary":
-		var body nodeproto.SummaryRequest
+		var body nodewire.SummaryRequest
 		if err := decodeService(request, &body); err != nil {
 			return err
 		}
@@ -317,7 +319,7 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 }
 
 func (s *ProcessServices) step(id string) error {
-	if id != "" && !slices.ContainsFunc(s.Job.Steps, func(step nodeproto.StepSpec) bool { return step.ID == id }) {
+	if id != "" && !slices.ContainsFunc(s.Job.Steps, func(step nodewire.StepSpec) bool { return step.ID == id }) {
 		return executorError(apierr.UnknownStep, "record step is not declared by the bound job")
 	}
 	return nil
@@ -364,11 +366,11 @@ func decodeService(request *http.Request, target any) error {
 	}
 	required := []string{}
 	switch target.(type) {
-	case *nodeproto.MaskRequest:
+	case *nodewire.MaskRequest:
 		required = []string{"value"}
-	case *nodeproto.AnnotationRequest:
+	case *nodewire.AnnotationRequest:
 		required = []string{"message"}
-	case *nodeproto.SummaryRequest:
+	case *nodewire.SummaryRequest:
 		required = []string{"markdown"}
 	}
 	for _, key := range required {

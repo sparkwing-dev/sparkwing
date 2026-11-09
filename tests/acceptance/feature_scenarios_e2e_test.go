@@ -15,13 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func testFeaturePlacement(f *featureController) {
 	f.poll(f.fast, "lane=fast")
-	run := f.plan(runspec.Request{}, []nodeproto.JobSpec{{ID: "job"}})
+	run := f.plan(runspec.Request{}, []nodewire.JobSpec{{ID: "job"}})
 	if f.claim(f.slow, run, "job", "lane=slow") != nil {
 		f.t.Fatal("fallback bypassed a live preferred runner's hold")
 	}
@@ -55,7 +55,7 @@ func testFeaturePlacement(f *featureController) {
 	f.t.Logf("run=%s fallback opened after %s; unstarted return preserved ready=%s", run, elapsed, ready.Format(time.RFC3339Nano))
 
 	f.poll(f.fast, "lane=fast", "mid-hold")
-	run = f.plan(runspec.Request{}, []nodeproto.JobSpec{{ID: "job", Requires: []string{"mid-hold"}}})
+	run = f.plan(runspec.Request{}, []nodewire.JobSpec{{ID: "job", Requires: []string{"mid-hold"}}})
 	f.delay(500 * time.Millisecond)
 	joined := f.mustClaim(f.slow, run, "job", "lane=late", "mid-hold")
 	joinedRow, err := f.host(joined).ReadNode(f.ctx, runspec.NodeRef{RunID: runspec.RunID(run), NodeID: "job"})
@@ -76,17 +76,17 @@ func testFeaturePlacement(f *featureController) {
 
 func testFeatureRetry(f *featureController) {
 	ids := []string{"a", "b", "c", "d"}
-	var jobs []nodeproto.JobSpec
+	var jobs []nodewire.JobSpec
 	for i, id := range ids {
-		job := nodeproto.JobSpec{ID: id, Artifacts: []string{"payload.txt"}}
+		job := nodewire.JobSpec{ID: id, Artifacts: []string{"payload.txt"}}
 		if i > 0 {
 			job.Needs = []string{ids[i-1]}
 		}
 		jobs = append(jobs, job)
 	}
-	last := nodeproto.JobSpec{ID: "failed", Needs: ids}
+	last := nodewire.JobSpec{ID: "failed", Needs: ids}
 	for _, id := range ids {
-		last.Consumes = append(last.Consumes, nodeproto.ArtifactInput{Producer: id, Into: id})
+		last.Consumes = append(last.Consumes, nodewire.ArtifactInput{Producer: id, Into: id})
 	}
 	jobs = append(jobs, last)
 	source := f.plan(runspec.Request{}, jobs)
@@ -147,9 +147,9 @@ func testFeatureRetry(f *featureController) {
 
 func testFeatureChildren(f *featureController) {
 	for _, ending := range []string{"parent_cancelled", "parent_failed", "creating_job_ended"} {
-		jobs := []nodeproto.JobSpec{{ID: "parent", Children: []nodeproto.ChildPipeline{{Pipeline: "child"}}}}
+		jobs := []nodewire.JobSpec{{ID: "parent", Children: []nodewire.ChildPipeline{{Pipeline: "child"}}}}
 		if ending == "creating_job_ended" {
-			jobs = append(jobs, nodeproto.JobSpec{ID: "keep-parent-running", Requires: []string{"keep-parent"}})
+			jobs = append(jobs, nodewire.JobSpec{ID: "keep-parent-running", Requires: []string{"keep-parent"}})
 		}
 		parent := f.plan(runspec.Request{}, jobs)
 		parentAward := f.mustClaim(f.slow, parent, "parent")
@@ -167,7 +167,7 @@ func testFeatureChildren(f *featureController) {
 		if err != nil {
 			f.t.Fatalf("start child: %v", err)
 		}
-		f.accept(child, []nodeproto.JobSpec{{ID: "child"}})
+		f.accept(child, []nodewire.JobSpec{{ID: "child"}})
 		childAward := f.mustClaim(f.fast, child, "child")
 		f.start(childAward)
 		if detail := f.awaitStatus(child, "running"); len(detail.Attempts) != 1 {

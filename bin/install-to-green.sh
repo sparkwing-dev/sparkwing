@@ -239,8 +239,8 @@ else
     # Source checkouts can omit tags; the pipeline module keeps a released SDK pin.
     if [[ -z "$STAGE_TAG" && -r "$ROOT/.sparkwing/go.mod" ]]; then
       STAGE_TAG="$(awk '
-        $1 == "github.com/sparkwing-dev/sparkwing" { print $2; exit }
-        $1 == "require" && $2 == "github.com/sparkwing-dev/sparkwing" { print $3; exit }
+        $1 == "github.com/sparkwing-dev/sparkwing/sparkwing" { print $2; exit }
+        $1 == "require" && $2 == "github.com/sparkwing-dev/sparkwing/sparkwing" { print $3; exit }
       ' "$ROOT/.sparkwing/go.mod")" || fail "could not read the pipeline module SDK pin"
     fi
     [[ "$STAGE_TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]] ||
@@ -386,7 +386,7 @@ sparkwing -C "$REPO" pipeline new --pipeline demo --template "$template" \
 if [[ "$mode" == build ]]; then
   [[ -f "$REPO/.sparkwing/go.mod" ]] ||
     { cat "$WORK/scaffold.log" >&2; fail "the scaffold left no pipeline module under $REPO/.sparkwing"; }
-  go -C "$REPO/.sparkwing" mod edit -replace "github.com/sparkwing-dev/sparkwing=$ROOT" ||
+  go -C "$REPO/.sparkwing" mod edit -replace "github.com/sparkwing-dev/sparkwing/sparkwing=$ROOT/sparkwing" ||
     fail "could not point the scaffolded module at this worktree"
   go -C "$REPO/.sparkwing" mod tidy >"$WORK/tidy.log" 2>&1 || {
     cat "$WORK/tidy.log" >&2

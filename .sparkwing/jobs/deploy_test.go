@@ -16,12 +16,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 const testRegistry = "123456789012.dkr.ecr.us-west-2.amazonaws.com"
@@ -537,7 +538,7 @@ func deployGitIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := testgit.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(testgit.Env(os.Environ()), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
+	cmd.Env = append(gitcontrol.Env(os.Environ()), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -704,7 +705,7 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 	case name == "git":
 		cmd := testgit.CommandContext(ctx, "git", c.Args...)
 		cmd.Dir = c.Dir
-		cmd.Env = testgit.Env(os.Environ())
+		cmd.Env = gitcontrol.Env(os.Environ())
 		for k, v := range c.Env {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}

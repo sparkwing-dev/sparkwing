@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -26,6 +25,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // NativeServices supplies the per-award host services and their joined cleanup.
@@ -49,12 +50,12 @@ type NativeConfig struct {
 	Refresh        func(context.Context) (capability.Principal, error)
 	Renew          func(context.Context, string, bool) (runstate.LeaseBeat, error)
 	Source         source.Options
-	Services       func(context.Context, capability.Principal, nodeproto.JobSpec) (ProcessServices, error)
+	Services       func(context.Context, capability.Principal, nodewire.JobSpec) (ProcessServices, error)
 	Storage        func(context.Context, capability.Principal) (StorageBinding, error)
 	Logs           func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
 	Evaluate       func(context.Context, EvaluationInput) (ProcessGrant, error)
 	ExpansionActor func(context.Context, RunInput, runstate.NodeRow) (runstate.Actor, error)
-	ReadFailure    func(context.Context, runspec.NodeRef, int64) (*nodeproto.JobFailure, error)
+	ReadFailure    func(context.Context, runspec.NodeRef, int64) (*nodewire.JobFailure, error)
 }
 
 // NewNativeServices constructs the shared host services without opening a state store.
@@ -197,7 +198,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		upload, err := outputs.Bind(ctx, input)
 		upload.Key.Kind, upload.Key.Name, upload.Key.Scope.Key = blob.KindDepcache, key.Name, key.Key
 		return upload, err
-	}, Resolve: func(ctx context.Context, input NodeInput, cache nodeproto.CacheSpec) (string, error) {
+	}, Resolve: func(ctx context.Context, input NodeInput, cache nodewire.CacheSpec) (string, error) {
 		return processes.Session.Environments.cacheDirectory(ctx, input, cache)
 	}}
 	follower := stateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
@@ -208,7 +209,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		Validation: nodeproto.ValidationContext{Placement: store.RequestPlacement(run.Run.Request.Request)},
 		Admission:  cfg.Admission,
 		Owner:      OwnerOperations{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Debug: debug, Wait: follower.wait, WaitNode: follower.waitNode, AdoptClaim: claims.adopt, ExpansionActor: cfg.ExpansionActor},
-		PlanningLog: func(ctx context.Context, frame nodeproto.FrameLog) error {
+		PlanningLog: func(ctx context.Context, frame nodewire.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		},
 		Executor: ExecutionOperations{ReadFailure: cfg.ReadFailure, PublishOutput: outputs.PublishOutput, Annotate: claims.annotate, PrepareArtifacts: artifacts.Prepare, PrepareCaches: caches.Prepare, BindStorage: func(ctx context.Context, input NodeInput) (StorageBinding, error) {

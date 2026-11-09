@@ -11,10 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
@@ -42,7 +42,7 @@ func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range snapshot.Nodes {
-		var declaration nodeproto.JobSpec
+		var declaration nodewire.JobSpec
 		if json.Unmarshal(row.Spec, &declaration) != nil || runspec.NodeID(declaration.ID) != row.Ref.NodeID {
 			t.Fatalf("persisted mask namespace has an invalid job: %s", row.Ref.NodeID)
 		}

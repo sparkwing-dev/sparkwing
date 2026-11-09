@@ -11,9 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestOwnerBindingsCannotMutateGrantedRunnerProperty(t *testing.T) {
@@ -23,7 +23,7 @@ func TestOwnerBindingsCannotMutateGrantedRunnerProperty(t *testing.T) {
 			if here {
 				award = hereAward(t)
 			}
-			award.Runner = nodeproto.RunnerIdentity{Name: name, Type: kind, Labels: slices.Clone(labels)}
+			award.Runner = nodewire.RunnerIdentity{Name: name, Type: kind, Labels: slices.Clone(labels)}
 			want := award.Runner
 			want.Labels = slices.Clone(labels)
 			valid := false
@@ -32,7 +32,7 @@ func TestOwnerBindingsCannotMutateGrantedRunnerProperty(t *testing.T) {
 					received.Runner.Labels[i] = "binding-selected-label"
 				}
 				return hereHostSession{
-					input: nodehost.RunInput{GrantedRunner: nodeproto.RunnerIdentity{Name: "binding-selected-runner", Type: "cloud"}},
+					input: nodehost.RunInput{GrantedRunner: nodewire.RunnerIdentity{Name: "binding-selected-runner", Type: "cloud"}},
 					close: func() error { return nil },
 					host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						valid = reflect.DeepEqual(input.GrantedRunner, want)

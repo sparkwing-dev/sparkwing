@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // projectOrigin retains file, key and line and rejects unknown source values.
@@ -75,7 +75,7 @@ func ProjectCeilings(values OperatorValues) (runspec.Ceilings, error) {
 		return out, err
 	}
 	if values.AllowedSources != nil {
-		policies := make([]nodeproto.SourceSpec, len(values.AllowedSources))
+		policies := make([]nodewire.SourceSpec, len(values.AllowedSources))
 		for i, policy := range values.AllowedSources {
 			if err := validateSource(policy, true); err != nil {
 				return out, err

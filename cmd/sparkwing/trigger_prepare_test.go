@@ -13,12 +13,12 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func triggerPreparationRepo(t *testing.T) (string, string) {
@@ -255,9 +255,9 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 	input := triggerRequestInput{
 		home: t.TempDir(), source: selection, settings: inputs,
 		args: []string{"-r", "us-east", "--image", "release", "--password", password},
-		declarations: declarationFixture(t, []nodeproto.PipelineDescription{
-			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
-			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{
+		declarations: declarationFixture(t, []nodewire.PipelineDescription{
+			{Name: "deploy-prod", Args: []nodewire.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
+			{Name: "Deploy", Args: []nodewire.ArgumentDescription{
 				{Name: "region", Short: "r", Type: "string", Required: true},
 				{Name: "image", Type: "string", JobID: "rollout", Required: true},
 				{Name: "password", Type: "string", Secret: true},
@@ -295,7 +295,7 @@ func TestPrepareTriggerRequestSubmitsThroughTheFinalController(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy"}}), idempotencyKey: "stable-key"})
+	request, err := prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, declarations: declarationFixture(t, []nodewire.PipelineDescription{{Name: "Deploy"}}), idempotencyKey: "stable-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 		home:           t.TempDir(),
 		idempotencyKey: "retained",
 		source:         preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-		declarations:   declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy"}}),
+		declarations:   declarationFixture(t, []nodewire.PipelineDescription{{Name: "Deploy"}}),
 		settings:       settings.Inputs{Flags: settings.Values{Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: priority}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: output}}, Runner: runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runner}}}}, Context: settings.Context{NumCPU: 4}},
 		submittedEnv:   map[string][]byte{"DEPLOY_REGION": []byte("private-region")},
 	})
@@ -382,7 +382,7 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 		request, err := prepareTriggerRequest(triggerRequestInput{
 			home:         t.TempDir(),
 			source:       preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-			declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy"}}),
+			declarations: declarationFixture(t, []nodewire.PipelineDescription{{Name: "Deploy"}}),
 			settings:     settings.Inputs{Context: settings.Context{NumCPU: 4}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte(value)},
 		})
 		if strings.ContainsRune(value, 0) {
@@ -425,7 +425,7 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 		_, err := prepareTriggerRequest(triggerRequestInput{
 			home:         t.TempDir(),
 			source:       preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-			declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}}),
+			declarations: declarationFixture(t, []nodewire.PipelineDescription{{Name: "Deploy", Args: []nodewire.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}}),
 			args:         args,
 		})
 		var canonical *apierr.Error
@@ -446,7 +446,7 @@ func FuzzTriggerPreparationDiagnosticsExcludeArguments(f *testing.F) {
 func TestPrepareTriggerRequestMasksQuotedEnumValues(t *testing.T) {
 	_, err := prepareTriggerRequest(triggerRequestInput{
 		source:       preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
-		declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"us-east"}}}}}),
+		declarations: declarationFixture(t, []nodewire.PipelineDescription{{Name: "Deploy", Args: []nodewire.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"us-east"}}}}}),
 		args:         []string{"--region=private-\x00value"},
 	})
 	if err == nil || strings.Contains(err.Error(), `private-\x00value`) || !strings.Contains(err.Error(), "--region") {
@@ -550,7 +550,7 @@ func TestPrepareTriggerRequestSaltsEnvironmentWithTheHostKey(t *testing.T) {
 	}
 	prepare := func(home string) runspec.EnvSnapshot {
 		t.Helper()
-		request, err := prepareTriggerRequest(triggerRequestInput{home: home, source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "Deploy"}}), submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte("west")}})
+		request, err := prepareTriggerRequest(triggerRequestInput{home: home, source: selection, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, declarations: declarationFixture(t, []nodewire.PipelineDescription{{Name: "Deploy"}}), submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte("west")}})
 		if err != nil {
 			t.Fatal(err)
 		}

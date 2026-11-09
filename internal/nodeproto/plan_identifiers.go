@@ -3,10 +3,12 @@ package nodeproto
 import (
 	"fmt"
 	"sort"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // VisitPlanIdentifiers visits the validator's identifier fields and stops on the first visitor error.
-func VisitPlanIdentifiers(plan PlanDoc, visit func(value, path string) error) error {
+func VisitPlanIdentifiers(plan nodewire.PlanDoc, visit func(value, path string) error) error {
 	if err := visitConcurrencyIdentifiers(plan.Concurrency, "plan.concurrency", visit); err != nil {
 		return err
 	}
@@ -100,7 +102,7 @@ func visitIdentifierList(values []string, path string, visit func(string, string
 	return nil
 }
 
-func visitConcurrencyIdentifiers(specs []ConcurrencySpec, path string, visit func(string, string) error) error {
+func visitConcurrencyIdentifiers(specs []nodewire.ConcurrencySpec, path string, visit func(string, string) error) error {
 	for i, spec := range specs {
 		if err := visit(spec.Group, fmt.Sprintf("%s[%d].group", path, i)); err != nil {
 			return err
@@ -109,7 +111,7 @@ func visitConcurrencyIdentifiers(specs []ConcurrencySpec, path string, visit fun
 	return nil
 }
 
-func visitRegisteredJobIdentifiers(job JobSpec, path string, visit func(string, string) error) error {
+func visitRegisteredJobIdentifiers(job nodewire.JobSpec, path string, visit func(string, string) error) error {
 	if err := visit(job.ID, path+".id"); err != nil {
 		return err
 	}
@@ -124,7 +126,7 @@ func visitRegisteredJobIdentifiers(job JobSpec, path string, visit func(string, 
 	return nil
 }
 
-func visitClosureIdentifiers(c ClosureSpec, path string, visit func(string, string) error) error {
+func visitClosureIdentifiers(c nodewire.ClosureSpec, path string, visit func(string, string) error) error {
 	for _, field := range []struct {
 		values []string
 		name   string

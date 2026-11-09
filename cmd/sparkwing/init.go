@@ -106,26 +106,15 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 }
 
 func renderInitGoMod(moduleName string) string {
-	goDirective := userGoModDirective()
-	if goDirective == "" {
-		goDirective = "1.26"
-	}
 	return fmt.Sprintf(`module %s
 
-go %s
+go 1.25.0
 
-require github.com/sparkwing-dev/sparkwing %s
-`, moduleName, goDirective, sdkRequirementVersion())
+require github.com/sparkwing-dev/sparkwing/sparkwing %s
+`, moduleName, sdkRequirementVersion())
 }
 
 func sdkRequirementVersion() string {
-	v := installedVersion()
-	if strings.Contains(v, "-qa.") && !engine.QATrust {
-		return scaffold.FallbackSDKVersion
-	}
-	if isResolvableModuleVersion(v) {
-		return v
-	}
 	return scaffold.FallbackSDKVersion
 }
 

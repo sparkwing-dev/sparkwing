@@ -15,20 +15,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 type claimEngine struct{ resolved engine.Resolved }
@@ -99,9 +99,9 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			var entered atomic.Bool
 			revoked, cleaned := false, false
 			cfg := ProtocolSessionConfig{
-				Environments: sdkTestEnvironment(s), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
+				Environments: sdkTestEnvironment(s), ParseFrame: protocolTestCodec, ValidateRequest: func(nodewire.Request) error { return nil },
 				RunCleanups: func(context.Context, CleanupScope) error { cleaned = true; return nil },
-				Log: func(_ context.Context, log nodeproto.FrameLog) error {
+				Log: func(_ context.Context, log nodewire.FrameLog) error {
 					if log.Message == "entered" {
 						entered.Store(true)
 						if outcome == "lease_lost" {
@@ -132,7 +132,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 					cleaned = true
 					return nil
 				}
-				return ProcessGrant{Binding: nodeproto.ProcessBinding{RunID: input.Accepted.RunID, JobID: input.NodeID, Routes: nodeproto.ProcessRoutes{URL: "http://host", Bearer: issued.Raw}}, Revoke: func() error {
+				return ProcessGrant{Binding: nodewire.ProcessBinding{RunID: input.Accepted.RunID, JobID: input.NodeID, Routes: nodewire.ProcessRoutes{URL: "http://host", Bearer: issued.Raw}}, Revoke: func() error {
 					revoked = true
 					return revoke()
 				}}, nil
@@ -228,7 +228,7 @@ func hostSourceCheckout(t *testing.T) (string, string) {
 		{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "source"},
 	} {
 		cmd := testgit.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
-		cmd.Env = append(testgit.Env(os.Environ()), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+		cmd.Env = append(gitcontrol.Env(os.Environ()), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git: %v: %s", err, out)
 		}

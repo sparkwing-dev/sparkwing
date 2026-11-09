@@ -479,7 +479,7 @@ func TestReleaseStyleBuildKeepsRuntimeTagDistinctFromGoPseudoVersion(t *testing.
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(repo, "..", ".."))
-	goMod := "module fixture\n\ngo 1.26.6\n\nrequire github.com/sparkwing-dev/sparkwing v0.0.0-20260916172407-926a5e82d62d\n\nreplace github.com/sparkwing-dev/sparkwing => " + root + "\n"
+	goMod := "module fixture\n\ngo 1.26.6\n\nrequire github.com/sparkwing-dev/sparkwing v0.0.0-20260916172407-926a5e82d62d\n\nreplace github.com/sparkwing-dev/sparkwing => " + root + "\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => " + filepath.Join(root, "sparkwing") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o600); err != nil {
 		t.Fatal(err)
 	}

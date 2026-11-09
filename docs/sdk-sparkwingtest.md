@@ -4,7 +4,7 @@
 
 Package sparkwingtest supplies an in-process host for pipeline and helper-library tests.
 
-Import as `swsparkwingtest "github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
+Import as `swsparkwingtest "github.com/sparkwing-dev/sparkwing/sparkwingtest"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
 
 ## Types
 

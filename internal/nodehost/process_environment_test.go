@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T) {
@@ -26,11 +26,11 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 	spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "snapshot"}, strings.Repeat("5", 64))
 	spec.Resolved.Settings.Options.DryRun.Set, spec.Resolved.Settings.Options.DryRun.Value = true, true
 	input.Accepted.Spec, _ = json.Marshal(spec)
-	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "awarded", Type: "cloud", Labels: []string{"gpu"}}
+	input.GrantedRunner = nodewire.RunnerIdentity{Name: "awarded", Type: "cloud", Labels: []string{"gpu"}}
 	// safety: generated declarations are absent from the initial plan; their environment comes from persistence.
 	input.NodeID, input.RouteBinding.JobID = "generated", "generated"
 	st.row.Ref.NodeID = runspec.NodeID(input.NodeID)
-	job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{
+	job := nodewire.JobSpec{ID: input.NodeID, Env: map[string]nodewire.EnvValue{
 		"STARTUP": {Value: "interpreter", Startup: true}, "BODY": {Value: "body"},
 	}}
 	st.row.Spec, _ = json.Marshal(job)
@@ -64,7 +64,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 }
 
 func TestSDKPlanningEnvironmentHasNoJobStartup(t *testing.T) {
-	input := PlanningProcessInput{Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci", DryRun: true, Git: &nodeproto.Git{SHA: "sha", Branch: "topic", Repo: "repo"}, Trigger: &nodeproto.Trigger{Source: "github_actions"}}, Runner: nodeproto.RunnerIdentity{Name: "actions", Type: "agent", Labels: []string{"linux"}}}
+	input := PlanningProcessInput{Run: nodewire.RunContext{RunID: "run", Pipeline: "ci", DryRun: true, Git: &nodewire.Git{SHA: "sha", Branch: "topic", Repo: "repo"}, Trigger: &nodewire.Trigger{Source: "github_actions"}}, Runner: nodewire.RunnerIdentity{Name: "actions", Type: "agent", Labels: []string{"linux"}}}
 	policy := SDKEnvironment{Build: func(kind procenv.Kind, _ procenv.Base, runtime procenv.Runtime) (procenv.Env, error) {
 		if kind != procenv.Plan || runtime.RunID != "run" || runtime.JobID != "" || !runtime.DryRun || runtime.Commit != "sha" || runtime.Branch != "topic" || runtime.Repo != "repo" || runtime.TriggerSource != "github_actions" || runtime.Runner.Name != "actions" || len(runtime.Startup) != 0 {
 			t.Fatalf("planning environment = %+v", runtime)
@@ -157,7 +157,7 @@ func testProcessEnv(t testing.TB, values ...string) procenv.Env {
 }
 
 func TestSDKRuntimeNamesTheEngineVersion(t *testing.T) {
-	if got := sdkRuntime(nodeproto.RunContext{RunID: "run"}, nodeproto.RunnerIdentity{}).EngineVersion; got == "" || got != engineVersion() {
+	if got := sdkRuntime(nodewire.RunContext{RunID: "run"}, nodewire.RunnerIdentity{}).EngineVersion; got == "" || got != engineVersion() {
 		t.Fatalf("EngineVersion = %q, want the node host's own build %q", got, engineVersion())
 	}
 }

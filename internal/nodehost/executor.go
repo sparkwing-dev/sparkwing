@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -23,6 +22,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // NodeTransitionStore is the executor's fenced state boundary.
@@ -38,7 +39,7 @@ type NodeTransitionStore interface {
 // revokes the process binding and joins the process; Cleanup then runs registered
 // cleanups under its own bounded context. Both are called after failed setup too.
 type ExecutorProcess interface {
-	Request(context.Context, nodeproto.Request) (nodeproto.Reply, error)
+	Request(context.Context, nodewire.Request) (nodewire.Reply, error)
 	Close() error
 	Cleanup(context.Context) error
 }
@@ -70,7 +71,7 @@ type ExecutorActivity struct {
 // fence refusals, leave the result intact and alert the operator about incomplete logs.
 type ExecutorDependencies struct {
 	memoEnvironment  func(context.Context, NodeInput) (procenv.Env, error)
-	Log              func(context.Context, NodeInput, nodeproto.FrameLog) error
+	Log              func(context.Context, NodeInput, nodewire.FrameLog) error
 	BindStorage      func(context.Context, NodeInput) (StorageBinding, error)
 	Store            NodeTransitionStore
 	Bind             func(context.Context, NodeInput) (ProcessGrant, error)
@@ -78,11 +79,11 @@ type ExecutorDependencies struct {
 	EnsureEngine     func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error)
 	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation       nodeproto.ValidationContext
-	PrepareArtifacts func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
-	PrepareCaches    func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
+	PrepareArtifacts func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
+	PrepareCaches    func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
 	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
-	Annotate         func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
-	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodeproto.JobFailure, error)
+	Annotate         func(context.Context, NodeInput, nodewire.AnnotationRequest) error
+	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodewire.JobFailure, error)
 	ReadOutput       func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error)
 	Masker           *secrets.Masker
 	Masks            *MaskRegistry
@@ -191,10 +192,10 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 	return h.report(ctx, input, result, runErr)
 }
 
-func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.Spec, runstate.NodeRow, nodeproto.JobSpec, error) {
+func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.Spec, runstate.NodeRow, nodewire.JobSpec, error) {
 	var spec runspec.Spec
 	var row runstate.NodeRow
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	if input.Accepted.RunID == "" || input.NodeID == "" || input.Attempt < 0 || input.Generation < 1 || input.Authority.Holder == "" || input.Authority.CapabilityPrefix == "" || input.Entry == nil {
 		return spec, row, job, errors.New("node execution lacks an accepted claim or source entry")
 	}
@@ -247,7 +248,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	return spec, row, job, nil
 }
 
-func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodeproto.JobSpec, body func() (runstate.NodeResult, error)) (result runstate.NodeResult, err error) {
+func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodewire.JobSpec, body func() (runstate.NodeResult, error)) (result runstate.NodeResult, err error) {
 	var finalizers []ExecutorFinalizer
 	defer func() {
 		for i := len(finalizers) - 1; i >= 0; i-- {
@@ -261,7 +262,7 @@ func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodepro
 			}
 		}
 	}()
-	prepare := func(operation func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error), required bool) error {
+	prepare := func(operation func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error), required bool) error {
 		if operation == nil {
 			if required {
 				return errors.New("executor requires a declared storage adapter")
@@ -306,7 +307,7 @@ func (h *nodeExecutor) startExecution(ctx context.Context, input NodeInput, spec
 	return input, nil
 }
 
-func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runspec.Spec, row runstate.NodeRow, job nodeproto.JobSpec) (runstate.NodeResult, error) {
+func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runspec.Spec, row runstate.NodeRow, job nodewire.JobSpec) (runstate.NodeResult, error) {
 	remaining := max(0, input.Execution.Retry.Value-row.ApplicationRetries)
 	for retry := 0; ; retry++ {
 		input.exitedAt = new(time.Time)
@@ -443,7 +444,7 @@ func (h *nodeExecutor) failureAt(err error, stage string) runstate.NodeResult {
 		code = maskedFailureCode(failure.Code, h.deps.Masker.Mask)
 		result.Reason = string(code)
 	}
-	result.Failure = &nodeproto.JobFailure{Stage: stage, Error: &apierr.Error{Code: code, Message: result.MaskedError}}
+	result.Failure = &nodewire.JobFailure{Stage: stage, Error: &apierr.Error{Code: code, Message: result.MaskedError}}
 	return result
 }
 

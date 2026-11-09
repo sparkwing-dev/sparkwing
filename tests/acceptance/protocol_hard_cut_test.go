@@ -10,8 +10,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func testGoSDKVersionAndHardCut(t *testing.T) {
@@ -42,7 +43,7 @@ func testGoSDKVersionAndHardCut(t *testing.T) {
 		}
 		additive["future_optional"] = map[string]any{"enabled": true}
 		sendProtocolProbe(t, process, additive)
-		var negotiated nodeproto.HelloResult
+		var negotiated nodewire.HelloResult
 		decodeProtocolProbe(t, protocolProbeReply(t, process, "hello"), &negotiated)
 
 		sendProtocolProbe(t, process, map[string]any{"id": "removed", "op": "run_node", "job": "probe"})

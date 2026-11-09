@@ -4,9 +4,10 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // MaskRegistry serializes run-local registrations and topology acceptance.
@@ -104,11 +105,11 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 
 // acceptPlan checks initial or generated identifiers, commits under the registration
 // lock, then retains their names. A refused commit changes no registry state.
-func (r *MaskRegistry) acceptPlan(plan nodeproto.PlanDoc, commit func() error) error {
+func (r *MaskRegistry) acceptPlan(plan nodewire.PlanDoc, commit func() error) error {
 	return r.accept(plan, commit, r.masker)
 }
 
-func (r *MaskRegistry) accept(plan nodeproto.PlanDoc, commit func() error, matcher *secrets.Masker) error {
+func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matcher *secrets.Masker) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.masker == nil || commit == nil {

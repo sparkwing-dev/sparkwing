@@ -11,7 +11,7 @@ import (
 
 	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ProcessCleanups owns one delegated process's registrations until joined cleanup.

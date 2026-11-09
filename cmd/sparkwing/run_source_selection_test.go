@@ -11,11 +11,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestLocalRunSelectionsReachPreparationSealingAndReplan(t *testing.T) {
@@ -151,8 +151,8 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 					}
 				}()
 				sessions := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Masker: options.Base.Masker}}}
-				planner := nodehost.SDKPlanner{Start: sessions.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker, Log: func(context.Context, nodeproto.FrameLog) error { return nil }}
-				selected, err := planner.PrepareCheckout(t.Context(), nodehost.CheckoutPlanningInput{Request: runspec.SealedRequest{RunID: "trigger", Request: submitted.Request}, Entry: hosted, Project: []byte("pipelines:\n  - name: deploy-prod\n    entrypoint: HEADEntry\n"), Runner: nodeproto.RunnerIdentity{Name: "runner", Type: "runner", Labels: []string{}}})
+				planner := nodehost.SDKPlanner{Start: sessions.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker, Log: func(context.Context, nodewire.FrameLog) error { return nil }}
+				selected, err := planner.PrepareCheckout(t.Context(), nodehost.CheckoutPlanningInput{Request: runspec.SealedRequest{RunID: "trigger", Request: submitted.Request}, Entry: hosted, Project: []byte("pipelines:\n  - name: deploy-prod\n    entrypoint: HEADEntry\n"), Runner: nodewire.RunnerIdentity{Name: "runner", Type: "runner", Labels: []string{}}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -191,12 +191,12 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 				t.Fatalf("inspection did not use hosting acquisition: %+v %v", inspected, err)
 			}
 			processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base, Snapshots: snapshots}}
-			planner := nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker, Log: func(context.Context, nodeproto.FrameLog) error { return nil }}
+			planner := nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker, Log: func(context.Context, nodewire.FrameLog) error { return nil }}
 			codeRevision := "OLD"
 			if tc.pipelineSHA == head {
 				codeRevision = "HEAD"
 			}
-			planned, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{Entry: entry, Entrypoint: sealed.Request.Source.Entrypoint, Environment: sealed.Request.Env, Run: nodeproto.RunContext{RunID: "selected", Pipeline: "deploy-prod"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, nodehost.PlanningInput{})
+			planned, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{Entry: entry, Entrypoint: sealed.Request.Source.Entrypoint, Environment: sealed.Request.Env, Run: nodewire.RunContext{RunID: "selected", Pipeline: "deploy-prod"}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, nodehost.PlanningInput{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -204,7 +204,7 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 			if err != nil {
 				t.Fatal(err)
 			}
-			var plan nodeproto.PlanDoc
+			var plan nodewire.PlanDoc
 			if err := json.Unmarshal(raw, &plan); err != nil {
 				t.Fatal(err)
 			}
@@ -219,7 +219,7 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 	described := captureStdout(t, func() {
 		inspectionErr = runSparkwing([]string{"pipeline", "describe", "--pipeline=deploy-prod", "-o=json"})
 	})
-	var schema nodeproto.PipelineDescription
+	var schema nodewire.PipelineDescription
 	if inspectionErr != nil || json.Unmarshal([]byte(described), &schema) != nil || schema.Help != "OLD/DIRTY" {
 		t.Fatalf("public describe selected wrong code: %s %v", described, inspectionErr)
 	}

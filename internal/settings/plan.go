@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func planInputs(in PlanInputs) (Inputs, error) {
@@ -80,7 +81,7 @@ func codeDuration(value *int64, key string) (runspec.Setting[time.Duration], err
 	return codeValue(duration, key), err
 }
 
-func planOptions(plan nodeproto.PlanDoc) (runspec.Options, error) {
+func planOptions(plan nodewire.PlanDoc) (runspec.Options, error) {
 	out := runspec.Options{Priority: codeValue(plan.Priority, "priority"), AdmissionClass: codeValue(plan.AdmissionClass, "admission_class")}
 	if plan.Source != nil {
 		out.Checkout = sourceSetting(*plan.Source, Origin{Source: code, Key: "source"})
@@ -90,7 +91,7 @@ func planOptions(plan nodeproto.PlanDoc) (runspec.Options, error) {
 	return out, err
 }
 
-func jobInputs(base Inputs, job nodeproto.JobSpec) (Inputs, error) {
+func jobInputs(base Inputs, job nodewire.JobSpec) (Inputs, error) {
 	in := base
 	code := &in.Code.Options
 	prefix := "jobs." + job.ID + "."
@@ -124,7 +125,7 @@ func jobInputs(base Inputs, job nodeproto.JobSpec) (Inputs, error) {
 	return in, nil
 }
 
-func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspec.JobExecutionSettings, error) {
+func resolveJob(base Inputs, job nodewire.JobSpec, run runspec.Options) (runspec.JobExecutionSettings, error) {
 	in, err := jobInputs(base, job)
 	if err != nil {
 		return runspec.JobExecutionSettings{}, err
@@ -204,7 +205,7 @@ func ResolvePlan(in PlanInputs) (runspec.ExecutionSettings, error) {
 	return result, nil
 }
 
-func resolveJobs(in Inputs, jobs []nodeproto.JobSpec, options runspec.Options) (map[string]runspec.JobExecutionSettings, error) {
+func resolveJobs(in Inputs, jobs []nodewire.JobSpec, options runspec.Options) (map[string]runspec.JobExecutionSettings, error) {
 	out := make(map[string]runspec.JobExecutionSettings, len(jobs))
 	for _, job := range jobs {
 		if job.ID == "" {

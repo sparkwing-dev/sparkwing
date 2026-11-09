@@ -6,7 +6,7 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type generatedArgsInputs struct {
@@ -80,9 +80,11 @@ func TestGeneratedJobArguments(t *testing.T) {
 						child = member
 					}
 				}
-				prepared, err := nodeproto.PrepareJobArguments(child.Arguments, acceptedArgs)
-				if err != nil {
-					t.Fatal(err)
+				prepared := maps.Clone(acceptedArgs)
+				for _, arg := range child.Arguments {
+					if _, supplied := prepared[arg.Name]; !supplied && arg.Default != nil {
+						prepared[arg.Name] = *arg.Default
+					}
 				}
 				run, err := ops.RunStep(t.Context(), built, nodeproto.Request{Args: prepared, Job: "child", Step: "run", Attempt: 1, Settled: []string{}})
 				if err != nil || run.Error != nil {

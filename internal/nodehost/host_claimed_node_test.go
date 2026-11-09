@@ -12,11 +12,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type claimExecutor func(context.Context, NodeInput) error
@@ -31,7 +31,7 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				identity := engineid.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}
-				plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
+				plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}}
 				request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build"}}
 				request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}
 				request.Request.Git.SHA, request.Request.Git.Repository.Key = strings.Repeat("a", 40), "example.com/acme/repo"
@@ -46,7 +46,7 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 				}
 				row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 4, SpecHash: "job-spec"}
 				s := newClaimedHostStore(store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run", Spec: &spec, PlanHash: ownerPlanHash, Plan: body}}, Nodes: []runstate.NodeRow{row}}, mode)
-				input, err := NewNodeInput(AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: ownerPlanHash, Plan: plan}, row, engine.Resolved{Identity: identity}, nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
+				input, err := NewNodeInput(AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: ownerPlanHash, Plan: plan}, row, engine.Resolved{Identity: identity}, nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
 				if err != nil {
 					t.Fatal(err)
 				}

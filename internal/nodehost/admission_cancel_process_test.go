@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -64,7 +65,7 @@ func TestMachineLeaseWatchMeasuresCancelToJobProcessExit(t *testing.T) {
 			session, err := startProtocolSession(ctx, ProtocolSessionConfig{
 				Command: []string{binary, "-test.run=^TestProtocolSessionChild$", "--", "cancel"}, Environment: testProcessEnv(t, "GORACE=atexit_sleep_ms=0"),
 				ParseFrame: protocolTestCodec,
-				Log: func(_ context.Context, log nodeproto.FrameLog) error {
+				Log: func(_ context.Context, log nodewire.FrameLog) error {
 					if log.Message == "entered" {
 						close(entered)
 					}
@@ -78,16 +79,16 @@ func TestMachineLeaseWatchMeasuresCancelToJobProcessExit(t *testing.T) {
 				started <- nil
 				return err
 			}
-			_, err = session.Request(ctx, nodeproto.Request{
-				Op: nodeproto.OpHello, Protocol: nodeproto.Version,
-				Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+			_, err = session.Request(ctx, nodewire.Request{
+				Op: nodewire.OpHello, Protocol: nodewire.Version,
+				Engine: &nodewire.EngineIdentity{Version: "test"}, Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 			})
 			if err != nil {
 				started <- nil
 				return err
 			}
 			started <- session
-			_, err = session.Request(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: "job", Step: "body", Attempt: 1, Settled: []string{}})
+			_, err = session.Request(ctx, nodewire.Request{Op: nodewire.OpRunStep, Job: "job", Step: "body", Attempt: 1, Settled: []string{}})
 			return errors.Join(err, context.Cause(ctx))
 		})
 	}()

@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestEngineJobCancelHTTP(t *testing.T) {
@@ -92,7 +92,7 @@ func TestEngineFailureHTTP(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			b := newCredentialBoundary()
 			b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.DataRead}
-			f := &engineTransactions{failure: &nodeproto.JobFailure{Job: "source", Stage: "step:build", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked failure"}}}
+			f := &engineTransactions{failure: &nodewire.JobFailure{Job: "source", Stage: "step:build", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked failure"}}}
 			path := "/api/v1/runs/run/jobs/source/failure?generation=7"
 			status, code, reads := 200, apierr.Code(""), 1
 			switch state {
@@ -137,7 +137,7 @@ func TestEngineFailureHTTP(t *testing.T) {
 				assertEngineError(t, w, status, code)
 				return
 			}
-			var got *nodeproto.JobFailure
+			var got *nodewire.JobFailure
 			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got, f.failure) {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}

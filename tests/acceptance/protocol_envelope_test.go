@@ -10,8 +10,9 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -43,13 +44,13 @@ func testGoSDKEnvelopeTranscripts(t *testing.T) {
 			for _, closure := range envelopeClosures(job) {
 				t.Run(closure.kind, func(t *testing.T) {
 					recordLeaf(t)
-					sendProtocolProbe(t, process, nodeproto.Request{
-						ID: closure.kind, Op: nodeproto.OpEval, Closure: closure.id,
+					sendProtocolProbe(t, process, nodewire.Request{
+						ID: closure.kind, Op: nodewire.OpEval, Closure: closure.id,
 						Input: json.RawMessage(`{"outcome":"success"}`),
 					})
 					reply := protocolProbeReply(t, process, closure.kind)
-					var result nodeproto.EvalResult
-					if err := reply.Decode(&result); err != nil || result.ValidateValue(closure.kind) != nil {
+					var result nodewire.EvalResult
+					if err := reply.Decode(&result); err != nil || nodeproto.ValidateEvalValue(result, closure.kind) != nil {
 						t.Fatalf("invalid %s result: %+v, %v", closure.kind, result, err)
 					}
 					if mode == "fail" {
@@ -66,7 +67,7 @@ func testGoSDKEnvelopeTranscripts(t *testing.T) {
 						t.Fatalf("closure result = %+v; want %s", result, want)
 					}
 					if closure.kind == "generate" {
-						var document nodeproto.PlanDoc
+						var document nodewire.PlanDoc
 						if err := json.Unmarshal(result.Value, &document); err != nil || len(document.Jobs) != 1 || document.Jobs[0].ID != "generated" || !reflect.DeepEqual(document.Jobs[0].Needs, []string{"envelope"}) {
 							t.Fatalf("generation result = %s, %v", result.Value, err)
 						}
@@ -96,11 +97,11 @@ func testProtocolMalformedReplies(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			recordLeaf(t)
 			var tracker nodeproto.Tracker
-			id := tracker.Start(nodeproto.OpEval)
-			if frame, err := nodeproto.ParseFrame([]byte(raw)); !errors.Is(err, nodeproto.ErrMalformed) || frame.Reply != nil {
+			id := tracker.Start(nodewire.OpEval)
+			if frame, err := nodewire.ParseFrame([]byte(raw)); !errors.Is(err, nodewire.ErrMalformed) || frame.Reply != nil {
 				t.Fatalf("malformed reply accepted: %+v, %v", frame, err)
 			}
-			if pending := tracker.Pending(); len(pending) != 1 || pending[id] != nodeproto.OpEval {
+			if pending := tracker.Pending(); len(pending) != 1 || pending[id] != nodewire.OpEval {
 				t.Fatalf("malformed reply completed a request: %v", pending)
 			}
 		})
@@ -111,21 +112,21 @@ func testProtocolReplyCorrelation(t *testing.T) {
 	recordLeaf(t)
 	property := func(suffix string) bool {
 		var tracker nodeproto.Tracker
-		id := tracker.Start(nodeproto.OpEval)
-		raw, err := json.Marshal(nodeproto.Reply{ID: "unsolicited-" + suffix, OK: true, Result: json.RawMessage(`{"value":true}`)})
+		id := tracker.Start(nodewire.OpEval)
+		raw, err := json.Marshal(nodewire.Reply{ID: "unsolicited-" + suffix, OK: true, Result: json.RawMessage(`{"value":true}`)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		frame, err := nodeproto.ParseFrame(raw)
+		frame, err := nodewire.ParseFrame(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := tracker.Resolve(*frame.Reply); !errors.Is(err, nodeproto.ErrUnknownReply) || len(tracker.Pending()) != 1 {
 			return false
 		}
-		reply := nodeproto.Reply{ID: id, OK: true, Result: json.RawMessage(`{"value":true}`)}
+		reply := nodewire.Reply{ID: id, OK: true, Result: json.RawMessage(`{"value":true}`)}
 		op, err := tracker.Resolve(reply)
-		if err != nil || op != nodeproto.OpEval || len(tracker.Pending()) != 0 {
+		if err != nil || op != nodewire.OpEval || len(tracker.Pending()) != 0 {
 			return false
 		}
 		_, err = tracker.Resolve(reply)
@@ -145,19 +146,19 @@ func testProtocolEvalValueTypes(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			recordLeaf(t)
 			for _, value := range []string{"true", "false", `"key"`, `""`, "null", "[]", "{}", "1", `{"jobs":[]}`} {
-				var result nodeproto.EvalResult
-				if err := (nodeproto.Reply{ID: "eval", OK: true, Result: json.RawMessage(`{"value":` + value + `}`)}).Decode(&result); err != nil {
+				var result nodewire.EvalResult
+				if err := (nodewire.Reply{ID: "eval", OK: true, Result: json.RawMessage(`{"value":` + value + `}`)}).Decode(&result); err != nil {
 					t.Fatal(err)
 				}
 				want := false
 				for _, candidate := range valid {
 					want = want || candidate == value
 				}
-				if err := result.ValidateValue(kind); (err == nil) != want {
+				if err := nodeproto.ValidateEvalValue(result, kind); (err == nil) != want {
 					t.Fatalf("%s value %s: %v; want valid=%t", kind, value, err, want)
 				}
 				result.Error = &apierr.Error{Code: apierr.SDKError, Message: "closure failed"}
-				if err := result.ValidateValue(kind); (err == nil) != (value == "null") {
+				if err := nodeproto.ValidateEvalValue(result, kind); (err == nil) != (value == "null") {
 					t.Fatalf("failed %s value %s: %v", kind, value, err)
 				}
 			}
@@ -165,18 +166,18 @@ func testProtocolEvalValueTypes(t *testing.T) {
 	}
 }
 
-func planEnvelopeProbe(t *testing.T, bin, mode string) (*acceptance.GoSDKProcess, nodeproto.JobSpec) {
+func planEnvelopeProbe(t *testing.T, bin, mode string) (*acceptance.GoSDKProcess, nodewire.JobSpec) {
 	t.Helper()
 	process := startProtocolProbe(t, bin)
 	hello := probeHello()
-	hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "envelope", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture-bearer"}}
+	hello.Binding = &nodewire.ProcessBinding{RunID: "r", JobID: "envelope", Routes: nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture-bearer"}}
 	sendProtocolProbe(t, process, hello)
 	protocolProbeReply(t, process, "hello")
-	sendProtocolProbe(t, process, nodeproto.Request{
-		ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.EnvelopeName,
-		Args: map[string]string{"name": mode}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: "invoked-envelope"},
+	sendProtocolProbe(t, process, nodewire.Request{
+		ID: "plan", Op: nodewire.OpPlan, Pipeline: protocolgo.EnvelopeName,
+		Args: map[string]string{"name": mode}, Run: &nodewire.RunContext{RunID: "r", Pipeline: "invoked-envelope"},
 	})
-	var doc nodeproto.PlanDoc
+	var doc nodewire.PlanDoc
 	if err := protocolProbeReply(t, process, "plan").Decode(&doc); err != nil || len(doc.Jobs) != 1 {
 		t.Fatalf("envelope plan: %+v, %v", doc, err)
 	}
@@ -185,7 +186,7 @@ func planEnvelopeProbe(t *testing.T, bin, mode string) (*acceptance.GoSDKProcess
 
 type envelopeClosure struct{ kind, id, value string }
 
-func envelopeClosures(job nodeproto.JobSpec) []envelopeClosure {
+func envelopeClosures(job nodewire.JobSpec) []envelopeClosure {
 	return []envelopeClosure{
 		{"skip_if", job.Closures.SkipIf[0], "true"},
 		{"before_run", job.Closures.BeforeRun[0], "null"},
@@ -198,9 +199,9 @@ func envelopeClosures(job nodeproto.JobSpec) []envelopeClosure {
 
 func testEnvelopeInvocationResults(t *testing.T, process *acceptance.GoSDKProcess, mode string) {
 	t.Helper()
-	sendProtocolProbe(t, process, nodeproto.Request{
-		ID: "plan-again", Op: nodeproto.OpPlan, Pipeline: protocolgo.EnvelopeName,
-		Args: map[string]string{"name": "changed"}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: "invoked-envelope"},
+	sendProtocolProbe(t, process, nodewire.Request{
+		ID: "plan-again", Op: nodewire.OpPlan, Pipeline: protocolgo.EnvelopeName,
+		Args: map[string]string{"name": "changed"}, Run: &nodewire.RunContext{RunID: "r", Pipeline: "invoked-envelope"},
 	})
 	requireProtocolCode(t, protocolProbeReply(t, process, "plan-again"), apierr.ProtocolError)
 	for _, attempt := range []int{0, -1, 1} {
@@ -211,7 +212,7 @@ func testEnvelopeInvocationResults(t *testing.T, process *acceptance.GoSDKProces
 			requireProtocolCode(t, reply, apierr.BadRequest)
 			continue
 		}
-		var result nodeproto.RunResult
+		var result nodewire.RunResult
 		if err := reply.Decode(&result); err != nil {
 			t.Fatal(err)
 		}
@@ -223,30 +224,30 @@ func testEnvelopeInvocationResults(t *testing.T, process *acceptance.GoSDKProces
 			t.Fatalf("body success = %+v", result)
 		}
 	}
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "absent-step", Op: nodeproto.OpRunStep, Job: "envelope", Step: "absent", Attempt: 1, Settled: []string{}})
+	sendProtocolProbe(t, process, nodewire.Request{ID: "absent-step", Op: nodewire.OpRunStep, Job: "envelope", Step: "absent", Attempt: 1, Settled: []string{}})
 	requireProtocolCode(t, protocolProbeReply(t, process, "absent-step"), apierr.UnknownStep)
 }
 
 func testEnvelopeCancel(t *testing.T, bin string) {
 	process, job := planEnvelopeProbe(t, bin, "cancel")
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "sibling", Op: nodeproto.OpRunStep, Job: "envelope", Step: "sibling", Attempt: 1, Settled: []string{}})
+	sendProtocolProbe(t, process, nodewire.Request{ID: "sibling", Op: nodewire.OpRunStep, Job: "envelope", Step: "sibling", Attempt: 1, Settled: []string{}})
 	requireEnvelopeLog(t, process, "sibling-waiting")
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "memo", Op: nodeproto.OpEval, Closure: job.Closures.MemoKey})
+	sendProtocolProbe(t, process, nodewire.Request{ID: "memo", Op: nodewire.OpEval, Closure: job.Closures.MemoKey})
 	requireEnvelopeLog(t, process, "memo-waiting")
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "cancel", Op: nodeproto.OpCancel, Target: "memo"})
-	var evaluation nodeproto.EvalResult
+	sendProtocolProbe(t, process, nodewire.Request{ID: "cancel", Op: nodewire.OpCancel, Target: "memo"})
+	var evaluation nodewire.EvalResult
 	if err := protocolProbeReply(t, process, "memo").Decode(&evaluation); err != nil || evaluation.Error == nil || string(evaluation.Value) != "null" {
 		t.Fatalf("cancelled eval = %+v, %v", evaluation, err)
 	}
 	if reply := protocolProbeReply(t, process, "cancel"); !reply.OK {
 		t.Fatalf("cancel acknowledgement = %+v", reply)
 	}
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "release", Op: nodeproto.OpEval, Closure: job.Closures.BeforeRun[0]})
+	sendProtocolProbe(t, process, nodewire.Request{ID: "release", Op: nodewire.OpEval, Closure: job.Closures.BeforeRun[0]})
 	for range 2 {
 		reply := protocolProbeReply(t, process, "")
 		switch reply.ID {
 		case "sibling":
-			var result nodeproto.RunResult
+			var result nodewire.RunResult
 			if err := reply.Decode(&result); err != nil || result.Outcome != "success" {
 				t.Fatalf("target cancellation affected sibling: %+v, %v", result, err)
 			}
@@ -269,7 +270,7 @@ func requireEnvelopeLog(t *testing.T, process *acceptance.GoSDKProcess, message 
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame, err := nodeproto.ParseFrame(raw)
+	frame, err := nodewire.ParseFrame(raw)
 	if err != nil || frame.Log == nil || frame.Log.Message != message {
 		t.Fatalf("expected barrier log %q; got %s, %v", message, raw, err)
 	}

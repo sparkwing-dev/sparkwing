@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -20,6 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestNativeClosureFailures(t *testing.T) {
@@ -27,12 +28,12 @@ func TestNativeClosureFailures(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	bin := buildNativeSDKFixture(t, ctx, "evalfixture")
-	runner := nodeproto.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}
-	hello, plan := planNativeSDKFixture(t, ctx, bin, "eval", map[string]string{}, nodeproto.RunContext{RunID: "run", Pipeline: "eval"}, runner)
+	runner := nodewire.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}
+	hello, plan := planNativeSDKFixture(t, ctx, bin, "eval", map[string]string{}, nodewire.RunContext{RunID: "run", Pipeline: "eval"}, runner)
 	for _, id := range []string{"source", "skip", "memo", "memo_no_read"} {
 		t.Run(id, func(t *testing.T) {
 			jobID := strings.TrimSuffix(id, "_no_read")
-			var job nodeproto.JobSpec
+			var job nodewire.JobSpec
 			for _, declared := range plan.Jobs {
 				if declared.ID == jobID {
 					job = declared
@@ -61,7 +62,7 @@ func TestNativeClosureFailures(t *testing.T) {
 			if id == "source" {
 				st.node.Status, st.node.Outcome, st.node.Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionExpected
 			}
-			input := EvaluationInput{Accepted: accepted, NodeID: jobID, SpecHash: string(jobHash), Engine: selected, Entry: &source.Entry{Engine: selected, Command: []string{bin}, Directory: t.TempDir()}, GrantedRunner: runner, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: jobID}}
+			input := EvaluationInput{Accepted: accepted, NodeID: jobID, SpecHash: string(jobHash), Engine: selected, Entry: &source.Entry{Engine: selected, Command: []string{bin}, Directory: t.TempDir()}, GrantedRunner: runner, RouteBinding: nodewire.ProcessBinding{RunID: "run", JobID: jobID}}
 			revoked, cleaned := false, false
 			var mu sync.Mutex
 			var logs []string
@@ -70,7 +71,7 @@ func TestNativeClosureFailures(t *testing.T) {
 			cfg := ProtocolSessionConfig{
 				Masks:        masks,
 				Environments: SDKEnvironment{Store: st, Base: procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH")}}},
-				Log: func(_ context.Context, frame nodeproto.FrameLog) error {
+				Log: func(_ context.Context, frame nodewire.FrameLog) error {
 					mu.Lock()
 					defer mu.Unlock()
 					logs = append(logs, frame.Message)
@@ -95,7 +96,7 @@ func TestNativeClosureFailures(t *testing.T) {
 				},
 				Bind: func(_ context.Context, input EvaluationInput) (ProcessGrant, error) {
 					binding := input.RouteBinding
-					binding.Routes = nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "delegated-process"}
+					binding.Routes = nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "delegated-process"}
 					return ProcessGrant{Binding: binding, Revoke: func() error { revoked = true; return nil }}, nil
 				},
 			})
@@ -119,7 +120,7 @@ func TestNativeClosureFailures(t *testing.T) {
 					},
 					Bind: func(_ context.Context, input NodeInput) (ProcessGrant, error) {
 						binding := input.RouteBinding
-						binding.Routes = nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "delegated-process"}
+						binding.Routes = nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "delegated-process"}
 						return ProcessGrant{Binding: binding, Revoke: func() error { revoked = true; return nil }}, nil
 					},
 				})

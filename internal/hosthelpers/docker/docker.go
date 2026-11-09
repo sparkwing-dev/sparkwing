@@ -24,8 +24,9 @@ import (
 	"regexp"
 	"strings"
 
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // ErrDockerUnavailable is returned by every function that shells out

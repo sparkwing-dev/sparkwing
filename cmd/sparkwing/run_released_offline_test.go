@@ -19,19 +19,17 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/mod/module"
-
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-
-	modzip "golang.org/x/mod/zip"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"golang.org/x/mod/module"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	modzip "golang.org/x/mod/zip"
 )
 
 func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
@@ -209,11 +207,11 @@ func inspectReleasedOffline(t *testing.T, spec source.Spec, options source.Optio
 	}
 	sessions := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base, Snapshots: snapshots}}
 	var logs bytes.Buffer
-	planner := nodehost.SDKPlanner{Log: func(_ context.Context, frame nodeproto.FrameLog) error {
+	planner := nodehost.SDKPlanner{Log: func(_ context.Context, frame nodewire.FrameLog) error {
 		_, err := fmt.Fprintln(&logs, frame.Message)
 		return err
 	}, Start: sessions.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: options.Base.Masker}
-	planned, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{Entry: entry, Environment: snapshot, Entrypoint: "offline", Args: map[string]string{}, Run: nodeproto.RunContext{RunID: "released-offline", Pipeline: "offline"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, nodehost.PlanningInput{})
+	planned, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{Entry: entry, Environment: snapshot, Entrypoint: "offline", Args: map[string]string{}, Run: nodewire.RunContext{RunID: "released-offline", Pipeline: "offline"}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, nodehost.PlanningInput{})
 	if err != nil || planned.Description.Name != "offline" {
 		t.Fatalf("released SDK inspection: %+v: %v", planned.Description, err)
 	}
@@ -223,7 +221,7 @@ func inspectReleasedOffline(t *testing.T, spec source.Spec, options source.Optio
 func releasedSDKProxy(t *testing.T, root, version string) string {
 	t.Helper()
 	stage := sdkFixtureModuleRoot(t)
-	body, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	body, err := os.ReadFile(filepath.Join(stage, "go.mod"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,12 +11,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // StepReport fences step state to the attempt that produced it.
@@ -35,7 +36,7 @@ type AnnotationWrite struct {
 	Ref    runspec.NodeRef
 	Actor  runstate.Actor
 	StepID string
-	nodeproto.Annotation
+	nodewire.Annotation
 }
 
 // SummaryWrite carries masked job or step markdown under the writer's live binding.
@@ -162,7 +163,7 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 	if !utf8.ValidString(annotation.File) {
 		return authorityError(apierr.BadRequest, "annotation file is not valid UTF-8")
 	}
-	if err := annotation.Validate(); err != nil {
+	if err := nodeproto.ValidateAnnotation(annotation.Annotation); err != nil {
 		return authorityError(apierr.BadRequest, err.Error())
 	}
 	encoded, err := json.Marshal(annotation.Annotation)
@@ -194,7 +195,7 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 		if err := tx.QueryRowContext(ctx, "SELECT annotations_json FROM "+query, args...).Scan(&existing); err != nil {
 			return err
 		}
-		var entries []nodeproto.Annotation
+		var entries []nodewire.Annotation
 		if len(existing) > 0 {
 			if err := json.Unmarshal(existing, &entries); err != nil {
 				return err

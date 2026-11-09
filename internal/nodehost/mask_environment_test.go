@@ -13,11 +13,11 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestClaimedEnvironmentRegistrationCannotCollideWithAcceptedIdentifiers(t *testing.T) {
@@ -26,11 +26,11 @@ func TestClaimedEnvironmentRegistrationCannotCollideWithAcceptedIdentifiers(t *t
 		config, input, state, _ := nativeHostFixture(t)
 		switch seed[0] % 3 {
 		case 0:
-			input.Accepted.Plan.Jobs[0].Caches = []nodeproto.CacheSpec{{Name: "cache-" + value}}
+			input.Accepted.Plan.Jobs[0].Caches = []nodewire.CacheSpec{{Name: "cache-" + value}}
 		case 1:
-			input.Accepted.Plan.Jobs[0].References = []nodeproto.PipelineReference{{Pipeline: "pipeline-" + value, Job: "build"}}
+			input.Accepted.Plan.Jobs[0].References = []nodewire.PipelineReference{{Pipeline: "pipeline-" + value, Job: "build"}}
 		case 2:
-			input.Accepted.Plan.Jobs[0].References = []nodeproto.PipelineReference{{Pipeline: "build", Job: "job-" + value}}
+			input.Accepted.Plan.Jobs[0].References = []nodewire.PipelineReference{{Pipeline: "build", Job: "job-" + value}}
 		}
 		state.run.Plan, _ = json.Marshal(input.Accepted.Plan)
 		config.Source.Base = procenv.Base{Ambient: []string{"APP_VALUE=" + value}, SubmitEnvAllow: []string{"APP_VALUE"}}

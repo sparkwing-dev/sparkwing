@@ -42,7 +42,7 @@ func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, writeErr := fmt.Fprintf(mod, "\nreplace github.com/sparkwing-dev/sparkwing => %q\n", root)
+	_, writeErr := fmt.Fprintf(mod, "\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %q\n", filepath.Join(root, "sparkwing"))
 	if err := mod.Close(); err != nil || writeErr != nil {
 		t.Fatalf("local SDK replacement: %v %v", writeErr, err)
 	}

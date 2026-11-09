@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRemoteDepcache(t *testing.T) {
@@ -98,7 +98,7 @@ func TestExecutorDepcache(t *testing.T) {
 					backend.upload.Authority.Attempt = backend.upload.Identity.Attempt
 					return StorageBinding{Bytes: backend, Records: backend, Authority: backend.upload.Authority}, nil
 				}
-				deps.PrepareCaches = func(ctx context.Context, in NodeInput, job nodeproto.JobSpec) (ExecutorFinalizer, error) {
+				deps.PrepareCaches = func(ctx context.Context, in NodeInput, job nodewire.JobSpec) (ExecutorFinalizer, error) {
 					finish, err := originalPrepare(ctx, in, job)
 					if err != nil || miss {
 						return finish, err
@@ -146,7 +146,7 @@ func TestExecutorDepcache(t *testing.T) {
 	}
 }
 
-func depcacheFixture(t *testing.T) (NodeInput, DepcacheRecords, *depcacheBackendFixture, nodeproto.JobSpec) {
+func depcacheFixture(t *testing.T) (NodeInput, DepcacheRecords, *depcacheBackendFixture, nodewire.JobSpec) {
 	t.Helper()
 	input, _, publisher := artifactPublicationFixture(t)
 	input.Entry = &source.Entry{Directory: t.TempDir()}
@@ -163,7 +163,7 @@ func depcacheFixture(t *testing.T) (NodeInput, DepcacheRecords, *depcacheBackend
 		return backend.upload, nil
 	}}
 	writePublishedFile(t, input.Entry.Directory, "lockfile", "dependencies-v1", 0o600)
-	job := nodeproto.JobSpec{ID: input.NodeID, Caches: []nodeproto.CacheSpec{{Name: "dependencies", Path: "vendor", KeyFiles: []string{"lockfile"}}}}
+	job := nodewire.JobSpec{ID: input.NodeID, Caches: []nodewire.CacheSpec{{Name: "dependencies", Path: "vendor", KeyFiles: []string{"lockfile"}}}}
 	return input, adapter, backend, job
 }
 
@@ -294,7 +294,7 @@ func TestDepcacheRecords(t *testing.T) {
 	}
 }
 
-func seedDepcache(t *testing.T, input NodeInput, adapter DepcacheRecords, backend *depcacheBackendFixture, job nodeproto.JobSpec) {
+func seedDepcache(t *testing.T, input NodeInput, adapter DepcacheRecords, backend *depcacheBackendFixture, job nodewire.JobSpec) {
 	t.Helper()
 	finish, err := adapter.Prepare(t.Context(), input, job)
 	if err != nil || finish == nil {

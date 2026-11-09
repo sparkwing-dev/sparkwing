@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -32,9 +31,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -76,7 +77,7 @@ func TestBurstSDKExecutesHerePersonalAndCloudAwards(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 3.8s measured in the short class; the full suite runs it")
 	}
-	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
+	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodewire.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if err != nil {
 		t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(snapshot.Run.Plan, &plan); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +180,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			processes.Session.Environments.Base = native.source.Base
 		}
 	}
-	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
+	processes.Log = func(_ context.Context, _, _ string, frame nodewire.FrameLog) error {
 		logs.WriteString(frame.Message)
 		logs.Write(frame.Attrs)
 		return nil
@@ -210,7 +211,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			storage, err := private.BindStorage(ctx, principal)
 			return nodehost.StorageBinding{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority}, err
 		},
-		PrepareCaches: caches.Prepare, PrepareArtifacts: func(ctx context.Context, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
+		PrepareCaches: caches.Prepare, PrepareArtifacts: func(ctx context.Context, input nodehost.NodeInput, job nodewire.JobSpec) (nodehost.ExecutorFinalizer, error) {
 			finish, err := artifacts.Prepare(ctx, input, job)
 			if err != nil || finish == nil {
 				return finish, err
@@ -254,7 +255,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 		},
 		Store: state, Masker: masker, Masks: masks,
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementRunnerHosted, Secrets: masks},
-		Log: func(_ context.Context, _ nodehost.NodeInput, frame nodeproto.FrameLog) error {
+		Log: func(_ context.Context, _ nodehost.NodeInput, frame nodewire.FrameLog) error {
 			logs.WriteString(frame.Message)
 			logs.Write(frame.Attrs)
 			return nil
@@ -276,7 +277,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			}
 			return processes.Delegate(ctx, capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte(award.Capability))}, capability.DelegateSpec{
 				Parent: principal.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport, capability.SecretsRelease}, Binding: principal.Capability.Binding, Repositories: principal.Capability.Repositories, ExpiresAt: principal.Capability.ExpiresAt,
-			}, nodehost.ProcessServices{RunID: award.RunID, Job: input.Accepted.Plan.Jobs[0], Annotation: func(_ context.Context, _ capability.Authorized, request nodeproto.AnnotationRequest) error {
+			}, nodehost.ProcessServices{RunID: award.RunID, Job: input.Accepted.Plan.Jobs[0], Annotation: func(_ context.Context, _ capability.Authorized, request nodewire.AnnotationRequest) error {
 				logs.WriteString(request.Message)
 				return nil
 			}, Secrets: []string{"TOKEN"}, Secret: func(ctx context.Context, _ capability.Authorized, name string) (string, bool, error) {
@@ -375,8 +376,8 @@ func (s *burstSDKServices) Secret(ctx context.Context, name string) (string, boo
 	return value.Value, value.Masked, nil
 }
 
-func (s *burstSDKServices) Emit(frame nodeproto.FrameLog) {
-	body, err := json.Marshal(nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Message: frame.Message}, Step: frame.Step})
+func (s *burstSDKServices) Emit(frame nodewire.FrameLog) {
+	body, err := json.Marshal(nodewire.AnnotationRequest{Annotation: nodewire.Annotation{Message: frame.Message}, Step: frame.Step})
 	if err != nil {
 		panic(err)
 	}
@@ -390,34 +391,34 @@ func (s *burstSDKServices) Emit(frame nodeproto.FrameLog) {
 }
 
 type burstSDKProcess struct {
-	runner   nodeproto.RunnerIdentity
+	runner   nodewire.RunnerIdentity
 	identity engineid.Identity
 	services *burstSDKServices
 	plan     any
-	run      nodeproto.RunContext
+	run      nodewire.RunContext
 	closed   *bool
 }
 
-func (p *burstSDKProcess) Request(ctx context.Context, request nodeproto.Request) (nodeproto.Reply, error) {
+func (p *burstSDKProcess) Request(ctx context.Context, request nodewire.Request) (nodewire.Reply, error) {
 	ops := sdkserve.DefaultOperations
 	ctx = ops.Context(ctx, p.run, p.runner, p.services)
 	var result any
 	var err error
 	switch request.Op {
-	case nodeproto.OpHello:
-		result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: p.identity.Pin.Version}}
-	case nodeproto.OpPlan:
+	case nodewire.OpHello:
+		result = nodewire.HelloResult{Protocol: nodewire.Version, SDK: nodewire.SDKIdentity{Language: "go", Version: p.identity.Pin.Version}}
+	case nodewire.OpPlan:
 		p.run = *request.Run
-		var plan nodeproto.PlanDoc
+		var plan nodewire.PlanDoc
 		p.plan, plan, err = ops.Plan(ctx, request.Pipeline, request.Args, p.run)
 		result = plan
-	case nodeproto.OpRunStep:
+	case nodewire.OpRunStep:
 		result, err = ops.RunStep(ctx, p.plan, request)
 	default:
 		err = fmt.Errorf("unexpected SDK operation: %s", request.Op)
 	}
 	raw, marshalErr := json.Marshal(result)
-	return nodeproto.Reply{ID: request.ID, OK: true, Result: raw}, errors.Join(err, marshalErr)
+	return nodewire.Reply{ID: request.ID, OK: true, Result: raw}, errors.Join(err, marshalErr)
 }
 
 func (p *burstSDKProcess) Close() error                { *p.closed = true; return nil }

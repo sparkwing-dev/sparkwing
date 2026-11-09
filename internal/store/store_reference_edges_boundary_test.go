@@ -9,9 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func checkStoreReferenceBoundary(t *testing.T) error {
@@ -22,16 +22,16 @@ func checkStoreReferenceBoundary(t *testing.T) error {
 	authorized := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef}, Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: reader.Team}}}
 	for _, test := range []struct {
 		name    string
-		spec    nodeproto.JobSpec
+		spec    nodewire.JobSpec
 		allowed bool
 	}{
-		{"unrelated", nodeproto.JobSpec{}, false},
-		{"dependency", nodeproto.JobSpec{Needs: []string{"job"}}, true},
-		{"optional_dependency", nodeproto.JobSpec{NeedsIfPresent: []string{"job"}}, true},
-		{"transitive_dependency", nodeproto.JobSpec{Needs: []string{"unrelated"}}, true},
-		{"artifact_input", nodeproto.JobSpec{Consumes: []nodeproto.ArtifactInput{{Producer: "job"}}}, true},
-		{"generated_group", nodeproto.JobSpec{NeedsGenerated: []string{"generated"}}, true},
-		{"failure_handler", nodeproto.JobSpec{OnFailureOf: "job"}, true},
+		{"unrelated", nodewire.JobSpec{}, false},
+		{"dependency", nodewire.JobSpec{Needs: []string{"job"}}, true},
+		{"optional_dependency", nodewire.JobSpec{NeedsIfPresent: []string{"job"}}, true},
+		{"transitive_dependency", nodewire.JobSpec{Needs: []string{"unrelated"}}, true},
+		{"artifact_input", nodewire.JobSpec{Consumes: []nodewire.ArtifactInput{{Producer: "job"}}}, true},
+		{"generated_group", nodewire.JobSpec{NeedsGenerated: []string{"generated"}}, true},
+		{"failure_handler", nodewire.JobSpec{OnFailureOf: "job"}, true},
 	} {
 		test.spec.ID = reader.NodeID
 		body, err := json.Marshal(test.spec)

@@ -8,7 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // safety: Optional preserves an explicitly selected zero separately from absence.
@@ -230,7 +230,7 @@ type PauseSelection struct {
 // CheckoutPolicy preserves the C3 policy and each field's winning origin.
 // Origins uses full_history, depth, tags, submodules and lfs; every present field has one.
 type CheckoutPolicy struct {
-	Policy  nodeproto.SourceSpec     `json:"policy"`
+	Policy  nodewire.SourceSpec      `json:"policy"`
 	Origins map[string]SettingOrigin `json:"origins"`
 }
 
@@ -330,13 +330,13 @@ type Options struct {
 
 // safety: Ceilings snapshots operator bounds for C4 to enforce without silent clamping.
 type Ceilings struct {
-	Priority                Setting[int]                    `json:"priority"`
-	OwnerExecutionTimeout   Setting[time.Duration]          `json:"owner_execution_timeout"`
-	ClaimWait               Setting[time.Duration]          `json:"claim_wait"`
-	Retry                   Setting[int]                    `json:"retry"`
-	MemoTTL                 Setting[time.Duration]          `json:"memo_ttl"`
-	AllowedAdmissionClasses Setting[[]string]               `json:"allowed_admission_classes"`
-	AllowedSources          Setting[[]nodeproto.SourceSpec] `json:"allowed_sources"`
+	Priority                Setting[int]                   `json:"priority"`
+	OwnerExecutionTimeout   Setting[time.Duration]         `json:"owner_execution_timeout"`
+	ClaimWait               Setting[time.Duration]         `json:"claim_wait"`
+	Retry                   Setting[int]                   `json:"retry"`
+	MemoTTL                 Setting[time.Duration]         `json:"memo_ttl"`
+	AllowedAdmissionClasses Setting[[]string]              `json:"allowed_admission_classes"`
+	AllowedSources          Setting[[]nodewire.SourceSpec] `json:"allowed_sources"`
 }
 
 // ExecutionSettings contains one sealed winner set for each declared job ID.
@@ -444,7 +444,7 @@ type Guards struct {
 // classifications but cannot declassify a requested value or expose it through display.
 // Raw Args remain available for execution, retries and masking, never direct display.
 type Resolved struct {
-	ArgumentDeclarations []nodeproto.ArgumentDescription `json:"argument_declarations,omitempty"`
+	ArgumentDeclarations []nodewire.ArgumentDescription `json:"argument_declarations,omitempty"`
 	// Engine pins the portable verified release identity; executors resolve their own platform asset.
 	Engine              engineid.Identity   `json:"engine"`
 	Args                map[string]string   `json:"args"`

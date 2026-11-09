@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 func executeCommand(ctx context.Context, name string, args []string, dir string, env map[string]string) (ExecResult, error) {

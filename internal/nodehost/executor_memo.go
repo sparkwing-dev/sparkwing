@@ -8,15 +8,15 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func (h *nodeExecutor) memo(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec, spec runspec.Spec) (runspec.Hash, *runstate.NodeResult, error) {
+func (h *nodeExecutor) memo(ctx context.Context, session *executorSession, input NodeInput, job nodewire.JobSpec, spec runspec.Spec) (runspec.Hash, *runstate.NodeResult, error) {
 	key, err := h.memoKey(ctx, session, input, job)
 	if err != nil || key == "" {
 		return "", nil, err
@@ -35,7 +35,7 @@ func (h *nodeExecutor) memo(ctx context.Context, session *executorSession, input
 	return hash, result, err
 }
 
-func (h *nodeExecutor) memoKey(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec) (string, error) {
+func (h *nodeExecutor) memoKey(ctx context.Context, session *executorSession, input NodeInput, job nodewire.JobSpec) (string, error) {
 	if job.Memo == nil && job.Closures.MemoKey == "" {
 		return "", nil
 	}

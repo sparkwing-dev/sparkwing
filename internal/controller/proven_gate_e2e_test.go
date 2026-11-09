@@ -12,20 +12,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const provenGateSHA = "0123456789abcdef0123456789abcdef01234567"
@@ -44,7 +45,7 @@ type provenLatestServices struct {
 	bearer string
 }
 
-func (provenLatestServices) Emit(nodeproto.FrameLog) {}
+func (provenLatestServices) Emit(nodewire.FrameLog) {}
 
 func (s provenLatestServices) Latest(ctx context.Context, pipeline, job string, age time.Duration, fromAnyRun, fromProvenRun bool) (json.RawMessage, error) {
 	query := url.Values{"job": {job}, "max_age_ms": {strconv.FormatInt(age.Milliseconds(), 10)}}
@@ -190,7 +191,7 @@ func TestProvenGatePassReachesALaterRunAtTheSameCommit(t *testing.T) {
 		data = &copied
 	}
 	grant, err := processes.Delegate(ctx, capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}, capability.DelegateSpec{Parent: principal.Authority, Audience: capability.NodeHost, Binding: binding, Grants: principal.Capability.Grants, Repositories: principal.Capability.Repositories, Data: data, ExpiresAt: principal.Capability.ExpiresAt}, nodehost.ProcessServices{
-		RunID: "run", Job: nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "gate", Job: "record-tree", FromProvenRun: true}}},
+		RunID: "run", Job: nodewire.JobSpec{ID: "job", References: []nodewire.PipelineReference{{Pipeline: "gate", Job: "record-tree", FromProvenRun: true}}},
 		Latest: func(ctx context.Context, auth capability.Authorized, pipeline, job string, age time.Duration, fromAnyRun bool) (nodehost.ProcessOutput, error) {
 			proven := auth.Target.Reference != nil && auth.Target.Reference.FromProvenRun
 			run, output, err := process.Latest(ctx, pipeline, job, age, fromAnyRun, proven)
@@ -201,7 +202,7 @@ func TestProvenGatePassReachesALaterRunAtTheSameCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = grant.Revoke() })
-	sdk := sdkserve.DefaultOperations.Context(ctx, nodeproto.RunContext{RunID: "run"}, nodeproto.RunnerIdentity{}, provenLatestServices{router: router, bearer: grant.Binding.Routes.Bearer})
+	sdk := sdkserve.DefaultOperations.Context(ctx, nodewire.RunContext{RunID: "run"}, nodewire.RunnerIdentity{}, provenLatestServices{router: router, bearer: grant.Binding.Routes.Bearer})
 	ref := sparkwing.RefToLastRun[provenGatePass]("gate", "record-tree", sparkwing.FromProvenRunAtCommit())
 	read := func() (pass provenGatePass, found bool) {
 		defer func() {

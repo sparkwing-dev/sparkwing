@@ -10,19 +10,19 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // CheckoutPlanningInput supplies acquired project bytes and immutable intake facts to every planner.
 type CheckoutPlanningInput struct {
 	Request     runspec.SealedRequest
 	Entry       *source.Entry
-	Runner      nodeproto.RunnerIdentity
+	Runner      nodewire.RunnerIdentity
 	Project     []byte
 	ProjectFile string
 	Planning    PlanningInput
@@ -131,7 +131,7 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	resolved.Guards = checkoutGuardVerdict(guards, request, resolved)
 	return OwnerPlanning{
 		Declarations: declarations, Resolved: resolved, Planning: prepared.Input, Plan: prepared.Plan,
-		Resolve: func(plan nodeproto.PlanDoc) (runspec.Resolved, error) {
+		Resolve: func(plan nodewire.PlanDoc) (runspec.Resolved, error) {
 			winner := resolved
 			settings, err := settings.ResolvePlan(settings.PlanInputs{Request: input.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: request.Origin == runspec.OriginLocal}})
 			winner.Settings = settings

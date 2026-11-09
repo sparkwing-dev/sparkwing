@@ -4,23 +4,24 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func validatePlan(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
+func validatePlan(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodewire.PlanDoc, error) {
 	plan, err := nodeproto.ValidatePlan(raw, ctx)
 	if err != nil {
-		return nodeproto.PlanDoc{}, err
+		return nodewire.PlanDoc{}, err
 	}
 	for _, job := range plan.Jobs {
 		for _, child := range job.Children {
 			if child.Repository != "" {
 				if err := runspec.ValidateRepoUse(runspec.RepoKey(child.Repository), runspec.RepoMachineStore); err != nil {
-					return nodeproto.PlanDoc{}, authorityError(apierr.PlanInvalid, "child repository must be a canonical repository key")
+					return nodewire.PlanDoc{}, authorityError(apierr.PlanInvalid, "child repository must be a canonical repository key")
 				}
 			}
 		}

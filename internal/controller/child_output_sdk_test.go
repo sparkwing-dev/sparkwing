@@ -18,23 +18,24 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type childOutputTransport struct {
@@ -152,7 +153,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := nodehost.WithClient(nodehost.NativeConfig{Store: state}, host)
-	services, err := cfg.Services(ctx, principal, nodeproto.JobSpec{ID: "job"})
+	services, err := cfg.Services(ctx, principal, nodewire.JobSpec{ID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 		finishChildOutput(t, e.Store, handler, httpClient, child.RunID)
 		childOutputSQL(t, e.Store, `UPDATE runs SET status='success',finished_at=? WHERE team='a' AND id=?`, time.Now().UnixNano(), child.RunID)
 	}
-	sdkContext := sdkserve.DefaultOperations.Context(ctx, nodeproto.RunContext{RunID: "run"}, nodeproto.RunnerIdentity{}, childAwaitServices{process: services})
+	sdkContext := sdkserve.DefaultOperations.Context(ctx, nodewire.RunContext{RunID: "run"}, nodewire.RunnerIdentity{}, childAwaitServices{process: services})
 	got, err := sparkwing.RunAndAwait[childWeather, sparkwing.NoInputs](sdkContext, "weather-report", "stamp")
 	if err != nil || got != (childWeather{Weather: "clear", Degrees: 72}) {
 		t.Fatalf("typed child output: %+v: %v", got, err)
@@ -283,11 +284,11 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 		t.Fatal(err)
 	}
 	ops := sdkserve.DefaultOperations
-	built, _, err := ops.Plan(t.Context(), "child-output-weather-fixture", map[string]string{}, nodeproto.RunContext{RunID: run, Pipeline: "weather-report"})
+	built, _, err := ops.Plan(t.Context(), "child-output-weather-fixture", map[string]string{}, nodewire.RunContext{RunID: run, Pipeline: "weather-report"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := ops.RunStep(ops.Context(t.Context(), nodeproto.RunContext{RunID: run}, nodeproto.RunnerIdentity{}, nil), built, nodeproto.Request{Job: "stamp", Step: "run", Attempt: 1, Settled: []string{}})
+	result, err := ops.RunStep(ops.Context(t.Context(), nodewire.RunContext{RunID: run}, nodewire.RunnerIdentity{}, nil), built, nodewire.Request{Job: "stamp", Step: "run", Attempt: 1, Settled: []string{}})
 	if err != nil || result.Outcome != "success" {
 		t.Fatalf("child stamp: %+v: %v", result, err)
 	}
@@ -393,7 +394,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 			data = &copy
 		}
 		grant, err := processes.Delegate(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}, capability.DelegateSpec{Parent: principal.Authority, Audience: capability.NodeHost, Binding: binding, Grants: principal.Capability.Grants, Repositories: principal.Capability.Repositories, Data: data, ExpiresAt: principal.Capability.ExpiresAt}, nodehost.ProcessServices{
-			RunID: "run", Job: nodeproto.JobSpec{ID: "job", Needs: []string{"stamp"}},
+			RunID: "run", Job: nodewire.JobSpec{ID: "job", Needs: []string{"stamp"}},
 			Output: func(ctx context.Context, _ capability.Authorized, job string) (json.RawMessage, error) {
 				return process.Output(ctx, "run", job)
 			},

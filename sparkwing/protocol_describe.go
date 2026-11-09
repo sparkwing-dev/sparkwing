@@ -7,9 +7,10 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/swtags"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/swtags"
 )
 
 func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error) {

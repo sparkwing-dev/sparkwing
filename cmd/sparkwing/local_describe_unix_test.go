@@ -12,16 +12,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
-
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
@@ -39,7 +39,7 @@ func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	captured := testgit.Env(os.Environ())
+	captured := gitcontrol.Env(os.Environ())
 	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", captured, snapshots, runFlags{})
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestNativeLocalPreparationResolvesTrackingSparksBeforeInstallation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = prepareNativeLocalRun(t.Context(), home, dir, "ci", testgit.Env(os.Environ()), snapshots, runFlags{})
+	_, err = prepareNativeLocalRun(t.Context(), home, dir, "ci", gitcontrol.Env(os.Environ()), snapshots, runFlags{})
 	if err == nil || !strings.Contains(err.Error(), "--sw-no-update") || !strings.Contains(err.Error(), "example.com/dependency@latest") {
 		t.Fatalf("tracking resolution did not precede source installation: %v", err)
 	}
@@ -106,7 +106,7 @@ func main() {
 	}
 	binary := filepath.Join(t.TempDir(), "pipeline")
 	build := exec.CommandContext(t.Context(), "go", "-C", dir, "build", "-mod=mod", "-o", binary, ".")
-	build.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+	build.Env = append(gitcontrol.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build local probe: %v: %s", err, output)
 	}
@@ -143,22 +143,22 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seal, err := snapshots.Capture(t.Context(), testgit.Env(os.Environ()))
+	seal, err := snapshots.Capture(t.Context(), gitcontrol.Env(os.Environ()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Local: true, Captured: testgit.Env(os.Environ()), Masker: masker}}}
+	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Local: true, Captured: gitcontrol.Env(os.Environ()), Masker: masker}}}
 	planner := nodehost.SDKPlanner{
 		Start: processes.StartPlanning, Masker: masker,
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		Log: func(_ context.Context, frame nodeproto.FrameLog) error { t.Log(frame.Message); return nil },
+		Log: func(_ context.Context, frame nodewire.FrameLog) error { t.Log(frame.Message); return nil },
 	}
 	prepared, err := planner.Prepare(t.Context(), nodehost.PlanningProcessInput{
 		Entry:  entry,
-		Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
-		Run:    nodeproto.RunContext{RunID: "probe", Pipeline: "ci"}, Args: map[string]string{},
+		Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+		Run:    nodewire.RunContext{RunID: "probe", Pipeline: "ci"}, Args: map[string]string{},
 		Environment: seal,
 	}, nodehost.PlanningInput{})
 	if err != nil {
@@ -171,7 +171,7 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(raw, &plan); err != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "check" {
 		t.Fatalf("local probe plan: %s: %v", raw, err)
 	}
@@ -218,7 +218,7 @@ func main() { sw.Register("Required", func() sw.Pipeline[args] { return pipeline
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := prepareNativeLocalRun(t.Context(), home, dir, "required", testgit.Env(os.Environ()), snapshots, runFlags{})
+	prepared, err := prepareNativeLocalRun(t.Context(), home, dir, "required", gitcontrol.Env(os.Environ()), snapshots, runFlags{})
 	if err != nil {
 		t.Fatalf("discovery required invocation arguments before parsing them: %v", err)
 	}

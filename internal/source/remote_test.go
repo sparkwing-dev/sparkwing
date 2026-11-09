@@ -10,12 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {
@@ -40,7 +39,7 @@ func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {
 			}
 			entry, err := source.PrepareCheckout(t.Context(), source.Spec{
 				RepoKey: "git:8.8.8.8/team/repo", RemoteURL: test.remote, SHA: sha, DefaultBranch: "trunk",
-				Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{LFS: new(true)}},
+				Checkout: runspec.CheckoutPolicy{Policy: nodewire.SourceSpec{LFS: new(true)}},
 			}, source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{credential: credential}})
 			if err != nil {
 				t.Fatal(err)
@@ -155,7 +154,7 @@ func TestPrepareCheckoutChecksSubmoduleAllowlistBeforeFetching(t *testing.T) {
 	sourcetest.Git(t, parent, "commit", "-qm", "submodule")
 	sha := sourcetest.Git(t, parent, "rev-parse", "HEAD")
 	log := sourcetest.Remote(t, map[string]string{remote: parent, subremote: child})
-	spec := source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{Submodules: new(true)}}}
+	spec := source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: nodewire.SourceSpec{Submodules: new(true)}}}
 	credential := source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private-source-password"}
 	if _, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{credential: credential}}); err == nil {
 		t.Fatal("fetched an unauthorized submodule")
@@ -186,13 +185,13 @@ func TestPrepareCheckoutAppliesHistoryAndTagPolicy(t *testing.T) {
 	sourcetest.Remote(t, map[string]string{remote: dir})
 	for _, test := range []struct {
 		name          string
-		policy        nodeproto.SourceSpec
+		policy        nodewire.SourceSpec
 		commits, tags string
 	}{
-		{"default", nodeproto.SourceSpec{}, "1", ""},
-		{"depth two", nodeproto.SourceSpec{Depth: new(2)}, "2", ""},
-		{"depth zero", nodeproto.SourceSpec{Depth: new(0)}, "2", ""},
-		{"full history and tags", nodeproto.SourceSpec{FullHistory: new(true), Tags: new(true)}, "2", "v1"},
+		{"default", nodewire.SourceSpec{}, "1", ""},
+		{"depth two", nodewire.SourceSpec{Depth: new(2)}, "2", ""},
+		{"depth zero", nodewire.SourceSpec{Depth: new(0)}, "2", ""},
+		{"full history and tags", nodewire.SourceSpec{FullHistory: new(true), Tags: new(true)}, "2", "v1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: test.policy}}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})

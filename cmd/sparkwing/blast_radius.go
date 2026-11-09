@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type stepRiskFinding struct {
@@ -26,7 +26,7 @@ func (e *riskBlockedError) Error() string {
 	return fmt.Sprintf("step %q in pipeline %q requires --sw-allow-risk %s to confirm (or --sw-dry-run to preview).", e.StepID, e.Pipeline, strings.Join(e.MissingLabels, ","))
 }
 
-func risksIn(schema nodeproto.PipelineDescription) []stepRiskFinding {
+func risksIn(schema nodewire.PipelineDescription) []stepRiskFinding {
 	var out []stepRiskFinding
 	for _, row := range schema.RisksByStep {
 		if len(row.Labels) == 0 {

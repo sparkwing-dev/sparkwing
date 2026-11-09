@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type refusedRecords struct{ sdkserve.Services }

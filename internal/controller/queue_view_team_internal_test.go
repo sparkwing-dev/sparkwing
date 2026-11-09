@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
@@ -27,7 +27,7 @@ func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
 		if team == "team-b" {
 			name, cores = "team-b-box", 2.0
 		}
-		return queueRunnerTenant{queueTeamReader: queueTeamReader{team: team}, runnerInventoryFake: &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: string(team), Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: cores, ObservedAt: now}}}}}}, nil
+		return queueRunnerTenant{queueTeamReader: queueTeamReader{team: team}, runnerInventoryFake: &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: string(team), Runner: nodewire.RunnerIdentity{Name: name, Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: cores, ObservedAt: now}}}}}}, nil
 	})
 
 	view := func(team store.Team) []string {

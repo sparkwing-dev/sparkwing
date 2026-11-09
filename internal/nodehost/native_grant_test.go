@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func FuzzNativeStartupGrantIsolation(f *testing.F) {
@@ -19,7 +19,7 @@ func FuzzNativeStartupGrantIsolation(f *testing.F) {
 		for _, owner := range []bool{false, true} {
 			revoked, stale, projected := false, false, false
 			refused := errors.New("environment refused")
-			grant := ProcessGrant{Binding: nodeproto.ProcessBinding{RunID: run, JobID: job, Routes: nodeproto.ProcessRoutes{Bearer: bearer}}, Revoke: func() error { revoked = true; return nil }}
+			grant := ProcessGrant{Binding: nodewire.ProcessBinding{RunID: run, JobID: job, Routes: nodewire.ProcessRoutes{Bearer: bearer}}, Revoke: func() error { revoked = true; return nil }}
 			var bindError error
 			if bindFailed {
 				bindError = errors.New("delegation interrupted")
@@ -31,8 +31,8 @@ func FuzzNativeStartupGrantIsolation(f *testing.F) {
 			}
 			var err error
 			if owner {
-				input, st, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
-					job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
+				input, st, deps, _ := policyFixture(t, func(job *nodewire.JobSpec) {
+					job.Approval, job.Steps = &nodewire.ApprovalSpec{Message: "ship?"}, nil
 					job.Closures.SkipIf = []string{"condition"}
 				})
 				input.RouteBinding.Routes.Bearer = "parent"

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRunReviewRoutesAndAuthority(t *testing.T) {
@@ -26,10 +26,10 @@ func TestRunReviewRoutesAndAuthority(t *testing.T) {
 			return c.ResolveApproval(t.Context(), "412", "deploy/prod", controllerwire.ApprovalDecision{Resolution: "approved", Comment: "safe", IdempotencyKey: "stable-key"})
 		}},
 		{"annotate", "POST", "/api/v1/runs/412/jobs/build/annotations", `{"level":"info","message":"note"}`, ``, func(c controllerwire.RunReview) (any, error) {
-			return nil, c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{Annotation: nodeproto.Annotation{Level: "info", Message: "note"}})
+			return nil, c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{Annotation: nodewire.Annotation{Level: "info", Message: "note"}})
 		}},
 		{"step", "POST", "/api/v1/runs/412/jobs/build/steps/annotations", `{"level":"warn","message":"note","file":"source.go","line":7,"end_line":8,"column":3,"step_id":"compile"}`, ``, func(c controllerwire.RunReview) (any, error) {
-			return nil, c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{StepID: "compile", Annotation: nodeproto.Annotation{Level: "warn", Message: "note", File: "source.go", Line: 7, Column: 3, EndLine: 8}})
+			return nil, c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{StepID: "compile", Annotation: nodewire.Annotation{Level: "warn", Message: "note", File: "source.go", Line: 7, Column: 3, EndLine: 8}})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,7 +74,7 @@ func TestRunReviewValidatesBeforeTransport(t *testing.T) {
 			t.Fatalf("accepted %+v", input)
 		}
 	}
-	for _, input := range []controllerwire.AnnotationWrite{{Annotation: nodeproto.Annotation{Level: "warning", Message: "x"}}, {Annotation: nodeproto.Annotation{Message: "x", Line: 5, EndLine: 4}}, {StepID: "..", Annotation: nodeproto.Annotation{Level: "info", Message: "x"}}} {
+	for _, input := range []controllerwire.AnnotationWrite{{Annotation: nodewire.Annotation{Level: "warning", Message: "x"}}, {Annotation: nodewire.Annotation{Message: "x", Line: 5, EndLine: 4}}, {StepID: "..", Annotation: nodewire.Annotation{Level: "info", Message: "x"}}} {
 		if err := c.AppendAnnotation(t.Context(), "r", "j", input); err == nil {
 			t.Fatalf("accepted %+v", input)
 		}
@@ -88,7 +88,7 @@ func TestRunReviewPreservesForbiddenAndRejectsUnresolvedSuccess(t *testing.T) {
 	failure := testEngine(t, func(*http.Request) (*http.Response, error) {
 		return engineResponse(403, `{"error":{"code":"forbidden","message":"reporting credential required","hint":"use an authorized credential"}}`), nil
 	})
-	err := failure.AppendAnnotation(t.Context(), "r", "j", controllerwire.AnnotationWrite{Annotation: nodeproto.Annotation{Level: "info", Message: "x"}})
+	err := failure.AppendAnnotation(t.Context(), "r", "j", controllerwire.AnnotationWrite{Annotation: nodewire.Annotation{Level: "info", Message: "x"}})
 	var api *apierr.Error
 	if !errors.As(err, &api) || api.Code != apierr.Forbidden || api.Hint != "use an authorized credential" {
 		t.Fatalf("lost authorization failure: %v", err)
@@ -128,8 +128,8 @@ func TestRunReviewDecisionRetryKeepsExactBodyAndKey(t *testing.T) {
 }
 
 func TestRunReviewAnnotationObservationRoundTrip(t *testing.T) {
-	annotation := nodeproto.Annotation{Level: "warn", Message: "masked note", File: "source.go", Line: 7, Column: 3, EndLine: 8}
-	run := controllerwire.RunDetail{ID: "r", Jobs: []controllerwire.JobDetail{{ID: "build", Annotations: []nodeproto.Annotation{annotation}}}}
+	annotation := nodewire.Annotation{Level: "warn", Message: "masked note", File: "source.go", Line: 7, Column: 3, EndLine: 8}
+	run := controllerwire.RunDetail{ID: "r", Jobs: []controllerwire.JobDetail{{ID: "build", Annotations: []nodewire.Annotation{annotation}}}}
 	body, err := json.Marshal(run)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestRunReviewAnnotationObservationRoundTrip(t *testing.T) {
 	if err != nil || len(got.Jobs) != 1 || len(got.Jobs[0].Annotations) != 1 || got.Jobs[0].Annotations[0] != annotation {
 		t.Fatalf("annotation roundtrip: %+v %v", got, err)
 	}
-	steps := controllerwire.RunSteps{Steps: []controllerwire.StepDetail{{JobID: "build", ID: "compile", Annotations: []nodeproto.Annotation{annotation}}}}
+	steps := controllerwire.RunSteps{Steps: []controllerwire.StepDetail{{JobID: "build", ID: "compile", Annotations: []nodewire.Annotation{annotation}}}}
 	body, err = json.Marshal(steps)
 	if err != nil {
 		t.Fatal(err)

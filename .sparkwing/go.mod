@@ -5,6 +5,7 @@ go 1.26.0
 toolchain go1.26.10
 
 require (
+	github.com/sparkwing-dev/sparkwing/sparkwing v0.1.0
 	github.com/fergusstrange/embedded-postgres v1.34.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/lib/pq v1.10.9
@@ -59,3 +60,5 @@ require (
 )
 
 replace github.com/sparkwing-dev/sparkwing => ..
+
+replace github.com/sparkwing-dev/sparkwing/sparkwing => ../sparkwing

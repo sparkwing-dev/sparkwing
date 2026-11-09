@@ -9,9 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type blobReadCandidate struct {
@@ -76,7 +76,7 @@ func requireBlobMemoTx(ctx context.Context, tx *storeTx, a blobActor) error {
 	if err := tx.QueryRowContext(ctx, "SELECT spec_json FROM nodes WHERE team=? AND run_id=? AND node_id=?", id.Team, id.RunID, id.NodeID).Scan(&raw); err != nil {
 		return err
 	}
-	var spec nodeproto.JobSpec
+	var spec nodewire.JobSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		return err
 	}
@@ -262,12 +262,12 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 	return edge, false, nil
 }
 
-func blobDependenciesTx(ctx context.Context, tx *storeTx, team Team, run, node string) (map[string]bool, []nodeproto.PipelineReference, error) {
+func blobDependenciesTx(ctx context.Context, tx *storeTx, team Team, run, node string) (map[string]bool, []nodewire.PipelineReference, error) {
 	rows, err := tx.queryContext(ctx, "SELECT node_id,spec_json FROM nodes WHERE team=? AND run_id=?", team, run)
 	if err != nil {
 		return nil, nil, err
 	}
-	specs := map[string]nodeproto.JobSpec{}
+	specs := map[string]nodewire.JobSpec{}
 	groups := map[string][]string{}
 	for rows.Next() {
 		var id string
@@ -275,7 +275,7 @@ func blobDependenciesTx(ctx context.Context, tx *storeTx, team Team, run, node s
 		if err := rows.Scan(&id, &raw); err != nil {
 			return nil, nil, errors.Join(err, rows.Close())
 		}
-		var spec nodeproto.JobSpec
+		var spec nodewire.JobSpec
 		if err := json.Unmarshal(raw, &spec); err != nil {
 			return nil, nil, errors.Join(err, rows.Close())
 		}

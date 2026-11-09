@@ -5,22 +5,22 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 func FuzzOutputRecordUsesSharedLimit(f *testing.F) {
-	for _, size := range []uint64{0, 1, uint64(limits.NodeOutputBytes - 1), uint64(limits.NodeOutputBytes), uint64(limits.NodeOutputBytes + 1), 64 << 20} {
+	for _, size := range []uint64{0, 1, uint64(protolimits.NodeOutputBytes - 1), uint64(protolimits.NodeOutputBytes), uint64(protolimits.NodeOutputBytes + 1), 64 << 20} {
 		f.Add(size)
 	}
 	f.Fuzz(func(t *testing.T, value uint64) {
 		s, records, intent := blobRecordFixture(t)
-		size := int64(value % (2*uint64(limits.NodeOutputBytes) + 1))
+		size := int64(value % (2*uint64(protolimits.NodeOutputBytes) + 1))
 		rewriteSchemaExec(t, s.db, "UPDATE blobs SET size=? WHERE team='a' AND digest=?", size, intent.Digest)
 		_, err := records.tenant.CommitRecord(t.Context(), blobOutputRequest(intent))
-		if size <= limits.NodeOutputBytes {
+		if size <= protolimits.NodeOutputBytes {
 			if err != nil {
 				t.Fatalf("size %d: %v", size, err)
 			}
@@ -35,14 +35,14 @@ func FuzzOutputRecordUsesSharedLimit(f *testing.F) {
 }
 
 func TestBlobRecordsMemoCannotBypassOutputLimit(t *testing.T) {
-	for _, size := range []int64{limits.NodeOutputBytes, limits.NodeOutputBytes + 1} {
+	for _, size := range []int64{protolimits.NodeOutputBytes, protolimits.NodeOutputBytes + 1} {
 		t.Run(strconv.FormatInt(size, 10), func(t *testing.T) {
 			s, records, intent := blobRecordFixture(t)
 			rewriteSchemaExec(t, s.db, "UPDATE blobs SET size=? WHERE team='a' AND digest=?", size, intent.Digest)
 			memo := blobOutputRequest(intent)
 			memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", fixtureMemoHash
 			_, err := records.CommitRecord(t.Context(), memo)
-			if size > limits.NodeOutputBytes {
+			if size > protolimits.NodeOutputBytes {
 				var failure *apierr.Error
 				if !errors.As(err, &failure) || failure.Code != apierr.PayloadTooLarge {
 					t.Fatalf("oversized output refusal=%v, want payload_too_large", err)
@@ -71,7 +71,7 @@ func TestBlobRecordsOversizedMemoIsAMissWithoutPartialEdges(t *testing.T) {
 	}
 	activateMemoFixture(t, s)
 	// safety: persisted cache corruption must not manufacture an oversized output edge.
-	rewriteSchemaExec(t, s.db, "UPDATE blobs SET size=? WHERE team='a' AND digest=?", limits.NodeOutputBytes+1, intent.Digest)
+	rewriteSchemaExec(t, s.db, "UPDATE blobs SET size=? WHERE team='a' AND digest=?", protolimits.NodeOutputBytes+1, intent.Digest)
 	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: assertedRef("main"), Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
 	if hit, err := records.LookupMemo(t.Context(), lookup); err != nil || hit.Found {
 		t.Fatalf("oversized memo lookup=%+v: %v", hit, err)
@@ -87,7 +87,7 @@ func TestBlobRecordsOversizedMemoIsAMissWithoutPartialEdges(t *testing.T) {
 
 func TestBlobRecordsMemoOutputLimitDoesNotCapManifests(t *testing.T) {
 	s, records, intent := blobRecordFixture(t)
-	rewriteSchemaExec(t, s.db, "UPDATE blobs SET size=? WHERE team='a' AND digest=?", limits.NodeOutputBytes+1, intent.Digest)
+	rewriteSchemaExec(t, s.db, "UPDATE blobs SET size=? WHERE team='a' AND digest=?", protolimits.NodeOutputBytes+1, intent.Digest)
 	records.manifests = fakeBlobManifests{intent.Digest: nil}
 	memo := blobOutputRequest(intent)
 	memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "manifest", fixtureMemoHash

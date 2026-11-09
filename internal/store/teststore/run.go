@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // SeedRun inserts reporting facts without admitting executable work.
@@ -126,7 +126,7 @@ func SeedNode(s *store.Store, ctx context.Context, n store.Node) error {
 	if err != nil {
 		return err
 	}
-	spec, err := json.Marshal(nodeproto.JobSpec{ID: n.NodeID, Needs: n.Deps, Requires: n.NeedsLabels, Prefers: n.PrefersLabels})
+	spec, err := json.Marshal(nodewire.JobSpec{ID: n.NodeID, Needs: n.Deps, Requires: n.NeedsLabels, Prefers: n.PrefersLabels})
 	if err != nil {
 		return err
 	}

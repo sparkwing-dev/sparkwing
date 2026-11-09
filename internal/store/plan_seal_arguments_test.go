@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPlanSealPreservesRawListInputsAcrossSubmissionSources(t *testing.T) {
@@ -54,13 +54,13 @@ func TestPlanSealPreservesRawListInputsAcrossSubmissionSources(t *testing.T) {
 			}
 			persistPlanOwner(t, tenant.s, owner)
 			seedTriggerClaim(t, tenant.s, admitted.RunID, "host", owner.Prefix, 1, tenant.s.now().Add(time.Hour))
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
+			plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}}
 			declarations := runspec.CheckoutDeclarations{Version: 1}
 			resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := PlanAcceptance{RunID: admitted.RunID, Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{ArgumentDeclarations: []nodeproto.ArgumentDescription{{Name: "targets", Type: "[]string"}}, Args: map[string]string{"targets": "prod,dev"}, SecretArgs: []string{}, Settings: resolved}}}
+			request := PlanAcceptance{RunID: admitted.RunID, Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{ArgumentDeclarations: []nodewire.ArgumentDescription{{Name: "targets", Type: "[]string"}}, Args: map[string]string{"targets": "prod,dev"}, SecretArgs: []string{}, Settings: resolved}}}
 			accepted, err := tenant.AcceptPlan(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)
@@ -92,12 +92,12 @@ func TestPlanSealResolvesCheckoutArgumentsBeforeDeclaredDefaults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			argument := nodeproto.ArgumentDescription{Name: "targets", Type: "[]string", Required: source == "required"}
+			argument := nodewire.ArgumentDescription{Name: "targets", Type: "[]string", Required: source == "required"}
 			if source == "default" {
 				value := "other"
 				argument.Default = &value
 			}
-			request.Seal.Declarations, request.Seal.Resolved.ArgumentDeclarations = declarations, []nodeproto.ArgumentDescription{argument}
+			request.Seal.Declarations, request.Seal.Resolved.ArgumentDeclarations = declarations, []nodewire.ArgumentDescription{argument}
 			request.Seal.Resolved.Args["targets"] = "dev,prod"
 			if source == "intake" {
 				request.Seal.Resolved.Args["targets"] = "prod,dev"
@@ -114,7 +114,7 @@ func TestPlanSealRejectsInvalidArgumentsAndChangedDefaults(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			tenant, request, _ := planFixture(t, runspec.DispatchHost)
 			value := "expected"
-			argument := nodeproto.ArgumentDescription{Name: "extra", Type: "string"}
+			argument := nodewire.ArgumentDescription{Name: "extra", Type: "string"}
 			switch source {
 			case "required":
 				argument.Required = true
@@ -130,7 +130,7 @@ func TestPlanSealRejectsInvalidArgumentsAndChangedDefaults(t *testing.T) {
 			case "injected":
 				request.Seal.Resolved.Args["extra"] = "injected"
 			}
-			request.Seal.Resolved.ArgumentDeclarations = []nodeproto.ArgumentDescription{argument}
+			request.Seal.Resolved.ArgumentDeclarations = []nodewire.ArgumentDescription{argument}
 			_, err := tenant.AcceptPlan(t.Context(), request)
 			var canonical *apierr.Error
 			want := apierr.InvalidArgs

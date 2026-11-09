@@ -1,0 +1,69 @@
+# sparkwing/docker
+
+func Build(ctx context.Context, cfg BuildConfig) (BuildResult, error)
+func BuildAndPush(ctx context.Context, cfg BuildConfig) (BuildResult, error)
+type BuildConfig struct {
+	Image string
+
+	Dockerfile string
+
+	Context string
+
+	Platforms []string
+
+	Registries []string
+
+	Tags []string
+
+	BuildArgs map[string]string
+
+	Labels map[string]string
+}
+type BuildResult struct {
+	Image string
+
+	Digests map[string]string
+
+	Registries []string
+}
+func BuildxPlatforms(ctx context.Context) ([]string, error)
+func ComputeTags(ctx context.Context) (ImageTag, error)
+func ComputeTagsIn(ctx context.Context, repoDir string) (ImageTag, error)
+var ErrBuildxRequired = errors.New("docker: buildx plugin required for multi-platform builds")
+var ErrDockerUnavailable = errors.New("docker: binary not available on PATH")
+var ErrPlatformUnsupported = errors.New("docker: requested platform not supported by active buildx builder")
+func FilterBuildxPlatforms(ctx context.Context, wish []string) ([]string, error)
+type ImageTag struct {
+	Commit  string
+	Content string
+	Branch  string
+	Dirty   bool
+}
+func (t ImageTag) All() []string
+func (t ImageTag) DeployTag() string
+func (t ImageTag) ProdTag() string
+func Login(ctx context.Context, registry, username, secret string) error
+func Push(ctx context.Context, image string, tags, registries []string) error
+func Run(ctx context.Context, opts RunOptions) error
+type RunOptions struct {
+	Image string
+
+	Cmd []string
+
+	WorkDir string
+
+	Env map[string]string
+
+	User string
+
+	InputDir string
+
+	OutputDir string
+
+	OutputTo string
+
+	Volumes map[string]string
+
+	Stdout io.Writer
+	Stderr io.Writer
+}

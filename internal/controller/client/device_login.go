@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // DeviceLogin drives one device sign-in. It carries no bearer: the device code is its only proof.

@@ -11,10 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // PublicationInput supplies completed local state, verified bytes and controller-proxied logs.
@@ -78,15 +78,15 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 	return response.RunID, err
 }
 
-func publicationPlan(state runstate.LocalPublication) (nodeproto.PlanDoc, error) {
-	var plan nodeproto.PlanDoc
+func publicationPlan(state runstate.LocalPublication) (nodewire.PlanDoc, error) {
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(state.Run.Plan, &plan); err != nil {
 		return plan, err
 	}
-	plan.Jobs = []nodeproto.JobSpec{}
+	plan.Jobs = []nodewire.JobSpec{}
 	generated := map[string][]string{}
 	for _, expansion := range state.Expansions {
-		var body nodeproto.PlanDoc
+		var body nodewire.PlanDoc
 		if err := json.Unmarshal(expansion.Body, &body); err != nil {
 			return plan, err
 		}
@@ -95,7 +95,7 @@ func publicationPlan(state runstate.LocalPublication) (nodeproto.PlanDoc, error)
 		}
 	}
 	for _, node := range state.Nodes {
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(node.Spec, &job); err != nil {
 			return plan, err
 		}

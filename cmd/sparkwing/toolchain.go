@@ -29,19 +29,6 @@ func userGoVersion() string {
 	return strings.TrimSpace(string(out))
 }
 
-func userGoModDirective() string {
-	v := userGoVersion()
-	if v == "" {
-		return ""
-	}
-	v = strings.TrimPrefix(v, "go")
-	parts := strings.Split(v, ".")
-	if len(parts) < 2 {
-		return ""
-	}
-	return parts[0] + "." + parts[1]
-}
-
 func goInstallHint() string {
 	if goOnPath() {
 		return ""

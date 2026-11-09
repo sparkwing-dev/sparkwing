@@ -4,7 +4,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/labels"
 )
 
 // NeedsTools restricts the job to agents that have every named tool on their
@@ -16,7 +16,7 @@ import (
 // attention until one can, for up to its plan's ClaimWait.
 func (n *JobNode) NeedsTools(names ...string) *JobNode {
 	for _, name := range names {
-		if label := match.ToolPrefix + name; !slices.Contains(n.tools, label) {
+		if label := labels.ToolPrefix + name; !slices.Contains(n.tools, label) {
 			n.tools = append(n.tools, label)
 		}
 	}

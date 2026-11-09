@@ -1,5 +1,7 @@
 package nativehost_test
 
+import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -15,14 +17,14 @@ import (
 )
 
 type corpusStep struct {
-	Op         nodeproto.Op `json:"op"`
-	ID         string       `json:"id"`
-	Kind       string       `json:"kind"`
-	Code       string       `json:"code"`
-	Contains   string       `json:"contains"`
-	Name       string       `json:"name"`
-	PlanVector string       `json:"plan_vector"`
-	Job        string       `json:"job"`
+	Op         nodewire.Op `json:"op"`
+	ID         string      `json:"id"`
+	Kind       string      `json:"kind"`
+	Code       string      `json:"code"`
+	Contains   string      `json:"contains"`
+	Name       string      `json:"name"`
+	PlanVector string      `json:"plan_vector"`
+	Job        string      `json:"job"`
 }
 
 type corpusSession struct {
@@ -76,27 +78,27 @@ func TestNativeConformance(t *testing.T) {
 			h := startSDKAt(t, node, root, "conformance.mjs")
 			protocol := session.Protocol
 			if protocol == 0 {
-				protocol = nodeproto.Version
+				protocol = nodewire.Version
 			}
-			hello := nodeproto.Request{ID: "hello", Op: nodeproto.OpHello, Protocol: protocol, Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}
+			hello := nodewire.Request{ID: "hello", Op: nodewire.OpHello, Protocol: protocol, Engine: &nodewire.EngineIdentity{Version: "fixture"}, Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}
 			if session.Binding {
 				job := session.BindingJob
 				if job == "" {
 					job = "task"
 				}
-				hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: job, Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "secret"}}
+				hello.Binding = &nodewire.ProcessBinding{RunID: "r", JobID: job, Routes: nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "secret"}}
 			}
 			h.send(hello)
 			got := nextReply(t, h)
-			if protocol != nodeproto.Version {
+			if protocol != nodewire.Version {
 				if got.Error == nil || got.Error.Code != "protocol_mismatch" {
 					t.Fatalf("mismatch: %+v", got)
 				}
 			} else if !got.OK {
 				t.Fatalf("hello: %+v", got)
 			}
-			var plan nodeproto.PlanDoc
-			var generated []nodeproto.JobSpec
+			var plan nodewire.PlanDoc
+			var generated []nodewire.JobSpec
 			for index, step := range session.Requests {
 				req := corpusRequest(plan, step, index)
 				h.send(req)
@@ -118,7 +120,7 @@ func TestNativeConformance(t *testing.T) {
 				}
 				definition, schema := "", "wire"
 				switch step.Op {
-				case nodeproto.OpPlan:
+				case nodewire.OpPlan:
 					definition, schema = "PlanDoc", "documents"
 					if _, err := nodeproto.ValidatePlan(reply.Result, nodeproto.ValidationContext{Secrets: fixtureSecrets{}, Placement: nodeproto.PlacementLocal}); err != nil {
 						t.Fatal(err)
@@ -126,18 +128,18 @@ func TestNativeConformance(t *testing.T) {
 					if err := reply.Decode(&plan); err != nil {
 						t.Fatal(err)
 					}
-				case nodeproto.OpDescribe:
+				case nodewire.OpDescribe:
 					definition, schema = "DescribeDoc", "documents"
-				case nodeproto.OpRunStep:
+				case nodewire.OpRunStep:
 					definition = "RunResult"
-				case nodeproto.OpEval:
+				case nodewire.OpEval:
 					definition = "EvalResult"
-					var result nodeproto.EvalResult
+					var result nodewire.EvalResult
 					if err := reply.Decode(&result); err != nil {
 						t.Fatal(err)
 					}
 					kind := map[string]string{"skip": "skip_if", "memo": "memo_key", "before": "before_run", "after": "after_run", "verify": "verify", "generate": "generate"}[step.Kind]
-					if err := result.ValidateValue(kind); err != nil {
+					if err := nodeproto.ValidateEvalValue(result, kind); err != nil {
 						t.Fatal(err)
 					}
 					if step.PlanVector != "" {
@@ -153,7 +155,7 @@ func TestNativeConformance(t *testing.T) {
 	}
 }
 
-func nextReply(t *testing.T, h *host) nodeproto.Reply {
+func nextReply(t *testing.T, h *host) nodewire.Reply {
 	t.Helper()
 	for {
 		frame := h.frame()
@@ -191,24 +193,24 @@ type fixtureSecrets struct{}
 
 func (fixtureSecrets) ContainsSecret(string) bool { return false }
 
-func corpusRequest(plan nodeproto.PlanDoc, step corpusStep, index int) nodeproto.Request {
-	req := nodeproto.Request{ID: fmt.Sprintf("%d", index+1), Op: step.Op}
+func corpusRequest(plan nodewire.PlanDoc, step corpusStep, index int) nodewire.Request {
+	req := nodewire.Request{ID: fmt.Sprintf("%d", index+1), Op: step.Op}
 	if step.ID != "" {
 		req.ID = step.ID
 	}
 	switch step.Op {
-	case nodeproto.OpPlan:
+	case nodewire.OpPlan:
 		name := step.Name
 		if name == "" {
 			name = "demo"
 		}
-		req.Pipeline, req.Args, req.Run = "conformance", map[string]string{"name": name}, &nodeproto.RunContext{RunID: "r", Pipeline: "conformance"}
-	case nodeproto.OpRunStep:
+		req.Pipeline, req.Args, req.Run = "conformance", map[string]string{"name": name}, &nodewire.RunContext{RunID: "r", Pipeline: "conformance"}
+	case nodewire.OpRunStep:
 		req.Job, req.Step, req.Attempt, req.Settled = "task", "run", 1, []string{}
 		if step.Job != "" {
 			req.Job = step.Job
 		}
-	case nodeproto.OpEval:
+	case nodewire.OpEval:
 		closures := plan.Jobs[0].Closures
 		switch step.Kind {
 		case "skip":
@@ -224,13 +226,13 @@ func corpusRequest(plan nodeproto.PlanDoc, step corpusStep, index int) nodeproto
 		case "generate":
 			req.Closure = closures.Generate[0]
 		}
-	case nodeproto.OpCancel:
+	case nodewire.OpCancel:
 		req.Job, req.Step = "task", "run"
 	}
 	return req
 }
 
-func checkGenerated(t *testing.T, corpus sharedCorpus, plan nodeproto.PlanDoc, generated []nodeproto.JobSpec, result nodeproto.EvalResult, vectorName string) []nodeproto.JobSpec {
+func checkGenerated(t *testing.T, corpus sharedCorpus, plan nodewire.PlanDoc, generated []nodewire.JobSpec, result nodewire.EvalResult, vectorName string) []nodewire.JobSpec {
 	t.Helper()
 	if result.Error != nil {
 		t.Fatal(result.Error)
@@ -255,7 +257,7 @@ func checkGenerated(t *testing.T, corpus sharedCorpus, plan nodeproto.PlanDoc, g
 	if !found {
 		t.Fatalf("missing vector %s", vectorName)
 	}
-	var document nodeproto.PlanDoc
+	var document nodewire.PlanDoc
 	if err := json.Unmarshal(result.Value, &document); err != nil {
 		t.Fatal(err)
 	}

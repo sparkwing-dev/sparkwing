@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func request() runspec.SealedRequest {
@@ -20,7 +20,7 @@ func request() runspec.SealedRequest {
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}, Entrypoint: "ignored-entrypoint", BundleDigest: runspec.Optional[string]{Set: true, Value: "bundle-digest"}},
 		Options: runspec.Options{
 			RepoLocation: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "https://github.com/team/repo"}},
-			Checkout:     runspec.Setting[runspec.CheckoutPolicy]{Optional: runspec.Optional[runspec.CheckoutPolicy]{Set: true, Value: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{Depth: new(2)}}}},
+			Checkout:     runspec.Setting[runspec.CheckoutPolicy]{Optional: runspec.Optional[runspec.CheckoutPolicy]{Set: true, Value: runspec.CheckoutPolicy{Policy: nodewire.SourceSpec{Depth: new(2)}}}},
 		},
 	}}
 }
@@ -37,7 +37,7 @@ func TestSourceProjectionUsesCapturedAndAcceptedCheckoutWinners(t *testing.T) {
 	accepted := runspec.Spec{Request: r, Resolved: runspec.Resolved{
 		Engine:     engineid.Identity{Version: "v1.2.3", ManifestDigest: "manifest"},
 		Entrypoint: "pipelines/release", DefaultBranch: runspec.Optional[string]{Set: true, Value: "accepted-default"},
-		Settings: runspec.ExecutionSettings{Options: runspec.Options{Checkout: runspec.Setting[runspec.CheckoutPolicy]{Optional: runspec.Optional[runspec.CheckoutPolicy]{Set: true, Value: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{FullHistory: new(true)}}}}}},
+		Settings: runspec.ExecutionSettings{Options: runspec.Options{Checkout: runspec.Setting[runspec.CheckoutPolicy]{Optional: runspec.Optional[runspec.CheckoutPolicy]{Set: true, Value: runspec.CheckoutPolicy{Policy: nodewire.SourceSpec{FullHistory: new(true)}}}}}},
 	}}
 	second, err := source.ForExecution(accepted)
 	if err != nil {

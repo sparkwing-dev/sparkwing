@@ -8,7 +8,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -33,14 +34,14 @@ func testRecoveryChainDescription(t *testing.T, bin string) {
 	process := startProtocolProbe(t, bin)
 	sendProtocolProbe(t, process, probeHello())
 	protocolProbeReply(t, process, "hello")
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "describe", Op: nodeproto.OpDescribe})
-	var doc nodeproto.DescribeDoc
+	sendProtocolProbe(t, process, nodewire.Request{ID: "describe", Op: nodewire.OpDescribe})
+	var doc nodewire.DescribeDoc
 	decodeProtocolProbe(t, protocolProbeReply(t, process, "describe"), &doc)
 	found := false
 	for _, pipeline := range doc.Pipelines {
 		if pipeline.Name == protocolgo.RecoveryChainName {
 			found = true
-			want := []nodeproto.ArgumentDescription{
+			want := []nodewire.ArgumentDescription{
 				{Name: "recipient", Type: "string", Required: true, JobID: "notify"},
 				{Name: "notification", Type: "string", Default: new("email"), Enum: []string{"email", "chat"}, JobID: "notify"},
 			}
@@ -72,7 +73,7 @@ func testRecoveryChainArguments(t *testing.T, bin string, host sparkwingtest.Hos
 			fake, err := host.Plan(t.Context(), protocolgo.RecoveryChainName, tc.args)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
-			hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "notify", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}
+			hello.Binding = &nodewire.ProcessBinding{RunID: "r", JobID: "notify", Routes: nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}
 			sendProtocolProbe(t, process, hello)
 			protocolProbeReply(t, process, "hello")
 			args, prepareErr := prepareProtocolArguments(t, process, protocolgo.RecoveryChainName, tc.args)
@@ -84,16 +85,16 @@ func testRecoveryChainArguments(t *testing.T, bin string, host sparkwingtest.Hos
 				if prepareErr != nil || err != nil {
 					t.Fatalf("process preparation = %v, fake preparation = %v", prepareErr, err)
 				}
-				sendProtocolProbe(t, process, nodeproto.Request{ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.RecoveryChainName, Args: args, Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.RecoveryChainName}})
+				sendProtocolProbe(t, process, nodewire.Request{ID: "plan", Op: nodewire.OpPlan, Pipeline: protocolgo.RecoveryChainName, Args: args, Run: &nodewire.RunContext{RunID: "r", Pipeline: protocolgo.RecoveryChainName}})
 				reply := protocolProbeReply(t, process, "plan")
-				var doc nodeproto.PlanDoc
+				var doc nodewire.PlanDoc
 				decodeProtocolProbe(t, reply, &doc)
 				assertRecoveryChain(t, doc.Jobs, false)
 				if !reflect.DeepEqual(fake, doc) {
 					t.Error("fake and process recovery chains differ")
 				}
-				sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Attempt: 1, Settled: []string{}})
-				var result nodeproto.RunResult
+				sendProtocolProbe(t, process, nodewire.Request{ID: "body", Op: nodewire.OpRunStep, Job: "notify", Step: "run", Attempt: 1, Settled: []string{}})
+				var result nodewire.RunResult
 				decodeProtocolProbe(t, protocolProbeReply(t, process, "body"), &result)
 				if result.Outcome != "success" || result.Error != nil || string(result.Output) != tc.output {
 					t.Errorf("nested recovery result = %+v, want %s", result, tc.output)
@@ -115,7 +116,7 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 	if err != nil {
 		t.Fatalf("fake expansion = %v", err)
 	}
-	var document nodeproto.PlanDoc
+	var document nodewire.PlanDoc
 	if err := json.Unmarshal(fake, &document); err != nil {
 		t.Fatal(err)
 	}
@@ -130,18 +131,18 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 			recordLeaf(t)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
-			hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "notify", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}
+			hello.Binding = &nodewire.ProcessBinding{RunID: "r", JobID: "notify", Routes: nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}
 			sendProtocolProbe(t, process, hello)
 			protocolProbeReply(t, process, "hello")
-			sendProtocolProbe(t, process, nodeproto.Request{ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.GeneratedRecoveryChainName, Args: tc.args, Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.GeneratedRecoveryChainName}})
+			sendProtocolProbe(t, process, nodewire.Request{ID: "plan", Op: nodewire.OpPlan, Pipeline: protocolgo.GeneratedRecoveryChainName, Args: tc.args, Run: &nodewire.RunContext{RunID: "r", Pipeline: protocolgo.GeneratedRecoveryChainName}})
 			protocolProbeReply(t, process, "plan")
-			sendProtocolProbe(t, process, nodeproto.Request{ID: "expand", Op: nodeproto.OpEval, Closure: "source/generate/0", Input: json.RawMessage("null")})
-			var result nodeproto.EvalResult
+			sendProtocolProbe(t, process, nodewire.Request{ID: "expand", Op: nodewire.OpEval, Closure: "source/generate/0", Input: json.RawMessage("null")})
+			var result nodewire.EvalResult
 			decodeProtocolProbe(t, protocolProbeReply(t, process, "expand"), &result)
 			if result.Error != nil || !reflect.DeepEqual(result.Value, fake) {
 				t.Errorf("process expansion = %+v, want %s", result, fake)
 			}
-			var generated nodeproto.PlanDoc
+			var generated nodewire.PlanDoc
 			if err := json.Unmarshal(result.Value, &generated); err != nil {
 				t.Fatal(err)
 			}
@@ -149,9 +150,9 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 			if err != nil {
 				t.Fatal(err)
 			}
-			sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Args: args, Attempt: 1, Settled: []string{}})
+			sendProtocolProbe(t, process, nodewire.Request{ID: "body", Op: nodewire.OpRunStep, Job: "notify", Step: "run", Args: args, Attempt: 1, Settled: []string{}})
 			reply := protocolProbeReply(t, process, "body")
-			var body nodeproto.RunResult
+			var body nodewire.RunResult
 			decodeProtocolProbe(t, reply, &body)
 			if body.Outcome != "success" || body.Error != nil || string(body.Output) != tc.output {
 				t.Errorf("generated recovery body = %+v, want %s", body, tc.output)
@@ -163,7 +164,7 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 	}
 }
 
-func assertRecoveryChain(t *testing.T, jobs []nodeproto.JobSpec, generated bool) {
+func assertRecoveryChain(t *testing.T, jobs []nodewire.JobSpec, generated bool) {
 	t.Helper()
 	if len(jobs) != 3 {
 		t.Fatalf("recovery chain has %d jobs, want 3: %+v", len(jobs), jobs)

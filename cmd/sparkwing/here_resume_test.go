@@ -17,15 +17,15 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type hereTestController struct {
@@ -66,7 +66,7 @@ func hereAward(t *testing.T) controllerwire.ClaimedUnit {
 		RunID: "retry-run", UnitID: "owner-unit", Capability: "awarded-private-capability", Request: request,
 		Binding:        capability.Binding{Kind: capability.BindingTrigger, RunID: "retry-run", Generation: 7, Holder: "granted-holder"},
 		LeaseExpiresAt: time.Unix(900, 0),
-		Runner:         nodeproto.RunnerIdentity{Name: "granted-here", Type: "here", Labels: []string{"os=linux"}},
+		Runner:         nodewire.RunnerIdentity{Name: "granted-here", Type: "here", Labels: []string{"os=linux"}},
 	}
 }
 
@@ -138,9 +138,9 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 
 func TestHereHostPreservesAwardedRunnerProperty(t *testing.T) {
 	base := hereAward(t)
-	property := func(name, kind string, labels []string, ambient nodeproto.RunnerIdentity) bool {
+	property := func(name, kind string, labels []string, ambient nodewire.RunnerIdentity) bool {
 		award := base
-		award.Runner = nodeproto.RunnerIdentity{Name: name, Type: kind, Labels: labels}
+		award.Runner = nodewire.RunnerIdentity{Name: name, Type: kind, Labels: labels}
 		called, closed := false, false
 		completion, err := runHereAward(t.Context(), client.EngineOptions{}, award.RunID, award,
 			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
@@ -595,7 +595,7 @@ func FuzzHerePreparationCannotReplaceAward(f *testing.F) {
 			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
 				prepared := nodehost.RunInput{
 					RunID: run, RequestHash: run, SealedRequest: []byte(run),
-					GrantedRunner: nodeproto.RunnerIdentity{Name: run, Type: holder, Labels: []string{label}},
+					GrantedRunner: nodewire.RunnerIdentity{Name: run, Type: holder, Labels: []string{label}},
 					Owner:         runstate.Actor{Kind: runstate.ActorOperator, CapabilityPrefix: "bound-authority", Owner: runstate.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: runspec.RunID(run), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}},
 				}
 				award.Runner.Labels[0] = label

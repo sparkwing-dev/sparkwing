@@ -1,0 +1,11 @@
+# sparkwing/inputs
+
+func Compose(inputs ...sparkwing.MemoInput) sparkwing.MemoInput
+func Const(value string) sparkwing.MemoInput
+func Env(names ...string) sparkwing.MemoInput
+func Files(patterns ...string) sparkwing.MemoInput
+func Ignore(patterns ...string) RepoFilesOption
+func Parts(parts ...any) sparkwing.MemoInput
+func RepoFiles(options ...RepoFilesOption) sparkwing.MemoInput
+type RepoFilesOption func(*sparkwing.MemoInput)
+func Tree(root string) sparkwing.MemoInput

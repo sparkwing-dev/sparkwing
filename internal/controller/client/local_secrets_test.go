@@ -6,12 +6,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestResolveLocalSecretsResolvesOnlyDeclarations(t *testing.T) {
 	var names []string
-	values, err := ResolveLocalSecrets(t.Context(), []nodeproto.SecretDeclaration{{Name: "TOKEN"}, {Name: "OPTIONAL", Optional: true}}, func(_ context.Context, name string) (string, bool, error) {
+	values, err := ResolveLocalSecrets(t.Context(), []nodewire.SecretDeclaration{{Name: "TOKEN"}, {Name: "OPTIONAL", Optional: true}}, func(_ context.Context, name string) (string, bool, error) {
 		names = append(names, name)
 		if name == "TOKEN" {
 			return "", true, nil
@@ -28,7 +28,7 @@ func FuzzResolveLocalSecretsNeverReturnsUndeclaredOrFailedValues(f *testing.F) {
 	f.Add("", true)
 	f.Add("a", true)
 	f.Fuzz(func(t *testing.T, value string, failed bool) {
-		declarations := []nodeproto.SecretDeclaration{{Name: "DECLARED"}}
+		declarations := []nodewire.SecretDeclaration{{Name: "DECLARED"}}
 		got, err := ResolveLocalSecrets(t.Context(), declarations, func(_ context.Context, name string) (string, bool, error) {
 			if name != "DECLARED" {
 				t.Fatal("undeclared lookup")
@@ -51,7 +51,7 @@ func FuzzResolveLocalSecretsNeverReturnsUndeclaredOrFailedValues(f *testing.F) {
 }
 
 func TestResolveLocalSecretsRefusesInvalidOrMissingBeforeIntake(t *testing.T) {
-	for _, declarations := range [][]nodeproto.SecretDeclaration{{{Name: "TOKEN"}}, {{Name: "../TOKEN"}}, {{Name: "TOKEN"}, {Name: "TOKEN"}}} {
+	for _, declarations := range [][]nodewire.SecretDeclaration{{{Name: "TOKEN"}}, {{Name: "../TOKEN"}}, {{Name: "TOKEN"}, {Name: "TOKEN"}}} {
 		if got, err := ResolveLocalSecrets(t.Context(), declarations, func(context.Context, string) (string, bool, error) { return "", false, nil }); err == nil || got != nil {
 			t.Fatalf("resolved invalid declarations: %#v %v", got, err)
 		}

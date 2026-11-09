@@ -5,14 +5,12 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func (s *Server) handleGetRunReceipt(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
@@ -53,7 +51,7 @@ func receiptSnapshot(snapshot store.RunSnapshot) (*store.Run, []*store.Node, err
 	}
 	nodes := make([]*store.Node, 0, len(snapshot.Nodes))
 	for _, row := range snapshot.Nodes {
-		var declaration nodeproto.JobSpec
+		var declaration nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &declaration); err != nil || runspec.NodeID(declaration.ID) != row.Ref.NodeID {
 			return nil, nil, errors.New("invalid persisted receipt job")
 		}

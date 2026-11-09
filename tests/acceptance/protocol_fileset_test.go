@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func testGoSDKFilesetPathNames(t *testing.T) {

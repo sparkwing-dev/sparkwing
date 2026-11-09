@@ -13,7 +13,7 @@ func TestModuleGoModAbsolutizesRelativeReplacePath(t *testing.T) {
 		t.Fatalf("moduleGoMod: %v", err)
 	}
 
-	const prefix = "replace github.com/sparkwing-dev/sparkwing => "
+	const prefix = "replace github.com/sparkwing-dev/sparkwing/sparkwing => "
 	var target string
 	for _, line := range strings.Split(got, "\n") {
 		if strings.HasPrefix(line, prefix) {

@@ -10,16 +10,16 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func nativeProcessesFixture(t *testing.T) (*NativeProcesses, capability.CredentialLookup, capability.DelegateSpec, ProcessServices) {
 	t.Helper()
 	authorities, _, lookup, spec, services := processAuthorityFixture(t)
 	t.Cleanup(func() { _ = authorities.Close() })
-	processes := &NativeProcesses{Authorities: authorities, Masks: services.Masks, URL: "http://host", Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }}
+	processes := &NativeProcesses{Authorities: authorities, Masks: services.Masks, URL: "http://host", Log: func(context.Context, string, string, nodewire.FrameLog) error { return nil }}
 	return processes, lookup, spec, *services
 }
 
@@ -59,7 +59,7 @@ func TestNativeProcessMasksApplyOnlyToItsOwnOutput(t *testing.T) {
 	if err := processes.Masks.registerIssued("late-issued-secret"); err != nil {
 		t.Fatal(err)
 	}
-	if err := processes.Masks.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated-job"}}}, func() error { return nil }); err != nil {
+	if err := processes.Masks.acceptPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "generated-job"}}}, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	request = httptest.NewRequest(http.MethodPost, "/node/v1/masks", strings.NewReader(`{"value":"generated-job"}`))
@@ -67,7 +67,7 @@ func TestNativeProcessMasksApplyOnlyToItsOwnOutput(t *testing.T) {
 		t.Fatal("job mask ignored an identifier accepted after delegation")
 	}
 	var output []string
-	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
+	processes.Log = func(_ context.Context, _, _ string, frame nodewire.FrameLog) error {
 		output = append(output, frame.Message)
 		return nil
 	}
@@ -76,7 +76,7 @@ func TestNativeProcessMasksApplyOnlyToItsOwnOutput(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := config.Log(t.Context(), nodeproto.FrameLog{Message: "accepted-secret late-accepted-secret late-issued-secret other-job-log-text"}); err != nil {
+		if err := config.Log(t.Context(), nodewire.FrameLog{Message: "accepted-secret late-accepted-secret late-issued-secret other-job-log-text"}); err != nil {
 			t.Fatal(err)
 		}
 		bound, err := processes.Authorities.processServices(t.Context(), grant.Binding)
@@ -149,7 +149,7 @@ func TestNativeProcessesKeepIndependentCleanupLedgers(t *testing.T) {
 		t.Fatal("another process released a cleanup")
 	}
 	refused := errors.New("log delivery refused")
-	processes.Log = func(_ context.Context, run, job string, record nodeproto.FrameLog) error {
+	processes.Log = func(_ context.Context, run, job string, record nodewire.FrameLog) error {
 		if run != "run" || job != "job" || strings.Contains(record.Message, first.Binding.Routes.Bearer) {
 			t.Error("cleanup log lost attribution or exposed process authority")
 		}
@@ -251,7 +251,7 @@ func TestNativeProcessRuntimeCredentialsUseHostMasker(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output string
-	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
+	processes.Log = func(_ context.Context, _, _ string, frame nodewire.FrameLog) error {
 		output += frame.Message
 		return nil
 	}
@@ -270,7 +270,7 @@ func TestNativeProcessRuntimeCredentialsUseHostMasker(t *testing.T) {
 	if got := processes.Masks.mask("runtime-secret runtime-token"); got != "*** ***" {
 		t.Errorf("shared host masker exposed credentials: %q", got)
 	}
-	if err := config.Log(t.Context(), nodeproto.FrameLog{Message: "runtime-secret runtime-token"}); err != nil {
+	if err := config.Log(t.Context(), nodewire.FrameLog{Message: "runtime-secret runtime-token"}); err != nil {
 		t.Fatal(err)
 	}
 	if output != "*** ***" {

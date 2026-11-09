@@ -8,15 +8,15 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec, retryAllowed bool) (result runstate.NodeResult, err error) {
+func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodewire.JobSpec, retryAllowed bool) (result runstate.NodeResult, err error) {
 	parent := ctx
 	ctx, cancel, err := h.deps.ChildContext(ctx, input.Execution.Timeout.Value, 0)
 	if err != nil {
@@ -201,8 +201,8 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	return result, err
 }
 
-func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec, result runstate.NodeResult) error {
-	after := nodeproto.RunResult{Outcome: string(result.Outcome)}
+func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, input NodeInput, job nodewire.JobSpec, result runstate.NodeResult) error {
+	after := nodewire.RunResult{Outcome: string(result.Outcome)}
 	if result.Outcome == runstate.NodeFailed {
 		code := apierr.SDKError
 		if result.Reason == string(apierr.DeadlineExceeded) {
@@ -231,7 +231,7 @@ func executorContains(values []string, value string) bool {
 	return false
 }
 
-func executorResultFailure(result nodeproto.RunResult) error {
+func executorResultFailure(result nodewire.RunResult) error {
 	if result.Outcome == "success" && result.Error == nil {
 		return nil
 	}
@@ -255,7 +255,7 @@ func (h *nodeExecutor) withholdOutput(ctx context.Context, input NodeInput) erro
 	attrs := map[string]any{}
 	if h.deps.Annotate == nil {
 		attrs["annotation_error"] = "annotation persistence is unavailable"
-	} else if err := h.deps.Annotate(ctx, input, nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Level: "warn", Message: outputWithheld}}); err != nil {
+	} else if err := h.deps.Annotate(ctx, input, nodewire.AnnotationRequest{Annotation: nodewire.Annotation{Level: "warn", Message: outputWithheld}}); err != nil {
 		attrs["annotation_error"] = err.Error()
 	}
 	return h.diagnostic(ctx, input, "warn", "output_withheld", "", outputWithheld, attrs)
