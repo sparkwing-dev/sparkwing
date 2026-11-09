@@ -28,6 +28,12 @@
   },
   "routes": [
     {
+      "route": "/api/status",
+      "kind": "api",
+      "exempt": "Requires authenticated team history, runner observations and a local daemon where configured, absent from the dashboard page-weight corpus. HTTP tests verify team isolation and status contents. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/team/settings",
       "kind": "api",
       "exempt": "Requires a live team member or administrator, absent from the dashboard corpus. PUT changes enrollment policy and must not be probed against a person's team. In-process tests verify issuance, authorization and transactional audit. Authorized latency, cold start and response bytes remain unmeasured.",
