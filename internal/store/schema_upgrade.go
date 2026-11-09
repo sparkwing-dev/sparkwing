@@ -20,40 +20,6 @@ type schemaUpgrade struct {
 // the open transaction, which holds the migrate advisory lock on PostgreSQL, so concurrent openers upgrade once.
 var schemaUpgrades = []schemaUpgrade{
 	{
-		from: 30, release: "v0.69.2", digest: "d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4",
-		statements: []string{`CREATE TABLE local_machine_admission (
-    singleton BIGINT NOT NULL PRIMARY KEY CHECK(singleton=1),
-    state_json BLOB NOT NULL
-)`},
-	},
-	{
-		from: 31, release: "schema 31", digest: "c09c6196b47e8c6561edd4f6274c105e5c8d00a8cbe9ec8925c5e0f23a68d236",
-		statements: []string{`CREATE TABLE local_run_secrets (
-    team TEXT NOT NULL REFERENCES teams(name),
-    run_id TEXT NOT NULL,
-    envelope TEXT NOT NULL,
-    PRIMARY KEY(team,run_id),
-    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
-)`},
-	},
-	{
-		from: 32, release: "schema 32", digest: "8229dac48bd08544fb5b2cddfe2f9c9d0f0f3c41968eda4db1591aff9f247f61",
-		statements: []string{`CREATE TABLE local_runner_instances (
-    id TEXT NOT NULL PRIMARY KEY CHECK(id <> ''),
-    capability_prefix TEXT NOT NULL UNIQUE REFERENCES capabilities(prefix) ON DELETE CASCADE,
-    machine TEXT NOT NULL CHECK(machine <> ''),
-    pid BIGINT NOT NULL CHECK(pid > 0),
-    process_birth TEXT NOT NULL CHECK(process_birth <> ''),
-    version TEXT NOT NULL CHECK(version <> ''),
-    build_identity TEXT NOT NULL CHECK(build_identity <> ''),
-    state TEXT NOT NULL CHECK(state IN ('registered','active','draining','stopped'))
-)`, `CREATE UNIQUE INDEX idx_local_runner_active ON local_runner_instances(machine) WHERE state='active'`},
-	},
-	{
-		from: 33, release: "schema 33", digest: "b4ac52448bafd4ea378d1ed2e1d9aec0c610d3a5e27df4a7a780c178f425a47b",
-		statements: []string{`CREATE INDEX idx_runs_live_children ON runs(team,id) WHERE parent_run_id <> '' AND status IN ('pending','running')`},
-	},
-	{
 		from: 34, release: "schema 34", digest: "187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012",
 		statements: schema35ActionsStatements,
 	},

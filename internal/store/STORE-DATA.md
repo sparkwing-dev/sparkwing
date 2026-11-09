@@ -13,19 +13,19 @@ The baseline version is 37. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
-transaction, under the migration advisory lock on PostgreSQL. Schema 30 is the
-oldest accepted baseline. Schema 31 adds `local_machine_admission`, schema 32 adds
-`local_run_secrets`, and schema 33 adds `local_runner_instances` with a unique
-active instance per verified local peer root. Runner registration persists its
-claim capability, process ID and birth identity, version and build identity.
-Activation shares queue arbitration with claim awards, atomically draining the
-previous instance before admitting the successor. Registered, draining and
-stopped instances receive no new awards. Held award authority remains live
-while an instance drains. Existing credential retention removes an instance
-record when its ended claim capability is retired. Schema 34 adds
-`idx_runs_live_children`, a partial index on pending and running child runs that
-the parent-cancellation sweep reads instead of the whole run history. Schema 35
-adds `github_actions_approvals` and `github_actions_dispatches`. Approval rows
+transaction, under the migration advisory lock on PostgreSQL. Schema 34 is the
+oldest accepted baseline. Earlier stores are refused unchanged.
+
+Runner registration persists its claim capability, process ID and birth identity,
+version and build identity. Activation shares queue arbitration with claim awards,
+atomically draining the previous instance before admitting the successor.
+Registered, draining and stopped instances receive no new awards. Held award
+authority remains live while an instance drains. Existing credential retention
+removes an instance record when its ended claim capability is retired.
+`idx_runs_live_children` indexes pending and running child runs so the
+parent-cancellation sweep avoids the whole run history.
+
+Schema 35 adds `github_actions_approvals` and `github_actions_dispatches`. Approval rows
 bind a team repository, workflow ref and hosted image. A dispatch receipt binds
 one job queue start and placement generation to its workflow revision and provider
 run. Sending is persisted before HTTP. Expired sender leases become uncertain,
