@@ -2,7 +2,7 @@
 
 `pipeline trigger --runner here` reserves one controller run for the caller's machine. The controller keeps the run history, authorization and results. The shared run host executes the sealed source and plan on that machine.
 
-Initial trigger intake and native shared hosting remain incomplete in this build. Initial here hosting, retries and resume use the same retained-authority handoff and sealed owner claim. A missing native host reports `unavailable` before it claims work.
+Initial here hosting, retries and resume use the same retained-authority handoff and sealed owner claim. A missing native host reports `unavailable` before it claims work.
 
 ```sh
 sparkwing pipeline trigger release --profile prod --runner here --reason "runners unavailable"
@@ -34,7 +34,9 @@ The first interrupt requests cancellation on the controller while the host keeps
 
 ## Secrets and lifetime
 
-Here authority grants access only to its bound run and declared data. The controller applies the same secret preflight and release checks as other placements. Pool-restricted secrets remain unavailable to a here runner. Descendant authority stays under the requester's ancestry.
+Here authority grants access only to its bound run and declared data. The controller applies the same secret preflight and release checks as other placements. A here run supplies its own code, so it reads only `--shared` team-wide secrets, which any run of the team can read; a repository's pipeline secrets stay unavailable even when a shared secret of the same name exists. A plan that declares a pool-restricted (`--only-on`) secret is refused. Descendant authority stays under the requester's ancestry.
+
+Each release goes to the run's current claim and is audited as `secret.released`. The member's own credential, another member, another run's here bearer, a superseded or expired claim, a cancelled or finished run, and a member removed from the team receive nothing. The run records its `--reason`. A here run therefore cannot reach a secret its requester could not already read through any other run.
 
 The controller owns execution deadlines and credential expiry. A remote owner's default execution budget is six hours, subject to its sealed operator policy and parent lifetime. Resume never extends those bounds.
 
