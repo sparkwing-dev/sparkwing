@@ -28,7 +28,7 @@ func BuildGoSDKFixture(ctx context.Context) (string, func(), error) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	build := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false"), "go", "build", "-p", "4", "-o", bin, goSDKModule+"/tests/acceptance/testdata/protocolgo/cmd")
+	build := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=auto", "GOFLAGS=-trimpath -buildvcs=false"), "go", "build", "-p", "2", "-o", bin, goSDKHostModule+"/tests/acceptance/testdata/protocolgo/cmd")
 	if output, err := build.CombinedOutput(); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("compile protocol fixture: %w: %s", err, strings.TrimSpace(string(output)))

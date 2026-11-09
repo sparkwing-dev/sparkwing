@@ -1,4 +1,4 @@
-package sparkwing
+package sdkchecks
 
 import (
 	"os"
@@ -30,7 +30,7 @@ func TestRequiresDocumentationStatesDispatchBehavior(t *testing.T) {
 }
 
 func TestGeneratedRequiresDocumentationStatesClaimBoundary(t *testing.T) {
-	for _, path := range []string{"../docs/sdk-reference.md", "../pkg/docs/mirror/sdk-reference.md"} {
+	for _, path := range []string{"../../docs/sdk-reference.md", "../../pkg/docs/mirror/sdk-reference.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

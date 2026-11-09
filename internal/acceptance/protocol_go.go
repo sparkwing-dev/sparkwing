@@ -14,11 +14,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
-const goSDKModule = "github.com/sparkwing-dev/sparkwing"
+const (
+	goSDKHostModule = "github.com/sparkwing-dev/sparkwing"
+	goSDKModule     = goSDKHostModule + "/sparkwing"
+)
 
 // GoSDKLinkage lists the public SDK's linked packages and refuses host-owned dependencies.
 func GoSDKLinkage(ctx context.Context) ([]string, error) {
-	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false"), "go", "list", "-deps", "-f", "{{.ImportPath}}", goSDKModule+"/sparkwing")
+	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=auto", "GOFLAGS=-trimpath -buildvcs=false"), "go", "list", "-deps", "-f", "{{.ImportPath}}", goSDKModule)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("list Go SDK imports: %w: %s", err, strings.TrimSpace(string(output)))
@@ -29,7 +32,7 @@ func GoSDKLinkage(ctx context.Context) ([]string, error) {
 			strings.HasPrefix(path, "sigs.k8s.io/yaml") {
 			return linked, fmt.Errorf("Go SDK links YAML implementation %s", path)
 		}
-		if !strings.HasPrefix(path, goSDKModule+"/") {
+		if !strings.HasPrefix(path, goSDKHostModule+"/") {
 			continue
 		}
 		linked = append(linked, path)
@@ -38,7 +41,7 @@ func GoSDKLinkage(ctx context.Context) ([]string, error) {
 			"/internal/engine", "/internal/nodehost", "/internal/orchestrator", "/internal/runners",
 			"/internal/settings", "/internal/wingd", "/internal/controller", "/internal/store",
 		} {
-			if path == goSDKModule+forbidden || strings.HasPrefix(path, goSDKModule+forbidden+"/") {
+			if path == goSDKHostModule+forbidden || strings.HasPrefix(path, goSDKHostModule+forbidden+"/") {
 				return linked, fmt.Errorf("Go SDK links host-owned package %s", path)
 			}
 		}

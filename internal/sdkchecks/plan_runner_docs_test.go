@@ -1,10 +1,11 @@
-package sparkwing
+package sdkchecks
 
 import (
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,7 +27,7 @@ func TestPrefersDocumentationStatesEligibility(t *testing.T) {
 }
 
 func TestGeneratedPrefersDocumentationStatesEligibility(t *testing.T) {
-	for _, path := range []string{"../docs/sdk-reference.md", "../pkg/docs/mirror/sdk-reference.md"} {
+	for _, path := range []string{"../../docs/sdk-reference.md", "../../pkg/docs/mirror/sdk-reference.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -48,7 +49,7 @@ func TestGeneratedPrefersDocumentationStatesEligibility(t *testing.T) {
 }
 
 func TestSchedulingPrefersDocumentationStatesEligibility(t *testing.T) {
-	for _, path := range []string{"../docs/scheduling.md", "../pkg/docs/mirror/scheduling.md"} {
+	for _, path := range []string{"../../docs/scheduling.md", "../../pkg/docs/mirror/scheduling.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -68,7 +69,7 @@ func TestSchedulingPrefersDocumentationStatesEligibility(t *testing.T) {
 
 func methodDoc(t *testing.T, path, receiver, method string) string {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", "sparkwing", path), nil, parser.ParseComments)
 	if err != nil {
 		t.Fatal(err)
 	}
