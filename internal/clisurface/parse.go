@@ -39,7 +39,12 @@ func (i Invocation) Help() bool { return i.Bool("help") || i.Bool("help-all") }
 
 // Output selects the format before any command side effects.
 func (i Invocation) Output(terminal bool) string {
-	if value := i.Value("output"); value != "" {
+	return OutputFormat(i.Value("output"), terminal)
+}
+
+// OutputFormat selects a validated explicit format or the stdout terminal default.
+func OutputFormat(value string, terminal bool) string {
+	if value != "" {
 		return value
 	}
 	if terminal {
