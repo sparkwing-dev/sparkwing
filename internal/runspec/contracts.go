@@ -171,7 +171,6 @@ func (s Source) FetchedFromRemote() bool {
 // PipelineDir is checkout-relative and cannot escape the checkout. Git.SHA pins remote execution.
 // Intake verifies the location belongs to Git.Repository before sealing or releasing source authority.
 type SourceLocation struct {
-	Installation  string `json:"installation,omitempty"`
 	RemoteURL     string `json:"remote_url,omitempty"`
 	LocalCheckout string `json:"local_checkout,omitempty"`
 	PipelineDir   string `json:"pipeline_dir"`

@@ -192,13 +192,6 @@ A run that compiles prints `Cache miss: pipeline binary compiled in <duration>`,
 so a cache that a CI provider failed to restore shows up in the run output.
 See [Warmup](sparks.md#warmup) for receipts and the process-policy integration.
 
-Local Go runs can pass the CLI's verified installation to their owner on the
-same machine. The owner checks source-file and directory identities, Go build
-settings and the copied executable's digest. Changed or unsupported inputs take
-the full installation path. The receipt lasts only for that CLI invocation.
-CGO builds, workspace discovery and unsupported filesystem identities use the
-full path.
-
 ### The key
 
 The key fingerprints the inputs sparkwing controls: the effective Go version,

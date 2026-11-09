@@ -9,5 +9,3 @@ import (
 func fileIdentity(os.FileInfo, time.Time) (string, bool) { return "", false }
 
 func directoryIdentity(os.FileInfo) string { return "" }
-
-func symlinkIdentity(os.FileInfo, time.Time) string { return "" }

@@ -338,10 +338,6 @@ func stableKeyParts(ctx context.Context, sparkwingDir, goos, goarch string, env 
 }
 
 func keyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
-	witness := inputWitness(ctx)
-	for _, name := range []string{"go.mod", "go.sum", ".resolved.mod", ".resolved.sum"} {
-		witness.file(filepath.Join(sparkwingDir, name))
-	}
 	var parts []KeyPart
 	add := func(label, detail string, material []byte) {
 		parts = append(parts, KeyPart{
@@ -363,7 +359,7 @@ func keyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []stri
 	add("compiled inputs", "Go-selected source and embedded files", compiled)
 
 	var moduleBuf bytes.Buffer
-	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles, hashAllFiles, witness)
+	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles, hashAllFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +394,7 @@ func keyParts(ctx context.Context, sparkwingDir, goos, goarch string, env []stri
 		var buf bytes.Buffer
 
 		fmt.Fprintf(&buf, "replace:%s\n", t.Label)
-		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles, hashAllFiles, witness)
+		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles, hashAllFiles)
 		if err != nil {
 			return nil, err
 		}
@@ -490,11 +486,7 @@ func hashable(dir string, keep fileFilter, hashAllFiles bool, directories map[st
 	return kept, pruned, nil
 }
 
-func snapshotHashable(files []string, witnesses ...*InputWitness) (map[string]fileState, error) {
-	var witness *InputWitness
-	if len(witnesses) != 0 {
-		witness = witnesses[0]
-	}
+func snapshotHashable(files []string) (map[string]fileState, error) {
 	out := make(map[string]fileState, len(files))
 	for _, path := range files {
 		info, err := os.Lstat(path)
@@ -504,30 +496,17 @@ func snapshotHashable(files []string, witnesses ...*InputWitness) (map[string]fi
 		if err != nil {
 			return nil, err
 		}
-		witness.capture(path, info)
 		out[path] = fileState{size: info.Size(), modTime: info.ModTime().UnixNano()}
 	}
 	return out, nil
 }
 
-func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool, witnesses ...*InputWitness) (hashStats, error) {
-	var witness *InputWitness
-	if len(witnesses) != 0 {
-		witness = witnesses[0]
-	}
-	if witness != nil && !witness.Disabled {
-		absolute, err := filepath.Abs(dir)
-		if err != nil {
-			witness.Disabled = true
-		} else if resolved, err := filepath.EvalSymlinks(absolute); err != nil || resolved != absolute {
-			witness.Disabled = true
-		}
-	}
+func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
 	files, ignored, err := hashable(dir, keep, hashAllFiles, nil)
 	if err != nil {
 		return hashStats{}, err
 	}
-	before, err := snapshotHashable(files, witness)
+	before, err := snapshotHashable(files)
 	if err != nil {
 		return hashStats{}, err
 	}
@@ -550,7 +529,7 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 		if err != nil {
 			return stats, err
 		}
-		after, err := snapshotHashable(files, witness)
+		after, err := snapshotHashable(files)
 		if err != nil {
 			return stats, err
 		}
@@ -562,15 +541,6 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 			return stats, err
 		}
 		if runtime.GOOS == "windows" || unchanged {
-			if witness != nil && !witness.Disabled {
-				for path, before := range directories {
-					info, statErr := os.Lstat(path)
-					if statErr != nil || before == "" || directoryIdentity(info) != before || !witness.capture(path, info) {
-						witness.Disabled = true
-						break
-					}
-				}
-			}
 			_, err = h.Write(digest.Bytes())
 			return stats, err
 		}
