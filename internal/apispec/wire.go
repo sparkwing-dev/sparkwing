@@ -121,6 +121,7 @@ func wireOperations() map[string]wireOperation {
 	result["POST /api/v1/team/billing/standing-request"] = operation("Contact operators for High standing, higher limits or larger payments", wire.StandingRequestWrite{}, wire.StandingRequest{})
 	result["GET /api/v1/operator/standing-requests"] = operation("List open standing requests", nil, wire.OperatorStandingQueue{})
 	result["POST /api/v1/operator/teams/{team}/standing-request/decline"] = operation("Decline a team's open standing request", wire.StandingDecline{}, wire.StandingRequest{})
+	result["GET /api/v1/runs/{run}/jobs/{job}/artifacts"] = operation("List committed job artifacts or sign an exact path download", nil, wire.ArtifactPage{}, query("path", "string"))
 	result["GET /api/v1/runs/{run}/jobs/{job}/output"] = operation("Read an authorized committed job output", nil, wire.JobOutput{})
 	result["GET /api/v1/runs/{run}/children/{child}/jobs/{job}/output"] = operation("Read an authorized child output", nil, wire.JobOutput{})
 
@@ -170,6 +171,9 @@ func wireOperations() map[string]wireOperation {
 	result["POST /api/v1/data/memo/copy"] = operation("Copy memo references to the authenticated attempt", wire.DataMemoLookupRequest{}, wire.DataMemoLookupResult{})
 	addCollectionOperations(result)
 	addReadParameters(result)
+	artifacts := result["GET /api/v1/runs/{run}/jobs/{job}/artifacts"]
+	artifacts.variants = []reflect.Type{reflect.TypeFor[wire.ArtifactPage](), reflect.TypeFor[wire.JobArtifacts]()}
+	result["GET /api/v1/runs/{run}/jobs/{job}/artifacts"] = artifacts
 	return result
 }
 
@@ -235,6 +239,7 @@ func addCollectionOperations(operations map[string]wireOperation) {
 		"/api/v1/runs/{run}/attempts":                                       "runs",
 		"/api/v1/runs/{run}/jobs":                                           "jobs",
 		"/api/v1/runs/{run}/jobs/{job}/attempts":                            "attempts",
+		"/api/v1/runs/{run}/jobs/{job}/artifacts":                           "artifacts",
 		"/api/v1/runs/{run}/jobs/{job}/steps":                               "steps",
 		"/api/v1/runs/{run}/steps":                                          "steps",
 		"/api/v1/runs/{run}/debug-pauses":                                   "pauses",

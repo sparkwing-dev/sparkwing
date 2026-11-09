@@ -47,6 +47,11 @@ var approvedExternalBoundaries = []externalBoundary{
 		marker:   "// sleepcheck:external-boundary a real controller outage must outlast the old 700ms intake budget",
 	},
 	{
+		file: "tests/acceptance/artifacts_cli_e2e_test.go", function: "TestArtifactsCLIRealMembersAndInterrupt",
+		duration: "10 * time.Second",
+		marker:   "// sleepcheck:external-boundary SIGINT must unwind the real streaming CLI process",
+	},
+	{
 		file: ".sparkwing/jobs/release_cli_e2e_test.go", function: "TestReleaseCLIWithConcurrentMainActor",
 		duration: "20 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary wait for the real Git publication subprocess",

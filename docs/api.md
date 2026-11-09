@@ -68,6 +68,14 @@ appropriate. The CLI and dashboard follow these cursors to display complete
 inventories. Existing run, log, metric, sizing and other bounded-query
 pagination retain their own limits.
 
+`GET /api/v1/runs/{run}/jobs/{job}/artifacts` lists committed files under
+current membership and `runs.read`. Listings use `limit` (default 50, maximum
+200) and `cursor`, and return `artifacts`, `next_cursor` and `truncated` without
+download credentials. Supplying one exact manifest `path` instead returns one
+artifact and its signed `download` transfer. A download request accepts no
+`limit` or `cursor`. The CLI keeps these signed URLs private and pages its
+output separately with `sparkwing runs artifacts --limit N --cursor CURSOR`.
+
 The repository's `api/openapi.yaml` is generated from the same policy and the
 shared wire types. Each operation retains its complete authorization alternatives
 under `x-sparkwing-policy`. JSON schemas preserve omitted fields, nulls and byte

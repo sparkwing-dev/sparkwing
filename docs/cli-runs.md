@@ -12,6 +12,7 @@ Inspect and control pipeline runs
 
 - `annotations` -- Read or append persistent job + step annotations
 - `approvals` -- List approval gates (pending and history)
+- `artifacts` -- List or download a run’s committed artifact files
 - `cancel` -- Request cancellation of in-flight runs
 - `grep` -- Search run log text
 - `list` -- List recent pipeline runs
@@ -161,6 +162,34 @@ Without --run, list pending approvals. With --run, include resolved history. Pla
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--run RUN_ID` | Run ID or per-team run number. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+
+## `sparkwing runs artifacts`
+
+List or download a run’s committed artifact files
+
+List files from each job's committed Artifacts manifest. --job narrows the list to one job. Unfinished jobs and absent or expired manifests yield no files. Missing or corrupt retained manifests fail listing; missing or corrupt file bytes fail download.
+
+Listings default to 40 files in job and path order. Use a positive --limit and continue with --cursor using the same run and job filters. JSON emits artifact records followed by a page record with returned, limit, truncated and next_cursor. Plain prints paths and sends continuation guidance to stderr.
+
+Fetch one exact manifest path with --job, --path and --dest. The destination must not exist. Downloads verify the file's size and SHA-256 before publication. JSON download records carry run_id, job_id, path, digest, size, mode and saved_to. Signed download URLs stay private. --limit and --cursor apply only to listings.
+
+Reads use the selected controller profile or the local controller and require current team membership with runs.read. Execution claims and cache-only data credentials cannot use this read surface.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--run RUN_ID` | Run ID or per-team run number. (required) |
+| `--job JOB_ID` | List only this job's files; required for a download. |
+| `--path PATH` | Exact path in the committed manifest to download; requires --job and --dest. |
+| `--dest FILE` | Write the verified file to this new destination; its parent directory must exist. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
+| `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing runs cancel`

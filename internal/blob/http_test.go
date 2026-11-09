@@ -3,6 +3,7 @@ package blob
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -36,5 +37,42 @@ func TestSignedTransferHTTP(t *testing.T) {
 		if _, err := (TransferClient{}).Transfer(context.Background(), SignedTransfer{URL: url}, nil); err == nil {
 			t.Fatalf("unsafe URL %q", url)
 		}
+	}
+}
+
+type failingTransferBody struct{ failure error }
+
+func (b failingTransferBody) Read([]byte) (int, error) { return 0, b.failure }
+func (b failingTransferBody) Close() error             { return b.failure }
+
+func TestSignedTransferErrorsDoNotRetainCredentials(t *testing.T) {
+	const signedURL = "https://bucket.s3.example/object?X-Amz-Credential=private&X-Amz-Signature=secret"
+	for _, stage := range []string{"request", "read", "close"} {
+		t.Run(stage, func(t *testing.T) {
+			failure := fmt.Errorf("object request %s failed", signedURL)
+			client := TransferClient{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+				if stage == "request" {
+					return nil, failure
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: failingTransferBody{failure: failure}, Header: make(http.Header)}, nil
+			})}
+			body, err := client.Transfer(t.Context(), SignedTransfer{URL: signedURL}, nil)
+			if body != nil {
+				if stage == "read" {
+					_, err = io.ReadAll(body)
+				} else {
+					err = body.Close()
+				}
+				_ = body.Close()
+			}
+			if err == nil {
+				t.Fatal("transfer failure succeeded")
+			}
+			for current := err; current != nil; current = errors.Unwrap(current) {
+				if strings.ContainsAny(fmt.Sprintf("%+v", current), "?&") || strings.Contains(current.Error(), "secret") || errors.Is(current, failure) {
+					t.Fatal("transfer error retained signed credentials")
+				}
+			}
+		})
 	}
 }
