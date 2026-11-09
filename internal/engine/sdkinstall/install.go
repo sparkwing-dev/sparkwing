@@ -221,7 +221,21 @@ func selectionInputs(dir string, environment procenv.Env) ([]string, string) {
 	return append(args, "-m", "-json", engine.GoModule), inputs.String()
 }
 
-func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {
+func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (_ []string, result error) {
+	// bug: npm ci removes packages beneath running SDK processes. Serialize npm's
+	// incremental installs so npm owns reuse without replacing an unchanged tree.
+	lock, err := os.Open(filepath.Join(dir, pin.Lockfile))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { result = errors.Join(result, lock.Close()) }()
+	if err := lockTypeScriptInstall(lock); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	var manifest struct{ Main string }
 	body, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
@@ -233,11 +247,17 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 	if manifest.Main == "" {
 		return nil, errors.New("TypeScript package.json requires a main entry")
 	}
-	body, err = installTool(ctx, dir, environment, "npm", "ci", "--no-audit", "--no-fund")
+	// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
+	body, err = installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")
 	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
 		return nil, err
 	}
-	body, err = os.ReadFile(filepath.Join(dir, "node_modules", "@sparkwing", "sdk", "package.json"))
+	body, err = installTool(ctx, dir, environment, "npm", "install", "--no-save", "--no-audit", "--no-fund")
+	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+		return nil, err
+	}
+	installedManifest := filepath.Join(dir, "node_modules", "@sparkwing", "sdk", "package.json")
+	body, err = os.ReadFile(installedManifest)
 	if err != nil {
 		return nil, err
 	}
