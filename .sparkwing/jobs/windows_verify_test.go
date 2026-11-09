@@ -76,6 +76,7 @@ func TestWindowsVerifySelectsNativeRegressionFixtures(t *testing.T) {
 	selection := regexp.MustCompile(windowsVerifyRuntimeTests)
 	for _, relative := range []string{
 		"internal/nodehost/host_exec_windows_test.go", "internal/pipelineentry/npm_test.go",
+		"internal/procenv/look_command_windows_test.go",
 		"internal/wingd/client/query_absent_windows_test.go", "internal/orchestrator/run_handle_test.go",
 	} {
 		source, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", filepath.FromSlash(relative)), nil, 0)
@@ -114,8 +115,10 @@ func TestWindowsVerifyRunsHostCommandRegressionPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(strings.Fields(string(args)), "./internal/nodehost") {
-		t.Fatalf("Windows race command omits host regression package: %s", args)
+	for _, pkg := range []string{"./internal/nodehost", "./internal/procenv"} {
+		if !slices.Contains(strings.Fields(string(args)), pkg) {
+			t.Errorf("Windows race command omits regression package %s: %s", pkg, args)
+		}
 	}
 }
 
