@@ -59,7 +59,7 @@ The deploy role gets no RDS permission. Recovery uses RDS point-in-time recovery
 
 ## Cluster access
 
-An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, type `STANDARD`, with no AWS-managed access policy. Argo applies every change from GitOps, so the role only reads; it cannot patch an Argo application, so the pipeline does not ask for a hard refresh and Argo finds each commit by polling. The RBAC lives in kikd-infra (`k8s/apps/sparkwing-deployer-rbac.yaml`), outside anything the deploy key can write:
+An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, type `STANDARD`, with no AWS-managed access policy. The RBAC lives in kikd-infra (`k8s/apps/sparkwing-deployer-rbac.yaml`), outside anything the deploy key can write:
 
 | Scope | Resources | Verbs | Used for |
 | --- | --- | --- | --- |
