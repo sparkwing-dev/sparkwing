@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,18 +54,22 @@ func (p *Review) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, ru
 	if run.Git != nil {
 		branch = run.Git.Branch
 	}
-	reviewJobNode(plan, in, branch)
+	reviewJobNode(plan, in, branch, false)
 	return nil
 }
 
 // safety: land declares its review through this function too, so the review it
 // requires before pushing main is the job `sparkwing run review` runs.
-func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string) *sparkwing.JobNode {
-	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch}).
+func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string, prePush bool) *sparkwing.JobNode {
+	cores := lightJobCores
+	if prePush {
+		cores += float64(prePushReservationCores(currentHost().cpus))
+	}
+	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch, prePush: prePush}).
 		Inline().
 		Timeout(45 * time.Minute).
 		NoProgressTimeout(30 * time.Minute).
-		Cores(lightJobCores)
+		Cores(cores)
 }
 
 func init() {
@@ -74,11 +79,17 @@ func init() {
 type reviewJob struct {
 	sparkwing.Base
 	sparkwing.Produces[reviewRecord]
-	args   ReviewArgs
-	branch string
+	args    ReviewArgs
+	branch  string
+	prePush bool
 }
 
 func (j *reviewJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	if j.prePush {
+		if _, err := (&PrePush{}).Work(w); err != nil {
+			return nil, err
+		}
+	}
 	return sparkwing.Step(w, "review", j.run), nil
 }
 
@@ -487,7 +498,48 @@ func overwingStandards(ctx context.Context, root, diff string) (string, error) {
 	if len(names) == 0 {
 		return "", nil
 	}
-	return sparkwing.Exec(ctx, "overwing", append([]string{"standards", "show"}, append(names, "-o", "plain")...)...).String()
+	cards, err := sparkwing.Exec(ctx, "overwing", append([]string{"standards", "show"}, append(names, "-o", "json")...)...).String()
+	if err != nil {
+		return "", err
+	}
+	return reviewStandardBodies(cards)
+}
+
+var standardBacklink = regexp.MustCompile(`^- \[\[[^\]]+\]\] \x{2014} (ai|semantic)$`)
+
+// perf: routing metadata and vault backlinks do not instruct the reviewer.
+func reviewStandardBodies(cards string) (string, error) {
+	dec := json.NewDecoder(strings.NewReader(cards))
+	var bodies []string
+	for {
+		var card struct {
+			Contents string `json:"contents"`
+		}
+		if err := dec.Decode(&card); err != nil {
+			if errors.Is(err, io.EOF) {
+				return strings.Join(bodies, "\n\n"), nil
+			}
+			return "", fmt.Errorf("review: decode standards card: %w", err)
+		}
+		body := card.Contents
+		if strings.HasPrefix(body, "---\n") {
+			if metadata, rest, ok := strings.Cut(body[4:], "\n---\n"); ok && !strings.Contains(metadata, "lint_rules:") {
+				body = rest
+			}
+		}
+		if rules, related, ok := strings.Cut(body, "\n## Related\n"); ok {
+			// safety: remove only a terminal section of vault backlinks.
+			linksOnly := true
+			for _, line := range strings.Split(related, "\n") {
+				line = strings.TrimSpace(line)
+				linksOnly = linksOnly && (line == "" || standardBacklink.MatchString(line))
+			}
+			if linksOnly {
+				body = rules
+			}
+		}
+		bodies = append(bodies, strings.TrimSpace(body))
+	}
 }
 
 func standardCardNames(ndjson string) []string {

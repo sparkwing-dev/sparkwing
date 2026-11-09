@@ -4,7 +4,7 @@
   `runners add --label` records the allowed set. Extra claim labels are refused
   with an admin update command. `sparkwing-controller admin runner-labels` views
   and replaces the set. Existing runners keep their last stored labels on upgrade.
-  Browser approval shows the full allowed set before consent. Labels are bounded
+  Browser approval accepts only an empty allowed set. Labels are bounded
   to 32 entries of 1 to 128 ASCII characters, including `host=...` and `tool:...`.
 
 ### Fixed

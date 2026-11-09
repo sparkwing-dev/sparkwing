@@ -36,7 +36,37 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 | `guards` | `Guards` | no | Guards gate dispatch on where the run is dispatched, args, and git branch. Reject fires before any step runs when any token matches; Require fires when not every token matches. Token vocabulary: `where:local`, `where:controller`, `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. A literal branch matches the checked-out head. The default token matches the repository's default branch: a GitHub App trigger records it, and any other run reads origin's HEAD from its checkout; a run that cannot resolve it is refused. `arg:` tokens read the merged argument set the run executes with, so a value supplied by defaults.args, this entry's own args: block or a flag's SDK default is guarded exactly like one typed on the command line. See pkg/pipelines/guards.go. |
 | `args` | `map[string]string` | no | Args supplies per-arg default values. Higher priority than a field's `default` tag; lower than an explicit operator CLI flag. Keyed by the field's `flag` tag on pipeline Inputs or a job's WithArgs[T]. |
 | `profile` | `string` | no | Profile pins the pipeline to the controller profile it names: `sparkwing run` refuses it, and `sparkwing pipeline trigger` accepts only --profile with this name. Empty leaves the pipeline unpinned. |
-| `requires` | `[]string` | no | Requires are runner-label requirements all jobs in this pipeline must satisfy in addition to their own Job.Requires(). Wholesale replaces defaults.requires when non-empty. The reserved label "local" keeps fleet helpers from claiming the node. |
+
+## Repository placement on a pipeline entry
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `placement` | `Placement` | no | Placement orders where repository-proven runs of this pipeline place their jobs. Only the verified default-branch copy takes effect. |
+| `jobs` | `map[string]JobOverride` | no | Jobs holds per-job overrides keyed by job ID. |
+
+See [repository placement](scheduling.md#repository-placement) for targets, holds, default-branch policy and per-job replacement rules.
+
+## `placement`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `prefer` | `[]PlacementTier` | **yes** |  |
+
+## `placement.prefer` list item
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | `string` | **yes** |  |
+| `labels` | `[]string` | no |  |
+| `hold` | `string` | no |  |
+| `workflow` | `string` | no |  |
+| `runner` | `string` | no |  |
+
+## `jobs.<job-id>`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `placement` | `Placement` | no |  |
 
 ## `guards`
 

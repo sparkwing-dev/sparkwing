@@ -26,6 +26,20 @@ sparkwing run land --sw-allow-risk destructive,prod  # land on main
 Lands run on owned hardware. Policy, gate, review and push use that machine.
 The land queue invokes it with `--sw-route local`.
 
+The focused queue can pass `-- --pre-push-review` with `--sw-only '*[wy]'`.
+This keeps policy and review selected and adds every unchanged `pre-push`
+step beside the review in the same inline job. The job fails fast, cancels
+in-flight siblings and joins them before reporting completion. Its CPU
+reservation includes the pre-push compilers. The reviewers have read-only
+access. They write their review record outside the checkout, while pre-push
+writes compiler and lint caches. Neither changes source.
+
+The queue captures HEAD after merging main, requires a clean checkout before
+checks, then requires the same HEAD and a clean checkout after both gates
+pass. Only that exact commit can push with `--no-verify`, because its normal
+pre-push checks already passed. A failed or cancelled check cannot push.
+The normal land path and human pushes keep their existing gates.
+
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
 itself, a CHANGELOG.md that repeats a `###` heading within a release, and a
 branch whose merge with a freshly fetched `origin/main`
@@ -34,8 +48,20 @@ merges cleanly goes ahead. The gate's `policy` job runs next, alongside review: 
 the formatters, em dashes, tracker IDs, comments, test sleeps, tracked
 binaries, home resolution, the docs mirror, changelog lint and links, the
 required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
-generated CLI reference (`bin/gen-cli-docs.sh --check`). Each answers in
-seconds with a warm build cache. Once it passes, the rest of
+generated CLI reference (`bin/gen-cli-docs.sh --check`), Markdown lint, config-reference
+drift and wire-cut coverage. Each answers in
+seconds with a warm build cache. Warm-tree wall times measured on 2026-11-09
+with `GOWORK=off GOFLAGS=-trimpath GOMAXPROCS=2` after one warm-up run:
+
+| Policy check | Command | Wall time |
+| --- | --- | --- |
+| Markdown lint | `npx --yes markdownlint-cli2@0.23.2` | 2.90 s |
+| Config reference | `bash bin/gen-config-docs.sh --check` | 0.27 s |
+| Wire-cut coverage | `go -C .sparkwing test -p 2 ./jobs -run ^TestRepositoryUnreleasedSectionDeclaresEveryWireCut$ -count=1` | 1.49 s |
+
+Gate and land request full source history and tags. Wire-cut coverage refuses
+a checkout without a reachable release tag before invoking the existing test.
+The policy job keeps its ten-minute cold-build deadline. Once it passes, the rest of
 the gate (the same jobs as `sparkwing run gate`) starts while review continues.
 Review is the same job as `sparkwing run review`, under `.review.yaml`. A focused
 policy/review run selects both with `--sw-only '*[wy]'` (the job names ending in
@@ -53,7 +79,9 @@ in profile order after both finish. A failed profile leaves the prior review
 record unchanged. Review logs time diff assembly, context gathering, each model
 invocation (including failed session resumes), settlement and record writing.
 Model time includes the reviewer's repository reads and any nested reviewers.
-Prompts and findings never appear in these timing logs.
+Prompts and findings never appear in these timing logs. Standards prompts keep
+the complete rule bodies and omit card routing metadata and terminal vault
+backlink lists.
 The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,

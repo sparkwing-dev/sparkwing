@@ -2,9 +2,6 @@
 
 - **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/_unreleased.md#bound-object-presence-requests).
 
-
-
-
 - **controller (Breaking):** Remove the ineffective `trust_local_builds` setting and its team API.
   The schema baseline advances to version 37. Existing configured data upgrades
   in place. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-37).

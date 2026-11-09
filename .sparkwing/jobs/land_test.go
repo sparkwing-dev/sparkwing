@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"path"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
@@ -334,4 +336,34 @@ func TestLandReviewIsNeverSkipped(t *testing.T) {
 		return
 	}
 	t.Fatal("land has no review job")
+}
+
+func TestLandPrePushReviewUsesTheWholeTierAndFailsFast(t *testing.T) {
+	doc := inspectPipeline(t, "Land", map[string]string{"pre-push-review": "true"})
+	var review jobDocument
+	for _, job := range doc.Jobs {
+		if job.ID == "review" {
+			review = job
+		}
+	}
+	if !review.Inline || review.FailurePolicy != sparkwing.FailFast {
+		t.Fatalf("combined checks must share the frozen checkout and cancel siblings: %+v", review)
+	}
+	if review.Cores != lightJobCores+float64(prePushReservationCores(currentHost().cpus)) {
+		t.Fatalf("combined reservation = %v", review.Cores)
+	}
+	tier := inspectWork(t, &PrePush{})
+	if len(review.Steps) != len(tier.Steps)+1 {
+		t.Fatalf("steps = %+v", review.Steps)
+	}
+	for _, step := range tier.Steps {
+		got := findStep(review, step.ID)
+		if got == nil || !reflect.DeepEqual(*got, step) {
+			t.Fatalf("pre-push step %s changed: %+v", step.ID, got)
+		}
+	}
+	step := findStep(review, "review")
+	if step == nil || len(step.Needs) != 0 || step.Finally || step.ContinueOnError {
+		t.Fatalf("review must run beside pre-push and fail the job: %+v", step)
+	}
 }

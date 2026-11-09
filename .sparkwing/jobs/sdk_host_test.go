@@ -12,6 +12,10 @@ import (
 )
 
 type pipelineDocument struct {
+	Source struct {
+		FullHistory *bool `json:"full_history"`
+		Tags        *bool `json:"tags"`
+	} `json:"source"`
 	Jobs           []jobDocument
 	Priority       int
 	AdmissionClass sparkwing.AdmissionClass `json:"admission_class"`

@@ -50,7 +50,8 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(t.TempDir(), "engine")
-	build := exec.Command("go", "build", "-buildvcs=false", "-p", "4", "-ldflags", "-X main.Version="+version, "-o", binary, "./cmd/sparkwing")
+	// safety: Go omits linker flags from build identity with trimpath, hiding the fixture's release stamp.
+	build := exec.Command("go", "build", "-trimpath=false", "-buildvcs=false", "-p", "2", "-ldflags", "-X main.Version="+version, "-o", binary, "./cmd/sparkwing")
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build released engine: %v\n%s", err, out)

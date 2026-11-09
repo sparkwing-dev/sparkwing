@@ -68,6 +68,8 @@ func TestTestStepRerunsWhenTheCheckoutChangesOutsideTheModule(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: three real go test runs; the fast class runs under -short")
 	}
+	// bug: earlier fixture runs can cache these exact checkout states with -trimpath.
+	t.Setenv("GOCACHE", t.TempDir())
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "internal", "state_test.go"), `package internal
 import (

@@ -45,6 +45,17 @@ func main() {
 	section(&b, "Top level", structFields(cf, "Config"))
 	section(&b, "`defaults`", structFields(cf, "Defaults"))
 	section(&b, "Pipeline entry (a `pipelines:` list item)", structFields(pf, "Pipeline"))
+	var placementFields []fieldDoc
+	for _, field := range structFields(cf, "Pipeline") {
+		if field.yaml == "placement" || field.yaml == "jobs" {
+			placementFields = append(placementFields, field)
+		}
+	}
+	section(&b, "Repository placement on a pipeline entry", placementFields)
+	b.WriteString("See [repository placement](scheduling.md#repository-placement) for targets, holds, default-branch policy and per-job replacement rules.\n\n")
+	section(&b, "`placement`", structFields(cf, "Placement"))
+	section(&b, "`placement.prefer` list item", structFields(cf, "PlacementTier"))
+	section(&b, "`jobs.<job-id>`", structFields(cf, "JobOverride"))
 	section(&b, "`guards`", structFields(pf, "Guards"))
 	section(&b, "Triggers (`on:`)", structFields(pf, "Triggers"))
 	section(&b, "`on.push`", structFields(pf, "PushTrigger"))

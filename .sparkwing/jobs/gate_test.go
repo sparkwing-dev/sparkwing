@@ -39,6 +39,9 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 
+	if plan.Source.FullHistory == nil || !*plan.Source.FullHistory || plan.Source.Tags == nil || !*plan.Source.Tags {
+		t.Fatal("gate requires full source history and tags for wire-cut coverage")
+	}
 	nodes := plan.Jobs
 	if len(nodes) != 4 {
 		t.Fatalf("gate plan nodes = %d, want policy, broad checks, touched-package race and the tree record", len(nodes))
@@ -374,6 +377,7 @@ func TestThePolicyJobRunsEveryCheapCheckAndNothingHeavy(t *testing.T) {
 	for _, id := range []string{
 		"gofmt", "formatters", "tracker-ids", "em-dashes", "comments", "test-sleeps", "tracked-binaries",
 		"docs-mirror", "changelog-links", "docs-sidebar", "home-resolution", "changelog", "api-spec", "api-snapshot", "cli-docs",
+		"markdownlint", "config-reference", "wire-cut-coverage",
 	} {
 		step := findStep(w, id)
 		if step == nil {
