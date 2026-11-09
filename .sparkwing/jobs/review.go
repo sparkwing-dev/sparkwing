@@ -54,18 +54,22 @@ func (p *Review) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, ru
 	if run.Git != nil {
 		branch = run.Git.Branch
 	}
-	reviewJobNode(plan, in, branch)
+	reviewJobNode(plan, in, branch, false)
 	return nil
 }
 
 // safety: land declares its review through this function too, so the review it
 // requires before pushing main is the job `sparkwing run review` runs.
-func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string) *sparkwing.JobNode {
-	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch}).
+func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string, prePush bool) *sparkwing.JobNode {
+	cores := lightJobCores
+	if prePush {
+		cores += float64(prePushReservationCores(currentHost().cpus))
+	}
+	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch, prePush: prePush}).
 		Inline().
 		Timeout(45 * time.Minute).
 		NoProgressTimeout(30 * time.Minute).
-		Cores(lightJobCores)
+		Cores(cores)
 }
 
 func init() {
@@ -75,11 +79,17 @@ func init() {
 type reviewJob struct {
 	sparkwing.Base
 	sparkwing.Produces[reviewRecord]
-	args   ReviewArgs
-	branch string
+	args    ReviewArgs
+	branch  string
+	prePush bool
 }
 
 func (j *reviewJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	if j.prePush {
+		if _, err := (&PrePush{}).Work(w); err != nil {
+			return nil, err
+		}
+	}
 	return sparkwing.Step(w, "review", j.run), nil
 }
 
