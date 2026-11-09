@@ -1,14 +1,16 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (s *DataController) persistedDataAuthority(ctx context.Context, a capability.Authorized) (blob.Authority, error) {
@@ -26,7 +28,7 @@ func (s *DataController) persistedDataAuthority(ctx context.Context, a capabilit
 }
 
 func dataForbidden() *apierr.Error {
-	return apierr.Authorization(apierr.ReasonBinding, "data authority does not match the authenticated scope")
+	return hosterr.Authorization(hosterr.ReasonBinding, "data authority does not match the authenticated scope")
 }
 
 func validateDataAuthority(a capability.Authorized, authority blob.Authority) error {

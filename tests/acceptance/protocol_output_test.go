@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -8,30 +10,30 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
 func testGoSDKReplyResultReuse(t *testing.T) {
 	t.Run("hello-required-fields", func(t *testing.T) {
 		recordLeaf(t)
-		var greeting nodeproto.HelloResult
-		complete := nodeproto.Reply{ID: "first", OK: true, Result: json.RawMessage(`{"protocol":2,"sdk":{"language":"go","version":"v1"}}`)}
+		var greeting nodewire.HelloResult
+		complete := nodewire.Reply{ID: "first", OK: true, Result: json.RawMessage(`{"protocol":2,"sdk":{"language":"go","version":"v1"}}`)}
 		if err := complete.Decode(&greeting); err != nil {
 			t.Fatal(err)
 		}
-		incomplete := nodeproto.Reply{ID: "second", OK: true, Result: json.RawMessage(`{"protocol":2,"sdk":{"language":"go"}}`)}
-		if err := incomplete.Decode(&greeting); !errors.Is(err, nodeproto.ErrMalformed) {
+		incomplete := nodewire.Reply{ID: "second", OK: true, Result: json.RawMessage(`{"protocol":2,"sdk":{"language":"go"}}`)}
+		if err := incomplete.Decode(&greeting); !errors.Is(err, nodewire.ErrMalformed) {
 			t.Fatalf("incomplete hello inherited required fields from prior reply: %+v, %v", greeting, err)
 		}
 	})
 	t.Run("success-after-failure", func(t *testing.T) {
 		recordLeaf(t)
-		result := nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "prior failure"}}
-		reply := nodeproto.Reply{ID: "next", OK: true, Result: json.RawMessage(`{"outcome":"success","output":null}`)}
+		result := nodewire.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "prior failure"}}
+		reply := nodewire.Reply{ID: "next", OK: true, Result: json.RawMessage(`{"outcome":"success","output":null}`)}
 		if err := reply.Decode(&result); err != nil || result.Outcome != "success" || result.Error != nil || string(result.Output) != "null" {
 			t.Fatalf("success inherited prior failure: %+v, %v", result, err)
 		}
@@ -53,9 +55,9 @@ func testGoSDKRequiredDescribeFields(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			recordLeaf(t)
-			var describe nodeproto.DescribeDoc
-			err := (nodeproto.Reply{ID: "describe", OK: true, Result: json.RawMessage(raw)}).Decode(&describe)
-			if !errors.Is(err, nodeproto.ErrMalformed) {
+			var describe nodewire.DescribeDoc
+			err := (nodewire.Reply{ID: "describe", OK: true, Result: json.RawMessage(raw)}).Decode(&describe)
+			if !errors.Is(err, nodewire.ErrMalformed) {
 				t.Fatalf("missing required describe field accepted: %s: %v", raw, err)
 			}
 		})
@@ -65,8 +67,8 @@ func testGoSDKRequiredDescribeFields(t *testing.T) {
 		`{"pipelines":[{"name":"build","args":[]}]}`,
 		`{"pipelines":[{"name":"build","args":[{"name":"target","type":"string","required":false,"future":null}],"secrets":[{"name":"TOKEN"}],"env_vars":[{"name":"REGION"}],"examples":[{"comment":"","command":"build"}],"risks_by_step":[{"job_id":"build","step_id":"run","labels":[]}],"future":null}],"future":null}`,
 	} {
-		var describe nodeproto.DescribeDoc
-		if err := (nodeproto.Reply{ID: "describe", OK: true, Result: json.RawMessage(raw)}).Decode(&describe); err != nil {
+		var describe nodewire.DescribeDoc
+		if err := (nodewire.Reply{ID: "describe", OK: true, Result: json.RawMessage(raw)}).Decode(&describe); err != nil {
 			t.Fatalf("valid describe with optional or additive fields refused: %s: %v", raw, err)
 		}
 	}
@@ -107,7 +109,7 @@ func testGoSDKOutputFailures(t *testing.T) {
 		{name: "missing"},
 		{name: "corrupt", raw: json.RawMessage(`{"broken":`)},
 		{name: "non-json-whitespace", raw: json.RawMessage("\u00a0null")},
-		{name: "unavailable", err: &apierr.Error{Code: apierr.Unavailable, Message: "fixture unavailable"}},
+		{name: "unavailable", err: &apierr.Error{Code: hosterr.Unavailable, Message: "fixture unavailable"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recordLeaf(t)

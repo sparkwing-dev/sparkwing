@@ -7,11 +7,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
@@ -59,8 +59,8 @@ func claimRemote(t *testing.T, f *storeHostFixture, node string) (store.UnitClai
 	return claim, input
 }
 
-func remotePlan() nodeproto.PlanDoc {
-	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Needs: []string{"build"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
+func remotePlan() nodewire.PlanDoc {
+	return nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}, {ID: "test", Needs: []string{"build"}, Steps: []nodewire.StepSpec{{ID: "body"}}}}}
 }
 
 func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
@@ -89,7 +89,7 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 }
 
 func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "flaky", Retry: &nodewire.RetrySpec{Attempts: 3}, Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 	releaseRemote(t, f, "flaky")
 	_, input := claimRemote(t, f, "flaky")
 	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "flaky"}
@@ -156,7 +156,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 				t.Run(fmt.Sprintf("local_admission=%t/%s/%s", compute, scope, mode), func(t *testing.T) {
 					plan := remotePlan()
 					for i := range plan.Jobs {
-						plan.Jobs[i].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new(scope)}}
+						plan.Jobs[i].Concurrency = []nodewire.ConcurrencySpec{{Group: "db", Scope: new(scope)}}
 					}
 					f := newStoreHostFixture(t, plan)
 					claims := map[string]NodeInput{}
@@ -241,7 +241,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 	plan := remotePlan()
 	plan.Jobs = plan.Jobs[:1]
-	plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new("global"), OnLimit: new("cancel_others")}}
+	plan.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "db", Scope: new("global"), OnLimit: new("cancel_others")}}
 	f := newStoreHostFixture(t, plan)
 	f.Host.Local = func(runstate.NodeRow) bool { return false }
 	d := newFakeDaemon()

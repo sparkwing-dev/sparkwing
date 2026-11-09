@@ -96,7 +96,7 @@ func exampleBuildCLI(in ExampleInputs, rc sparkwing.RunContext) func(context.Con
 			return err
 		}
 		bin := filepath.Join(dir, "sparkwing-cli")
-		if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-buildvcs=false", "-o", bin, "./cmd/sparkwing").Env("CGO_ENABLED", "0").Env("GOWORK", "off").Run(); err != nil {
+		if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-buildvcs=false", "-o", bin, "./cmd/sparkwing").Env("CGO_ENABLED", "0").Env("GOWORK", "auto").Run(); err != nil {
 			return err
 		}
 		for _, path := range []string{home, bin} {

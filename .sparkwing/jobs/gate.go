@@ -332,7 +332,7 @@ func runScopedChecker(ctx context.Context, step string, plan func(context.Contex
 		return err
 	}
 	sparkwing.Info(ctx, "%s: %s", step, scope)
-	_, err = sparkwing.Bash(ctx, command).Env("GOWORK", "off").Run()
+	_, err = sparkwing.Bash(ctx, command).Env("GOWORK", "auto").Run()
 	return err
 }
 
@@ -408,10 +408,10 @@ var homeRules = []homeRule{
 		label:   "build the sparkwing home from a home directory",
 		pattern: homeDirJoin,
 		allowed: map[string]string{
-			"internal/paths/paths.go":             "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
-			"internal/storage/storeurl/spec.go":   "storage URL configuration carries its own test-sandbox redirect",
-			"internal/configguard/configguard.go": "watches the real user's home for writes a suite should not have made, so resolving anywhere else would measure the wrong directory; its package doc states this",
-			"internal/testleak/testleak.go":       "lays out the sandbox home a test binary runs in, before internal/paths has a home to resolve",
+			"internal/paths/paths.go":                    "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
+			"internal/storage/storeurl/spec.go":          "storage URL configuration carries its own test-sandbox redirect",
+			"internal/configguard/configguard.go":        "watches the real user's home for writes a suite should not have made, so resolving anywhere else would measure the wrong directory; its package doc states this",
+			"sparkwing/testsupport/testleak/testleak.go": "lays out the sandbox home a test binary runs in, before internal/paths has a home to resolve",
 		},
 		advice: "Call internal/paths.DefaultPaths() for the real home, or paths.PathsAt(root) when the root is already known.",
 	},
@@ -532,7 +532,7 @@ func formattersOverScope(ctx context.Context, scopeOf scopeFunc) error {
 	}
 	var diffs []string
 	for _, batch := range argBatches(files) {
-		_, runErr := sparkwing.Exec(ctx, "golangci-lint", append([]string{"fmt", "--diff", "--"}, batch...)...).Capture()
+		_, runErr := sparkwing.Exec(ctx, "golangci-lint", append([]string{"fmt", "--diff", "--"}, batch...)...).Env("GOWORK", "auto").Capture()
 		if runErr == nil {
 			continue
 		}
@@ -993,7 +993,7 @@ func failedTestSummaries(err error) []string {
 
 func modulePackageArgs(ctx context.Context, dir string, testOnly bool) ([]string, error) {
 	// safety: -e keeps broken product packages in the list for vet/build/test to reject.
-	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list -e -f '{{.ImportPath}} {{len .GoFiles}}' ./...`, dir)).String()
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list -e -f '{{.ImportPath}} {{len .GoFiles}}' ./...`, dir)).Env("GOWORK", "auto").String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
 	}
@@ -1017,7 +1017,7 @@ func modulePackageArgs(ctx context.Context, dir string, testOnly bool) ([]string
 }
 
 func moduleHasNoPackages(ctx context.Context, dir string) (bool, error) {
-	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list ./... 2>&1 || true`, dir)).String()
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list ./... 2>&1 || true`, dir)).Env("GOWORK", "auto").String()
 	if err != nil {
 		return false, err
 	}

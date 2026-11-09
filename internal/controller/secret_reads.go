@@ -1,16 +1,18 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"net/http"
 	"net/url"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // SecretReader resolves a row under live authority and commits claim-release audits atomically.
@@ -44,7 +46,7 @@ func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capa
 	}
 	cipher, ok := s.secretsCipher.(BoundCipher)
 	if !ok || cipher == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "secret decryption is unavailable"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "secret decryption is unavailable"}
 	}
 	// A run-bound read selects the repository and pipeline the run speaks
 	// for; only a member's unbound read names them.

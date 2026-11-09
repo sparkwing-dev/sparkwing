@@ -1,10 +1,10 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestAuthenticationToleratesBackwardClockStep(t *testing.T) {
@@ -21,7 +21,7 @@ func TestAuthenticationToleratesBackwardClockStep(t *testing.T) {
 	}
 	r.snapshot.Now = issued.Add(time.Minute)
 	_, err := NewAuthenticator(r).Authenticate(t.Context(), presentation, route)
-	requireAuthenticationCode(t, err, apierr.Unauthenticated)
+	requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 }
 
 func TestCredentialClockSkewKeepsDeadlinesStrict(t *testing.T) {

@@ -1,16 +1,17 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func (c *nodeClaims) evaluate(ctx context.Context, input EvaluationInput) (ProcessGrant, error) {
@@ -31,7 +32,7 @@ func (c *nodeClaims) evaluate(ctx context.Context, input EvaluationInput) (Proce
 	if row.Ref != (runspec.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(input.NodeID)}) || row.Generation != runspec.ClaimGeneration(input.Generation) || row.SpecHash != input.SpecHash {
 		return ProcessGrant{}, nodeClaimMismatch()
 	}
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	if err := json.Unmarshal(row.Spec, &job); err != nil {
 		return ProcessGrant{}, err
 	}
@@ -67,12 +68,12 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 		return nodeClaimMismatch()
 	}
 	if rule == capability.BindReadSet {
-		var source nodeproto.JobSpec
+		var source nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &source); err != nil {
 			return err
 		}
 		if runspec.NodeID(source.ID) != b.source.NodeID || target.RunID != "" && runspec.RunID(target.RunID) != b.source.RunID {
-			return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
+			return hosterr.Authorization(hosterr.ReasonBinding, "output is outside the evaluated job read set")
 		}
 		if target.Reference != nil {
 			if p.Capability.Unit == capability.UnitEval && !capability.EvaluationReadsDeclarations(source) {
@@ -85,26 +86,26 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 				}
 			}
 			if !declared {
-				return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
+				return hosterr.Authorization(hosterr.ReasonBinding, "output is outside the evaluated job read set")
 			}
 		} else if p.Capability.Unit == capability.UnitEval && !capability.EvaluationReadsDeclarations(source) {
 			if runspec.NodeID(target.NodeID) != b.source.NodeID {
-				return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
+				return hosterr.Authorization(hosterr.ReasonBinding, "output is outside the evaluated job read set")
 			}
 		} else {
 			output, err := b.readNode(ctx, runspec.NodeRef{RunID: b.source.RunID, NodeID: runspec.NodeID(target.NodeID)})
 			if err != nil {
 				if errors.Is(err, store.ErrNotFound) {
-					return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
+					return hosterr.Authorization(hosterr.ReasonBinding, "output is outside the evaluated job read set")
 				}
 				return err
 			}
-			var job nodeproto.JobSpec
+			var job nodewire.JobSpec
 			if err := json.Unmarshal(output.Spec, &job); err != nil {
 				return err
 			}
 			if output.Ref != (runspec.NodeRef{RunID: b.source.RunID, NodeID: runspec.NodeID(target.NodeID)}) || job.ID != target.NodeID || !capability.ReadsJobOutput(source, job) {
-				return apierr.Authorization(apierr.ReasonBinding, "output is outside the evaluated job read set")
+				return hosterr.Authorization(hosterr.ReasonBinding, "output is outside the evaluated job read set")
 			}
 		}
 	}

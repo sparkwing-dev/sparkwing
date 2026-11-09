@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 const hostExecSecret = "hostexec-secret-value"
@@ -24,14 +24,14 @@ func TestHostCommandMasksBeforeOutputCuts(t *testing.T) {
 					t.Fatal(err)
 				}
 				// safety: the secret crosses the log's partial-line flush and the raw diagnostic tail cut.
-				raw := strings.Repeat("x", (1<<20)-1) + hostExecSecret + strings.Repeat("y", nodeproto.ExecTailBytes-1)
+				raw := strings.Repeat("x", (1<<20)-1) + hostExecSecret + strings.Repeat("y", nodewire.ExecTailBytes-1)
 				dir := t.TempDir()
 				path := filepath.Join(dir, "output")
 				if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				var messages, captured strings.Builder
-				logs := &planningLogs{masker: masker, known: true, sink: func(_ context.Context, frame nodeproto.FrameLog) error {
+				logs := &planningLogs{masker: masker, known: true, sink: func(_ context.Context, frame nodewire.FrameLog) error {
 					messages.WriteString(frame.Message)
 					return nil
 				}}
@@ -44,13 +44,13 @@ func TestHostCommandMasksBeforeOutputCuts(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				req := nodeproto.ExecRequest{ID: "boundary", Argv: []string{executable, "-test.run=^TestHostCommandOutputHelper$", "--", "--host-command-output", stream, path}, Dir: dir, Env: os.Environ(), Capture: capture}
+				req := nodewire.ExecRequest{ID: "boundary", Argv: []string{executable, "-test.run=^TestHostCommandOutputHelper$", "--", "--host-command-output", stream, path}, Dir: dir, Env: os.Environ(), Capture: capture}
 				done, session := runHostCommand(req, masker, make(chan struct{}), make(chan struct{}), func(gotStream string, chunk []byte, eof bool) error {
 					if capture {
 						captured.Write(chunk)
 						return nil
 					}
-					return logs.stream(t.Context(), gotStream, nodeproto.FrameLog{Level: "info"}, chunk, eof)
+					return logs.stream(t.Context(), gotStream, nodewire.FrameLog{Level: "info"}, chunk, eof)
 				}, nil)
 				if err := endCommandSessions([]*commandSession{session}); err != nil {
 					t.Fatal(err)
@@ -72,7 +72,7 @@ func TestHostCommandMasksBeforeOutputCuts(t *testing.T) {
 					tail = done.Stderr
 				}
 				masked := masker.Mask(raw)
-				if string(tail) != masked[len(masked)-nodeproto.ExecTailBytes:] {
+				if string(tail) != masked[len(masked)-nodewire.ExecTailBytes:] {
 					t.Fatal("diagnostic tail was cut before masking")
 				}
 				if messages.String() != masked {

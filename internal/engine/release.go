@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -16,8 +18,8 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // VerifyRelease authenticates bytes and inspects their build identity without executing them.
@@ -37,7 +39,7 @@ func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBun
 	for _, setting := range info.Settings {
 		settings[setting.Key] = setting.Value
 	}
-	if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != GoModule+"/cmd/"+string(target.Binary) {
+	if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != HostModule+"/cmd/"+string(target.Binary) {
 		return VerifiedRelease{}, integrity(fmt.Errorf("executable binary or platform does not match release target"))
 	}
 	embedded, err := executableVersion(info)
@@ -61,7 +63,7 @@ const firstEngineRelease = "v0.68.0"
 
 func predatesEngine(version string, cause error) error {
 	return &apierr.Error{
-		Code:    apierr.VersionUnsupported,
+		Code:    hosterr.VersionUnsupported,
 		Message: fmt.Sprintf("SDK pin %s is older than %s, the oldest release this CLI can run as a pipeline engine; its release was not executed", version, firstEngineRelease),
 		Hint:    "Run `" + UpgradeCommand + "` in this repository to move the pin to the latest release, then fix the pipeline code it reports; see https://sparkwing.dev/docs/migration-guide/",
 		Details: map[string]any{"version": version, "minimum": firstEngineRelease, "cause": cause.Error()},

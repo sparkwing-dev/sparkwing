@@ -1,11 +1,13 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPublicOriginRequiresDeclaredExternalURL(t *testing.T) {
@@ -20,7 +22,7 @@ func TestPublicOriginRequiresDeclaredExternalURL(t *testing.T) {
 				return
 			}
 			var refusal *apierr.Error
-			if got != "" || !errors.As(err, &refusal) || refusal.Code != apierr.CapabilityUnsupported {
+			if got != "" || !errors.As(err, &refusal) || refusal.Code != hosterr.CapabilityUnsupported {
 				t.Fatalf("undeclared origin = %q, %v; want capability_unsupported", got, err)
 			}
 		})

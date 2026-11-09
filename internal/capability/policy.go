@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -8,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Owner identifies the authoritative lookup required before a route can expose a resource.
@@ -288,11 +290,11 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 	}
 	p := authenticated.Principal
 	if p.Capability.Audience != route.Audience {
-		return Authorized{}, forbidden(apierr.ReasonAudience)
+		return Authorized{}, forbidden(hosterr.ReasonAudience)
 	}
 	var refusal error
 	if route.Method == http.MethodPost && route.Path == "/api/v1/runners" && !p.DirectAccountSession() {
-		return Authorized{}, apierr.Authorization(apierr.ReasonMissingGrant, "runner enrollment requires an independent account session; in the controller pod run sparkwing-controller admin session --operator ACCOUNT_ID --team TEAM --reason TEXT --output plain as an existing team administrator, then pipe its output to sparkwing runners add --session-stdin")
+		return Authorized{}, hosterr.Authorization(hosterr.ReasonMissingGrant, "runner enrollment requires an independent account session; in the controller pod run sparkwing-controller admin session --operator ACCOUNT_ID --team TEAM --reason TEXT --output plain as an existing team administrator, then pipe its output to sparkwing runners add --session-stdin")
 	}
 	for _, live := range authenticated.Live {
 		if live.RuleIndex < 0 || live.RuleIndex >= len(route.Access) {
@@ -319,12 +321,12 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 			}
 		}
 		if !bindingShape(p, rule.Binding, target) {
-			refusal = forbidden(apierr.ReasonBinding)
+			refusal = forbidden(hosterr.ReasonBinding)
 			continue
 		}
 		if err := bindings.CheckBinding(ctx, p, rule.Binding, target); err != nil {
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
+			if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden {
 				return Authorized{}, err
 			}
 			refusal = err
@@ -342,7 +344,7 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 	for _, rule := range route.Access {
 		alternatives = append(alternatives, rule.Grants)
 	}
-	return Authorized{}, RequiredAuthority(apierr.ReasonMissingGrant, alternatives...)
+	return Authorized{}, RequiredAuthority(hosterr.ReasonMissingGrant, alternatives...)
 }
 
 func claimSelection(p Principal, path string, kinds []UnitKind) error {
@@ -350,26 +352,26 @@ func claimSelection(p Principal, path string, kinds []UnitKind) error {
 		return nil
 	}
 	if len(kinds) == 0 {
-		return forbidden(apierr.ReasonBinding)
+		return forbidden(hosterr.ReasonBinding)
 	}
 	seen := make(map[UnitKind]bool, len(kinds))
 	for _, kind := range kinds {
 		if seen[kind] {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 		seen[kind] = true
 		var grant Grant
 		switch path {
 		case "/api/v1/launcher/claim":
 			if kind != UnitNode && kind != UnitPlan && kind != UnitEval {
-				return forbidden(apierr.ReasonBinding)
+				return forbidden(hosterr.ReasonBinding)
 			}
 			grant = ClaimsLaunch
 		case "/api/v1/runners/claim", "/api/v1/runs/{run}/claim":
 			switch kind {
 			case UnitNode, UnitEval, UnitPlan:
 				if path != "/api/v1/runners/claim" {
-					return forbidden(apierr.ReasonBinding)
+					return forbidden(hosterr.ReasonBinding)
 				}
 				grant = NodesClaim
 				if kind == UnitPlan {
@@ -378,28 +380,28 @@ func claimSelection(p Principal, path string, kinds []UnitKind) error {
 			case UnitTrigger:
 				grant = TriggersClaim
 			default:
-				return forbidden(apierr.ReasonBinding)
+				return forbidden(hosterr.ReasonBinding)
 			}
 		default:
 			return policyFailure()
 		}
 		if !slices.Contains(p.Capability.Grants, grant) {
-			return forbidden(apierr.ReasonMissingGrant)
+			return forbidden(hosterr.ReasonMissingGrant)
 		}
 	}
 	return nil
 }
 
 func policyFailure() *apierr.Error {
-	return &apierr.Error{Code: apierr.PolicyMissing, Message: "route authorization policy is incomplete"}
+	return &apierr.Error{Code: hosterr.PolicyMissing, Message: "route authorization policy is incomplete"}
 }
 
 func unauthenticated() *apierr.Error {
-	return &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}
+	return &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}
 }
 
 func forbidden(reason apierr.Reason) *apierr.Error {
-	return apierr.Authorization(reason, "credential does not authorize this operation")
+	return hosterr.Authorization(reason, "credential does not authorize this operation")
 }
 
 func subset[T comparable](child, parent []T) bool {
@@ -490,14 +492,14 @@ func checkOwner(p Principal, owner Owner, rule AccessRule, target Target) error 
 	switch owner {
 	case OwnerTeam, OwnerRun:
 		if target.Team == "" || p.Capability.Team == "" {
-			return forbidden(apierr.ReasonNoTeam)
+			return forbidden(hosterr.ReasonNoTeam)
 		}
 		if target.Team != p.Capability.Team {
-			return forbidden(apierr.ReasonTeam)
+			return forbidden(hosterr.ReasonTeam)
 		}
 	case ownerAccount:
 		if target.AccountID != "" && p.Capability.Subject.ID != target.AccountID {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 	case OwnerNone, OwnerDeployment, ownerNodeHost:
 	default:

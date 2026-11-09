@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -9,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type profileTransport func(*http.Request) (*http.Response, error)
@@ -232,7 +234,7 @@ func TestProfilesAddRejectsInvalidController(t *testing.T) {
 }
 
 func TestProfileProbePreservesCanonicalError(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.Forbidden, apierr.Unauthenticated} {
+	for _, code := range []apierr.Code{hosterr.Forbidden, hosterr.Unauthenticated} {
 		t.Run(string(code), func(t *testing.T) {
 			profilesFixturePath(t)
 			withStdin(t, "private-credential\n")
@@ -252,10 +254,10 @@ func TestProfileProbePreservesCanonicalError(t *testing.T) {
 				t.Fatal("probe accepted refusal")
 			}
 			var out bytes.Buffer
-			if err := writeInvocationError(&out, &invocationError{inv: inv, cause: err}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(apierr.Envelope{Error: e}) }); err != nil {
+			if err := writeInvocationError(&out, &invocationError{inv: inv, cause: err}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(hosterr.Envelope{Error: e}) }); err != nil {
 				t.Fatal(err)
 			}
-			var response apierr.Envelope
+			var response hosterr.Envelope
 			if json.Unmarshal(out.Bytes(), &response) != nil || response.Error.Code != code || response.Error.Details["reason"] != "grant" {
 				t.Fatalf("error: %s", &out)
 			}

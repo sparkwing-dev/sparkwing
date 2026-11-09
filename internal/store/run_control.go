@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -9,11 +11,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // CreateAuthorizedDebugPause commits a masked pause under live run-control authority.
@@ -51,7 +53,7 @@ func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Au
 			return err
 		}
 		if run.FinishedAt != nil || run.CancelRequestedAt != nil || row.Status == runstate.StatusDone || row.CancelRequestedAt != nil {
-			return authorityError(apierr.IllegalTransition, "job cannot be paused")
+			return authorityError(hosterr.IllegalTransition, "job cannot be paused")
 		}
 		now := tx.now(ctx)
 		if expires.IsZero() {
@@ -110,7 +112,7 @@ func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Aut
 			return err
 		}
 		if run.FinishedAt != nil || run.CancelRequestedAt != nil {
-			return authorityError(apierr.IllegalTransition, "run is no longer executable")
+			return authorityError(hosterr.IllegalTransition, "run is no longer executable")
 		}
 		comment, err := controlTextTx(ctx, tx, t.team, run, decision.Comment)
 		if err != nil {
@@ -156,7 +158,7 @@ func (t *Tenant) runControlAuthorityTx(ctx context.Context, tx *storeTx, a capab
 	}
 	route, ok := capability.LookupRoute("POST", path)
 	if !ok || len(route.Access) != 1 || route.Access[0].Liveness != capability.LiveCredential {
-		return p, authorityError(apierr.PolicyMissing, "run control policy is unavailable")
+		return p, authorityError(hosterr.PolicyMissing, "run control policy is unavailable")
 	}
 	_, err = capability.Authorize(ctx, tx, route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, a.Target)
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // NativeProcesses binds native SDK startup to the delegated process's services and cleanup ledger.
@@ -19,7 +19,7 @@ type NativeProcesses struct {
 	Masks       *MaskRegistry
 	URL         string
 	Session     ProtocolSessionConfig
-	Log         func(context.Context, string, string, nodeproto.FrameLog) error
+	Log         func(context.Context, string, string, nodewire.FrameLog) error
 }
 
 // Delegate creates fresh service authority and cleanup registrations for one SDK process.
@@ -41,9 +41,9 @@ func (p *NativeProcesses) Delegate(ctx context.Context, parent capability.Creden
 		once.Do(func() { p.Masks.releaseJob(services.RunID, services.Job.ID) })
 		return err
 	}
-	return ProcessGrant{Binding: nodeproto.ProcessBinding{
+	return ProcessGrant{Binding: nodewire.ProcessBinding{
 		RunID: spec.Binding.RunID, JobID: services.Job.ID,
-		Routes: nodeproto.ProcessRoutes{URL: strings.TrimRight(p.URL, "/"), Bearer: issued.Raw},
+		Routes: nodewire.ProcessRoutes{URL: strings.TrimRight(p.URL, "/"), Bearer: issued.Raw},
 	}, Revoke: release, masks: services.Masks}, nil
 }
 
@@ -66,7 +66,7 @@ func (p *NativeProcesses) startEvaluation(ctx context.Context, input EvaluationI
 }
 
 // startPlanning uses the shared environment and planner's secret-discovery log gate.
-func (p *NativeProcesses) startPlanning(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+func (p *NativeProcesses) startPlanning(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 	config := p.Session
 	config.Revoke, config.RunCleanups = nil, nil
 	return p.compute.start(input.Run.RunID, func() (ExecutorProcess, error) { return config.StartPlanning(ctx, input, log) })
@@ -75,7 +75,7 @@ func (p *NativeProcesses) startPlanning(ctx context.Context, input PlanningProce
 // Computing reports whether SDK work remains live for a run.
 func (p *NativeProcesses) Computing(runID string) bool { return p.compute.active(runID) }
 
-func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.ProcessBinding, revoke func() error, activity ExecutorActivity, accepted AcceptedRun) (ProtocolSessionConfig, error) {
+func (p *NativeProcesses) configuration(ctx context.Context, binding nodewire.ProcessBinding, revoke func() error, activity ExecutorActivity, accepted AcceptedRun) (ProtocolSessionConfig, error) {
 	config := p.Session
 	config.Revoke, config.RunCleanups = revoke, nil
 	if p.Authorities == nil || p.Log == nil || revoke == nil || binding.Routes.URL != strings.TrimRight(p.URL, "/") {
@@ -93,7 +93,7 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 	if err != nil {
 		return config, config.failedStartup(err)
 	}
-	logs := &planningLogs{debug: debug, known: true, masker: service.Masks.masker, sink: func(ctx context.Context, record nodeproto.FrameLog) error {
+	logs := &planningLogs{debug: debug, known: true, masker: service.Masks.masker, sink: func(ctx context.Context, record nodewire.FrameLog) error {
 		return p.Log(ctx, service.RunID, service.Job.ID, record)
 	}}
 	config.Log = logs.write
@@ -113,7 +113,7 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 	return config, nil
 }
 
-func (a *ProcessAuthorities) processServices(ctx context.Context, binding nodeproto.ProcessBinding) (*ProcessServices, error) {
+func (a *ProcessAuthorities) processServices(ctx context.Context, binding nodewire.ProcessBinding) (*ProcessServices, error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}

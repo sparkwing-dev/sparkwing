@@ -1,19 +1,21 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSession, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec) (json.RawMessage, error) {
+func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSession, input NodeInput, spec runspec.Spec, job nodewire.JobSpec) (json.RawMessage, error) {
 	children := map[string][]string{}
 	for _, step := range job.Steps {
 		for _, need := range step.Needs {
@@ -24,7 +26,7 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 	graph := stepGraph{
 		skips: rangeSkips(job.Steps, children, options.StartAt.Value, options.StopAt.Value),
 		job:   job,
-		step: func(ctx context.Context, step nodeproto.StepSpec, settled []string) (json.RawMessage, string, string, error) {
+		step: func(ctx context.Context, step nodewire.StepSpec, settled []string) (json.RawMessage, string, string, error) {
 			return h.step(ctx, session, input, spec, step, settled)
 		},
 		record: func(ctx context.Context, id, state, reason string, started *time.Time, failure error) error {
@@ -32,7 +34,7 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 		},
 		cancel: func(ctx context.Context, id string) error {
 			var reply json.RawMessage
-			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpCancel, Job: input.NodeID, Step: id}, &reply, "")
+			return session.call(ctx, nodewire.Request{Op: nodewire.OpCancel, Job: input.NodeID, Step: id}, &reply, "")
 		},
 		failFast: func(ctx context.Context, trigger string, cancelled []string, latency time.Duration) error {
 			return h.diagnostic(ctx, input, "info", "work_fail_fast", "", trigger, map[string]any{
@@ -49,7 +51,7 @@ type executorCleanupError struct{ err error }
 func (e *executorCleanupError) Error() string { return e.err.Error() }
 func (e *executorCleanupError) Unwrap() error { return e.err }
 
-func settledSteps(steps []nodeproto.StepSpec, finished map[string]bool) []string {
+func settledSteps(steps []nodewire.StepSpec, finished map[string]bool) []string {
 	settled := []string{}
 	for _, step := range steps {
 		if finished[step.ID] {
@@ -59,7 +61,7 @@ func settledSteps(steps []nodeproto.StepSpec, finished map[string]bool) []string
 	return settled
 }
 
-func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, step nodeproto.StepSpec, settled []string) (json.RawMessage, string, string, error) {
+func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, step nodewire.StepSpec, settled []string) (json.RawMessage, string, string, error) {
 	for _, closure := range step.Closures.SkipIf {
 		raw, err := h.eval(ctx, session, input, closure, "skip_if", nil, settled)
 		if err != nil {
@@ -79,12 +81,12 @@ func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input
 	if !spec.Resolved.Settings.Options.DryRun.Value {
 		for _, risk := range step.Risks {
 			if !executorContains(spec.Resolved.Settings.Options.AllowRisk.Value, risk) {
-				return nil, "", "", executorError(apierr.Forbidden, "step requires an unapproved risk")
+				return nil, "", "", executorError(hosterr.Forbidden, "step requires an unapproved risk")
 			}
 		}
 	}
-	var result nodeproto.RunResult
-	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: input.NodeID, Step: step.ID, Attempt: int(input.Attempt), Settled: settled}, &result, ""); err != nil {
+	var result nodewire.RunResult
+	if err := session.call(ctx, nodewire.Request{Op: nodewire.OpRunStep, Job: input.NodeID, Step: step.ID, Attempt: int(input.Attempt), Settled: settled}, &result, ""); err != nil {
 		return nil, "", "", err
 	}
 	if err := executorResultFailure(result); err != nil {

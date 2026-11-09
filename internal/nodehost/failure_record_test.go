@@ -1,12 +1,13 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNodeExecutorRecordsVerifyTimeoutStage(t *testing.T) {
@@ -24,8 +25,8 @@ func TestNodeExecutorRecordsVerifyTimeoutStage(t *testing.T) {
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, activity)
 		process.(*executorProcess).plan = input.Accepted.Plan
-		process.(*executorProcess).answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpEval && request.Closure == "verify" {
+		process.(*executorProcess).answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpEval && request.Closure == "verify" {
 				expire(context.DeadlineExceeded)
 				return nil, context.Cause(ctx)
 			}
@@ -41,7 +42,7 @@ func TestNodeExecutorRecordsVerifyTimeoutStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := storage.changes[len(storage.changes)-1].Extra.Result
-	if result == nil || result.Failure == nil || result.Failure.Stage != "verify" || result.Failure.Job != input.NodeID || result.Failure.Error == nil || result.Failure.Error.Code != apierr.DeadlineExceeded {
+	if result == nil || result.Failure == nil || result.Failure.Stage != "verify" || result.Failure.Job != input.NodeID || result.Failure.Error == nil || result.Failure.Error.Code != hosterr.DeadlineExceeded {
 		t.Fatalf("verify timeout lost its persisted stage: %+v", result)
 	}
 }

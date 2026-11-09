@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -7,7 +9,6 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -156,11 +157,11 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	}
 	options := requestSeal.Request.Options
 	if options.Runner.Value.Kind == runspec.RunnerHere && !here && (requestSeal.Request.Burst == nil || unit.Kind != capability.UnitNode) {
-		return profile, match.Demand{}, authorityError(apierr.Forbidden, "work is reserved for its here claimant")
+		return profile, match.Demand{}, authorityError(hosterr.Forbidden, "work is reserved for its here claimant")
 	}
 	if sealed := run.spec; sealed != nil {
 		if (unit.Kind == capability.UnitNode || unit.Kind == capability.UnitEval) && runGuardRefusal(RunRow{Execution: runstate.Execution{Spec: sealed}}) != "" {
-			return profile, match.Demand{}, authorityError(apierr.Forbidden, "run guard refused execution")
+			return profile, match.Demand{}, authorityError(hosterr.Forbidden, "run guard refused execution")
 		}
 		options = sealed.Resolved.Settings.Options
 	}
@@ -185,18 +186,18 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	switch selected := requestSeal.Request.Options.Runner.Value; selected.Kind {
 	case runspec.RunnerName:
 		if selected.Value == "" {
-			return profile, demand, authorityError(apierr.IntegrityFailure, "sealed runner name is empty")
+			return profile, demand, authorityError(hosterr.IntegrityFailure, "sealed runner name is empty")
 		}
 		if profile.Name != selected.Value {
-			return profile, demand, authorityError(apierr.Forbidden, "work selects another runner")
+			return profile, demand, authorityError(hosterr.Forbidden, "work selects another runner")
 		}
 	case runspec.RunnerActions:
 		if (unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan) && !slices.ContainsFunc(chain, func(node authorityNode) bool { return node.principal.Capability.Binding.Kind == capability.BindingPush }) {
-			return profile, demand, authorityError(apierr.Forbidden, "work is reserved for a GitHub Actions runner")
+			return profile, demand, authorityError(hosterr.Forbidden, "work is reserved for a GitHub Actions runner")
 		}
 	case runspec.RunnerLabel:
 		if selected.Value == "" {
-			return profile, demand, authorityError(apierr.IntegrityFailure, "sealed runner label is empty")
+			return profile, demand, authorityError(hosterr.IntegrityFailure, "sealed runner label is empty")
 		}
 		demand.Selector = append(demand.Selector, selected.Value)
 	}
@@ -222,7 +223,7 @@ func authenticatedClaimProfile(c capability.Capability, profile match.Profile, h
 func checkRepositoryClaimScope(chain []authorityNode, repository capability.RepositoryIdentity) error {
 	for _, ancestor := range chain {
 		if !capability.RepositoryAllowed(ancestor.principal.Capability.Repositories, repository) {
-			return authorityError(apierr.Forbidden, "claimant repository scope excludes work")
+			return authorityError(hosterr.Forbidden, "claimant repository scope excludes work")
 		}
 	}
 	return nil
@@ -249,7 +250,7 @@ func checkPushClaimScope(ctx context.Context, tx *storeTx, chain []authorityNode
 			return err
 		}
 		if matches != 1 {
-			return authorityError(apierr.Forbidden, "work is outside the Actions push scope")
+			return authorityError(hosterr.Forbidden, "work is outside the Actions push scope")
 		}
 	}
 	return nil

@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const ownerPlanHash = "0a5796e93f9b57ddf7c45f860485cbb7353fc0eda3dca753a444d0fd2a1573fe"
@@ -43,12 +45,12 @@ func TestOwnerSeals(t *testing.T) {
 			}
 			refused := errors.New("acceptance refused")
 			secret := "private-owner-credential"
-			secretFailure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: "retry " + secret, Details: map[string]any{"credential": secret}}
+			secretFailure := &apierr.Error{Code: hosterr.Unavailable, Message: secret, Hint: "retry " + secret, Details: map[string]any{"credential": secret}}
 			if mode == "refused" {
 				s.refused = refused
 			}
 			if mode == "rejected_owner" {
-				s.renewError = &apierr.Error{Code: apierr.LockHeld}
+				s.renewError = &apierr.Error{Code: hosterr.LockHeld}
 			}
 			if mode == "cancelled_owner" {
 				s.beat = runstate.LeaseBeat{CancelRequested: true, CancelReason: "operator requested stop"}
@@ -128,7 +130,7 @@ func TestOwnerSeals(t *testing.T) {
 			case "cancelled_acquire_success":
 				want = []string{"acquire", "finish"}
 				var cancelled *lease.CancelError
-				if !errors.As(err, &cancelled) || s.finished.Transition.Reason != string(apierr.ReasonCancelled) || s.finished.Unit != owner {
+				if !errors.As(err, &cancelled) || s.finished.Transition.Reason != string(hosterr.ReasonCancelled) || s.finished.Unit != owner {
 					t.Fatalf("unaccepted cancellation left its owner unfinished: %+v error=%v", s.finished, err)
 				}
 			}

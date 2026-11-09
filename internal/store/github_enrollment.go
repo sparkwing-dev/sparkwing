@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -8,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -107,7 +108,7 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 		return bindingRefusal()
 	}
 	if spec.ExpiresAt == nil {
-		return authorityError(apierr.Forbidden, "Actions credential requires its verified expiry ceiling")
+		return authorityError(hosterr.Forbidden, "Actions credential requires its verified expiry ceiling")
 	}
 	return nil
 }
@@ -142,7 +143,7 @@ func consumeActionsExchangeTx(ctx context.Context, tx *storeTx, spec capability.
 }
 
 func actionsExchangeUsed() error {
-	refusal := apierr.Authorization(apierr.ReasonExchangeUsed, "this GitHub Actions run attempt already exchanged its token; each run attempt gets one runner credential")
+	refusal := hosterr.Authorization(hosterr.ReasonExchangeUsed, "this GitHub Actions run attempt already exchanged its token; each run attempt gets one runner credential")
 	refusal.Hint = "Re-run the job for a new run attempt. If the runner restarted to update itself, set github.com/sparkwing-dev/sparkwing in .sparkwing/go.mod to the latest release."
 	return refusal
 }

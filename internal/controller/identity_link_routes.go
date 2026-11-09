@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -11,11 +13,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // IdentityLinkWriter rechecks the direct session and commits nonce consumption and identity attachment.
@@ -52,7 +54,7 @@ func (s *Server) identityLinkSession(r *http.Request) (*store.Session, signInPro
 		return nil, nil, err
 	}
 	if session.CapabilityPrefix != "" {
-		return nil, nil, reasonedRefusal(apierr.Forbidden, "direct_sign_in_required", "linking requires the account's own provider sign-in")
+		return nil, nil, reasonedRefusal(hosterr.Forbidden, "direct_sign_in_required", "linking requires the account's own provider sign-in")
 	}
 	name := r.PathValue("provider")
 	if _, known := providerLabels[name]; !known {
@@ -66,7 +68,7 @@ func (s *Server) identityLinkSession(r *http.Request) (*store.Session, signInPro
 		return nil, nil, invalidEngineBody("redirect_uri is not on this controller's allowlist")
 	}
 	if !recentSignIn(session.CreatedAt, session.Now) {
-		return nil, nil, reasonedRefusal(apierr.Forbidden, "reauth_required", "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
+		return nil, nil, reasonedRefusal(hosterr.Forbidden, "reauth_required", "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
 	}
 	notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
 		Team: string(session.Team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: session.AccountID},
@@ -76,7 +78,7 @@ func (s *Server) identityLinkSession(r *http.Request) (*store.Session, signInPro
 
 func (s *Server) admitIdentityLink(session *store.Session) error {
 	if !s.identityLinkLimit.allow(session.AccountID, identityLinkAttemptsPerMinute, time.Now()) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("identity link attempt limit is %d per account per minute; current usage is %d attempts; wait a minute or contact support@sparkwing.dev to raise this limit", identityLinkAttemptsPerMinute, identityLinkAttemptsPerMinute), Details: map[string]any{"retry_after_ms": time.Minute.Milliseconds()}}
+		return &apierr.Error{Code: hosterr.RateLimited, Message: fmt.Sprintf("identity link attempt limit is %d per account per minute; current usage is %d attempts; wait a minute or contact support@sparkwing.dev to raise this limit", identityLinkAttemptsPerMinute, identityLinkAttemptsPerMinute), Details: map[string]any{"retry_after_ms": time.Minute.Milliseconds()}}
 	}
 	return nil
 }
@@ -92,7 +94,7 @@ func (s *Server) verifyIdentityLinkStart(r *http.Request) error {
 	}
 	if len(r.PostForm) != 1 || len(r.PostForm["csrf_token"]) != 1 || len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 ||
 		!validFormCSRF(r, s.cookiesSecure()) || !constantTimeEqual(r.PostForm.Get("csrf_token"), session.CSRFToken) {
-		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
+		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	if err := s.admitIdentityLink(session); err != nil {
 		return err
@@ -178,7 +180,7 @@ func (s *Server) verifyIdentityLinkComplete(r *http.Request) error {
 		return identityLinkProviderError(err)
 	}
 	if profile.Provider != claim.Provider || profile.Subject == "" || !profile.EmailVerified {
-		return reasonedRefusal(apierr.Forbidden, "provider_unverified", "the provider did not verify this sign-in")
+		return reasonedRefusal(hosterr.Forbidden, "provider_unverified", "the provider did not verify this sign-in")
 	}
 	if _, err := writer.LinkAccountIdentity(r.Context(), claim, profile); err != nil {
 		return identityLinkError(err)
@@ -188,7 +190,7 @@ func (s *Server) verifyIdentityLinkComplete(r *http.Request) error {
 }
 
 func invalidIdentityLink() error {
-	return reasonedRefusal(apierr.Forbidden, "link_state_invalid", "this link could not be verified; start linking again")
+	return reasonedRefusal(hosterr.Forbidden, "link_state_invalid", "this link could not be verified; start linking again")
 }
 
 func identityLinkError(err error) error {
@@ -204,18 +206,18 @@ func identityLinkError(err error) error {
 	case errors.Is(err, store.ErrProviderAlreadyLinked):
 		return reasonedRefusal(apierr.Conflict, "provider_already_linked", "this account already has a sign-in from this provider; unlink it before linking another")
 	default:
-		return &apierr.Error{Code: apierr.Unavailable, Message: "linking service unavailable; start linking again"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "linking service unavailable; start linking again"}
 	}
 }
 
 func identityLinkProviderError(err error) error {
 	switch {
 	case errors.Is(err, errSignInRejected):
-		return reasonedRefusal(apierr.Unauthenticated, "provider_rejected", "the provider did not confirm the sign-in; start linking again")
+		return reasonedRefusal(hosterr.Unauthenticated, "provider_rejected", "the provider did not confirm the sign-in; start linking again")
 	case errors.Is(err, errSignInUnverified):
-		return reasonedRefusal(apierr.Forbidden, "provider_unverified", "the provider has not verified this account's email address")
+		return reasonedRefusal(hosterr.Forbidden, "provider_unverified", "the provider has not verified this account's email address")
 	default:
-		return &apierr.Error{Code: apierr.Unavailable, Message: "linking service unavailable; start linking again"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "linking service unavailable; start linking again"}
 	}
 }
 
@@ -226,7 +228,7 @@ func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request,
 	}
 	grant, label := proof.grant, providerLabels[r.PathValue("provider")]
 	if !setFlowCookie(w, oauthFlowCookieName, oauthFlow{Provider: r.PathValue("provider"), State: grant.State, Verifier: grant.Verifier, Mode: oauthFlowLink}, s.cookiesSecure()) {
-		return &apierr.Error{Code: apierr.Internal, Message: "could not start linking"}
+		return &apierr.Error{Code: hosterr.Internal, Message: "could not start linking"}
 	}
 	renderFlowPage(w, http.StatusOK, flowPage{Title: "Linking " + label, Message: "Continuing to " + label + " to confirm the account.", Refresh: grant.AuthorizeURL, ActionHref: grant.AuthorizeURL, ActionLabel: "Continue to " + label})
 	return nil

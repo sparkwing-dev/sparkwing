@@ -1,23 +1,25 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // RunTransactions is the controller's tenant transaction and read boundary. Persistence owns validation,
@@ -34,7 +36,7 @@ type RunTransactions interface {
 	ReadOwnerSnapshot(context.Context, capability.AuthorityRef, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 	ReconcileNode(context.Context, store.ReconcileRequest) (runstate.ReconciledNode, error)
-	ReadFailure(context.Context, runspec.NodeRef, int64, runstate.Actor) (*nodeproto.JobFailure, error)
+	ReadFailure(context.Context, runspec.NodeRef, int64, runstate.Actor) (*nodewire.JobFailure, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
 	TransitionNode(context.Context, store.NodeCommand) (runstate.Applied, error)
@@ -58,7 +60,7 @@ func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunReques
 		return store.IntakeRequest{}, routepolicy.MissingEndpointPolicy()
 	}
 	if body.Request.Team != "" && body.Request.Team != a.Target.Team {
-		return store.IntakeRequest{}, apierr.Authorization(apierr.ReasonTeam, "intake team does not match authority")
+		return store.IntakeRequest{}, hosterr.Authorization(hosterr.ReasonTeam, "intake team does not match authority")
 	}
 	request := body.Request
 	request.Team, request.Dispatch = a.Target.Team, ""
@@ -119,7 +121,7 @@ func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSub
 		return store.ExpansionSubmission{}, invalidEngineBody("source_generation must be positive")
 	}
 	if body.SourceGeneration != a.Target.UnitSourceGeneration || a.Binding.Generation != a.Target.UnitSourceGeneration {
-		return store.ExpansionSubmission{}, &apierr.Error{Code: apierr.LockHeld, Message: "expansion source generation changed"}
+		return store.ExpansionSubmission{}, &apierr.Error{Code: hosterr.LockHeld, Message: "expansion source generation changed"}
 	}
 	if (len(body.Body) > 0) == (body.Failure != nil) {
 		return store.ExpansionSubmission{}, invalidEngineBody("expansion requires exactly one body or failure")
@@ -202,7 +204,7 @@ func expansionResponse(accepted store.AcceptedExpansion) (controllerwire.Expansi
 		Jobs: make([]controllerwire.ExpandedJob, 0, len(accepted.Nodes)), Replayed: accepted.Replayed,
 	}
 	for _, node := range accepted.Nodes {
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(node.Spec, &job); err != nil || job.ID == "" || node.SpecHash == "" {
 			return controllerwire.ExpansionAccepted{}, errors.New("invalid persisted expansion job")
 		}
@@ -227,7 +229,7 @@ func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authoriz
 		return controllerwire.PlanAccepted{}, routepolicy.MissingEndpointPolicy()
 	}
 	if run.Request.Request.Mode == runspec.IntakePublish {
-		var plan nodeproto.PlanDoc
+		var plan nodewire.PlanDoc
 		if err := json.Unmarshal(body.Plan, &plan); err != nil {
 			return controllerwire.PlanAccepted{}, invalidEngineBody("invalid publication plan")
 		}

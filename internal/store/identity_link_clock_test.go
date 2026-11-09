@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"database/sql"
 	"errors"
@@ -10,8 +12,8 @@ import (
 
 	modernsqlite "modernc.org/sqlite"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestIdentityLinkRechecksExpiryAfterLockWait(t *testing.T) {
@@ -102,7 +104,7 @@ func TestFlowNonceRechecksExpiryAfterInsertWait(t *testing.T) {
 	}
 	used, err := s.consumeFlowNonce(t.Context(), "github_app_connect", "waiting", expires)
 	var refused *apierr.Error
-	if !waited || used || !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+	if !waited || used || !errors.As(err, &refused) || refused.Code != hosterr.Forbidden {
 		t.Fatalf("waited=%v used=%v error=%v", waited, used, err)
 	}
 	var consumed int

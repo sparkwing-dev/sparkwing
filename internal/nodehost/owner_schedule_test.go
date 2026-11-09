@@ -11,11 +11,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
@@ -82,7 +82,7 @@ func TestOwnerHostRefusesChangedResumeBeforeAcquisition(t *testing.T) {
 func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
 	for _, id := range []string{"blocked", "sibling"} {
-		f.snapshot.Nodes = append(f.snapshot.Nodes, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Spec: marshalEventFixture(t, nodeproto.JobSpec{ID: id}), Status: runstate.StatusPending})
+		f.snapshot.Nodes = append(f.snapshot.Nodes, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Spec: marshalEventFixture(t, nodewire.JobSpec{ID: id}), Status: runstate.StatusPending})
 	}
 	blocked := make(chan struct{})
 	released := make(chan struct{})
@@ -161,7 +161,7 @@ func FuzzOwnerHostSelfClaimPreservesExecutionIdentity(f *testing.F) {
 	f.Add("granted", "team=four", uint8(4))
 	f.Fuzz(func(t *testing.T, name, label string, flags uint8) {
 		input, state, _, _ := executorFixture(t)
-		runner := nodeproto.RunnerIdentity{Name: name, Type: "agent", Labels: []string{label}}
+		runner := nodewire.RunnerIdentity{Name: name, Type: "agent", Labels: []string{label}}
 		expires := time.Now().Add(time.Hour)
 		state.row.LeaseExpiresAt = &expires
 		claim := &runstate.ClaimAward{Holder: state.row.ClaimedBy, CapabilityPrefix: state.row.CapabilityPrefix, Generation: state.row.Generation, LeaseExpiresAt: expires}
@@ -263,7 +263,7 @@ func TestOwnerHostRequestsHolderCancellationThroughTransition(t *testing.T) {
 func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 	_, host, input := newOwnerFixture(t, true)
 	input.Storage = StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}}
-	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{"native"}}
+	input.GrantedRunner = nodewire.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{"native"}}
 	entry := &source.Entry{Engine: engine.Resolved{Identity: engineid.Identity{Version: "selected"}}}
 	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: runstate.StatusPending, Generation: 7, SpecHash: "job-seal"}
 	policies := 0

@@ -20,6 +20,7 @@ import (
 )
 
 func TestResolveSparksToolchainFailureHasFixWithoutNoUpdateHint(t *testing.T) {
+	t.Setenv("GOWORK", "off")
 	dir := newSparksFixture(t, "libraries:\n  - name: lib\n    source: example.com/lib\n    version: v1.0.0\n")
 	bin := filepath.Join(t.TempDir(), "go")
 	script := `#!/bin/sh

@@ -1,13 +1,15 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRenewUnitRequiresCurrentAwardProperty(t *testing.T) {
@@ -52,7 +54,7 @@ func TestRenewUnitRequiresCurrentAwardProperty(t *testing.T) {
 				_, err := s.AsOperator().RenewUnit(t.Context(), prefix, random.IntN(2) == 0)
 				var transition *ErrIllegalTransition
 				var denied *apierr.Error
-				if !(errors.As(err, &transition) && transition.Reason == ReasonHolderRights || errors.As(err, &denied) && denied.Code == apierr.Unauthenticated) {
+				if !(errors.As(err, &transition) && transition.Reason == ReasonHolderRights || errors.As(err, &denied) && denied.Code == hosterr.Unauthenticated) {
 					t.Fatalf("iteration %d expected an authority refusal: %v", iteration, err)
 				}
 				var lease int64

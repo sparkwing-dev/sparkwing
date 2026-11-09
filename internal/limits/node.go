@@ -17,8 +17,6 @@ const (
 	MaxEvents int = 50000
 	// MaxMetricSamples bounds metric samples per job.
 	MaxMetricSamples int = 10000
-	// NodeOutputBytes bounds typed output per job or step.
-	NodeOutputBytes int64 = 16 << 20
 	// ErrorBytes bounds UTF-8 head and tail error text after masking.
 	ErrorBytes int64 = 8 << 10
 	// failureBytes bounds structured failure record.

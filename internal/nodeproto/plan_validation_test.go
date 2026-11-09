@@ -1,12 +1,15 @@
 package nodeproto
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type planSecrets []string
@@ -24,7 +27,7 @@ func planContext() ValidationContext {
 	return ValidationContext{Placement: PlacementLocal, Secrets: planSecrets{}}
 }
 
-func checkPlan(t *testing.T, raw string, context ValidationContext, code apierr.Code) PlanDoc {
+func checkPlan(t *testing.T, raw string, context ValidationContext, code apierr.Code) nodewire.PlanDoc {
 	t.Helper()
 	plan, err := ValidatePlan(json.RawMessage(raw), context)
 	if code == "" {
@@ -37,7 +40,7 @@ func checkPlan(t *testing.T, raw string, context ValidationContext, code apierr.
 	if !ok || failure.Code != code {
 		t.Fatalf("ValidatePlan error = %v, want %s", err, code)
 	}
-	return PlanDoc{}
+	return nodewire.PlanDoc{}
 }
 
 func TestValidatePlanStrictJSON(t *testing.T) {
@@ -85,7 +88,7 @@ func TestExpansionCannotDependOnItsOwnBarrierConsumer(t *testing.T) {
 	checkPlan(t, `{"jobs":[{"id":"child","steps":[{"id":"run"}],"groups":["generator"],"deps":["consumer"]}]}`, ctx, apierr.PlanInvalid)
 	checkPlan(t, `{"jobs":[{"id":"child","steps":[{"id":"run"}],"groups":["generator"],"deps":["source"]}]}`, ctx, "")
 
-	base.Jobs = append(base.Jobs, JobSpec{ID: "child", Steps: []StepSpec{{ID: "run"}}, Groups: []string{"generator"}, Needs: []string{"consumer"}})
+	base.Jobs = append(base.Jobs, nodewire.JobSpec{ID: "child", Steps: []nodewire.StepSpec{{ID: "run"}}, Groups: []string{"generator"}, Needs: []string{"consumer"}})
 	raw, err := json.Marshal(base)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +162,7 @@ func TestApprovalConcurrencyRefusedAtAcceptance(t *testing.T) {
 				context.Placement = placement
 				if expansion {
 					context.Expansion, context.SourceJob = true, "source"
-					context.ExistingJobs = []JobSpec{{ID: "source", Steps: []StepSpec{{ID: "run"}}, Closures: ClosureSpec{Generate: []string{"children"}}}}
+					context.ExistingJobs = []nodewire.JobSpec{{ID: "source", Steps: []nodewire.StepSpec{{ID: "run"}}, Closures: nodewire.ClosureSpec{Generate: []string{"children"}}}}
 				}
 				raw := json.RawMessage(`{"jobs":[{"id":"gate","approval":{},"groups":["children"],"concurrency":[{"group":"deploy"}]}]}`)
 				_, err := ValidatePlan(raw, context)
@@ -214,7 +217,7 @@ func TestValidatePlanSecretsStayOutOfErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := ValidatePlan(json.RawMessage(raw), context)
 			failure, ok := err.(*apierr.Error)
-			if !ok || failure.Code != apierr.SecretInIdentifier {
+			if !ok || failure.Code != hosterr.SecretInIdentifier {
 				t.Fatalf("error = %v", err)
 			}
 			if strings.Contains(fmt.Sprint(failure), "sëcret") || strings.Contains(fmt.Sprint(failure.Details), "sëcret") {
@@ -260,7 +263,7 @@ func TestSecretIdentifiers(t *testing.T) {
 				return
 			}
 			failure, ok := err.(*apierr.Error)
-			if !ok || failure.Code != apierr.SecretInIdentifier || failure.Details["field"] != row.field {
+			if !ok || failure.Code != hosterr.SecretInIdentifier || failure.Details["field"] != row.field {
 				t.Fatalf("error = %v; want field %s", err, row.field)
 			}
 			serialized, _ := json.Marshal(failure)
@@ -271,29 +274,29 @@ func TestSecretIdentifiers(t *testing.T) {
 	}
 	expansion := context
 	expansion.Expansion = true
-	expansion.ExistingJobs = []JobSpec{{ID: "source", Steps: []StepSpec{{ID: "run"}}, Closures: ClosureSpec{Generate: []string{"fanout"}}}}
+	expansion.ExistingJobs = []nodewire.JobSpec{{ID: "source", Steps: []nodewire.StepSpec{{ID: "run"}}, Closures: nodewire.ClosureSpec{Generate: []string{"fanout"}}}}
 	expansion.SourceJob = "source"
 	_, err := ValidatePlan(json.RawMessage(`{"jobs":[{"id":"generated-hunter22","groups":["fanout"],"steps":[{"id":"run"}]}]}`), expansion)
 	failure, ok := err.(*apierr.Error)
-	if !ok || failure.Code != apierr.SecretInIdentifier || failure.Details["field"] != "jobs[0].id" {
+	if !ok || failure.Code != hosterr.SecretInIdentifier || failure.Details["field"] != "jobs[0].id" {
 		t.Fatalf("expansion error = %v", err)
 	}
 }
 
 func TestValidatePlanExpansion(t *testing.T) {
-	source := JobSpec{ID: "source", Steps: []StepSpec{{ID: "run"}}, Closures: ClosureSpec{Generate: []string{"first", "second", "empty"}}}
+	source := nodewire.JobSpec{ID: "source", Steps: []nodewire.StepSpec{{ID: "run"}}, Closures: nodewire.ClosureSpec{Generate: []string{"first", "second", "empty"}}}
 	context := planContext()
 	context.Expansion = true
-	context.ExistingJobs = []JobSpec{source}
+	context.ExistingJobs = []nodewire.JobSpec{source}
 	context.SourceJob = source.ID
 	makeJobs := func(first, second int) string {
-		jobs := make([]JobSpec, 0, first+second)
+		jobs := make([]nodewire.JobSpec, 0, first+second)
 		for group, count := range map[string]int{"first": first, "second": second} {
 			for i := 0; i < count; i++ {
-				jobs = append(jobs, JobSpec{ID: fmt.Sprintf("%s-%d", group, i), Groups: []string{group}, Steps: []StepSpec{{ID: "run"}}})
+				jobs = append(jobs, nodewire.JobSpec{ID: fmt.Sprintf("%s-%d", group, i), Groups: []string{group}, Steps: []nodewire.StepSpec{{ID: "run"}}})
 			}
 		}
-		raw, err := json.Marshal(PlanDoc{Jobs: jobs})
+		raw, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -307,13 +310,13 @@ func TestValidatePlanExpansion(t *testing.T) {
 	checkPlan(t, `{"jobs":[],"priority":0}`, context, apierr.PlanInvalid)
 	checkPlan(t, `{"jobs":[]}`, context, "")
 	cyclic := context
-	cyclic.ExistingJobs = []JobSpec{{ID: "source", Steps: []StepSpec{{ID: "run"}}, NeedsIfPresent: []string{"child"}, Closures: ClosureSpec{Generate: []string{"first"}}}}
+	cyclic.ExistingJobs = []nodewire.JobSpec{{ID: "source", Steps: []nodewire.StepSpec{{ID: "run"}}, NeedsIfPresent: []string{"child"}, Closures: nodewire.ClosureSpec{Generate: []string{"first"}}}}
 	checkPlan(t, `{"jobs":[{"id":"child","groups":["first"],"steps":[{"id":"run"}]}]}`, cyclic, apierr.PlanInvalid)
-	initialJobs := make([]JobSpec, 257)
+	initialJobs := make([]nodewire.JobSpec, 257)
 	for i := range initialJobs {
-		initialJobs[i] = JobSpec{ID: fmt.Sprintf("job-%d", i), Steps: []StepSpec{{ID: "run"}}}
+		initialJobs[i] = nodewire.JobSpec{ID: fmt.Sprintf("job-%d", i), Steps: []nodewire.StepSpec{{ID: "run"}}}
 	}
-	initialRaw, _ := json.Marshal(PlanDoc{Jobs: initialJobs})
+	initialRaw, _ := json.Marshal(nodewire.PlanDoc{Jobs: initialJobs})
 	checkPlan(t, string(initialRaw), planContext(), "")
 }
 

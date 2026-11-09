@@ -11,10 +11,10 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
@@ -25,10 +25,10 @@ func TestSealedSecretInputsNeverEscapeHostBoundaries(t *testing.T) {
 				t.Run(placement+"/"+scope, func(t *testing.T) {
 					masks := NewMaskRegistry(secrets.NewMasker())
 					var output strings.Builder
-					logs := planningLogs{known: true, masker: masks.masker, sink: func(_ context.Context, frame nodeproto.FrameLog) error { output.WriteString(frame.Message); return nil }}
+					logs := planningLogs{known: true, masker: masks.masker, sink: func(_ context.Context, frame nodewire.FrameLog) error { output.WriteString(frame.Message); return nil }}
 					acquire := func(ctx context.Context) (*source.Entry, error) {
 						for _, stream := range []string{"stdout", "stderr"} {
-							if err := logs.write(ctx, nodeproto.FrameLog{Level: "info", Event: stream, Message: value}); err != nil {
+							if err := logs.write(ctx, nodewire.FrameLog{Level: "info", Event: stream, Message: value}); err != nil {
 								t.Fatal(err)
 							}
 						}

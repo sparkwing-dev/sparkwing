@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -8,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRegisteredAgentsHonorRotationGraceProperty(t *testing.T) {
@@ -153,7 +155,7 @@ func TestRecordRunnerPollRejectsExpiredParent(t *testing.T) {
 	authorityPersist(t, s, root)
 	err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}})
 	var denied *apierr.Error
-	if !errors.As(err, &denied) || denied.Code != apierr.Unauthenticated {
+	if !errors.As(err, &denied) || denied.Code != hosterr.Unauthenticated {
 		t.Fatalf("expired parent: %v", err)
 	}
 }

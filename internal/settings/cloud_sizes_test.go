@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCloudSizeValidationAtRequestAndPlan(t *testing.T) {
@@ -33,9 +33,9 @@ func TestCloudSizeValidationAtRequestAndPlan(t *testing.T) {
 			}
 			_, err = ResolvePlan(PlanInputs{Declarations: declarations, Context: Context{Local: true}})
 			assertRefused(err)
-			_, err = ResolvePlan(PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Requires: []string{selector}}}}, Context: Context{Local: true}})
+			_, err = ResolvePlan(PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Requires: []string{selector}}}}, Context: Context{Local: true}})
 			assertRefused(err)
-			_, err = ResolveExpansion(ExpansionInputs{Spec: runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Requires: []string{selector}}}}, Context: Context{Local: true}})
+			_, err = ResolveExpansion(ExpansionInputs{Spec: runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}}, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Requires: []string{selector}}}}, Context: Context{Local: true}})
 			assertRefused(err)
 		})
 	}
@@ -43,7 +43,7 @@ func TestCloudSizeValidationAtRequestAndPlan(t *testing.T) {
 
 func TestCloudSizeValidationPreservesCustomerLabelsAndAlternatives(t *testing.T) {
 	for _, selector := range []string{"linux, sparkwing-2cpu", "sparkwing-2cpu, sparkwing-4cpu", "sparkwing-custom", "custom-3cpu", "pool=custom"} {
-		_, err := ResolvePlan(PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Requires: []string{selector}}}}, Context: Context{Local: true}})
+		_, err := ResolvePlan(PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Requires: []string{selector}}}}, Context: Context{Local: true}})
 		if err != nil {
 			t.Errorf("selector %q: %v", selector, err)
 		}

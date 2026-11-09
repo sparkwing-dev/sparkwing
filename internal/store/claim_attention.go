@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -9,10 +11,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: a claim hides the reason without writing the run row.
@@ -62,7 +64,7 @@ func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand)
 			return err
 		}
 		if !facts.Observable && !here {
-			return authorityError(apierr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
+			return authorityError(hosterr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 		}
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now(ctx)})
 		if err != nil {
@@ -152,7 +154,7 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 				return nil, err
 			}
 			if a.poll.ObservedAt.IsZero() || a.poll.ObservedAt.After(now) {
-				return nil, authorityError(apierr.IntegrityFailure, "invalid runner label observation")
+				return nil, authorityError(hosterr.IntegrityFailure, "invalid runner label observation")
 			}
 		}
 		observations = append(observations, a)

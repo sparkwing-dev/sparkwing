@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -15,12 +17,12 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: local runs, the local controller, update and upgrade must read and refresh one policy cache.
@@ -80,11 +82,31 @@ func (r *Resolver) Resolve(ctx context.Context, pin engineid.Pin, target release
 	if pin.Replacement != "" {
 		return installedEngine(ctx, pin, target)
 	}
-	version, err := VersionForPin(pin)
+	version, err := r.EngineVersion(ctx, pin)
 	if err != nil {
 		return Resolved{}, err
 	}
 	return r.resolve(ctx, engineid.Identity{Pin: pin, Version: version}, target)
+}
+
+// EngineVersion resolves a pin through signed SDK and engine policy without downloading executables.
+func (r *Resolver) EngineVersion(ctx context.Context, pin engineid.Pin) (string, error) {
+	version, err := SDKVersionForPin(pin)
+	if err != nil {
+		return "", err
+	}
+	if pin.Replacement != "" {
+		return installedEngineVersion()
+	}
+	policy, err := r.sdkIndex(ctx, time.Now())
+	if err != nil {
+		return "", err
+	}
+	sdk, _, err := SelectSDK(policy.Index, pin.SDK, version, time.Now())
+	if err != nil {
+		return "", err
+	}
+	return SelectEngine(policy.Index, sdk, time.Now())
 }
 
 // Ensure binds another machine's executable to the accepted portable identity.
@@ -98,7 +120,7 @@ func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, targe
 		}
 		if r.config.LocalBuildDirectory == "" {
 			return Resolved{}, &apierr.Error{
-				Code: apierr.IntegrityFailure,
+				Code: hosterr.IntegrityFailure,
 				Message: fmt.Sprintf("planned on engine %s (sha256 %s), this host has %s (sha256 %s); route planning to the executing host (repository runner requirements) or install %s (sha256 %s)",
 					identity.Version, identity.ManifestDigest, resolved.Identity.Version, resolved.Identity.ManifestDigest, identity.Version, identity.ManifestDigest),
 			}
@@ -120,11 +142,7 @@ func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, targe
 		}
 		return resolved, nil
 	}
-	version, err := VersionForPin(identity.Pin)
-	if err != nil {
-		return Resolved{}, err
-	}
-	if version != identity.Version || !validDigest(identity.ManifestDigest) {
+	if !releaseVersion(identity.Version) || !validDigest(identity.ManifestDigest) {
 		return Resolved{}, integrity(fmt.Errorf("accepted engine identity is invalid"))
 	}
 	return r.resolve(ctx, identity, target)
@@ -138,7 +156,7 @@ func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, targ
 		return Resolved{}, err
 	}
 	now := time.Now()
-	policy, err := r.Index(ctx, now)
+	policy, err := r.sdkIndex(ctx, now)
 	if err != nil {
 		return Resolved{}, err
 	}
@@ -146,7 +164,11 @@ func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, targ
 	if err != nil {
 		return Resolved{}, err
 	}
-	notices = append(policy.Notices, notices...)
+	sdkNotices, err := acceptsSDK(policy.Index, identity.Pin, identity.Version, now)
+	if err != nil {
+		return Resolved{}, err
+	}
+	notices = append(append(policy.Notices, notices...), sdkNotices...)
 	cached, ok, err := r.findCached(ctx, identity, target)
 	if err != nil {
 		return Resolved{}, err
@@ -156,7 +178,7 @@ func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, targ
 		return cached, nil
 	}
 	if r.config.Mode == toolchain.ModeLocal {
-		return Resolved{}, &apierr.Error{Code: apierr.Unavailable, Message: "Exact verified engine is absent from the machine cache", Hint: "Use auto toolchain mode once to fetch the matching official release."}
+		return Resolved{}, &apierr.Error{Code: hosterr.Unavailable, Message: "Exact verified engine is absent from the machine cache", Hint: "Use auto toolchain mode once to fetch the matching official release."}
 	}
 	release, err := r.fetchRelease(ctx, identity.Version, target)
 	if err != nil {
@@ -203,11 +225,8 @@ func (r *Resolver) cached(ctx context.Context, identity engineid.Identity, targe
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, false, err
 	}
-	version, err := VersionForPin(identity.Pin)
-	if err != nil {
-		return Resolved{}, false, err
-	}
-	if version != identity.Version || !validDigest(identity.ManifestDigest) {
+	version := identity.Version
+	if !releaseVersion(version) || !validDigest(identity.ManifestDigest) {
 		return Resolved{}, false, integrity(fmt.Errorf("invalid cache identity"))
 	}
 	dir, err := r.targetDirectory(version, target)
@@ -232,7 +251,7 @@ func (r *Resolver) cached(ctx context.Context, identity engineid.Identity, targe
 	}
 	release, err := readCachedRelease(version, target, executable, r.config.TrustedKeys)
 	var failure *apierr.Error
-	if errors.Is(err, os.ErrNotExist) || errors.As(err, &failure) && failure.Code == apierr.IntegrityFailure {
+	if errors.Is(err, os.ErrNotExist) || errors.As(err, &failure) && failure.Code == hosterr.IntegrityFailure {
 		return Resolved{}, false, nil
 	}
 	if err != nil {
@@ -241,7 +260,7 @@ func (r *Resolver) cached(ctx context.Context, identity engineid.Identity, targe
 	if digest(release.bundle.Manifest) != identity.ManifestDigest {
 		return Resolved{}, false, nil
 	}
-	return Resolved{trustedKeys: r.config.TrustedKeys, Identity: identity, Target: target, AssetDigest: release.asset.Digest(), Executable: executable}, true, nil
+	return Resolved{trustedKeys: r.config.TrustedKeys, verifiedIdentity: identity, Identity: identity, Target: target, AssetDigest: release.asset.Digest(), Executable: executable}, true, nil
 }
 
 func readCachedRelease(version string, target releaseasset.Target, executable string, keys []ed25519.PublicKey) (VerifiedRelease, error) {
@@ -265,11 +284,8 @@ func (r *Resolver) storeVerified(ctx context.Context, pin engineid.Pin, release 
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, err
 	}
-	version, err := VersionForPin(pin)
-	if err != nil {
-		return Resolved{}, err
-	}
-	if version != release.version || release.asset.Name() == "" {
+	version := release.version
+	if !releaseVersion(version) || release.asset.Name() == "" {
 		return Resolved{}, integrity(fmt.Errorf("release capability does not match SDK pin"))
 	}
 	// perf: a VerifiedRelease is VerifyRelease's result, so trusting every key it was checked under stands in
@@ -322,7 +338,7 @@ func (r *Resolver) storeVerified(ctx context.Context, pin engineid.Pin, release 
 			return Resolved{}, err
 		}
 	}
-	return Resolved{trustedKeys: r.config.TrustedKeys, Identity: identity, Target: release.target, AssetDigest: release.asset.Digest(), Executable: filepath.Join(destination, release.asset.Name())}, nil
+	return Resolved{trustedKeys: r.config.TrustedKeys, verifiedIdentity: identity, Identity: identity, Target: release.target, AssetDigest: release.asset.Digest(), Executable: filepath.Join(destination, release.asset.Name())}, nil
 }
 
 func (r *Resolver) targetDirectory(version string, target releaseasset.Target) (string, error) {

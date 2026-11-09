@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -12,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type creditReads struct {
@@ -110,7 +112,7 @@ func TestCreditReadsRefuseUnrelatedAuthority(t *testing.T) {
 		for _, identity := range []string{"missing", "revoked", "expired", "membership removed", "wrong audience", "machine", "work", "trigger", "bootstrap", "publisher", "missing grant", "no team", "relational refusal", "store read failure"} {
 			t.Run(path+"/"+identity, func(t *testing.T) {
 				b, f := creditReadFixture()
-				code, status := apierr.Unauthenticated, 401
+				code, status := hosterr.Unauthenticated, 401
 				p := &b.snapshot.Authorities[0].Principal
 				switch identity {
 				case "missing":
@@ -127,10 +129,10 @@ func TestCreditReadsRefuseUnrelatedAuthority(t *testing.T) {
 					p.Capability.Audience = capability.NodeHost
 					p.Capability.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "runner", Generation: 4, Attempt: 2}
 					b.snapshot.Binding.Current, b.snapshot.Binding.ProcessAlive = p.Capability.Binding, true
-					code, status = apierr.Forbidden, 403
+					code, status = hosterr.Forbidden, 403
 				case "machine":
 					p.Capability.Subject = capability.Subject{Kind: capability.SubjectMachine, ID: "machine"}
-					code, status = apierr.Forbidden, 403
+					code, status = hosterr.Forbidden, 403
 				case "work", "trigger", "bootstrap":
 					b = newCredentialBoundary()
 					if identity == "trigger" {
@@ -141,23 +143,23 @@ func TestCreditReadsRefuseUnrelatedAuthority(t *testing.T) {
 					if identity == "bootstrap" {
 						p.Capability.Delivery = capability.DeliveryBootstrap
 					}
-					code, status = apierr.Forbidden, 403
+					code, status = hosterr.Forbidden, 403
 				case "publisher":
 					b = publisherBoundary()
 					b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
-					code, status = apierr.Forbidden, 403
+					code, status = hosterr.Forbidden, 403
 				case "missing grant":
 					p.Capability.Grants = nil
-					code, status = apierr.Forbidden, 403
+					code, status = hosterr.Forbidden, 403
 				case "no team":
 					p.Capability.Team = ""
-					code, status = apierr.Forbidden, 403
+					code, status = hosterr.Forbidden, 403
 				case "relational refusal":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "not a member"}
-					code, status = apierr.Forbidden, 403
+					b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "not a member"}
+					code, status = hosterr.Forbidden, 403
 				case "store read failure":
 					b.readErr = errors.New("private database credential")
-					code, status = apierr.Internal, 500
+					code, status = hosterr.Internal, 500
 				}
 				w := snapshotRequest(creditReadServer(t, b, f), b, "GET", path)
 				assertEngineError(t, w, status, code)
@@ -193,26 +195,26 @@ func TestCreditReadsMaskFailuresAndRejectMethods(t *testing.T) {
 		for _, failure := range []string{"foreign tenant", "private error", "not found", "nil reader", "unregistered team", "resolver error", "head", "post"} {
 			t.Run(path+"/"+failure, func(t *testing.T) {
 				b, f := creditReadFixture()
-				method, status, code := "GET", 500, apierr.Internal
+				method, status, code := "GET", 500, hosterr.Internal
 				switch failure {
 				case "foreign tenant":
 					f.team = "other"
-					code = apierr.PolicyMissing
+					code = hosterr.PolicyMissing
 				case "private error":
 					f.err = errors.New("private ledger credential")
 				case "not found":
 					f.err = store.ErrNotFound
 					status, code = 404, apierr.NotFound
 				case "nil reader":
-					f.nilReader, code = true, apierr.PolicyMissing
+					f.nilReader, code = true, hosterr.PolicyMissing
 				case "unregistered team":
 					f.resolveErr, status, code = store.ErrUnknownTeam, 404, apierr.NotFound
 				case "resolver error":
 					f.resolveErr = errors.New("private resolver credential")
 				case "head":
-					method, status, code = "HEAD", 405, apierr.MethodNotAllowed
+					method, status, code = "HEAD", 405, hosterr.MethodNotAllowed
 				case "post":
-					method, status, code = "POST", 405, apierr.MethodNotAllowed
+					method, status, code = "POST", 405, hosterr.MethodNotAllowed
 				}
 				w := snapshotRequest(creditReadServer(t, b, f), b, method, path)
 				assertEngineError(t, w, status, code)
@@ -256,13 +258,13 @@ func TestCreditReadsCheckAvailabilityAfterAuthentication(t *testing.T) {
 		for _, identity := range []string{"missing", "machine", "member"} {
 			t.Run(path+identity, func(t *testing.T) {
 				b, _ := creditReadFixture()
-				status, code := 401, apierr.Unauthenticated
+				status, code := 401, hosterr.Unauthenticated
 				switch identity {
 				case "missing":
 					b.raw = ""
 				case "machine":
 					b.snapshot.Authorities[0].Principal.Capability.Subject.Kind = capability.SubjectMachine
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "member":
 					status, code = 404, apierr.NotFound
 				}
@@ -278,7 +280,7 @@ func TestCreditHistoryDoesNotReturnPartialLedger(t *testing.T) {
 	f.grants = []store.CreditGrant{{ID: "private-partial-grant"}}
 	f.chargeErr = errors.New("private charge failure")
 	w := snapshotRequest(creditReadServer(t, b, f), b, "GET", "/api/v1/credits/history")
-	assertEngineError(t, w, 500, apierr.Internal)
+	assertEngineError(t, w, 500, hosterr.Internal)
 	if strings.Contains(w.Body.String(), "private") || f.reads != 2 {
 		t.Fatalf("reads=%d body=%s", f.reads, w.Body.String())
 	}
@@ -288,7 +290,7 @@ func TestCreditReadsMissingDefaultReader(t *testing.T) {
 	b, _ := creditReadFixture()
 	h := licensedCreditServer(t, b).Handler()
 	for _, path := range []string{"/api/v1/credits", "/api/v1/credits/history"} {
-		assertEngineError(t, snapshotRequest(h, b, "GET", path), 500, apierr.PolicyMissing)
+		assertEngineError(t, snapshotRequest(h, b, "GET", path), 500, hosterr.PolicyMissing)
 	}
 }
 

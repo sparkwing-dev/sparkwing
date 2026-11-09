@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -63,7 +63,7 @@ func runReposInfo(inv clisurface.Invocation) error {
 		return err
 	}
 
-	latest, _ := fetchLatestRelease()
+	latest, _ := fetchLatestSDK()
 	fleet, err := buildFleet(latest)
 	if err != nil {
 		return err

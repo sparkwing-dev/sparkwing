@@ -15,12 +15,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestBurstSourceBundleTrackedEditsAndDeclaredFiles(t *testing.T) {
@@ -138,12 +137,12 @@ func TestBurstBundleRemotePoliciesRequireLiveCredentialAuthority(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		sha    string
-		policy nodeproto.SourceSpec
+		policy nodewire.SourceSpec
 	}{
 		{name: "missing commit", sha: strings.Repeat("b", 40)},
-		{name: "tags", policy: nodeproto.SourceSpec{Tags: &yes}},
-		{name: "submodules", policy: nodeproto.SourceSpec{Submodules: &yes}},
-		{name: "LFS", policy: nodeproto.SourceSpec{LFS: &yes}},
+		{name: "tags", policy: nodewire.SourceSpec{Tags: &yes}},
+		{name: "submodules", policy: nodewire.SourceSpec{Submodules: &yes}},
+		{name: "LFS", policy: nodewire.SourceSpec{LFS: &yes}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sha := snapshot.SHA

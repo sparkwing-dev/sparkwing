@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -9,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestReplacementSelectsInstalledEngineWithoutNetwork(t *testing.T) {
@@ -144,7 +146,7 @@ func TestReplacementEngineMismatchRemainsIntegrityFailure(t *testing.T) {
 			}
 			_, err := resolver.Ensure(t.Context(), accepted, target)
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.IntegrityFailure {
+			if !errors.As(err, &failure) || failure.Code != hosterr.IntegrityFailure {
 				t.Fatalf("changed installed engine must retain its integrity diagnosis: %v", err)
 			}
 			for _, want := range []string{

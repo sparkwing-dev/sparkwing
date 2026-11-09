@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -12,10 +14,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type routeParent struct {
@@ -28,7 +29,7 @@ func (p *routeParent) ReadAuthentication(_ context.Context, lookup capability.Cr
 	defer p.mu.Unlock()
 	snapshot, ok := p.snapshots[lookup.Digest]
 	if !ok || lookup.Class != capability.CredentialBearer || lookup.Audience != capability.Controller {
-		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown parent"}
+		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "unknown parent"}
 	}
 	return snapshot, nil
 }
@@ -59,12 +60,12 @@ type server struct {
 
 func newService(t testing.TB) *ProcessServices {
 	t.Helper()
-	return &ProcessServices{RunID: "run-1", Job: nodeproto.JobSpec{ID: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}}, Masks: NewMaskRegistry(secrets.NewMasker())}
+	return &ProcessServices{RunID: "run-1", Job: nodewire.JobSpec{ID: "deploy", Steps: []nodewire.StepSpec{{ID: "body"}}}, Masks: NewMaskRegistry(secrets.NewMasker())}
 }
 
 type routeNode struct {
 	RunID, NodeID string
-	Job           nodeproto.JobSpec
+	Job           nodewire.JobSpec
 	Secrets       []string
 	Resolver      interface {
 		Resolve(context.Context, string) (string, bool, error)

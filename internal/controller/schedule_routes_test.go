@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -12,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
@@ -22,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type scheduleWriterRefusal struct {
@@ -298,7 +300,7 @@ func TestScheduleHTTPInvalidInputAndBackend(t *testing.T) {
 		body := strings.Replace(schedulePushJSON, `"main"`, strconv.Quote(branch), 1)
 		f.call(t, "PUT", "/api/v1/schedules/repos", body, "", 400, nil)
 	}
-	f.writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "authority changed"}
+	f.writer.failure = &apierr.Error{Code: hosterr.Forbidden, Message: "authority changed"}
 	testOnlyTenantPort[scheduleWriter](f.s, func(context.Context, store.Team) (scheduleWriter, error) { return f.writer, nil })
 	f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 403, nil)
 	rows, err := f.writer.ListCronSchedules(t.Context())

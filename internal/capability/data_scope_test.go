@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -7,7 +9,7 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type dataCheck func(context.Context, Authorized, DataTarget) error
@@ -42,24 +44,24 @@ func TestDataRefScope(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			x := target
 			tc.change(&x)
-			requireCode(t, AuthorizeData(context.Background(), edges, a, x), apierr.Forbidden)
+			requireCode(t, AuthorizeData(context.Background(), edges, a, x), hosterr.Forbidden)
 		})
 	}
 	if calls != 1 {
 		t.Fatal("scope failure reached edge owner")
 	}
 	denied := dataCheck(func(context.Context, Authorized, DataTarget) error {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "digest is not readable"}
+		return &apierr.Error{Code: hosterr.Forbidden, Message: "digest is not readable"}
 	})
 	target.Operation, target.Digest = DataDownload, "digest"
 	a.Access.Grants = []Grant{DataRead}
-	requireCode(t, AuthorizeData(context.Background(), denied, a, target), apierr.Forbidden)
+	requireCode(t, AuthorizeData(context.Background(), denied, a, target), hosterr.Forbidden)
 	p.Capability.Data.Use = DataRemoteCache
 	p.Capability.Data.VerifiedDefaultOnly = true
 	a.Principal = p
 	target.Operation = DataRecord
 	a.Access.Grants = []Grant{DataWrite}
-	requireCode(t, AuthorizeData(context.Background(), edges, a, target), apierr.Forbidden)
+	requireCode(t, AuthorizeData(context.Background(), edges, a, target), hosterr.Forbidden)
 }
 
 func TestSourceReleaseReachesSharedRunnersAndCloudOnly(t *testing.T) {
@@ -68,7 +70,7 @@ func TestSourceReleaseReachesSharedRunnersAndCloudOnly(t *testing.T) {
 	a := Authorized{Principal: p, Binding: p.Capability.Binding, Target: Target{Team: "team", RunID: "run"}, Access: AccessRule{Grants: []Grant{SourceRead}, Binding: BindSource, Liveness: LiveSensitive}}
 	request := SourceReleaseRequest{Authorization: a, Executor: SourceExecutor{Team: "team", MachineID: "machine", OwnerAccountID: "owner", AuthorizedRepositories: p.Capability.Repositories}, RepositoryKey: p.Capability.Repositories[0], CredentialID: "git", Host: "github.com"}
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	requireCode(t, sourceError(request, now), apierr.Forbidden)
+	requireCode(t, sourceError(request, now), hosterr.Forbidden)
 	request.Executor.Shared = true
 	audit, err := AuthorizeSourceRelease(request, now)
 	if err != nil || audit.Team != "team" || audit.RunID != "run" || audit.CapabilityPrefix != "work" || audit.ReleasedAt != now || audit.ID == "" {
@@ -89,7 +91,11 @@ func TestSourceReleaseReachesSharedRunnersAndCloudOnly(t *testing.T) {
 		{"reporting authority", func(r *SourceReleaseRequest) { r.Authorization.Access.Liveness = LiveReporting }},
 		{"claimless", func(r *SourceReleaseRequest) { r.Authorization.Principal.Capability.UnitID = "" }},
 	} {
-		t.Run(tc.name, func(t *testing.T) { r := request; tc.change(&r); requireCode(t, sourceError(r, now), apierr.Forbidden) })
+		t.Run(tc.name, func(t *testing.T) {
+			r := request
+			tc.change(&r)
+			requireCode(t, sourceError(r, now), hosterr.Forbidden)
+		})
 	}
 }
 
@@ -102,7 +108,7 @@ func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
 		request := SourceReleaseRequest{Authorization: a, Executor: SourceExecutor{Team: "team", MachineID: "laptop", OwnerAccountID: owner, AuthorizedRepositories: p.Capability.Repositories}, RepositoryKey: p.Capability.Repositories[0], CredentialID: "git", Host: "github.com", GitHubApp: githubApp, SSH: ssh, SSHHostConfirmed: confirmed}
 		audit, err := AuthorizeSourceRelease(request, now)
 		var failure *apierr.Error
-		return audit.ID == "" && errors.As(err, &failure) && failure.Details["reason"] == apierr.ReasonPersonalMachine
+		return audit.ID == "" && errors.As(err, &failure) && failure.Details["reason"] == hosterr.ReasonPersonalMachine
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 256}); err != nil {
 		t.Fatal(err)

@@ -16,15 +16,15 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Prepared binds source installation to authenticated run storage and sealed acquisition inputs.
@@ -71,7 +71,7 @@ func preparedSource(spec Spec) Spec {
 	policy := spec.Checkout.Policy
 	enabled := func(value *bool) bool { return value != nil && *value }
 	depth := checkoutDepth(policy)
-	spec.Checkout = runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{
+	spec.Checkout = runspec.CheckoutPolicy{Policy: nodewire.SourceSpec{
 		FullHistory: new(depth == 0), Depth: new(depth), Tags: new(enabled(policy.Tags)),
 		Submodules: new(enabled(policy.Submodules)), LFS: new(enabled(policy.LFS)),
 	}}

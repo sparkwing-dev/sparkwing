@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -8,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ProcessOutput carries an authorized recorded output, including explicit null.
@@ -108,7 +110,7 @@ func (s *ProcessServices) read(request *http.Request, auth capability.Authorized
 	case "/node/v1/children/{run}/await":
 		body, err = s.awaitChild(request, auth)
 	default:
-		err = executorError(apierr.UnsupportedRoute, "unknown process service")
+		err = executorError(hosterr.UnsupportedRoute, "unknown process service")
 	}
 	return body, status, err
 }
@@ -116,7 +118,7 @@ func (s *ProcessServices) read(request *http.Request, auth capability.Authorized
 func (s *ProcessServices) secret(request *http.Request, auth capability.Authorized) (any, error) {
 	name := request.PathValue("name")
 	if !executorContains(s.Secrets, name) {
-		return nil, &apierr.Error{Code: apierr.Forbidden, Message: "secret is not declared", Details: map[string]any{"reason": apierr.ReasonSecretUndeclared}}
+		return nil, &apierr.Error{Code: hosterr.Forbidden, Message: "secret is not declared", Details: map[string]any{"reason": hosterr.ReasonSecretUndeclared}}
 	}
 	if s.Secret == nil {
 		return nil, serviceUnavailable()
@@ -198,7 +200,7 @@ func (s *ProcessServices) awaitChild(request *http.Request, auth capability.Auth
 	if result.Error != nil {
 		masked := maskHostError(result.Error, s.Masks.masker)
 		if !errors.As(masked, &result.Error) {
-			return nil, executorError(apierr.Internal, "child error could not be encoded")
+			return nil, executorError(hosterr.Internal, "child error could not be encoded")
 		}
 	}
 	return result, nil
@@ -223,5 +225,5 @@ func serviceDuration(raw string) (time.Duration, error) {
 }
 
 func serviceUnavailable() error {
-	return executorError(apierr.Unavailable, "process service is unavailable")
+	return executorError(hosterr.Unavailable, "process service is unavailable")
 }

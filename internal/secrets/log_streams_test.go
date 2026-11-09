@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestChildStreamPayloadsMaskBeforeLinesAndPreserveUTF8(t *testing.T) {
@@ -21,7 +21,7 @@ func TestChildStreamPayloadsMaskBeforeLinesAndPreserveUTF8(t *testing.T) {
 		data := input
 		for len(data) > 0 {
 			n := min(width, len(data))
-			frames, err := logs.Push(nodeproto.FrameLog{Stream: "command-stdout", StreamData: base64.StdEncoding.EncodeToString([]byte(data[:n])), Step: "body", Event: "exec_line"})
+			frames, err := logs.Push(nodewire.FrameLog{Stream: "command-stdout", StreamData: base64.StdEncoding.EncodeToString([]byte(data[:n])), Step: "body", Event: "exec_line"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -33,7 +33,7 @@ func TestChildStreamPayloadsMaskBeforeLinesAndPreserveUTF8(t *testing.T) {
 			}
 			data = data[n:]
 		}
-		frames, err := logs.Push(nodeproto.FrameLog{Stream: "command-stdout", StreamEnd: true})
+		frames, err := logs.Push(nodewire.FrameLog{Stream: "command-stdout", StreamEnd: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,7 +47,7 @@ func TestChildStreamPayloadsMaskBeforeLinesAndPreserveUTF8(t *testing.T) {
 }
 
 func TestChildStreamRefusesMalformedTransportPayload(t *testing.T) {
-	for _, frame := range []nodeproto.FrameLog{{StreamData: "abcd"}, {Stream: "child", StreamData: "!"}, {Stream: "child", Message: "plaintext"}, {Stream: "child", Attrs: []byte(`{}`)}} {
+	for _, frame := range []nodewire.FrameLog{{StreamData: "abcd"}, {Stream: "child", StreamData: "!"}, {Stream: "child", Message: "plaintext"}, {Stream: "child", Attrs: []byte(`{}`)}} {
 		if _, err := NewLogStreams(NewMasker()).Push(frame); err == nil {
 			t.Fatal("accepted malformed stream payload")
 		}
@@ -57,7 +57,7 @@ func TestChildStreamRefusesMalformedTransportPayload(t *testing.T) {
 func TestRawStreamLinesKeepReceiveTimestamps(t *testing.T) {
 	logs := NewLogStreams(NewMasker())
 	for _, ts := range []string{"first", "second"} {
-		frames := logs.Text("raw:info", nodeproto.FrameLog{Level: "info", TS: ts}, ts+"\n", false)
+		frames := logs.Text("raw:info", nodewire.FrameLog{Level: "info", TS: ts}, ts+"\n", false)
 		if len(frames) != 1 || frames[0].TS != ts {
 			t.Fatalf("frames = %+v", frames)
 		}

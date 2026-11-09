@@ -5,6 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 	mathrand "math/rand/v2"
 	"net/url"
 	"strconv"
@@ -13,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
@@ -52,7 +54,7 @@ func (c *LocalHostClient) ProcessClient(ctx context.Context, principal capabilit
 }
 
 // Annotation commits a masked annotation through the common reporting transaction.
-func (c *NativeProcessClient) Annotation(ctx context.Context, input nodeproto.AnnotationRequest) error {
+func (c *NativeProcessClient) Annotation(ctx context.Context, input nodewire.AnnotationRequest) error {
 	return c.transport.AppendAnnotation(ctx, c.run, c.job, controllerwire.AnnotationWrite{
 		Annotation: input.Annotation,
 		StepID:     input.Step,
@@ -60,7 +62,7 @@ func (c *NativeProcessClient) Annotation(ctx context.Context, input nodeproto.An
 }
 
 // Summary commits a masked summary through the common reporting transaction.
-func (c *NativeProcessClient) Summary(ctx context.Context, input nodeproto.SummaryRequest) error {
+func (c *NativeProcessClient) Summary(ctx context.Context, input nodewire.SummaryRequest) error {
 	suffix := "/summary"
 	if input.Step != "" {
 		suffix = "/steps" + suffix

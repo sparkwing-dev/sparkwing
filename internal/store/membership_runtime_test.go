@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -9,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestMembershipRevalidatesOnlyTheAffectedPersonalCredentialsProperty(t *testing.T) {
@@ -167,7 +169,7 @@ func TestMembershipRemovalKeepsAccountSessionsScopedAndParentsBoundProperty(t *t
 				p, err := tx.ResolveAuthority(t.Context(), member.Authority)
 				var failure *apierr.Error
 				if team == "" {
-					if !errors.As(err, &failure) || failure.Code != apierr.Unauthenticated {
+					if !errors.As(err, &failure) || failure.Code != hosterr.Unauthenticated {
 						t.Fatalf("removed member session: %v", err)
 					}
 				} else if err != nil {
@@ -176,7 +178,7 @@ func TestMembershipRemovalKeepsAccountSessionsScopedAndParentsBoundProperty(t *t
 					t.Fatalf("account session acquired foreign authority: %+v", p.Capability)
 				}
 				_, err = tx.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "backed"})
-				if !errors.As(err, &failure) || failure.Code != apierr.Unauthenticated {
+				if !errors.As(err, &failure) || failure.Code != hosterr.Unauthenticated {
 					t.Fatalf("revoked capability session: %v", err)
 				}
 				return nil

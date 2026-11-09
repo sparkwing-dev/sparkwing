@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
-	"github.com/sparkwing-dev/sparkwing/internal/testleak"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
 )
 
 func TestMain(m *testing.M) {
 	if len(os.Args) == 2 && os.Args[1] == "__sdk-install" {
-		if err := sdkinstall.Run(context.Background(), "development", os.Stdin, os.Stdout, os.Stderr); err != nil {
+		if err := sdkinstall.Run(context.Background(), os.Stdin, os.Stdout, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

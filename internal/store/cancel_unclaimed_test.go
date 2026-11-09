@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -9,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func cancellationFixture(t *testing.T, kind capability.UnitKind) (*Store, *Tenant, UnitDemand, runstate.RunTransition) {
@@ -105,7 +107,7 @@ func TestRunCancellationRacesOwnerAwardProperty(t *testing.T) {
 			} else {
 				var denied *apierr.Error
 				var illegal *ErrIllegalTransition
-				if !errors.Is(claimErr, ErrNotFound) && (!errors.As(claimErr, &denied) || denied.Code != apierr.LockHeld && denied.Code != apierr.Forbidden) && (!errors.As(claimErr, &illegal) || illegal.Reason != ReasonHolderRights) {
+				if !errors.Is(claimErr, ErrNotFound) && (!errors.As(claimErr, &denied) || denied.Code != hosterr.LockHeld && denied.Code != hosterr.Forbidden) && (!errors.As(claimErr, &illegal) || illegal.Reason != ReasonHolderRights) {
 					t.Fatal(claimErr)
 				}
 				rewriteSchemaCount(t, s.db, "billing_awards", 0)

@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/json"
@@ -10,7 +12,6 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
@@ -63,8 +64,8 @@ func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 				}
 			}
 			code, bodyText := f.do("POST", "/api/v1/runners/claim?team="+url.QueryEscape(forged), f.runnerB, body)
-			var refusal apierr.Envelope
-			if code != http.StatusForbidden || json.Unmarshal([]byte(bodyText), &refusal) != nil || refusal.Error.Code != apierr.Forbidden || refusal.Error.Details["reason"] != string(apierr.ReasonNoTeam) || strings.Contains(bodyText, `"capability"`) {
+			var refusal hosterr.Envelope
+			if code != http.StatusForbidden || json.Unmarshal([]byte(bodyText), &refusal) != nil || refusal.Error.Code != hosterr.Forbidden || refusal.Error.Details["reason"] != string(hosterr.ReasonNoTeam) || strings.Contains(bodyText, `"capability"`) {
 				t.Fatalf("teamless claim = %d: %s", code, bodyText)
 			}
 			var awards int

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -11,16 +13,16 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type runnerAdmissionFunc func(context.Context, string) error
@@ -57,7 +59,7 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 			t.Fatal("runner version was replaced")
 		}
 		if !allowed {
-			return &apierr.Error{Code: apierr.VersionRevoked, Message: "revoked"}
+			return &apierr.Error{Code: hosterr.VersionRevoked, Message: "revoked"}
 		}
 		return nil
 	})
@@ -110,7 +112,7 @@ func TestEngineClaimRequiresTrustedServicesBeforeAward(t *testing.T) {
 		}
 		_, err := server.Claim(t.Context(), capability.Authorized{Principal: root}, body)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.Unavailable {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable {
 			t.Fatalf("missing trusted service: %v", err)
 		}
 	}
@@ -162,7 +164,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 func TestEngineReadFailureUsesAuthorizedSourceGeneration(t *testing.T) {
 	server, _ := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
-	failure := nodeproto.JobFailure{Job: "source", Stage: "verify", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked error"}}
+	failure := nodewire.JobFailure{Job: "source", Stage: "verify", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked error"}}
 	raw, err := json.Marshal(failure)
 	if err != nil {
 		t.Fatal(err)

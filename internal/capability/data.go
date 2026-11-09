@@ -1,11 +1,13 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // DataUse constrains an opt-in separately from an executable claim's data authority.
@@ -108,33 +110,33 @@ func AuthorizeData(ctx context.Context, edges DataAccessChecker, authorized Auth
 	sourceBundle := authorized.Access.Binding == BindSourceBundle
 	if sourceBundle {
 		if target.Operation != DataDownload || !matchesCredential(authorized.Principal, CredentialBootstrap) || c.Delivery != DeliveryBootstrap {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 		grant = SourceRead
 	}
 	if c.Audience != Controller {
-		return forbidden(apierr.ReasonAudience)
+		return forbidden(hosterr.ReasonAudience)
 	}
 	if !slices.Contains(c.Grants, grant) || !slices.Contains(authorized.Access.Grants, grant) {
-		return forbidden(apierr.ReasonMissingGrant)
+		return forbidden(hosterr.ReasonMissingGrant)
 	}
 	if c.Team == "" || authorized.Target.Team != c.Team {
-		return forbidden(apierr.ReasonTeam)
+		return forbidden(hosterr.ReasonTeam)
 	}
 	scope := c.Data
 	if scope == nil || scope.RepositoryKey == "" {
-		return forbidden(apierr.ReasonRepositoryUnauthorized)
+		return forbidden(hosterr.ReasonRepositoryUnauthorized)
 	}
 	if authorized.ResultReplay || authorized.LogTailAttempt != 0 || authorized.Access.Binding != BindData && !sourceBundle {
-		return forbidden(apierr.ReasonBinding)
+		return forbidden(hosterr.ReasonBinding)
 	}
 	if authorized.Access.Liveness != LiveSensitive && authorized.Access.Liveness != LiveExpansion &&
 		!(authorized.Access.Liveness == LiveCredential && (scope.Use == DataRemoteCache || scope.Use == DataPublish)) {
-		return forbidden(apierr.ReasonBinding)
+		return forbidden(hosterr.ReasonBinding)
 	}
 	if sourceBundle {
 		if authorized.Access.Liveness != LiveSensitive || scope.Use != DataClaim && !(scope.Use == DataExpansion && c.Unit == UnitEval) || scope.RunID == "" || scope.RunID != c.Binding.RunID || target.RunID != scope.RunID || target.NodeID != scope.NodeID || target.Generation != scope.Generation {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 		return edges.CheckDataAccess(ctx, authorized, target)
 	}
@@ -142,7 +144,7 @@ func AuthorizeData(ctx context.Context, edges DataAccessChecker, authorized Auth
 		return err
 	}
 	if policy.Grant == DataWrite && !dataWriter(*scope, target) {
-		return forbidden(apierr.ReasonBinding)
+		return forbidden(hosterr.ReasonBinding)
 	}
 	return edges.CheckDataAccess(ctx, authorized, target)
 }
@@ -151,32 +153,32 @@ func dataUse(p Principal, scope DataScope, grant Grant) error {
 	switch scope.Use {
 	case DataRemoteCache:
 		if grant != DataRead {
-			return forbidden(apierr.ReasonReadOnly)
+			return forbidden(hosterr.ReasonReadOnly)
 		}
 		if !scope.VerifiedDefaultOnly || !matchesCredential(p, CredentialRepoReader) {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 	case DataPublish:
 		if !matchesCredential(p, CredentialPublisher) {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 	case DataClaim:
 		if !isClaim(p) || p.Capability.Delivery == DeliveryBootstrap || scope.RunID != p.Capability.Binding.RunID {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 		if b := p.Capability.Binding; b.Kind == BindingNode && (scope.NodeID != b.NodeID || scope.Generation != b.Generation || scope.Attempt != b.Attempt) {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 	case DataExpansion:
 		if grant != DataRead {
-			return forbidden(apierr.ReasonReadOnly)
+			return forbidden(hosterr.ReasonReadOnly)
 		}
 		if !isClaim(p) || p.Capability.Binding.Expansion == nil || scope.RunID != p.Capability.Binding.RunID ||
 			scope.NodeID != p.Capability.Binding.NodeID || scope.Generation != p.Capability.Binding.Generation {
-			return forbidden(apierr.ReasonBinding)
+			return forbidden(hosterr.ReasonBinding)
 		}
 	default:
-		return forbidden(apierr.ReasonBinding)
+		return forbidden(hosterr.ReasonBinding)
 	}
 	return nil
 }

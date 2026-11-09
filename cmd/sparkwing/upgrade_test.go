@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -16,12 +18,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type fakeUpgradeResolver struct {
@@ -115,7 +117,7 @@ func TestUpgradeReportPreservesOutputFailure(t *testing.T) {
 
 func TestUpgradePreservesPolicyAndVerificationFailures(t *testing.T) {
 	root := upgradeFixture(t, engineid.GoSDK)
-	for _, failure := range []error{&apierr.Error{Code: apierr.VersionRevoked, Message: "signed security reason", Hint: "sparkwing pipeline upgrade"}, errors.New("type checking failed")} {
+	for _, failure := range []error{&apierr.Error{Code: hosterr.VersionRevoked, Message: "signed security reason", Hint: "sparkwing pipeline upgrade"}, errors.New("type checking failed")} {
 		fake := &fakeUpgradeResolver{err: failure}
 		var out bytes.Buffer
 		command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, out: &out}
@@ -148,13 +150,13 @@ func TestUpgradeVerifiedResult(t *testing.T) {
 
 func TestUpgradeAppliedPinWithFailingCodeNamesTheMigrationGuides(t *testing.T) {
 	root := upgradeFixture(t, engineid.GoSDK)
-	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Unverified: errors.New("undefined: runner.Main"), Plan: engine.UpgradePlan{Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.67.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}, Edits: []engine.PinEdit{{Path: ".sparkwing/go.mod"}, {Path: ".sparkwing/go.sum"}}}}}
+	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Unverified: errors.New("undefined: runner.Main"), Plan: engine.UpgradePlan{Engine: engineid.Identity{Version: "v0.80.0"}, Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.67.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}, Edits: []engine.PinEdit{{Path: ".sparkwing/go.mod"}, {Path: ".sparkwing/go.sum"}}}}}
 	var out bytes.Buffer
 	command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, verifier: &upgradeVerifier{}, out: &out}
 	err := command.runArgs(t.Context(), []string{"--checkout", root, "--output=pretty"})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || !strings.Contains(failure.Message, "moved to v0.68.0") || !strings.Contains(failure.Message, "undefined: runner.Main") ||
-		!strings.Contains(failure.Hint, "docs migrations --from v0.67.0 --to v0.68.0") {
+		!strings.Contains(failure.Hint, "/tree/v0.80.0/docs/migrations") {
 		t.Fatalf("error = %v", err)
 	}
 	if !strings.Contains(failure.Hint, "changed only .sparkwing/go.mod .sparkwing/go.sum") || strings.Contains(failure.Hint, "checkout -- .sparkwing`") {
@@ -177,7 +179,7 @@ func TestUpgradePlainReportsTargetVersion(t *testing.T) {
 			if err := writeUpgradeReport(&out, "plain", result); err != nil {
 				t.Fatal(err)
 			}
-			if out.String() != version+"\n" {
+			if out.String() != "sdk="+version+"\nengine=\n" {
 				t.Fatalf("plain result: %q, want version %q", out.String(), version)
 			}
 		}
@@ -391,7 +393,7 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 		encoded := base64.StdEncoding.EncodeToString([]byte(secret))
 		for failAt := 0; failAt < 5; failAt++ {
 			calls := 0
-			failure := &apierr.Error{Code: apierr.Internal, Message: secret, Hint: encoded, Details: map[string]any{secret: []string{encoded, secret}}}
+			failure := &apierr.Error{Code: hosterr.Internal, Message: secret, Hint: encoded, Details: map[string]any{secret: []string{encoded, secret}}}
 			fail := func() error {
 				calls++
 				if calls == failAt+1 {
@@ -425,7 +427,7 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 				}
 				var out bytes.Buffer
 				encode := func(w io.Writer, failure *apierr.Error) error {
-					return json.NewEncoder(w).Encode(apierr.Envelope{Error: failure})
+					return json.NewEncoder(w).Encode(hosterr.Envelope{Error: failure})
 				}
 				if err := writeInvocationError(&out, &invocationError{inv: inv, cause: err}, encode); err != nil {
 					t.Fatal(err)
@@ -436,4 +438,17 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestUpgradeReportKeepsIndependentEngineVersion(t *testing.T) {
+	result := engine.UpgradeResult{DryRun: true, Plan: engine.UpgradePlan{Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.1.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.2.0"}, Engine: engineid.Identity{Version: "v0.80.0"}}}
+	for _, format := range []string{"pretty", "plain", "json"} {
+		var out bytes.Buffer
+		if err := writeUpgradeReport(&out, format, result); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "v0.2.0") || !strings.Contains(out.String(), "v0.80.0") {
+			t.Fatalf("%s output lost SDK or engine identity: %s", format, &out)
+		}
+	}
 }

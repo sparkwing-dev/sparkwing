@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -15,13 +17,13 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type cacheHTTPTransactions struct {
@@ -255,7 +257,7 @@ func TestDataCacheHTTPRepoReaderKeepsTrustedFallbackAndCannotCopy(t *testing.T) 
 		}
 		*f.events = nil
 		w := authorityHTTP(h, f.boundary, "POST", "/api/v1/data/memo/copy", cacheBody("memo/copy"))
-		assertEngineError(t, w, 403, apierr.Forbidden)
+		assertEngineError(t, w, 403, hosterr.Forbidden)
 		if len(*f.events) != 0 {
 			t.Fatal("read-only cache access reached copy")
 		}
@@ -268,7 +270,7 @@ func TestDataCacheHTTPRefusesDeadOrInsufficientAuthority(t *testing.T) {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				f, tx := newCacheHTTPFixture(t)
 				p := &f.boundary.snapshot.Authorities[0].Principal
-				status, code := 401, apierr.Unauthenticated
+				status, code := 401, hosterr.Unauthenticated
 				switch state {
 				case "missing":
 					f.boundary.raw = ""
@@ -277,7 +279,7 @@ func TestDataCacheHTTPRefusesDeadOrInsufficientAuthority(t *testing.T) {
 				case "cancelled":
 					f.boundary.snapshot.Binding.RunCancelled = true
 					if operation != "memo/copy" {
-						status, code = 403, apierr.Forbidden
+						status, code = 403, hosterr.Forbidden
 					}
 				case "no read", "no write":
 					grant := capability.DataRead
@@ -285,24 +287,24 @@ func TestDataCacheHTTPRefusesDeadOrInsufficientAuthority(t *testing.T) {
 						grant = capability.DataWrite
 					}
 					p.Capability.Grants = slices.DeleteFunc(p.Capability.Grants, func(g capability.Grant) bool { return g == grant })
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 					if state == "no write" && operation != "memo/copy" {
 						status = 200
 					}
 				case "edge":
 					f.edges.err = blob.ErrDigestNotReadable
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "resolver":
 					f.data.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) {
 						return blob.Authority{}, errors.New("private origin failure")
 					}
-					status, code = 500, apierr.Internal
+					status, code = 500, hosterr.Internal
 				case "transaction":
 					tx.lookupErr, tx.settleErr = errors.New("private transaction failure"), errors.New("private transaction failure")
-					status, code = 500, apierr.Internal
+					status, code = 500, hosterr.Internal
 				case "missing controller":
 					f.data = nil
-					status, code = 500, apierr.PolicyMissing
+					status, code = 500, hosterr.PolicyMissing
 				}
 				w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation, cacheBody(operation))
 				if status == 200 {
@@ -361,7 +363,7 @@ func TestDataCacheHTTPRejectsCallerAuthority(t *testing.T) {
 		for _, method := range []string{"GET", "HEAD", "PUT", "DELETE"} {
 			f, _ := newCacheHTTPFixture(t)
 			w := authorityHTTP(f.handler(), f.boundary, method, "/api/v1/data/"+operation, "")
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+			assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 		}
 	}
 }
@@ -371,7 +373,7 @@ func TestDataCacheHTTPMemoCopyCannotBorrowReadGrant(t *testing.T) {
 	p := &f.boundary.snapshot.Authorities[0].Principal
 	p.Capability.Grants = []capability.Grant{capability.DataWrite}
 	w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/memo/copy", cacheBody("memo/copy"))
-	assertEngineError(t, w, 403, apierr.Forbidden)
+	assertEngineError(t, w, 403, hosterr.Forbidden)
 	if len(*f.events) != 0 {
 		t.Fatalf("events=%v", *f.events)
 	}

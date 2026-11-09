@@ -6,20 +6,20 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func newRecoveryCapacityFixture(t *testing.T) *storeRecoveryFixture {
 	t.Helper()
-	return newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), func(doc *nodeproto.PlanDoc) {
+	return newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), func(doc *nodewire.PlanDoc) {
 		scope, capacity, cost, policy := "global", 1, 1, "queue"
-		doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "plan", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}
+		doc.Concurrency = []nodewire.ConcurrencySpec{{Group: "plan", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}
 		for _, name := range []string{"node", "deploy"} {
-			doc.Jobs[0].Concurrency = append(doc.Jobs[0].Concurrency, nodeproto.ConcurrencySpec{Group: name, Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy})
+			doc.Jobs[0].Concurrency = append(doc.Jobs[0].Concurrency, nodewire.ConcurrencySpec{Group: name, Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy})
 		}
 	})
 }
@@ -40,7 +40,7 @@ func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name strin
 func TestClaimedCapacityWaiterFollowsNodeRenewal(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
 	ctx := t.Context()
-	blocker, award := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) { doc.Concurrency = nil })
+	blocker, award := admissionPolicyBlocker(t, f, func(doc *nodewire.PlanDoc) { doc.Concurrency = nil })
 	admissionWant(t, f, blocker, award, runstate.AcquireGranted)
 	queued, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
 	if err != nil || queued.Kind != runstate.AcquireQueued {

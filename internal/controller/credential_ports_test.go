@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -13,13 +15,13 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
@@ -162,8 +164,8 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 			return false
 		}
 		if status == 401 {
-			var failure apierr.Envelope
-			return json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == apierr.Unauthenticated
+			var failure hosterr.Envelope
+			return json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == hosterr.Unauthenticated
 		}
 		return true
 	}
@@ -190,8 +192,8 @@ func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
 			r.Header.Set("X-Sparkwing-Claim-Generation", "1")
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
-			var failure apierr.Envelope
-			if w.Code != http.StatusForbidden || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != apierr.Forbidden {
+			var failure hosterr.Envelope
+			if w.Code != http.StatusForbidden || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != hosterr.Forbidden {
 				t.Logf("grant=%s path=%s: %d %s", grant, request.path, w.Code, w.Body)
 				return false
 			}
@@ -263,7 +265,7 @@ func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
 				return false
 			}
 			if auth.status == http.StatusNotFound {
-				var failure apierr.Envelope
+				var failure hosterr.Envelope
 				if json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != apierr.NotFound {
 					return false
 				}

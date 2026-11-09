@@ -1,0 +1,8 @@
+# sparkwing/cleanup
+
+func Register(ctx context.Context, spec Spec) (release func(), err error)
+type Spec struct {
+	Argv []string
+
+	Description string
+}

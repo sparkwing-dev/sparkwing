@@ -12,9 +12,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type verifyFunc func(context.Context, string, Resolved) error
@@ -131,7 +131,7 @@ func createUpgradeRepo(t *testing.T, dir string, sdk engineid.SDKKind) {
 		t.Fatal(err)
 	}
 	if sdk == engineid.GoSDK {
-		writeFixture(t, dir, "go.mod", []byte("module fixture\ngo 1.26\nrequire github.com/sparkwing-dev/sparkwing v0.10.2\n"))
+		writeFixture(t, dir, "go.mod", []byte("module fixture\ngo 1.26\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.10.2\n"))
 		writeFixture(t, dir, "go.sum", []byte("original native checksums\n"))
 	} else {
 		writeFixture(t, dir, "package.json", []byte(`{"name":"fixture","dependencies":{"@sparkwing/sdk":"0.10.2"},"description":"keep me"}`))
@@ -159,14 +159,14 @@ func TestBreakingUpgradeMovesThePinAndReportsTheCodeThatFails(t *testing.T) {
 	if err != nil || !result.Applied || result.Verified || !errors.Is(result.Unverified, removed) {
 		t.Fatalf("breaking upgrade = %+v, %v; want the pin applied with the failing code reported", result, err)
 	}
-	if want := []string{"go mod tidy", "go get github.com/sparkwing-dev/sparkwing@v0.20.0"}; strings.Join(ran, ";") != strings.Join(want, ";") {
+	if want := []string{"go mod tidy", "go get github.com/sparkwing-dev/sparkwing/sparkwing@v0.20.0"}; strings.Join(ran, ";") != strings.Join(want, ";") {
 		t.Fatalf("native commands = %q, want %q", ran, want)
 	}
 	pin, err := ReadPin(filepath.Join(repo, ".sparkwing"), engineid.GoSDK)
 	if err != nil || pin.Version != "v0.20.0" {
 		t.Fatalf("pin = %+v, %v; want v0.20.0", pin, err)
 	}
-	if guides := MigrationGuides("v0.10.2", "v0.20.0"); !strings.Contains(guides, "docs migrations --from v0.10.2 --to v0.20.0") || !strings.Contains(guides, "/tree/v0.20.0/docs/migrations") {
+	if guides := MigrationGuides("v0.20.0"); !strings.Contains(guides, "docs migrations") || !strings.Contains(guides, "/tree/v0.20.0/docs/migrations") {
 		t.Fatalf("migration guides = %q", guides)
 	}
 }

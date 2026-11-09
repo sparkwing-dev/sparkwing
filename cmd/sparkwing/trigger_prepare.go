@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -13,7 +15,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
@@ -23,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type triggerSourceInput struct {
@@ -251,7 +253,7 @@ func triggerRepository(ctx context.Context, remote string, githubID func(context
 	input := runspec.RepoInput{RemoteURL: remote}
 	if strings.EqualFold(u.Hostname(), "github.com") {
 		if githubID == nil {
-			return runspec.Repository{}, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository identity lookup is unavailable"}
+			return runspec.Repository{}, &apierr.Error{Code: hosterr.Unavailable, Message: "GitHub repository identity lookup is unavailable"}
 		}
 		id, err := githubID(ctx, remote)
 		if err != nil {

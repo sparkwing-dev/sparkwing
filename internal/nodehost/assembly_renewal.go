@@ -1,12 +1,14 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func localOwnerRenew(current func(context.Context) (capability.Principal, error), renew func(context.Context, string, bool) (runstate.LeaseBeat, error)) func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
@@ -22,7 +24,7 @@ func localOwnerRenew(current func(context.Context) (capability.Principal, error)
 			owned, fenced = true, actor.Holder == fence.Holder && actor.Generation == runspec.ClaimGeneration(fence.Generation)
 		}
 		if !owned || !fenced || c.Prefix == "" || actor.Kind != runstate.ActorRunHost || actor.Authority != principal.Authority || actor.CapabilityPrefix != c.Prefix {
-			return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld, Message: "local renewal differs from its authenticated owner award"}
+			return runstate.LeaseBeat{}, &apierr.Error{Code: hosterr.LockHeld, Message: "local renewal differs from its authenticated owner award"}
 		}
 		return renew(ctx, c.Prefix, computing)
 	}

@@ -1,7 +1,9 @@
 # Versioning and the plugin ecosystem
 
-A repository's SDK pin selects its engine. The Go SDK, TypeScript SDK and engine
-release together. Spark libraries use their own module versions.
+A repository's SDK pin selects a permitted engine through the signed
+SDK-to-engine mapping. The Go SDK, TypeScript SDK and engine each have their own
+version. An SDK publishes only when its source changes. Spark libraries use
+their own module versions.
 
 The current stable release and its notes are at
 [GitHub releases/latest](https://github.com/sparkwing-dev/sparkwing/releases/latest);
@@ -11,15 +13,17 @@ The current stable release and its notes are at
 
 Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
 TypeScript pipelines pin `@sparkwing/sdk` through their manifest and native
-lockfile. A version range alone cannot select an exact engine. Go `vX.Y.Z` and
-TypeScript `X.Y.Z` identify engine `vX.Y.Z`, including any prerelease suffix.
+lockfile. A version range alone cannot identify an exact SDK. Go `vX.Y.Z` and
+TypeScript `X.Y.Z` identify SDK releases. The signed index records each SDK's
+language, version, protocol and source digest. It selects a permitted engine
+that accepts that protocol. The SDK and engine versions can differ.
 
 For local TypeScript development, pin a version-stamped SDK directory with
 `file:../sdk` or a tarball such as `file:vendor/sparkwing-sdk-0.68.0.tgz`.
 Relative tarball paths without `file:` also work. Run npm install to update the
 native lockfile. Sparkwing reads the local package's name and version without
-executing it, checks that the lockfile resolves that source, and selects that
-exact release's engine. Local pins retain signed engine verification. Keep local
+executing it, checks that the lockfile resolves that source, and resolves that
+SDK version through the signed mapping. Local pins retain signed engine verification. Keep local
 sources inside the repository when they must travel with a fetched checkout.
 Tarball bytes, or a directory's package manifest, participate in pin identity.
 
@@ -49,8 +53,9 @@ security policy comes from the verified version index.
 ## The SDK pin selects the CLI
 
 Every placement acquires its sealed source, reads the pin, resolves and verifies
-the matching engine, then uses that engine to install/build and host the SDK.
-A newer ambient CLI or runner image does not substitute for an older exact pin.
+a permitted engine that accepts the SDK's protocol, then uses that engine to
+install/build and host the SDK. New engine releases can accept the same SDK pin
+without requiring another SDK publication.
 The CLI resolves the pin even when its installed version matches. It reuses the
 selected executable only after the resolver checks policy and cached bytes.
 A missing release fails instead of selecting another version.
@@ -233,4 +238,4 @@ See [Local execution](local-execution.md) and [Controller HTTP API](api.md).
 Pin exact SDK versions and test supported versions of the library. Describe the
 supported SDK range in the library's README. For local Go development, a `replace`
 directive can point at editable source. Published pins must remain reproducible.
-A release's SDK declaration contract and its matching engine travel together.
+The signed mapping binds each SDK declaration contract to permitted engines.

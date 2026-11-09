@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 // safety: a logged command's result keeps only the last nodeproto.ExecTailBytes of each stream; the log has it all.

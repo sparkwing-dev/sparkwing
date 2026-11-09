@@ -1,16 +1,18 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"net/http"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type loginProofKey struct{}
@@ -36,7 +38,7 @@ func (s *Server) verifyLoginPage(r *http.Request) error {
 		var err error
 		proof.session, err = s.readSessionFlow(r)
 		var failure *apierr.Error
-		if errors.As(err, &failure) && failure.Code != apierr.Unauthenticated {
+		if errors.As(err, &failure) && failure.Code != hosterr.Unauthenticated {
 			return err
 		}
 		if err != nil {
@@ -67,7 +69,7 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 	}
 	p, c := auth.Principal, auth.Principal.Capability
 	if p.Class != capability.CredentialBearer || c.Subject.Kind != capability.SubjectAccount || c.Audience != capability.Controller || c.Team == "" || c.Unit != "" || c.Purpose != "" || c.Binding.Kind != capability.BindingNone || c.Data != nil {
-		return apierr.Authorization(apierr.ReasonBinding, "sign-in requires an unbound account access token without data scope")
+		return hosterr.Authorization(hosterr.ReasonBinding, "sign-in requires an unbound account access token without data scope")
 	}
 	raw, session, err := s.operator.CreateCapabilitySession(r.Context(), c.Prefix, s.sessionInitialTTL())
 	if err != nil {
@@ -75,7 +77,7 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 		if errors.As(err, &failure) {
 			return err
 		}
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "sign-in service unavailable"}, err)
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "sign-in service unavailable"}, err)
 	}
 	notePolicyPrincipal(r.Context(), p)
 	*r = *r.WithContext(context.WithValue(r.Context(), loginProofKey{}, loginProof{raw: raw, session: session}))
@@ -90,14 +92,14 @@ func (s *Server) readLoginForm(r *http.Request) error {
 		return sessionUnavailable()
 	}
 	if !sameOriginRequest(r) {
-		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
+		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	r.Body = http.MaxBytesReader(nil, r.Body, maxFormBody)
 	if err := r.ParseForm(); err != nil {
 		return invalidEngineBody("invalid sign-in form")
 	}
 	if len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 || len(r.PostForm["csrf_token"]) != 1 || !validFormCSRF(r, s.cookiesSecure()) {
-		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
+		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	for key, values := range r.PostForm {
 		if key != "token" && key != "next" && key != "csrf_token" || len(values) != 1 {

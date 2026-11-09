@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // ScheduleNode is the immutable graph projection consumed by the shared decider.
@@ -280,7 +280,7 @@ func (snapshot ScheduleSnapshot) Dependencies() map[string][]string {
 }
 
 // planDependencyClosure returns the selected jobs and every prerequisite used by scheduling.
-func planDependencyClosure(plan nodeproto.PlanDoc, selected []string) (map[string]bool, error) {
+func planDependencyClosure(plan nodewire.PlanDoc, selected []string) (map[string]bool, error) {
 	nodes := make([]ScheduleNode, len(plan.Jobs))
 	byID := make(map[string]int, len(nodes))
 	groups := make(map[string]ScheduleExpansion)
@@ -390,7 +390,7 @@ func scheduleRunVerdict(nodes []ScheduleNode) (string, string) {
 // State comes only from persisted rows; elapsed leases never imply a requeue.
 // Both run hosts and controller settlement call Decide on this projection.
 func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := decodeScheduleDeclaration(snapshot.Run.Plan, &plan); err != nil {
 		return ScheduleSnapshot{}, fmt.Errorf("accepted plan: %w", err)
 	}
@@ -413,7 +413,7 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 		finished: snapshot.Run.FinishedAt != nil,
 		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil, DryRun: dryRun, GuardRefusal: runGuardRefusal(snapshot.Run), SelectionSkips: skips},
 		rows:     make(map[string]runstate.NodeRow, len(snapshot.Nodes)),
-		jobs:     make(map[string]nodeproto.JobSpec, len(snapshot.Nodes)),
+		jobs:     make(map[string]nodewire.JobSpec, len(snapshot.Nodes)),
 		groups:   make(map[string]int),
 		accepted: make(map[string]bool),
 	}
@@ -447,7 +447,7 @@ type scheduleProjection struct {
 	finished bool
 	result   ScheduleSnapshot
 	rows     map[string]runstate.NodeRow
-	jobs     map[string]nodeproto.JobSpec
+	jobs     map[string]nodewire.JobSpec
 	groups   map[string]int
 	accepted map[string]bool
 }
@@ -467,7 +467,7 @@ func decodeScheduleDeclaration(raw json.RawMessage, value any) error {
 	return nil
 }
 
-func (projection *scheduleProjection) add(job nodeproto.JobSpec) error {
+func (projection *scheduleProjection) add(job nodewire.JobSpec) error {
 	if _, exists := projection.jobs[job.ID]; job.ID == "" || exists {
 		return fmt.Errorf("empty or duplicate declared job %q", job.ID)
 	}
@@ -475,7 +475,7 @@ func (projection *scheduleProjection) add(job nodeproto.JobSpec) error {
 	if !exists {
 		return fmt.Errorf("declared job %q has no persisted row", job.ID)
 	}
-	var persisted nodeproto.JobSpec
+	var persisted nodewire.JobSpec
 	if err := decodeScheduleDeclaration(row.Spec, &persisted); err != nil {
 		return fmt.Errorf("job %q spec: %w", job.ID, err)
 	}
@@ -507,7 +507,7 @@ func (projection *scheduleProjection) add(job nodeproto.JobSpec) error {
 	return nil
 }
 
-func scheduleDeclaration(job nodeproto.JobSpec) ScheduleNode {
+func scheduleDeclaration(job nodewire.JobSpec) ScheduleNode {
 	kind := "work"
 	if job.Approval != nil {
 		kind = "approval"
@@ -525,7 +525,7 @@ func (projection *scheduleProjection) expand(expansion runstate.AcceptedExpansio
 		return fmt.Errorf("expansion source %q disagrees with persisted declaration or generation", expansion.Source.NodeID)
 	}
 	var body struct {
-		Jobs []nodeproto.JobSpec `json:"jobs"`
+		Jobs []nodewire.JobSpec `json:"jobs"`
 	}
 	if err := decodeScheduleDeclaration(expansion.Body, &body); err != nil {
 		return fmt.Errorf("expansion source %q: %w", source.ID, err)

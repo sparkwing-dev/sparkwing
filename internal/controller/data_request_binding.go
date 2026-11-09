@@ -1,12 +1,13 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"net/http"
 	"net/url"
 	"strconv"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -94,7 +95,7 @@ func resolveDataTarget(_ context.Context, p capability.Principal, target capabil
 	}
 	if p.Capability.Data == nil {
 		if target.Data.Operation == capability.DataLookup {
-			return target, capability.RequiredAuthority(apierr.ReasonBinding, []capability.Grant{capability.DataRead})
+			return target, capability.RequiredAuthority(hosterr.ReasonBinding, []capability.Grant{capability.DataRead})
 		}
 		return target, dataForbidden()
 	}

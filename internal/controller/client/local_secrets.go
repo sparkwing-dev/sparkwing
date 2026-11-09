@@ -1,15 +1,17 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ResolveLocalSecrets resolves declared requester inputs without exposing provider failures.
-func ResolveLocalSecrets(ctx context.Context, declarations []nodeproto.SecretDeclaration, lookup func(context.Context, string) (string, bool, error)) (map[string]string, error) {
+func ResolveLocalSecrets(ctx context.Context, declarations []nodewire.SecretDeclaration, lookup func(context.Context, string) (string, bool, error)) (map[string]string, error) {
 	seen := map[string]bool{}
 	for _, declaration := range declarations {
 		if secretname.Validate(declaration.Name) != nil || seen[declaration.Name] {
@@ -18,7 +20,7 @@ func ResolveLocalSecrets(ctx context.Context, declarations []nodeproto.SecretDec
 		seen[declaration.Name] = true
 	}
 	if lookup == nil {
-		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "local secret source is unavailable"}
+		return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "local secret source is unavailable"}
 	}
 	values := make(map[string]string, len(declarations))
 	for _, declaration := range declarations {
@@ -27,7 +29,7 @@ func ResolveLocalSecrets(ctx context.Context, declarations []nodeproto.SecretDec
 		}
 		value, present, err := lookup(ctx, declaration.Name)
 		if err != nil {
-			return nil, &apierr.Error{Code: apierr.Unavailable, Message: "requester local secret resolution failed"}
+			return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "requester local secret resolution failed"}
 		}
 		if !present {
 			if declaration.Optional {

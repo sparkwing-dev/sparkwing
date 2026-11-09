@@ -4,8 +4,8 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // LocalRunner describes the machine a private controller executes on.
@@ -32,7 +32,7 @@ func mergeLocalRunner(snapshot capability.RunnerSnapshot, team string, local *Lo
 	}
 	row := capability.RunnerObservation{
 		ID: "local:" + local.Name, Team: team, Location: "local", LastSeen: snapshot.Now, ActiveJobs: []string{},
-		Runner: nodeproto.RunnerIdentity{Name: local.Name, Type: "local", Labels: slices.Clone(local.Labels)},
+		Runner: nodewire.RunnerIdentity{Name: local.Name, Type: "local", Labels: slices.Clone(local.Labels)},
 	}
 	runners := make([]capability.RunnerObservation, 0, len(snapshot.Runners)+1)
 	for _, r := range snapshot.Runners {

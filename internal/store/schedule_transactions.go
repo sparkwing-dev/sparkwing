@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -12,13 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ScheduleSourcePolicy resolves stored source intent before the committing authority check.
@@ -67,7 +69,7 @@ func (t *Tenant) scheduleAuthorityTx(ctx context.Context, tx *storeTx, ref capab
 	}
 	route, ok := capability.LookupRoute("PUT", "/api/v1/schedules/repos")
 	if !ok {
-		return p, authorityError(apierr.PolicyMissing, "schedule policy is unavailable")
+		return p, authorityError(hosterr.PolicyMissing, "schedule policy is unavailable")
 	}
 	_, err = capability.Authorize(ctx, tx, route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: string(t.team)})
 	return p, err
@@ -164,7 +166,7 @@ func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Au
 	var requests []runspec.Request
 	policy, ok := t.s.intakePolicy.(ScheduleSourcePolicy)
 	if !ok {
-		return nil, nil, authorityError(apierr.Unavailable, "schedule source policy is unavailable")
+		return nil, nil, authorityError(hosterr.Unavailable, "schedule source policy is unavailable")
 	}
 	if len(body.Schedules) > limits.MaxSchedulesPerTeam {
 		err := t.s.inTx(ctx, func(tx *storeTx) error {
@@ -448,7 +450,7 @@ func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, sele
 			// safety: decision 67 lets team admins pause and resume App schedules; their declaration stays the repository's.
 			if appAudit == "" || row.GitHubRepositoryID == 0 || !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
 				if appAudit == "" && row.GitHubRepositoryID > 0 {
-					return apierr.Authorization(apierr.ReasonBinding, "GitHub App manages this schedule; edit the declaration in the repository or update App automation")
+					return hosterr.Authorization(hosterr.ReasonBinding, "GitHub App manages this schedule; edit the declaration in the repository or update App automation")
 				}
 				return bindingRefusal()
 			}
@@ -585,7 +587,7 @@ func (t *Tenant) DeleteAuthorizedSchedules(ctx context.Context, a capability.Aut
 		for _, row := range rows {
 			if row.RepoPath == repo {
 				if !ownsSchedule(nil, repo, row) {
-					return apierr.Authorization(apierr.ReasonBinding, "GitHub App manages this schedule; edit the declaration in the repository or update App automation")
+					return hosterr.Authorization(hosterr.ReasonBinding, "GitHub App manages this schedule; edit the declaration in the repository or update App automation")
 				}
 				if err = deleteScheduleTx(ctx, tx, t.team, row.ID); err != nil {
 					return err

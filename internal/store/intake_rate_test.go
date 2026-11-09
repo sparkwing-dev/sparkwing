@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -8,10 +10,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain(t *testing.T) {
@@ -35,7 +37,7 @@ func TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain(t *testing.T) {
 		t.Fatalf("hourly refusal=%v", err)
 	}
 	var canonical *apierr.Error
-	if !errors.As(err, &canonical) || canonical.Code != apierr.RateLimited {
+	if !errors.As(err, &canonical) || canonical.Code != hosterr.RateLimited {
 		t.Fatalf("hourly refusal has no canonical rate_limited code: %v", err)
 	}
 	if canonical.Details["reason"] != "compute_limit" || canonical.Details["scope"] != refusal.Scope {

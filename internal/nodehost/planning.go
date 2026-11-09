@@ -9,18 +9,19 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // PlanningInput supplies current validation for initial SDK planning.
 type PlanningInput struct {
 	Validation           nodeproto.ValidationContext
 	declarations         *runspec.DeclarationGate
-	argumentDeclarations []nodeproto.ArgumentDescription
+	argumentDeclarations []nodewire.ArgumentDescription
 }
 
 // plannedInitial contains validated declarations for AcceptPlan.
 type plannedInitial struct {
-	Plan          nodeproto.PlanDoc
+	Plan          nodewire.PlanDoc
 	CanonicalPlan json.RawMessage
 	PlanHash      runspec.Hash
 }

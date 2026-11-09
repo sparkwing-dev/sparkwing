@@ -311,9 +311,9 @@ cp "$fixture_root/go.mod" "$fixture_root/go.sum" "$fixture_root/main.go" "$fixtu
 cp "$fixture_root/jobs/k8s.go" "$fixture_root/jobs/k8s_test.go" "$fixture_checkout/.sparkwing/jobs/"
 # The uploaded repository must resolve its SDK without the caller's checkout.
 mkdir -p "$fixture_checkout/sdk"
-git -C "$repo_root" archive HEAD -- go.mod go.sum build sparkwing internal pkg | \
+git -C "$repo_root" archive HEAD -- go.mod go.sum build sparkwing sparkwingtest internal pkg | \
   tar -x -C "$fixture_checkout/sdk"
-sed 's|=> ../../../..$|=> ../sdk|' "$fixture_root/go.mod" >"$fixture_checkout/.sparkwing/go.mod"
+sed -e 's|=> ../../../..$|=> ../sdk|' -e 's|=> ../../../../sparkwing$|=> ../sdk/sparkwing|' "$fixture_root/go.mod" >"$fixture_checkout/.sparkwing/go.mod"
 git -C "$fixture_checkout" init --initial-branch=main
 git -C "$fixture_checkout" add .
 git -C "$fixture_checkout" -c user.name='Kubernetes E2E' -c user.email=k8s-e2e@sparkwing.invalid \

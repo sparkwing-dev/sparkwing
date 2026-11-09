@@ -6,9 +6,9 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func bindingExpansionTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
@@ -92,11 +92,11 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if b.Kind != capability.BindingTrigger && (b.Kind != capability.BindingNode || row.Ref.NodeID != runspec.NodeID(b.NodeID)) {
 			continue
 		}
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return err
 		}
-		var output nodeproto.JobSpec
+		var output nodewire.JobSpec
 		if err := json.Unmarshal(source.Spec, &output); err != nil {
 			return err
 		}
@@ -140,7 +140,7 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 		if node && (row.Ref.NodeID != runspec.NodeID(b.NodeID) || !approval && row.CapabilityPrefix != c.Prefix) {
 			continue
 		}
-		var spec nodeproto.JobSpec
+		var spec nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &spec); err != nil {
 			return err
 		}

@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -19,11 +21,11 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func capacityPods(t *testing.T, kube *fake.Clientset) []corev1.Pod {
@@ -367,7 +369,7 @@ func TestStaleCapacityCleanupSparesTheNewerAward(t *testing.T) {
 			case "release":
 				l1.Control = preparationControl{CloudControl: &controlFake{}, prepare: func(context.Context, []capability.LeaseRef) (time.Time, error) {
 					resume()
-					return time.Time{}, &apierr.Error{Code: apierr.LockHeld, Message: "award exchanged"}
+					return time.Time{}, &apierr.Error{Code: hosterr.LockHeld, Message: "award exchanged"}
 				}}
 				if _, err := l1.LaunchOne(t.Context()); err == nil {
 					t.Fatal("a lapsed award was placed")

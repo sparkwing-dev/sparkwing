@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestDeclaredPipelineReferenceProperty(t *testing.T) {
@@ -26,7 +26,7 @@ func TestDeclaredPipelineReferenceProperty(t *testing.T) {
 	var pipeline string
 	for range 64 {
 		pipeline = fmt.Sprintf("producer-%x", random.Uint64())
-		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: pipeline, Job: "output"}}})
+		spec, err := json.Marshal(nodewire.JobSpec{ID: "job", References: []nodewire.PipelineReference{{Pipeline: pipeline, Job: "output"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +73,7 @@ func TestPipelineReferenceOptOutMustBeDeclared(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, declared := range []bool{false, true} {
-		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: declared}}})
+		spec, err := json.Marshal(nodewire.JobSpec{ID: "job", References: []nodewire.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: declared}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +101,7 @@ func TestPipelineOutputRequiresVerifiedDefaultBranchOrDeclaredOptOut(t *testing.
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','producer-run',2,'producer','success',?,'producer',1,'gh:1','host','execute','account',1,2,'r30',30)`, []byte(`{"version":1,"request":{"pipeline":"producer"}}`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES ('a','producer-run','output','done','success',2,?,?)`, []byte(`{"id":"output"}`), []byte(`{}`))
 	for _, declared := range []bool{false, true} {
-		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: declared}}})
+		spec, err := json.Marshal(nodewire.JobSpec{ID: "job", References: []nodewire.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: declared}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,7 +156,7 @@ func TestProvenPipelineOutputNeedsADeclaredProvenReferenceAndACleanRun(t *testin
 			t.Fatal(err)
 		}
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json,trusted_host) VALUES ('a','producer-run','output','done','success',2,?,?,1)`, []byte(`{"id":"output"}`), []byte(`{}`))
-		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: tc.anyRun, FromProvenRun: tc.provenRun}}})
+		spec, err := json.Marshal(nodewire.JobSpec{ID: "job", References: []nodewire.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: tc.anyRun, FromProvenRun: tc.provenRun}}})
 		if err != nil {
 			t.Fatal(err)
 		}

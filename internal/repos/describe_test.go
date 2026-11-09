@@ -2,6 +2,8 @@
 
 package repos
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -14,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func fakeSDK(t *testing.T, body string) (bin, requests string) {
@@ -47,8 +49,8 @@ printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"demo","args":[{"n
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := nodeproto.ParseRequest([]byte(strings.TrimSpace(string(raw))))
-	if err != nil || req.Op != nodeproto.OpDescribe {
+	req, err := nodewire.ParseRequest([]byte(strings.TrimSpace(string(raw))))
+	if err != nil || req.Op != nodewire.OpDescribe {
 		t.Fatalf("request = %+v, %v", req, err)
 	}
 }
@@ -113,7 +115,7 @@ func TestDescribeMasksProtocolErrors(t *testing.T) {
 			t.Fatalf("protocol error was not masked with its type retained: %v", err)
 		}
 		var output bytes.Buffer
-		if err := apierr.WriteJSON(&output, typed); err != nil {
+		if err := hosterr.WriteJSON(&output, typed); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(output.String(), "proxy-private-password") {
@@ -142,7 +144,7 @@ func FuzzDescribeErrorsNeverExposeProxyCredentials(f *testing.F) {
 			t.Fatalf("missing typed failure: %v", err)
 		}
 		var output bytes.Buffer
-		if err := apierr.WriteJSON(&output, typed); err != nil {
+		if err := hosterr.WriteJSON(&output, typed); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(output.String(), password) || strings.Contains(err.Error(), password) {

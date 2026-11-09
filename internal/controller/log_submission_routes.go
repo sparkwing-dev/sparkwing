@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -10,7 +12,6 @@ import (
 	"net/http"
 	"reflect"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -19,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type logSubmissionObjects interface {
@@ -43,7 +45,7 @@ func (s *Server) submissionObjects() (logSubmissionObjects, error) {
 			return objects, nil
 		}
 	}
-	return nil, &apierr.Error{Code: apierr.Unavailable, Message: "log storage is not configured"}
+	return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "log storage is not configured"}
 }
 
 func (s *Server) logSubmission(r *http.Request, a capability.Authorized, proposed blob.LogSubject) (*store.Tenant, blob.LogSubject, error) {
@@ -226,7 +228,7 @@ func (s *Server) handleLiveLogSubmission(w http.ResponseWriter, r *http.Request,
 		node = subject.Attempt.NodeID
 	}
 	if s.liveLogs == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "log storage is not configured"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "log storage is not configured"}
 	}
 	attemptID := hex.EncodeToString(sum[:])
 	if subject.Attempt != nil {
@@ -250,9 +252,9 @@ func storageGrowthRefusal(err error) error {
 	case errors.As(err, &held):
 		return creditsRefusal(held)
 	case errors.Is(err, store.ErrStorageQuota):
-		return &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
+		return &apierr.Error{Code: hosterr.QuotaExceeded, Message: err.Error()}
 	case errors.Is(err, store.ErrInsufficientCredits):
-		return &apierr.Error{Code: apierr.InsufficientCredit, Message: err.Error(), Details: map[string]any{"reason": creditsRefusedCode}}
+		return &apierr.Error{Code: hosterr.InsufficientCredit, Message: err.Error(), Details: map[string]any{"reason": creditsRefusedCode}}
 	default:
 		return engineLookupError(err)
 	}

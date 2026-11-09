@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -11,13 +13,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type hereDependencies struct {
@@ -132,7 +134,7 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 		return completion, incompleteHereHandoff(run, err)
 	}
 	if runtime.controller == nil || runtime.bind == nil {
-		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.Unavailable, Message: "here runtime has no controller or host binding"})
+		return completion, incompleteHereHandoff(run, &apierr.Error{Code: hosterr.Unavailable, Message: "here runtime has no controller or host binding"})
 	}
 	if err := ctx.Err(); err != nil {
 		return completion, incompleteHereHandoff(run, err)
@@ -141,9 +143,9 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 	var response controllerwire.ClaimResponse
 	for {
 		response, err = runtime.controller.Claim(ctx, claim)
-		delay, retry := apierr.RetryDelay(err)
+		delay, retry := hosterr.RetryDelay(err)
 		var failure *apierr.Error
-		if !retry || !errors.As(err, &failure) || failure.Code != apierr.RateLimited {
+		if !retry || !errors.As(err, &failure) || failure.Code != hosterr.RateLimited {
 			break
 		}
 		if err = waitStatusPoll(ctx, delay); err != nil {
@@ -154,7 +156,7 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 		return completion, incompleteHereHandoff(run, err)
 	}
 	if response.Claim == nil {
-		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.LockHeld, Message: "here run has no available owner claim"})
+		return completion, incompleteHereHandoff(run, &apierr.Error{Code: hosterr.LockHeld, Message: "here run has no available owner claim"})
 	}
 	award := *response.Claim
 	masker.Register(award.Capability)

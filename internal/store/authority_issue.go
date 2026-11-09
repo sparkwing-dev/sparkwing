@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -14,13 +16,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // issue persists one capability within its intake, claim or exchange transaction.
@@ -214,7 +216,7 @@ func (op *Operator) loadAwardRowTx(ctx context.Context, tx *storeTx, spec capabi
 		return row, err
 	}
 	if runCancel.Valid || row.cancel.Valid || (status != "pending" && status != "running") {
-		return row, authorityError(apierr.LockHeld, "award run is no longer executable")
+		return row, authorityError(hosterr.LockHeld, "award run is no longer executable")
 	}
 	if !row.expiry.Valid && (spec.Unit == capability.UnitNode || spec.Unit == capability.UnitEval) {
 		err = tx.QueryRowContext(ctx, "SELECT expires_at FROM triggers WHERE team = ? AND id = ?", row.team, row.run).Scan(&row.expiry)
@@ -291,11 +293,11 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		}
 	}
 	if !claimOK {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "claimant lacks the award grant")
+		return capability.Capability{}, authorityError(hosterr.Forbidden, "claimant lacks the award grant")
 	}
 	cloudLauncher := capability.CloudLauncher(claimant.Capability)
 	if spec.Delivery == capability.DeliveryBootstrap && (!capability.Launcher(claimant.Capability) || !slices.Contains(capability.BootstrapUnits(), spec.Unit)) {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "bootstrap requires launcher authority")
+		return capability.Capability{}, authorityError(hosterr.Forbidden, "bootstrap requires launcher authority")
 	}
 	row, err := tx.operator.loadAwardRowTx(ctx, tx, spec)
 	if err != nil {
@@ -322,15 +324,15 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		facts.HostKind, facts.FreshHost = capability.HostHere, false
 	}
 	if sealed.Provenance.ProvenRepository() != "" && !facts.HostKind.AllowsProvenRepository() {
-		return capability.Capability{}, authorityError(apierr.Forbidden, provenRepositoryHostReason)
+		return capability.Capability{}, authorityError(hosterr.Forbidden, provenRepositoryHostReason)
 	}
 	if repositoryScoped(chain) && sealed.Provenance.ProvenRepository() == "" {
-		return capability.Capability{}, authorityError(apierr.Forbidden, repositoryScopedRunnerReason)
+		return capability.Capability{}, authorityError(hosterr.Forbidden, repositoryScopedRunnerReason)
 	}
 	if reason, err := claimantTrustRefusalTx(ctx, tx, Team(row.team), row.run, chain[len(chain)-1].principal.Capability, facts.Launcher, facts.PersistentKubernetes); err != nil {
 		return capability.Capability{}, err
 	} else if reason != "" {
-		return capability.Capability{}, authorityError(apierr.Forbidden, reason)
+		return capability.Capability{}, authorityError(hosterr.Forbidden, reason)
 	}
 	if prospective != nil {
 		// safety: the locked row supplies scope; the claim transaction supplies only its next fence.
@@ -340,13 +342,13 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		row.holder, row.generation, row.lease = prospective.holder, prospective.generation, prospective.lease
 	}
 	if !cloudLauncher && claimant.Capability.Team != row.team {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "claimant belongs to another team")
+		return capability.Capability{}, authorityError(hosterr.Forbidden, "claimant belongs to another team")
 	}
 	if claimant.Capability.Binding.Kind != capability.BindingNone && claimant.Capability.Binding.RunID != "" && claimant.Capability.Binding.RunID != row.run {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "claimant is bound to another run")
+		return capability.Capability{}, authorityError(hosterr.Forbidden, "claimant is bound to another run")
 	}
 	if row.prefix != "" {
-		return capability.Capability{}, authorityError(apierr.LockHeld, "unit already has an awarded capability")
+		return capability.Capability{}, authorityError(hosterr.LockHeld, "unit already has an awarded capability")
 	}
 	here := spec.Purpose == capability.PurposeHere
 	if here {
@@ -354,7 +356,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 			return capability.Capability{}, authorityError(apierr.BadRequest, "here award names another run")
 		}
 	} else if row.generation <= 0 || row.holder != claimant.Capability.Subject.ID || !row.lease.Valid || row.lease.Int64 <= tx.now(ctx).UnixNano() {
-		return capability.Capability{}, authorityError(apierr.LockHeld, "unit is not held by claimant")
+		return capability.Capability{}, authorityError(hosterr.LockHeld, "unit is not held by claimant")
 	}
 	parent := chain[len(chain)-1].principal
 	for _, node := range chain {
@@ -399,7 +401,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		c.ExpiresAt = parent.Capability.ExpiresAt
 	}
 	if c.ExpiresAt == nil && !here && parent.Capability.Subject.Kind != capability.SubjectLocal && parent.Capability.Purpose != capability.PurposeHere {
-		return capability.Capability{}, authorityError(apierr.Unavailable, "awarded unit deadline is unavailable")
+		return capability.Capability{}, authorityError(hosterr.Unavailable, "awarded unit deadline is unavailable")
 	}
 	if here {
 		by := time.Unix(0, row.created).UTC().Add(limits.ClaimWindow)
@@ -546,15 +548,15 @@ func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Cap
 
 // awardChildrenTx seals the accepted plan's execution authority without widening
 // the claim's authority to read its own repository, secrets or data.
-func awardChildrenTx(ctx context.Context, tx *storeTx, row awardRow, unit capability.UnitKind) ([]nodeproto.ChildPipeline, error) {
+func awardChildrenTx(ctx context.Context, tx *storeTx, row awardRow, unit capability.UnitKind) ([]nodewire.ChildPipeline, error) {
 	if unit != capability.UnitNode {
 		return nil, nil
 	}
-	var spec nodeproto.JobSpec
+	var spec nodewire.JobSpec
 	if err := json.Unmarshal(row.spec, &spec); err != nil {
 		return nil, err
 	}
-	var children []nodeproto.ChildPipeline
+	var children []nodewire.ChildPipeline
 	var covered []string
 	coverageLoaded := false
 	for _, child := range spec.Children {
@@ -625,7 +627,7 @@ func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Exch
 	}
 	c := p.Capability
 	if c.Delivery != capability.DeliveryBootstrap || c.Parent == nil || !slices.Contains(c.Grants, capability.ClaimExchange) {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "authority is not an exchangeable bootstrap")
+		return capability.Capability{}, authorityError(hosterr.Forbidden, "authority is not an exchangeable bootstrap")
 	}
 	row, err := tx.operator.loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
 	if err != nil {
@@ -636,14 +638,14 @@ func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Exch
 		generation = c.Binding.Expansion.Generation
 	}
 	if row.prefix != spec.BootstrapPrefix || row.holder != c.Binding.Holder || row.generation != generation || !row.lease.Valid || row.lease.Int64 <= tx.now(ctx).UnixNano() {
-		return capability.Capability{}, authorityError(apierr.LockHeld, "bootstrap unit fence has ended")
+		return capability.Capability{}, authorityError(hosterr.LockHeld, "bootstrap unit fence has ended")
 	}
 	if err := tx.operator.revokeAuthorityTx(ctx, tx, ref); err != nil {
 		return capability.Capability{}, err
 	}
 	policy, ok := awardPolicy(c.Purpose)
 	if !ok {
-		return capability.Capability{}, authorityError(apierr.IntegrityFailure, "unknown bootstrap purpose")
+		return capability.Capability{}, authorityError(hosterr.IntegrityFailure, "unknown bootstrap purpose")
 	}
 	c.Issuance = capability.Exchange
 	c.Delivery = capability.DeliveryDirect
@@ -673,7 +675,7 @@ func bindExchangedUnitTx(ctx context.Context, tx *storeTx, c capability.Capabili
 		return err
 	}
 	if count != 1 {
-		return authorityError(apierr.LockHeld, "bootstrap claim changed during exchange")
+		return authorityError(hosterr.LockHeld, "bootstrap claim changed during exchange")
 	}
 	return nil
 }

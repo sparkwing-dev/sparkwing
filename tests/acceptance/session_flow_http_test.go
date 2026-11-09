@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"crypto/sha256"
@@ -14,7 +16,6 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
@@ -23,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type sessionFlow struct {
@@ -198,7 +200,7 @@ func TestSessionFlowHTTPProofProperty(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		after, renewed := f.state(t)
-		var result apierr.Envelope
+		var result hosterr.Envelope
 		return (w.Code == 401 || w.Code == 403) && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && before == after && expiry == renewed && w.Header().Get("Cache-Control") == "no-store" && !strings.Contains(w.Body.String(), f.raw) && !strings.Contains(w.Body.String(), f.csrf)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 120}); err != nil {
@@ -275,7 +277,7 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 		before, expiry := f.state(t)
 		w := httptest.NewRecorder()
 		f.server.Handler().ServeHTTP(w, f.request(method, path, ""))
-		assertEngineError(t, w, 401, apierr.Unauthenticated)
+		assertEngineError(t, w, 401, hosterr.Unauthenticated)
 		after, renewed := f.state(t)
 		if before != after || expiry != renewed {
 			t.Fatal("revoked parent allowed session renewal or deletion")
@@ -291,7 +293,7 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 				cfg = deployment.Config{}
 			}
 			f := newDeploymentSessionFlow(t, cfg)
-			method, path, body, code := "GET", "/api/v1/auth/session", "", apierr.Unauthenticated
+			method, path, body, code := "GET", "/api/v1/auth/session", "", hosterr.Unauthenticated
 			digest := sha256.Sum256([]byte(f.raw))
 			query, value := "", int64(0)
 			switch state {
@@ -308,19 +310,19 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 			case "license":
 			case "missing key":
 				f.restartWithCipher(t, nil)
-				code = apierr.Unavailable
+				code = hosterr.Unavailable
 			case "wrong key":
 				cipher, err := secrets.NewCipher(bytes.Repeat([]byte{79}, secrets.KeySize))
 				if err != nil {
 					t.Fatal(err)
 				}
 				f.restartWithCipher(t, cipher)
-				code = apierr.Unavailable
+				code = hosterr.Unavailable
 			case "backend":
 				query = "DROP TABLE sessions"
-				code = apierr.Unavailable
+				code = hosterr.Unavailable
 			case "head":
-				method, code = "HEAD", apierr.MethodNotAllowed
+				method, code = "HEAD", hosterr.MethodNotAllowed
 			case "body":
 				method, path, body, code = "POST", "/api/v1/auth/logout", `{"session_id":"foreign"}`, apierr.BadRequest
 			}
@@ -337,7 +339,7 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 			r.Header.Set("Authorization", "Session "+f.raw)
 			w := httptest.NewRecorder()
 			f.server.Handler().ServeHTTP(w, r)
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			if strings.Contains(w.Body.String(), f.raw) || strings.Contains(w.Body.String(), f.csrf) || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}

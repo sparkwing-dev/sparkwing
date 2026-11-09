@@ -36,7 +36,7 @@ func (FeatureE2E) Plan(_ context.Context, plan *sparkwing.Plan, in FeatureE2EArg
 		return fmt.Errorf("repeat must be positive")
 	}
 	sparkwing.Job(plan, "scenarios", func(ctx context.Context) error {
-		_, err := sparkwing.Bash(ctx, fmt.Sprintf("GOWORK=off GOMAXPROCS=2 go test -p 1 -count=%d -v -timeout 25m ./tests/acceptance -run '%s'", in.Repeat, selection)).Run()
+		_, err := sparkwing.Bash(ctx, fmt.Sprintf("GOWORK=auto GOMAXPROCS=2 go test -p 1 -count=%d -v -timeout 25m ./tests/acceptance -run '%s'", in.Repeat, selection)).Run()
 		return err
 	}).Cores(2)
 	return nil

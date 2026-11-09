@@ -1,16 +1,18 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"testing"
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type cancelledReconciliation struct {
@@ -22,7 +24,7 @@ func (s cancelledReconciliation) ReconcileNode(context.Context, store.ReconcileR
 	if s.cancel != nil {
 		s.cancel()
 	}
-	return runstate.ReconciledNode{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}
+	return runstate.ReconciledNode{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}
 }
 
 func TestOwnerDrainsCancelledHoldersWithoutReconciliation(t *testing.T) {
@@ -35,7 +37,7 @@ func TestOwnerDrainsCancelledHoldersWithoutReconciliation(t *testing.T) {
 				state.snapshot.Run.CancelRequestedAt = &now
 				state.snapshot.Nodes = []runstate.NodeRow{{
 					Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending,
-					Spec:      marshalEventFixture(t, nodeproto.JobSpec{ID: "job"}),
+					Spec:      marshalEventFixture(t, nodewire.JobSpec{ID: "job"}),
 					ClaimedBy: "holder", ReadyAt: &now, CancelRequestedAt: &now,
 				}}
 				if mode == "running" {

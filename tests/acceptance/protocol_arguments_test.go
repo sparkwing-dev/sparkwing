@@ -7,7 +7,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -25,14 +26,14 @@ func testGoSDKJobArguments(t *testing.T) {
 		process := startProtocolProbe(t, bin)
 		sendProtocolProbe(t, process, probeHello())
 		protocolProbeReply(t, process, "hello")
-		sendProtocolProbe(t, process, nodeproto.Request{ID: "describe", Op: nodeproto.OpDescribe})
-		var doc nodeproto.DescribeDoc
+		sendProtocolProbe(t, process, nodewire.Request{ID: "describe", Op: nodewire.OpDescribe})
+		var doc nodewire.DescribeDoc
 		decodeProtocolProbe(t, protocolProbeReply(t, process, "describe"), &doc)
 		for _, pipeline := range doc.Pipelines {
 			if pipeline.Name != protocolgo.ArgumentsName {
 				continue
 			}
-			want := []nodeproto.ArgumentDescription{
+			want := []nodewire.ArgumentDescription{
 				{Name: "count", Type: "int", Default: new("3"), JobID: "primary"},
 				{Name: "mode", Type: "string", Default: new("rollback"), Enum: []string{"rollback", "notify"}, JobID: "recovery"},
 				{Name: "reason", Type: "string", Required: true, JobID: "recovery"},
@@ -61,7 +62,7 @@ func testGoSDKJobArguments(t *testing.T) {
 			fake, err := host.Plan(t.Context(), protocolgo.ArgumentsName, tc.args)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
-			hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "recovery", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}
+			hello.Binding = &nodewire.ProcessBinding{RunID: "r", JobID: "recovery", Routes: nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}
 			sendProtocolProbe(t, process, hello)
 			protocolProbeReply(t, process, "hello")
 			args, prepareErr := prepareProtocolArguments(t, process, protocolgo.ArgumentsName, tc.args)
@@ -73,15 +74,15 @@ func testGoSDKJobArguments(t *testing.T) {
 				if prepareErr != nil || err != nil {
 					t.Fatalf("process preparation = %v, fake preparation = %v", prepareErr, err)
 				}
-				sendProtocolProbe(t, process, nodeproto.Request{ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.ArgumentsName, Args: args, Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.ArgumentsName}})
+				sendProtocolProbe(t, process, nodewire.Request{ID: "plan", Op: nodewire.OpPlan, Pipeline: protocolgo.ArgumentsName, Args: args, Run: &nodewire.RunContext{RunID: "r", Pipeline: protocolgo.ArgumentsName}})
 				reply := protocolProbeReply(t, process, "plan")
-				var doc nodeproto.PlanDoc
+				var doc nodewire.PlanDoc
 				decodeProtocolProbe(t, reply, &doc)
 				if !reflect.DeepEqual(doc, fake) {
 					t.Error("fake and process argument plans differ")
 				}
-				sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "recovery", Step: "run", Attempt: 1, Settled: []string{}})
-				var result nodeproto.RunResult
+				sendProtocolProbe(t, process, nodewire.Request{ID: "body", Op: nodewire.OpRunStep, Job: "recovery", Step: "run", Attempt: 1, Settled: []string{}})
+				var result nodewire.RunResult
 				decodeProtocolProbe(t, protocolProbeReply(t, process, "body"), &result)
 				if result.Error != nil || result.Outcome != "success" || string(result.Output) != tc.output {
 					raw, _ := json.Marshal(result)
@@ -97,8 +98,8 @@ func testGoSDKJobArguments(t *testing.T) {
 
 func prepareProtocolArguments(t *testing.T, process *acceptance.GoSDKProcess, pipeline string, raw map[string]string) (map[string]string, error) {
 	t.Helper()
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "describe", Op: nodeproto.OpDescribe})
-	var doc nodeproto.DescribeDoc
+	sendProtocolProbe(t, process, nodewire.Request{ID: "describe", Op: nodewire.OpDescribe})
+	var doc nodewire.DescribeDoc
 	decodeProtocolProbe(t, protocolProbeReply(t, process, "describe"), &doc)
 	description, found := doc.Pipeline(pipeline)
 	if !found || description.Error != nil {

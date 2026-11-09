@@ -9,11 +9,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func controllerCapacityFixture(t *testing.T, opts ...store.Option) (*serverFixture, *store.Tenant, capability.Principal) {
@@ -49,13 +49,13 @@ func TestControllerPlanAdmissionRefusalFinishesUnreleasedWork(t *testing.T) {
 			now := time.Now()
 			server, tenant, owner := controllerCapacityFixture(t, teststore.WithClock(func() time.Time { return now }))
 			seedOtherCapacityHolder(t, server, "plan:global:serial")
-			group := nodeproto.ConcurrencySpec{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: &test.policy}
+			group := nodewire.ConcurrencySpec{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: &test.policy}
 			if test.policy == "queue" {
 				group.QueueTimeoutMS = new(int64(1))
 			}
-			acceptCapacityDocument(t, server, tenant, owner, nodeproto.PlanDoc{
-				Concurrency: []nodeproto.ConcurrencySpec{group},
-				Jobs:        []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}},
+			acceptCapacityDocument(t, server, tenant, owner, nodewire.PlanDoc{
+				Concurrency: []nodewire.ConcurrencySpec{group},
+				Jobs:        []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}},
 			})
 			if test.policy == "queue" {
 				row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "build"})
@@ -102,14 +102,14 @@ func TestControllerPlanAdmissionRefusalFinishesUnreleasedWork(t *testing.T) {
 
 func TestPrivateCapacityEvalUsesOnlyItsAwardedSource(t *testing.T) {
 	server, tenant, owner := controllerCapacityFixture(t)
-	acceptCapacityDocument(t, server, tenant, owner, nodeproto.PlanDoc{
-		Concurrency: []nodeproto.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}},
-		Jobs: []nodeproto.JobSpec{
+	acceptCapacityDocument(t, server, tenant, owner, nodewire.PlanDoc{
+		Concurrency: []nodewire.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}},
+		Jobs: []nodewire.JobSpec{
 			{
-				ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"generated"}},
-				Concurrency: []nodeproto.ConcurrencySpec{{Group: "job-only", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}},
+				ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{Generate: []string{"generated"}},
+				Concurrency: []nodewire.ConcurrencySpec{{Group: "job-only", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}},
 			},
-			{ID: "another-source", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "another-source", Steps: []nodewire.StepSpec{{ID: "body"}}},
 		},
 	})
 	claim := func(unit store.UnitRef) store.UnitClaim {
@@ -169,9 +169,9 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 			if occupied {
 				seedOtherCapacityHolder(t, server, "plan:global:serial")
 			}
-			acceptCapacityDocument(t, server, tenant, owner, nodeproto.PlanDoc{
-				Concurrency: []nodeproto.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}},
-				Jobs:        []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}},
+			acceptCapacityDocument(t, server, tenant, owner, nodewire.PlanDoc{
+				Concurrency: []nodewire.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}},
+				Jobs:        []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}},
 			})
 			row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "build"})
 			if err != nil || (row.ReadyAt == nil) != occupied {

@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
@@ -9,7 +11,6 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 )
@@ -43,7 +44,7 @@ func TestConsoleSessionHTTPDirectAccount(t *testing.T) {
 	f.server.WithOperatorAccounts(nil)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, f.request("GET", "/api/v1/operator/teams", ""))
-	assertEngineError(t, w, 403, apierr.Forbidden)
+	assertEngineError(t, w, 403, hosterr.Forbidden)
 }
 
 func TestConsoleSessionHTTPProofProperty(t *testing.T) {
@@ -101,6 +102,6 @@ func TestConsoleSessionHTTPRejectsCapabilityAncestry(t *testing.T) {
 		r.Header.Set("Authorization", presentation)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		assertEngineError(t, w, 403, apierr.Forbidden)
+		assertEngineError(t, w, 403, hosterr.Forbidden)
 	}
 }

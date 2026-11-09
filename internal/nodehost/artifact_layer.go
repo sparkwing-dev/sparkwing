@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // Prepare implements the artifact portion of ExecutorDependencies.PrepareArtifacts.
 // It stages consumes in declaration order and publishes once after successful
 // execution. The finalizer uses the last committed attempt's storage authority.
-func (a ArtifactRecords) Prepare(ctx context.Context, input NodeInput, job nodeproto.JobSpec) (ExecutorFinalizer, error) {
+func (a ArtifactRecords) Prepare(ctx context.Context, input NodeInput, job nodewire.JobSpec) (ExecutorFinalizer, error) {
 	if len(job.Artifacts) == 0 && len(job.Consumes) == 0 {
 		return nil, nil
 	}

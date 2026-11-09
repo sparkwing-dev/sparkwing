@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -10,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func actionsEnrollment(t *testing.T) (*Tenant, capability.Authorized, GitHubRunnerBinding) {
@@ -192,7 +194,7 @@ func TestGitHubEnrollmentRemovalFencesRootsAndDescendants(t *testing.T) {
 	for _, issued := range []capability.Issued{root, child} {
 		_, err := tenant.s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest)
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+		if !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated {
 			t.Fatalf("removed enrollment authority: %v", err)
 		}
 	}
@@ -207,7 +209,7 @@ func TestGitHubEnrollmentRemovalFencesRootsAndDescendants(t *testing.T) {
 	}
 	_, err = tenant.s.AsOperator().LookupCapability(t.Context(), root.Capability.Digest)
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated {
 		t.Fatalf("re-enrolled root: %v", err)
 	}
 }
@@ -233,12 +235,12 @@ func TestGitHubEnrollmentRemovalRacesIssuance(t *testing.T) {
 			if issueErr == nil {
 				_, err := tenant.s.AsOperator().LookupCapability(t.Context(), issued.Capability.Digest)
 				var refusal *apierr.Error
-				if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+				if !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated {
 					t.Fatalf("racing issuance after revocation: %v", err)
 				}
 			} else {
 				var refusal *apierr.Error
-				if issued.Raw != "" || !errors.As(issueErr, &refusal) || refusal.Code != apierr.Forbidden {
+				if issued.Raw != "" || !errors.As(issueErr, &refusal) || refusal.Code != hosterr.Forbidden {
 					t.Fatalf("issuance returned an unexpected result: %v", issueErr)
 				}
 			}

@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -12,14 +14,14 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestLocalForegroundObservationRecoversAcrossControllerOutage(t *testing.T) {
 	for name, failure := range map[string]error{
 		"transport":   io.EOF,
-		"unavailable": &apierr.Error{Code: apierr.Unavailable, Message: "controller restarting"},
+		"unavailable": &apierr.Error{Code: hosterr.Unavailable, Message: "controller restarting"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -76,7 +78,7 @@ func TestLocalForegroundObservationRecoversAcrossControllerOutage(t *testing.T) 
 }
 
 func TestLocalForegroundObservationKeepsReadRefusals(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.Forbidden, apierr.Unauthenticated, apierr.ProtocolError, apierr.IntegrityFailure, apierr.NotFound} {
+	for _, code := range []apierr.Code{hosterr.Forbidden, hosterr.Unauthenticated, apierr.ProtocolError, hosterr.IntegrityFailure, apierr.NotFound} {
 		t.Run(string(code), func(t *testing.T) {
 			var calls []string
 			deps := localRuntimeFor(t, localTestAward(t), false, &calls)
@@ -105,7 +107,7 @@ func TestLocalForegroundObservationKeepsReadRefusals(t *testing.T) {
 }
 
 func TestFollowingRunLogsKeepsReadRefusals(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.Forbidden, apierr.Unauthenticated, apierr.ProtocolError, apierr.IntegrityFailure, apierr.NotFound} {
+	for _, code := range []apierr.Code{hosterr.Forbidden, hosterr.Unauthenticated, apierr.ProtocolError, hosterr.IntegrityFailure, apierr.NotFound} {
 		t.Run(string(code), func(t *testing.T) {
 			failure := &apierr.Error{Code: code, Message: "log read refused"}
 			reads, waits := 0, 0
@@ -129,7 +131,7 @@ func TestRunLogOutageStopsOnCancellationAndPreservesOneShotReads(t *testing.T) {
 		t.Run(map[bool]string{false: "one shot", true: "cancelled follow"}[follow], func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			failure := &apierr.Error{Code: apierr.Unavailable, Message: "controller restarting"}
+			failure := &apierr.Error{Code: hosterr.Unavailable, Message: "controller restarting"}
 			reads, waits := 0, 0
 			reader := fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
 				reads++

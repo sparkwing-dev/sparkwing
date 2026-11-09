@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"fmt"
@@ -7,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const updateRunnerServicesNote = "Installed runner services update themselves from their controller."
@@ -62,7 +64,7 @@ func (c updateCommand) run(ctx context.Context, inv clisurface.Invocation) error
 		return err
 	}
 	if units == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "update requires managed-unit integration"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "update requires managed-unit integration"}
 	}
 	result, err := c.install(inv.Value("version"), inv.Bool("force"), inv.Bool("override-hold"))
 	if err != nil {
@@ -86,7 +88,7 @@ func validateManagedUpdate(result updateReceipt) error {
 	if result.Target != "cli" || result.Status != "current" && result.Status != "updated" ||
 		!filepath.IsAbs(result.After.Path) || !validUpdateVersion(result.After.Version) ||
 		result.Status == "updated" && (!isSHA256Digest(result.Digest) || result.ResolvedRelease != result.After.Version) {
-		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "installed CLI identity is unconfirmed; managed units were not refreshed", Hint: "inspect the installed binary with sparkwing doctor"}
+		return &apierr.Error{Code: hosterr.IntegrityFailure, Message: "installed CLI identity is unconfirmed; managed units were not refreshed", Hint: "inspect the installed binary with sparkwing doctor"}
 	}
 	return nil
 }

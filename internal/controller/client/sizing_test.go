@@ -1,13 +1,15 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSizingQueryUsesAuthorizedReadAndPreservesMeasurements(t *testing.T) {
@@ -36,7 +38,7 @@ func TestSizingResetRefusesBeforeHTTPWithoutPolicy(t *testing.T) {
 	})
 	_, err := c.ResetSizing(t.Context(), controllerwire.SizingReset{Pipeline: "check"})
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.PolicyMissing {
+	if !errors.As(err, &failure) || failure.Code != hosterr.PolicyMissing {
 		t.Fatalf("missing route: %v", err)
 	}
 }

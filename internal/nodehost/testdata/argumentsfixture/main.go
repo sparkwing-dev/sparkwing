@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+
 	"os"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 type inputs struct {
@@ -106,7 +109,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		_, plan, err := sdkserve.DefaultOperations.Plan(context.Background(), "conditional", map[string]string{"enable": "true"}, nodeproto.RunContext{Pipeline: "conditional"})
+		_, plan, err := sdkserve.DefaultOperations.Plan(context.Background(), "conditional", map[string]string{"enable": "true"}, nodewire.RunContext{Pipeline: "conditional"})
 		if err != nil {
 			panic(err)
 		}
@@ -126,17 +129,17 @@ func main() {
 	register[invalidShort]("invalid-short")
 	register[requiredEmpty]("required-empty")
 	if len(os.Args) > 1 {
-		jobs := map[string][]nodeproto.JobSpec{}
+		jobs := map[string][]nodewire.JobSpec{}
 		for _, name := range []string{"args", "required-default", "enum-type", "enum-anchor", "enum-default", "float-default", "duplicate-name", "duplicate-short", "invalid-short", "required-empty"} {
-			built, _, err := sdkserve.DefaultOperations.Plan(context.Background(), name, nil, nodeproto.RunContext{Pipeline: name})
+			built, _, err := sdkserve.DefaultOperations.Plan(context.Background(), name, nil, nodewire.RunContext{Pipeline: name})
 			if err != nil {
 				panic(err)
 			}
-			result, err := sdkserve.DefaultOperations.Eval(context.Background(), built, nodeproto.Request{Closure: "source/generate/0", Input: json.RawMessage("null")})
+			result, err := sdkserve.DefaultOperations.Eval(context.Background(), built, nodewire.Request{Closure: "source/generate/0", Input: json.RawMessage("null")})
 			if err != nil || result.Error != nil {
 				panic(result.Error)
 			}
-			var document nodeproto.PlanDoc
+			var document nodewire.PlanDoc
 			if err := json.Unmarshal(result.Value, &document); err != nil {
 				panic(err)
 			}

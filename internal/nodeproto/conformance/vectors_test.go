@@ -8,11 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type vectorSecrets []string
@@ -30,8 +32,8 @@ type declarationVector struct {
 	Name, Raw, Canonical, SHA256 string
 	Code                         apierr.Code
 	Secrets                      []string
-	SourceJob                    string              `json:"source_job"`
-	ExistingJobs                 []nodeproto.JobSpec `json:"existing_jobs"`
+	SourceJob                    string             `json:"source_job"`
+	ExistingJobs                 []nodewire.JobSpec `json:"existing_jobs"`
 }
 
 type v2Vectors struct {

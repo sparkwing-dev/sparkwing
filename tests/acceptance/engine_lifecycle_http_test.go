@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func ownerBoundary() *credentialBoundary {
@@ -70,10 +72,10 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 				switch name {
 				case "revoked":
 					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-					status, code, writes = 401, apierr.Unauthenticated, 0
+					status, code, writes = 401, hosterr.Unauthenticated, 0
 				case "wrong grant":
 					b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-					status, code, writes = 403, apierr.Forbidden, 0
+					status, code, writes = 403, hosterr.Forbidden, 0
 				case "bad body":
 					body = `null`
 					status, code, writes = 400, apierr.BadRequest, 0
@@ -84,11 +86,11 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 					body += `{}`
 					status, code, writes = 400, apierr.BadRequest, 0
 				case "store race":
-					f.err = &apierr.Error{Code: apierr.LockHeld, Message: "authority changed"}
-					status, code = 409, apierr.LockHeld
+					f.err = &apierr.Error{Code: hosterr.LockHeld, Message: "authority changed"}
+					status, code = 409, hosterr.LockHeld
 				case "private error":
 					f.err = errors.New("private credential")
-					status, code = 500, apierr.Internal
+					status, code = 500, hosterr.Internal
 				}
 				w := engineHTTP(t, b, f, path, body)
 				if f.writes != writes {
@@ -192,7 +194,7 @@ func TestEngineResultReplayHTTP(t *testing.T) {
 				f := &engineTransactions{applied: runstate.Applied{Replayed: true}}
 				w := engineHTTP(t, b, f, path, body)
 				if name != "exact" {
-					assertEngineError(t, w, 401, apierr.Unauthenticated)
+					assertEngineError(t, w, 401, hosterr.Unauthenticated)
 					if f.writes != 0 {
 						t.Fatal("unauthorized replay reached transaction")
 					}
@@ -212,10 +214,10 @@ func TestEngineTypedTransitionRefusals(t *testing.T) {
 		reason store.IllegalTransitionReason
 		code   apierr.Code
 	}{
-		{store.ReasonHolderRights, apierr.LockHeld},
-		{store.ReasonStaleGeneration, apierr.LockHeld},
-		{store.ReasonIllegalEdge, apierr.IllegalTransition},
-		{store.ReasonTerminal, apierr.IllegalTransition},
+		{store.ReasonHolderRights, hosterr.LockHeld},
+		{store.ReasonStaleGeneration, hosterr.LockHeld},
+		{store.ReasonIllegalEdge, hosterr.IllegalTransition},
+		{store.ReasonTerminal, hosterr.IllegalTransition},
 	} {
 		t.Run(string(tc.reason), func(t *testing.T) {
 			f := &engineTransactions{err: &store.ErrIllegalTransition{Reason: tc.reason}}
@@ -235,7 +237,7 @@ func TestEngineLifecycleMethodRefusal(t *testing.T) {
 			t.Run(method+path, func(t *testing.T) {
 				w := httptest.NewRecorder()
 				handler.ServeHTTP(w, httptest.NewRequest(method, path, nil))
-				assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+				assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 				if w.Header().Get("Allow") != "POST" {
 					t.Fatalf("Allow = %q", w.Header().Get("Allow"))
 				}

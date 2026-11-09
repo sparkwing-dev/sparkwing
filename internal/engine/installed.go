@@ -60,7 +60,7 @@ func replacementEngineAt(ctx context.Context, pin engineid.Pin, target releaseas
 		for _, setting := range info.Settings {
 			settings[setting.Key] = setting.Value
 		}
-		if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != GoModule+"/cmd/"+string(target.Binary) {
+		if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != HostModule+"/cmd/"+string(target.Binary) {
 			return Resolved{}, integrity(errors.New("retained executable does not match the native Sparkwing target"))
 		}
 		stat, err := os.Stat(path)

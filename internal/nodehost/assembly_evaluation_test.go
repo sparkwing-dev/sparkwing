@@ -6,18 +6,18 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestEvaluationBindingsSeparateApprovalDependenciesFromGeneratorSource(t *testing.T) {
 	for _, unit := range []capability.UnitKind{capability.UnitTrigger, capability.UnitEval} {
 		for _, approval := range []bool{false, true} {
 			t.Run(string(unit)+map[bool]string{false: "/generator", true: "/approval"}[approval], func(t *testing.T) {
-				source := nodeproto.JobSpec{ID: "gate", Needs: []string{"build"}, References: []nodeproto.PipelineReference{{Pipeline: "upstream", Job: "artifact"}}}
+				source := nodewire.JobSpec{ID: "gate", Needs: []string{"build"}, References: []nodewire.PipelineReference{{Pipeline: "upstream", Job: "artifact"}}}
 				if approval {
-					source.Approval = &nodeproto.ApprovalSpec{}
+					source.Approval = &nodewire.ApprovalSpec{}
 					source.Closures.SkipIf = []string{"guard"}
 				}
 				body, err := json.Marshal(source)
@@ -29,7 +29,7 @@ func TestEvaluationBindingsSeparateApprovalDependenciesFromGeneratorSource(t *te
 					if ref.NodeID == "gate" {
 						return row, nil
 					}
-					body, err := json.Marshal(nodeproto.JobSpec{ID: string(ref.NodeID)})
+					body, err := json.Marshal(nodewire.JobSpec{ID: string(ref.NodeID)})
 					return runstate.NodeRow{Ref: ref, Spec: body}, err
 				}}
 				p := capability.Principal{Capability: capability.Capability{Unit: unit, Binding: capability.Binding{RunID: "run"}}}

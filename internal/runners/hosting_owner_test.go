@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -8,14 +10,12 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -24,6 +24,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type hostingOwnerState struct {
@@ -71,8 +73,8 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 					Store: state, Lease: lease.Keeper{Lease: time.Minute, Interval: time.Second}, Source: source.Options{Engines: hostingOwnerEngines{}},
 					Masks:       nodehost.NewMaskRegistry(secrets.NewMasker()),
 					Router:      routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities}),
-					Processes:   &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
-					PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+					Processes:   &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodewire.FrameLog) error { return nil }},
+					PlanningLog: func(context.Context, nodewire.FrameLog) error { return nil },
 					Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 						return nodehost.ProcessGrant{}, errors.New("unexpected execution")
 					}},
@@ -86,7 +88,7 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 								t.Error("owner renewal lost authority or current activity")
 							}
 							if renewals == 2 {
-								return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
+								return runstate.LeaseBeat{}, &apierr.Error{Code: hosterr.LockHeld}
 							}
 							return runstate.LeaseBeat{}, nil
 						},

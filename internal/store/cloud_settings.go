@@ -1,11 +1,12 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 	"strconv"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -36,7 +37,7 @@ func cloudUpsizeEnabledTx(ctx context.Context, tx *storeTx) (bool, error) {
 	}
 	var enabled *bool
 	if err := json.Unmarshal([]byte(raw), &enabled); err != nil || enabled == nil {
-		return false, authorityError(apierr.IntegrityFailure, "cloud_upsize_enabled must hold a boolean")
+		return false, authorityError(hosterr.IntegrityFailure, "cloud_upsize_enabled must hold a boolean")
 	}
 	return *enabled, nil
 }

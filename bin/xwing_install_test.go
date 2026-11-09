@@ -95,7 +95,7 @@ chmod +x "$out"
 		t.Fatal(err)
 	}
 	traceLines := strings.Split(string(content), "\n")
-	if len(traceLines) < 4 || traceLines[0] != "off" || traceLines[1] != "-C" || filepath.Clean(installerNativePath(t, traceLines[2])) != filepath.Clean(source) || traceLines[3] != "build" {
+	if len(traceLines) < 4 || traceLines[0] != "auto" || traceLines[1] != "-C" || filepath.Clean(installerNativePath(t, traceLines[2])) != filepath.Clean(source) || traceLines[3] != "build" {
 		t.Fatalf("compiler arguments = %s", content)
 	}
 	if content, err := os.ReadFile(filepath.Join(source, "web-rebuilt")); err != nil || string(content) != "rebuilt" {

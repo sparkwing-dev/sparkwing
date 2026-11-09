@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type debugWaitFunc func(context.Context, DebugBoundary) error
@@ -41,9 +41,9 @@ func debugOptions(reason string) runspec.Options {
 func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 	for _, reason := range []string{store.PauseReasonBefore, store.PauseReasonAfter, store.PauseReasonOnFailure} {
 		t.Run(reason, func(t *testing.T) {
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-				{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "deploy", Needs: []string{"build"}, Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+				{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}},
+				{ID: "deploy", Needs: []string{"build"}, Optional: true, Steps: []nodewire.StepSpec{{ID: "body"}}},
 			}}
 			f := newStoreHostFixtureOn(t, openStore(t), plan, debugOptions(reason))
 			var mu sync.Mutex
@@ -96,7 +96,7 @@ func TestDebugPauseUsesSealedTimeoutBeforeExecution(t *testing.T) {
 	options := debugOptions(store.PauseReasonBefore)
 	options.PauseTimeout.Set, options.PauseTimeout.Value = true, time.Minute
 	options.PauseTimeout.Origin = runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "pause_timeout"}
-	f := newStoreHostFixtureOn(t, openStore(t), nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, options)
+	f := newStoreHostFixtureOn(t, openStore(t), nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}}}, options)
 	var expired bool
 	f.Host.Debug = debugWaitFunc(func(_ context.Context, b DebugBoundary) error {
 		if b.Timeout != time.Minute {
@@ -119,9 +119,9 @@ func TestDebugPauseUsesSealedTimeoutBeforeExecution(t *testing.T) {
 func TestDebugCancellationStopsOwnerWithoutChangingTerminalResult(t *testing.T) {
 	for _, reason := range []string{store.PauseReasonBefore, store.PauseReasonAfter} {
 		t.Run(reason, func(t *testing.T) {
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-				{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "deploy", Needs: []string{"build"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+				{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}},
+				{ID: "deploy", Needs: []string{"build"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
 			}}
 			f := newStoreHostFixtureOn(t, openStore(t), plan, debugOptions(reason))
 			ctx, cancel := context.WithCancelCause(t.Context())
@@ -149,10 +149,10 @@ func TestDebugCancellationStopsOwnerWithoutChangingTerminalResult(t *testing.T) 
 }
 
 func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "go?"}},
-		{ID: "deploy", Needs: []string{"gate"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "rollback", OnFailureOf: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "gate", Approval: &nodewire.ApprovalSpec{Message: "go?"}},
+		{ID: "deploy", Needs: []string{"gate"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "rollback", OnFailureOf: "deploy", Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}}
 	options := debugOptions(store.PauseReasonBefore)
 	options.Pause.Value.Before.Value = []string{"gate", "rollback"}

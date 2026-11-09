@@ -39,7 +39,7 @@ func TestRunGoSDKNeedsOnlyThePipelineDependencyArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output, diagnostics bytes.Buffer
-	if err := Run(t.Context(), "development", bytes.NewReader(request), &output, &diagnostics); err != nil {
+	if err := Run(t.Context(), bytes.NewReader(request), &output, &diagnostics); err != nil {
 		t.Fatalf("unneeded module blocked pipeline installation: %v: %s", err, &diagnostics)
 	}
 	var installed engine.SDKCommand
@@ -53,7 +53,7 @@ func TestRunGoSDKNeedsOnlyThePipelineDependencyArchives(t *testing.T) {
 	writeInput(t, dir, "main.go", []byte("package main\nimport _ \"example.test/unused\"\nfunc main(){}\n"))
 	output.Reset()
 	diagnostics.Reset()
-	if err := Run(t.Context(), "development", bytes.NewReader(request), &output, &diagnostics); err == nil || output.Len() != 0 || !strings.Contains(diagnostics.String(), "example.test/unused") {
+	if err := Run(t.Context(), bytes.NewReader(request), &output, &diagnostics); err == nil || output.Len() != 0 || !strings.Contains(diagnostics.String(), "example.test/unused") {
 		t.Fatalf("missing imported module did not refuse installation: %s %s %v", &output, &diagnostics, err)
 	}
 }
@@ -93,7 +93,7 @@ func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output, diagnostics bytes.Buffer
-		if err := Run(t.Context(), "v0.20.0", bytes.NewReader(request), &output, &diagnostics); err != nil {
+		if err := Run(t.Context(), bytes.NewReader(request), &output, &diagnostics); err != nil {
 			t.Fatalf("real Go installation: %v: %s", err, &diagnostics)
 		}
 		var command engine.SDKCommand
@@ -143,7 +143,7 @@ func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output, diagnostics bytes.Buffer
-		err = Run(t.Context(), "v0.20.0", bytes.NewReader(request), &output, &diagnostics)
+		err = Run(t.Context(), bytes.NewReader(request), &output, &diagnostics)
 		if err == nil || output.Len() != 0 {
 			t.Logf("replacement produced executable: %s %v", &output, err)
 			return false
@@ -200,7 +200,7 @@ func TestRunGoSDKUpgradeWithStaleSparksOverlay(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output, diagnostics bytes.Buffer
-		if err := Run(t.Context(), "v0.20.0", bytes.NewReader(request), &output, &diagnostics); err != nil {
+		if err := Run(t.Context(), bytes.NewReader(request), &output, &diagnostics); err != nil {
 			t.Fatalf("upgrade installation (uncached=%v): %v: %s", uncached, err, &diagnostics)
 		}
 		var command engine.SDKCommand

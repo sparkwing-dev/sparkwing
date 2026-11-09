@@ -1,12 +1,14 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestDashboardOpenRefusesABuildWithoutItsBundle(t *testing.T) {
@@ -18,7 +20,7 @@ func TestDashboardOpenRefusesABuildWithoutItsBundle(t *testing.T) {
 		}
 		err = requireDashboardBundle(inv, missing)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || !strings.Contains(failure.Hint, "bin/build-web.sh") {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || !strings.Contains(failure.Hint, "bin/build-web.sh") {
 			t.Fatalf("%v: err = %v, want an unavailable refusal naming the build step", args, err)
 		}
 	}

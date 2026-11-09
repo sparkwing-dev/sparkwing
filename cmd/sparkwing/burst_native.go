@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -26,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args []string, route userconfig.RunRouting, connection client.EngineOptions) error {
@@ -242,8 +242,8 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	return request, nil
 }
 
-func resolveBurstSecrets(ctx context.Context, names []string, declarations []nodeproto.SecretDeclaration, held map[string]string) (map[string]string, error) {
-	selected := []nodeproto.SecretDeclaration{}
+func resolveBurstSecrets(ctx context.Context, names []string, declarations []nodewire.SecretDeclaration, held map[string]string) (map[string]string, error) {
+	selected := []nodewire.SecretDeclaration{}
 	for _, name := range names {
 		found := false
 		for _, d := range declarations {

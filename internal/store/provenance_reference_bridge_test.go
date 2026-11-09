@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -360,7 +362,7 @@ func admitReferenceChild(t *testing.T, s *Store, parent runspec.Provenance, pare
 	expiry := now.Add(time.Hour)
 	claim := authorityRoot("child-parent", "a")
 	claim.Grants = []capability.Grant{capability.ChildrenStart}
-	claim.Children = []nodeproto.ChildPipeline{{Pipeline: "deploy", Repository: "gh:1"}, {Pipeline: "deploy", Repository: "gh:2"}}
+	claim.Children = []nodewire.ChildPipeline{{Pipeline: "deploy", Repository: "gh:1"}, {Pipeline: "deploy", Repository: "gh:2"}}
 	claim.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}
 	claim.ExpiresAt = &expiry
 	authorityPersist(t, s, claim)
@@ -644,7 +646,7 @@ func ChildPipelinesMustBeDeclared(t *testing.T, open func(*testing.T) *Store) {
 	parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
 	_, _, err := admitReferenceChild(t, open(t), parent, git, childRequest("deploy2", "refs/heads/main", referenceMain))
 	var refused *apierr.Error
-	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+	if !errors.As(err, &refused) || refused.Code != hosterr.Forbidden {
 		t.Fatalf("undeclared child pipeline admitted: %v", err)
 	}
 	if !strings.Contains(refused.Message, "StartsChildren") {
@@ -661,7 +663,7 @@ func ChildrenOfTheirParentsRepositoryUseItsSourceLocation(t *testing.T, open fun
 	child.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/attacker/repo.git"}
 	_, _, err := admitReferenceChild(t, open(t), parent, git, child)
 	var refused *apierr.Error
-	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+	if !errors.As(err, &refused) || refused.Code != hosterr.Forbidden {
 		t.Fatalf("child in its parent's repository used another source location: %v", err)
 	}
 }

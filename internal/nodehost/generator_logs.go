@@ -1,19 +1,21 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const generatorFailureMessage = "generator failed (details withheld: secret declarations unavailable)"
 
 type declarationProcess interface {
 	gateDeclarations()
-	releaseDeclarations(context.Context, runspec.Spec, nodeproto.EvalResult) error
+	releaseDeclarations(context.Context, runspec.Spec, nodewire.EvalResult) error
 }
 
 func (s *protocolSession) gateDeclarations() {
@@ -22,9 +24,9 @@ func (s *protocolSession) gateDeclarations() {
 	}
 }
 
-func (s *protocolSession) releaseDeclarations(ctx context.Context, spec runspec.Spec, result nodeproto.EvalResult) error {
+func (s *protocolSession) releaseDeclarations(ctx context.Context, spec runspec.Spec, result nodewire.EvalResult) error {
 	if s.cfg.output == nil || s.cfg.Masks == nil {
-		return executorError(apierr.Internal, "generator output requires host masking")
+		return executorError(hosterr.Internal, "generator output requires host masking")
 	}
 	if result.Error != nil || !result.DeclarationsKnown {
 		return executorError(apierr.SDKError, generatorFailureMessage)
@@ -41,18 +43,18 @@ func (s *protocolSession) releaseDeclarations(ctx context.Context, spec runspec.
 	return s.cfg.output.release(ctx)
 }
 
-func finishGeneratorLogs(ctx context.Context, process ExecutorProcess, accepted AcceptedRun, result nodeproto.EvalResult) error {
+func finishGeneratorLogs(ctx context.Context, process ExecutorProcess, accepted AcceptedRun, result nodewire.EvalResult) error {
 	gate, ok := process.(declarationProcess)
 	if !ok {
 		return nil
 	}
 	var spec runspec.Spec
 	if json.Unmarshal(accepted.Spec, &spec) != nil {
-		return executorError(apierr.SpecDrift, "generator masking requires accepted inputs")
+		return executorError(hosterr.SpecDrift, "generator masking requires accepted inputs")
 	}
 	return gate.releaseDeclarations(ctx, spec, result)
 }
 
-func generatorRegistration(spec runspec.Spec, arguments []nodeproto.ArgumentDescription) (runspec.SecretRegistration, error) {
+func generatorRegistration(spec runspec.Spec, arguments []nodewire.ArgumentDescription) (runspec.SecretRegistration, error) {
 	return runspec.GeneratedRegistration(spec.Request.Request, spec.Resolved, arguments)
 }

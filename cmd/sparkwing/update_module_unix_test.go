@@ -84,7 +84,7 @@ func TestSDKPinInspectionRejectsUnsafeInputsProperty(t *testing.T) {
 		dir := t.TempDir()
 		input := inputs[int(selection)%len(inputs)]
 		files := map[string]string{
-			"go.mod":            "module fixture\nrequire github.com/sparkwing-dev/sparkwing v1.2.3\n",
+			"go.mod":            "module fixture\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n",
 			"go.sum":            "",
 			"package.json":      `{"dependencies":{"@sparkwing/sdk":"1.2.3"}}`,
 			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"1.2.3"}},"node_modules/@sparkwing/sdk":{"version":"1.2.3"}}}`,
@@ -113,7 +113,7 @@ func TestSDKPinInspectionRejectsUnsafeInputsProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, input.sdk, engine.ReadPin, engine.VersionForPin)
+		report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, input.sdk, engine.ReadPin, func(engineid.Pin) (string, error) { return "v0.80.0", nil })
 		return report.Runs == "" && strings.Contains(report.Refusal, "regular file")
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {

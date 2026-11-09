@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -11,7 +13,7 @@ import (
 
 	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ProcessCleanups owns one delegated process's registrations until joined cleanup.
@@ -35,7 +37,7 @@ func (c *ProcessCleanups) register(argv []string, description string) (string, e
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return "", executorError(apierr.LockHeld, "process cleanup registrations are closed")
+		return "", executorError(hosterr.LockHeld, "process cleanup registrations are closed")
 	}
 	if len(c.list.items) >= maxCleanups {
 		return "", executorError(apierr.BadRequest, "process cleanup registrations are full")
@@ -51,7 +53,7 @@ func (c *ProcessCleanups) release(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return executorError(apierr.LockHeld, "process cleanup registrations are closed")
+		return executorError(hosterr.LockHeld, "process cleanup registrations are closed")
 	}
 	index := slices.IndexFunc(c.list.items, func(item cleanup) bool { return item.id == id })
 	if index < 0 {

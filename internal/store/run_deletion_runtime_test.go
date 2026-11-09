@@ -1,5 +1,7 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -7,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.T) {
@@ -87,7 +89,7 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 				t.Fatal(err)
 			}
 			var refused *apierr.Error
-			if err := tenant.DeleteAuthorizedRun(t.Context(), forbidden, nil); !errors.As(err, &refused) || refused.Code != apierr.Forbidden || !strings.Contains(refused.Error(), "team.admin") {
+			if err := tenant.DeleteAuthorizedRun(t.Context(), forbidden, nil); !errors.As(err, &refused) || refused.Code != hosterr.Forbidden || !strings.Contains(refused.Error(), "team.admin") {
 				t.Fatalf("foreign-creator deletion must name team.admin: %v", err)
 			}
 			if _, err := tenant.ReadRun(t.Context(), row.ID); err != nil {

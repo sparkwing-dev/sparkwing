@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
@@ -34,6 +33,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func nativeStoreFixtureW8(t *testing.T, kind capability.UnitKind) (*storedEngineW8, capability.Issued) {
@@ -159,8 +159,8 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			Store: finishingStoreW9{NativeHostStore: binding.Tenant, finished: &finishedThroughServices},
 			Lease: lease.Keeper{Lease: time.Minute, Interval: time.Second}, Source: source.Options{Engines: nativeStoreEnginesW8{}},
 			Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), Router: router,
-			Processes:   &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
-			PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+			Processes:   &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodewire.FrameLog) error { return nil }},
+			PlanningLog: func(context.Context, nodewire.FrameLog) error { return nil },
 			Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 				return nodehost.ProcessGrant{}, errors.New("unexpected work")
 			}},

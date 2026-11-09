@@ -705,6 +705,7 @@ regenerate with `go test ./tests/acceptance -run '^TestCurrentContractSymbolInve
 | `Origin` | [source](../../../internal/settings/contract.go) |
 | `OwnerExecution` | [source](../../../internal/settings/resolvers.go) |
 | `PlanInputs` | [source](../../../internal/settings/contract.go) |
+| `PlanningRequirements` | [source](../../../internal/settings/plan.go) |
 | `ProjectCeilings` | [source](../../../internal/settings/projection.go) |
 | `ProjectCheckoutDeclarations` | [source](../../../internal/settings/declarations.go) |
 | `ResolveExpansion` | [source](../../../internal/settings/plan.go) |

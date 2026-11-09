@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testing.T) {
@@ -25,11 +25,11 @@ func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testin
 		t.Run(policy, func(t *testing.T) {
 			now := time.Now()
 			server, tenant, owner := controllerCapacityFixture(t, teststore.WithClock(func() time.Time { return now }))
-			plan := nodeproto.PlanDoc{
-				Concurrency: []nodeproto.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1), OnLimit: &policy, QueueTimeoutMS: new(int64(1))}},
-				Jobs: []nodeproto.JobSpec{
-					{ID: "first", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-					{ID: "next", Needs: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			plan := nodewire.PlanDoc{
+				Concurrency: []nodewire.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1), OnLimit: &policy, QueueTimeoutMS: new(int64(1))}},
+				Jobs: []nodewire.JobSpec{
+					{ID: "first", Steps: []nodewire.StepSpec{{ID: "body"}}},
+					{ID: "next", Needs: []string{"first"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
 				},
 			}
 			acceptCapacityDocument(t, server, tenant, owner, plan)
@@ -52,7 +52,7 @@ func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testin
 			}
 			engineSQL(t, server.store, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team='a' AND run_id='run' AND node_id=''`)
 			other := addControllerCapacityRun(t, server, tenant)
-			acceptCapacityDocumentForRun(t, server, tenant, other, "other", nodeproto.PlanDoc{Concurrency: plan.Concurrency, Jobs: []nodeproto.JobSpec{{ID: "hold", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+			acceptCapacityDocumentForRun(t, server, tenant, other, "other", nodewire.PlanDoc{Concurrency: plan.Concurrency, Jobs: []nodewire.JobSpec{{ID: "hold", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 			for range 2 {
 				server.reconcileOwnedRuns(t.Context())
 				now = now.Add(time.Second)

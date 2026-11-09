@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -9,10 +11,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const sourceBundleRetention = 24 * time.Hour
@@ -40,7 +42,7 @@ func sourceUploaderTx(ctx context.Context, tx *storeTx, team Team, authority cap
 	}
 	c := p.Capability
 	if c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || !slices.Contains(c.Grants, capability.RunsWrite) || !capability.RepositoryAllowed(c.Repositories, capability.RepositoryIdentity{Key: string(scope.Repository), Display: scope.RepositoryDisplay}) {
-		return p, authorityError(apierr.Forbidden, "source upload requires repository-bound run submission authority")
+		return p, authorityError(hosterr.Forbidden, "source upload requires repository-bound run submission authority")
 	}
 	return p, nil
 }
@@ -175,14 +177,14 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 		from := parent.Request.Request
 		// safety: intake has fenced the live parent job; its bundle authority extends only to the exact source.
 		if input.Git.Repository.Key != from.Git.Repository.Key || input.Git.Ref != from.Git.Ref || input.Git.SHA != from.Git.SHA || input.Source.Ref != from.Source.Ref || input.Source.BundleDigest != from.Source.BundleDigest {
-			return authorityError(apierr.Forbidden, "child source bundle differs from its parent's source")
+			return authorityError(hosterr.Forbidden, "child source bundle differs from its parent's source")
 		}
 		return copySubmissionSourceRecordTx(ctx, tx, team, parent.ID, result.RunID, input.Source.BundleDigest.Value)
 	}
 	var id string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM source_uploads WHERE team=? AND authority_kind=? AND authority_id=? AND repo_key=? AND execution_sha=? AND pipeline_sha=? AND digest=? AND committed_at>0 AND expires_at>? AND bound_run_id IS NULL ORDER BY id LIMIT 1`+tx.forUpdate(), team, request.Authority.Kind, request.Authority.ID, input.Git.Repository.Key, input.Git.SHA, input.Source.Ref, input.Source.BundleDigest.Value, tx.now(ctx).UnixNano()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return authorityError(apierr.Forbidden, "source bundle is not committed by this submitter for these revisions")
+		return authorityError(hosterr.Forbidden, "source bundle is not committed by this submitter for these revisions")
 	}
 	if err != nil {
 		return err
@@ -239,7 +241,7 @@ func copySubmissionSourceRecordTx(ctx context.Context, tx *storeTx, team Team, p
 		return err
 	}
 	if count == 0 {
-		return authorityError(apierr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", previous, digest))
+		return authorityError(hosterr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", previous, digest))
 	}
 	return requireOneRow(result, "submission source binding")
 }

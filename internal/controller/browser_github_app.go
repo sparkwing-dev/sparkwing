@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -9,10 +11,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: the flow cookie is what proves the browser GitHub returns is the one that started connecting, and it holds
@@ -320,7 +322,7 @@ func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 	refused, ok := refusalOf(err)
 	var failure *apierr.Error
 	if !ok && errors.As(err, &failure) {
-		refused = &flowRefusal{status: apierr.Status(failure.Code), message: failure.Message}
+		refused = &flowRefusal{status: hosterr.Status(failure.Code), message: failure.Message}
 		ok = true
 	}
 	if !ok {

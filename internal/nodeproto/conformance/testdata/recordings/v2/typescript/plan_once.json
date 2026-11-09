@@ -1,0 +1,198 @@
+{
+  "protocol": 2,
+  "language": "typescript",
+  "exchanges": [
+    {
+      "wire_request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        }
+      },
+      "expected": {
+        "reply": "hello",
+        "ok": true,
+        "result": {
+          "protocol": 2,
+          "sdk": {
+            "language": "typescript",
+            "version": "v0.0.0"
+          }
+        }
+      },
+      "request": {
+        "id": "hello",
+        "op": "hello",
+        "protocol": 2,
+        "engine": {
+          "version": "fixture"
+        },
+        "runner": {
+          "name": "local",
+          "type": "local",
+          "labels": []
+        }
+      },
+      "frames": [
+        {
+          "reply": "hello",
+          "ok": true,
+          "result": {
+            "protocol": 2,
+            "sdk": {
+              "language": "typescript",
+              "version": "v0.0.0"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "1",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "expected": {
+        "reply": "1",
+        "ok": true,
+        "result": {
+          "jobs": [
+            {
+              "id": "task",
+              "failure_policy": "fail_fast",
+              "memo": {},
+              "closures": {
+                "before_run": [
+                  "task/before_run/0"
+                ],
+                "verify": "task/verify/0",
+                "after_run": [
+                  "task/after_run/0"
+                ],
+                "skip_if": [
+                  "task/skip_if/0"
+                ],
+                "memo_key": "task/memo_key/0",
+                "generate": [
+                  "task/generate/0"
+                ]
+              },
+              "steps": [
+                {
+                  "id": "run"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "request": {
+        "id": "1",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "frames": [
+        {
+          "reply": "1",
+          "ok": true,
+          "result": {
+            "jobs": [
+              {
+                "id": "task",
+                "failure_policy": "fail_fast",
+                "memo": {},
+                "closures": {
+                  "before_run": [
+                    "task/before_run/0"
+                  ],
+                  "verify": "task/verify/0",
+                  "after_run": [
+                    "task/after_run/0"
+                  ],
+                  "skip_if": [
+                    "task/skip_if/0"
+                  ],
+                  "memo_key": "task/memo_key/0",
+                  "generate": [
+                    "task/generate/0"
+                  ]
+                },
+                "steps": [
+                  {
+                    "id": "run"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "wire_request": {
+        "id": "2",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "expected": {
+        "reply": "2",
+        "ok": false,
+        "error": {
+          "code": "protocol_error",
+          "message": "plan occurs at most once per process"
+        }
+      },
+      "request": {
+        "id": "2",
+        "op": "plan",
+        "pipeline": "conformance",
+        "args": {
+          "name": "demo"
+        },
+        "run": {
+          "run_id": "r",
+          "pipeline": "conformance"
+        }
+      },
+      "frames": [
+        {
+          "reply": "2",
+          "ok": false,
+          "error": {
+            "code": "protocol_error",
+            "message": "plan occurs at most once per process"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,17 +1,19 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type nodeClaims struct {
@@ -21,7 +23,7 @@ type nodeClaims struct {
 	current   func(context.Context) (capability.Principal, error)
 	readNode  func(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 	processes *NativeProcesses
-	services  func(context.Context, capability.Principal, nodeproto.JobSpec) (ProcessServices, error)
+	services  func(context.Context, capability.Principal, nodewire.JobSpec) (ProcessServices, error)
 	mu        sync.Mutex
 	nodes     map[string]nodeClaim
 }
@@ -96,7 +98,7 @@ func (c *nodeClaims) authenticate(ctx context.Context, owner capability.Principa
 }
 
 func nodeClaimMismatch() error {
-	return &apierr.Error{Code: apierr.LockHeld, Message: "local process requires its independently awarded current node authority"}
+	return &apierr.Error{Code: hosterr.LockHeld, Message: "local process requires its independently awarded current node authority"}
 }
 
 func (c *nodeClaims) delegate(ctx context.Context, node string, generation, attempt int64) (ProcessGrant, error) {
@@ -112,7 +114,7 @@ func (c *nodeClaims) delegate(ctx context.Context, node string, generation, atte
 	if row.Ref != (runspec.NodeRef{RunID: runspec.RunID(fence.RunID), NodeID: runspec.NodeID(node)}) || row.Generation != runspec.ClaimGeneration(generation) || row.Attempt != runspec.AttemptOrdinal(attempt) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != fence.Holder {
 		return ProcessGrant{}, nodeClaimMismatch()
 	}
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	if err := json.Unmarshal(row.Spec, &job); err != nil {
 		return ProcessGrant{}, err
 	}
@@ -144,7 +146,7 @@ func completeServices(s ProcessServices) bool {
 	return s.Secret != nil && s.Output != nil && s.Latest != nil && s.OIDC != nil && s.Annotation != nil && s.Summary != nil && s.StartChild != nil && s.AwaitChild != nil
 }
 
-func (c *nodeClaims) annotate(ctx context.Context, input NodeInput, body nodeproto.AnnotationRequest) error {
+func (c *nodeClaims) annotate(ctx context.Context, input NodeInput, body nodewire.AnnotationRequest) error {
 	principal, err := c.principal(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 	if err != nil {
 		return err
@@ -152,7 +154,7 @@ func (c *nodeClaims) annotate(ctx context.Context, input NodeInput, body nodepro
 	if c.services == nil {
 		return errors.New("local process services are unavailable")
 	}
-	services, err := c.services(ctx, principal, nodeproto.JobSpec{ID: input.NodeID})
+	services, err := c.services(ctx, principal, nodewire.JobSpec{ID: input.NodeID})
 	if err != nil {
 		return err
 	}

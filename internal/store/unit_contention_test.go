@@ -1,5 +1,7 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -7,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestUnitClaimRenewReleaseContentionProperty(t *testing.T) {
@@ -48,7 +50,7 @@ func TestUnitClaimRenewReleaseContentionProperty(t *testing.T) {
 							} else {
 								var refused *apierr.Error
 								var holder *store.ErrIllegalTransition
-								if !(errors.As(err, &refused) && refused.Code == apierr.LockHeld) && !(errors.As(err, &holder) && holder.Reason == store.ReasonHolderRights) {
+								if !(errors.As(err, &refused) && refused.Code == hosterr.LockHeld) && !(errors.As(err, &holder) && holder.Reason == store.ReasonHolderRights) {
 									t.Errorf("claim refusal: %v", err)
 								}
 							}

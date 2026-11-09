@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -7,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -62,7 +63,7 @@ func (t *Tenant) ConsumeGitHubConnect(ctx context.Context, a capability.Authoriz
 			return err
 		}
 		if !used {
-			return apierr.Authorization(apierr.ReasonBinding, "This connection was already used or expired. Start again from your team's GitHub settings.")
+			return hosterr.Authorization(hosterr.ReasonBinding, "This connection was already used or expired. Start again from your team's GitHub settings.")
 		}
 		return nil
 	})

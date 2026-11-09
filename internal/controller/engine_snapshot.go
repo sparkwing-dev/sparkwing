@@ -8,10 +8,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func (s *EngineController) handleSnapshot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -74,7 +74,7 @@ func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot
 		if !exists {
 			return controllerwire.ScheduleSnapshot{}, errors.New("scheduling projection names an absent job")
 		}
-		var declaration nodeproto.JobSpec
+		var declaration nodewire.JobSpec
 		if err := json.Unmarshal(node.Spec, &declaration); err != nil || declaration.ID != scheduled.ID {
 			return controllerwire.ScheduleSnapshot{}, errors.New("invalid persisted snapshot declaration")
 		}

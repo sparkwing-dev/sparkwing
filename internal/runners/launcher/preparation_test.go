@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -11,10 +13,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestLauncherPreparationTransportRequiresRetainedFence(t *testing.T) {
@@ -159,7 +161,7 @@ func TestPreparationRenewalIgnoresPersistentRetirementFailure(t *testing.T) {
 				return false, nil, nil
 			}
 			retirementCalls++
-			return true, nil, &apierr.Error{Code: apierr.Forbidden, Message: "retirement denied"}
+			return true, nil, &apierr.Error{Code: hosterr.Forbidden, Message: "retirement denied"}
 		})
 		preparer := preparationControl{CloudControl: control, prepare: func(context.Context, []capability.LeaseRef) (time.Time, error) {
 			renewals++

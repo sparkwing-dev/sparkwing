@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -9,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type profileProbeResult struct {
@@ -27,7 +29,7 @@ func interpretHealthBody(r *profileProbeResult, resp *http.Response) (health.Res
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		r.Status = "fail"
-		r.err = &apierr.Error{Code: apierr.Unavailable, Message: "controller health check failed"}
+		r.err = &apierr.Error{Code: hosterr.Unavailable, Message: "controller health check failed"}
 		r.Detail = fmt.Sprintf("health returned %s: %s",
 			resp.Status, strings.TrimSpace(string(raw)))
 		return health.Response{}, true
@@ -64,7 +66,7 @@ func probeController(ctx context.Context, prof *namedProfile) profileProbeResult
 	if err != nil {
 		r.Status = "fail"
 		r.Detail = err.Error()
-		r.err = &apierr.Error{Code: apierr.Unavailable, Message: r.Detail}
+		r.err = &apierr.Error{Code: hosterr.Unavailable, Message: r.Detail}
 		return r
 	}
 	defer resp.Body.Close()

@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -12,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -21,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -96,7 +98,7 @@ func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (d
 	}
 	services, err := deps.local(ctx)
 	if err == nil && services.lifecycle == nil {
-		err = &apierr.Error{Code: apierr.Unavailable, Message: "doctor requires local controller diagnostics", Hint: "the local controller integration is unavailable in this build"}
+		err = &apierr.Error{Code: hosterr.Unavailable, Message: "doctor requires local controller diagnostics", Hint: "the local controller integration is unavailable in this build"}
 	}
 	if err != nil {
 		report.ControllerError = err.Error()

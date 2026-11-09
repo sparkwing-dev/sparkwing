@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"cmp"
 	"context"
@@ -9,8 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (op *Operator) setPaymentModeTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode) error {
@@ -77,7 +79,7 @@ type PaymentSettlement struct {
 // SettlePayment settles verified provider events against committed billing facts.
 func (o *Operator) SettlePayment(ctx context.Context, proof capability.VerifiedPaymentEvent) (PaymentSettlement, error) {
 	if proof == (capability.VerifiedPaymentEvent{}) {
-		return PaymentSettlement{}, authorityError(apierr.Unauthenticated, "payment verification is required")
+		return PaymentSettlement{}, authorityError(hosterr.Unauthenticated, "payment verification is required")
 	}
 	return o.s.settlePaymentFacts(ctx, proof.Event())
 }
@@ -151,7 +153,7 @@ func configuredPaymentModeTx(ctx context.Context, tx *storeTx, eventMode capabil
 		return err
 	}
 	if mode != eventMode {
-		return authorityError(apierr.Forbidden, "payment mode does not match configuration")
+		return authorityError(hosterr.Forbidden, "payment mode does not match configuration")
 	}
 	return nil
 }
@@ -159,7 +161,7 @@ func configuredPaymentModeTx(ctx context.Context, tx *storeTx, eventMode capabil
 func paymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
 	mode, err := scanPaymentMode(tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"))
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", authorityError(apierr.Unavailable, "payment mode is not configured")
+		return "", authorityError(hosterr.Unavailable, "payment mode is not configured")
 	}
 	return mode, err
 }
@@ -180,7 +182,7 @@ func scanPaymentMode(row rowScanner) (capability.PaymentMode, error) {
 	}
 	var mode capability.PaymentMode
 	if json.Unmarshal(encoded, &mode) != nil || (mode != capability.PaymentTest && mode != capability.PaymentLive) {
-		return "", authorityError(apierr.Unavailable, "configured payment mode is invalid")
+		return "", authorityError(hosterr.Unavailable, "configured payment mode is invalid")
 	}
 	return mode, nil
 }

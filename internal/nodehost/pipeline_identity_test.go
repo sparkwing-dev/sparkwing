@@ -5,22 +5,22 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestSDKCheckoutPlanningUsesRegisteredNameAndRetainsGoType(t *testing.T) {
 	planner, input, fixture, processes := sdkPlanningFixture(t)
 	start := planner.Start
-	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 		process, err := start(ctx, input, log)
 		proc := process.(*executorProcess)
 		answer := proc.answer
-		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+		proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
 			switch request.Op {
-			case nodeproto.OpDescribe:
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "target", Type: "string", Required: true}, {Name: "build.image", Type: "string", Required: true, JobID: "build"}}}}}, nil
-			case nodeproto.OpPlan:
+			case nodewire.OpDescribe:
+				return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "Deploy", Args: []nodewire.ArgumentDescription{{Name: "target", Type: "string", Required: true}, {Name: "build.image", Type: "string", Required: true, JobID: "build"}}}}}, nil
+			case nodewire.OpPlan:
 				if request.Pipeline != "Deploy" || request.Run.Pipeline != "deploy-prod" || request.Args["target"] != "production" || request.Args["build.image"] != "release" {
 					t.Fatalf("pipeline identity or arguments changed: %+v", request)
 				}
@@ -63,8 +63,8 @@ func TestNodeExecutorReplanUsesRegisteredName(t *testing.T) {
 	planned := false
 	deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, input, activity)
-		process.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpPlan {
+		process.(*executorProcess).answer = func(_ context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpPlan {
 				planned = true
 				if request.Pipeline != "Deploy" || request.Run.Pipeline != "deploy-prod" {
 					t.Errorf("replan changed pipeline identity: %+v", request)

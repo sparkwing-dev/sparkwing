@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -17,16 +19,16 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type localTestController struct {
@@ -64,7 +66,7 @@ func localTestAward(t *testing.T) controllerwire.ClaimedUnit {
 		Unit: capability.UnitTrigger, Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect,
 		RunID: "local-run", UnitID: "owner-unit", Capability: "private-award", Request: request,
 		Binding: capability.Binding{Kind: capability.BindingTrigger, RunID: "local-run", Generation: 7, Holder: "granted-holder"},
-		Runner:  nodeproto.RunnerIdentity{Name: "local", Type: "local"}, LeaseExpiresAt: time.Unix(900, 0),
+		Runner:  nodewire.RunnerIdentity{Name: "local", Type: "local"}, LeaseExpiresAt: time.Unix(900, 0),
 	}
 }
 
@@ -597,7 +599,7 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 	}
 	return localRunPreparation{
 		identity:     clisurface.PipelineIdentity{Name: "ci", Entrypoint: "CI"},
-		declarations: declarationFixture(t, []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}}),
+		declarations: declarationFixture(t, []nodewire.PipelineDescription{{Name: "CI", Args: []nodewire.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}}),
 		git:          award.Request.Request.Git, source: runspec.Source{Ref: award.Request.Request.Source.Ref, Entrypoint: "CI"}, environment: env,
 		settings: settings.Inputs{Context: settings.Context{NumCPU: 4}},
 	}
@@ -698,7 +700,7 @@ func TestLocalPreparationRiskRefusalPrecedesIntake(t *testing.T) {
 	if _, err := prepareLocalRunRequest(t.Context(), input, runFlags{only: "build"}, []string{"--password", "private-value"}); err != nil {
 		t.Fatalf("narrowed run was refused before plan acceptance knew its selection: %v", err)
 	}
-	broken := append(doc.Pipelines, nodeproto.PipelineDescription{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "undiscovered"}})
+	broken := append(doc.Pipelines, nodewire.PipelineDescription{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "undiscovered"}})
 	input.declarations = declarationFixture(t, broken)
 	_, err = prepareLocalRunRequest(t.Context(), input, runFlags{}, []string{"--password", "private-value"})
 	if err == nil || !strings.Contains(err.Error(), "requires --sw-allow-risk prod") || strings.Contains(err.Error(), "withheld") {
@@ -992,7 +994,7 @@ func TestLocalRemoteCacheRequiresTheSealedOptIn(t *testing.T) {
 		deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 		err := runLocalCommand(t.Context(), "ci", flags, []string{"--password", "private-value"}, io.Discard, deps)
 		var unavailable *apierr.Error
-		if !errors.As(err, &unavailable) || unavailable.Code != apierr.Unavailable || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "close"}) {
+		if !errors.As(err, &unavailable) || unavailable.Code != hosterr.Unavailable || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "close"}) {
 			t.Fatalf("unbound storage reached intake: calls=%v error=%v", calls, err)
 		}
 	}
@@ -1142,9 +1144,9 @@ func TestLocalPreparationGatesDeclarationErrors(t *testing.T) {
 		t.Run(fmt.Sprint(complete), func(t *testing.T) {
 			private := "legitimate-private-token"
 			input := localTestPreparation(t, localTestAward(t))
-			pipelines := []nodeproto.PipelineDescription{
-				{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{private}}}, RisksByStep: []nodeproto.StepRisks{{JobID: private, StepID: private, Labels: []string{"prod"}}}},
-				{Name: "sibling", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true, Default: &private}}},
+			pipelines := []nodewire.PipelineDescription{
+				{Name: "CI", Args: []nodewire.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{private}}}, RisksByStep: []nodewire.StepRisks{{JobID: private, StepID: private, Labels: []string{"prod"}}}},
+				{Name: "sibling", Args: []nodewire.ArgumentDescription{{Name: "token", Secret: true, Default: &private}}},
 			}
 			if !complete {
 				pipelines[1].Error = &apierr.Error{Code: apierr.SDKError, Message: private}

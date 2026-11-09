@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestClaimUnitLocksControllerCapacityBeforeBilling(t *testing.T) {
@@ -17,9 +17,9 @@ func TestClaimUnitLocksControllerCapacityBeforeBilling(t *testing.T) {
 		t.Run(map[bool]string{false: "owned", true: "metered"}[metered], func(t *testing.T) {
 			ctx := t.Context()
 			s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
-			configure := func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+			configure := func(input *store.IntakeRequest, doc *nodewire.PlanDoc) {
 				input.Request.Dispatch = runspec.DispatchController
-				doc.Concurrency = []nodeproto.ConcurrencySpec{admissionGroup(1, 1)}
+				doc.Concurrency = []nodewire.ConcurrencySpec{admissionGroup(1, 1)}
 			}
 			tenant, first, err := storePlanSealRequestWith(ctx, s, configure)
 			if err != nil {

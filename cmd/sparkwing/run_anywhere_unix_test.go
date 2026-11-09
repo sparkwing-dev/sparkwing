@@ -15,12 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 var runAnywhereKinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}
@@ -37,7 +37,7 @@ func runAnywherePoll(t *testing.T, f cloudDispatch, raw string, freeSlots int) *
 func runAnywherePlan(t *testing.T, f cloudDispatch, created controllerwire.CreateRunResponse, bearer string) {
 	t.Helper()
 	engineID := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "verify", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	doc := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "verify", Steps: []nodewire.StepSpec{{ID: "run"}}}}}
 	body, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)

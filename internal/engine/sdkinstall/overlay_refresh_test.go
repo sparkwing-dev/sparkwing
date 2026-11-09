@@ -27,14 +27,14 @@ func TestRefreshOverlayPinRefusesSymlinkedOverlay(t *testing.T) {
 
 func TestRefreshOverlayPinUpdatesRegularOverlay(t *testing.T) {
 	overlay := filepath.Join(t.TempDir(), ".resolved.mod")
-	if err := os.WriteFile(overlay, []byte("module example.test/pipelines\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing v0.68.2\n"), 0o600); err != nil {
+	if err := os.WriteFile(overlay, []byte("module example.test/pipelines\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.68.2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := refreshOverlayPin(overlay, "v0.68.4"); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(overlay)
-	if err != nil || !strings.Contains(string(body), "github.com/sparkwing-dev/sparkwing v0.68.4") {
+	if err != nil || !strings.Contains(string(body), "github.com/sparkwing-dev/sparkwing/sparkwing v0.68.4") {
 		t.Fatalf("overlay not refreshed: %s, %v", body, err)
 	}
 }

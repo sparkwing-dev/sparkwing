@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -14,7 +16,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -24,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type storeLauncherSyncW8 func(context.Context, capability.AuthorityRef, []capability.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
@@ -142,13 +144,13 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 			}
 			return controllerwire.LauncherSyncResponse{}, nil
 		})
-		want := apierr.Forbidden
+		want := hosterr.Forbidden
 		switch mode % 6 {
 		case 0:
 			want = ""
 		case 1:
 			raw += mutation
-			want = apierr.Unauthenticated
+			want = hosterr.Unauthenticated
 		case 2:
 			principal, err := server.Store.AsOperator().LookupCapability(t.Context(), root.Capability.Digest)
 			if err != nil {
@@ -169,7 +171,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 			if err := server.Store.AsOperator().RevokeAuthority(t.Context(), actor, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}); err != nil {
 				t.Fatal(err)
 			}
-			want = apierr.Unauthenticated
+			want = hosterr.Unauthenticated
 		case 5:
 			options.Bearer = func(context.Context) (string, error) { return "", providerFailure }
 		}

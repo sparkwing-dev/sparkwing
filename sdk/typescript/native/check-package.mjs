@@ -11,7 +11,7 @@ if (
   lock.version !== manifest.version ||
   lock.packages?.[""]?.version !== manifest.version
 ) {
-  throw new Error("Stamp the engine release version before packaging: npm version <engine-version> --no-git-tag-version");
+  throw new Error("Stamp the SDK release version before packaging: npm version <sdk-version> --no-git-tag-version");
 }
 
 for (const [arch, machine] of [

@@ -13,8 +13,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestProcessAuthority(t *testing.T) {
@@ -56,7 +56,7 @@ func TestProcessAuthority(t *testing.T) {
 	spec := capability.DelegateSpec{Parent: ref, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport}, Binding: binding, ExpiresAt: &expires}
 	masker := secrets.NewMasker()
 	writes := 0
-	service := &ProcessServices{RunID: "run", Job: nodeproto.JobSpec{ID: "job"}, Masks: NewMaskRegistry(masker), Summary: func(context.Context, capability.Authorized, nodeproto.SummaryRequest) error { writes++; return nil }}
+	service := &ProcessServices{RunID: "run", Job: nodewire.JobSpec{ID: "job"}, Masks: NewMaskRegistry(masker), Summary: func(context.Context, capability.Authorized, nodewire.SummaryRequest) error { writes++; return nil }}
 	issued, revoke, err := authorities.delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestProcessAuthority(t *testing.T) {
 					}
 					issued = append(issued, child)
 					grant := ProcessGrant{
-						Binding: nodeproto.ProcessBinding{RunID: in.Accepted.RunID, JobID: in.NodeID, Routes: nodeproto.ProcessRoutes{URL: "http://host", Bearer: child.Raw}},
+						Binding: nodewire.ProcessBinding{RunID: in.Accepted.RunID, JobID: in.NodeID, Routes: nodewire.ProcessRoutes{URL: "http://host", Bearer: child.Raw}},
 						Revoke: func() error {
 							for _, process := range processes {
 								if process.input.Attempt == in.Attempt && (process.closed || process.cleaned) {

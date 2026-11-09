@@ -10,8 +10,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func testGoSDKVersionAndHardCut(t *testing.T) {
@@ -42,7 +43,7 @@ func testGoSDKVersionAndHardCut(t *testing.T) {
 		}
 		additive["future_optional"] = map[string]any{"enabled": true}
 		sendProtocolProbe(t, process, additive)
-		var negotiated nodeproto.HelloResult
+		var negotiated nodewire.HelloResult
 		decodeProtocolProbe(t, protocolProbeReply(t, process, "hello"), &negotiated)
 
 		sendProtocolProbe(t, process, map[string]any{"id": "removed", "op": "run_node", "job": "probe"})
@@ -121,8 +122,8 @@ func testGoSDKCompileSurface(t *testing.T) {
 		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		command := exec.CommandContext(t.Context(), "go", "build", "-p", "4", "-o", filepath.Join(dir, "probe"), path)
-		command.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+		command := exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-o", filepath.Join(dir, "probe"), path)
+		command.Env = append(os.Environ(), "GOWORK=auto", "GOFLAGS=-trimpath -buildvcs=false")
 		output, err := command.CombinedOutput()
 		return string(output), err
 	}

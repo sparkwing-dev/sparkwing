@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"crypto/ed25519"
@@ -13,10 +15,10 @@ import (
 	"golang.org/x/mod/semver"
 	strictjson "sigs.k8s.io/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // VerifyIndex checks signature and policy invariants before accepting authority.
@@ -46,10 +48,33 @@ func validatePolicy(p VersionIndex) error {
 		if _, exists := versions[v.Version]; exists {
 			return fmt.Errorf("duplicate version %s", v.Version)
 		}
+		protocols := map[int]bool{}
+		for _, protocol := range v.AcceptedSDKProtocols {
+			if protocol < 1 || protocols[protocol] {
+				return fmt.Errorf("invalid accepted SDK protocols for %s", v.Version)
+			}
+			protocols[protocol] = true
+		}
 		versions[v.Version] = v
 	}
 	if _, ok := versions[p.Latest]; !ok {
 		return fmt.Errorf("latest release is absent from version index")
+	}
+	sdkSeen := map[string]bool{}
+	for _, sdk := range p.SDKs {
+		key := string(sdk.Language) + ":" + sdk.Version
+		if sdk.Language == "" || strings.TrimSpace(string(sdk.Language)) != string(sdk.Language) || !releaseVersion(sdk.Version) || sdk.Protocol < 1 || !validDigest(sdk.SourceDigest) || sdk.SourceDigest != strings.ToLower(sdk.SourceDigest) || sdkSeen[key] {
+			return fmt.Errorf("invalid or duplicate SDK entry %s", key)
+		}
+		sdkSeen[key] = true
+		if sdk.Revoked != nil {
+			if sdk.Revoked.Version != sdk.Version {
+				return fmt.Errorf("SDK revocation version differs from SDK entry")
+			}
+			if err := validateRestriction(*sdk.Revoked, VersionIndex{PublishedAt: p.PublishedAt}, false); err != nil {
+				return err
+			}
+		}
 	}
 	seen := map[string]bool{}
 	for _, restriction := range p.Revoked {
@@ -103,6 +128,16 @@ const PolicyRefreshHint = "Run `sparkwing update` to cache the verified version 
 func (v VerifiedIndex) Policy() VersionIndex {
 	p := v.index
 	p.Versions = append([]engineid.VersionInfo(nil), p.Versions...)
+	for i := range p.Versions {
+		p.Versions[i].AcceptedSDKProtocols = slices.Clone(p.Versions[i].AcceptedSDKProtocols)
+	}
+	p.SDKs = slices.Clone(p.SDKs)
+	for i := range p.SDKs {
+		if p.SDKs[i].Revoked != nil {
+			restriction := *p.SDKs[i].Revoked
+			p.SDKs[i].Revoked = &restriction
+		}
+	}
 	p.Revoked = append([]Restriction(nil), p.Revoked...)
 	return p
 }
@@ -145,7 +180,7 @@ func evaluate(index VerifiedIndex, version string, now time.Time, hint string) (
 		return nil, nil
 	}
 	if index.index.Format != VersionIndexFormat || len(index.signed.Body) == 0 {
-		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "No verified version policy is available", Hint: "Check connectivity to sparkwing.dev and retry."}
+		return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "No verified version policy is available", Hint: "Check connectivity to sparkwing.dev and retry."}
 	}
 	if !releaseVersion(version) {
 		return nil, invalid("invalid release version", "Use an exact release version.")
@@ -170,27 +205,27 @@ func evaluatePolicy(p VersionIndex, version string, now time.Time, hint string) 
 		}
 	}
 	if !found {
-		return nil, &apierr.Error{Code: apierr.VersionUnsupported, Message: "Release is not listed in the verified version index", Hint: hint, Details: map[string]any{"version": version}}
+		return nil, &apierr.Error{Code: hosterr.VersionUnsupported, Message: "Release is not listed in the verified version index", Hint: hint, Details: map[string]any{"version": version}}
 	}
 	for _, r := range p.Revoked {
 		if r.Version != version {
 			continue
 		}
 		if !now.Before(r.EffectiveAt) {
-			return nil, restrictionError(apierr.VersionRevoked, version, r, hint)
+			return nil, restrictionError(hosterr.VersionRevoked, version, r, hint)
 		}
 		notices = append(notices, restrictionNotice(version, r, hint))
 	}
 	if r := p.Minimum; r.Version != "" && semver.Compare(version, r.Version) < 0 {
 		if !now.Before(r.EffectiveAt) {
-			return nil, restrictionError(apierr.VersionUnsupported, version, r, hint)
+			return nil, restrictionError(hosterr.VersionUnsupported, version, r, hint)
 		}
 		notices = append(notices, restrictionNotice(version, r, hint))
 	}
 	return notices, nil
 }
 
-func restrictionError(code apierr.Code, version string, r Restriction, hint string) error {
+func restrictionError(code apierr.Code, version string, r Restriction, hint string) *apierr.Error {
 	return &apierr.Error{Code: code, Message: fmt.Sprintf("Release %s is blocked: %s", version, r.Reason), Hint: hint, Details: map[string]any{"version": version, "minimum": r.Version, "reason": r.Reason, "security": r.Security}}
 }
 
@@ -200,7 +235,7 @@ func restrictionNotice(version string, r Restriction, hint string) engineid.Noti
 }
 
 func integrity(err error) error {
-	return &apierr.Error{Code: apierr.IntegrityFailure, Message: err.Error(), Hint: "Retry with the official signed release; do not execute unverified bytes."}
+	return &apierr.Error{Code: hosterr.IntegrityFailure, Message: err.Error(), Hint: "Retry with the official signed release; do not execute unverified bytes."}
 }
 
 func decodeUniqueJSON(body []byte, out any) error {

@@ -11,10 +11,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 type sdkOperations struct{}
@@ -39,11 +40,11 @@ func planningFailure(value any) error {
 
 func sdkVersion() string {
 	if b, ok := debug.ReadBuildInfo(); ok {
-		if b.Main.Path == "github.com/sparkwing-dev/sparkwing" {
+		if b.Main.Path == "github.com/sparkwing-dev/sparkwing/sparkwing" {
 			return b.Main.Version
 		}
 		for _, d := range b.Deps {
-			if d.Path == "github.com/sparkwing-dev/sparkwing" {
+			if d.Path == "github.com/sparkwing-dev/sparkwing/sparkwing" {
 				return d.Version
 			}
 		}
@@ -192,7 +193,7 @@ func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Reque
 		result.Error = sdkError(apierr.SDKError, err.Error())
 		return result, nil
 	}
-	if int64(len(result.Output)) > limits.NodeOutputBytes {
+	if int64(len(result.Output)) > protolimits.NodeOutputBytes {
 		result.Output = nil
 		result.Error = sdkError(apierr.SDKError, "step output exceeds the output limit")
 		return result, nil
@@ -493,17 +494,6 @@ func (sdkOperations) Prepare(built any, request nodeproto.Request) error {
 
 func generatorClosure(job *JobNode, closure string) bool {
 	return slices.ContainsFunc(job.generators, func(generator *Generator) bool { return generator.id == closure })
-}
-
-type noHostSecrets struct{}
-
-func (noHostSecrets) ContainsSecret(string) bool { return false }
-
-func hostSecretMatcher(ctx context.Context) nodeproto.SecretMatcher {
-	if matcher, ok := sdkserve.ServicesFrom(ctx).(nodeproto.SecretMatcher); ok {
-		return matcher
-	}
-	return noHostSecrets{}
 }
 
 func referenceError(err error, latest bool) error {

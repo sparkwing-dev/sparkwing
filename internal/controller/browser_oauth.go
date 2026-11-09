@@ -1,12 +1,14 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"html/template"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: the flow cookie is what proves the browser finishing a sign-in is the one that started it; without it a
@@ -47,7 +49,7 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request, _ capa
 		return routepolicy.MissingEndpointPolicy()
 	}
 	if !setFlowCookie(w, oauthFlowCookieName, proof.flow, s.cookiesSecure()) {
-		return &apierr.Error{Code: apierr.Internal, Message: "could not start sign-in"}
+		return &apierr.Error{Code: hosterr.Internal, Message: "could not start sign-in"}
 	}
 	http.Redirect(w, r, proof.grant.AuthorizeURL, http.StatusSeeOther)
 	return nil
@@ -88,7 +90,7 @@ var signedInTmpl = template.Must(template.New("signed-in").Parse(`<!doctype html
 
 func (s *Server) continueIdentityLink(w http.ResponseWriter, r *http.Request, flow oauthFlow) error {
 	if !setFlowCookie(w, oauthFlowCookieName, flow, s.cookiesSecure()) {
-		return &apierr.Error{Code: apierr.Internal, Message: "could not continue linking"}
+		return &apierr.Error{Code: hosterr.Internal, Message: "could not continue linking"}
 	}
 	next := "/auth/" + flow.Provider + "/link/complete"
 	renderFlowPage(w, http.StatusOK, flowPage{

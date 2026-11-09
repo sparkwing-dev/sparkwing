@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -9,9 +11,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestBillingPagesShareHourlySessionLimitAndReplay(t *testing.T) {
@@ -42,7 +44,7 @@ func TestBillingPagesShareHourlySessionLimitAndReplay(t *testing.T) {
 	}
 	_, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "excess")
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.RateLimited || failure.Details["usage"] != checkoutSessionsPerHour || failure.Details["retry_after_ms"] != time.Hour.Milliseconds() {
+	if !errors.As(err, &failure) || failure.Code != hosterr.RateLimited || failure.Details["usage"] != checkoutSessionsPerHour || failure.Details["retry_after_ms"] != time.Hour.Milliseconds() {
 		t.Fatalf("hourly refusal = %#v, %v", failure, err)
 	}
 	for _, text := range []string{"Stripe Checkout Session", "20 per hour", "current usage is 20", "contact support"} {
@@ -81,7 +83,7 @@ func TestBillingPagesConcurrentSessionLimit(t *testing.T) {
 			accepted++
 		} else {
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.RateLimited {
+			if !errors.As(err, &failure) || failure.Code != hosterr.RateLimited {
 				t.Fatal(err)
 			}
 		}

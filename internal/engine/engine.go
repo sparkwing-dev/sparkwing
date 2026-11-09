@@ -1,4 +1,4 @@
-// Package engine selects the exact SDK-matched engine and owns verified machine caching.
+// Package engine selects permitted engines through signed SDK protocol declarations and owns verified machine caching.
 package engine
 
 import (
@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	GoModule           = "github.com/sparkwing-dev/sparkwing"
+	GoModule           = "github.com/sparkwing-dev/sparkwing/sparkwing"
+	HostModule         = "github.com/sparkwing-dev/sparkwing"
 	typeScriptPackage  = "@sparkwing/sdk"
 	UpgradeCommand     = "sparkwing pipeline upgrade"
 	VersionIndexFormat = 1
@@ -28,6 +29,7 @@ type Resolved struct {
 	Executable         string
 	Notices            []engineid.Notice
 	trustedKeys        []ed25519.PublicKey
+	verifiedIdentity   engineid.Identity
 	retainedExecutable string
 	retainedIdentity   engineid.Identity
 }
@@ -85,12 +87,22 @@ type Restriction struct {
 
 // VersionIndex is signed as the exact JSON body bytes. Versions is append-only by release identity.
 type VersionIndex struct {
+	SDKs        []SDKRelease           `json:"sdks"`
 	Format      int                    `json:"format"`
 	PublishedAt time.Time              `json:"published_at"`
 	Latest      string                 `json:"latest"`
 	Minimum     Restriction            `json:"minimum"`
 	Revoked     []Restriction          `json:"revoked"`
 	Versions    []engineid.VersionInfo `json:"versions"`
+}
+
+// SDKRelease binds an independently published SDK to its wire protocol.
+type SDKRelease struct {
+	Language     engineid.SDKKind `json:"language"`
+	Version      string           `json:"version"`
+	Protocol     int              `json:"protocol"`
+	SourceDigest string           `json:"source_digest"`
+	Revoked      *Restriction     `json:"revoked,omitempty"`
 }
 
 // SignedIndex keeps the exact bytes and detached signature for verification and persistent fallback.

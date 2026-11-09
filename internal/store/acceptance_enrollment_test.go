@@ -1,17 +1,19 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func checkStoreEnrolledClaims(t *testing.T) (err error) {
@@ -91,7 +93,7 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 		claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 		if repository == "foreign" {
 			var denied *apierr.Error
-			if !(errors.As(err, &denied) && denied.Code == apierr.Forbidden) || len(claim.Bearer) != 0 {
+			if !(errors.As(err, &denied) && denied.Code == hosterr.Forbidden) || len(claim.Bearer) != 0 {
 				return errors.Join(errors.New("enrollment permitted another repository"), err)
 			}
 			continue

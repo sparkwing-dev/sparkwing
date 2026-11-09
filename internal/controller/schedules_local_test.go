@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -20,7 +22,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -33,6 +34,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func FuzzLocalSchedulesRequireVerifiedTransportPeer(f *testing.F) {
@@ -44,7 +46,7 @@ func FuzzLocalSchedulesRequireVerifiedTransportPeer(f *testing.F) {
 		authorized := capability.Authorized{Target: capability.Target{Team: string(store.DefaultTeam)}, Principal: capability.Principal{Class: capability.CredentialPeer, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectLocal, ID: subject}}}}
 		_, err := new(Server).localScheduleService(request, authorized)
 		var canonical *apierr.Error
-		if !errors.As(err, &canonical) || canonical.Code != apierr.Forbidden {
+		if !errors.As(err, &canonical) || canonical.Code != hosterr.Forbidden {
 			t.Fatal("request material substituted for kernel peer identity")
 		}
 	})

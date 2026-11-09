@@ -12,9 +12,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type corpus struct {
@@ -30,14 +31,14 @@ type corpusSession struct {
 }
 
 type corpusStep struct {
-	Op         nodeproto.Op `json:"op"`
-	ID         string       `json:"id,omitempty"`
-	Kind       string       `json:"kind,omitempty"`
-	Code       string       `json:"code,omitempty"`
-	Contains   string       `json:"contains,omitempty"`
-	Name       string       `json:"name,omitempty"`
-	PlanVector string       `json:"plan_vector,omitempty"`
-	Job        string       `json:"job,omitempty"`
+	Op         nodewire.Op `json:"op"`
+	ID         string      `json:"id,omitempty"`
+	Kind       string      `json:"kind,omitempty"`
+	Code       string      `json:"code,omitempty"`
+	Contains   string      `json:"contains,omitempty"`
+	Name       string      `json:"name,omitempty"`
+	PlanVector string      `json:"plan_vector,omitempty"`
+	Job        string      `json:"job,omitempty"`
 }
 
 func TestGoSDKConformsV2(t *testing.T) {
@@ -45,7 +46,7 @@ func TestGoSDKConformsV2(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	build := exec.CommandContext(t.Context(), "go", "build", "-p", "4", "-o", bin, "./testdata/gofixture")
+	build := exec.CommandContext(t.Context(), "go", "build", "-p", "2", "-o", bin, "./testdata/gofixture")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build fixture: %v\n%s", err, output)
 	}
@@ -64,27 +65,28 @@ func TestGoSDKConformsV2(t *testing.T) {
 	for _, session := range cases.Sessions {
 		t.Run(session.Name, func(t *testing.T) {
 			p := startFixture(t, bin)
-			protocol := nodeproto.Version
+			p.recording = NewRecording(t, "go", session.Name)
+			protocol := nodewire.HelloProtocol
 			if session.Protocol != 0 {
 				protocol = session.Protocol
 			}
-			hello := nodeproto.Request{
-				ID: "hello", Op: nodeproto.OpHello, Protocol: protocol,
-				Engine: &nodeproto.EngineIdentity{Version: "fixture"},
-				Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+			hello := nodewire.Request{
+				ID: "hello", Op: nodewire.OpHello, Protocol: protocol,
+				Engine: &nodewire.EngineIdentity{Version: "fixture"},
+				Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 			}
 			if session.Binding {
-				hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "task", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "secret"}}
+				hello.Binding = &nodewire.ProcessBinding{RunID: "r", JobID: "task", Routes: nodewire.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "secret"}}
 				if session.BindingJob != "" {
 					hello.Binding.JobID = session.BindingJob
 				}
 			}
 			p.send(t, hello)
 			frame := p.reply(t)
-			if protocol == nodeproto.Version && (!frame.OK || frame.Result == nil) {
+			if protocol == nodewire.HelloProtocol && (!frame.OK || frame.Result == nil) {
 				t.Fatalf("hello: %+v", frame)
 			}
-			if protocol != nodeproto.Version && (frame.Error == nil || frame.Error.Code != apierr.ProtocolMismatch) {
+			if protocol != nodewire.HelloProtocol && (frame.Error == nil || frame.Error.Code != apierr.ProtocolMismatch) {
 				t.Fatalf("mismatch: %+v", frame)
 			}
 			for i, step := range session.Requests {
@@ -103,28 +105,28 @@ func TestGoSDKConformsV2(t *testing.T) {
 				if !got.OK {
 					t.Fatalf("%s: %+v", step.Op, got)
 				}
-				if step.Op == nodeproto.OpPlan {
+				if step.Op == nodewire.OpPlan {
 					p.validate(t, p.documents, "PlanDoc", got.Result)
 					if bytes.Contains(got.Result, []byte(`"protocol"`)) || bytes.Contains(got.Result, []byte(`"spec_hash"`)) {
 						t.Fatalf("plan carries host fields: %s", got.Result)
 					}
-					var plan nodeproto.PlanDoc
+					var plan nodewire.PlanDoc
 					if err := got.Decode(&plan); err != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "task" {
 						t.Fatalf("plan: %+v, %v", plan, err)
 					}
 					p.plan = plan
 				}
-				if step.Op == nodeproto.OpDescribe {
+				if step.Op == nodewire.OpDescribe {
 					p.validate(t, p.documents, "DescribeDoc", got.Result)
 				}
-				if step.Op == nodeproto.OpRunStep {
+				if step.Op == nodewire.OpRunStep {
 					p.validate(t, p.wire, "RunResult", got.Result)
-					var result nodeproto.RunResult
+					var result nodewire.RunResult
 					if err := got.Decode(&result); err != nil {
 						t.Fatal(err)
 					}
 				}
-				if step.Op == nodeproto.OpEval {
+				if step.Op == nodewire.OpEval {
 					p.validate(t, p.wire, "EvalResult", got.Result)
 					p.checkEval(t, got, step, vectors)
 				}
@@ -137,14 +139,14 @@ func TestGoSDKConformsV2(t *testing.T) {
 	}
 }
 
-func (p *fixtureProcess) checkEval(t *testing.T, reply nodeproto.Reply, step corpusStep, vectors map[string]declarationVector) {
+func (p *fixtureProcess) checkEval(t *testing.T, reply nodewire.Reply, step corpusStep, vectors map[string]declarationVector) {
 	t.Helper()
-	var result nodeproto.EvalResult
+	var result nodewire.EvalResult
 	if err := reply.Decode(&result); err != nil {
 		t.Fatal(err)
 	}
 	kind := map[string]string{"skip": "skip_if", "memo": "memo_key", "before": "before_run", "after": "after_run", "verify": "verify", "generate": "generate"}[step.Kind]
-	if err := result.ValidateValue(kind); err != nil {
+	if err := nodeproto.ValidateEvalValue(result, kind); err != nil {
 		t.Fatal(err)
 	}
 	if step.PlanVector == "" {
@@ -171,8 +173,9 @@ func (p *fixtureProcess) checkEval(t *testing.T, reply nodeproto.Reply, step cor
 }
 
 type fixtureProcess struct {
+	recording *Recording
 	process   *acceptance.GoSDKProcess
-	plan      nodeproto.PlanDoc
+	plan      nodewire.PlanDoc
 	wire      *Schema
 	documents *Schema
 }
@@ -197,14 +200,15 @@ func startFixture(t *testing.T, bin string) *fixtureProcess {
 	return p
 }
 
-func (p *fixtureProcess) send(t *testing.T, req nodeproto.Request) {
+func (p *fixtureProcess) send(t *testing.T, req nodewire.Request) {
 	t.Helper()
+	p.recording.Request(t, req)
 	if err := p.process.Send(req); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (p *fixtureProcess) reply(t *testing.T) nodeproto.Reply {
+func (p *fixtureProcess) reply(t *testing.T) nodewire.Reply {
 	t.Helper()
 	for {
 		line, err := p.process.NextFrame()
@@ -212,6 +216,7 @@ func (p *fixtureProcess) reply(t *testing.T) nodeproto.Reply {
 			p.process.Close()
 			t.Fatalf("frame read: %v; stderr: %s", err, p.process.Stderr())
 		}
+		p.recording.Frame(t, line)
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(line, &fields); err != nil {
 			t.Fatal(err)
@@ -221,7 +226,7 @@ func (p *fixtureProcess) reply(t *testing.T) nodeproto.Reply {
 			continue
 		}
 		p.validate(t, p.wire, "Reply", line)
-		var reply nodeproto.Reply
+		var reply nodewire.Reply
 		if err := json.Unmarshal(line, &reply); err != nil {
 			t.Fatal(err)
 		}
@@ -249,27 +254,27 @@ func (p *fixtureProcess) validate(t *testing.T, schema *Schema, definition strin
 	}
 }
 
-func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodeproto.Request {
+func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodewire.Request {
 	id := step.ID
 	if id == "" {
 		id = fmt.Sprintf("%d", index+1)
 	}
-	r := nodeproto.Request{ID: id, Op: step.Op}
+	r := nodewire.Request{ID: id, Op: step.Op}
 	switch step.Op {
-	case nodeproto.OpPlan:
+	case nodewire.OpPlan:
 		r.Pipeline = "conformance"
 		r.Args = map[string]string{"name": "demo"}
 		if step.Name != "" {
 			r.Args["name"] = step.Name
 		}
-		r.Run = &nodeproto.RunContext{RunID: "r", Pipeline: "conformance"}
-	case nodeproto.OpRunStep:
+		r.Run = &nodewire.RunContext{RunID: "r", Pipeline: "conformance"}
+	case nodewire.OpRunStep:
 		r.Job, r.Step, r.Attempt = "task", "run", 1
 		r.Settled = []string{}
 		if step.Job != "" {
 			r.Job = step.Job
 		}
-	case nodeproto.OpEval:
+	case nodewire.OpEval:
 		if len(p.plan.Jobs) != 0 {
 			switch step.Kind {
 			case "skip":
@@ -287,7 +292,7 @@ func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodeproto.Reque
 				r.Input = json.RawMessage(`{"outcome":"success"}`)
 			}
 		}
-	case nodeproto.OpCancel:
+	case nodewire.OpCancel:
 		r.Job, r.Step = "task", "run"
 	}
 	return r

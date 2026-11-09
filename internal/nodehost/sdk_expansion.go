@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func (h *sdkCode) generate(ctx context.Context, session *executorSession, code NodeInput, job nodeproto.JobSpec, output json.RawMessage) (json.RawMessage, error) {
+func (h *sdkCode) generate(ctx context.Context, session *executorSession, code NodeInput, job nodewire.JobSpec, output json.RawMessage) (json.RawMessage, error) {
 	if err := session.prepareArguments(job); err != nil {
 		return nil, err
 	}
@@ -34,8 +35,8 @@ func (h *sdkCode) generate(ctx context.Context, session *executorSession, code N
 		}
 		for _, raw := range group {
 			var member struct {
-				Groups    []string                        `json:"groups"`
-				Arguments []nodeproto.ArgumentDescription `json:"arguments"`
+				Groups    []string                       `json:"groups"`
+				Arguments []nodewire.ArgumentDescription `json:"arguments"`
 			}
 			if err := json.Unmarshal(raw, &member); err != nil || !executorContains(member.Groups, id) {
 				return nil, executorError(apierr.PlanInvalid, "generated job does not belong to its evaluated generator")

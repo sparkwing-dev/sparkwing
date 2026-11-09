@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) {
@@ -40,10 +41,10 @@ func nativeExecutorMemoRuns(t *testing.T, repo runspec.RepoKey) {
 	database := openStore(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ResultBlobs: storage.BlobManifests{Objects: objects}}, nil
 	}))
-	job := nodeproto.JobSpec{ID: "output", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Memo: &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "parts", Parts: []any{"same-key"}}}}
-	job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "memo-job", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}
+	job := nodewire.JobSpec{ID: "output", Steps: []nodewire.StepSpec{{ID: "body"}}, ResultStep: "body", Memo: &nodewire.MemoSpec{Input: &nodewire.MemoInput{Kind: "parts", Parts: []any{"same-key"}}}}
+	job.Concurrency = []nodewire.ConcurrencySpec{{Group: "memo-job", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}
 	job.Artifacts = []string{"artifact.txt"}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}
 	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: repo}, SHA: strings.Repeat("a", 40)}}
 	if strings.HasPrefix(string(repo), "local:") {
 		request.Origin = runspec.OriginLocal
@@ -123,8 +124,8 @@ func nativeExecutorMemoRuns(t *testing.T, repo runspec.RepoKey) {
 					t.Fatalf("memo entered before capacity: %+v error=%v", capacity, err)
 				}
 				started = append(started, input)
-				return &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"memo-output"`)}, onRun: func(context.Context) { bodies++ }, answer: func(_ context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpEval {
+				return &executorProcess{plan: plan, result: nodewire.RunResult{Outcome: "success", Output: json.RawMessage(`"memo-output"`)}, onRun: func(context.Context) { bodies++ }, answer: func(_ context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpEval {
 						t.Fatal("built-in recipe invoked author callback")
 					}
 					return nil, nil

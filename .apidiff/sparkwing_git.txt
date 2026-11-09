@@ -1,0 +1,19 @@
+# sparkwing/git
+
+func ChangedFiles(ctx context.Context, repoDir, since string) ([]string, error)
+func Clone(ctx context.Context, url, destDir string, opts ...CloneOption) error
+type CloneOption func(*cloneConfig)
+func CurrentBranch(ctx context.Context, repoDir string) (string, error)
+func CurrentSHA(ctx context.Context, repoDir string) (string, error)
+func DefaultBranch(ctx context.Context, repoDir string) (string, error)
+var ErrTagAlreadyExists = errors.New("git: tag already exists on remote")
+func Fetch(ctx context.Context, repoDir string) error
+func FilesetHash(ctx context.Context, repoDir string) (string, error)
+func IsDirty(ctx context.Context, repoDir string) (bool, error)
+func LatestTag(ctx context.Context, repoDir, prefix string) (string, error)
+func PushTag(ctx context.Context, repoDir, tag, message string) error
+func RemoteOriginURL(ctx context.Context, repoDir string) (string, error)
+func ShortCommit(ctx context.Context, repoDir string) (string, error)
+func TagExistsOnRemote(ctx context.Context, repoDir, tag string) (bool, error)
+func TagsAtHead(ctx context.Context, repoDir string) ([]string, error)
+func WithDepth(n int) CloneOption

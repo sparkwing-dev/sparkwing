@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/json"
@@ -10,14 +12,14 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
@@ -26,7 +28,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := &serverFixture{}
-	e, tenant, h, raw, body := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "work"}}}}}, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
+	e, tenant, h, raw, body := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "a", Steps: []nodewire.StepSpec{{ID: "work"}}}}}, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
 	for _, secret := range []store.Secret{{Name: "TEAM_ONLY", Value: "private-team", Masked: true}, {Name: "ELSEWHERE", Value: "private-elsewhere", Repo: "gh:1", RepoName: "acme/repo", Pipeline: "release", Masked: true}, {Name: "DEPLOY_TOKEN", Value: "private-outsider", Repo: "gh:2", RepoName: "acme/other", Pipeline: "ci", Masked: true}} {
 		sealed, err := cipher.SealBound(secrets.PurposeSecret, string(tenant.Team()), secret.Name, secret.SealScope(), secret.Shared, secret.Masked, secret.Value)
 		if err != nil {
@@ -47,7 +49,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/plan", string(body), http.StatusUnprocessableEntity)
-	var failure apierr.Envelope
+	var failure hosterr.Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != apierr.PlanInvalid {
 		t.Fatalf("preflight error=%s: %v", w.Body, err)
 	}

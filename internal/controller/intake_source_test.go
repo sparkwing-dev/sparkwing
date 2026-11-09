@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -16,7 +18,6 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -28,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type intakeGitHubTransport func(*http.Request) (*http.Response, error)
@@ -209,7 +211,7 @@ func TestIntakeSourceProofCannotBeChangedProperty(t *testing.T) {
 	refused := func(ctx context.Context, request runspec.Request) bool {
 		_, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: p.Authority, Request: request})
 		var failure *apierr.Error
-		return errors.As(err, &failure) && failure.Code == apierr.Forbidden
+		return errors.As(err, &failure) && failure.Code == hosterr.Forbidden
 	}
 	if !refused(t.Context(), input) {
 		t.Fatal("GitHub intake accepted an unverified source")

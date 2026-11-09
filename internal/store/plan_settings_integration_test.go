@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func sharedSettingsPlan(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcceptance) {
+func sharedSettingsPlan(t *testing.T, plan nodewire.PlanDoc) (*Tenant, PlanAcceptance) {
 	t.Helper()
 	tenant, in, now := intakeFixture(t)
 	in.Request.Options.OwnerExecutionTimeout.Origin = runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "owner_execution_timeout"}
@@ -44,7 +44,7 @@ func sharedSettingsPlan(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcce
 
 func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
 	timeout := int64(1234)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: &timeout, Requires: []string{"linux"}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", TimeoutMS: &timeout, Requires: []string{"linux"}}}}
 	tenant, request := sharedSettingsPlan(t, plan)
 	accepted, err := tenant.AcceptPlan(t.Context(), request)
 	if err != nil {
@@ -67,7 +67,7 @@ func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
 }
 
 func TestAcceptanceRerunsSharedSettingsBeforePersistence(t *testing.T) {
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}}
 	tenant, request := sharedSettingsPlan(t, plan)
 	invalidTimeout := int64(-1)
 	plan.Jobs[0].TimeoutMS = &invalidTimeout
@@ -90,7 +90,7 @@ func TestAcceptancePersistsConcurrencyWinnersFromResolutionContract(t *testing.T
 	tenant, request, _ := planFixture(t, runspec.DispatchHost)
 	want := []runspec.Concurrency{{Group: "deploy", Scope: "global", Capacity: 1, Cost: 1, OnLimit: "queue"}}
 	request.Seal.Plan = []byte(`{"jobs":[{"id":"job","steps":[{"id":"step"}],"concurrency":[{"group":"deploy","capacity":1,"cost":1,"scope":"global","on_limit":"queue"}]}]}`)
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(request.Seal.Plan, &plan); err != nil {
 		t.Fatal(err)
 	}

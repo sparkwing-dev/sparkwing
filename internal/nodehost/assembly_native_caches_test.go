@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeServicesSavesAndRestoresDeclaredCache(t *testing.T) {
@@ -55,11 +55,11 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 	backend := &nativeCacheBackend{}
 	input.Storage.Bytes, input.Storage.Records = backend, backend
 	directory := filepath.Join(input.Entry.Directory, "modules")
-	cache := nodeproto.CacheSpec{Name: name, Path: "modules", KeyFiles: []string{"result.txt"}}
-	job := nodeproto.JobSpec{ID: "job", Caches: []nodeproto.CacheSpec{cache}}
+	cache := nodewire.CacheSpec{Name: name, Path: "modules", KeyFiles: []string{"result.txt"}}
+	job := nodewire.JobSpec{ID: "job", Caches: []nodewire.CacheSpec{cache}}
 	if resolve {
 		job.Caches[0].Resolver, job.Caches[0].Path = "go-modules", ""
-		job.Env = map[string]nodeproto.EnvValue{"GOMODCACHE": {Value: directory}}
+		job.Env = map[string]nodewire.EnvValue{"GOMODCACHE": {Value: directory}}
 		body, err := json.Marshal(job)
 		if err != nil {
 			t.Fatal(err)

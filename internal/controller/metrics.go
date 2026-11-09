@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -7,12 +9,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (s *Server) metricEndpoints() []controllerwire.Endpoint {
@@ -73,7 +75,7 @@ type metricsPage struct {
 	NextCursor string         `json:"next_cursor,omitempty"`
 }
 
-var errCloudMetricsUnavailable = &apierr.Error{Code: apierr.Unavailable, Message: "metrics unavailable on Cloud runners: no resource samples were recorded for this job"}
+var errCloudMetricsUnavailable = &apierr.Error{Code: hosterr.Unavailable, Message: "metrics unavailable on Cloud runners: no resource samples were recorded for this job"}
 
 func metricsPageRequest(r *http.Request) (after time.Time, limit int, err error) {
 	limit = defaultMetricPage
@@ -148,7 +150,7 @@ func (s *Server) handleGetJobMetrics(w http.ResponseWriter, r *http.Request, a c
 
 func metricError(err error) error {
 	if errors.Is(err, store.ErrNodeMetricLimit) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: err.Error()}
+		return &apierr.Error{Code: hosterr.RateLimited, Message: err.Error()}
 	}
 	return engineLookupError(err)
 }

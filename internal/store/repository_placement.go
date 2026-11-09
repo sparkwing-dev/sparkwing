@@ -7,11 +7,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: the list only narrows where jobs run, so it is sealed whatever the provenance. A child takes the list of
@@ -77,7 +77,7 @@ func checkJobPlacement(policy *runspec.RepositoryPlacement, row runstate.NodeRow
 	if len(tiers) == 0 {
 		return nil
 	}
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	if err := json.Unmarshal(row.Spec, &job); err != nil {
 		return err
 	}

@@ -1,13 +1,15 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type adapterTenant struct {
@@ -50,7 +52,7 @@ func TestUnboundDataAuthorityRefusesMissingPolicy(t *testing.T) {
 	server := New(nil, nil).WithDataObjects(nil)
 	_, err := server.dataController.authorityTenant(t.Context(), blob.Authority{CapabilityRef: "missing"})
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.PolicyMissing {
+	if !errors.As(err, &failure) || failure.Code != hosterr.PolicyMissing {
 		t.Fatalf("missing authority: %v", err)
 	}
 }

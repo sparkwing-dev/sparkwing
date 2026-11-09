@@ -11,7 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/mod/modfile"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
@@ -153,7 +156,7 @@ func runInstallToGreen(t *testing.T, options installToGreenOptions) installToGre
 	argv := append([]string{filepath.Join(root, "bin", "install-to-green.sh"), "--binary", stub}, options.args...)
 	cmd := exec.Command("bash", argv...)
 	cmd.Dir = root
-	cmd.Env = append(testgit.Env(os.Environ()),
+	cmd.Env = append(gitcontrol.Env(os.Environ()),
 		"INSTALL_TO_GREEN_TRACE="+trace,
 		"INSTALL_TO_GREEN_STUB_RUN="+options.stubRun,
 		"INSTALL_TO_GREEN_STUB_SCAFFOLD="+options.stubScaffold,
@@ -393,7 +396,7 @@ func operatorRepository(t *testing.T) string {
 		},
 	} {
 		cmd := testgit.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = testgit.Env(os.Environ())
+		cmd.Env = gitcontrol.Env(os.Environ())
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git fixture: %v %s", err, out)
 		}
@@ -404,7 +407,7 @@ func operatorRepository(t *testing.T) string {
 func gitCommitCount(t *testing.T, repo string) string {
 	t.Helper()
 	cmd := testgit.Command("git", "-C", repo, "rev-list", "--count", "HEAD")
-	cmd.Env = testgit.Env(os.Environ())
+	cmd.Env = gitcontrol.Env(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("count commits in %s: %v", repo, err)
@@ -558,13 +561,37 @@ func TestInstallToGreenBuildUsesPublicScaffoldAndCandidateSDK(t *testing.T) {
 		t.Skip("slow: builds the CLI, downloads the published SDK, then compiles the candidate pipeline")
 	}
 	root := installToGreenRoot(t)
-	cmd := exec.Command("bash", filepath.Join(root, "bin", "install-to-green.sh"), "--build", "--output", "json")
+	cmd := exec.Command("bash", filepath.Join(root, "bin", "install-to-green.sh"), "--build", "--output", "json", "--keep")
 	cmd.Dir = root
-	cmd.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "XDG_CONFIG_HOME="+filepath.Join(t.TempDir(), "config"))
+	cmd.Env = append(gitcontrol.Env(os.Environ()), "GOWORK=off", "XDG_CONFIG_HOME="+filepath.Join(t.TempDir(), "config"))
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("candidate install-to-green failed: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	kept := regexp.MustCompile(`install-to-green: kept ([^\n]+)`).FindStringSubmatch(stderr.String())
+	if kept == nil {
+		t.Fatal("candidate did not retain the generated pipeline")
+	}
+	t.Cleanup(func() {
+		if out, err := exec.Command("chmod", "-R", "u+w", kept[1]).CombinedOutput(); err != nil {
+			t.Errorf("make retained module cache writable: %v: %s", err, out)
+		}
+		if err := os.RemoveAll(kept[1]); err != nil {
+			t.Error(err)
+		}
+	})
+	manifest := filepath.Join(kept[1], "demo", ".sparkwing", "go.mod")
+	body, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module, err := modfile.Parse(manifest, body, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if module.Module.Mod.Path != "demo" || len(module.Require) != 1 || module.Require[0].Mod.Path != "github.com/sparkwing-dev/sparkwing/sparkwing" {
+		t.Fatalf("candidate pipeline does not require only the SDK module: %s", body)
 	}
 	var report installToGreenReport
 	if err := json.Unmarshal([]byte(stdout.String()), &report); err != nil {
@@ -594,7 +621,7 @@ func TestInstallToGreenBuildSelectsAStableSDKVersion(t *testing.T) {
 			root := t.TempDir()
 			for name, content := range map[string]string{
 				"bin/install-to-green.sh": string(script),
-				".sparkwing/go.mod":       "module pipeline\n\nrequire github.com/sparkwing-dev/sparkwing " + tt.pin + "\n",
+				".sparkwing/go.mod":       "module pipeline\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing " + tt.pin + "\n",
 			} {
 				path := filepath.Join(root, name)
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -609,20 +636,20 @@ func TestInstallToGreenBuildSelectsAStableSDKVersion(t *testing.T) {
 				{"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "fixture"},
 			} {
 				cmd := testgit.Command("git", append([]string{"-C", root}, args...)...)
-				cmd.Env = testgit.Env(os.Environ())
+				cmd.Env = gitcontrol.Env(os.Environ())
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("git fixture: %v\n%s", err, out)
 				}
 			}
 			if tt.tag != "" {
 				cmd := testgit.Command("git", "-C", root, "tag", tt.tag)
-				cmd.Env = testgit.Env(os.Environ())
+				cmd.Env = gitcontrol.Env(os.Environ())
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("git tag: %v\n%s", err, out)
 				}
 			}
 			cmd := exec.Command("bash", filepath.Join(root, "bin", "install-to-green.sh"), "--build", "--keep")
-			cmd.Env = append(testgit.Env(os.Environ()), "GOWORK=off")
+			cmd.Env = append(gitcontrol.Env(os.Environ()), "GOWORK=off")
 			out, err := cmd.CombinedOutput()
 			kept := regexp.MustCompile(`install-to-green: kept ([^\n]+)`).FindStringSubmatch(string(out))
 			if kept == nil {
@@ -704,7 +731,7 @@ func TestInstallToGreenTidiesSoACandidateDependencyResolves(t *testing.T) {
 	run := func(dir string, args ...string) (string, error) {
 		cmd := exec.Command(goBinary, args...)
 		cmd.Dir = dir
-		cmd.Env = append(testgit.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+		cmd.Env = append(gitcontrol.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false")
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}

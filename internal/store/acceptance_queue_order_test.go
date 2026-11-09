@@ -7,13 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestStoreQueueOrder(t *testing.T) {
@@ -33,14 +32,14 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	t.Helper()
 	ctx := t.Context()
 	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
-	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodewire.PlanDoc) {
 		input.Request.Git.Ref, input.Request.Git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
 		input.Request.Git.Repository.Key = "gh:42"
 		input.FetchedRepository.ID = 42
-		doc.Jobs = []nodeproto.JobSpec{
-			{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-			{ID: "z-preferred", Prefers: []string{"gpu"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-			{ID: "a-blocked", Requires: []string{"unavailable"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		doc.Jobs = []nodewire.JobSpec{
+			{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}},
+			{ID: "z-preferred", Prefers: []string{"gpu"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+			{ID: "a-blocked", Requires: []string{"unavailable"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
 		}
 	})
 	if err != nil {

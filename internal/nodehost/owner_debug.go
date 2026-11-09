@@ -7,10 +7,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 const defaultDebugPauseTimeout = 30 * time.Minute
@@ -42,7 +42,7 @@ func (h *OwnerHost) debugBoundary(ctx context.Context, input RunInput, accepted 
 
 func debugBoundary(input RunInput, accepted AcceptedRun, row runstate.NodeRow, before bool) (*DebugBoundary, error) {
 	var spec runspec.Spec
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	if json.Unmarshal(accepted.Spec, &spec) != nil {
 		return nil, errors.New("debug boundary requires accepted run and job declarations")
 	}

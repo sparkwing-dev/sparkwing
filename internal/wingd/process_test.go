@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
 )
 
 var (

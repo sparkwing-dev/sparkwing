@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func FuzzNativeCleanupMasksAcrossWriteBoundaries(f *testing.F) {
@@ -26,7 +26,7 @@ func FuzzNativeCleanupMasksAcrossWriteBoundaries(f *testing.F) {
 			content = base64.StdEncoding.EncodeToString([]byte(secret))
 		}
 		var messages []string
-		logs := &planningLogs{known: true, masker: masks, sink: func(_ context.Context, record nodeproto.FrameLog) error {
+		logs := &planningLogs{known: true, masker: masks, sink: func(_ context.Context, record nodewire.FrameLog) error {
 			messages = append(messages, record.Message)
 			return nil
 		}}

@@ -29,7 +29,7 @@ func main(){
  }
  if len(os.Args)>1 && os.Args[1]=="env" { if len(os.Args)>2 && os.Args[2]=="-json" { fmt.Print("{\"GOVERSION\":\"go1.26.9\"}") } else { fmt.Print("auto\ngo1.26.9\noff\n") };return }
  if len(os.Args)>1 && os.Args[1]=="mod" { return }
- if len(os.Args)>1 && os.Args[1]=="list" { fmt.Print("{\"Path\":\"github.com/sparkwing-dev/sparkwing\",\"Version\":\"v0.20.0\"}");return }
+ if len(os.Args)>1 && os.Args[1]=="list" { fmt.Print("{\"Path\":\"github.com/sparkwing-dev/sparkwing/sparkwing\",\"Version\":\"v0.20.0\"}");return }
  for i,arg:=range os.Args { if arg=="-o" && i+1<len(os.Args) { if os.WriteFile(os.Args[i+1],[]byte("locally-built-fixture"),0700)!=nil { os.Exit(12) };fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));return } }
  os.Exit(13)
 }`
@@ -57,7 +57,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			if err := Run(t.Context(), "v0.20.0", bytes.NewReader(body), &stdout, &stderr); err != nil {
+			if err := Run(t.Context(), bytes.NewReader(body), &stdout, &stderr); err != nil {
 				t.Fatal(err)
 			}
 			var command engine.SDKCommand
@@ -79,7 +79,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := Run(t.Context(), "v0.20.0", bytes.NewReader(body), &stdout, &stderr); err != nil {
+				if err := Run(t.Context(), bytes.NewReader(body), &stdout, &stderr); err != nil {
 					t.Fatalf("local binary cache: %v", err)
 				}
 				if err := json.Unmarshal(stdout.Bytes(), &command); err != nil || first == command.Command[0] {
@@ -88,13 +88,9 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 			}
 			for _, input := range [][]byte{[]byte(`{"directory":"a","directory":"b"}`), []byte(`{"directory":"a","Directory":"b","sdk":"go"}`), []byte(`{"sdk":"go","SDK":"typescript"}`), []byte(`{"environment":["TOKEN=credential"]}`), append(bytes.Clone(body), []byte(" {}")...)} {
 				stdout.Reset()
-				if err := Run(t.Context(), "v0.20.0", bytes.NewReader(input), &stdout, &stderr); err == nil || stdout.Len() != 0 {
+				if err := Run(t.Context(), bytes.NewReader(input), &stdout, &stderr); err == nil || stdout.Len() != 0 {
 					t.Fatalf("invalid installation returned a command: %v", err)
 				}
-			}
-			stdout.Reset()
-			if err := Run(t.Context(), "v0.10.0", bytes.NewReader(body), &stdout, &stderr); err == nil || stdout.Len() != 0 {
-				t.Fatalf("wrong engine version returned a command: %v", err)
 			}
 		})
 	}

@@ -1,16 +1,18 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"net/http"
 	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func resolveEngineController(ctx context.Context, profileName string) (controllerwire.Controller, func(), error) {
@@ -66,7 +68,7 @@ type controllerSocketTransport struct {
 
 func controllerSocketOptions(socket string) (client.EngineOptions, func(), error) {
 	if !filepath.IsAbs(socket) {
-		return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller returned a non-absolute API socket"}
+		return client.EngineOptions{}, nil, &apierr.Error{Code: hosterr.Unavailable, Message: "local controller returned a non-absolute API socket"}
 	}
 	socket = filepath.Clean(socket)
 	hc := wingdclient.NewAPIClient(socket)
@@ -80,7 +82,7 @@ func localControllerOptions(ctx context.Context, home string, query func(context
 		return client.EngineOptions{}, nil, err
 	}
 	if !filepath.IsAbs(home) {
-		return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller home must be absolute"}
+		return client.EngineOptions{}, nil, &apierr.Error{Code: hosterr.Unavailable, Message: "local controller home must be absolute"}
 	}
 	status, err := query(ctx, home)
 	if err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
@@ -96,7 +98,7 @@ func localControllerOptions(ctx context.Context, home string, query func(context
 		return client.EngineOptions{}, nil, err
 	}
 	if !status.Running || status.PID <= 0 || status.Version == "" {
-		return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller has not established API readiness"}
+		return client.EngineOptions{}, nil, &apierr.Error{Code: hosterr.Unavailable, Message: "local controller has not established API readiness"}
 	}
 	admission, err := wingd.EnsureSocketPath(home)
 	socket := wingd.APISocketBeside(admission)

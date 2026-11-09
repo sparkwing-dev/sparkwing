@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -10,15 +12,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // OwnerStore is the transactional boundary used by every run-host placement.
@@ -41,7 +43,7 @@ type OwnerPlanning struct {
 	Resolved     runspec.Resolved
 	Planning     PlanningInput
 	Plan         func(context.Context) (json.RawMessage, error)
-	Resolve      func(nodeproto.PlanDoc) (runspec.Resolved, error)
+	Resolve      func(nodewire.PlanDoc) (runspec.Resolved, error)
 }
 
 // ownerLayerResult proposes a store transition that ends this scheduling pass.
@@ -364,7 +366,7 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 		if !errors.As(cause, &cancelled) {
 			return errors.Join(failure, cause)
 		}
-		reason = string(apierr.ReasonCancelled)
+		reason = string(hosterr.ReasonCancelled)
 		message = "cancellation requested"
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)

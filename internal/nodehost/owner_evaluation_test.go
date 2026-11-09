@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -11,13 +13,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, evaluationDependencies, *executorProcess) {
@@ -61,19 +64,19 @@ func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
 		t.Run(string(outcome), func(t *testing.T) {
 			in, st, deps, p := evaluationFixture(t)
 			st.row.Outcome = outcome
-			p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-				if r.Op != nodeproto.OpEval {
+			p.answer = func(_ context.Context, r nodewire.Request) (any, error) {
+				if r.Op != nodewire.OpEval {
 					return nil, nil
 				}
 				if string(r.Input) != `{"count":2}` || r.Job != "" || r.Attempt != 0 {
 					t.Fatalf("eval = %+v", r)
 				}
-				jobs := []nodeproto.JobSpec{}
+				jobs := []nodewire.JobSpec{}
 				if r.Closure != "empty" {
-					jobs = append(jobs, nodeproto.JobSpec{ID: r.Closure, Groups: []string{r.Closure}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+					jobs = append(jobs, nodewire.JobSpec{ID: r.Closure, Groups: []string{r.Closure}, Steps: []nodewire.StepSpec{{ID: "body"}}})
 				}
-				raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
-				return nodeproto.EvalResult{Value: raw}, nil
+				raw, _ := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
+				return nodewire.EvalResult{Value: raw}, nil
 			}
 			h, err := newOwnerEvaluator(deps)
 			if err != nil {
@@ -83,7 +86,7 @@ func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
 			if err != nil || failure != nil {
 				t.Fatalf("failure = %+v, error = %v", failure, err)
 			}
-			var plan nodeproto.PlanDoc
+			var plan nodewire.PlanDoc
 			if err := json.Unmarshal(body, &plan); err != nil {
 				t.Fatal(err)
 			}
@@ -93,11 +96,11 @@ func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
 			if p.closed != 1 || p.cleaned != 1 || len(st.changes) != 0 {
 				t.Fatalf("cleanup = %d/%d, writes = %v", p.closed, p.cleaned, st.changes)
 			}
-			var ops []nodeproto.Op
+			var ops []nodewire.Op
 			for _, r := range p.requests {
 				ops = append(ops, r.Op)
 			}
-			if !reflect.DeepEqual(ops, []nodeproto.Op{nodeproto.OpHello, nodeproto.OpPlan, nodeproto.OpEval, nodeproto.OpEval, nodeproto.OpEval}) {
+			if !reflect.DeepEqual(ops, []nodewire.Op{nodewire.OpHello, nodewire.OpPlan, nodewire.OpEval, nodewire.OpEval, nodewire.OpEval}) {
 				t.Fatalf("operations = %v", ops)
 			}
 		})
@@ -106,9 +109,9 @@ func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
 
 func TestOwnerEvaluationEmptyExpansionIsExplicit(t *testing.T) {
 	in, _, deps, p := evaluationFixture(t)
-	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-		if r.Op == nodeproto.OpEval {
-			return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
+	p.answer = func(_ context.Context, r nodewire.Request) (any, error) {
+		if r.Op == nodewire.OpEval {
+			return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 		}
 		return nil, nil
 	}
@@ -141,26 +144,26 @@ func TestOwnerEvaluationRefusesFreshIdentifierAfterIssuance(t *testing.T) {
 		}
 		return grant, err
 	}
-	process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-		if request.Op != nodeproto.OpEval {
+	process.answer = func(_ context.Context, request nodewire.Request) (any, error) {
+		if request.Op != nodewire.OpEval {
 			return nil, nil
 		}
 		if _, err := bound.oidc(httptest.NewRequest(http.MethodPost, "/node/v1/oidc-token", strings.NewReader(`{"audience":"deploy"}`)), capability.Authorized{}); err != nil {
 			t.Fatal(err)
 		}
-		jobs := []nodeproto.JobSpec{}
+		jobs := []nodewire.JobSpec{}
 		if request.Closure == "first" {
-			jobs = append(jobs, nodeproto.JobSpec{ID: generatedID, Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "run"}}})
+			jobs = append(jobs, nodewire.JobSpec{ID: generatedID, Groups: []string{"first"}, Steps: []nodewire.StepSpec{{ID: "run"}}})
 		}
-		raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
-		return nodeproto.EvalResult{Value: raw}, nil
+		raw, _ := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
+		return nodewire.EvalResult{Value: raw}, nil
 	}
 	host, err := newOwnerEvaluator(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _, failure, err := host.evaluateExpansion(t.Context(), in)
-	if err != nil || failure == nil || failure.Code != apierr.SecretInIdentifier || len(body) != 0 {
+	if err != nil || failure == nil || failure.Code != hosterr.SecretInIdentifier || len(body) != 0 {
 		t.Fatalf("fresh expansion = %s, failure = %+v, error = %v", body, failure, err)
 	}
 	generatedID = "unrelated-job"
@@ -175,24 +178,24 @@ func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			in, _, deps, p := evaluationFixture(t)
 			cause := &apierr.Error{Code: apierr.SDKError, Message: "private evaluation failed"}
-			p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-				if r.Op != nodeproto.OpEval {
+			p.answer = func(_ context.Context, r nodewire.Request) (any, error) {
+				if r.Op != nodewire.OpEval {
 					return nil, nil
 				}
 				if mode == "sdk" && r.Closure == "last" {
-					return nodeproto.EvalResult{Error: cause}, nil
+					return nodewire.EvalResult{Error: cause}, nil
 				}
 				if mode == "validator" {
-					return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[{"id":"child","groups":["first"],"steps":[]}]}`)}, nil
+					return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[{"id":"child","groups":["first"],"steps":[]}]}`)}, nil
 				}
 				if mode == "shape" {
-					return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+					return nodewire.EvalResult{Value: json.RawMessage(`[]`)}, nil
 				}
-				return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
+				return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 			}
 			switch mode {
 			case "drift":
-				p.plan.Jobs = []nodeproto.JobSpec{{ID: "changed", Steps: []nodeproto.StepSpec{{ID: "body"}}}}
+				p.plan.Jobs = []nodewire.JobSpec{{ID: "changed", Steps: []nodewire.StepSpec{{ID: "body"}}}}
 			case "output":
 				deps.ReadOutput = func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) { return nil, cause }
 			case "close":
@@ -205,7 +208,7 @@ func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 			if err != nil || len(body) != 0 || failure == nil || strings.Contains(failure.MaskedError, "private") {
 				t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 			}
-			if mode == "drift" && failure.Code != apierr.PlanDrift {
+			if mode == "drift" && failure.Code != hosterr.PlanDrift {
 				t.Fatalf("failure = %+v", failure)
 			}
 			if mode != "output" && (p.closed != 1 || p.cleaned != 1) {
@@ -219,8 +222,8 @@ func TestOwnerEvaluationAuthorityLossDoesNotResolveBarrier(t *testing.T) {
 	for _, cause := range []error{context.Canceled, lease.ErrLeaseLost, lease.ErrSilent, &lease.CancelError{Reason: "cancel_requested"}} {
 		in, _, deps, p := evaluationFixture(t)
 		ctx, cancel := context.WithCancelCause(t.Context())
-		p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-			if r.Op == nodeproto.OpEval {
+		p.answer = func(_ context.Context, r nodewire.Request) (any, error) {
+			if r.Op == nodewire.OpEval {
 				cancel(cause)
 				return nil, cause
 			}
@@ -278,9 +281,9 @@ func TestOwnerEvaluationRequiresCurrentSuccessfulSource(t *testing.T) {
 
 func TestOwnerEvaluationCannotAttributeJobsToAnotherGenerator(t *testing.T) {
 	in, _, deps, p := evaluationFixture(t)
-	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-		if r.Op == nodeproto.OpEval {
-			return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[{"id":"child","groups":["last"]}]}`)}, nil
+	p.answer = func(_ context.Context, r nodewire.Request) (any, error) {
+		if r.Op == nodewire.OpEval {
+			return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[{"id":"child","groups":["last"]}]}`)}, nil
 		}
 		return nil, nil
 	}
@@ -293,15 +296,15 @@ func TestOwnerEvaluationCannotAttributeJobsToAnotherGenerator(t *testing.T) {
 
 func TestOwnerEvaluationRejectsUnknownFieldsInCombinedBody(t *testing.T) {
 	in, _, deps, p := evaluationFixture(t)
-	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-		if r.Op != nodeproto.OpEval {
+	p.answer = func(_ context.Context, r nodewire.Request) (any, error) {
+		if r.Op != nodewire.OpEval {
 			return nil, nil
 		}
 		raw := json.RawMessage(`{"jobs":[]}`)
 		if r.Closure == "first" {
 			raw = json.RawMessage(`{"jobs":[{"id":"child","groups":["first"],"steps":[{"id":"body"}],"unrecognized":true}]}`)
 		}
-		return nodeproto.EvalResult{Value: raw}, nil
+		return nodewire.EvalResult{Value: raw}, nil
 	}
 	h, _ := newOwnerEvaluator(deps)
 	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
@@ -313,12 +316,12 @@ func TestOwnerEvaluationRejectsUnknownFieldsInCombinedBody(t *testing.T) {
 func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	in, st, deps, p := evaluationFixture(t)
 	source := in.Accepted.Plan.Jobs[0]
-	root := nodeproto.JobSpec{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestor"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	root := nodewire.JobSpec{ID: "root", Closures: nodewire.ClosureSpec{Generate: []string{"ancestor"}}, Steps: []nodewire.StepSpec{{ID: "body"}}}
 	source.Groups = []string{"ancestor"}
 	st.row.Spec, _ = json.Marshal(source)
 	hash, _ := runspec.CanonicalHash(source)
 	st.row.SpecHash, in.SpecHash = string(hash), string(hash)
-	in.Accepted.Plan = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{root}}
+	in.Accepted.Plan = nodewire.PlanDoc{Jobs: []nodewire.JobSpec{root}}
 	p.plan = in.Accepted.Plan
 	hash, _ = runspec.CanonicalHash(in.Accepted.Plan)
 	in.Accepted.PlanHash = string(hash)
@@ -329,7 +332,7 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	spec["plan_hash"] = hash
 	in.Accepted.Spec, _ = json.Marshal(spec)
 	st.accepted = &in.Accepted
-	expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}}
+	expansion := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{source}}
 	hash, _ = runspec.CanonicalHash(expansion)
 	raw, _ := json.Marshal(expansion)
 	st.expansions = []runstate.AcceptedExpansionRow{{Source: runspec.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 0, Body: raw, BodyHash: string(hash)}}
@@ -364,8 +367,8 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	in.Storage = StorageBinding{Bytes: backend, Records: backend, Authority: authority}
 	deps.ReadOutput = nil
 	replayed := 0
-	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-		if r.Op != nodeproto.OpEval {
+	p.answer = func(_ context.Context, r nodewire.Request) (any, error) {
+		if r.Op != nodewire.OpEval {
 			return nil, nil
 		}
 		if r.Closure == "ancestor" {
@@ -373,13 +376,13 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 			if r.Job != "" || string(r.Input) != `{"root":true}` {
 				t.Fatalf("replay = %+v", r)
 			}
-			jobs, _ := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}})
-			return nodeproto.EvalResult{Value: jobs}, nil
+			jobs, _ := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{source}})
+			return nodewire.EvalResult{Value: jobs}, nil
 		}
 		if r.Job != "" || string(r.Input) != `{"count":2}` {
 			t.Fatalf("expansion = %+v", r)
 		}
-		return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
+		return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 	}
 	h, _ := newOwnerEvaluator(deps)
 	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
@@ -391,9 +394,9 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 func TestOwnerEvaluationUnclaimedMemoSourceKeepsGenerationZero(t *testing.T) {
 	in, st, deps, p := evaluationFixture(t)
 	in.Generation, st.row.Generation, st.row.Outcome = 0, 0, runstate.NodeMemoized
-	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
-		if r.Op == nodeproto.OpEval {
-			return nodeproto.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
+	p.answer = func(_ context.Context, r nodewire.Request) (any, error) {
+		if r.Op == nodewire.OpEval {
+			return nodewire.EvalResult{Value: json.RawMessage(`{"jobs":[]}`)}, nil
 		}
 		return nil, nil
 	}

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -18,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type upgradeResolver interface {
@@ -93,7 +93,7 @@ func (c upgradeCommand) run(ctx context.Context, inv clisurface.Invocation) erro
 		return &apierr.Error{
 			Code:    apierr.PlanFailed,
 			Message: fmt.Sprintf("the SDK pin moved to %s, but the pipeline does not build or plan against it yet: %v", result.Plan.After.Version, result.Unverified),
-			Hint: "Make the code changes the migration guides describe, " + engine.MigrationGuides(result.Plan.Before.Version, result.Plan.After.Version) +
+			Hint: "Make the code changes the migration guides describe, " + engine.MigrationGuides(result.Plan.Engine.Version) +
 				", then rerun the pipeline. This upgrade changed only " + changed + "; to return to the old pin, review `git diff -- " + changed +
 				"` and revert those files, which keeps your other pipeline edits.",
 		}
@@ -124,7 +124,7 @@ func writeUpgradeReport(out io.Writer, format string, result engine.UpgradeResul
 		return json.NewEncoder(out).Encode(report)
 	}
 	if format == "plain" {
-		_, err := fmt.Fprintln(out, report.After.Version)
+		_, err := fmt.Fprintf(out, "sdk=%s\nengine=%s\n", report.After.Version, report.Engine.Version)
 		return err
 	}
 	status := "Verified"
@@ -138,6 +138,9 @@ func writeUpgradeReport(out io.Writer, format string, result engine.UpgradeResul
 		status = "Preview"
 	}
 	if _, err := fmt.Fprintf(out, "%s: %s SDK %s -> %s\n", status, report.After.SDK, report.Before.Version, report.After.Version); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "  Engine %s\n", report.Engine.Version); err != nil {
 		return err
 	}
 	for _, path := range report.Files {

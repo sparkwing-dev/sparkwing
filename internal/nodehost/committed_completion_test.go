@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type cancelBeforeCompletion struct {
@@ -23,7 +23,7 @@ func (s cancelBeforeCompletion) FinishRunAndUnit(ctx context.Context, request ru
 }
 
 func TestOwnerReportsCancellationCommittedAfterScheduling(t *testing.T) {
-	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}})
+	fixture := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}})
 	fixture.Host.Store = cancelBeforeCompletion{OwnerStore: fixture.State, control: fixture.Control}
 	completion, err := fixture.Host.Run(t.Context(), fixture.Input)
 	if err != nil {

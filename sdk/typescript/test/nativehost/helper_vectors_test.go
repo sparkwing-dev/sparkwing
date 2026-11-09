@@ -1,5 +1,7 @@
 package nativehost_test
 
+import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 import (
 	"context"
 	"encoding/json"
@@ -8,11 +10,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/testleak"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
 )
 
 func TestMain(m *testing.M) {
@@ -45,7 +45,7 @@ func TestSharedNestedGenerationGroups(t *testing.T) {
 		return nil
 	})
 	for _, job := range []string{"source", "child"} {
-		result, err := sdkserve.DefaultOperations.Eval(t.Context(), plan, nodeproto.Request{Job: job, Closure: job + "/generate/0", Input: json.RawMessage(`null`)})
+		result, err := sdkserve.DefaultOperations.Eval(t.Context(), plan, nodewire.Request{Job: job, Closure: job + "/generate/0", Input: json.RawMessage(`null`)})
 		if err != nil || result.Error != nil {
 			t.Fatalf("generate %s: %v, %v", job, err, result.Error)
 		}

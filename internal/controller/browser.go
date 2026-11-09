@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"io/fs"
@@ -7,7 +9,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -15,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Dashboard configures the browser surface a controller serves beside its
@@ -143,7 +145,7 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "page method is not registered"})
+			routepolicy.WritePolicyError(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "page method is not registered"})
 			return
 		}
 		secure := s.cookiesSecure()
@@ -181,5 +183,5 @@ func operatorPage(p string) bool {
 
 func sessionFlowUnavailable(err error) bool {
 	var failure *apierr.Error
-	return errors.As(err, &failure) && failure.Code != apierr.Unauthenticated
+	return errors.As(err, &failure) && failure.Code != hosterr.Unauthenticated
 }

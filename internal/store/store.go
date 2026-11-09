@@ -8,6 +8,9 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -23,15 +26,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
-	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	_ "modernc.org/sqlite"
 )
 
 // DefaultBusyTimeoutMS is the SQLite busy_timeout Open applies, in
@@ -730,7 +731,7 @@ type Node struct {
 	FailureReason string `json:"failure_reason,omitempty"`
 	ExitCode      *int   `json:"exit_code,omitempty"`
 
-	Annotations []nodeproto.Annotation `json:"annotations,omitempty"`
+	Annotations []nodewire.Annotation `json:"annotations,omitempty"`
 
 	Summary string `json:"summary,omitempty"`
 
@@ -849,15 +850,15 @@ const (
 // state for the inner-Work DAG. Status moves from running to passed, failed, or
 // cancelled once; skipped is terminal at insert.
 type NodeStep struct {
-	RunID       string                 `json:"run_id,omitempty"`
-	NodeID      string                 `json:"node_id"`
-	StepID      string                 `json:"step_id"`
-	Attempt     int64                  `json:"attempt"`
-	Status      string                 `json:"status"`
-	Error       string                 `json:"error,omitempty"`
-	StartedAt   *time.Time             `json:"started_at,omitempty"`
-	FinishedAt  *time.Time             `json:"finished_at,omitempty"`
-	Annotations []nodeproto.Annotation `json:"annotations,omitempty"`
+	RunID       string                `json:"run_id,omitempty"`
+	NodeID      string                `json:"node_id"`
+	StepID      string                `json:"step_id"`
+	Attempt     int64                 `json:"attempt"`
+	Status      string                `json:"status"`
+	Error       string                `json:"error,omitempty"`
+	StartedAt   *time.Time            `json:"started_at,omitempty"`
+	FinishedAt  *time.Time            `json:"finished_at,omitempty"`
+	Annotations []nodewire.Annotation `json:"annotations,omitempty"`
 	// Summary is the latest markdown run summary emitted by
 	// sparkwing.Summary inside this step's body. Overwrite-on-write:
 	// only the last value is kept.

@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -72,17 +72,17 @@ func testGoSDKClosureIdentifiers(t *testing.T) {
 			recordLeaf(t)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
-			hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: job.ID, Routes: nodeproto.ProcessRoutes{
+			hello.Binding = &nodewire.ProcessBinding{RunID: "r", JobID: job.ID, Routes: nodewire.ProcessRoutes{
 				URL: "http://127.0.0.1:1", Bearer: "fixture",
 			}}
 			sendProtocolProbe(t, process, hello)
 			protocolProbeReply(t, process, "hello")
-			sendProtocolProbe(t, process, nodeproto.Request{
-				ID: "plan", Op: nodeproto.OpPlan,
+			sendProtocolProbe(t, process, nodewire.Request{
+				ID: "plan", Op: nodewire.OpPlan,
 				Pipeline: protocolgo.ClosureName, Args: map[string]string{},
-				Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.ClosureName},
+				Run: &nodewire.RunContext{RunID: "r", Pipeline: protocolgo.ClosureName},
 			})
-			var actual nodeproto.PlanDoc
+			var actual nodewire.PlanDoc
 			decodeProtocolProbe(t, protocolProbeReply(t, process, "plan"), &actual)
 			if !reflect.DeepEqual(doc, actual) {
 				t.Fatalf("fake and process closure declarations differ: fake=%+v process=%+v", doc, actual)
@@ -108,12 +108,12 @@ func testGoSDKClosureIdentifiers(t *testing.T) {
 				if err != nil || string(fake) != want {
 					t.Fatalf("fake closure %q = %s, %v; want %s", closure, fake, err, want)
 				}
-				request := nodeproto.Request{ID: closure, Op: nodeproto.OpEval, Closure: closure, Input: json.RawMessage("null")}
+				request := nodewire.Request{ID: closure, Op: nodewire.OpEval, Closure: closure, Input: json.RawMessage("null")}
 				if stepClosures[closure] {
 					request.Attempt, request.Settled = 1, []string{}
 				}
 				sendProtocolProbe(t, process, request)
-				var result nodeproto.EvalResult
+				var result nodewire.EvalResult
 				decodeProtocolProbe(t, protocolProbeReply(t, process, closure), &result)
 				if result.Error != nil || string(result.Value) != want {
 					t.Fatalf("process closure %q = %+v; want %s", closure, result, want)

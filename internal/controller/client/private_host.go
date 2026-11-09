@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -7,13 +9,13 @@ import (
 	"net/url"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // LocalHostClient binds private host state and authority reads to one awarded run.
@@ -167,7 +169,7 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref runspec.NodeRef) (ru
 }
 
 // ReadFailure reads the persisted recovery source under the host's current award.
-func (c *LocalHostClient) ReadFailure(ctx context.Context, source runspec.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+func (c *LocalHostClient) ReadFailure(ctx context.Context, source runspec.NodeRef, generation int64) (*nodewire.JobFailure, error) {
 	if source.RunID != runspec.RunID(c.run) {
 		return nil, localHostClientRefusal()
 	}
@@ -379,7 +381,7 @@ func (c *LocalHostClient) Close() error {
 }
 
 func localHostClientRefusal() error {
-	return &apierr.Error{Code: apierr.Forbidden, Message: "operation is outside the local host award"}
+	return &apierr.Error{Code: hosterr.Forbidden, Message: "operation is outside the local host award"}
 }
 
 var (

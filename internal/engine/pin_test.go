@@ -13,12 +13,12 @@ func TestReadPinRequiresExactRelease(t *testing.T) {
 		name, goMod, version string
 		bad                  bool
 	}{
-		{"older exact", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.10.2\n", "v0.10.2", false},
-		{"prerelease", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.10.2-rc.1\n", "v0.10.2-rc.1", false},
+		{"older exact", "module fixture\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.10.2\n", "v0.10.2", false},
+		{"prerelease", "module fixture\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.10.2-rc.1\n", "v0.10.2-rc.1", false},
 		{"missing", "module fixture\n", "", true},
-		{"replacement", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.10.2\nreplace github.com/sparkwing-dev/sparkwing => ../sdk\n", "v0.10.2", false},
-		{"replacement pseudo", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.0.0-20261014120000-abcdefabcdef\nreplace github.com/sparkwing-dev/sparkwing => ../sdk\n", "v0.0.0-20261014120000-abcdefabcdef", false},
-		{"pseudo", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.0.0-20261014120000-abcdefabcdef\n", "", true},
+		{"replacement", "module fixture\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.10.2\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => ../sdk\n", "v0.10.2", false},
+		{"replacement pseudo", "module fixture\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.0.0-20261014120000-abcdefabcdef\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => ../sdk\n", "v0.0.0-20261014120000-abcdefabcdef", false},
+		{"pseudo", "module fixture\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.0.0-20261014120000-abcdefabcdef\n", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -45,7 +45,7 @@ func TestReadTypeScriptPinRejectsConflictAndRangeWithoutLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	version, err := VersionForPin(pin)
+	version, err := SDKVersionForPin(pin)
 	if err != nil || version != "v0.10.2" {
 		t.Fatalf("%s %v", version, err)
 	}

@@ -3,8 +3,8 @@ package runspec
 import (
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/argvalue"
 )
 
 // BuildSecretRegistration derives the accepted run's complete argument mask set.
@@ -48,7 +48,7 @@ func BuildSecretRegistration(request Request, resolved Resolved) (SecretRegistra
 }
 
 // GeneratedRegistration seals literal inputs so expansion replay needs no argument reconstruction.
-func GeneratedRegistration(request Request, resolved Resolved, arguments []nodeproto.ArgumentDescription) (SecretRegistration, error) {
+func GeneratedRegistration(request Request, resolved Resolved, arguments []nodewire.ArgumentDescription) (SecretRegistration, error) {
 	projection := SecretRegistration{}
 	for _, argument := range arguments {
 		if !argument.Secret && !slices.Contains(resolved.SecretArgs, argument.Name) && !slices.Contains(request.SecretArgs.Value, argument.Name) {

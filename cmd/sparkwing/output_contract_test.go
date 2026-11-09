@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -13,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
@@ -24,7 +25,7 @@ func TestOutputContractProcess(t *testing.T) {
 	for index, argument := range os.Args {
 		if argument == "--" {
 			if err := runSparkwing(os.Args[index+1:]); err != nil {
-				if writeErr := writeInvocationError(os.Stderr, err, apierr.WriteJSON); writeErr != nil {
+				if writeErr := writeInvocationError(os.Stderr, err, hosterr.WriteJSON); writeErr != nil {
 					fmt.Fprintln(os.Stderr, writeErr)
 				}
 				os.Exit(exitCodeFor(err))

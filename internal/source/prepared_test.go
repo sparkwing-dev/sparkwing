@@ -18,12 +18,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type preparedStorage struct {
@@ -282,9 +282,9 @@ func TestAcquirePreparedFallsBackForDifferentInputsAndAbsentBytes(t *testing.T) 
 			case "source":
 				f.spec.HashAllFiles = true
 			case "checkout depth":
-				f.spec.Checkout.Policy = nodeproto.SourceSpec{Depth: new(0)}
+				f.spec.Checkout.Policy = nodewire.SourceSpec{Depth: new(0)}
 			case "checkout submodules":
-				f.spec.Checkout.Policy = nodeproto.SourceSpec{Submodules: new(true)}
+				f.spec.Checkout.Policy = nodewire.SourceSpec{Submodules: new(true)}
 			case "engine":
 				identity := f.resolver.resolved.Identity
 				identity.ManifestDigest = "another-engine"

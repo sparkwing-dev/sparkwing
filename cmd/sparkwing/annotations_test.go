@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -8,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type fakeRunReview struct {
@@ -55,9 +57,9 @@ func (f *fakeRunReview) ResolveApproval(_ context.Context, run, job string, inpu
 
 func reviewFixture() *fakeRunReview {
 	return &fakeRunReview{run: controllerwire.RunDetail{ID: "run-stable", Jobs: []controllerwire.JobDetail{
-		{ID: "build", Annotations: []nodeproto.Annotation{{Level: "info", Message: "first"}, {Level: "warn", Message: "second", File: "main.go", Line: 7, Column: 3, EndLine: 8}}},
+		{ID: "build", Annotations: []nodewire.Annotation{{Level: "info", Message: "first"}, {Level: "warn", Message: "second", File: "main.go", Line: 7, Column: 3, EndLine: 8}}},
 		{ID: "deploy"},
-	}}, steps: controllerwire.RunSteps{Steps: []controllerwire.StepDetail{{JobID: "deploy", ID: "canary", Annotations: []nodeproto.Annotation{{Level: "error", Message: "third", File: "deploy.ts", Line: 5}}}}}}
+	}}, steps: controllerwire.RunSteps{Steps: []controllerwire.StepDetail{{JobID: "deploy", ID: "canary", Annotations: []nodewire.Annotation{{Level: "error", Message: "third", File: "deploy.ts", Line: 5}}}}}}
 }
 
 func runReviewFake(t *testing.T, f *fakeRunReview, args []string) (string, error) {
@@ -128,12 +130,12 @@ func TestReviewAnnotationWriteAndPolicyGap(t *testing.T) {
 	}
 	var api *apierr.Error
 	_, err = runReviewCommandWithoutTransport(t, []string{"runs", "annotations", "add", "--run", "412", "--message", "note"})
-	if !errors.As(err, &api) || api.Code != apierr.PolicyMissing {
+	if !errors.As(err, &api) || api.Code != hosterr.PolicyMissing {
 		t.Fatalf("run annotation gap: %v", err)
 	}
-	f.errorWrite = &apierr.Error{Code: apierr.Forbidden, Message: "member cannot report"}
+	f.errorWrite = &apierr.Error{Code: hosterr.Forbidden, Message: "member cannot report"}
 	out, err = runReviewFake(t, f, []string{"runs", "annotations", "add", "--run", "412", "--job", "deploy", "--message", "note", "-o", "plain"})
-	if !errors.As(err, &api) || api.Code != apierr.Forbidden || out != "" {
+	if !errors.As(err, &api) || api.Code != hosterr.Forbidden || out != "" {
 		t.Fatalf("forbidden write: %q %v", out, err)
 	}
 }
@@ -167,7 +169,7 @@ func TestReviewGrammarBeforeController(t *testing.T) {
 
 func TestReviewAnnotationsPlainIsOneValuePerLine(t *testing.T) {
 	f := reviewFixture()
-	f.run.Jobs[0].Annotations = []nodeproto.Annotation{{Level: "info", Message: "first\nsecond\rline"}}
+	f.run.Jobs[0].Annotations = []nodewire.Annotation{{Level: "info", Message: "first\nsecond\rline"}}
 	out, err := runReviewFake(t, f, []string{"runs", "annotations", "list", "--run", "412", "-o", "plain"})
 	if err != nil || out != "first second line\n" {
 		t.Fatalf("plain annotation=%q err=%v", out, err)

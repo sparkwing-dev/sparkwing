@@ -8,16 +8,18 @@ import (
 	"fmt"
 	"path/filepath"
 
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers/docker"
 	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers/git"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
 	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers/services"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // Run executes an operation for the current bound process.
-func Run(ctx context.Context, req nodeproto.HelperRequest) nodeproto.HelperResponse {
+func Run(ctx context.Context, req nodewire.HelperRequest) nodewire.HelperResponse {
 	if !filepath.IsAbs(req.Dir) {
 		return failed(errors.New("helper working directory must be absolute"))
 	}
@@ -306,7 +308,7 @@ func Run(ctx context.Context, req nodeproto.HelperRequest) nodeproto.HelperRespo
 	if encodeErr != nil {
 		return failed(encodeErr)
 	}
-	response := nodeproto.HelperResponse{Result: raw}
+	response := nodewire.HelperResponse{Result: raw}
 	if err != nil {
 		response = failed(err)
 		response.Result = raw
@@ -314,7 +316,7 @@ func Run(ctx context.Context, req nodeproto.HelperRequest) nodeproto.HelperRespo
 	return response
 }
 
-func failed(err error) nodeproto.HelperResponse {
+func failed(err error) nodewire.HelperResponse {
 	code := ""
 	for _, class := range []error{git.ErrTagAlreadyExists, docker.ErrDockerUnavailable, docker.ErrBuildxRequired, docker.ErrPlatformUnsupported} {
 		if errors.Is(err, class) {
@@ -322,5 +324,5 @@ func failed(err error) nodeproto.HelperResponse {
 			break
 		}
 	}
-	return nodeproto.HelperResponse{Error: err.Error(), Code: code, Result: json.RawMessage("null")}
+	return nodewire.HelperResponse{Error: err.Error(), Code: code, Result: json.RawMessage("null")}
 }

@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -9,10 +11,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type burstRunDependencies struct {
@@ -32,7 +34,7 @@ func burstControllerUnreachable(err error) bool {
 	}
 	var network net.Error
 	var failure *apierr.Error
-	return errors.As(err, &network) || errors.As(err, &failure) && failure.Code == apierr.Unavailable
+	return errors.As(err, &network) || errors.As(err, &failure) && failure.Code == hosterr.Unavailable
 }
 
 func resolveRunRouting(machine userconfig.Config, project *projectconfig.Config, pipeline string) userconfig.RunRouting {

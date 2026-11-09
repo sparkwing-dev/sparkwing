@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -9,8 +11,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // OverflowControl reports the authenticated user's monthly Cloud overflow budget.
@@ -144,7 +146,7 @@ func checkOverflowTx(ctx context.Context, tx *storeTx, team Team, run string) er
 	if err != nil || !exhausted {
 		return err
 	}
-	return authorityError(apierr.LockHeld, fmt.Sprintf("monthly Cloud overflow limit is %d minutes, current usage is %d seconds, requested reservation is %d seconds; raise your overflow setting and any lower run overflow setting, wait for the next month, or contact support@sparkwing.dev; local capacity remains available", *control.MonthlyMinutes, control.UsedSeconds, SliceSeconds))
+	return authorityError(hosterr.LockHeld, fmt.Sprintf("monthly Cloud overflow limit is %d minutes, current usage is %d seconds, requested reservation is %d seconds; raise your overflow setting and any lower run overflow setting, wait for the next month, or contact support@sparkwing.dev; local capacity remains available", *control.MonthlyMinutes, control.UsedSeconds, SliceSeconds))
 }
 
 // overflowExhaustedTx reports whether run's requester lacks room for reserving seconds more in its monthly overflow

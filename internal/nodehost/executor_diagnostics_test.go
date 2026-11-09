@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNodeExecutorDiagnosticsFollowCommittedSteps(t *testing.T) {
 	input, st, deps, _ := executorFixture(t)
 	job := input.Accepted.Plan.Jobs[0]
-	job.Steps = []nodeproto.StepSpec{{ID: "body"}, {ID: "blocked", Needs: []string{"body"}}}
+	job.Steps = []nodewire.StepSpec{{ID: "body"}, {ID: "blocked", Needs: []string{"body"}}}
 	executorChangeJob(t, &input, st, job)
 	records := &executorStepStore{NodeTransitionStore: st}
 	deps.Store = records
@@ -24,11 +24,11 @@ func TestNodeExecutorDiagnosticsFollowCommittedSteps(t *testing.T) {
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, in, activity)
 		p.(*executorProcess).plan = input.Accepted.Plan
-		p.(*executorProcess).result = nodeproto.RunResult{Outcome: "failed"}
+		p.(*executorProcess).result = nodewire.RunResult{Outcome: "failed"}
 		return p, err
 	}
 	var events []string
-	deps.Log = func(_ context.Context, in NodeInput, log nodeproto.FrameLog) error {
+	deps.Log = func(_ context.Context, in NodeInput, log nodewire.FrameLog) error {
 		if in.Attempt != input.Attempt+1 || in.Generation != input.Generation || in.Authority != input.Authority {
 			t.Fatal("diagnostic lost its committed attempt")
 		}
@@ -69,7 +69,7 @@ func TestNodeExecutorDiagnosticFailureJoinsWork(t *testing.T) {
 			input, st, deps, processes := executorFixture(t)
 			executorRetryBudget(t, &input, st, 2)
 			refused := errors.New("diagnostic write refused")
-			deps.Log = func(_ context.Context, _ NodeInput, log nodeproto.FrameLog) error {
+			deps.Log = func(_ context.Context, _ NodeInput, log nodewire.FrameLog) error {
 				if log.Event == event {
 					return refused
 				}
@@ -78,7 +78,7 @@ func TestNodeExecutorDiagnosticFailureJoinsWork(t *testing.T) {
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 				p, err := start(ctx, in, activity)
-				p.(*executorProcess).result = nodeproto.RunResult{Outcome: "failed"}
+				p.(*executorProcess).result = nodewire.RunResult{Outcome: "failed"}
 				return p, err
 			}
 			host, err := NewNodeExecutor(deps)
@@ -93,7 +93,7 @@ func TestNodeExecutorDiagnosticFailureJoinsWork(t *testing.T) {
 			}
 			if event == "step_start" {
 				for _, request := range (*processes)[0].requests {
-					if request.Op == nodeproto.OpRunStep {
+					if request.Op == nodewire.OpRunStep {
 						t.Fatal("body ran after its diagnostic failed")
 					}
 				}
@@ -108,15 +108,15 @@ func TestNodeExecutorWriteFailureSurvivesAttemptTimeout(t *testing.T) {
 			input, st, deps, processes := executorFixture(t)
 			executorRetryBudget(t, &input, st, 2)
 			job := input.Accepted.Plan.Jobs[0]
-			job.Steps = append(job.Steps, nodeproto.StepSpec{ID: "cleanup", Finally: true, Needs: []string{"body"}})
+			job.Steps = append(job.Steps, nodewire.StepSpec{ID: "cleanup", Finally: true, Needs: []string{"body"}})
 			job.Closures.AfterRun = []string{"after"}
 			executorChangeJob(t, &input, st, job)
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 				p, err := start(ctx, in, activity)
 				p.(*executorProcess).plan = input.Accepted.Plan
-				p.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpRunStep && request.Step == "cleanup" || request.Op == nodeproto.OpEval && request.Closure == "after" {
+				p.(*executorProcess).answer = func(_ context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpRunStep && request.Step == "cleanup" || request.Op == nodewire.OpEval && request.Closure == "after" {
 						t.Error("write refusal allowed further author code after timeout")
 					}
 					return nil, nil
@@ -139,7 +139,7 @@ func TestNodeExecutorWriteFailureSurvivesAttemptTimeout(t *testing.T) {
 					return nil
 				}}
 			} else {
-				deps.Log = func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+				deps.Log = func(_ context.Context, _ NodeInput, frame nodewire.FrameLog) error {
 					if frame.Event == "step_end" {
 						expire(context.DeadlineExceeded)
 						return refused
@@ -170,12 +170,12 @@ func TestNodeExecutorRetryDiagnosticKeepsCommittedOrdinal(t *testing.T) {
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, in, activity)
 		if in.Attempt == 11 {
-			p.(*executorProcess).result = nodeproto.RunResult{Outcome: "failed"}
+			p.(*executorProcess).result = nodewire.RunResult{Outcome: "failed"}
 		}
 		return p, err
 	}
 	retries := 0
-	deps.Log = func(_ context.Context, in NodeInput, log nodeproto.FrameLog) error {
+	deps.Log = func(_ context.Context, in NodeInput, log nodewire.FrameLog) error {
 		if log.Event != "retry" {
 			return nil
 		}

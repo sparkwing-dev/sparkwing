@@ -20,12 +20,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
@@ -42,7 +42,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 	t.Setenv("GOPROXY", "off")
 	t.Setenv("TOKEN", "ambient-requester-value-never-forward")
 	repo, sha, engines, selected := burstSDKSourceFixture(t, "")
-	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
+	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodewire.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,12 +70,12 @@ func burstSDKSourceFixture(t *testing.T, appended string) (string, string, *engi
 	repo, _ := sourcetest.Repository(t)
 	directory := filepath.Join(repo, ".sparkwing")
 	for _, name := range []string{"go.mod", "go.sum"} {
-		body, err := os.ReadFile(filepath.Join(root, name))
+		body, err := os.ReadFile(filepath.Join(root, "sparkwing", name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if name == "go.mod" {
-			body = []byte(strings.Replace(string(body), "module github.com/sparkwing-dev/sparkwing", "module burstfixture", 1) + fmt.Sprintf("\nrequire github.com/sparkwing-dev/sparkwing v0.0.0\nreplace github.com/sparkwing-dev/sparkwing => %q\n", root))
+			body = []byte(strings.Replace(string(body), "module github.com/sparkwing-dev/sparkwing/sparkwing", "module burstfixture", 1) + fmt.Sprintf("\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.0.0\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %q\n", filepath.Join(root, "sparkwing")))
 		}
 		sourcetest.Write(t, filepath.Join(directory, name), string(body))
 	}

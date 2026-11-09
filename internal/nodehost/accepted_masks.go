@@ -6,13 +6,13 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runspec.Resolved, plan *nodeproto.PlanDoc, nodes []runstate.NodeRow) error {
+func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runspec.Resolved, plan *nodewire.PlanDoc, nodes []runstate.NodeRow) error {
 	if r == nil {
 		return nil
 	}
@@ -33,9 +33,9 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 		return nil
 	}
 	namespace := *plan
-	namespace.Jobs = append([]nodeproto.JobSpec{}, plan.Jobs...)
+	namespace.Jobs = append([]nodewire.JobSpec{}, plan.Jobs...)
 	for _, row := range nodes {
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if len(row.Spec) == 0 || json.Unmarshal(row.Spec, &job) != nil || runspec.NodeID(job.ID) != row.Ref.NodeID {
 			return errors.New("persisted mask namespace has an invalid job")
 		}

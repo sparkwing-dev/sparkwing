@@ -230,17 +230,13 @@ else
     [[ "$STAGE_TAG" == v[0-9]* ]] ||
       fail "--binary $binary does not report a version tag, so no release can be staged from it"
   else
-    # The scaffold pins the SDK at the version the CLI reports, so a candidate
-    # build wears the newest published release tag: an invented tag pins a
-    # module version the proxy cannot serve and the scaffold never finishes.
-    # Prereleases and local candidate tags are excluded, because one of those
-    # ranking above the published release pins a module nothing has published.
+    # The staged installer needs a stable version identity for its signed asset.
     STAGE_TAG="$(git -C "$ROOT" tag -l 'v0.*' | awk '/^v0\.[0-9]+\.[0-9]+$/' | sort -V | tail -1)"
     # Source checkouts can omit tags; the pipeline module keeps a released SDK pin.
     if [[ -z "$STAGE_TAG" && -r "$ROOT/.sparkwing/go.mod" ]]; then
       STAGE_TAG="$(awk '
-        $1 == "github.com/sparkwing-dev/sparkwing" { print $2; exit }
-        $1 == "require" && $2 == "github.com/sparkwing-dev/sparkwing" { print $3; exit }
+        $1 == "github.com/sparkwing-dev/sparkwing/sparkwing" { print $2; exit }
+        $1 == "require" && $2 == "github.com/sparkwing-dev/sparkwing/sparkwing" { print $3; exit }
       ' "$ROOT/.sparkwing/go.mod")" || fail "could not read the pipeline module SDK pin"
     fi
     [[ "$STAGE_TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]] ||
@@ -253,7 +249,7 @@ else
   # Staging runs on the caller's Go caches on purpose: warming the demo home's
   # module cache here would hand the measured phases a cache no adopter has.
   if [[ "$mode" == build ]]; then
-    GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$STAGE_TAG" \
+    GOWORK=auto go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$STAGE_TAG" \
       -o "$STAGE/$asset" ./cmd/sparkwing ||
       fail "could not build ./cmd/sparkwing for the staged release"
   else
@@ -365,9 +361,8 @@ install_ms="$(milliseconds_of $((mark - start_ns)))"
 [[ -x "$PREFIX/sparkwing" ]] || fail "the installer reported success but left no binary at $PREFIX/sparkwing"
 
 # A candidate build compiles its own SDK, not the release its tag names: the
-# scaffold's require line resolves the published module and the replace then
-# points the build at this worktree, so the compile phase measures the source
-# under test.
+# local replacement is present before scaffolding resolves dependencies, so
+# unpublished candidate SDKs compile from the source under test.
 case "$mode" in
   build) sdk_source="candidate source at $ROOT via a replace pin" ;;
   binary) sdk_source="released module $STAGE_TAG" ;;
@@ -375,6 +370,12 @@ case "$mode" in
 esac
 
 previous="$mark"
+if [[ "$mode" == build ]]; then
+  mkdir -p "$REPO/.sparkwing"
+  printf 'module demo\n\ngo 1.25.0\n' >"$REPO/.sparkwing/go.mod"
+  go -C "$REPO/.sparkwing" mod edit -replace "github.com/sparkwing-dev/sparkwing/sparkwing=$ROOT/sparkwing" ||
+    fail "could not point the pipeline module at this worktree"
+fi
 sparkwing -C "$REPO" pipeline new --pipeline demo --template "$template" \
   >"$WORK/scaffold.log" 2>&1 || {
   cat "$WORK/scaffold.log" >&2
@@ -383,19 +384,6 @@ sparkwing -C "$REPO" pipeline new --pipeline demo --template "$template" \
   fi
   fail "the scaffold phase failed"
 }
-if [[ "$mode" == build ]]; then
-  [[ -f "$REPO/.sparkwing/go.mod" ]] ||
-    { cat "$WORK/scaffold.log" >&2; fail "the scaffold left no pipeline module under $REPO/.sparkwing"; }
-  go -C "$REPO/.sparkwing" mod edit -replace "github.com/sparkwing-dev/sparkwing=$ROOT" ||
-    fail "could not point the scaffolded module at this worktree"
-  go -C "$REPO/.sparkwing" mod tidy >"$WORK/tidy.log" 2>&1 || {
-    cat "$WORK/tidy.log" >&2
-    if download_unavailable "$WORK/tidy.log"; then
-      unavailable scaffold "could not resolve the candidate module graph"
-    fi
-    fail "could not resolve the scaffolded module against this worktree"
-  }
-fi
 mark="$(now_ns)"
 scaffold_ms="$(milliseconds_of $((mark - previous)))"
 

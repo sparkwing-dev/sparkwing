@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func (h *nodeExecutor) diagnostic(ctx context.Context, input NodeInput, level, event, step, message string, attrs map[string]any) error {
@@ -20,7 +20,7 @@ func (h *nodeExecutor) diagnostic(ctx context.Context, input NodeInput, level, e
 	if err != nil {
 		return err
 	}
-	return h.deps.Log(ctx, input, nodeproto.FrameLog{
+	return h.deps.Log(ctx, input, nodewire.FrameLog{
 		TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Event: event,
 		Step: h.deps.Masker.Mask(step), Message: h.deps.Masker.Mask(message), Attrs: h.deps.Masker.Attributes(raw),
 	})

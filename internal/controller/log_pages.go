@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -16,13 +18,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const logPageRecords = 500
@@ -65,7 +67,7 @@ func (b *logBudget) exhausted(err error) bool {
 
 var errLogBudget = errors.New("log search budget exhausted")
 
-var errLogScanStalled = &apierr.Error{Code: apierr.Unavailable, Message: "the log scan ran out of its time budget before making progress; retry the request"}
+var errLogScanStalled = &apierr.Error{Code: hosterr.Unavailable, Message: "the log scan ran out of its time budget before making progress; retry the request"}
 
 type lineScanner struct {
 	budget  *logBudget
@@ -329,11 +331,11 @@ func appendSubjectLines(reader segmentLogs, subject blob.LogSubject, q controlle
 	scan := &lineScanner{budget: budget, visit: func(raw []byte, length int64) error {
 		number, line := cursor.Lines[key]+1, string(raw)
 		record := controllerwire.LogRecord{RunID: subject.RunID, Subject: &subject, LineNo: number, Line: line}
-		var frame nodeproto.FrameLog
+		var frame nodewire.FrameLog
 		if json.Unmarshal(raw, &frame) == nil && frame.TS != "" {
 			at, err := time.Parse(time.RFC3339Nano, frame.TS)
 			if err != nil {
-				return &apierr.Error{Code: apierr.IntegrityFailure, Message: "log record has an invalid timestamp"}
+				return &apierr.Error{Code: hosterr.IntegrityFailure, Message: "log record has an invalid timestamp"}
 			}
 			record.Time = &at
 		}

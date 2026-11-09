@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -10,13 +12,13 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
@@ -24,13 +26,13 @@ func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			m := secrets.NewMasker()
 			registry := NewMaskRegistry(m)
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Groups: []string{"group"}, Steps: []nodeproto.StepSpec{{ID: "body"}, {ID: "encoded-YnVpbGQ="}}}}}
+			plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Groups: []string{"group"}, Steps: []nodewire.StepSpec{{ID: "body"}, {ID: "encoded-YnVpbGQ="}}}}}
 			if err := registry.acceptPlan(plan, func() error { return nil }); err != nil {
 				t.Fatal(err)
 			}
 			err := registry.registerValue(value)
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || !strings.Contains(failure.Message, "jobs[0]") || len(m.Values()) != 0 {
+			if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || !strings.Contains(failure.Message, "jobs[0]") || len(m.Values()) != 0 {
 				t.Fatalf("collision=%v, registry=%v", err, m.Values())
 			}
 		})
@@ -44,11 +46,11 @@ func TestMaskRegistryProtectsLaterExpansionAndFailedAcceptance(t *testing.T) {
 		t.Fatal("registration was not visible to all sinks and validators")
 	}
 	committed := false
-	if err := registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "secret-job"}}}, func() error { committed = true; return nil }); err == nil || committed {
+	if err := registry.acceptPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "secret-job"}}}, func() error { committed = true; return nil }); err == nil || committed {
 		t.Fatal("persisted a secret-bearing generated job")
 	}
 	sentinel := errors.New("store refused")
-	if err := registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "unused"}}}, func() error { return sentinel }); !errors.Is(err, sentinel) {
+	if err := registry.acceptPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "unused"}}}, func() error { return sentinel }); !errors.Is(err, sentinel) {
 		t.Fatal(err)
 	}
 	if err := registry.registerValue("unused"); err != nil {
@@ -64,7 +66,7 @@ func (r *serviceRegistrar) Register(endpoint controllerwire.Endpoint) error {
 }
 
 func TestProcessServicesPreserveResolutionRefusalCodes(t *testing.T) {
-	for _, definition := range apierr.Codes {
+	for _, definition := range hosterr.Codes {
 		t.Run(string(definition.Code), func(t *testing.T) {
 			routes := &serviceRegistrar{}
 			failure := &apierr.Error{Code: definition.Code, Message: "private-credential", Hint: "private-credential", Details: map[string]any{"private-credential": "private-credential"}}
@@ -83,7 +85,7 @@ func TestProcessServicesPreserveResolutionRefusalCodes(t *testing.T) {
 func serviceFixture(t *testing.T) (*serviceRegistrar, *ProcessServices, capability.Authorized) {
 	t.Helper()
 	masker := secrets.NewMasker()
-	service := &ProcessServices{RunID: "run", Job: nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "step"}}}, Masks: NewMaskRegistry(masker)}
+	service := &ProcessServices{RunID: "run", Job: nodewire.JobSpec{ID: "job", Steps: []nodewire.StepSpec{{ID: "step"}}}, Masks: NewMaskRegistry(masker)}
 	authorized := capability.Authorized{Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job"}}
 	routes := &serviceRegistrar{}
 	if err := RegisterProcessServices(routes, func(context.Context, capability.Authorized) (*ProcessServices, error) { return service, nil }); err != nil {
@@ -122,8 +124,8 @@ func TestProcessServicesAcknowledgeMaskAndPreserveBoundRecords(t *testing.T) {
 	if err != nil || strings.TrimSpace(out.Body.String()) != "{}" {
 		t.Fatalf("mask acknowledgement=%s, %v", out.Body.String(), err)
 	}
-	var annotation nodeproto.AnnotationRequest
-	service.Annotation = func(_ context.Context, _ capability.Authorized, request nodeproto.AnnotationRequest) error {
+	var annotation nodewire.AnnotationRequest
+	service.Annotation = func(_ context.Context, _ capability.Authorized, request nodewire.AnnotationRequest) error {
 		annotation = request
 		return nil
 	}
@@ -136,12 +138,12 @@ func TestProcessServicesAcknowledgeMaskAndPreserveBoundRecords(t *testing.T) {
 			t.Fatalf("default annotation level=%s error=%v", annotation.Level, err)
 		}
 	}
-	var summary nodeproto.SummaryRequest
-	service.Summary = func(_ context.Context, _ capability.Authorized, request nodeproto.SummaryRequest) error {
+	var summary nodewire.SummaryRequest
+	service.Summary = func(_ context.Context, _ capability.Authorized, request nodewire.SummaryRequest) error {
 		summary = request
 		return nil
 	}
-	body, _ := json.Marshal(nodeproto.SummaryRequest{Markdown: "credential" + strings.Repeat("界", int(limits.AnnotationBytes)) + "tail", Step: "step"})
+	body, _ := json.Marshal(nodewire.SummaryRequest{Markdown: "credential" + strings.Repeat("界", int(limits.AnnotationBytes)) + "tail", Step: "step"})
 	_, err = callService(t, routes, auth, "/node/v1/summary", string(body))
 	if err != nil || len(summary.Markdown) > int(limits.AnnotationBytes) || !utf8.ValidString(summary.Markdown) || strings.Contains(summary.Markdown, "credential") || !strings.HasSuffix(summary.Markdown, "tail") {
 		t.Fatalf("summary length=%d, error=%v", len(summary.Markdown), err)
@@ -155,7 +157,7 @@ func TestProcessServicesRefuseUnknownStepsAndPropagateMaskedWrites(t *testing.T)
 	}
 	sentinel := errors.New("credential write failed")
 	calls := 0
-	service.Annotation = func(context.Context, capability.Authorized, nodeproto.AnnotationRequest) error {
+	service.Annotation = func(context.Context, capability.Authorized, nodewire.AnnotationRequest) error {
 		calls++
 		return sentinel
 	}
@@ -182,7 +184,7 @@ func TestMaskRegistryJoinsRegistrationWithAcceptance(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	accepted := make(chan error, 1)
 	go func() {
-		accepted <- registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "secret-job"}}}, func() error { close(entered); <-release; return nil })
+		accepted <- registry.acceptPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "secret-job"}}}, func() error { close(entered); <-release; return nil })
 	}()
 	<-entered
 	registered := make(chan error, 1)
@@ -207,12 +209,12 @@ func TestOwnerHostSharesIdentifierRegistryWithAcceptance(t *testing.T) {
 	f, host, input := newOwnerFixture(t, false)
 	registry := NewMaskRegistry(secrets.NewMasker())
 	host.Masks = registry
-	job := nodeproto.JobSpec{ID: "persisted", Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	job := nodewire.JobSpec{ID: "persisted", Steps: []nodewire.StepSpec{{ID: "body"}}}
 	prepare := host.Prepare
 	host.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
 		planning, err := prepare(ctx, in, entry)
 		planning.Plan = func(context.Context) (json.RawMessage, error) {
-			return json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
+			return json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
 		}
 		return planning, err
 	}
@@ -230,7 +232,7 @@ func TestOwnerHostSharesIdentifierRegistryWithAcceptance(t *testing.T) {
 func TestMaskRegistryIssuedValueMayMatchAcceptedIdentifier(t *testing.T) {
 	m := secrets.NewMasker()
 	registry := NewMaskRegistry(m)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build-private-token"}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build-private-token"}}}
 	if err := registry.acceptPlan(plan, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -251,9 +253,9 @@ func TestMaskRegistryRefusesIssuedValueInFreshExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 	committed := false
-	err := registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated-private-token"}}}, func() error { committed = true; return nil })
+	err := registry.acceptPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "generated-private-token"}}}, func() error { committed = true; return nil })
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || committed {
+	if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || committed {
 		t.Fatalf("fresh expansion acceptance = %v, committed = %v", err, committed)
 	}
 }

@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -11,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRetryableTransportError(t *testing.T) {
@@ -28,8 +30,8 @@ func TestRetryableTransportError(t *testing.T) {
 		{"missing_file", os.ErrNotExist, false},
 		{"socket_permission", &net.OpError{Op: "dial", Net: "unix", Err: os.ErrPermission}, false},
 		{"pipe_permission", &os.PathError{Op: "connect", Path: "controller", Err: os.ErrPermission}, false},
-		{"authentication", &apierr.Error{Code: apierr.Unauthenticated}, false},
-		{"policy", &apierr.Error{Code: apierr.Forbidden}, false},
+		{"authentication", &apierr.Error{Code: hosterr.Unauthenticated}, false},
+		{"policy", &apierr.Error{Code: hosterr.Forbidden}, false},
 		{"cancelled", context.Canceled, false},
 		{"protocol", errors.New("invalid response"), false},
 	} {

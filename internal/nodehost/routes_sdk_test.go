@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -13,40 +15,40 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 type routerSDK struct {
 	body func(context.Context, sdkserve.Services) error
 }
 
-func (f routerSDK) Context(ctx context.Context, _ nodeproto.RunContext, _ nodeproto.RunnerIdentity, services sdkserve.Services) context.Context {
+func (f routerSDK) Context(ctx context.Context, _ nodewire.RunContext, _ nodewire.RunnerIdentity, services sdkserve.Services) context.Context {
 	return sdkserve.WithServices(ctx, services)
 }
 
-func (routerSDK) Document(any) nodeproto.PlanDoc {
-	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
+func (routerSDK) Document(any) nodewire.PlanDoc {
+	return nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "deploy", Steps: []nodewire.StepSpec{{ID: "body"}}}}}
 }
 
-func (routerSDK) Describe(context.Context) (nodeproto.DescribeDoc, error) {
-	return nodeproto.DescribeDoc{}, nil
+func (routerSDK) Describe(context.Context) (nodewire.DescribeDoc, error) {
+	return nodewire.DescribeDoc{}, nil
 }
 
-func (f routerSDK) Plan(context.Context, string, map[string]string, nodeproto.RunContext) (any, nodeproto.PlanDoc, error) {
+func (f routerSDK) Plan(context.Context, string, map[string]string, nodewire.RunContext) (any, nodewire.PlanDoc, error) {
 	return struct{}{}, f.Document(nil), nil
 }
 
-func (f routerSDK) RunStep(ctx context.Context, _ any, _ nodeproto.Request) (nodeproto.RunResult, error) {
-	return nodeproto.RunResult{Outcome: "success"}, f.body(ctx, sdkserve.ServicesFrom(ctx))
+func (f routerSDK) RunStep(ctx context.Context, _ any, _ nodewire.Request) (nodewire.RunResult, error) {
+	return nodewire.RunResult{Outcome: "success"}, f.body(ctx, sdkserve.ServicesFrom(ctx))
 }
 
-func (routerSDK) Eval(context.Context, any, nodeproto.Request) (nodeproto.EvalResult, error) {
-	return nodeproto.EvalResult{}, errors.New("unexpected evaluation")
+func (routerSDK) Eval(context.Context, any, nodewire.Request) (nodewire.EvalResult, error) {
+	return nodewire.EvalResult{}, errors.New("unexpected evaluation")
 }
 
 func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
@@ -92,11 +94,11 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 		return ProcessChildResult{RunID: run, Status: "success", Output: json.RawMessage(`{"image":"ready"}`)}, nil
 	}
 	var records []string
-	service.Annotation = func(_ context.Context, _ capability.Authorized, request nodeproto.AnnotationRequest) error {
+	service.Annotation = func(_ context.Context, _ capability.Authorized, request nodewire.AnnotationRequest) error {
 		records = append(records, request.Message)
 		return nil
 	}
-	service.Summary = func(_ context.Context, _ capability.Authorized, request nodeproto.SummaryRequest) error {
+	service.Summary = func(_ context.Context, _ capability.Authorized, request nodewire.SummaryRequest) error {
 		records = append(records, request.Markdown)
 		return nil
 	}
@@ -114,14 +116,14 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 			}
 			_, _, err = services.Secret(ctx, "OTHER")
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.Forbidden || failure.Details["reason"] != "secret_undeclared" {
+			if !errors.As(err, &failure) || failure.Code != hosterr.Forbidden || failure.Details["reason"] != "secret_undeclared" {
 				return errors.New("SDK secret refusal lost canonical reason")
 			}
 			if err := services.Mask(ctx, "dynamic-credential"); err != nil {
 				return err
 			}
-			services.Emit(nodeproto.FrameLog{Event: "annotation", Level: "warn", Message: "dynamic-credential", Step: "body", Attrs: json.RawMessage(`{"file":"main.go","line":3}`)})
-			services.Emit(nodeproto.FrameLog{Event: "summary", Message: "dynamic-credential", Step: "body"})
+			services.Emit(nodewire.FrameLog{Event: "annotation", Level: "warn", Message: "dynamic-credential", Step: "body", Attrs: json.RawMessage(`{"file":"main.go","line":3}`)})
+			services.Emit(nodewire.FrameLog{Event: "summary", Message: "dynamic-credential", Step: "body"})
 			raw, err := services.Output(ctx, "build")
 			if err != nil || string(raw) != `{"image":"ready"}` {
 				return errors.New("SDK output service failed")
@@ -164,7 +166,7 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 	}()
 	defer input.Close()
 	defer writer.Close()
-	hello := map[string]any{"id": "hello", "op": "hello", "protocol": 2, "engine": map[string]string{"version": "v1"}, "runner": map[string]any{"name": "local", "type": "local", "labels": []string{}}, "binding": nodeproto.ProcessBinding{RunID: "run-1", JobID: "deploy", Routes: nodeproto.ProcessRoutes{URL: host.URL, Bearer: bearer}}}
+	hello := map[string]any{"id": "hello", "op": "hello", "protocol": 2, "engine": map[string]string{"version": "v1"}, "runner": map[string]any{"name": "local", "type": "local", "labels": []string{}}, "binding": nodewire.ProcessBinding{RunID: "run-1", JobID: "deploy", Routes: nodewire.ProcessRoutes{URL: host.URL, Bearer: bearer}}}
 	go func() {
 		encoder := json.NewEncoder(writer)
 		if err := encoder.Encode(hello); err != nil {
@@ -204,4 +206,4 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 	}
 }
 
-func (routerSDK) Arguments(any) []nodeproto.ArgumentDescription { return nil }
+func (routerSDK) Arguments(any) []nodewire.ArgumentDescription { return nil }

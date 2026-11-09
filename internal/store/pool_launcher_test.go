@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
@@ -188,7 +188,7 @@ func poolPinFixtureOn(t *testing.T, reserved []string, secrets ...string) poolPi
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}}
 	raw, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)

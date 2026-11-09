@@ -1,13 +1,15 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type secretScope uint8
@@ -81,7 +83,7 @@ func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 		return err
 	}
 	if run.Spec == nil || !slices.Contains(run.Spec.Resolved.SecretNames, target.SecretName) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "the run's pipeline does not declare this secret", Details: map[string]any{"reason": apierr.ReasonSecretUndeclared}}
+		return &apierr.Error{Code: hosterr.Forbidden, Message: "the run's pipeline does not declare this secret", Details: map[string]any{"reason": hosterr.ReasonSecretUndeclared}}
 	}
 	selection, err := runSecretSelection(run.Request)
 	if err != nil {

@@ -7,18 +7,18 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func planWithJobs(t *testing.T, tenant *Tenant, request PlanAcceptance, count int) PlanAcceptance {
 	t.Helper()
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}}
 	for i := 0; i < count; i++ {
-		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: fmt.Sprintf("job-%d", i)})
+		plan.Jobs = append(plan.Jobs, nodewire.JobSpec{ID: fmt.Sprintf("job-%d", i)})
 	}
 	var err error
 	request.Seal.Plan, err = json.Marshal(testBodyPlan(plan))

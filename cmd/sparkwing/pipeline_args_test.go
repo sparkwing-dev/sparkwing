@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPipelineAliasResolvesBeforeArgumentParsing(t *testing.T) {
@@ -51,16 +51,16 @@ func TestPipelineAliasResolvesBeforeArgumentParsing(t *testing.T) {
 	}
 }
 
-var argsFixture = nodeproto.PipelineDescription{
+var argsFixture = nodewire.PipelineDescription{
 	Name: "deploy",
 	Help: "Ships the service.",
-	Args: []nodeproto.ArgumentDescription{
+	Args: []nodewire.ArgumentDescription{
 		{Name: "env", Short: "e", Type: "string", Required: true, Description: "target environment", Enum: []string{"dev", "prod"}},
 		{Name: "replicas", Type: "int", Default: new("2"), Description: "pod count", JobID: "rollout"},
 		{Name: "force", Type: "bool", Description: "skip checks"},
 		{Name: "token", Type: "string", Secret: true, Default: new("")},
 	},
-	Examples: []nodeproto.UsageExample{{Comment: "ship to dev", Command: "sparkwing run deploy --env dev"}},
+	Examples: []nodewire.UsageExample{{Comment: "ship to dev", Command: "sparkwing run deploy --env dev"}},
 }
 
 func TestParsePipelineArgsFromDescribe(t *testing.T) {
@@ -68,7 +68,7 @@ func TestParsePipelineArgsFromDescribe(t *testing.T) {
 	extra.Extra = true
 	for _, tc := range []struct {
 		name   string
-		schema nodeproto.PipelineDescription
+		schema nodewire.PipelineDescription
 		args   []string
 		want   map[string]string
 		err    string
@@ -139,7 +139,7 @@ func TestPipelineHelpFromDescribe(t *testing.T) {
 }
 
 func TestPipelineArgumentEnumDoesNotEchoSecretValue(t *testing.T) {
-	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true, Enum: []string{"valid-private-value"}}}}
+	schema := nodewire.PipelineDescription{Name: "demo", Args: []nodewire.ArgumentDescription{{Name: "password", Type: "string", Secret: true, Enum: []string{"valid-private-value"}}}}
 	_, err := parsePipelineArgs(schema, []string{"--password", "invalid-private-value"})
 	if err == nil || strings.Contains(err.Error(), "invalid-private-value") || strings.Contains(err.Error(), "valid-private-value") {
 		t.Fatalf("secret enum diagnostic: %v", err)
@@ -147,7 +147,7 @@ func TestPipelineArgumentEnumDoesNotEchoSecretValue(t *testing.T) {
 }
 
 func TestPipelineArgumentSliceEnumChecksEachValue(t *testing.T) {
-	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "target", Type: "[]string", Enum: []string{" linux ", " darwin "}}}}
+	schema := nodewire.PipelineDescription{Name: "demo", Args: []nodewire.ArgumentDescription{{Name: "target", Type: "[]string", Enum: []string{" linux ", " darwin "}}}}
 	for _, value := range []string{"linux,darwin", "linux, darwin,", ""} {
 		if _, err := parsePipelineArgs(schema, []string{"--target", value}); err != nil {
 			t.Fatalf("valid list: %v", err)
@@ -158,7 +158,7 @@ func TestPipelineArgumentSliceEnumChecksEachValue(t *testing.T) {
 	}
 }
 
-func presentationFixture(pipelines ...nodeproto.PipelineDescription) runspec.DescribePresentation {
+func presentationFixture(pipelines ...nodewire.PipelineDescription) runspec.DescribePresentation {
 	presentation := runspec.DescribePresentation{Pipelines: []runspec.PipelinePresentation{}}
 	for _, pipeline := range pipelines {
 		presentation.Pipelines = append(presentation.Pipelines, runspec.PipelinePresentation(pipeline))
@@ -167,7 +167,7 @@ func presentationFixture(pipelines ...nodeproto.PipelineDescription) runspec.Des
 }
 
 func TestPipelineArgumentErrorsWithholdSecretDeclarationText(t *testing.T) {
-	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "unknown-private-name", Short: "r", Type: "string", Secret: true, Enum: []string{"unknown-private-choice"}}}}
+	schema := nodewire.PipelineDescription{Name: "demo", Args: []nodewire.ArgumentDescription{{Name: "unknown-private-name", Short: "r", Type: "string", Secret: true, Enum: []string{"unknown-private-choice"}}}}
 	for _, args := range [][]string{{"-r", "invalid"}, {"-r"}} {
 		_, err := parsePipelineArgs(schema, args)
 		if err == nil || strings.Contains(err.Error(), "unknown-private") {
@@ -176,14 +176,14 @@ func TestPipelineArgumentErrorsWithholdSecretDeclarationText(t *testing.T) {
 	}
 }
 
-func declarationFixture(t testing.TB, pipelines []nodeproto.PipelineDescription) *runspec.DeclarationGate {
+func declarationFixture(t testing.TB, pipelines []nodewire.PipelineDescription) *runspec.DeclarationGate {
 	t.Helper()
 	for i := range pipelines {
 		if pipelines[i].Args == nil {
-			pipelines[i].Args = []nodeproto.ArgumentDescription{}
+			pipelines[i].Args = []nodewire.ArgumentDescription{}
 		}
 	}
-	gate, err := runspec.NewDeclarationGate(nodeproto.DescribeDoc{Pipelines: pipelines}, secrets.NewMasker())
+	gate, err := runspec.NewDeclarationGate(nodewire.DescribeDoc{Pipelines: pipelines}, secrets.NewMasker())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,8 +191,8 @@ func declarationFixture(t testing.TB, pipelines []nodeproto.PipelineDescription)
 }
 
 func TestTriggerPreparationWithholdsIncompleteDeclarationErrors(t *testing.T) {
-	gate := declarationFixture(t, []nodeproto.PipelineDescription{
-		{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"unknown-private-choice"}}}},
+	gate := declarationFixture(t, []nodewire.PipelineDescription{
+		{Name: "Deploy", Args: []nodewire.ArgumentDescription{{Name: "region", Type: "string", Enum: []string{"unknown-private-choice"}}}},
 		{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "unknown-private-error"}},
 	})
 	_, err := prepareTriggerRequest(triggerRequestInput{

@@ -11,12 +11,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type localLogs struct {
@@ -267,7 +267,7 @@ func (l *localLogs) open(node string) (*localLogStream, error) {
 	return stream, nil
 }
 
-func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto.FrameLog) error {
+func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.FrameLog) error {
 	if frame.Stream != "" || frame.StreamData != "" || frame.StreamEnd {
 		return errors.New("raw SDK streams require the host egress adapter")
 	}

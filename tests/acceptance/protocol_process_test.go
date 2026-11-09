@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/protofd"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -27,24 +27,24 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
 			if mode != "planning" {
-				hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "probe", Routes: nodeproto.ProcessRoutes{
+				hello.Binding = &nodewire.ProcessBinding{RunID: "r", JobID: "probe", Routes: nodewire.ProcessRoutes{
 					URL: "http://127.0.0.1:1", Bearer: "pipe-bearer-sentinel",
 				}}
 			}
 			sendProtocolProbe(t, process, hello)
-			var greeting nodeproto.HelloResult
+			var greeting nodewire.HelloResult
 			decodeProtocolProbe(t, protocolProbeReply(t, process, "hello"), &greeting)
 			if greeting.Protocol != 2 || greeting.SDK.Language != "go" || greeting.SDK.Version == "" {
 				t.Fatalf("hello result = %+v", greeting)
 			}
-			sendProtocolProbe(t, process, nodeproto.Request{ID: "describe", Op: nodeproto.OpDescribe})
-			var description nodeproto.DescribeDoc
+			sendProtocolProbe(t, process, nodewire.Request{ID: "describe", Op: nodewire.OpDescribe})
+			var description nodewire.DescribeDoc
 			decodeProtocolProbe(t, protocolProbeReply(t, process, "describe"), &description)
-			sendProtocolProbe(t, process, nodeproto.Request{
-				ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.Name,
-				Args: map[string]string{"name": mode}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.Name},
+			sendProtocolProbe(t, process, nodewire.Request{
+				ID: "plan", Op: nodewire.OpPlan, Pipeline: protocolgo.Name,
+				Args: map[string]string{"name": mode}, Run: &nodewire.RunContext{RunID: "r", Pipeline: protocolgo.Name},
 			})
-			var plan nodeproto.PlanDoc
+			var plan nodewire.PlanDoc
 			decodeProtocolProbe(t, protocolProbeReply(t, process, "plan"), &plan)
 			if mode != "planning" {
 				var closure string
@@ -53,8 +53,8 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 						closure = job.Closures.SkipIf[0]
 					}
 				}
-				sendProtocolProbe(t, process, nodeproto.Request{ID: "eval", Op: nodeproto.OpEval, Closure: closure})
-				var evaluation nodeproto.EvalResult
+				sendProtocolProbe(t, process, nodewire.Request{ID: "eval", Op: nodewire.OpEval, Closure: closure})
+				var evaluation nodewire.EvalResult
 				decodeProtocolProbe(t, protocolProbeReply(t, process, "eval"), &evaluation)
 				if string(evaluation.Value) != "false" || evaluation.Error != nil {
 					t.Fatalf("skip condition = %+v", evaluation)
@@ -92,7 +92,7 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 			"id": "valid", "op": "plan", "pipeline": protocolgo.Name, "args": map[string]string{"name": "demo"},
 			"run": json.RawMessage(`{"run_id":"r","pipeline":"p","git":{"sha":"","branch":"","future":null},"trigger":{"source":"","pull_request":{"number":0}},"dry_run":false,"future":null}`),
 		})
-		var plan nodeproto.PlanDoc
+		var plan nodewire.PlanDoc
 		decodeProtocolProbe(t, protocolProbeReply(t, process, "valid"), &plan)
 		if len(plan.Jobs) == 0 {
 			t.Fatal("valid snapshot did not reach pipeline declaration")
@@ -103,19 +103,19 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 	})
 }
 
-func runProtocolProbe(t *testing.T, process *acceptance.GoSDKProcess, mode string, runner *nodeproto.RunnerIdentity) {
+func runProtocolProbe(t *testing.T, process *acceptance.GoSDKProcess, mode string, runner *nodewire.RunnerIdentity) {
 	t.Helper()
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "step", Op: nodeproto.OpRunStep, Job: "probe", Step: "run", Attempt: 1, Settled: []string{}})
+	sendProtocolProbe(t, process, nodewire.Request{ID: "step", Op: nodewire.OpRunStep, Job: "probe", Step: "run", Attempt: 1, Settled: []string{}})
 	line, err := process.NextFrame()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var started nodeproto.FrameLog
+	var started nodewire.FrameLog
 	if err := json.Unmarshal(line, &started); err != nil || started.Message != "probe-started" {
 		t.Fatalf("step start frame = %s (%v)", line, err)
 	}
 	if mode == "cancel" {
-		sendProtocolProbe(t, process, nodeproto.Request{ID: "cancel", Op: nodeproto.OpCancel, Job: "probe", Step: "run"})
+		sendProtocolProbe(t, process, nodewire.Request{ID: "cancel", Op: nodewire.OpCancel, Job: "probe", Step: "run"})
 	}
 	step := protocolProbeReply(t, process, "")
 	if mode == "cancel" {
@@ -130,7 +130,7 @@ func runProtocolProbe(t *testing.T, process *acceptance.GoSDKProcess, mode strin
 	if step.ID != "step" {
 		t.Fatalf("step reply ID = %q", step.ID)
 	}
-	var result nodeproto.RunResult
+	var result nodewire.RunResult
 	decodeProtocolProbe(t, step, &result)
 	if mode == "cancel" {
 		if result.Outcome != "failed" || result.Error == nil || !strings.Contains(result.Error.Message, "canceled") {
@@ -161,11 +161,11 @@ func runProtocolProbe(t *testing.T, process *acceptance.GoSDKProcess, mode strin
 	}
 }
 
-func probeHello() nodeproto.Request {
-	return nodeproto.Request{
-		ID: "hello", Op: nodeproto.OpHello, Protocol: 2,
-		Engine: &nodeproto.EngineIdentity{Version: "fixture"},
-		Runner: &nodeproto.RunnerIdentity{Name: "server-granted", Type: "actions", Labels: []string{"pool=granted", "os=" + runtime.GOOS}},
+func probeHello() nodewire.Request {
+	return nodewire.Request{
+		ID: "hello", Op: nodewire.OpHello, Protocol: 2,
+		Engine: &nodewire.EngineIdentity{Version: "fixture"},
+		Runner: &nodewire.RunnerIdentity{Name: "server-granted", Type: "actions", Labels: []string{"pool=granted", "os=" + runtime.GOOS}},
 	}
 }
 
@@ -186,30 +186,30 @@ func sendProtocolProbe(t *testing.T, process *acceptance.GoSDKProcess, request a
 	}
 }
 
-func protocolProbeReply(t *testing.T, process *acceptance.GoSDKProcess, id string) nodeproto.Reply {
+func protocolProbeReply(t *testing.T, process *acceptance.GoSDKProcess, id string) nodewire.Reply {
 	t.Helper()
 	for {
 		line, err := process.NextFrame()
 		if err != nil {
 			t.Fatal(err)
 		}
-		frame, err := nodeproto.ParseFrame(line)
+		frame, err := nodewire.ParseFrame(line)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if frame.Exec != nil {
 			done := nodehost.ExecuteCommand(t.Context(), *frame.Exec, func(stream string, data []byte, _ bool) error {
-				return process.Send(nodeproto.ExecOutput{ID: frame.Exec.ID, Stream: stream, Data: data})
+				return process.Send(nodewire.ExecOutput{ID: frame.Exec.ID, Stream: stream, Data: data})
 			})
 			sendProtocolProbe(t, process, done)
 			continue
 		}
-		var reply nodeproto.Reply
+		var reply nodewire.Reply
 		if err := json.Unmarshal(line, &reply); err != nil {
 			t.Fatal(err)
 		}
 		if reply.ID == "" {
-			var log nodeproto.FrameLog
+			var log nodewire.FrameLog
 			if err := json.Unmarshal(line, &log); err != nil || log.TS == "" {
 				t.Fatalf("invalid log frame: %s (%v)", line, err)
 			}
@@ -222,7 +222,7 @@ func protocolProbeReply(t *testing.T, process *acceptance.GoSDKProcess, id strin
 	}
 }
 
-func decodeProtocolProbe(t *testing.T, reply nodeproto.Reply, result any) {
+func decodeProtocolProbe(t *testing.T, reply nodewire.Reply, result any) {
 	t.Helper()
 	if !reply.OK {
 		t.Fatalf("%s failed: %+v", reply.ID, reply.Error)
@@ -232,7 +232,7 @@ func decodeProtocolProbe(t *testing.T, reply nodeproto.Reply, result any) {
 	}
 }
 
-func requireProtocolCode(t *testing.T, reply nodeproto.Reply, code apierr.Code) {
+func requireProtocolCode(t *testing.T, reply nodewire.Reply, code apierr.Code) {
 	t.Helper()
 	if reply.OK || reply.Error == nil || reply.Error.Code != code || reply.Error.Message == "" {
 		t.Fatalf("reply = %+v, want %s", reply, code)

@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,10 +11,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const queuePriorityTimeout = 10 * time.Second
@@ -36,7 +38,7 @@ func queuePriorityInput(inv clisurface.Invocation) (controllerwire.QueuePriority
 		return input, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
 	}
 	if inv.Value("profile") != "" {
-		return input, &apierr.Error{Code: apierr.PolicyMissing, Message: "queue priority changes this machine's local admission only", Hint: "run it without --profile on the machine whose queue holds the run"}
+		return input, &apierr.Error{Code: hosterr.PolicyMissing, Message: "queue priority changes this machine's local admission only", Hint: "run it without --profile on the machine whose queue holds the run"}
 	}
 	return input, nil
 }

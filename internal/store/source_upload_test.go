@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -8,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ChildSourceBundleRegressions checks uploaded-source inheritance in the supplied store dialect.
@@ -32,7 +34,7 @@ func childSourceBundleRequiresExactParentSource(t *testing.T, open func(*testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			code, message := apierr.Forbidden, "child source bundle differs from its parent's source"
+			code, message := hosterr.Forbidden, "child source bundle differs from its parent's source"
 			switch mutation {
 			case "digest":
 				request.Request.Source.BundleDigest.Value = strings.Repeat("b", 64)
@@ -65,7 +67,7 @@ func childSourceBundleRequiresExactParentSource(t *testing.T, open func(*testing
 			admitted, err := tenant.AdmitRun(t.Context(), request)
 			if mutation != "none" {
 				if mutation == "missing record" || mutation == "foreign run record" || mutation == "foreign team record" {
-					code, message = apierr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", "run", digest)
+					code, message = hosterr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", "run", digest)
 				}
 				requireSourceBundleError(t, err, code, message)
 				rewriteSchemaCount(t, s.db, "runs", 1)
@@ -99,15 +101,15 @@ func childSourceBundleFixture(t *testing.T, s *Store, crossRepository bool) (*Te
 	s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 	})
-	children := []nodeproto.ChildPipeline{{Pipeline: "child", Repository: "gh:1"}}
+	children := []nodewire.ChildPipeline{{Pipeline: "child", Repository: "gh:1"}}
 	if crossRepository {
-		children = append(children, nodeproto.ChildPipeline{Pipeline: "child", Repository: "gh:2"})
+		children = append(children, nodewire.ChildPipeline{Pipeline: "child", Repository: "gh:2"})
 	}
 	authority := sourceBundleChildJob(t, s, "run", children)
 	return tenant, IntakeRequest{Authority: authority, IdempotencyKey: "invocation", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "child", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: parent.Request.Request.Git, Source: parent.Request.Request.Source, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}}}
 }
 
-func sourceBundleChildJob(t *testing.T, s *Store, run string, children []nodeproto.ChildPipeline) capability.AuthorityRef {
+func sourceBundleChildJob(t *testing.T, s *Store, run string, children []nodewire.ChildPipeline) capability.AuthorityRef {
 	t.Helper()
 	claim := authorityRoot("claim-"+run, "a")
 	claim.Grants = []capability.Grant{capability.ChildrenStart}
@@ -149,7 +151,7 @@ func childSourceBundleGrandchild(t *testing.T, open func(*testing.T) *Store) {
 		t.Fatal(err)
 	}
 	tenant.s.testOnlyExec(t, `DELETE FROM blob_records WHERE team='a' AND run_id='run' AND kind='source_bundle'`)
-	request.Authority = sourceBundleChildJob(t, tenant.s, child.RunID, []nodeproto.ChildPipeline{{Pipeline: "grandchild", Repository: "gh:1"}})
+	request.Authority = sourceBundleChildJob(t, tenant.s, child.RunID, []nodewire.ChildPipeline{{Pipeline: "grandchild", Repository: "gh:1"}})
 	request.Request.Pipeline = "grandchild"
 	request.Request.Lineage = runspec.Lineage{ParentRunID: child.RunID, ParentJobID: "job"}
 	grandchild, err := tenant.AdmitRun(t.Context(), request)
@@ -180,7 +182,7 @@ func childSourceBundleRetry(t *testing.T, open func(*testing.T) *Store) {
 			retry, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, RetryMode: "all", Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: child.RunID}}})
 			digest := request.Request.Source.BundleDigest.Value
 			if !matching {
-				requireSourceBundleError(t, err, apierr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", child.RunID, digest))
+				requireSourceBundleError(t, err, hosterr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", child.RunID, digest))
 				rewriteSchemaCount(t, s.db, "runs", 2)
 				return
 			}

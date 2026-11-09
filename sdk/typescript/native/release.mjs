@@ -20,7 +20,7 @@ const [operation] = positionals;
 if (positionals.length !== 1 || !["bridge", "pack", "local-pack"].includes(operation)) throw new Error("expected bridge, pack or local-pack");
 const version = values.version?.replace(/^v/, "");
 if (!version || version === "0.0.0" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/.test(version))
-  throw new Error("--version requires the engine release version");
+  throw new Error("--version requires the SDK release version");
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const run = (command, args, capture = false, cwd = root) => {
   const result = spawnSync(command, args, {

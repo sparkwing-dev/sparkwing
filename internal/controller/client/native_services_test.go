@@ -8,21 +8,21 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeAnnotationPreservesLocationAndStep(t *testing.T) {
 	for _, step := range []string{"", "compile"} {
 		t.Run(step, func(t *testing.T) {
-			input := nodeproto.AnnotationRequest{Step: step, Annotation: nodeproto.Annotation{Level: "warn", Message: "masked note", File: "source.go", Line: 7, EndLine: 9, Column: 3}}
+			input := nodewire.AnnotationRequest{Step: step, Annotation: nodewire.Annotation{Level: "warn", Message: "masked note", File: "source.go", Line: 7, EndLine: 9, Column: 3}}
 			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
 				var body controllerwire.AnnotationWrite
 				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 					t.Fatal(err)
 				}
-				want := controllerwire.AnnotationWrite{Annotation: nodeproto.Annotation{Level: input.Level, Message: input.Message, File: input.File, Line: input.Line, EndLine: input.EndLine, Column: input.Column}, StepID: step}
+				want := controllerwire.AnnotationWrite{Annotation: nodewire.Annotation{Level: input.Level, Message: input.Message, File: input.File, Line: input.Line, EndLine: input.EndLine, Column: input.Column}, StepID: step}
 				if !reflect.DeepEqual(body, want) {
 					t.Fatalf("annotation changed in transit: %+v, want %+v", body, want)
 				}
@@ -56,7 +56,7 @@ func TestAnnotationRequiresEmptyNoContentAcknowledgement(t *testing.T) {
 		transport := testEngine(t, func(*http.Request) (*http.Response, error) {
 			return engineResponse(response.status, response.body), nil
 		})
-		if err := transport.AppendAnnotation(t.Context(), "run", "job", controllerwire.AnnotationWrite{Annotation: nodeproto.Annotation{Level: "info", Message: "note"}}); err == nil {
+		if err := transport.AppendAnnotation(t.Context(), "run", "job", controllerwire.AnnotationWrite{Annotation: nodewire.Annotation{Level: "info", Message: "note"}}); err == nil {
 			t.Fatalf("accepted HTTP %d %s", response.status, response.body)
 		}
 	}
@@ -71,7 +71,7 @@ func TestNativeAnnotationAllowsEmptyMaskedText(t *testing.T) {
 		return engineResponse(http.StatusNoContent, ""), nil
 	})
 	process := &NativeProcessClient{transport: transport, run: "run", job: "job"}
-	if err := process.Annotation(t.Context(), nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Level: "info"}}); err != nil {
+	if err := process.Annotation(t.Context(), nodewire.AnnotationRequest{Annotation: nodewire.Annotation{Level: "info"}}); err != nil {
 		t.Fatal(err)
 	}
 }

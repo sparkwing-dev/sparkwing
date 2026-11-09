@@ -1,14 +1,16 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // gitHubAppWriter rechecks authority and installation ownership when committing App configuration.
@@ -52,7 +54,7 @@ func githubAppRequestError(status int, err error) error {
 	case http.StatusNotFound:
 		code = apierr.NotFound
 	case http.StatusBadGateway:
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository discovery is unavailable"}, err)
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "GitHub repository discovery is unavailable"}, err)
 	}
 	return &apierr.Error{Code: code, Message: err.Error()}
 }

@@ -1,13 +1,15 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // SignedEngineVersionPolicy reads release metadata and notices through the engine owner.
@@ -71,7 +73,7 @@ func (p SignedEngineVersionPolicy) notices(ctx context.Context, version string) 
 	}
 	notices, err := services.Evaluate(index.Index, version, now)
 	var failure *apierr.Error
-	if err != nil && (!errors.As(err, &failure) || (failure.Code != apierr.VersionRevoked && failure.Code != apierr.VersionUnsupported)) {
+	if err != nil && (!errors.As(err, &failure) || (failure.Code != hosterr.VersionRevoked && failure.Code != hosterr.VersionUnsupported)) {
 		return nil, err
 	}
 	out := append([]engineid.Notice{}, index.Notices...)
@@ -83,5 +85,5 @@ func (p SignedEngineVersionPolicy) notices(ctx context.Context, version string) 
 }
 
 func versionPolicyUnavailable() error {
-	return &apierr.Error{Code: apierr.Unavailable, Message: "engine version policy is unavailable"}
+	return &apierr.Error{Code: hosterr.Unavailable, Message: "engine version policy is unavailable"}
 }

@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func claimedFixtureNode(t *testing.T, f *storeHostFixture, id string) NodeInput {
@@ -38,12 +38,12 @@ func claimedFixtureNode(t *testing.T, f *storeHostFixture, id string) NodeInput 
 	return input
 }
 
-func acceptedFixtureExpansion(t *testing.T, f *storeHostFixture, source NodeInput, jobs ...nodeproto.JobSpec) store.AcceptedExpansion {
+func acceptedFixtureExpansion(t *testing.T, f *storeHostFixture, source NodeInput, jobs ...nodewire.JobSpec) store.AcceptedExpansion {
 	t.Helper()
 	if jobs == nil {
-		jobs = []nodeproto.JobSpec{}
+		jobs = []nodewire.JobSpec{}
 	}
-	body, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+	body, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestAResumedRunKeepsAFailedGeneratedNode(t *testing.T) {
 	if err := f.report(t.Context(), source, runstate.NodeSuccess); err != nil {
 		t.Fatal(err)
 	}
-	child := nodeproto.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	child := nodewire.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "body"}}}
 	acceptedFixtureExpansion(t, f, source, child)
 	if err := f.report(t.Context(), claimedFixtureNode(t, f, child.ID), runstate.NodeFailed); err != nil {
 		t.Fatal(err)
@@ -109,11 +109,11 @@ func TestAResumedRunGeneratesASourcesUnrecordedNodes(t *testing.T) {
 				if input.NodeID != source.NodeID || runspec.ClaimGeneration(input.Generation) != source.Generation || row.Ref.NodeID != runspec.NodeID(source.NodeID) {
 					t.Error("expansion lost source fence")
 				}
-				jobs := []nodeproto.JobSpec{}
+				jobs := []nodewire.JobSpec{}
 				if !empty {
-					jobs = append(jobs, nodeproto.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+					jobs = append(jobs, nodewire.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "body"}}})
 				}
-				body, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+				body, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 				return body, runspec.SecretRegistration{Version: 1}, nil, err
 			}
 			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, runstate.NodeSuccess) })
@@ -140,7 +140,7 @@ func TestAResumeKeepsACompleteBatchBesideAnEmptyOne(t *testing.T) {
 	if err := f.report(t.Context(), source, runstate.NodeSuccess); err != nil {
 		t.Fatal(err)
 	}
-	child := nodeproto.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	child := nodewire.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Steps: []nodewire.StepSpec{{ID: "body"}}}
 	accepted := acceptedFixtureExpansion(t, f, source, child)
 	replayed := acceptedFixtureExpansion(t, f, source, child)
 	if !replayed.Replayed || replayed.BodyHash != accepted.BodyHash {

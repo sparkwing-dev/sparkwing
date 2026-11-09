@@ -11,19 +11,18 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	ktesting "k8s.io/client-go/testing"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	ktesting "k8s.io/client-go/testing"
 )
 
 type launcherWireFake struct {
@@ -65,7 +64,7 @@ func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	identity := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}
 	unit := controllerwire.ClaimedUnit{
 		LeaseExpiresAt: deadline.Add(time.Hour),
-		Runner:         nodeproto.RunnerIdentity{Name: "server-holder", Type: "cloud"},
+		Runner:         nodewire.RunnerIdentity{Name: "server-holder", Type: "cloud"},
 		CloudResources: &match.Resources{Cores: 1.5, MemoryBytes: 2 << 30},
 		Unit:           kind, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
 		UnitID: "awarded-unit", RunID: "run", JobID: "job", Capability: "one-time-bootstrap",

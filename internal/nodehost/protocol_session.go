@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bufio"
 	"context"
@@ -14,15 +16,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 // ProtocolSessionConfig launches a protocol-v2 process. Native Start methods
@@ -38,13 +42,13 @@ type ProtocolSessionConfig struct {
 	Directory       string
 	Environment     procenv.Env
 	Environments    SDKEnvironment
-	Log             func(context.Context, nodeproto.FrameLog) error
+	Log             func(context.Context, nodewire.FrameLog) error
 	Revoke          func() error
 	RunCleanups     func(context.Context, CleanupScope) error
 	Activity        ExecutorActivity
 	Debug           bool
-	ParseFrame      func([]byte) (nodeproto.Frame, error)
-	ValidateRequest func(nodeproto.Request) error
+	ParseFrame      func([]byte) (nodewire.Frame, error)
+	ValidateRequest func(nodewire.Request) error
 	cleanupEnv      procenv.Env
 	cleanupEnvSet   bool
 	grace           time.Duration
@@ -101,7 +105,7 @@ func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input Eval
 
 // StartPlanning sends all describe and plan output through the planner's secret
 // gate. Planning hello carries no binding and requires no delegated route.
-func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 	if input.Entry == nil || log == nil {
 		return nil, cfg.failedStartup(errors.New("SDK planning requires a source entry and log sink"))
 	}
@@ -144,9 +148,9 @@ func (cfg ProtocolSessionConfig) failedStartup(err error) error {
 }
 
 type protocolCall struct {
-	request  nodeproto.Request
+	request  nodewire.Request
 	callerID string
-	reply    chan nodeproto.Reply
+	reply    chan nodewire.Reply
 }
 
 // protocolSession owns one SDK process tree until Close or the keeper execution
@@ -162,6 +166,8 @@ type protocolSession struct {
 	mu                        sync.Mutex
 	pending                   map[string]protocolCall
 	helloSent, ready, planned bool
+	sdkProtocol               int
+	adapter                   protocolAdapter
 	failure                   error
 	done                      chan struct{}
 	joined                    chan struct{}
@@ -201,10 +207,10 @@ func startProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 		cfg.grace = procgroup.DefaultTerminationGrace
 	}
 	if cfg.ParseFrame == nil {
-		cfg.ParseFrame = nodeproto.ParseFrame
+		cfg.ParseFrame = nodewire.ParseFrame
 	}
 	if cfg.ValidateRequest == nil {
-		cfg.ValidateRequest = nodeproto.Request.Validate
+		cfg.ValidateRequest = nodewire.Request.Validate
 	}
 	if cfg.output == nil {
 		var masker *secrets.Masker
@@ -213,7 +219,7 @@ func startProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 		}
 		sink := cfg.Log
 		if sink == nil {
-			sink = func(context.Context, nodeproto.FrameLog) error { return nil }
+			sink = func(context.Context, nodewire.FrameLog) error { return nil }
 		}
 		logs := &planningLogs{known: true, debug: cfg.Debug, masker: masker, sink: sink}
 		cfg.output, cfg.Log = logs, logs.write
@@ -278,24 +284,24 @@ func closeProtocolFiles(files []*os.File) {
 
 // Request assigns a fresh private correlation ID; returned replies use the
 // caller's ID. Cancellation preserves the original request's right to a reply.
-func (s *protocolSession) Request(ctx context.Context, request nodeproto.Request) (nodeproto.Reply, error) {
+func (s *protocolSession) Request(ctx context.Context, request nodewire.Request) (nodewire.Reply, error) {
 	if err := context.Cause(ctx); err != nil {
-		return nodeproto.Reply{}, err
+		return nodewire.Reply{}, err
 	}
 	callerID := request.ID
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return nodeproto.Reply{}, err
+		return nodewire.Reply{}, err
 	}
 	request.ID = hex.EncodeToString(nonce[:])
 	if err := s.cfg.ValidateRequest(request); err != nil {
-		return nodeproto.Reply{}, err
+		return nodewire.Reply{}, err
 	}
-	c := protocolCall{request: request, callerID: callerID, reply: make(chan nodeproto.Reply, 1)}
+	c := protocolCall{request: request, callerID: callerID, reply: make(chan nodewire.Reply, 1)}
 	s.mu.Lock()
 	if err := s.acceptProtocolRequest(request); err != nil {
 		s.mu.Unlock()
-		return nodeproto.Reply{}, err
+		return nodewire.Reply{}, err
 	}
 	s.pending[request.ID] = c
 	s.writes.Add(1)
@@ -306,7 +312,7 @@ func (s *protocolSession) Request(ctx context.Context, request nodeproto.Request
 	case err := <-written:
 		if err != nil {
 			s.failProtocol(err)
-			return nodeproto.Reply{}, err
+			return nodewire.Reply{}, err
 		}
 	case <-ctx.Done():
 		// safety: the SDK can consume a full frame before its writer publishes completion.
@@ -316,44 +322,44 @@ func (s *protocolSession) Request(ctx context.Context, request nodeproto.Request
 		case err := <-written:
 			if err != nil {
 				s.failProtocol(err)
-				return nodeproto.Reply{}, err
+				return nodewire.Reply{}, err
 			}
 		case <-s.done:
-			return nodeproto.Reply{}, errors.Join(context.Cause(ctx), s.protocolFailure())
+			return nodewire.Reply{}, errors.Join(context.Cause(ctx), s.protocolFailure())
 		case <-draining.C:
 			s.failProtocol(protocolSessionError(apierr.ProtocolError, "SDK request write interrupted"))
 			<-s.joined
-			return nodeproto.Reply{}, context.Cause(ctx)
+			return nodewire.Reply{}, context.Cause(ctx)
 		}
 	case <-s.done:
-		return nodeproto.Reply{}, s.protocolFailure()
+		return nodewire.Reply{}, s.protocolFailure()
 	}
 	select {
 	case reply := <-c.reply:
 		return reply, nil
 	case <-ctx.Done():
-		if request.Op == nodeproto.OpRunStep || request.Op == nodeproto.OpEval {
-			return nodeproto.Reply{}, s.cancelProtocolRequest(c, context.Cause(ctx))
+		if request.Op == nodewire.OpRunStep || request.Op == nodewire.OpEval {
+			return nodewire.Reply{}, s.cancelProtocolRequest(c, context.Cause(ctx))
 		}
 		err := context.Cause(ctx)
 		s.failProtocol(err)
 		<-s.joined
-		return nodeproto.Reply{}, err
+		return nodewire.Reply{}, err
 	case <-s.done:
 		select {
 		case reply := <-c.reply:
 			return reply, nil
 		default:
-			return nodeproto.Reply{}, s.protocolFailure()
+			return nodewire.Reply{}, s.protocolFailure()
 		}
 	}
 }
 
-func (s *protocolSession) acceptProtocolRequest(request nodeproto.Request) error {
+func (s *protocolSession) acceptProtocolRequest(request nodewire.Request) error {
 	if s.failure != nil {
 		return s.failure
 	}
-	if request.Op == nodeproto.OpHello {
+	if request.Op == nodewire.OpHello {
 		if s.helloSent {
 			return protocolSessionError(apierr.ProtocolError, "SDK hello may occur only once")
 		}
@@ -363,32 +369,32 @@ func (s *protocolSession) acceptProtocolRequest(request nodeproto.Request) error
 	} else if !s.ready {
 		return protocolSessionError(apierr.ProtocolError, "SDK hello has not completed")
 	}
-	if request.Op == nodeproto.OpPlan {
+	if request.Op == nodewire.OpPlan {
 		if s.planned {
 			return protocolSessionError(apierr.ProtocolError, "SDK plan may occur only once")
 		}
 	}
 	for _, pending := range s.pending {
-		if request.Op == nodeproto.OpDescribe || request.Op == nodeproto.OpPlan || pending.request.Op == nodeproto.OpDescribe || pending.request.Op == nodeproto.OpPlan {
+		if request.Op == nodewire.OpDescribe || request.Op == nodewire.OpPlan || pending.request.Op == nodewire.OpDescribe || pending.request.Op == nodewire.OpPlan {
 			return protocolSessionError(apierr.ProtocolError, "SDK describe and plan require an idle process")
 		}
-		if request.Op == nodeproto.OpRunStep && pending.request.Op == nodeproto.OpRunStep && request.Job == pending.request.Job && request.Step == pending.request.Step {
+		if request.Op == nodewire.OpRunStep && pending.request.Op == nodewire.OpRunStep && request.Job == pending.request.Job && request.Step == pending.request.Step {
 			return protocolSessionError(apierr.ProtocolError, "SDK step is already running")
 		}
 	}
-	s.helloSent = s.helloSent || request.Op == nodeproto.OpHello
-	s.planned = s.planned || request.Op == nodeproto.OpPlan
+	s.helloSent = s.helloSent || request.Op == nodewire.OpHello
+	s.planned = s.planned || request.Op == nodewire.OpPlan
 	return nil
 }
 
-func (s *protocolSession) writeProtocolRequest(request nodeproto.Request) error {
+func (s *protocolSession) writeProtocolRequest(request nodewire.Request) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	data, err := json.Marshal(request)
+	data, err := s.encodeProtocolRequest(request)
 	if err != nil {
 		return err
 	}
-	if int64(len(data)+1) > limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes {
+	if int64(len(data)+1) > protolimits.NodeOutputBytes+protolimits.ProtocolEnvelopeBytes {
 		return protocolSessionError(apierr.ProtocolError, "SDK request exceeds protocol frame limit")
 	}
 	if _, err = s.requests.Write(append(data, '\n')); err != nil {
@@ -405,8 +411,8 @@ func (s *protocolSession) cancelProtocolRequest(call protocolCall, cause error) 
 	}
 	ctx, cancel := context.WithTimeout(s.executionCtx, limits.CleanupTimeout)
 	defer cancel()
-	request := nodeproto.Request{Op: nodeproto.OpCancel}
-	if call.request.Op == nodeproto.OpEval {
+	request := nodewire.Request{Op: nodewire.OpCancel}
+	if call.request.Op == nodewire.OpEval {
 		request.Target = call.request.ID
 	} else {
 		request.Job, request.Step = call.request.Job, call.request.Step
@@ -436,7 +442,12 @@ func (s *protocolSession) readProtocolFrames(file *os.File) {
 	defer file.Close()
 	scanner := protocolScanner(file)
 	for scanner.Scan() {
-		frame, err := s.cfg.ParseFrame(scanner.Bytes())
+		line, err := s.upgradeProtocolFrame(scanner.Bytes())
+		if err != nil {
+			s.failProtocol(err)
+			return
+		}
+		frame, err := s.cfg.ParseFrame(line)
 		if err != nil {
 			s.failProtocol(protocolSessionError(apierr.ProtocolError, "invalid SDK frame"))
 			return
@@ -467,7 +478,7 @@ func (s *protocolSession) readProtocolFrames(file *os.File) {
 	}
 }
 
-func (s *protocolSession) deliverProtocolReply(reply nodeproto.Reply) error {
+func (s *protocolSession) deliverProtocolReply(reply nodewire.Reply) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failure != nil && !errors.Is(s.failure, errProtocolSessionClosed) {
@@ -478,17 +489,17 @@ func (s *protocolSession) deliverProtocolReply(reply nodeproto.Reply) error {
 		return protocolSessionError(apierr.ProtocolError, "SDK sent a duplicate or unsolicited reply")
 	}
 	delete(s.pending, reply.ID)
-	if call.request.Op == nodeproto.OpHello && reply.OK {
-		var hello nodeproto.HelloResult
+	if call.request.Op == nodewire.OpHello && reply.OK {
+		var hello nodewire.HelloResult
 		if err := json.Unmarshal(reply.Result, &hello); err != nil {
 			return protocolSessionError(apierr.ProtocolError, "SDK hello result is invalid")
 		}
-		if hello.Protocol != nodeproto.Version {
+		if hello.Protocol != nodewire.Version {
 			return protocolSessionError(apierr.ProtocolMismatch, "SDK protocol differs from the engine; rebuild .sparkwing")
 		}
 		s.ready = true
 	}
-	if call.request.Op == nodeproto.OpHello && reply.Error != nil && reply.Error.Code == apierr.UnknownOp {
+	if call.request.Op == nodewire.OpHello && reply.Error != nil && reply.Error.Code == apierr.UnknownOp {
 		return &apierr.Error{Code: apierr.ProtocolMismatch, Message: "SDK does not support hello", Hint: "Rebuild .sparkwing with the matching SDK."}
 	}
 	reply.ID = call.callerID
@@ -496,14 +507,14 @@ func (s *protocolSession) deliverProtocolReply(reply nodeproto.Reply) error {
 	return nil
 }
 
-func (s *protocolSession) attributeProtocolLog(log nodeproto.FrameLog) nodeproto.FrameLog {
+func (s *protocolSession) attributeProtocolLog(log nodewire.FrameLog) nodewire.FrameLog {
 	if log.Step == "" {
 		return log
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, call := range s.pending {
-		if call.request.Op == nodeproto.OpRunStep && call.request.Step == log.Step {
+		if call.request.Op == nodewire.OpRunStep && call.request.Step == log.Step {
 			return log
 		}
 	}
@@ -513,7 +524,7 @@ func (s *protocolSession) attributeProtocolLog(log nodeproto.FrameLog) nodeproto
 
 func protocolScanner(file *os.File) *bufio.Scanner {
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64<<10), int(limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes))
+	scanner.Buffer(make([]byte, 64<<10), int(protolimits.NodeOutputBytes+protolimits.ProtocolEnvelopeBytes))
 	return scanner
 }
 
@@ -545,7 +556,7 @@ func (s *protocolSession) readProtocolText(file *os.File, level string) {
 	}
 }
 
-func (s *protocolSession) emitProtocolLog(log nodeproto.FrameLog) {
+func (s *protocolSession) emitProtocolLog(log nodewire.FrameLog) {
 	if s.cfg.Activity.Progress != nil {
 		s.cfg.Activity.Progress()
 	}
@@ -580,13 +591,13 @@ func (s *protocolSession) watchProtocolProcess() {
 	case <-s.process.LeaderExited():
 		s.awaitProtocol(s.framesDone)
 		if s.protocolFailure() == nil {
-			s.failProtocol(protocolSessionError(apierr.SDKExited, "SDK process exited"))
+			s.failProtocol(protocolSessionError(hosterr.SDKExited, "SDK process exited"))
 		}
 	case <-s.framesDone:
 		if !s.awaitProtocol(s.process.LeaderExited()) {
-			s.failProtocol(protocolSessionError(apierr.FramesClosed, "SDK closed its frame pipe"))
+			s.failProtocol(protocolSessionError(hosterr.FramesClosed, "SDK closed its frame pipe"))
 		} else if s.protocolFailure() == nil {
-			s.failProtocol(protocolSessionError(apierr.SDKExited, "SDK process exited"))
+			s.failProtocol(protocolSessionError(hosterr.SDKExited, "SDK process exited"))
 		}
 	}
 	_ = s.requests.Close()

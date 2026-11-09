@@ -6,10 +6,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func (f *storeHostFixture) report(ctx context.Context, input NodeInput, outcome runstate.NodeState) error {
@@ -30,12 +30,12 @@ func (f *storeHostFixture) report(ctx context.Context, input NodeInput, outcome 
 }
 
 func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "ok", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "boom", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "after-boom", Needs: []string{"boom"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "skipper", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "superseded", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "ok", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "boom", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "after-boom", Needs: []string{"boom"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "skipper", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "superseded", Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}})
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		outcome := runstate.NodeSuccess

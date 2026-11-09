@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 )
 
 func TestRepositoryUpdatesApplyToSelectedCheckoutAndPreviewExplicitly(t *testing.T) {
+	isolateUpdateTests(t)
 	root, other := t.TempDir(), t.TempDir()
 	t.Chdir(root)
 	fleet := []repos.Repo{{Name: "selected", Primary: root}, {Name: "other", Primary: other}}
@@ -63,6 +65,7 @@ func TestRepositoryUpdatesRefuseUnconfirmedFleetBeforeReadingIt(t *testing.T) {
 }
 
 func TestRepositoryUpdateSelectionRejectsSiblingPrefixesProperty(t *testing.T) {
+	isolateUpdateTests(t)
 	parent := t.TempDir()
 	for i := range 32 {
 		primary := filepath.Join(parent, fmt.Sprintf("repo-%d", i))
@@ -96,5 +99,35 @@ func TestRepositoryUpdatePreviewDoesNotWriteStartupState(t *testing.T) {
 	entries, err := os.ReadDir(home)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("preview startup changed state: %v, %v", entries, err)
+	}
+}
+
+func TestRepositoryUpdatesSelectSignedSDKInsteadOfEngineRelease(t *testing.T) {
+	isolateUpdateTests(t)
+	root := t.TempDir()
+	t.Chdir(root)
+	updateFetchLatest = func(context.Context) (string, error) { t.Fatal("SDK update queried engine releases"); return "", nil }
+	updateSDKVersion = func(_ context.Context, requested string) (string, error) {
+		if requested != "" {
+			t.Fatalf("unexpected target %s", requested)
+		}
+		return "v0.1.0", nil
+	}
+	var commandErr error
+	captureStdout(t, func() {
+		commandErr = runReposUpdateWithArgs([]string{"--dry-run", "-o=json"}, func(target string) ([]repos.Repo, error) {
+			if target != "v0.1.0" {
+				t.Fatalf("inventory received engine version %s", target)
+			}
+			return []repos.Repo{{Name: "fixture", Primary: root}}, nil
+		}, func(_ []repos.Repo, cfg repos.UpdateConfig) []repos.Verdict {
+			if cfg.Target != "v0.1.0" {
+				t.Fatalf("bump received engine version %s", cfg.Target)
+			}
+			return nil
+		})
+	})
+	if commandErr != nil {
+		t.Fatal(commandErr)
 	}
 }

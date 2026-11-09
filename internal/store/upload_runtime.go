@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -8,10 +10,10 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func validUploadTicket(id string) bool {
@@ -39,7 +41,7 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 			return UploadReservation{}, err
 		}
 		if !reflect.DeepEqual(a.source, request.Intent.Identity) {
-			return UploadReservation{}, authorityError(apierr.Forbidden, "upload identity differs from live authority")
+			return UploadReservation{}, authorityError(hosterr.Forbidden, "upload identity differs from live authority")
 		}
 		if err := advisoryLockTx(ctx, tx, "upload:"+request.ID); err != nil {
 			return UploadReservation{}, err
@@ -249,7 +251,7 @@ func readBlobUploadTx(ctx context.Context, tx *storeTx, team Team, id string) (U
 
 func checkBlobUploadTx(ctx context.Context, tx *storeTx, team Team, a blobActor, u *UploadReservation, pending bool) error {
 	if u.Identity != a.source {
-		return authorityError(apierr.Forbidden, "upload belongs to another uploader")
+		return authorityError(hosterr.Forbidden, "upload belongs to another uploader")
 	}
 	var repo string
 	if err := tx.QueryRowContext(ctx, "SELECT repo_key FROM uploads WHERE team=? AND id=?", team, u.ID).Scan(&repo); err != nil {

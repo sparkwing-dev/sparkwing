@@ -1,14 +1,16 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // AccountWriter rechecks the account session and commits its mutation and session selection together.
@@ -46,9 +48,9 @@ func accountMutationError(err error) error {
 	case errors.Is(err, store.ErrSlugTaken), errors.Is(err, store.ErrAlreadyMember), errors.Is(err, store.ErrInvitationOpen):
 		return &apierr.Error{Code: apierr.Conflict, Message: "account resource already exists"}
 	case errors.Is(err, store.ErrInvitationLimit):
-		return &apierr.Error{Code: apierr.RateLimited, Message: err.Error()}
+		return &apierr.Error{Code: hosterr.RateLimited, Message: err.Error()}
 	case errors.Is(err, store.ErrLastOwner), errors.Is(err, store.ErrRoleAboveOwn), errors.Is(err, store.ErrWaitlisted):
-		return apierr.Authorization(apierr.ReasonMissingGrant, "account change refused")
+		return hosterr.Authorization(hosterr.ReasonMissingGrant, "account change refused")
 	case errors.Is(err, store.ErrInvitationClosed):
 		return &apierr.Error{Code: apierr.Conflict, Message: "invitation is no longer open"}
 	case errors.Is(err, store.ErrLastSignInMethod):

@@ -1,14 +1,16 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func lookupTriggerGitHubID(ctx context.Context, remote, profile string, captured []string) (int64, error) {
@@ -23,8 +25,8 @@ func lookupTriggerGitHubID(ctx context.Context, remote, profile string, captured
 		if ctx.Err() != nil || !errors.As(err, &failure) {
 			return 0, err
 		}
-		fallback := failure.Code == apierr.NotFound || failure.Code == apierr.RateLimited ||
-			failure.Code == apierr.Forbidden && (failure.Details["reason"] == nil || failure.Details["reason"] == string(apierr.ReasonRepositoryUnauthorized))
+		fallback := failure.Code == apierr.NotFound || failure.Code == hosterr.RateLimited ||
+			failure.Code == hosterr.Forbidden && (failure.Details["reason"] == nil || failure.Details["reason"] == string(hosterr.ReasonRepositoryUnauthorized))
 		if !fallback {
 			return 0, err
 		}

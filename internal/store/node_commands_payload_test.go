@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNodeCommandPayloadRejectsConflictingPayload(t *testing.T) {
@@ -78,7 +78,7 @@ func TestAdmissionRefusalHasNoOwnerCommand(t *testing.T) {
 
 func TestOwnerCannotSkipApprovalThroughDependencyEdge(t *testing.T) {
 	tenant, plan, _ := planFixture(t, runspec.DispatchHost)
-	doc := testBodyPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}}}})
+	doc := testBodyPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "gate", Approval: &nodewire.ApprovalSpec{}}}})
 	plan.Seal.Plan, _ = json.Marshal(doc)
 	var err error
 	plan.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: plan.Seal.Request, Declarations: plan.Seal.Declarations, Plan: doc})
@@ -109,7 +109,7 @@ func TestDependencySkipUsesSealedSelection(t *testing.T) {
 			tenant, plan, _ := planFixtureWithInput(t, runspec.DispatchHost, func(in *IntakeRequest) {
 				in.Request.Options.Only = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: string(selected)}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}
 			})
-			doc := testBodyPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build"}, {ID: "gate", Approval: &nodeproto.ApprovalSpec{}}}})
+			doc := testBodyPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build"}, {ID: "gate", Approval: &nodewire.ApprovalSpec{}}}})
 			plan.Seal.Plan, _ = json.Marshal(doc)
 			var err error
 			plan.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: plan.Seal.Request, Declarations: plan.Seal.Declarations, Plan: doc})

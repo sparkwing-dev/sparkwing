@@ -1,10 +1,10 @@
 package nodehost
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func recordNodeFailure(job string, result runstate.NodeResult, mask func(string) string) runstate.NodeResult {
@@ -25,7 +25,7 @@ func recordNodeFailure(job string, result runstate.NodeResult, mask func(string)
 	} else if result.Reason != "" {
 		code = maskedFailureCode(apierr.Code(result.Reason), mask)
 	}
-	result.Failure = &nodeproto.JobFailure{Job: job, Stage: stage, Error: &apierr.Error{Code: code, Message: result.MaskedError}}
+	result.Failure = &nodewire.JobFailure{Job: job, Stage: stage, Error: &apierr.Error{Code: code, Message: result.MaskedError}}
 	return result
 }
 

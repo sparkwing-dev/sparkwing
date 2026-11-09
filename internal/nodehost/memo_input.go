@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func memoValueKey(value any) (string, error) {
@@ -16,7 +16,7 @@ func memoValueKey(value any) (string, error) {
 	return string(key), err
 }
 
-func memoInputValue(ctx context.Context, input nodeproto.MemoInput, workspace string, environment procenv.Env) (any, error) {
+func memoInputValue(ctx context.Context, input nodewire.MemoInput, workspace string, environment procenv.Env) (any, error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func memoCheckoutRoot(ctx context.Context, workspace string, environment procenv
 	return strings.TrimRight(root, "\n"), err
 }
 
-func memoNeedsEnvironment(input nodeproto.MemoInput) bool {
+func memoNeedsEnvironment(input nodewire.MemoInput) bool {
 	if input.Kind == "env" || input.Kind == "files" || input.Kind == "repo_files" || input.Kind == "tree" {
 		return true
 	}

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"crypto/sha256"
@@ -14,10 +16,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestDataStorageSignedFilesystemRoutes(t *testing.T) {
@@ -79,12 +81,12 @@ func TestDataStorageSignedFilesystemRoutes(t *testing.T) {
 					t.Logf("substituted transfer succeeded: %s", path)
 					return false
 				}
-				var envelope apierr.Envelope
+				var envelope hosterr.Envelope
 				if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil || envelope.Error == nil {
 					t.Logf("noncanonical transfer refusal: %v %s", err, w.Body)
 					return false
 				}
-				if envelope.Error.Code == apierr.Forbidden && envelope.Error.Details["reason"] == nil {
+				if envelope.Error.Code == hosterr.Forbidden && envelope.Error.Details["reason"] == nil {
 					t.Log("transfer refusal lacks reason")
 					return false
 				}
@@ -107,12 +109,12 @@ func TestNativeBindingForbiddenReasonProperty(t *testing.T) {
 	property := func(selector [16]byte) bool {
 		path := fmt.Sprintf("/api/v1/pipelines/foreign-%x/sizing", selector)
 		response := engineClaimHTTP(t, handler, award.Claim.Capability, "GET", path, "", 403)
-		var envelope apierr.Envelope
+		var envelope hosterr.Envelope
 		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope.Error == nil {
 			t.Logf("invalid error: %v %s", err, response.Body)
 			return false
 		}
-		return envelope.Error.Code == apierr.Forbidden && envelope.Error.Details["reason"] == string(apierr.ReasonBinding)
+		return envelope.Error.Code == hosterr.Forbidden && envelope.Error.Details["reason"] == string(hosterr.ReasonBinding)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
@@ -136,19 +138,19 @@ func TestSignedFilesystemCanonicalTransportErrors(t *testing.T) {
 		code         apierr.Code
 		allow        string
 	}{
-		{"GET", "/api/v1/data/objects/teams/a/cas/digest", 403, apierr.Forbidden, ""},
-		{"HEAD", "/api/v1/data/objects/teams/a/cas/digest", 405, apierr.MethodNotAllowed, "GET"},
-		{"PUT", "/api/v1/data/uploads/upload", 403, apierr.Forbidden, ""},
-		{"PUT", "/api/v1/log-segments/logs/a/run/job/segment", 403, apierr.Forbidden, ""},
+		{"GET", "/api/v1/data/objects/teams/a/cas/digest", 403, hosterr.Forbidden, ""},
+		{"HEAD", "/api/v1/data/objects/teams/a/cas/digest", 405, hosterr.MethodNotAllowed, "GET"},
+		{"PUT", "/api/v1/data/uploads/upload", 403, hosterr.Forbidden, ""},
+		{"PUT", "/api/v1/log-segments/logs/a/run/job/segment", 403, hosterr.Forbidden, ""},
 	} {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
-			var envelope apierr.Envelope
+			var envelope hosterr.Envelope
 			if w.Code != tc.status || json.Unmarshal(w.Body.Bytes(), &envelope) != nil || envelope.Error == nil || envelope.Error.Code != tc.code || w.Header().Get("Allow") != tc.allow {
 				t.Fatalf("response: %d %v %s", w.Code, w.Header(), w.Body)
 			}
-			if tc.code == apierr.Forbidden && envelope.Error.Details["reason"] == nil {
+			if tc.code == hosterr.Forbidden && envelope.Error.Details["reason"] == nil {
 				t.Fatal("missing forbidden reason")
 			}
 		})
@@ -193,8 +195,8 @@ func TestSignedFilesystemCanonicalObjectErrors(t *testing.T) {
 			}
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, httptest.NewRequest(tc.method, signed.URL, bytes.NewBufferString(tc.body)))
-			var envelope apierr.Envelope
-			if w.Code != apierr.Status(tc.code) || json.Unmarshal(w.Body.Bytes(), &envelope) != nil || envelope.Error == nil || envelope.Error.Code != tc.code {
+			var envelope hosterr.Envelope
+			if w.Code != hosterr.Status(tc.code) || json.Unmarshal(w.Body.Bytes(), &envelope) != nil || envelope.Error == nil || envelope.Error.Code != tc.code {
 				t.Fatalf("response: %d %v %s", w.Code, w.Header(), w.Body)
 			}
 		})

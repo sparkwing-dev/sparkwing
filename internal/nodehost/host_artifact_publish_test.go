@@ -12,10 +12,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestExecutorArtifactPublication(t *testing.T) {
@@ -93,7 +93,7 @@ func TestExecutorArtifactPublication(t *testing.T) {
 	t.Run("validates_before_body", func(t *testing.T) {
 		_, a, _ := artifactPublicationFixture(t)
 		input := NodeInput{Entry: &source.Entry{Directory: t.TempDir()}}
-		if _, err := a.Prepare(t.Context(), input, nodeproto.JobSpec{Artifacts: []string{"../outside"}}); err == nil {
+		if _, err := a.Prepare(t.Context(), input, nodewire.JobSpec{Artifacts: []string{"../outside"}}); err == nil {
 			t.Fatal("accepted invalid capture path before execution")
 		}
 	})

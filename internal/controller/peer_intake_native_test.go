@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestPeerIntakeNativeCommitProperty(t *testing.T) {
@@ -172,7 +173,7 @@ func TestPeerIntakeBudgetsFollowPlacement(t *testing.T) {
 			if (placement == nodeproto.PlacementLocal) != tc.local {
 				t.Fatalf("intake placement=%s local=%v", placement, tc.local)
 			}
-			resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: storedIntake(t, st, admitted.RunID), Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: &timeout}}}, Context: settings.Context{Local: placement == nodeproto.PlacementLocal}})
+			resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: storedIntake(t, st, admitted.RunID), Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", TimeoutMS: &timeout}}}, Context: settings.Context{Local: placement == nodeproto.PlacementLocal}})
 			if err != nil || resolved.Jobs["job"].Timeout.Value != time.Hour {
 				t.Fatalf("admitted budget fails plan acceptance: %v", err)
 			}

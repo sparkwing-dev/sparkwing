@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRunDetailExplainsJobsThatNeverStarted(t *testing.T) {
@@ -64,15 +64,15 @@ func TestRunDetailNamesOnlyBlockingDependencies(t *testing.T) {
 }
 
 func TestRunDetailNamesFailedGeneratedDependency(t *testing.T) {
-	source := nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"children"}}}
-	consumer := nodeproto.JobSpec{ID: "consumer", NeedsGenerated: []string{"children"}}
-	failed := nodeproto.JobSpec{ID: "failed-member", Groups: []string{"children"}}
-	soft := nodeproto.JobSpec{ID: "soft-member", Groups: []string{"children"}, ContinueOnError: true}
-	plan, _ := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source, consumer}})
-	expansion, _ := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{failed, soft}})
+	source := nodewire.JobSpec{ID: "source", Closures: nodewire.ClosureSpec{Generate: []string{"children"}}}
+	consumer := nodewire.JobSpec{ID: "consumer", NeedsGenerated: []string{"children"}}
+	failed := nodewire.JobSpec{ID: "failed-member", Groups: []string{"children"}}
+	soft := nodewire.JobSpec{ID: "soft-member", Groups: []string{"children"}, ContinueOnError: true}
+	plan, _ := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{source, consumer}})
+	expansion, _ := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{failed, soft}})
 	finished := time.Unix(1, 0)
 	snapshot := store.RunSnapshot{Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "run", Number: 1, State: runstate.RunRunning, Plan: plan, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Team: "a"}}}}, StoreNow: finished, Expansions: []runstate.AcceptedExpansionRow{{Source: runspec.NodeRef{RunID: "run", NodeID: "source"}, Body: expansion}}}
-	for _, job := range []nodeproto.JobSpec{source, consumer, failed, soft} {
+	for _, job := range []nodewire.JobSpec{source, consumer, failed, soft} {
 		spec, _ := json.Marshal(job)
 		row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(job.ID)}, Spec: spec, Status: runstate.StatusDone, Outcome: runstate.NodeFailed, FinishedAt: &finished}
 		if job.ID == "source" {

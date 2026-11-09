@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func FuzzSDKCleanupEnvironment(f *testing.F) {
@@ -26,7 +26,7 @@ func FuzzSDKCleanupEnvironment(f *testing.F) {
 		captured := []string{"CAPTURED=original", "API_TOKEN=private-base-credential"}
 		spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "original", "API_TOKEN": "private-base-credential"}, strings.Repeat("5", 64))
 		input.Accepted.Spec, _ = json.Marshal(spec)
-		job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{name: {Value: value, Startup: startup}}}
+		job := nodewire.JobSpec{ID: input.NodeID, Env: map[string]nodewire.EnvValue{name: {Value: value, Startup: startup}}}
 		st.row.Spec, _ = json.Marshal(job)
 		policy := SDKEnvironment{Base: procenv.Base{Local: true, Captured: captured}, Store: st}
 		env, complete, err := policy.jobEnvironments(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, int64(input.Generation), input.SpecHash, input.GrantedRunner, true)

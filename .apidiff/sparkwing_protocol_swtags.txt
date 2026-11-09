@@ -1,0 +1,12 @@
+# sparkwing/protocol/swtags
+
+func CoerceAssign(fv reflect.Value, raw any, fieldName string) error
+type FieldSpec struct {
+	Field      reflect.StructField
+	Name       string
+	Required   bool
+	Optional   bool
+	DefaultRaw string
+	HasDefault bool
+}
+func Parse(t reflect.Type) ([]FieldSpec, error)

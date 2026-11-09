@@ -10,22 +10,22 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "setup", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "build-linux", Needs: deps("setup"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "build-mac", Needs: deps("setup"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "deploy", Needs: deps("build-linux", "build-mac"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "notify", OnFailureOf: "build-linux", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	doc := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "setup", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "build-linux", Needs: deps("setup"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "build-mac", Needs: deps("setup"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "deploy", Needs: deps("build-linux", "build-mac"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "notify", OnFailureOf: "build-linux", Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}}
 
 	f := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "build-l*"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
@@ -94,9 +94,9 @@ func TestOnlyRequiresControllerSelectionProjection(t *testing.T) {
 		supported bool
 	}{{"keep", false}, {"*", false}, {"keep", true}, {"*", true}} {
 		t.Run(tc.pattern+"/supported="+strconv.FormatBool(tc.supported), func(t *testing.T) {
-			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-				{ID: "keep", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "exclude", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			doc := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+				{ID: "keep", Steps: []nodewire.StepSpec{{ID: "body"}}},
+				{ID: "exclude", Steps: []nodewire.StepSpec{{ID: "body"}}},
 			}}
 			f := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: tc.pattern}}})
 			f.Host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
@@ -125,7 +125,7 @@ func TestOnlyRequiresControllerSelectionProjection(t *testing.T) {
 }
 
 func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
+	doc := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}, {ID: "test", Steps: []nodewire.StepSpec{{ID: "body"}}}}}
 	for _, tc := range []struct{ only, start, want string }{
 		{"deploy", "", `--only="deploy" matched no jobs (declared: [build test])`},
 		{"[", "", `--only="["`},
@@ -140,10 +140,10 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 	for _, generated := range []bool{false, true} {
 		t.Run(strconv.FormatBool(generated), func(t *testing.T) {
-			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-				{ID: "prerequisite", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "consumer", NeedsIfPresent: []string{"prerequisite", "absent"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "outside", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			doc := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+				{ID: "prerequisite", Steps: []nodewire.StepSpec{{ID: "body"}}},
+				{ID: "consumer", NeedsIfPresent: []string{"prerequisite", "absent"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+				{ID: "outside", Steps: []nodewire.StepSpec{{ID: "body"}}},
 			}}
 			if generated {
 				doc.Jobs[0].Closures.Generate = []string{"children"}
@@ -224,20 +224,20 @@ func TestOwnerRefusesUnknownStepWindowBeforeDispatch(t *testing.T) {
 func TestStepWindowRejectsEmptyJobs(t *testing.T) {
 	for _, tc := range []struct {
 		name, start, stop string
-		steps             []nodeproto.StepSpec
+		steps             []nodewire.StepSpec
 		wantRefusal       bool
 	}{
-		{"parallel", "terraform-fmt", "markdownlint", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "shellcheck"}, {ID: "markdownlint"}}, true},
-		{"reversed", "markdownlint", "terraform-fmt", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint", Needs: []string{"terraform-fmt"}}}, true},
-		{"connected", "terraform-fmt", "markdownlint", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint", Needs: []string{"terraform-fmt"}}}, false},
-		{"same step", "terraform-fmt", "terraform-fmt", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
-		{"start only", "terraform-fmt", "", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
-		{"stop only", "", "markdownlint", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
-		{"unfiltered", "", "", []nodeproto.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
+		{"parallel", "terraform-fmt", "markdownlint", []nodewire.StepSpec{{ID: "terraform-fmt"}, {ID: "shellcheck"}, {ID: "markdownlint"}}, true},
+		{"reversed", "markdownlint", "terraform-fmt", []nodewire.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint", Needs: []string{"terraform-fmt"}}}, true},
+		{"connected", "terraform-fmt", "markdownlint", []nodewire.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint", Needs: []string{"terraform-fmt"}}}, false},
+		{"same step", "terraform-fmt", "terraform-fmt", []nodewire.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
+		{"start only", "terraform-fmt", "", []nodewire.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
+		{"stop only", "", "markdownlint", []nodewire.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
+		{"unfiltered", "", "", []nodewire.StepSpec{{ID: "terraform-fmt"}, {ID: "markdownlint"}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-				{ID: "unrelated", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+				{ID: "unrelated", Steps: []nodewire.StepSpec{{ID: "body"}}},
 				{ID: "pre-push", Steps: tc.steps},
 			}}
 			var options runspec.Options
@@ -267,7 +267,7 @@ func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 			t.Fatal(err)
 		}
 		policy := SDKEnvironment{Store: state}
-		planned, err := policy.planning(t.Context(), PlanningProcessInput{Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci", DryRun: dryRun}})
+		planned, err := policy.planning(t.Context(), PlanningProcessInput{Run: nodewire.RunContext{RunID: "run", Pipeline: "ci", DryRun: dryRun}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -293,10 +293,10 @@ func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 }
 
 func TestRiskAllowanceCoversOnlySelectedSteps(t *testing.T) {
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "gate", Steps: []nodeproto.StepSpec{{ID: "test"}}},
-		{ID: "review", Needs: []string{"gate"}, Steps: []nodeproto.StepSpec{{ID: "review"}}},
-		{ID: "land", Needs: []string{"review"}, Steps: []nodeproto.StepSpec{{ID: "merge"}, {ID: "push", Needs: []string{"merge"}, Risks: []string{"remote"}}}},
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "gate", Steps: []nodewire.StepSpec{{ID: "test"}}},
+		{ID: "review", Needs: []string{"gate"}, Steps: []nodewire.StepSpec{{ID: "review"}}},
+		{ID: "land", Needs: []string{"review"}, Steps: []nodewire.StepSpec{{ID: "merge"}, {ID: "push", Needs: []string{"merge"}, Risks: []string{"remote"}}}},
 	}}
 	for _, tc := range []struct {
 		name                string

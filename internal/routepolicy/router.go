@@ -1,5 +1,7 @@
 package routepolicy
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -10,10 +12,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // New constructs the common controller/node-host authorization boundary.
@@ -42,7 +44,7 @@ func (router *Router) Register(endpoint controllerwire.Endpoint) (err error) {
 		// safety: ServeMux lets GET match HEAD, but grants apply to exact methods.
 		if r.Method != endpoint.Method {
 			w.Header().Set("Allow", endpoint.Method)
-			WritePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
+			WritePolicyError(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "method is not registered"})
 			return
 		}
 		if err := router.serveEndpoint(w, r, endpoint); err != nil {
@@ -50,7 +52,7 @@ func (router *Router) Register(endpoint controllerwire.Endpoint) (err error) {
 			// clients must retry against its successor; a client that cancelled
 			// reads nothing.
 			if r.Context().Err() != nil {
-				err = errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the controller stopped before answering"}, err)
+				err = errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "the controller stopped before answering"}, err)
 			}
 			WritePolicyError(w, err)
 		}
@@ -126,7 +128,7 @@ func AllowedRouteMethods(mux *http.ServeMux, r *http.Request, methods []string) 
 func WriteRouteMiss(w http.ResponseWriter, allowed []string) {
 	if len(allowed) != 0 {
 		w.Header().Set("Allow", strings.Join(allowed, ", "))
-		WritePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
+		WritePolicyError(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "method is not registered"})
 		return
 	}
 	WritePolicyError(w, &apierr.Error{Code: apierr.NotFound, Message: "route not found"})
@@ -261,12 +263,12 @@ func (router *Router) presentation(r *http.Request) (capability.Presentation, er
 				}
 			}
 		}
-		return capability.Presentation{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "invalid credential presentation"}
+		return capability.Presentation{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "invalid credential presentation"}
 	}
 	if router.authorization.Identify != nil {
 		return router.authorization.Identify(r)
 	}
-	return capability.Presentation{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "credential required"}
+	return capability.Presentation{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential required"}
 }
 
 func requiresCSRF(method string, class capability.CredentialClass) bool {
@@ -275,20 +277,20 @@ func requiresCSRF(method string, class capability.CredentialClass) bool {
 }
 
 func MissingEndpointPolicy() *apierr.Error {
-	return &apierr.Error{Code: apierr.PolicyMissing, Message: "route authorization policy is incomplete"}
+	return &apierr.Error{Code: hosterr.PolicyMissing, Message: "route authorization policy is incomplete"}
 }
 
 func WritePolicyError(w http.ResponseWriter, err error) {
 	var failure *apierr.Error
 	if !errors.As(err, &failure) {
-		failure = &apierr.Error{Code: apierr.Internal, Message: "request failed"}
+		failure = &apierr.Error{Code: hosterr.Internal, Message: "request failed"}
 	}
 	var encoded bytes.Buffer
-	if encodeErr := apierr.WriteJSON(&encoded, failure); encodeErr != nil {
+	if encodeErr := hosterr.WriteJSON(&encoded, failure); encodeErr != nil {
 		err = errors.Join(err, encodeErr)
-		failure = &apierr.Error{Code: apierr.Internal, Message: "request failed"}
+		failure = &apierr.Error{Code: hosterr.Internal, Message: "request failed"}
 	}
-	if apierr.Status(failure.Code) >= http.StatusInternalServerError {
+	if hosterr.Status(failure.Code) >= http.StatusInternalServerError {
 		apierrhttp.NoteResponseError(w, err)
 		safe := &apierr.Error{Code: failure.Code, Message: "request failed"}
 		switch delay := failure.Details["retry_after_ms"].(type) {

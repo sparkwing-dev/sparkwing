@@ -1,15 +1,17 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -66,11 +68,11 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 	}
 	now = now.Add(time.Minute)
 	var refusal *apierr.Error
-	if id, err := launcher.Launch(t.Context(), row, now); id != "" || !errors.As(err, &refusal) || refusal.Code != apierr.RateLimited {
+	if id, err := launcher.Launch(t.Context(), row, now); id != "" || !errors.As(err, &refusal) || refusal.Code != hosterr.RateLimited {
 		t.Fatalf("next slot escaped hourly cap: run=%s err=%v", id, err)
 	}
 	f.srv.WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 1})
-	if id, err := launcher.Launch(t.Context(), row, now); id != "" || !errors.As(err, &refusal) || refusal.Code != apierr.Unavailable {
+	if id, err := launcher.Launch(t.Context(), row, now); id != "" || !errors.As(err, &refusal) || refusal.Code != hosterr.Unavailable {
 		t.Fatalf("next slot escaped queue limit: run=%s err=%v", id, err)
 	}
 	runs, err := tenant.ListRuns(t.Context(), store.RunFilter{})
@@ -132,7 +134,7 @@ func TestScheduleRunNowSharesAdmissionWithDueLaunches(t *testing.T) {
 	}
 	runNow("next", 429)
 	var refusal *apierr.Error
-	if id, err := f.srv.ScheduleLauncher().Launch(t.Context(), row, *row.NextDueAt); id != "" || !errors.As(err, &refusal) || refusal.Code != apierr.RateLimited {
+	if id, err := f.srv.ScheduleLauncher().Launch(t.Context(), row, *row.NextDueAt); id != "" || !errors.As(err, &refusal) || refusal.Code != hosterr.RateLimited {
 		t.Fatalf("due launch did not share manual launch budget: %s %v", id, err)
 	}
 	f.srv.WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 1})

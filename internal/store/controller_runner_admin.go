@@ -1,11 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor) (capability.Principal, error) {
@@ -14,7 +16,7 @@ func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, acto
 		return p, err
 	}
 	if !teamAdministrator(p) {
-		return p, authorityError(apierr.Forbidden, "current team administration is required")
+		return p, authorityError(hosterr.Forbidden, "current team administration is required")
 	}
 	return p, nil
 }

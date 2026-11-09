@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 )
 
 func TestPromptlessGitPreservesStoredCredentials(t *testing.T) {
@@ -53,7 +54,7 @@ func TestPromptlessGitPreservesStoredCredentials(t *testing.T) {
 				args = append(args, "-c", "credential.helper="+tc.helper)
 			}
 			cmd := testgit.CommandContext(ctx, "git", append(args, "credential", "fill")...)
-			cmd.Env = append(testgit.Env(env), "GIT_ASKPASS="+askpass)
+			cmd.Env = append(gitcontrol.Env(env), "GIT_ASKPASS="+askpass)
 			cmd.Stdin = strings.NewReader("protocol=https\nhost=fixture.invalid\n\n")
 			out, err := cmd.Output()
 			if err != nil {

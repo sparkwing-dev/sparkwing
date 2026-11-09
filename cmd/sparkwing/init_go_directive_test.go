@@ -28,7 +28,7 @@ func TestPipelineScaffoldDoesNotRequireGoPatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mod.Go == nil || mod.Go.Version != "1.26" {
-		t.Fatalf("scaffold go directive = %v, want minor-only floor for patch-version Go", mod.Go)
+	if mod.Go == nil || mod.Go.Version != "1.25.0" {
+		t.Fatalf("scaffold go directive = %v, want SDK minimum independent of the installed Go patch", mod.Go)
 	}
 }

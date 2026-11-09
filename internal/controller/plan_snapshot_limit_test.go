@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -8,16 +10,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, opts ...store.Option) (*engineFixture, *store.Tenant, http.Handler, string, []byte) {
+func controllerPlanFixture(t *testing.T, plan nodewire.PlanDoc, opts ...store.Option) (*engineFixture, *store.Tenant, http.Handler, string, []byte) {
 	t.Helper()
 	e, tenant := engineRuntimeStore(t, opts...)
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
@@ -58,7 +60,7 @@ func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, opts ...store.O
 }
 
 func TestPlanSubmissionBodyLimitPreservesCommittedPlan(t *testing.T) {
-	_, tenant, h, raw, body := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}})
+	_, tenant, h, raw, body := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}})
 	refuse := func(body string, status int, code apierr.Code) {
 		t.Helper()
 		before, err := tenant.ReadSnapshot(t.Context(), "run")
@@ -66,7 +68,7 @@ func TestPlanSubmissionBodyLimitPreservesCommittedPlan(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/plan", body, status)
-		var failure apierr.Envelope
+		var failure hosterr.Envelope
 		if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != code {
 			t.Fatalf("oversized plan: %s (%v)", w.Body, err)
 		}
@@ -85,16 +87,16 @@ func TestPlanSubmissionBodyLimitPreservesCommittedPlan(t *testing.T) {
 	if err != nil || committed.Spec == nil || len(committed.Plan) == 0 {
 		t.Fatalf("plan did not commit: %v", err)
 	}
-	refuse(oversized, http.StatusUnauthorized, apierr.Unauthenticated)
+	refuse(oversized, http.StatusUnauthorized, hosterr.Unauthenticated)
 }
 
 func TestComputeLimits_PlanInsertionRefusedPastThePerRunCap(t *testing.T) {
-	e, tenant, h, raw, body := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "one", Steps: []nodeproto.StepSpec{{ID: "work"}}}, {ID: "two", Steps: []nodeproto.StepSpec{{ID: "work"}}}}})
+	e, tenant, h, raw, body := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "one", Steps: []nodewire.StepSpec{{ID: "work"}}}, {ID: "two", Steps: []nodewire.StepSpec{{ID: "work"}}}}})
 	if _, err := teststore.Exec(t.Context(), e.Store, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "compute_limit_"+store.ComputeLimitNodesPerRun, []byte("1")); err != nil {
 		t.Fatal(err)
 	}
 	w := engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/plan", string(body), http.StatusUnprocessableEntity)
-	var failure apierr.Envelope
+	var failure hosterr.Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil || failure.Error.Code != apierr.PlanInvalid || !strings.Contains(w.Body.String(), store.ComputeLimitNodesPerRun) {
 		t.Fatalf("plan limit refusal: %s: %v", w.Body, err)
 	}

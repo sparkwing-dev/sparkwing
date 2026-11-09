@@ -32,10 +32,9 @@ func TestPipelineEngineExecHelper(t *testing.T) {
 	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}
 	command := pipelineEngineSwitcher{
 		current: current, diagnostics: io.Discard,
-		target:     releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		readPin:    func(string, engineid.SDKKind) (engineid.Pin, error) { return pin, nil },
-		versionFor: func(engineid.Pin) (string, error) { return "v1.2.3", nil },
-		execute:    execToolchain,
+		target:  releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
+		readPin: func(string, engineid.SDKKind) (engineid.Pin, error) { return pin, nil },
+		execute: execToolchain,
 		resolve: func(_ context.Context, _ engineid.Pin, target releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
 			return engine.Resolved{Identity: engineid.Identity{Pin: pin, Version: "v1.2.3", ManifestDigest: "fixture-manifest"}, Target: target, AssetDigest: "fixture-asset", Executable: selected}, nil
 		},

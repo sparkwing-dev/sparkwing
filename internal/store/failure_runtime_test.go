@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func recoveryFailureFixture(t *testing.T) (*Tenant, runstate.Actor, runstate.Actor, *nodeproto.JobFailure) {
+func recoveryFailureFixture(t *testing.T) (*Tenant, runstate.Actor, runstate.Actor, *nodewire.JobFailure) {
 	t.Helper()
 	tenant, _, owner := reconcileFixture(t)
 	holder := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
@@ -24,7 +24,7 @@ func recoveryFailureFixture(t *testing.T) (*Tenant, runstate.Actor, runstate.Act
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM capabilities WHERE prefix='owner'`)
 	authorityPersist(t, tenant.s, root)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json) VALUES ('a','run','recover','pending',?,'recovery',?)`, []byte(`{"id":"recover","on_failure_of":"job"}`), []byte(`{}`))
-	failure := &nodeproto.JobFailure{Job: "job", Stage: "run", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked failure", Details: map[string]any{"exit_code": float64(2)}}}
+	failure := &nodewire.JobFailure{Job: "job", Stage: "run", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked failure", Details: map[string]any{"exit_code": float64(2)}}}
 	return tenant, owner, holder, failure
 }
 

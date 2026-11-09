@@ -1,16 +1,18 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 // JobUpload carries server-derived job authority and its destination record key.
@@ -78,7 +80,7 @@ func (o OutputRecords) PublishOutput(ctx context.Context, input NodeInput, value
 func (u JobUpload) check(input NodeInput, kind blob.Kind) error {
 	var spec runspec.Spec
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil || input.Accepted.SpecHash == "" || input.Accepted.PlanHash == "" || string(spec.Hash) != input.Accepted.SpecHash || string(spec.PlanHash) != input.Accepted.PlanHash {
-		return executorError(apierr.SpecDrift, "job upload requires an accepted run spec")
+		return executorError(hosterr.SpecDrift, "job upload requires an accepted run spec")
 	}
 	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation), Attempt: int64(input.Attempt)}
 	if attempt.Team == "" || attempt.RunID == "" || attempt.NodeID == "" || attempt.Generation < 1 || attempt.Attempt < 1 || input.Authority.Holder == "" || input.Authority.CapabilityPrefix == "" {
@@ -172,7 +174,7 @@ func readOutput(ctx context.Context, reader blob.VerifiedReader, readErr error) 
 	if reader == nil {
 		return nil, errors.New("output backend returned no reader")
 	}
-	value, err = io.ReadAll(io.LimitReader(reader, limits.NodeOutputBytes+1))
+	value, err = io.ReadAll(io.LimitReader(reader, protolimits.NodeOutputBytes+1))
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +191,8 @@ func readOutput(ctx context.Context, reader blob.VerifiedReader, readErr error) 
 }
 
 func checkOutput(value json.RawMessage) error {
-	if int64(len(value)) > limits.NodeOutputBytes {
-		return executorError(apierr.PayloadTooLarge, "job output exceeds its limit")
+	if int64(len(value)) > protolimits.NodeOutputBytes {
+		return executorError(hosterr.PayloadTooLarge, "job output exceeds its limit")
 	}
 	if !json.Valid(value) {
 		return executorError(apierr.ProtocolError, "job output is not JSON")

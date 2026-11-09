@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -15,10 +17,10 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type consoleWritesFake struct {
@@ -96,7 +98,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 		},
 		CheckCSRF: func(r *http.Request, _ capability.Principal) error {
 			if r.Header.Get(csrfHeaderName) != "session-proof" {
-				return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+				return &apierr.Error{Code: hosterr.Forbidden, Message: "invalid CSRF token"}
 			}
 			return nil
 		},
@@ -142,7 +144,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 					authority.principal.Capability.Grants = nil
 					want = 403
 				case 4:
-					f.err = &apierr.Error{Code: apierr.Forbidden, Message: "operator session changed"}
+					f.err = &apierr.Error{Code: hosterr.Forbidden, Message: "operator session changed"}
 					want = 403
 				case 5:
 					f.err = errors.New("private-backend-fault")
@@ -165,7 +167,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 					}
 				}
 				if want >= 400 {
-					var body apierr.Envelope
+					var body hosterr.Envelope
 					if json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil {
 						return false
 					}

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -7,10 +9,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // LauncherPreparation reports the committed authority bound for an acknowledged bootstrap fence.
@@ -149,5 +151,5 @@ func endedLauncherPreparation(err error) bool {
 		return true
 	}
 	var failure *apierr.Error
-	return errors.As(err, &failure) && (failure.Code == apierr.LockHeld || failure.Code == apierr.Unauthenticated || failure.Code == apierr.Forbidden)
+	return errors.As(err, &failure) && (failure.Code == hosterr.LockHeld || failure.Code == hosterr.Unauthenticated || failure.Code == hosterr.Forbidden)
 }

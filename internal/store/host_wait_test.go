@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRunViewExplainsLocalJobItsHostCannotExecute(t *testing.T) {
@@ -77,9 +77,9 @@ func localHostWaitView(t *testing.T, labels []string) RunView {
 		t.Fatal(err)
 	}
 	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Award.CapabilityPrefix}, CapabilityPrefix: award.Award.CapabilityPrefix, Owner: award.Owner}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "here", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}},
-		{ID: "elsewhere", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}, Requires: []string{"host=moonborn"}},
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "here", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}},
+		{ID: "elsewhere", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}, Requires: []string{"host=moonborn"}},
 	}}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})

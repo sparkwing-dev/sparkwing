@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func boundaryPointer[T any](value T) *T { return &value }
@@ -31,7 +31,7 @@ func acceptedSettings() (runspec.Spec, json.RawMessage, error) {
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
-	plan := nodeproto.PlanDoc{Priority: boundaryPointer(8), Jobs: []nodeproto.JobSpec{{ID: "build", Requires: []string{"go"}}, {ID: "test", Needs: []string{"build"}}}}
+	plan := nodewire.PlanDoc{Priority: boundaryPointer(8), Jobs: []nodewire.JobSpec{{ID: "build", Requires: []string{"go"}}, {ID: "test", Needs: []string{"build"}}}}
 	winners, err := settings.ResolvePlan(settings.PlanInputs{Request: request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
 	if err != nil {
 		return runspec.Spec{}, nil, err
@@ -67,7 +67,7 @@ func settingSeals() error {
 	if _, err := runspec.CheckSeal(spec, changed); err == nil {
 		return errors.New("changed sealed args accepted")
 	}
-	generated, err := settings.ResolveExpansion(settings.ExpansionInputs{Spec: spec, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated", Requires: []string{"docker"}}}}, Context: settings.Context{Local: true}})
+	generated, err := settings.ResolveExpansion(settings.ExpansionInputs{Spec: spec, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "generated", Requires: []string{"docker"}}}}, Context: settings.Context{Local: true}})
 	if err != nil {
 		return err
 	}

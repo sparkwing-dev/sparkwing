@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/base64"
@@ -9,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -17,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
@@ -24,7 +26,7 @@ func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			f, host, input := newOwnerFixture(t, false)
 			secret := "private-owner-credential"
-			failure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: "retry " + secret, Details: map[string]any{"credential": secret}}
+			failure := &apierr.Error{Code: hosterr.Unavailable, Message: secret, Hint: "retry " + secret, Details: map[string]any{"credential": secret}}
 			host.Masker = testMasker(secret)
 			switch stage {
 			case "acquire":
@@ -82,7 +84,7 @@ func TestOwnerHostAcquisitionReturningAfterCancellationCannotContinue(t *testing
 				}
 				var cancelled *lease.CancelError
 				if !resumed && errors.As(cause, &cancelled) {
-					if f.finished.Transition.Reason != string(apierr.ReasonCancelled) || f.finished.Unit != input.Owner.Owner {
+					if f.finished.Transition.Reason != string(hosterr.ReasonCancelled) || f.finished.Unit != input.Owner.Owner {
 						t.Fatalf("unaccepted cancellation left its owner unfinished: %+v", f.finished)
 					}
 				} else if f.finished.Transition.RunID != "" {
@@ -170,7 +172,7 @@ func TestOwnerHostCancelledPreparationFinishesWithCancellation(t *testing.T) {
 	if !errors.As(err, &cancelled) {
 		t.Fatalf("error = %v", err)
 	}
-	if f.finished.Transition.Reason != string(apierr.ReasonCancelled) {
+	if f.finished.Transition.Reason != string(hosterr.ReasonCancelled) {
 		t.Fatalf("finish = %+v", f.finished)
 	}
 }

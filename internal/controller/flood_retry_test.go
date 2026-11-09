@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -7,10 +9,10 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestFloodRunTokenSurvivesPolicyRechecksProperty(t *testing.T) {
@@ -41,7 +43,7 @@ func TestFloodRunTokenSurvivesPolicyRechecksProperty(t *testing.T) {
 		}
 		_, err = admitWithFlood(t.Context(), s, admit)
 		var refusal *apierr.Error
-		return errors.As(err, &refusal) && refusal.Code == apierr.RateLimited && calls == 3
+		return errors.As(err, &refusal) && refusal.Code == hosterr.RateLimited && calls == 3
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal("policy rechecks must spend one token, scoped to the requesting principal:", err)

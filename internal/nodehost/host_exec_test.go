@@ -18,11 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type hostExecObservation struct {
@@ -187,7 +188,7 @@ func TestHostExecSDKChild(t *testing.T) {
 type hostExecHarness struct {
 	session *protocolSession
 	mu      sync.Mutex
-	logs    []nodeproto.FrameLog
+	logs    []nodewire.FrameLog
 }
 
 func hostExecCommand(t testing.TB, lang string) []string {
@@ -215,12 +216,12 @@ func startHostExecHarness(t testing.TB, lang, dir string, extraEnv ...string) *h
 	return startHostExecHarnessWithSink(t, lang, "job", dir, nil, extraEnv...)
 }
 
-func startHostExecHarnessWithSink(t testing.TB, lang, job, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
+func startHostExecHarnessWithSink(t testing.TB, lang, job, dir string, sink func(context.Context, nodewire.FrameLog) error, extraEnv ...string) *hostExecHarness {
 	t.Helper()
 	return startTrackedHostExecHarness(t, nil, lang, job, dir, sink, extraEnv...)
 }
 
-func startTrackedHostExecHarness(t testing.TB, tracker admissionProcessTracker, lang, job, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
+func startTrackedHostExecHarness(t testing.TB, tracker admissionProcessTracker, lang, job, dir string, sink func(context.Context, nodewire.FrameLog) error, extraEnv ...string) *hostExecHarness {
 	t.Helper()
 	ctx := context.Background()
 	if tracker != nil {
@@ -238,7 +239,7 @@ func startTrackedHostExecHarness(t testing.TB, tracker admissionProcessTracker, 
 		Directory:   dir,
 		Masks:       NewMaskRegistry(masker),
 		Revoke:      func() error { return nil },
-		Log: func(ctx context.Context, log nodeproto.FrameLog) error {
+		Log: func(ctx context.Context, log nodewire.FrameLog) error {
 			if sink != nil {
 				return sink(ctx, log)
 			}
@@ -253,12 +254,12 @@ func startTrackedHostExecHarness(t testing.TB, tracker admissionProcessTracker, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = h.session.Close() })
-	h.call(t, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}, Binding: &nodeproto.ProcessBinding{RunID: "r", JobID: job, Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:9", Bearer: "private-test-bearer"}}})
-	h.call(t, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "hostexec", Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: "hostexec"}})
+	h.call(t, nodewire.Request{Op: nodewire.OpHello, Protocol: nodewire.Version, Engine: &nodewire.EngineIdentity{Version: "test"}, Runner: &nodewire.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}, Binding: &nodewire.ProcessBinding{RunID: "r", JobID: job, Routes: nodewire.ProcessRoutes{URL: "http://127.0.0.1:9", Bearer: "private-test-bearer"}}})
+	h.call(t, nodewire.Request{Op: nodewire.OpPlan, Pipeline: "hostexec", Args: map[string]string{}, Run: &nodewire.RunContext{RunID: "r", Pipeline: "hostexec"}})
 	return h
 }
 
-func (h *hostExecHarness) call(t testing.TB, req nodeproto.Request) nodeproto.Reply {
+func (h *hostExecHarness) call(t testing.TB, req nodewire.Request) nodewire.Reply {
 	t.Helper()
 	req.ID = "caller"
 	reply, err := h.session.Request(context.Background(), req)
@@ -272,8 +273,8 @@ func (h *hostExecHarness) call(t testing.TB, req nodeproto.Request) nodeproto.Re
 
 func (h *hostExecHarness) step(t testing.TB, step string) hostExecObservation {
 	t.Helper()
-	var result nodeproto.RunResult
-	if err := h.call(t, nodeproto.Request{Op: nodeproto.OpRunStep, Job: "job", Step: step, Attempt: 1, Settled: []string{}}).Decode(&result); err != nil {
+	var result nodewire.RunResult
+	if err := h.call(t, nodewire.Request{Op: nodewire.OpRunStep, Job: "job", Step: step, Attempt: 1, Settled: []string{}}).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
 	if result.Outcome != "success" {
@@ -483,7 +484,7 @@ func TestHostExecBackgroundChildEndsWithTheSession(t *testing.T) {
 func TestHostExecCloseBoundsABlockedLogSink(t *testing.T) {
 	blocked := make(chan struct{})
 	var once sync.Once
-	sink := func(ctx context.Context, log nodeproto.FrameLog) error {
+	sink := func(ctx context.Context, log nodewire.FrameLog) error {
 		if log.Event != "exec_line" {
 			return nil
 		}
@@ -493,7 +494,7 @@ func TestHostExecCloseBoundsABlockedLogSink(t *testing.T) {
 	}
 	h := startHostExecHarnessWithSink(t, "go", "job", t.TempDir(), sink)
 	go func() {
-		_, _ = h.session.Request(context.Background(), nodeproto.Request{ID: "logged", Op: nodeproto.OpRunStep, Job: "job", Step: "logged", Attempt: 1, Settled: []string{}})
+		_, _ = h.session.Request(context.Background(), nodewire.Request{ID: "logged", Op: nodewire.OpRunStep, Job: "job", Step: "logged", Attempt: 1, Settled: []string{}})
 	}()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()

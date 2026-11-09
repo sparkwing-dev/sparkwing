@@ -15,11 +15,11 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func readOutput(routes nodeproto.ProcessRoutes, node string) error {
+func readOutput(routes nodewire.ProcessRoutes, node string) error {
 	req, err := http.NewRequest(http.MethodGet, routes.URL+"/node/v1/nodes/"+node+"/output", nil)
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ func readOutput(routes nodeproto.ProcessRoutes, node string) error {
 }
 
 func main() {
-	var routes nodeproto.ProcessRoutes
+	var routes nodewire.ProcessRoutes
 	scenario, phase := os.Getenv("GENFIXTURE_SCENARIO"), os.Getenv("GENFIXTURE_PHASE")
 	generators := []string{"targets/generate/0"}
 	if scenario == "multi" {
@@ -56,11 +56,11 @@ func main() {
 	frames := os.NewFile(4, "frames")
 	for reqs.Scan() {
 		var q struct {
-			ID      any                       `json:"id"`
-			Op      string                    `json:"op"`
-			Closure string                    `json:"closure"`
-			Job     string                    `json:"job"`
-			Binding *nodeproto.ProcessBinding `json:"binding"`
+			ID      any                      `json:"id"`
+			Op      string                   `json:"op"`
+			Closure string                   `json:"closure"`
+			Job     string                   `json:"job"`
+			Binding *nodewire.ProcessBinding `json:"binding"`
 			Run     struct {
 				RunID string `json:"run_id"`
 			} `json:"run"`
@@ -74,7 +74,7 @@ func main() {
 			if q.Binding != nil {
 				routes = q.Binding.Routes
 			}
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}}
+			result = nodewire.HelloResult{Protocol: nodewire.Version, SDK: nodewire.SDKIdentity{Language: "go", Version: "test"}}
 		case "describe":
 			result = map[string]any{"pipelines": []any{map[string]any{"name": "probe", "args": []any{}}}}
 		case "plan":

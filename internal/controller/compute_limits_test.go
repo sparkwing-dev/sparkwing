@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -7,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -290,7 +292,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	}
 	f.call(http.MethodPost, "/api/v1/schedules/"+rows[0].ID+"/run", f.writer, nil,
 		http.StatusTooManyRequests, &refusal)
-	if refusal.Error.Code != apierr.RateLimited ||
+	if refusal.Error.Code != hosterr.RateLimited ||
 		refusal.Error.Details.Limit != store.ComputeLimitRunsPerHour {
 		t.Fatalf("refusal = %+v, want the hourly guard named", refusal)
 	}

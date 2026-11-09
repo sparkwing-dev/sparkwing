@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
@@ -11,7 +13,6 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
@@ -80,8 +81,8 @@ func TestPolicyPeerIdentityProperty(t *testing.T) {
 			var out whoamiJSON
 			return json.Unmarshal(w.Body.Bytes(), &out) == nil && out.Principal == id && out.Kind == capability.SubjectLocal && b.lookup.Peer == subject && b.lookup.Class == capability.CredentialPeer && b.lookup.Digest == ([32]byte{})
 		}
-		var failure apierr.Envelope
-		return json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == apierr.Unauthenticated
+		var failure hosterr.Envelope
+		return json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == hosterr.Unauthenticated
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Fatal(err)

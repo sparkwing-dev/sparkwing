@@ -8,10 +8,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -66,7 +66,7 @@ func wireOperations() map[string]wireOperation {
 		"POST /api/v1/runs/{run}/jobs/{job}/reconcile":         operation("Reconcile persisted job execution", wire.ReconcileRequest{}, wire.ReconcileResponse{}),
 		"POST /api/v1/runs/{run}/jobs/{job}/expansion":         operation("Accept a generated expansion", wire.ExpansionSubmission{}, wire.ExpansionAccepted{}),
 		"POST /api/v1/runs/{run}/jobs/{job}/cancel":            operation("Request job cancellation", wire.CancelRequest{}, wire.Applied{}),
-		"GET /api/v1/runs/{run}/jobs/{job}/failure":            operation("Read an authorized persisted failure", nil, (*nodeproto.JobFailure)(nil), query("generation", "integer")),
+		"GET /api/v1/runs/{run}/jobs/{job}/failure":            operation("Read an authorized persisted failure", nil, (*nodewire.JobFailure)(nil), query("generation", "integer")),
 		"GET /api/v1/runs/{run}/logs":                          operation("Read persisted run logs", nil, wire.LogPage{}),
 		"GET /api/v1/runs/{run}/jobs/{job}/logs":               operation("Read persisted job logs", nil, wire.LogPage{}),
 		"GET /api/v1/runs/{run}/logs/search":                   operation("Search persisted run logs", nil, wire.LogPage{}),
@@ -105,9 +105,9 @@ func wireOperations() map[string]wireOperation {
 		"POST /api/v1/data/commit":                             operation("Commit verified uploaded bytes", wire.DataCommitRequest{}, wire.DataReceipt{}),
 		"POST /api/v1/data/download":                           operation("Sign an authorized object download", wire.DataDownloadRequest{}, wire.DataSignedTransfer{}),
 		"POST /api/v1/data/has-many":                           operation("Read authorized object presence", wire.DataHasManyRequest{}, wire.DataPresence{}),
-		"POST /node/v1/masks":                                  operation("Register a mask across host sinks", nodeproto.MaskRequest{}, nodeproto.ServiceAcknowledged{}),
-		"POST /node/v1/annotations":                            operation("Write a masked annotation", nodeproto.AnnotationRequest{}, nodeproto.ServiceAcknowledged{}),
-		"POST /node/v1/summary":                                operation("Write a masked summary", nodeproto.SummaryRequest{}, nodeproto.ServiceAcknowledged{}),
+		"POST /node/v1/masks":                                  operation("Register a mask across host sinks", nodewire.MaskRequest{}, nodewire.ServiceAcknowledged{}),
+		"POST /node/v1/annotations":                            operation("Write a masked annotation", nodewire.AnnotationRequest{}, nodewire.ServiceAcknowledged{}),
+		"POST /node/v1/summary":                                operation("Write a masked summary", nodewire.SummaryRequest{}, nodewire.ServiceAcknowledged{}),
 	}
 	result["POST /api/v1/operator/teams"] = operation("Create a team and its first administrator", wire.OperatorTeamCreate{}, wire.OperatorTeamCreated{})
 	result["POST /api/v1/runs/{run}/local-host/nodes/{job}/debug-pause"] = operation("Follow a sealed debug boundary under the live owner award", localhostwire.LocalDebugPause{}, localhostwire.LocalDebugPauseState{})

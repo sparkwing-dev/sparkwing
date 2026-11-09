@@ -1,13 +1,15 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -58,7 +60,7 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 	c := chain[0].principal.Capability
 	e.launcher, e.metered = launcherClaimant(c), meteredPlacement(c, chain[len(chain)-1].principal.Capability)
 	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil || len(claimant.Kinds) > 0 && !slices.Contains(claimant.Kinds, unit.Kind) {
-		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(apierr.Forbidden, "claimant does not take this kind of unit"))
+		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(hosterr.Forbidden, "claimant does not take this kind of unit"))
 		return e, nil
 	}
 	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, false)
@@ -80,7 +82,7 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 	}
 	verdict := match.Evaluate(e.profile, e.demand)
 	if !verdict.OK() {
-		e.failed, e.refused = stepMatch, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
+		e.failed, e.refused = stepMatch, authorityError(hosterr.Forbidden, "work does not match claimant: "+verdict.String())
 		return e, nil
 	}
 	facts, err := claimFactsTx(ctx, tx, claimant)
@@ -93,15 +95,15 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 	}
 	proven := sealed.Provenance.ProvenRepository() != ""
 	if proven && !facts.HostKind.AllowsProvenRepository() {
-		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, provenRepositoryHostReason)
+		e.failed, e.refused = stepTrust, authorityError(hosterr.Forbidden, provenRepositoryHostReason)
 		return e, nil
 	}
 	if !proven && facts.ProvenOnly != 0 {
-		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, repositoryScopedRunnerReason)
+		e.failed, e.refused = stepTrust, authorityError(hosterr.Forbidden, repositoryScopedRunnerReason)
 		return e, nil
 	}
 	if reason, err := claimantTrustRefusalTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher, facts.PersistentPod != 0); err != nil || reason != "" {
-		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, reason)
+		e.failed, e.refused = stepTrust, authorityError(hosterr.Forbidden, reason)
 		if reason == freshPodReason {
 			e.failed = stepFreshPod
 		}
@@ -124,7 +126,7 @@ func explainUnitFundingTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 		}
 		if err := checkUnitBillingTx(ctx, tx, team, unit, e.price, capability.CloudLauncher(e.chain[0].principal.Capability)); err != nil {
 			var refused *apierr.Error
-			if errors.Is(err, ErrInsufficientCredits) || errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) {
+			if errors.Is(err, ErrInsufficientCredits) || errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == hosterr.LockHeld) {
 				e.failed, e.refused = stepBilling, err
 				return e, nil
 			}
@@ -136,7 +138,7 @@ func explainUnitFundingTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 
 func refusal(err error) bool {
 	var denied *apierr.Error
-	return errors.As(err, &denied) && (denied.Code == apierr.Forbidden || denied.Code == apierr.Unauthenticated)
+	return errors.As(err, &denied) && (denied.Code == hosterr.Forbidden || denied.Code == hosterr.Unauthenticated)
 }
 
 func localClaimant(c capability.Capability) bool {

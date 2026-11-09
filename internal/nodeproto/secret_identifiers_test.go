@@ -1,5 +1,7 @@
 package nodeproto
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -7,7 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func FuzzSecretIdentifierBoundary(f *testing.F) {
@@ -32,16 +35,16 @@ func FuzzSecretIdentifierBoundary(f *testing.F) {
 		ctx := ValidationContext{Placement: placements[placement%6], Secrets: planSecrets{secret, ""}, Expansion: expansion}
 		if expansion {
 			ctx.SourceJob = "source"
-			ctx.ExistingJobs = []JobSpec{{ID: "source", Steps: []StepSpec{{ID: "run"}}, Closures: ClosureSpec{Generate: []string{"fanout"}}}}
+			ctx.ExistingJobs = []nodewire.JobSpec{{ID: "source", Steps: []nodewire.StepSpec{{ID: "run"}}, Closures: nodewire.ClosureSpec{Generate: []string{"fanout"}}}}
 			job.Groups = append(job.Groups, "fanout")
 		}
-		raw, err := json.Marshal(PlanDoc{Jobs: []JobSpec{job}})
+		raw, err := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		plan, err := ValidatePlan(raw, ctx)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || plan.Jobs != nil {
+		if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || plan.Jobs != nil {
 			t.Fatalf("secret-bearing identifier accepted or misclassified: %+v, %v", plan, err)
 		}
 		diagnostics := []string{failure.Message, failure.Hint}
@@ -56,8 +59,8 @@ func FuzzSecretIdentifierBoundary(f *testing.F) {
 	})
 }
 
-func secretIdentifierJob(identifier string, field uint8) JobSpec {
-	job := JobSpec{ID: "job", Steps: []StepSpec{{ID: "run"}}}
+func secretIdentifierJob(identifier string, field uint8) nodewire.JobSpec {
+	job := nodewire.JobSpec{ID: "job", Steps: []nodewire.StepSpec{{ID: "run"}}}
 	switch field % 26 {
 	case 0:
 		job.ID = identifier
@@ -66,7 +69,7 @@ func secretIdentifierJob(identifier string, field uint8) JobSpec {
 	case 2:
 		job.Groups = []string{identifier}
 	case 3:
-		job.ID, job.Approval, job.Steps = identifier, &ApprovalSpec{}, nil
+		job.ID, job.Approval, job.Steps = identifier, &nodewire.ApprovalSpec{}, nil
 	case 4:
 		job.Needs = []string{identifier}
 	case 5:
@@ -82,13 +85,13 @@ func secretIdentifierJob(identifier string, field uint8) JobSpec {
 	case 10:
 		job.OnFailureOf = identifier
 	case 11:
-		job.Consumes = []ArtifactInput{{Producer: identifier}}
+		job.Consumes = []nodewire.ArtifactInput{{Producer: identifier}}
 	case 12:
-		job.References = []PipelineReference{{Pipeline: identifier, Job: "result"}}
+		job.References = []nodewire.PipelineReference{{Pipeline: identifier, Job: "result"}}
 	case 13:
-		job.References = []PipelineReference{{Pipeline: "pipeline", Job: identifier}}
+		job.References = []nodewire.PipelineReference{{Pipeline: "pipeline", Job: identifier}}
 	case 14:
-		job.Concurrency = []ConcurrencySpec{{Group: identifier}}
+		job.Concurrency = []nodewire.ConcurrencySpec{{Group: identifier}}
 	case 15:
 		job.Closures.Generate = []string{identifier}
 	case 16:
@@ -100,15 +103,15 @@ func secretIdentifierJob(identifier string, field uint8) JobSpec {
 	case 19:
 		job.Closures.Verify = identifier
 	case 20:
-		job.Closures.MemoKey, job.Memo = identifier, &MemoSpec{}
+		job.Closures.MemoKey, job.Memo = identifier, &nodewire.MemoSpec{}
 	case 21:
 		job.Requires = []string{identifier}
 	case 22:
 		job.Prefers = []string{identifier}
 	case 23:
-		job.Env = map[string]EnvValue{identifier: {Value: "body"}}
+		job.Env = map[string]nodewire.EnvValue{identifier: {Value: "body"}}
 	case 24:
-		job.Caches = []CacheSpec{{Name: identifier, KeyFiles: []string{}}}
+		job.Caches = []nodewire.CacheSpec{{Name: identifier, KeyFiles: []string{}}}
 	case 25:
 		job.Artifacts = []string{identifier}
 	}

@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,10 +12,10 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestAccountRolelessHTTPKeepsOnlyAccountAuthorityProperty(t *testing.T) {
@@ -67,7 +69,7 @@ func TestAccountTeamHTTPTransactionGuards(t *testing.T) {
 		before, expiry := f.state(t)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, f.request("POST", tc.path, tc.body))
-		assertEngineError(t, w, apierr.Status(tc.code), tc.code)
+		assertEngineError(t, w, hosterr.Status(tc.code), tc.code)
 		after, expires := f.state(t)
 		if len(writes.actors) != 1 || writes.actors[0].Principal.Capability.Subject.ID != "member" || before != after || expiry != expires || strings.Contains(w.Body.String(), f.raw) {
 			t.Fatalf("HTTP %d %s actors=%+v", w.Code, w.Body, writes.actors)

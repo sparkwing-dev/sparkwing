@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -8,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func burstFixture(t *testing.T, policy runspec.BurstPlacement) (*Store, UnitDemand) {
@@ -94,7 +96,7 @@ func TestBurstSealedPreferencesOverrideControllerPlacement(t *testing.T) {
 	ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: []PlacementPreference{{Prefers: []string{"name=runner"}}}, Liveness: time.Minute})
 	_, err := s.AsOperator().ClaimUnit(ctx, demand)
 	var denied *apierr.Error
-	if !errors.As(err, &denied) || denied.Code != apierr.LockHeld {
+	if !errors.As(err, &denied) || denied.Code != hosterr.LockHeld {
 		t.Fatalf("sealed earlier machine not held: %v", err)
 	}
 	now := s.now().Add(time.Minute)
@@ -271,7 +273,7 @@ func TestOverflowUsageIncludesCloudWorkAcrossMonthBoundary(t *testing.T) {
 	}
 	err = s.inTx(t.Context(), func(tx *storeTx) error { return checkOverflowTx(t.Context(), tx, "a", "run") })
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.LockHeld {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.LockHeld {
 		t.Fatalf("overflow allowance accepted another reservation: %v", err)
 	}
 	for _, want := range []string{"limit is 2 minutes", "current usage is 120 seconds", "requested reservation is 60 seconds", "support@sparkwing.dev"} {

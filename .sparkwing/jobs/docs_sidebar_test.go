@@ -30,6 +30,9 @@ func TestDocsSidebarGatesPolicyAndReleaseCut(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if name == "go.mod" {
+					body = append(body, []byte("\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => ./sparkwing\n")...)
+				}
 				writeFile(t, filepath.Join(repo, name), string(body))
 			}
 			for _, name := range []string{"internal", "pkg", "sparkwing", "build"} {
@@ -37,6 +40,7 @@ func TestDocsSidebarGatesPolicyAndReleaseCut(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			writeFile(t, filepath.Join(repo, "go.work"), "go 1.26.0\n\nuse (\n .\n ./sparkwing\n)\n")
 			writeFile(t, filepath.Join(repo, "docs", "_sidebar.json"), `{"categories":[{"label":"CLI","slugs":["index"]}]}`)
 			writeFile(t, filepath.Join(repo, "docs", "index.md"), "# Docs\n")
 			t.Chdir(repo)

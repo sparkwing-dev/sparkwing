@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto"
@@ -18,8 +20,8 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -223,7 +225,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		t.Fatal("stale authorization minted after cancellation")
 	} else {
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.Unauthenticated {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unauthenticated {
 			t.Fatalf("cancellation failure: %v", err)
 		}
 	}

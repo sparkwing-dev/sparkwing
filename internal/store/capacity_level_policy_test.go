@@ -3,15 +3,15 @@ package store_test
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCapacityLevelsKeepIndependentPolicies(t *testing.T) {
-	f := newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), func(doc *nodeproto.PlanDoc) {
-		doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "shared", Scope: new("global"), Capacity: new(3), OnLimit: new("fail")}}
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "shared", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
+	f := newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), func(doc *nodewire.PlanDoc) {
+		doc.Concurrency = []nodewire.ConcurrencySpec{{Group: "shared", Scope: new("global"), Capacity: new(3), OnLimit: new("fail")}}
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "shared", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
 	})
 	binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 	result, err := f.tenant.MayStart(t.Context(), binding, f.holder)

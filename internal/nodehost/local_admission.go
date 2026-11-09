@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -7,7 +9,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -159,7 +160,7 @@ func commandMeasurement(ctx context.Context) func(context.Context, int, string) 
 
 func localAdmissionFailure(err error) error {
 	if errors.Is(err, context.Canceled) && waitFailure(err, context.Canceled) == nil {
-		return &admissionFailure{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled), Err: err}
+		return &admissionFailure{Outcome: runstate.NodeCancelled, Reason: string(hosterr.ReasonCancelled), Err: err}
 	}
 	var refused *wingdclient.AdmissionError
 	if errors.As(err, &refused) {

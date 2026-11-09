@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,12 +11,12 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type debugObservation struct {
@@ -73,13 +75,13 @@ func observeDebug(ctx context.Context, inv clisurface.Invocation, reader control
 
 func attachObservedDebug(ctx context.Context, inv clisurface.Invocation, job controllerwire.DebugJob, out io.Writer, attach func(context.Context, controllerwire.DebugExecution, io.Writer) error) error {
 	if job.Job.Status != "running" {
-		return &apierr.Error{Code: apierr.IllegalTransition, Message: "job has no running executor to attach to"}
+		return &apierr.Error{Code: hosterr.IllegalTransition, Message: "job has no running executor to attach to"}
 	}
 	if job.Execution == nil {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "job has no Kubernetes attachment target. Cloud jobs do not support shell attachment", Hint: "use sparkwing debug env or sparkwing runs logs to inspect the job"}
+		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "job has no Kubernetes attachment target. Cloud jobs do not support shell attachment", Hint: "use sparkwing debug env or sparkwing runs logs to inspect the job"}
 	}
 	if job.Execution.Kind != "kubernetes" {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "job executor has no Kubernetes attachment target", Hint: "use sparkwing debug env to inspect the job"}
+		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "job executor has no Kubernetes attachment target", Hint: "use sparkwing debug env to inspect the job"}
 	}
 	target := *job.Execution
 	if inv.Has("namespace") {
@@ -105,7 +107,7 @@ func attachDebugExecution(ctx context.Context, target controllerwire.DebugExecut
 		return err
 	}
 	if target.Kind != "kubernetes" {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "executor has no Kubernetes attachment target"}
+		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "executor has no Kubernetes attachment target"}
 	}
 	bin, err := exec.LookPath("kubectl")
 	if err != nil {

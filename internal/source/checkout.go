@@ -11,10 +11,10 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // PrepareCheckout acquires source without invoking an SDK or an engine. Its Entry
@@ -341,7 +341,7 @@ func initCheckout(ctx context.Context, client *gitClient, checkout, origin, sha 
 	return err
 }
 
-func fetchArgs(policy nodeproto.SourceSpec) []string {
+func fetchArgs(policy nodewire.SourceSpec) []string {
 	args := []string{"fetch", "--quiet", "--no-recurse-submodules"}
 	if policy.Tags != nil && *policy.Tags {
 		args = append(args, "--tags")
@@ -354,7 +354,7 @@ func fetchArgs(policy nodeproto.SourceSpec) []string {
 	return args
 }
 
-func checkoutDepth(policy nodeproto.SourceSpec) int {
+func checkoutDepth(policy nodewire.SourceSpec) int {
 	if policy.Depth != nil {
 		return *policy.Depth
 	}

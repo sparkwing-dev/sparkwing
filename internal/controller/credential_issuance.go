@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"fmt"
@@ -7,10 +9,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // CredentialIssuer commits root provisioning and narrowing through Store.Issue.
@@ -55,7 +57,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 	p := a.Principal
 	if p.Class == capability.CredentialPeer && request.Data == nil {
 		if !peerClaimantRequest(request) {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "a local controller issues no member tokens; the CLI reaches it over its socket, and `sparkwing dashboard open` signs a browser in"}
+			return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "a local controller issues no member tokens; the CLI reaches it over its socket, and `sparkwing dashboard open` signs a browser in"}
 		}
 		limit := time.Now().UTC().Add(LocalClaimantLifetime)
 		if request.ExpiresAt == nil {

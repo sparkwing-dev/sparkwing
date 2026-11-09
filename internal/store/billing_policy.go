@@ -1,11 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // LaunchAccountLimit is the number of accounts admitted without operator approval.
@@ -135,7 +137,7 @@ func checkCloudCapacityTx(ctx context.Context, view ledgerView, cores int64) err
 		return err
 	}
 	if active+cores > standing.CloudVCPU {
-		return authorityError(apierr.LockHeld, "Cloud work waits for "+standing.Tier+" standing vCPU capacity")
+		return authorityError(hosterr.LockHeld, "Cloud work waits for "+standing.Tier+" standing vCPU capacity")
 	}
 	return nil
 }

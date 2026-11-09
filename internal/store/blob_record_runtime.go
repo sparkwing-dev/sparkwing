@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -9,12 +11,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 // BlobManifestReader separates bounded admission verification from admitted-member reads.
@@ -48,7 +51,7 @@ func (r *blobRecords) manifestMembers(tx *storeTx, request blob.CommitRecordRequ
 		return nil, nil
 	}
 	if r.manifests == nil {
-		return nil, authorityError(apierr.Unavailable, "verified manifest reader is not configured")
+		return nil, authorityError(hosterr.Unavailable, "verified manifest reader is not configured")
 	}
 	if _, err := tx.blobIO.read("verify:"+string(manifest.Value), func(ctx context.Context) ([]blob.Member, error) {
 		return nil, r.manifests.VerifyBlobManifest(ctx, r.tenant.team, manifest.Value, request.Members)
@@ -72,7 +75,7 @@ type blobIOResult struct {
 
 func (reads *blobIO) read(key string, fetch func(context.Context) ([]blob.Member, error)) ([]blob.Member, error) {
 	if reads == nil {
-		return nil, authorityError(apierr.Unavailable, "object reads require a deferred-read transaction")
+		return nil, authorityError(hosterr.Unavailable, "object reads require a deferred-read transaction")
 	}
 	if result, ok := reads.done[key]; ok {
 		return result.members, result.err
@@ -131,7 +134,7 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 			return blob.Record{}, err
 		}
 		if !reflect.DeepEqual(request.Source, a.source) || !blobKindAllowed(a, request.Key.Kind) {
-			return blob.Record{}, authorityError(apierr.Forbidden, "record is outside the uploader's authority")
+			return blob.Record{}, authorityError(hosterr.Forbidden, "record is outside the uploader's authority")
 		}
 		if request.Key.Kind == blob.KindManifest && request.ManifestDigest.Set && request.ManifestDigest.Value != request.Digest {
 			return blob.Record{}, authorityError(apierr.BadRequest, "manifest record identifies two manifests")
@@ -168,8 +171,8 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 			if err != nil {
 				return blob.Record{}, err
 			}
-			if size > limits.NodeOutputBytes {
-				return blob.Record{}, authorityError(apierr.PayloadTooLarge, "output exceeds the byte limit")
+			if size > protolimits.NodeOutputBytes {
+				return blob.Record{}, authorityError(hosterr.PayloadTooLarge, "output exceeds the byte limit")
 			}
 		}
 		if request.Key.Kind == blob.KindMemo {
@@ -201,19 +204,19 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 		ref = blob.RefScope{}
 	}
 	if key.Team != a.capability.Team || key.Scope.Repo != a.authority.Repo || key.Scope.Ref != ref || (key.Kind != blob.KindDepcache && key.Scope.Pipeline != a.pipeline) || key.Name == "" || !slices.Contains(blob.Kinds, key.Kind) {
-		return authorityError(apierr.Forbidden, "record key differs from sealed scope")
+		return authorityError(hosterr.Forbidden, "record key differs from sealed scope")
 	}
 	if key.Kind == blob.KindPrepared && (!blobKindAllowed(a, key.Kind) || key.Scope.Job != "" || key.Scope.Key != a.source.RunID || key.Name != "pipeline") {
 		return blob.ErrDigestNotReadable
 	}
 	if blobIsCache(key.Kind) && !blobCacheRepositoryAllowed(a, key.Kind) {
-		return authorityError(apierr.Forbidden, "shared caches require a remote repository")
+		return authorityError(hosterr.Forbidden, "shared caches require a remote repository")
 	}
 	if a.source.Attempt.Set && key.Kind != blob.KindDepcache && key.Scope.Job != a.source.Attempt.Value.NodeID {
-		return authorityError(apierr.Forbidden, "record names another job")
+		return authorityError(hosterr.Forbidden, "record names another job")
 	}
 	if !a.source.Attempt.Set && key.Scope.Job != "" {
-		return authorityError(apierr.Forbidden, "owner upload cannot name a job")
+		return authorityError(hosterr.Forbidden, "owner upload cannot name a job")
 	}
 	if key.Kind == blob.KindDepcache && (key.Scope.Job != "" || key.Scope.Pipeline != "") {
 		return authorityError(apierr.BadRequest, "depcache namespace is repository-scoped")
@@ -226,11 +229,11 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 	}
 	if key.Kind == blob.KindOutput || key.Kind == blob.KindManifest {
 		if key != blob.ResultRecordKey(a.source.Attempt.Value, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, key.Kind) {
-			return authorityError(apierr.Forbidden, "result key differs from attempt fence")
+			return authorityError(hosterr.Forbidden, "result key differs from attempt fence")
 		}
 	}
 	if key.Kind != blob.KindPrepared && a.capability.Data.WriteRef != key.Scope.Ref.CapabilityScope() {
-		return authorityError(apierr.Forbidden, "record ref is outside the data grant")
+		return authorityError(hosterr.Forbidden, "record ref is outside the data grant")
 	}
 	return nil
 }

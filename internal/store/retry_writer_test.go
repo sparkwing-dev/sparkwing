@@ -7,10 +7,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestRetriedCacheAndMemoStayInSourceWritersScope(t *testing.T) {
@@ -101,7 +101,7 @@ func startWriterCacheJob(t *testing.T, tenant *Tenant, admitted AdmissionResult)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := testBodyPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Memo: &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "const", Value: "fixture"}}}}})
+	plan := testBodyPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Memo: &nodewire.MemoSpec{Input: &nodewire.MemoInput{Kind: "const", Value: "fixture"}}}}})
 	body, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)

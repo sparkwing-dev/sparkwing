@@ -1,15 +1,17 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // WithLocalSessions binds the private controller's step session ledger.
@@ -21,10 +23,10 @@ func (s *Server) WithLocalSessions(directory string) *Server {
 func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	_, peer := localhostwire.LocalPeer(r.Context())
 	if !peer || a.Principal.Class != capability.CredentialPeer || a.Target.Team != string(store.DefaultTeam) {
-		return apierr.Authorization(apierr.ReasonBinding, "session sweep requires the verified local owner")
+		return hosterr.Authorization(hosterr.ReasonBinding, "session sweep requires the verified local owner")
 	}
 	if s.localSessions == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "local session ledger is unavailable"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "local session ledger is unavailable"}
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.DefaultTeam)
 	if err != nil {
@@ -65,7 +67,7 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 	}
 	result := localhostwire.LocalDoctor{Findings: findings}
 	if failure != nil {
-		result.Failure = &apierr.Error{Code: apierr.Internal, Message: failure.Error()}
+		result.Failure = &apierr.Error{Code: hosterr.Internal, Message: failure.Error()}
 	}
 	writeJSON(w, http.StatusOK, result)
 	return nil

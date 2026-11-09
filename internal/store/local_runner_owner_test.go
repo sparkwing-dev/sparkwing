@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestLocalRunnerRollStopsOwnerSelfClaimsAndPreservesHeldWork(t *testing.T) {
@@ -40,7 +40,7 @@ func TestLocalRunnerRollStopsOwnerSelfClaimsAndPreservesHeldWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Award.CapabilityPrefix}, CapabilityPrefix: owner.Award.CapabilityPrefix, Owner: owner.Owner}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "held", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}, Children: []nodeproto.ChildPipeline{{Pipeline: "child"}}}, {ID: "fresh", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}, Needs: []string{"held"}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "held", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}, Children: []nodewire.ChildPipeline{{Pipeline: "child"}}}, {ID: "fresh", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}, Needs: []string{"held"}}}}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
 	if err != nil {

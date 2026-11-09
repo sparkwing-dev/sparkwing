@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -14,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -23,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestEngineRunDetailRequiresStatusFacts(t *testing.T) {
@@ -200,7 +202,7 @@ func TestEngineRunDetailRefusesUnrelatedAuthority(t *testing.T) {
 			b := newCredentialBoundary()
 			p := &b.snapshot.Authorities[0].Principal
 			f := &runStatusFixture{facts: runStatusFacts(b)}
-			status, code := 401, apierr.Unauthenticated
+			status, code := 401, hosterr.Unauthenticated
 			switch scenario {
 			case "missing", "missing unknown run":
 				b.raw = ""
@@ -223,7 +225,7 @@ func TestEngineRunDetailRefusesUnrelatedAuthority(t *testing.T) {
 				b.snapshot.Binding.LeaseExpiresAt = b.snapshot.Now
 			case "cancelled run":
 				b.snapshot.Binding.RunCancelled = true
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "machine", "deployment":
 				b = jobViewBoundary("member")
 				p = &b.snapshot.Authorities[0].Principal
@@ -231,31 +233,31 @@ func TestEngineRunDetailRefusesUnrelatedAuthority(t *testing.T) {
 				if scenario == "deployment" {
 					p.Capability.Subject.Kind = capability.SubjectOperator
 				}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "publisher":
 				b = publisherBoundary()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "wrong audience":
 				b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")
 				p.Capability.Audience, p.Capability.Digest = capability.NodeHost, sha256.Sum256([]byte(b.raw))
 				b.snapshot.Binding.ProcessAlive = true
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "missing grant":
 				p.Capability.Grants = nil
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "foreign team":
 				p.Capability.Team = "foreign"
 				status, code = 404, apierr.NotFound
 			case "foreign run":
 				p.Capability.Binding.RunID, b.snapshot.Binding.Current.RunID = "foreign", "foreign"
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "binding refusal":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "not a member"}
-				status, code = 403, apierr.Forbidden
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "not a member"}
+				status, code = 403, hosterr.Forbidden
 			case "private auth error":
 				b.readErr = errors.New("private-authentication")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			}
 			w := snapshotRequest(runStatusServer(t, b, f), b, "GET", "/api/v1/runs/run")
 			assertEngineError(t, w, status, code)
@@ -271,10 +273,10 @@ func TestEngineRunDetailErrorsAndMethods(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			b := jobViewBoundary("member")
 			f := &runStatusFixture{facts: runStatusFacts(b)}
-			method, status, code := "GET", 500, apierr.Internal
+			method, status, code := "GET", 500, hosterr.Internal
 			switch scenario {
 			case "missing reader":
-				f.readerMissing, code = true, apierr.PolicyMissing
+				f.readerMissing, code = true, hosterr.PolicyMissing
 			case "not found":
 				f.err, status, code = store.ErrNotFound, 404, apierr.NotFound
 			case "unknown team":
@@ -288,7 +290,7 @@ func TestEngineRunDetailErrorsAndMethods(t *testing.T) {
 			case "private ownership error":
 				f.ownershipErr = errors.New("private-run-lookup")
 			case "head", "post":
-				method, status, code = strings.ToUpper(scenario), 405, apierr.MethodNotAllowed
+				method, status, code = strings.ToUpper(scenario), 405, hosterr.MethodNotAllowed
 			}
 			w := snapshotRequest(runStatusServer(t, b, f), b, method, "/api/v1/runs/run")
 			assertEngineError(t, w, status, code)
@@ -398,7 +400,7 @@ func FuzzEngineRunDetailScope(f *testing.F) {
 			}
 			fixture := &runStatusFixture{facts: facts}
 			w := snapshotRequest(runStatusServer(t, b, fixture), b, "GET", "/api/v1/runs/run")
-			assertEngineError(t, w, 500, apierr.Internal)
+			assertEngineError(t, w, 500, hosterr.Internal)
 			if strings.Contains(w.Body.String(), foreign) || strings.Contains(w.Body.String(), "private-") {
 				t.Fatalf("%s: partial status escaped: %s", part, w.Body.String())
 			}

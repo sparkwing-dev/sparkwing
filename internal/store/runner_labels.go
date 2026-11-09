@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -7,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ValidateRunnerLabels validates label count, length and characters for enrollment, admin updates and claims.
@@ -55,7 +57,7 @@ func checkRunnerLabelsTx(ctx context.Context, tx *storeTx, chain []authorityNode
 	}
 	for _, label := range match.SelfAsserted(labels) {
 		if !slices.Contains(record.Origin.AllowedLabels, label) {
-			return authorityError(apierr.Forbidden, fmt.Sprintf("runner %q may not advertise label %q; ask a team administrator to revoke this enrollment and re-enroll with sparkwing runners add --runner %s --label LABEL --force (repeat --label for the complete allowed set and retain the other enrollment settings). Self-hosted operators can instead update allowed labels with sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team %s --runner %s --reason TEXT --label LABEL", root.Capability.Subject.ID, label, root.Capability.Subject.ID, root.Capability.Team, root.Capability.Subject.ID))
+			return authorityError(hosterr.Forbidden, fmt.Sprintf("runner %q may not advertise label %q; ask a team administrator to revoke this enrollment and re-enroll with sparkwing runners add --runner %s --label LABEL --force (repeat --label for the complete allowed set and retain the other enrollment settings). Self-hosted operators can instead update allowed labels with sparkwing-controller admin runner-labels --operator ACCOUNT_ID --team %s --runner %s --reason TEXT --label LABEL", root.Capability.Subject.ID, label, root.Capability.Subject.ID, root.Capability.Team, root.Capability.Subject.ID))
 		}
 	}
 	return nil
@@ -80,7 +82,7 @@ func (o *Operator) ConfigureRunnerLabels(ctx context.Context, team Team, name, o
 		var role Role
 		err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`, team, operator).Scan(&role)
 		if err != nil || role != RoleOwner {
-			return nil, authorityError(apierr.Forbidden, "runner labels require an existing team administrator in --team")
+			return nil, authorityError(hosterr.Forbidden, "runner labels require an existing team administrator in --team")
 		}
 		now := tx.now(ctx).UnixNano()
 		rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND parent_id IS NULL AND bind_kind='none' AND `+liveCredentialSQL("")+` ORDER BY created_at,prefix`, team, name, now, now)

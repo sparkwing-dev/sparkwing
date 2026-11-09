@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -14,7 +16,6 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -176,8 +177,8 @@ func TestConcurrentDownloadsAreCappedPerPrincipal(t *testing.T) {
 
 func assertEgressLimit(t *testing.T, w *httptest.ResponseRecorder, reason string) {
 	t.Helper()
-	var body apierr.Envelope
-	if w.Code != 429 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != apierr.RateLimited || body.Error.Details["reason"] != reason || w.Header().Get("Retry-After") == "" {
+	var body hosterr.Envelope
+	if w.Code != 429 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != hosterr.RateLimited || body.Error.Details["reason"] != reason || w.Header().Get("Retry-After") == "" {
 		t.Fatalf("limit: %d %s", w.Code, w.Body)
 	}
 	for _, want := range []string{"already holds 1 concurrent", "which is the cap", "raise --"} {

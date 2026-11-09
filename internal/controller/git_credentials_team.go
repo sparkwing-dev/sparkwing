@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -15,10 +17,10 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // GitCredentialJSON is a team git credential as the API shows it: never its
@@ -116,7 +118,7 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request, 
 	}
 	cipher, ok := s.secretsCipher.(BoundCipher)
 	if !ok {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": apierr.ReasonSecretsKeyRequired}}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": hosterr.ReasonSecretsKeyRequired}}
 	}
 	host := strings.ToLower(strings.TrimSpace(req.Host))
 	if !validGitCredentialHost(host) {
@@ -142,7 +144,7 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request, 
 		}
 		key, err := s.scanHostKey(r.Context(), host, port)
 		if err != nil {
-			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "could not read the ssh host key"}, err)
+			return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "could not read the ssh host key"}, err)
 		}
 		addr := host
 		if port != 22 {

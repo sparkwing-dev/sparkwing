@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -9,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestCloudSizePreferenceIsRecordedOnAward(t *testing.T) {
@@ -169,7 +171,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 				claim, err := s.AsOperator().ClaimUnit(ctx, request)
 				if problem == "live" || problem == "granted_name" {
 					var denied *apierr.Error
-					if !errors.Is(err, ErrNotFound) && (!errors.As(err, &denied) || denied.Code != apierr.LockHeld) {
+					if !errors.Is(err, ErrNotFound) && (!errors.As(err, &denied) || denied.Code != hosterr.LockHeld) {
 						t.Fatalf("live preferred runner did not hold work: %+v, %v", claim, err)
 					}
 					after, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
@@ -262,7 +264,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 			claim, err := s.AsOperator().ClaimUnit(WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: preferences, Liveness: time.Minute}), request)
 			if wantHeld {
 				var refused *apierr.Error
-				if !errors.Is(err, ErrNotFound) && (!errors.As(err, &refused) || refused.Code != apierr.LockHeld) {
+				if !errors.Is(err, ErrNotFound) && (!errors.As(err, &refused) || refused.Code != hosterr.LockHeld) {
 					t.Fatalf("order=%v rank=%d elapsed=%s: %+v %v", order, rank, elapsed, claim, err)
 				}
 				after, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})

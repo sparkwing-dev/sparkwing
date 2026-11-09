@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -8,13 +10,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // FetchedRepository is a GitHub repository id and the owner/name the App
@@ -188,7 +190,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 	if (len(request.Body) == 0) == (request.Failure == nil) {
 		return result, authorityError(apierr.BadRequest, "expansion requires exactly one body or failure")
 	}
-	if request.Failure != nil && (request.Failure.MaskedError == "" || len(request.Failure.MaskedError) > int(limits.ErrorBytes) || !slices.ContainsFunc(apierr.Codes, func(code apierr.Definition) bool { return code.Code == request.Failure.Code })) {
+	if request.Failure != nil && (request.Failure.MaskedError == "" || len(request.Failure.MaskedError) > int(limits.ErrorBytes) || !slices.ContainsFunc(hosterr.Codes, func(code hosterr.Definition) bool { return code.Code == request.Failure.Code })) {
 		return result, authorityError(apierr.BadRequest, "invalid expansion failure")
 	}
 	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
@@ -203,7 +205,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 			return err
 		}
 		if snapshot.Run.Spec == nil || snapshot.Run.CancelRequestedAt != nil || snapshot.Run.State != runstate.RunRunning && snapshot.Run.State != runstate.RunPending {
-			return authorityError(apierr.IllegalTransition, "expansion run is no longer executable")
+			return authorityError(hosterr.IllegalTransition, "expansion run is no longer executable")
 		}
 		if _, err := snapshot.Scheduling(); err != nil {
 			return err
@@ -236,7 +238,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 			return nil
 		}
 		if source.Expansion != runstate.ExpansionExpected {
-			return authorityError(apierr.IllegalTransition, "expansion differs from its accepted submission")
+			return authorityError(hosterr.IllegalTransition, "expansion differs from its accepted submission")
 		}
 		if request.Failure == nil {
 			result.Nodes, err = insertExpansionTx(ctx, tx, t.team, request, snapshot, accepted)
@@ -336,7 +338,7 @@ func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUn
 
 func resolveExpansionLossTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, now time.Time) error {
 	state := runstate.ExpansionFailed
-	failure := &ExpansionFailure{Code: apierr.Unavailable, MaskedError: "generator evaluator lost"}
+	failure := &ExpansionFailure{Code: hosterr.Unavailable, MaskedError: "generator evaluator lost"}
 	if status == "cancelled" {
 		state, failure = runstate.ExpansionNone, nil
 	}
@@ -427,7 +429,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 }
 
 func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string, spec runspec.Spec, body json.RawMessage, generation int64) error {
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(body, &plan); err != nil {
 		return err
 	}
@@ -444,7 +446,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		return err
 	}
 	if count != 1 {
-		return authorityError(apierr.SpecDrift, "run already has a sealed plan")
+		return authorityError(hosterr.SpecDrift, "run already has a sealed plan")
 	}
 	requirements, err := persistClaimRequirementsTx(ctx, tx, team, spec.Resolved.Settings.Options.Requires.Value)
 	if err != nil {
@@ -521,7 +523,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 		return AcceptedPlan{}, err
 	}
 	if run.Spec == nil && (run.CancelRequestedAt != nil || run.FinishedAt != nil) {
-		return AcceptedPlan{}, authorityError(apierr.IllegalTransition, "run is no longer accepting plans")
+		return AcceptedPlan{}, authorityError(hosterr.IllegalTransition, "run is no longer accepting plans")
 	}
 	spec, body, err := preparePlanSealTx(ctx, tx, team, request, run)
 	if err != nil {
@@ -529,7 +531,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 	}
 	replay := run.Spec != nil
 	if replay && run.Spec.Hash != spec.Hash {
-		return AcceptedPlan{}, authorityError(apierr.SpecDrift, "plan differs from the accepted seal")
+		return AcceptedPlan{}, authorityError(hosterr.SpecDrift, "plan differs from the accepted seal")
 	}
 	if err = planAuthorityTx(ctx, tx, team, request); err != nil {
 		return AcceptedPlan{}, err
@@ -538,7 +540,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 		return AcceptedPlan{Spec: *run.Spec, Plan: run.Plan, PlanHash: run.PlanHash, Owner: run.Owner, Replayed: true}, nil
 	}
 	if run.Request.Request.Mode == runspec.IntakeExecute && dispatch == string(runspec.DispatchController) && controller == nil {
-		return AcceptedPlan{}, authorityError(apierr.Unavailable, "controller ownership lease is unavailable")
+		return AcceptedPlan{}, authorityError(hosterr.Unavailable, "controller ownership lease is unavailable")
 	}
 	if !replay {
 		if err = writeAcceptedPlanTx(ctx, tx, team, run.ID, spec, body, int64(request.Actor.Owner.Generation)); err != nil {

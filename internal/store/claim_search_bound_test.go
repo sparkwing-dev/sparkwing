@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"database/sql"
 	"database/sql/driver"
@@ -14,9 +16,9 @@ import (
 
 	"modernc.org/sqlite"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), contextVisits ...*atomic.Int64) *claimBenchmarkTrace {
@@ -217,7 +219,7 @@ func TestClaimSearchActionsRejectsUntrustedPushBeforeNodeLookup(t *testing.T) {
 			demand.Kinds = []capability.UnitKind{capability.UnitNode}
 			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			var refused *apierr.Error
-			if named && (!errors.As(err, &refused) || refused.Code != apierr.Forbidden && refused.Code != apierr.LockHeld) || !named && !errors.Is(err, ErrNotFound) {
+			if named && (!errors.As(err, &refused) || refused.Code != hosterr.Forbidden && refused.Code != hosterr.LockHeld) || !named && !errors.Is(err, ErrNotFound) {
 				t.Errorf("Actions claim of asserted provenance: %v; want refusal", err)
 			}
 			if !named && examined.Load() != 0 {

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -19,13 +21,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // A Cloud job whose pipeline fails to compile has no attempt, so its compiler output reaches the requester only as
@@ -42,7 +43,7 @@ func TestBurstCloudCompileFailureShowsMaskedCompilerOutput(t *testing.T) {
 	t.Setenv("TOKEN", "ambient-requester-value-never-forward")
 	const secret = "compile-output-secret-7f3a"
 	repo, sha, engines, selected := burstSDKSourceFixture(t, "\nvar compileFailure int = \""+secret+"\"\n")
-	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
+	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodewire.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +104,7 @@ func executeBurstCompileFailure(t *testing.T, engines *engine.Resolver, selected
 	if err != nil {
 		t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(snapshot.Run.Plan, &plan); err != nil {
 		t.Fatal(err)
 	}

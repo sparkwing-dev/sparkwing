@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/testleak"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
 )
 
 var (
@@ -124,8 +124,9 @@ var sdkFixtureModule = sync.OnceValues(func() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	root = filepath.Join(root, "sparkwing")
 	stage := filepath.Join(sdkFixtureDir, "sdk")
-	list := exec.Command(sdkFixtureGo, "list", "-deps", "-json", "./sparkwing/...")
+	list := exec.Command(sdkFixtureGo, "list", "-deps", "-json", "./...")
 	list.Dir, list.Env = root, sdkFixtureEnvironment
 	output, err := list.Output()
 	if err != nil {
@@ -214,8 +215,12 @@ func reuseSDKFixtureCache() error {
 	return os.Setenv("SPARKWING_HOME", filepath.Join(owner, "home"))
 }
 
-func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
+func writeSDKFixtureModule(t *testing.T, sparkwingDir string) {
 	t.Helper()
+	t.Setenv("GOWORK", "off")
+	if err := os.MkdirAll(sparkwingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	root := sdkFixtureModuleRoot(t)
 	for _, name := range []string{"go.mod", "go.sum"} {
 		body, err := os.ReadFile(filepath.Join(root, name))
@@ -223,13 +228,18 @@ func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
 			t.Fatal(err)
 		}
 		if name == "go.mod" {
-			body = []byte(strings.Replace(string(body), "module github.com/sparkwing-dev/sparkwing", "module sdkfixture", 1) +
-				fmt.Sprintf("\nrequire github.com/sparkwing-dev/sparkwing v0.0.0\nreplace github.com/sparkwing-dev/sparkwing => %q\n", root))
+			body = []byte(strings.Replace(string(body), "module github.com/sparkwing-dev/sparkwing/sparkwing", "module sdkfixture", 1) +
+				fmt.Sprintf("\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.0.0\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %q\n", root))
 		}
 		if err := os.WriteFile(filepath.Join(sparkwingDir, name), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
+	t.Helper()
+	writeSDKFixtureModule(t, sparkwingDir)
 	if err := os.WriteFile(filepath.Join(sparkwingDir, "main.go"), []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}

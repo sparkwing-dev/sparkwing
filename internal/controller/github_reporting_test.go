@@ -9,11 +9,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func (f *githubCompletionFixture) pending() func() {
@@ -43,11 +43,11 @@ func (f *githubCompletionFixture) addReportingNode(id string, outcome runstate.N
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(run.Plan, &plan); err != nil {
 		f.t.Fatal(err)
 	}
-	plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: id})
+	plan.Jobs = append(plan.Jobs, nodewire.JobSpec{ID: id})
 	encoded, err := json.Marshal(plan)
 	if err != nil {
 		f.t.Fatal(err)
@@ -140,14 +140,14 @@ func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(run.Plan, &plan); err != nil {
 		t.Fatal(err)
 	}
 	rows := make([]string, 400)
 	args := make([]any, 0, 6*len(rows))
 	for i := range rows {
-		job := nodeproto.JobSpec{ID: "node-" + strings.Repeat("x", 40) + "-" + strconv.Itoa(i)}
+		job := nodewire.JobSpec{ID: "node-" + strings.Repeat("x", 40) + "-" + strconv.Itoa(i)}
 		plan.Jobs = append(plan.Jobs, job)
 		spec, err := json.Marshal(job)
 		if err != nil {

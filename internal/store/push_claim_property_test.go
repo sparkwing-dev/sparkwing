@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -7,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
@@ -56,7 +58,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 						writePushRun(t, s, altered)
 						_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 						var refused *apierr.Error
-						if named && (!errors.As(err, &refused) || refused.Code != apierr.Forbidden) || !named && !errors.Is(err, ErrNotFound) {
+						if named && (!errors.As(err, &refused) || refused.Code != hosterr.Forbidden) || !named && !errors.Is(err, ErrNotFound) {
 							t.Fatalf("out-of-scope claim: %v", err)
 						}
 						rewriteSchemaCount(t, s.db, "billing_awards", 0)
@@ -123,7 +125,7 @@ func TestPushAwardedHostRetainsAncestorScopeProperty(t *testing.T) {
 		writePushRun(t, s, altered)
 		_, err = s.AsOperator().ClaimUnit(t.Context(), demand)
 		var refused *apierr.Error
-		if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+		if !errors.As(err, &refused) || refused.Code != hosterr.Forbidden {
 			t.Fatalf("awarded host escaped its push ancestor: %v", err)
 		}
 		rewriteSchemaCount(t, s.db, "billing_awards", 1)

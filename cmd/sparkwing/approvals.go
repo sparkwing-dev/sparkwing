@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -9,12 +11,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func resolveRunReview(ctx context.Context, profile string) (controllerwire.RunReview, func(), error) {
@@ -36,7 +38,7 @@ func runReviewCommand(ctx context.Context, inv clisurface.Invocation, out io.Wri
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
 	}
 	if inv.Command.Path == cmdAnnotationsAdd.Path && inv.Value("job") == "" {
-		return &apierr.Error{Code: apierr.PolicyMissing, Message: "run-scoped annotations are unavailable", Hint: "use --job to annotate a job or one of its steps"}
+		return &apierr.Error{Code: hosterr.PolicyMissing, Message: "run-scoped annotations are unavailable", Hint: "use --job to annotate a job or one of its steps"}
 	}
 	review, closeTransport, err := resolve(ctx, inv.Value("profile"))
 	if err != nil {

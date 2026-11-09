@@ -3,17 +3,17 @@ package store_test
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestJobStageQueuesAllowCrossRunPipelining(t *testing.T) {
-	group := func(name string) func(*nodeproto.PlanDoc) {
-		return func(doc *nodeproto.PlanDoc) {
-			doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: name, Capacity: new(1)}}
+	group := func(name string) func(*nodewire.PlanDoc) {
+		return func(doc *nodewire.PlanDoc) {
+			doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: name, Capacity: new(1)}}
 		}
 	}
 	f := newStoreRecoveryFixtureAt(t, true, storetest.NewSQLite(t), group("production"))

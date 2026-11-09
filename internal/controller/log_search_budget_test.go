@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func budgetedLogSegments(t *testing.T) (segmentLogs, *store.Store, []string, int64) {
@@ -148,7 +150,7 @@ func TestJSONLogScansTakeTheDownloadSlotFirst(t *testing.T) {
 		}
 		err = json.NewDecoder(response.Body).Decode(&refused)
 		_ = response.Body.Close()
-		if err != nil || response.StatusCode != http.StatusTooManyRequests || refused.Error == nil || refused.Error.Code != apierr.RateLimited {
+		if err != nil || response.StatusCode != http.StatusTooManyRequests || refused.Error == nil || refused.Error.Code != hosterr.RateLimited {
 			t.Fatalf("%s with the slot held = HTTP %d, %+v, %v", path, response.StatusCode, refused.Error, err)
 		}
 	}

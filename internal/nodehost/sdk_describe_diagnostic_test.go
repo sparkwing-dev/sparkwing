@@ -1,13 +1,15 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func FuzzSDKDescribeFailureWithholdsDetailsAndNamesClass(f *testing.F) {
@@ -24,9 +26,9 @@ func FuzzSDKDescribeFailureWithholdsDetailsAndNamesClass(f *testing.F) {
 		case 0:
 			cause = errors.New(secret)
 		case 1:
-			code, cause = apierr.DeadlineExceeded, fmt.Errorf("%s: %w", secret, context.DeadlineExceeded)
+			code, cause = hosterr.DeadlineExceeded, fmt.Errorf("%s: %w", secret, context.DeadlineExceeded)
 		case 2:
-			code = apierr.SDKExited
+			code = hosterr.SDKExited
 		case 3:
 			code = apierr.ProtocolMismatch
 		case 4:
@@ -35,7 +37,7 @@ func FuzzSDKDescribeFailureWithholdsDetailsAndNamesClass(f *testing.F) {
 		if cause == nil {
 			cause = &apierr.Error{Code: code, Message: secret, Hint: secret, Details: map[string]any{secret: secret}}
 		}
-		p.Start = func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		p.Start = func(context.Context, PlanningProcessInput, func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 			return nil, cause
 		}
 		_, err := p.Prepare(t.Context(), input, fixture.input)

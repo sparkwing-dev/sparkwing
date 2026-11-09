@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCapturedHostEnvironment(t *testing.T) {
@@ -60,7 +60,7 @@ func TestCapturedHostEnvironment(t *testing.T) {
 			var process ExecutorProcess
 			switch strings.TrimPrefix(placement, "retry_") {
 			case "plan":
-				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Environment: sealed, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build"}}, func(context.Context, nodeproto.FrameLog) error { return nil })
+				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Environment: sealed, Run: nodewire.RunContext{RunID: input.Accepted.RunID, Pipeline: "build"}}, func(context.Context, nodewire.FrameLog) error { return nil })
 			case "attempt":
 				process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 			case "eval":

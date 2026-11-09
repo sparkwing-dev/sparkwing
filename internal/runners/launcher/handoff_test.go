@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -14,9 +16,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSuccessorWaitsForPredecessorNode(t *testing.T) {
@@ -240,13 +242,13 @@ func (c *leasedControl) Prepare(ctx context.Context, fences []capability.LeaseRe
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cancelled {
-		return time.Time{}, &apierr.Error{Code: apierr.LockHeld, Message: "award cancelled"}
+		return time.Time{}, &apierr.Error{Code: hosterr.LockHeld, Message: "award cancelled"}
 	}
 	now := time.Now()
 	for _, fence := range fences {
 		if expires, ok := c.expires[fence]; ok && !now.Before(expires) {
 			c.lapsed = true
-			return time.Time{}, &apierr.Error{Code: apierr.LockHeld, Message: "lease lapsed"}
+			return time.Time{}, &apierr.Error{Code: hosterr.LockHeld, Message: "lease lapsed"}
 		}
 		c.expires[fence] = now.Add(time.Minute)
 	}
@@ -257,7 +259,7 @@ func (c *leasedControl) Claim(context.Context, string, []string) (*CloudJobAward
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.claimed++
-	return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(10 * time.Minute / time.Millisecond)}}
+	return nil, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(10 * time.Minute / time.Millisecond)}}
 }
 
 func TestTeardownWaitRenewsThroughClaimBackoff(t *testing.T) {

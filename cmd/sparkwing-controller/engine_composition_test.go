@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -15,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -23,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func composedClaimants(t *testing.T, version string, policy engine.Config) map[string]controllerwire.Controller {
@@ -135,7 +137,7 @@ func TestControllerCompositionEnforcesSignedRunnerPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &http.Client{Transport: signedPolicyTransport{body: body, signature: ed25519.Sign(key, body)}}
-	runnerWant := map[string]apierr.Code{"v0.10.0": apierr.VersionUnsupported, "v0.25.0": apierr.VersionRevoked, "v0.40.0": apierr.VersionUnsupported, "v0.30.0-4-g0123abc": apierr.VersionUnsupported, "v0.30.0": ""}
+	runnerWant := map[string]apierr.Code{"v0.10.0": hosterr.VersionUnsupported, "v0.25.0": hosterr.VersionRevoked, "v0.40.0": hosterr.VersionUnsupported, "v0.30.0-4-g0123abc": hosterr.VersionUnsupported, "v0.30.0": ""}
 	// safety: a controller deployed from a main commit must enforce the same runner policy as a release.
 	for _, controllerVersion := range []string{"v0.30.0", "v0.30.0-4-g0123abc"} {
 		for name, claims := range composedClaimants(t, controllerVersion, engine.Config{HTTPClient: transport, TrustedKeys: []ed25519.PublicKey{public}}) {

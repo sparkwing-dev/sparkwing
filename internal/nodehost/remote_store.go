@@ -7,13 +7,13 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // RemoteOwnerStore projects shared controller responses into the same owner
@@ -97,7 +97,7 @@ func (s *RemoteOwnerStore) AcceptExpansion(ctx context.Context, submission store
 	seen := map[string]bool{}
 	for _, job := range wire.Jobs {
 		row, err := executionRow(string(submission.Source.RunID), job.Current)
-		var declaration nodeproto.JobSpec
+		var declaration nodewire.JobSpec
 		if err != nil || json.Unmarshal(row.Spec, &declaration) != nil || !reflect.DeepEqual(job.Job, declaration) || row.SpecHash != job.SpecHash || !reflect.DeepEqual(row.Execution, job.Execution) || seen[string(row.Ref.NodeID)] {
 			return store.AcceptedExpansion{}, errors.New("expansion response differs from its persisted generated job")
 		}
@@ -111,7 +111,7 @@ func (s *RemoteOwnerStore) AcceptExpansion(ctx context.Context, submission store
 }
 
 func executionRow(runID string, job controllerwire.ExecutionJob) (runstate.NodeRow, error) {
-	var declaration nodeproto.JobSpec
+	var declaration nodewire.JobSpec
 	if job.ID == "" || job.SpecHash == "" || job.Generation < 0 || job.Attempt < 0 || job.ApplicationRetries < 0 || job.Disruptions < 0 || json.Unmarshal(job.Spec, &declaration) != nil || declaration.ID != job.ID {
 		return runstate.NodeRow{}, errors.New("execution response has an invalid persisted job")
 	}

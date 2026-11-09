@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -10,18 +12,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type engineFixture struct {
@@ -104,7 +106,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 			result, err := server.cancel(t.Context(), authorized, controllerwire.CancelRequest{Reason: "user_cancelled"})
 			if !current {
 				var refusal *apierr.Error
-				if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+				if !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated {
 					t.Fatalf("removed member cancellation: %+v, %v", result, err)
 				}
 			} else {
@@ -220,7 +222,7 @@ func engineOwnerWithPendingJob(t *testing.T) (*engineFixture, *store.Tenant, cap
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := json.Marshal(nodeproto.JobSpec{ID: "job"})
+	job, err := json.Marshal(nodewire.JobSpec{ID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,14 +326,14 @@ func engineAcceptedFixturePlan(t *testing.T, e *engineFixture, team store.Team, 
 	if len(jobs) == 0 {
 		jobs = []string{"job"}
 	}
-	plan := nodeproto.PlanDoc{Jobs: make([]nodeproto.JobSpec, 0, len(jobs))}
+	plan := nodewire.PlanDoc{Jobs: make([]nodewire.JobSpec, 0, len(jobs))}
 	for _, id := range jobs {
-		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: id})
+		plan.Jobs = append(plan.Jobs, nodewire.JobSpec{ID: id})
 	}
 	engineAcceptedFixturePlanDoc(t, e, team, runID, plan)
 }
 
-func engineAcceptedFixturePlanDoc(t *testing.T, e *engineFixture, team store.Team, runID string, plan nodeproto.PlanDoc) {
+func engineAcceptedFixturePlanDoc(t *testing.T, e *engineFixture, team store.Team, runID string, plan nodewire.PlanDoc) {
 	t.Helper()
 	tenant, err := e.Store.ForTeam(t.Context(), team)
 	if err != nil {

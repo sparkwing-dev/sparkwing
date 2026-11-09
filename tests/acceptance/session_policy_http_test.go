@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/hex"
 	"encoding/json"
@@ -11,12 +13,12 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSessionPolicyHTTPTransports(t *testing.T) {
@@ -57,7 +59,7 @@ func TestSessionPolicyHTTPRefusals(t *testing.T) {
 				cfg = deployment.Config{}
 			}
 			f := newDeploymentSessionFlow(t, cfg)
-			code := apierr.Unauthenticated
+			code := hosterr.Unauthenticated
 			var query string
 			switch state {
 			case "expired":
@@ -68,7 +70,7 @@ func TestSessionPolicyHTTPRefusals(t *testing.T) {
 				query = `DELETE FROM memberships`
 			case "license":
 			case "backend":
-				query, code = `DROP TABLE memberships`, apierr.Unavailable
+				query, code = `DROP TABLE memberships`, hosterr.Unavailable
 			}
 			if query != "" {
 				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), query); err != nil {
@@ -78,7 +80,7 @@ func TestSessionPolicyHTTPRefusals(t *testing.T) {
 			before, expiry := f.state(t)
 			w := httptest.NewRecorder()
 			f.server.WithDashboard(controller.Dashboard{}).Handler().ServeHTTP(w, f.request("GET", "/api/v1/auth/whoami", ""))
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			after, renewed := f.state(t)
 			if before != after || expiry != renewed || strings.Contains(w.Body.String(), "memberships") {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
@@ -121,7 +123,7 @@ func TestSessionPolicyHTTPProofProperty(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		after, renewed := f.state(t)
-		var result apierr.Envelope
+		var result hosterr.Envelope
 		var minted int
 		if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&minted); err != nil {
 			t.Fatal(err)
@@ -193,7 +195,7 @@ func TestSessionFlowHTTPLifetimeCases(t *testing.T) {
 			f.server.WithSessionMaxLifetime(test.maximum).Handler().ServeHTTP(w, f.request("GET", "/api/v1/auth/session", ""))
 			count, stored := f.state(t)
 			if test.refused {
-				assertEngineError(t, w, 401, apierr.Unauthenticated)
+				assertEngineError(t, w, 401, hosterr.Unauthenticated)
 				if count != 1 || stored != now.Add(test.expiry).UnixNano() {
 					t.Fatalf("refused session was changed: count=%d expiry=%d", count, stored)
 				}
@@ -278,7 +280,7 @@ func TestBrowserLogoutHTTPProofProperty(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		after, renewed := f.state(t)
-		var result apierr.Envelope
+		var result hosterr.Envelope
 		return (w.Code == 401 || w.Code == 403) && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && before == after && expiry == renewed && w.Header().Get("Cache-Control") == "no-store" && !strings.Contains(w.Body.String(), f.raw) && !strings.Contains(w.Body.String(), f.csrf)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
@@ -295,10 +297,10 @@ func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 			}
 			f := newDeploymentSessionFlow(t, cfg)
 			r := browserLogoutRequest(f, f.csrf)
-			code, query := apierr.Unauthenticated, ""
+			code, query := hosterr.Unauthenticated, ""
 			switch state {
 			case "method":
-				r.Method, code = "GET", apierr.MethodNotAllowed
+				r.Method, code = "GET", hosterr.MethodNotAllowed
 			case "expired":
 				query = `UPDATE sessions SET expires_at=1`
 			case "revoked":
@@ -306,9 +308,9 @@ func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 			case "license":
 			case "key":
 				f.restartWithCipher(t, nil)
-				code = apierr.Unavailable
+				code = hosterr.Unavailable
 			case "delete":
-				query, code = `CREATE TRIGGER refuse_session_delete BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT,'private deletion fault'); END`, apierr.Unavailable
+				query, code = `CREATE TRIGGER refuse_session_delete BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT,'private deletion fault'); END`, hosterr.Unavailable
 			case "form":
 				r.Body, code = http.NoBody, apierr.BadRequest
 				r.Header.Set("Content-Type", "application/x-www-form-urlencoded; invalid")
@@ -321,7 +323,7 @@ func TestBrowserLogoutHTTPRefusals(t *testing.T) {
 			before, expiry := f.state(t)
 			w := httptest.NewRecorder()
 			f.server.WithDashboard(controller.Dashboard{}).Handler().ServeHTTP(w, r)
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			after, renewed := f.state(t)
 			if before != after || expiry != renewed || len(w.Result().Cookies()) != 0 || strings.Contains(w.Body.String(), "private deletion fault") {
 				t.Fatalf("HTTP %d %s cookies=%v", w.Code, w.Body.String(), w.Result().Cookies())

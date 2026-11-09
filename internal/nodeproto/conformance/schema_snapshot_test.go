@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 var updateV2Schemas = flag.Bool("update-v2-schemas", false, "write the protocol v2 schema snapshots")
@@ -22,12 +23,12 @@ func TestV2SchemaSnapshots(t *testing.T) {
 		name  string
 		types []any
 	}{
-		{"v2-wire.schema.json", []any{nodeproto.Request{}, nodeproto.Reply{}, nodeproto.FrameLog{}, nodeproto.HelloResult{}, nodeproto.RunResult{}, nodeproto.EvalResult{}}},
-		{"v2-documents.schema.json", []any{nodeproto.DescribeDoc{}, nodeproto.PlanDoc{}}},
+		{"v2-wire.schema.json", []any{nodewire.Request{}, nodewire.Reply{}, nodewire.FrameLog{}, nodewire.HelloResult{}, nodewire.RunResult{}, nodewire.EvalResult{}}},
+		{"v2-documents.schema.json", []any{nodewire.DescribeDoc{}, nodewire.PlanDoc{}}},
 	} {
 		defs := map[string]any{}
 		for _, value := range group.types {
-			shape(reflect.TypeOf(value), defs, reflect.TypeOf(value) == reflect.TypeOf(nodeproto.PlanDoc{}))
+			shape(reflect.TypeOf(value), defs, reflect.TypeOf(value) == reflect.TypeOf(nodewire.PlanDoc{}))
 		}
 		root := map[string]any{"$schema": "https://json-schema.org/draft/2020-12/schema", "$defs": defs}
 		raw, err := json.MarshalIndent(root, "", "  ")
@@ -101,7 +102,7 @@ func shape(t reflect.Type, defs map[string]any, strict bool) map[string]any {
 				key = field.Name
 			}
 			properties[key] = shape(field.Type, defs, strict)
-			if t == reflect.TypeOf(nodeproto.CacheSpec{}) && field.Name == "Resolver" {
+			if t == reflect.TypeOf(nodewire.CacheSpec{}) && field.Name == "Resolver" {
 				properties[key] = map[string]any{"type": "string", "enum": nodeproto.CacheResolvers}
 			}
 			if !strings.Contains(options, "omitempty") && !strings.Contains(options, "omitzero") {

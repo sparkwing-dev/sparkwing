@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -16,10 +15,7 @@ func TestScaffoldPinMatchesBuildKind(t *testing.T) {
 	t.Cleanup(func() { Version = previous })
 	for _, version := range []string{"v0.67.0", "(devel)", "v0.68.0-qa.16"} {
 		Version = version
-		want := version
-		if version == "(devel)" || strings.Contains(version, "-qa.") && !engine.QATrust {
-			want = scaffold.FallbackSDKVersion
-		}
+		want := scaffold.FallbackSDKVersion
 		if got := sdkRequirementVersion(); got != want {
 			t.Errorf("build %q (QA=%v) pins %q, want %q", version, engine.QATrust, got, want)
 		}
@@ -31,7 +27,7 @@ func TestScaffoldTidyResolvesQAPin(t *testing.T) {
 		t.Skip("fake Go uses a POSIX shell")
 	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\ngo 1.26\nrequire github.com/sparkwing-dev/sparkwing v0.68.0-qa.16\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\ngo 1.26\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.68.0-qa.16\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	script := `#!/bin/sh

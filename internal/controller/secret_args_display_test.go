@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,12 +12,12 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -89,7 +91,7 @@ func assertPrivateReceipt(t *testing.T, body, private string) {
 func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	w := f.serve(f.cookieRequest(http.MethodPost, "/api/v1/runs", `{"id":"old-writer","pipeline":"deploy","invocation":{"inputs_hash":"sha256:offline-oracle","args":{"token":"s3cr3t-token-value"}}}`))
-	var failure apierr.Envelope
+	var failure hosterr.Envelope
 	if w.Code != http.StatusBadRequest || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error.Code != apierr.BadRequest || strings.Contains(w.Body.String(), ctlSecretValue) || strings.Contains(w.Body.String(), "offline-oracle") {
 		t.Fatalf("old writer: HTTP %d %s", w.Code, w.Body)
 	}

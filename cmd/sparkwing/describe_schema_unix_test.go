@@ -13,8 +13,8 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing.T) {
@@ -28,7 +28,7 @@ func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing
 				t.Fatal(err)
 			}
 			if cached {
-				if err := storeDescribe(dir, "unrelated-source", presentationFixture(nodeproto.PipelineDescription{Name: "Deploy", Args: []nodeproto.ArgumentDescription{}})); err != nil {
+				if err := storeDescribe(dir, "unrelated-source", presentationFixture(nodewire.PipelineDescription{Name: "Deploy", Args: []nodewire.ArgumentDescription{}})); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -49,11 +49,11 @@ func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
 	property := func(value string, secretsOnly bool) bool {
 		fresh := registered
 		fresh.Extra = true
-		fresh.Args = append([]nodeproto.ArgumentDescription{}, registered.Args...)
+		fresh.Args = append([]nodewire.ArgumentDescription{}, registered.Args...)
 		fresh.Args[2].Name = "password-" + hex.EncodeToString([]byte(value))
-		fresh.Secrets = []nodeproto.SecretDeclaration{{Name: "TOKEN_" + hex.EncodeToString([]byte(value))}}
-		raw, err := json.Marshal([]nodeproto.PipelineDescription{
-			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{}}, fresh,
+		fresh.Secrets = []nodewire.SecretDeclaration{{Name: "TOKEN_" + hex.EncodeToString([]byte(value))}}
+		raw, err := json.Marshal([]nodewire.PipelineDescription{
+			{Name: "deploy-prod", Args: []nodewire.ArgumentDescription{}}, fresh,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -84,7 +84,7 @@ func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
 			}
 			return json.Unmarshal([]byte(out), &selection) == nil && selection.Pipeline == "deploy-prod"
 		}
-		var description nodeproto.PipelineDescription
+		var description nodewire.PipelineDescription
 		return json.Unmarshal([]byte(out), &description) == nil && description.Extra == fresh.Extra && got.Name == "deploy-prod" && got.Entrypoint == "Deploy" && reflect.DeepEqual(got.Args, fresh.Args) && reflect.DeepEqual(got.Risks, fresh.Risks)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {

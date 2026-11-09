@@ -1,17 +1,21 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"net/http"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (s *EngineController) handleSummary(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -62,7 +66,7 @@ func (s *EngineController) handleStep(w http.ResponseWriter, r *http.Request, a 
 		return err
 	}
 	if body.SourceAttempt != attempt.Attempt {
-		return &apierr.Error{Code: apierr.LockHeld, Message: "step report names another attempt"}
+		return &apierr.Error{Code: hosterr.LockHeld, Message: "step report names another attempt"}
 	}
 	report := store.StepReport{
 		Attempt: attempt, Actor: engineActor(a), StepID: body.StepID, State: body.State,
@@ -92,7 +96,7 @@ func reportingAttempt(ctx context.Context, tenant RunTransactions, a capability.
 		attempt.Attempt, attempt.Generation = int64(node.Attempt), int64(node.Generation)
 	}
 	if attempt.Attempt <= 0 || attempt.Generation <= 0 {
-		return attempt, &apierr.Error{Code: apierr.IllegalTransition, Message: "job has no reporting attempt"}
+		return attempt, &apierr.Error{Code: hosterr.IllegalTransition, Message: "job has no reporting attempt"}
 	}
 	return attempt, nil
 }
@@ -102,7 +106,7 @@ func (s *EngineController) handleAnnotation(w http.ResponseWriter, r *http.Reque
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	if err := body.Validate(); err != nil {
+	if err := nodeproto.ValidateAnnotation(body.Annotation); err != nil {
 		return invalidEngineBody(err.Error())
 	}
 	if err := reportingStep(r, body.StepID); err != nil {
@@ -134,7 +138,7 @@ func reportingStep(r *http.Request, step string) error {
 
 func reportingText(text string) error {
 	if int64(len(text)) > limits.AnnotationBytes {
-		return &apierr.Error{Code: apierr.PayloadTooLarge, Message: "annotation or summary exceeds its byte limit", Details: map[string]any{"limit_bytes": limits.AnnotationBytes}}
+		return &apierr.Error{Code: hosterr.PayloadTooLarge, Message: "annotation or summary exceeds its byte limit", Details: map[string]any{"limit_bytes": limits.AnnotationBytes}}
 	}
 	return nil
 }

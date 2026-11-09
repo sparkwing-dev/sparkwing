@@ -2,6 +2,8 @@
 
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/base64"
@@ -17,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
@@ -204,7 +206,7 @@ func TestPlanInspectionMasksSecretArgumentsAndErrors(t *testing.T) {
 		var output strings.Builder
 		if err != nil {
 			if writeErr := writeInvocationError(&output, err, func(w io.Writer, failure *apierr.Error) error {
-				return json.NewEncoder(w).Encode(apierr.Envelope{Error: failure})
+				return json.NewEncoder(w).Encode(hosterr.Envelope{Error: failure})
 			}); writeErr != nil {
 				t.Fatal(writeErr)
 			}
@@ -261,7 +263,7 @@ func FuzzPlanInspectionDoesNotDisplaySecrets(f *testing.F) {
 				t.Fatal("failed plan succeeded")
 			}
 			if err := writeInvocationError(&output, err, func(w io.Writer, failure *apierr.Error) error {
-				return json.NewEncoder(w).Encode(apierr.Envelope{Error: failure})
+				return json.NewEncoder(w).Encode(hosterr.Envelope{Error: failure})
 			}); err != nil {
 				t.Fatal(err)
 			}

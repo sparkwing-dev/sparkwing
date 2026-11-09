@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -10,16 +12,16 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type planSecretProbe struct {
@@ -52,7 +54,7 @@ func TestPlanSecretOpenerUsesStoreSelectedBinding(t *testing.T) {
 		if configured {
 			want = "plan secret decryption failed"
 		}
-		if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || failure.Message != want || (probe.opens == 1) != configured {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || failure.Message != want || (probe.opens == 1) != configured {
 			t.Fatalf("configured=%v opens=%d err=%v", configured, probe.opens, err)
 		}
 		run, err := tenant.ReadRun(t.Context(), "run")
@@ -126,7 +128,7 @@ func TestPlanSecretOpenerRejectsSecretIdentifiersInAcceptance(t *testing.T) {
 			input = input[:16]
 		}
 		identifier := "x-" + hex.EncodeToString(input) + "-private-value"
-		job := nodeproto.JobSpec{ID: "build", Steps: []nodeproto.StepSpec{{ID: "run"}}}
+		job := nodewire.JobSpec{ID: "build", Steps: []nodewire.StepSpec{{ID: "run"}}}
 		switch field % 4 {
 		case 0:
 			job.ID = identifier
@@ -135,15 +137,15 @@ func TestPlanSecretOpenerRejectsSecretIdentifiersInAcceptance(t *testing.T) {
 		case 2:
 			job.Groups = []string{identifier}
 		case 3:
-			job.Concurrency = []nodeproto.ConcurrencySpec{{Group: identifier}}
+			job.Concurrency = []nodewire.ConcurrencySpec{{Group: identifier}}
 		}
-		raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
+		raw, err := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		_, err = e.AcceptPlan(t.Context(), owner, controllerwire.PlanSubmission{Plan: raw, Resolved: runspec.Resolved{SecretArgs: []string{}}})
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), "private-value") {
+		if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || strings.Contains(err.Error(), "private-value") {
 			t.Logf("secret-bearing plan returned %v", err)
 			return false
 		}
@@ -185,7 +187,7 @@ func TestPlanSecretOpenerAllowsValidatedPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,request_hash=? WHERE team='a' AND id='run'`, request, string(sealed.Hash))
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "run"}}}}}
 	body, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)

@@ -6,15 +6,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func completeServiceFixture(_ context.Context, p capability.Principal, job nodeproto.JobSpec) (ProcessServices, error) {
+func completeServiceFixture(_ context.Context, p capability.Principal, job nodewire.JobSpec) (ProcessServices, error) {
 	return ProcessServices{
 		RunID: p.Capability.Binding.RunID, Job: job,
-		Annotation: func(context.Context, capability.Authorized, nodeproto.AnnotationRequest) error { return nil },
-		Summary:    func(context.Context, capability.Authorized, nodeproto.SummaryRequest) error { return nil },
+		Annotation: func(context.Context, capability.Authorized, nodewire.AnnotationRequest) error { return nil },
+		Summary:    func(context.Context, capability.Authorized, nodewire.SummaryRequest) error { return nil },
 		Secret:     func(context.Context, capability.Authorized, string) (string, bool, error) { return "", false, nil },
 		Output: func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
 			return json.RawMessage(`null`), nil

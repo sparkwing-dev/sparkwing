@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/hmac"
@@ -12,8 +14,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Session carries presentation, current authority and store time after a committed lookup.
@@ -120,7 +122,7 @@ func (o *Operator) CreateCapabilitySession(ctx context.Context, prefix string, t
 
 func checkCapabilitySession(c capability.Capability) error {
 	if c.Subject.Kind != capability.SubjectAccount || c.Team == "" || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Data != nil {
-		return authorityError(apierr.Forbidden, "session requires an unbound account capability without data scope")
+		return authorityError(hosterr.Forbidden, "session requires an unbound account capability without data scope")
 	}
 	return nil
 }
@@ -176,7 +178,7 @@ func (op *Operator) lookupSessionTx(ctx context.Context, tx *storeTx, rawSession
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: digest}, true, digest)
 	if err != nil {
 		var failure *apierr.Error
-		if errors.As(err, &failure) && failure.Code == apierr.Unauthenticated {
+		if errors.As(err, &failure) && failure.Code == hosterr.Unauthenticated {
 			return nil, err
 		}
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)

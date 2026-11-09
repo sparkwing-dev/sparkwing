@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -10,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type retryController struct {
@@ -108,7 +110,7 @@ func TestRetryCommandHelpAndCancellationHaveNoSideEffects(t *testing.T) {
 }
 
 func TestRetryConnectionFailureDoesNotSubmit(t *testing.T) {
-	refusal := &apierr.Error{Code: apierr.Unavailable, Message: "local controller unavailable"}
+	refusal := &apierr.Error{Code: hosterr.Unavailable, Message: "local controller unavailable"}
 	resolve := func(context.Context, string) (retryConnection, error) {
 		return retryConnection{}, refusal
 	}
@@ -122,7 +124,7 @@ func TestRetryConnectionFailureDoesNotSubmit(t *testing.T) {
 func TestRetryReportsPartialFailureAndKeepsReplay(t *testing.T) {
 	c := retryController{retry: func(_ context.Context, id string, _ controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
 		if id == "a" {
-			return controllerwire.CreateRunResponse{}, &apierr.Error{Code: apierr.Forbidden, Message: "retry refused", Hint: "ask a team admin"}
+			return controllerwire.CreateRunResponse{}, &apierr.Error{Code: hosterr.Forbidden, Message: "retry refused", Hint: "ask a team admin"}
 		}
 		result := retryResponse("new-b")
 		result.Replayed = true

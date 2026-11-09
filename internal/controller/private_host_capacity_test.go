@@ -13,29 +13,29 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func acceptCapacityPlan(t *testing.T, server *serverFixture, tenant *store.Tenant, owner capability.Principal, scope, policy string, capacity, cost int, ids ...string) {
 	t.Helper()
-	plan := nodeproto.PlanDoc{}
+	plan := nodewire.PlanDoc{}
 	for _, id := range ids {
-		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: id, Steps: []nodeproto.StepSpec{{ID: "body"}}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "serial", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}})
+		plan.Jobs = append(plan.Jobs, nodewire.JobSpec{ID: id, Steps: []nodewire.StepSpec{{ID: "body"}}, Concurrency: []nodewire.ConcurrencySpec{{Group: "serial", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}})
 	}
 	acceptCapacityDocument(t, server, tenant, owner, plan)
 }
 
-func acceptCapacityDocument(t *testing.T, server *serverFixture, tenant *store.Tenant, owner capability.Principal, plan nodeproto.PlanDoc) {
+func acceptCapacityDocument(t *testing.T, server *serverFixture, tenant *store.Tenant, owner capability.Principal, plan nodewire.PlanDoc) {
 	t.Helper()
 	acceptCapacityDocumentForRun(t, server, tenant, owner, "run", plan)
 }
 
-func acceptCapacityDocumentForRun(t *testing.T, server *serverFixture, tenant *store.Tenant, owner capability.Principal, runID string, plan nodeproto.PlanDoc) {
+func acceptCapacityDocumentForRun(t *testing.T, server *serverFixture, tenant *store.Tenant, owner capability.Principal, runID string, plan nodewire.PlanDoc) {
 	t.Helper()
 	run, err := tenant.ReadRun(t.Context(), runID)
 	if err != nil {
@@ -94,8 +94,8 @@ func privateCapacityRequest(t *testing.T, server *serverFixture, bearer string, 
 
 func TestPrivateStartRequiresAwardAndUsesAcceptedGroupSet(t *testing.T) {
 	server, ownerClient, tenant, owner, ownerBearer := localHostAwardFixture(t)
-	acceptCapacityDocument(t, server, tenant, owner, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{
-		ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Concurrency: []nodeproto.ConcurrencySpec{
+	acceptCapacityDocument(t, server, tenant, owner, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{
+		ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}, Concurrency: []nodewire.ConcurrencySpec{
 			{Group: "global", Scope: new("global"), Capacity: new(3), Cost: new(2), OnLimit: new("queue")},
 			{Group: "run", Scope: new("run"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")},
 			{Group: "machine", Scope: new("box"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")},

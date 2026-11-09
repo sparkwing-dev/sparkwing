@@ -6,10 +6,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func evalGoSDKMemo(t *testing.T, resolve sparkwing.MemoKeyFn) (json.RawMessage, error) {

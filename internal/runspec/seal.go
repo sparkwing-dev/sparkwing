@@ -1,5 +1,7 @@
 package runspec
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"maps"
@@ -8,7 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // SealRequest snapshots authorized intake values without resolving their precedence.
@@ -183,7 +185,9 @@ func verifySpec(s Spec) error {
 	return nil
 }
 
-func drift() error { return &apierr.Error{Code: apierr.SpecDrift, Message: "sealed run inputs differ"} }
+func drift() error {
+	return &apierr.Error{Code: hosterr.SpecDrift, Message: "sealed run inputs differ"}
+}
 
 // CheckSeal verifies bytes as well as claimed hashes before permitting replay.
 func CheckSeal(existing, proposed Spec) (bool, error) {

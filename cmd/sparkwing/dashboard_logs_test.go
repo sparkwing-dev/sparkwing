@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -11,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func dashboardLogFixture(t *testing.T, body string) (string, dashboardServices) {
@@ -135,7 +137,7 @@ func TestDashboardLogsFailOnMissingSourceOrOutput(t *testing.T) {
 	}
 	err = runDashboardCommandArgs(t.Context(), []string{"logs"}, io.Discard, "linux", func(context.Context) (dashboardServices, error) { return dashboardServices{}, nil })
 	var unavailable *apierr.Error
-	if !errors.As(err, &unavailable) || unavailable.Code != apierr.Unavailable {
+	if !errors.As(err, &unavailable) || unavailable.Code != hosterr.Unavailable {
 		t.Fatalf("missing source accepted: %v", err)
 	}
 	services.openLog = func(context.Context) (*os.File, error) { return nil, os.ErrNotExist }

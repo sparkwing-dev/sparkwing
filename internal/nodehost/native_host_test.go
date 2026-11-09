@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type nativeHostState struct {
@@ -55,7 +56,7 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 		Source:    source.Options{Engines: claimEngine{resolved: input.Engine}},
 		Masks:     NewMaskRegistry(secrets.NewMasker()),
 		Router:    &serviceRegistrar{},
-		Processes: &NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
+		Processes: &NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodewire.FrameLog) error { return nil }},
 
 		Executor: executionOperationsFixture(execution),
 		ReadOutput: func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) {
@@ -66,7 +67,7 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 				return ProcessGrant{}, errors.New("fixture delegation unavailable")
 			},
 		},
-		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+		PlanningLog: func(context.Context, nodewire.FrameLog) error { return nil },
 		Owner: OwnerOperations{Renew: func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
 			return runstate.LeaseBeat{}, nil
 		}, Wait: func(context.Context, store.RunSnapshot) error { return nil }},
@@ -115,8 +116,8 @@ func TestNativeHostDefaultExpansionUsesSharedEvaluator(t *testing.T) {
 
 func TestNativeHostOpensApprovalThroughOwnerTransition(t *testing.T) {
 	config, _, state, _ := nativeHostFixture(t)
-	input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
-		job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
+	input, policyState, _, _ := policyFixture(t, func(job *nodewire.JobSpec) {
+		job.Approval, job.Steps = &nodewire.ApprovalSpec{Message: "ship?"}, nil
 	})
 	state.executorStore = policyState
 	persistNativeAcceptance(t, state, input.Accepted)
@@ -138,9 +139,9 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 	for _, mode := range []string{"remote", "local", "concurrency", "debug", "debug-after"} {
 		t.Run(mode, func(t *testing.T) {
 			config, _, state, _ := nativeHostFixture(t)
-			input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
+			input, policyState, _, _ := policyFixture(t, func(job *nodewire.JobSpec) {
 				if mode == "memo" {
-					job.Memo, job.Closures.MemoKey = &nodeproto.MemoSpec{}, "key"
+					job.Memo, job.Closures.MemoKey = &nodewire.MemoSpec{}, "key"
 				}
 			})
 			state.executorStore = policyState
@@ -185,8 +186,8 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 
 func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 	config, _, state, _ := nativeHostFixture(t)
-	input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
-		job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
+	input, policyState, _, _ := policyFixture(t, func(job *nodewire.JobSpec) {
+		job.Approval, job.Steps = &nodewire.ApprovalSpec{Message: "ship?"}, nil
 		job.Closures.SkipIf = []string{"guard"}
 	})
 	state.executorStore = policyState
@@ -253,7 +254,7 @@ func TestNativeHostIssuedMaskSurvivesReplanAndRunStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := claimed.Executor.(*nodeExecutor)
-	process := &executorProcess{plan: input.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success"}}
+	process := &executorProcess{plan: input.Accepted.Plan, result: nodewire.RunResult{Outcome: "success"}}
 	executor.deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) { return process, nil }
 	executor.deps.Bind = func(context.Context, NodeInput) (ProcessGrant, error) {
 		return ProcessGrant{Binding: input.RouteBinding, Revoke: func() error { return nil }}, nil
@@ -262,7 +263,7 @@ func TestNativeHostIssuedMaskSurvivesReplanAndRunStep(t *testing.T) {
 	if err := executor.Execute(t.Context(), input); err != nil {
 		t.Fatalf("issued value invalidated accepted execution: %v", err)
 	}
-	if !slices.ContainsFunc(process.requests, func(request nodeproto.Request) bool { return request.Op == nodeproto.OpRunStep }) {
+	if !slices.ContainsFunc(process.requests, func(request nodewire.Request) bool { return request.Op == nodewire.OpRunStep }) {
 		t.Fatal("accepted step did not run")
 	}
 	if config.Masks.masker.Mask("build") != "***" {

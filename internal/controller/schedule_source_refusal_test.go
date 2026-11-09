@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -7,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestScheduleSourceResolutionRefusals(t *testing.T) {
@@ -38,7 +40,7 @@ func TestScheduleSourceResolutionRefusals(t *testing.T) {
 			if response.Code != tc.status {
 				t.Fatalf("schedule registration: %d %s, want %d", response.Code, response.Body, tc.status)
 			}
-			var failure apierr.Envelope
+			var failure hosterr.Envelope
 			if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil || failure.Error == nil {
 				t.Fatalf("error envelope: %s, err=%v", response.Body, err)
 			}
@@ -55,7 +57,7 @@ func TestScheduleSourceResolutionRefusals(t *testing.T) {
 				if strings.Contains(logs, "level=ERROR") || !strings.Contains(logs, "level=INFO") {
 					t.Errorf("source refusal log level: %s", logs)
 				}
-			} else if failure.Error.Code != apierr.Internal || !strings.Contains(logs, "level=ERROR") {
+			} else if failure.Error.Code != hosterr.Internal || !strings.Contains(logs, "level=ERROR") {
 				t.Errorf("server fault: %s logs=%s", response.Body, logs)
 			}
 			rows, err := teststore.ForTeam(t, f.st, store.DefaultTeam).ListCronSchedules(t.Context())

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -11,12 +13,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // StepReport fences step state to the attempt that produced it.
@@ -35,7 +38,7 @@ type AnnotationWrite struct {
 	Ref    runspec.NodeRef
 	Actor  runstate.Actor
 	StepID string
-	nodeproto.Annotation
+	nodewire.Annotation
 }
 
 // SummaryWrite carries masked job or step markdown under the writer's live binding.
@@ -52,7 +55,7 @@ func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref runspe
 		return runstate.NodeRow{}, err
 	}
 	if !slices.Contains(p.Capability.Grants, capability.NodeReport) {
-		return runstate.NodeRow{}, authorityError(apierr.Forbidden, "job reporting grant is required")
+		return runstate.NodeRow{}, authorityError(hosterr.Forbidden, "job reporting grant is required")
 	}
 	if err := lockStateRunTx(ctx, tx, team, string(ref.RunID)); err != nil {
 		return runstate.NodeRow{}, err
@@ -85,7 +88,7 @@ func boundedResultText(text string) error {
 		return authorityError(apierr.BadRequest, "result text must be UTF-8")
 	}
 	if int64(len(text)) > limits.AnnotationBytes {
-		return authorityError(apierr.PayloadTooLarge, fmt.Sprintf("result text byte limit is %d, submitted usage is %d bytes; shorten the text or contact support@sparkwing.dev to raise this limit", limits.AnnotationBytes, len(text)))
+		return authorityError(hosterr.PayloadTooLarge, fmt.Sprintf("result text byte limit is %d, submitted usage is %d bytes; shorten the text or contact support@sparkwing.dev to raise this limit", limits.AnnotationBytes, len(text)))
 	}
 	return nil
 }
@@ -140,7 +143,7 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeR
 	}
 	if exists && state != "running" {
 		if state != report.State || message != report.MaskedError || sourceStarted != sourceStart || sourceFinished != sourceEnd {
-			return authorityError(apierr.IllegalTransition, "finished step is immutable")
+			return authorityError(hosterr.IllegalTransition, "finished step is immutable")
 		}
 		return nil
 	}
@@ -162,7 +165,7 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 	if !utf8.ValidString(annotation.File) {
 		return authorityError(apierr.BadRequest, "annotation file is not valid UTF-8")
 	}
-	if err := annotation.Validate(); err != nil {
+	if err := nodeproto.ValidateAnnotation(annotation.Annotation); err != nil {
 		return authorityError(apierr.BadRequest, err.Error())
 	}
 	encoded, err := json.Marshal(annotation.Annotation)
@@ -170,7 +173,7 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 		return err
 	}
 	if int64(len(encoded)) > limits.AnnotationBytes {
-		return authorityError(apierr.PayloadTooLarge, fmt.Sprintf("annotation byte limit is %d, submitted usage is %d bytes; shorten the annotation or contact support@sparkwing.dev to raise this limit", limits.AnnotationBytes, len(encoded)))
+		return authorityError(hosterr.PayloadTooLarge, fmt.Sprintf("annotation byte limit is %d, submitted usage is %d bytes; shorten the annotation or contact support@sparkwing.dev to raise this limit", limits.AnnotationBytes, len(encoded)))
 	}
 	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
 		row, err := checkMetadataWriterTx(ctx, tx, t.team, annotation.Ref, annotation.Actor, annotation.StepID)
@@ -183,10 +186,10 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 			return err
 		}
 		if count >= int64(limits.MaxAnnotations) {
-			return authorityError(apierr.LimitExceeded, fmt.Sprintf("run annotation count limit is %d, current usage is %d annotations; combine annotations or contact support@sparkwing.dev to raise this limit", limits.MaxAnnotations, count))
+			return authorityError(hosterr.LimitExceeded, fmt.Sprintf("run annotation count limit is %d, current usage is %d annotations; combine annotations or contact support@sparkwing.dev to raise this limit", limits.MaxAnnotations, count))
 		}
 		if total+int64(len(encoded))+2 > limits.RunAnnotationBytes {
-			return authorityError(apierr.LimitExceeded, fmt.Sprintf("run annotation byte limit is %d, current usage is %d bytes, requested addition is %d bytes; shorten annotations or contact support@sparkwing.dev to raise this limit", limits.RunAnnotationBytes, total, len(encoded)+2))
+			return authorityError(hosterr.LimitExceeded, fmt.Sprintf("run annotation byte limit is %d, current usage is %d bytes, requested addition is %d bytes; shorten annotations or contact support@sparkwing.dev to raise this limit", limits.RunAnnotationBytes, total, len(encoded)+2))
 		}
 		var existing []byte
 		query, args := resultTarget(row, t.team, annotation.StepID)
@@ -194,7 +197,7 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 		if err := tx.QueryRowContext(ctx, "SELECT annotations_json FROM "+query, args...).Scan(&existing); err != nil {
 			return err
 		}
-		var entries []nodeproto.Annotation
+		var entries []nodewire.Annotation
 		if len(existing) > 0 {
 			if err := json.Unmarshal(existing, &entries); err != nil {
 				return err

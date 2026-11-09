@@ -9,16 +9,19 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
-const goSDKModule = "github.com/sparkwing-dev/sparkwing"
+const (
+	goSDKHostModule = "github.com/sparkwing-dev/sparkwing"
+	goSDKModule     = goSDKHostModule + "/sparkwing"
+)
 
 // GoSDKLinkage lists the public SDK's linked packages and refuses host-owned dependencies.
 func GoSDKLinkage(ctx context.Context) ([]string, error) {
-	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false"), "go", "list", "-deps", "-f", "{{.ImportPath}}", goSDKModule+"/sparkwing")
+	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "GOWORK=auto", "GOFLAGS=-trimpath -buildvcs=false"), "go", "list", "-deps", "-f", "{{.ImportPath}}", goSDKModule)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("list Go SDK imports: %w: %s", err, strings.TrimSpace(string(output)))
@@ -29,7 +32,7 @@ func GoSDKLinkage(ctx context.Context) ([]string, error) {
 			strings.HasPrefix(path, "sigs.k8s.io/yaml") {
 			return linked, fmt.Errorf("Go SDK links YAML implementation %s", path)
 		}
-		if !strings.HasPrefix(path, goSDKModule+"/") {
+		if !strings.HasPrefix(path, goSDKHostModule+"/") {
 			continue
 		}
 		linked = append(linked, path)
@@ -38,7 +41,7 @@ func GoSDKLinkage(ctx context.Context) ([]string, error) {
 			"/internal/engine", "/internal/nodehost", "/internal/orchestrator", "/internal/runners",
 			"/internal/settings", "/internal/wingd", "/internal/controller", "/internal/store",
 		} {
-			if path == goSDKModule+forbidden || strings.HasPrefix(path, goSDKModule+forbidden+"/") {
+			if path == goSDKHostModule+forbidden || strings.HasPrefix(path, goSDKHostModule+forbidden+"/") {
 				return linked, fmt.Errorf("Go SDK links host-owned package %s", path)
 			}
 		}
@@ -48,8 +51,8 @@ func GoSDKLinkage(ctx context.Context) ([]string, error) {
 
 // GoSDKProcessResult records protocol results produced by separate SDK processes.
 type GoSDKProcessResult struct {
-	Plan  nodeproto.PlanDoc
-	Steps map[string]nodeproto.RunResult
+	Plan  nodewire.PlanDoc
+	Steps map[string]nodewire.RunResult
 }
 
 // RunGoSDKProcessFixture executes the same pipeline used by the public fake-host comparison.
@@ -59,7 +62,7 @@ func RunGoSDKProcessFixture(ctx context.Context, routeOrigin string, jobs ...str
 		return GoSDKProcessResult{}, err
 	}
 	defer cleanup()
-	result := GoSDKProcessResult{Steps: make(map[string]nodeproto.RunResult)}
+	result := GoSDKProcessResult{Steps: make(map[string]nodewire.RunResult)}
 	plan, _, err := runGoSDKSession(ctx, bin, "", routeOrigin)
 	if err != nil {
 		return result, err
@@ -78,64 +81,64 @@ func RunGoSDKProcessFixture(ctx context.Context, routeOrigin string, jobs ...str
 	return result, nil
 }
 
-func equalPlanDoc(a, b nodeproto.PlanDoc) bool {
+func equalPlanDoc(a, b nodewire.PlanDoc) bool {
 	left, _ := json.Marshal(a)
 	right, _ := json.Marshal(b)
 	return bytes.Equal(left, right)
 }
 
-func runGoSDKSession(ctx context.Context, bin, job, routeOrigin string) (nodeproto.PlanDoc, nodeproto.RunResult, error) {
+func runGoSDKSession(ctx context.Context, bin, job, routeOrigin string) (nodewire.PlanDoc, nodewire.RunResult, error) {
 	process, err := StartGoSDKProcess(ctx, bin)
 	if err != nil {
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
+		return nodewire.PlanDoc{}, nodewire.RunResult{}, err
 	}
 	defer process.Close()
 	requestW, reader := process.request, process.frames
-	hello := nodeproto.Request{
-		ID: "hello", Op: nodeproto.OpHello, Protocol: nodeproto.Version,
-		Engine: &nodeproto.EngineIdentity{Version: "fixture"},
-		Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{"os=" + runtime.GOOS}},
+	hello := nodewire.Request{
+		ID: "hello", Op: nodewire.OpHello, Protocol: nodewire.Version,
+		Engine: &nodewire.EngineIdentity{Version: "fixture"},
+		Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{"os=" + runtime.GOOS}},
 	}
 	if job != "" {
 		origin := routeOrigin
 		if origin == "" {
 			origin = "http://127.0.0.1:1"
 		}
-		hello.Binding = &nodeproto.ProcessBinding{
+		hello.Binding = &nodewire.ProcessBinding{
 			RunID: "r", JobID: job,
-			Routes: nodeproto.ProcessRoutes{URL: origin, Bearer: "cap-" + job},
+			Routes: nodewire.ProcessRoutes{URL: origin, Bearer: "cap-" + job},
 		}
 	}
 	if err := sendGoSDKRequest(requestW, hello); err != nil {
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
+		return nodewire.PlanDoc{}, nodewire.RunResult{}, err
 	}
 	reply, err := readGoSDKReply(reader, "hello")
 	if err != nil {
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
+		return nodewire.PlanDoc{}, nodewire.RunResult{}, err
 	}
-	var greeting nodeproto.HelloResult
+	var greeting nodewire.HelloResult
 	if err := reply.Decode(&greeting); err != nil {
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, fmt.Errorf("hello: %w", err)
+		return nodewire.PlanDoc{}, nodewire.RunResult{}, fmt.Errorf("hello: %w", err)
 	}
-	request := nodeproto.Request{
-		ID: "plan", Op: nodeproto.OpPlan, Pipeline: protocolgo.Name,
+	request := nodewire.Request{
+		ID: "plan", Op: nodewire.OpPlan, Pipeline: protocolgo.Name,
 		Args: map[string]string{"name": "demo"},
-		Run:  &nodeproto.RunContext{RunID: "r", Pipeline: protocolgo.Name},
+		Run:  &nodewire.RunContext{RunID: "r", Pipeline: protocolgo.Name},
 	}
 	if err := sendGoSDKRequest(requestW, request); err != nil {
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
+		return nodewire.PlanDoc{}, nodewire.RunResult{}, err
 	}
 	reply, err = readGoSDKReply(reader, "plan")
 	if err != nil {
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
+		return nodewire.PlanDoc{}, nodewire.RunResult{}, err
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := reply.Decode(&plan); err != nil {
-		return plan, nodeproto.RunResult{}, fmt.Errorf("plan: %w", err)
+		return plan, nodewire.RunResult{}, fmt.Errorf("plan: %w", err)
 	}
-	var step nodeproto.RunResult
+	var step nodewire.RunResult
 	if job != "" {
-		request = nodeproto.Request{ID: "step", Op: nodeproto.OpRunStep, Job: job, Step: "run", Attempt: 1, Settled: []string{}}
+		request = nodewire.Request{ID: "step", Op: nodewire.OpRunStep, Job: job, Step: "run", Attempt: 1, Settled: []string{}}
 		if err := sendGoSDKRequest(requestW, request); err != nil {
 			return plan, step, err
 		}
@@ -165,7 +168,7 @@ func runGoSDKSession(ctx context.Context, bin, job, routeOrigin string) (nodepro
 	return plan, step, nil
 }
 
-func sendGoSDKRequest(pipe *os.File, request nodeproto.Request) error {
+func sendGoSDKRequest(pipe *os.File, request nodewire.Request) error {
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return err
@@ -174,19 +177,19 @@ func sendGoSDKRequest(pipe *os.File, request nodeproto.Request) error {
 	return err
 }
 
-func readGoSDKReply(reader *nodeproto.Reader, id string) (nodeproto.Reply, error) {
+func readGoSDKReply(reader *nodewire.Reader, id string) (nodewire.Reply, error) {
 	for {
 		line, err := reader.ReadLine()
 		if err != nil {
-			return nodeproto.Reply{}, err
+			return nodewire.Reply{}, err
 		}
-		frame, err := nodeproto.ParseFrame(line)
+		frame, err := nodewire.ParseFrame(line)
 		if err != nil {
-			return nodeproto.Reply{}, err
+			return nodewire.Reply{}, err
 		}
 		if frame.Reply != nil {
 			if frame.Reply.ID != id {
-				return nodeproto.Reply{}, fmt.Errorf("reply ID %q, want %q", frame.Reply.ID, id)
+				return nodewire.Reply{}, fmt.Errorf("reply ID %q, want %q", frame.Reply.ID, id)
 			}
 			return *frame.Reply, nil
 		}

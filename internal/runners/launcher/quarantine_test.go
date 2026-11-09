@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -18,8 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ktesting "k8s.io/client-go/testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func reservedNode(t *testing.T, name string, binding CloudJobBinding, reservation string) *corev1.Node {
@@ -67,7 +67,7 @@ func TestRunQuarantinesTamperedNodeAndKeepsClaiming(t *testing.T) {
 				l.Poll = time.Second
 				l.Control = claimSignalControl{CloudControl: publicationControl{CloudControl: control, sync: func(observed []CloudJobObservation) ([]CloudJobState, error) {
 					if test.refuse && observed[0].NodeUID == "tampered-uid" {
-						return nil, apierr.Authorization(apierr.ReasonBinding, "unknown award fence")
+						return nil, hosterr.Authorization(hosterr.ReasonBinding, "unknown award fence")
 					}
 					return []CloudJobState{{Binding: observed[0].Binding, LeaseExpiresAt: time.Now().Add(time.Hour), Delete: true}}, nil
 				}}, claimed: claimed}

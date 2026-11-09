@@ -1,16 +1,18 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"reflect"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // HostInputs contains validated native execution input for an award.
@@ -100,5 +102,5 @@ func principalMatches(unit controllerwire.ClaimedUnit, principal capability.Prin
 }
 
 func awardMismatch() error {
-	return &apierr.Error{Code: apierr.LockHeld, Message: "runner award differs from its authenticated claim"}
+	return &apierr.Error{Code: hosterr.LockHeld, Message: "runner award differs from its authenticated claim"}
 }

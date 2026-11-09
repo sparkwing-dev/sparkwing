@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 const trustedController = "https://controller.example"
@@ -101,7 +101,7 @@ func TestTrustedTriggerRequestIsProofEligible(t *testing.T) {
 	}
 	inputs := settings.Inputs{Context: settings.Context{NumCPU: 4}, Flags: settings.Values{Options: runspec.Options{Profile: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "prod"}}}}}
 	inputs.Flags.Runner.Set, inputs.Flags.Runner.Value = true, runnerFlagSelection("moonborn")
-	declarations := declarationFixture(t, []nodeproto.PipelineDescription{{Name: "deploy-prod"}, {Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "region", Type: "string"}}}})
+	declarations := declarationFixture(t, []nodewire.PipelineDescription{{Name: "deploy-prod"}, {Name: "Deploy", Args: []nodewire.ArgumentDescription{{Name: "region", Type: "string"}}}})
 	input := triggerRequestInput{home: t.TempDir(), source: selection, settings: inputs, args: []string{"--region", "west"}, declarations: declarations}
 	request, err := prepareTriggerRequest(input)
 	if err != nil {

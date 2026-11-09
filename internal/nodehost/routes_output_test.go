@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -8,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func outputPath(job string) string { return "/node/v1/jobs/" + url.PathEscape(job) + "/output" }
@@ -30,14 +32,14 @@ func TestOutputReadsANodeOfTheSameRun(t *testing.T) {
 }
 
 func TestOutputRefusals(t *testing.T) {
-	for _, code := range []apierr.Code{apierr.UnknownJob, apierr.Conflict, apierr.NotFound, apierr.Forbidden, apierr.Unavailable} {
+	for _, code := range []apierr.Code{apierr.UnknownJob, apierr.Conflict, apierr.NotFound, hosterr.Forbidden, hosterr.Unavailable} {
 		t.Run(string(code), func(t *testing.T) {
 			s := start(t)
 			service := newService(t)
 			service.Output = func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
 				return nil, &apierr.Error{Code: code, Message: "output refused"}
 			}
-			wantRefusal(t, askRoute(t, s, http.MethodGet, outputPath("build"), admitService(t, s, service), ""), apierr.Status(code), string(code))
+			wantRefusal(t, askRoute(t, s, http.MethodGet, outputPath("build"), admitService(t, s, service), ""), hosterr.Status(code), string(code))
 		})
 	}
 	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{"bad"`)} {
@@ -73,12 +75,12 @@ func TestPipelineLatestRefusals(t *testing.T) {
 		}
 		wantRefusal(t, askRoute(t, s, http.MethodGet, "/node/v1/pipelines/release/latest"+query, admitService(t, s, service), ""), http.StatusBadRequest, "bad_request")
 	}
-	for _, code := range []apierr.Code{apierr.NotFound, apierr.Forbidden, apierr.Unavailable} {
+	for _, code := range []apierr.Code{apierr.NotFound, hosterr.Forbidden, hosterr.Unavailable} {
 		s := start(t)
 		service := newService(t)
 		service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration, bool) (ProcessOutput, error) {
 			return ProcessOutput{}, &apierr.Error{Code: code, Message: "latest refused"}
 		}
-		wantRefusal(t, askRoute(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?job=tag", admitService(t, s, service), ""), apierr.Status(code), string(code))
+		wantRefusal(t, askRoute(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?job=tag", admitService(t, s, service), ""), hosterr.Status(code), string(code))
 	}
 }

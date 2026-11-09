@@ -6,16 +6,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestExpansionPreservesConcurrencyDeclarations(t *testing.T) {
-	group := ConcurrencySpec{Group: "pool", Capacity: new(3), Cost: new(1), Scope: new("run"), OnLimit: new("queue")}
+	group := nodewire.ConcurrencySpec{Group: "pool", Capacity: new(3), Cost: new(1), Scope: new("run"), OnLimit: new("queue")}
 	ctx := planContext()
 	ctx.Expansion, ctx.SourceJob = true, "source"
-	ctx.ExistingJobs = []JobSpec{{
-		ID: "source", Steps: []StepSpec{{ID: "run"}},
-		Closures: ClosureSpec{Generate: []string{"generator"}}, Concurrency: []ConcurrencySpec{group},
+	ctx.ExistingJobs = []nodewire.JobSpec{{
+		ID: "source", Steps: []nodewire.StepSpec{{ID: "run"}},
+		Closures: nodewire.ClosureSpec{Generate: []string{"generator"}}, Concurrency: []nodewire.ConcurrencySpec{group},
 	}}
 	for _, field := range []string{"cost", "capacity", "scope", "on_limit"} {
 		t.Run(field, func(t *testing.T) {
@@ -30,9 +31,9 @@ func TestExpansionPreservesConcurrencyDeclarations(t *testing.T) {
 			case "on_limit":
 				changed.OnLimit = new("fail")
 			}
-			raw, err := json.Marshal(PlanDoc{Jobs: []JobSpec{{
+			raw, err := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{
 				ID: "child", Groups: []string{"generator"},
-				Steps: []StepSpec{{ID: "run"}}, Concurrency: []ConcurrencySpec{changed},
+				Steps: []nodewire.StepSpec{{ID: "run"}}, Concurrency: []nodewire.ConcurrencySpec{changed},
 			}}})
 			if err != nil {
 				t.Fatal(err)
@@ -54,9 +55,9 @@ func TestExpansionPreservesConcurrencyDeclarations(t *testing.T) {
 			}
 			t.Run("job-membership", func(t *testing.T) { check(t, ctx) })
 			planContext := ctx
-			planContext.ExistingJobs = append([]JobSpec(nil), ctx.ExistingJobs...)
+			planContext.ExistingJobs = append([]nodewire.JobSpec(nil), ctx.ExistingJobs...)
 			planContext.ExistingJobs[0].Concurrency = nil
-			planContext.ExistingConcurrency = []ConcurrencySpec{group}
+			planContext.ExistingConcurrency = []nodewire.ConcurrencySpec{group}
 			t.Run("plan-membership", func(t *testing.T) { checkPlan(t, string(raw), planContext, "") })
 		})
 	}

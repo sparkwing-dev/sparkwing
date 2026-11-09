@@ -10,17 +10,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 	owner, err := f.Store.AsOperator().ResolveAuthority(t.Context(), f.Actor.Authority)
 	if err != nil {
 		t.Fatal(err)
@@ -48,10 +48,10 @@ func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 	processes := NativeProcesses{Authorities: registry, Masks: NewMaskRegistry(masker), URL: "http://process"}
 	spec := capability.DelegateSpec{Parent: owner.Authority, Audience: capability.NodeHost, Binding: owner.Capability.Binding, Grants: []capability.Grant{capability.NodeReport}, Repositories: owner.Capability.Repositories, ExpiresAt: owner.Capability.ExpiresAt}
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: owner.Capability.Digest}
-	if _, err := processes.Delegate(t.Context(), lookup, spec, ProcessServices{SourceBindings: host, RunID: f.Input.RunID, Job: nodeproto.JobSpec{ID: "foreign"}}); err == nil {
+	if _, err := processes.Delegate(t.Context(), lookup, spec, ProcessServices{SourceBindings: host, RunID: f.Input.RunID, Job: nodewire.JobSpec{ID: "foreign"}}); err == nil {
 		t.Fatal("unpersisted source delegated")
 	}
-	grant, err := processes.Delegate(t.Context(), lookup, spec, ProcessServices{SourceBindings: host, RunID: f.Input.RunID, Job: nodeproto.JobSpec{ID: "build"}})
+	grant, err := processes.Delegate(t.Context(), lookup, spec, ProcessServices{SourceBindings: host, RunID: f.Input.RunID, Job: nodewire.JobSpec{ID: "build"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -20,16 +22,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -101,7 +102,7 @@ func w9Planner(entry *source.Entry, base procenv.Base) nodehost.SDKPlanner {
 	sessions := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: w9ProcessBase(base)}}
 	return nodehost.SDKPlanner{Start: sessions.StartPlanning, Masker: base.Masker, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 		return entry.Engine, nil
-	}, Log: func(context.Context, nodeproto.FrameLog) error { return nil }}
+	}, Log: func(context.Context, nodewire.FrameLog) error { return nil }}
 }
 
 func TestNativeChildBuildToDeployPlansItsOwnSDKEntrypoint(t *testing.T) {
@@ -152,7 +153,7 @@ func TestNativeChildBuildToDeployPlansItsOwnSDKEntrypoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	planner := w9Planner(entry, procenv.Base{Masker: secrets.NewMasker()})
-	planned, err := planner.PrepareCheckout(t.Context(), nodehost.CheckoutPlanningInput{Entry: entry, Request: child.Request, Runner: nodeproto.RunnerIdentity{Name: "runner", Type: "runner", Labels: []string{}}})
+	planned, err := planner.PrepareCheckout(t.Context(), nodehost.CheckoutPlanningInput{Entry: entry, Request: child.Request, Runner: nodewire.RunnerIdentity{Name: "runner", Type: "runner", Labels: []string{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +161,7 @@ func TestNativeChildBuildToDeployPlansItsOwnSDKEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc nodeproto.PlanDoc
+	var doc nodewire.PlanDoc
 	if err := json.Unmarshal(plan, &doc); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 		t.Fatal(err)
 	}
 	planner := w9Planner(entry, base)
-	prepared, err := planner.PrepareCheckout(t.Context(), nodehost.CheckoutPlanningInput{Request: request, Entry: entry, Runner: nodeproto.RunnerIdentity{Name: "launcher", Type: "cloud", Labels: []string{}}})
+	prepared, err := planner.PrepareCheckout(t.Context(), nodehost.CheckoutPlanningInput{Request: request, Entry: entry, Runner: nodewire.RunnerIdentity{Name: "launcher", Type: "cloud", Labels: []string{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +206,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc nodeproto.PlanDoc
+	var doc nodewire.PlanDoc
 	if err := json.Unmarshal(plan, &doc); err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +292,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	ask := func(request nodeproto.Request) nodeproto.Reply {
+	ask := func(request nodewire.Request) nodewire.Reply {
 		t.Helper()
 		reply, err := process.Request(t.Context(), request)
 		if err != nil || !reply.OK {
@@ -299,10 +300,10 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 		}
 		return reply
 	}
-	ask(nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "v1.2.3"}, Runner: &claim.Runner, Binding: &nodeproto.ProcessBinding{RunID: "run", JobID: "source", Routes: nodeproto.ProcessRoutes{URL: "http://local", Bearer: claim.Capability}}})
-	ask(nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "Generator", Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "run", Pipeline: "Generator"}})
-	evaluated := ask(nodeproto.Request{Op: nodeproto.OpEval, Closure: doc.Jobs[0].Closures.Generate[0], Input: json.RawMessage(`null`)})
-	var result nodeproto.EvalResult
+	ask(nodewire.Request{Op: nodewire.OpHello, Protocol: nodewire.Version, Engine: &nodewire.EngineIdentity{Version: "v1.2.3"}, Runner: &claim.Runner, Binding: &nodewire.ProcessBinding{RunID: "run", JobID: "source", Routes: nodewire.ProcessRoutes{URL: "http://local", Bearer: claim.Capability}}})
+	ask(nodewire.Request{Op: nodewire.OpPlan, Pipeline: "Generator", Args: map[string]string{}, Run: &nodewire.RunContext{RunID: "run", Pipeline: "Generator"}})
+	evaluated := ask(nodewire.Request{Op: nodewire.OpEval, Closure: doc.Jobs[0].Closures.Generate[0], Input: json.RawMessage(`null`)})
+	var result nodewire.EvalResult
 	if err := json.Unmarshal(evaluated.Result, &result); err != nil || result.Error != nil {
 		t.Fatalf("generator: %+v %v", result, err)
 	}

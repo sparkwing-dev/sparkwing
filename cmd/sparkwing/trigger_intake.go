@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -8,11 +10,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type triggerSubmission struct {
@@ -57,7 +59,7 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 		return err
 	}
 	if connection.Controller == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "trigger intake requires a controller"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "trigger intake requires a controller"}
 	}
 	if input.IdempotencyKey == "" {
 		input.IdempotencyKey = rand.Text()
@@ -78,7 +80,7 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 	}
 	if here {
 		if connection.here == nil {
-			resultErr = incompleteHereHandoff(response.RunID, &apierr.Error{Code: apierr.Unavailable, Message: "here hosting requires a shared host binding"})
+			resultErr = incompleteHereHandoff(response.RunID, &apierr.Error{Code: hosterr.Unavailable, Message: "here hosting requires a shared host binding"})
 		} else {
 			resultErr = connection.here(ctx, response)
 		}
@@ -90,7 +92,7 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 	if resultErr != nil {
 		masked := &maskedCLIError{err: resultErr, masker: masker}
 		if !errors.As(masked, &receipt.Error) {
-			receipt.Error = &apierr.Error{Code: apierr.Internal, Message: masked.Error()}
+			receipt.Error = &apierr.Error{Code: hosterr.Internal, Message: masked.Error()}
 		}
 	}
 	return errors.Join(resultErr, writeTriggerReceipt(out, receipt, format))
@@ -108,14 +110,14 @@ func initialTriggerReceipt(pipeline string, here bool, response controllerwire.C
 
 func followTriggeredRun(ctx context.Context, run string, follow func(context.Context, string) (string, error)) (string, error) {
 	if follow == nil {
-		return "", observationError(&apierr.Error{Code: apierr.Unavailable, Message: "trigger observation requires a run follower"})
+		return "", observationError(&apierr.Error{Code: hosterr.Unavailable, Message: "trigger observation requires a run follower"})
 	}
 	outcome, err := follow(ctx, run)
 	if err := errors.Join(err, ctx.Err()); err != nil {
 		return "", observationError(err)
 	}
 	if !isTerminalRunStatus(outcome) {
-		return "", observationError(&apierr.Error{Code: apierr.Unavailable, Message: "triggered run outcome is unknown"})
+		return "", observationError(&apierr.Error{Code: hosterr.Unavailable, Message: "triggered run outcome is unknown"})
 	}
 	return outcome, statusExitCode(outcome)
 }

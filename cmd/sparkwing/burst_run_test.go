@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -11,10 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRunRoutingPrecedence(t *testing.T) {
@@ -97,10 +99,10 @@ func TestBurstRouteFallsBackOnlyBeforeIntake(t *testing.T) {
 		{name: "online", remote: true},
 		{name: "offline", probe: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("unreachable")}, local: true},
 		{name: "offline during source upload", run: &burstBeforeIntakeError{&net.OpError{Op: "write", Net: "tcp", Err: errors.New("unreachable")}}, local: true, remote: true},
-		{name: "unavailable during source upload", run: &burstBeforeIntakeError{&apierr.Error{Code: apierr.Unavailable, Message: "unreachable"}}, local: true, remote: true},
-		{name: "source upload forbidden", run: &burstBeforeIntakeError{&apierr.Error{Code: apierr.Forbidden, Message: "denied"}}, remote: true},
+		{name: "unavailable during source upload", run: &burstBeforeIntakeError{&apierr.Error{Code: hosterr.Unavailable, Message: "unreachable"}}, local: true, remote: true},
+		{name: "source upload forbidden", run: &burstBeforeIntakeError{&apierr.Error{Code: hosterr.Forbidden, Message: "denied"}}, remote: true},
 		{name: "source upload interrupted", run: &burstBeforeIntakeError{&net.OpError{Op: "write", Net: "tcp", Err: context.Canceled}}, remote: true},
-		{name: "unauthorized", probe: &apierr.Error{Code: apierr.Forbidden, Message: "denied"}},
+		{name: "unauthorized", probe: &apierr.Error{Code: hosterr.Forbidden, Message: "denied"}},
 		{name: "lost intake response", run: &net.OpError{Op: "read", Net: "tcp", Err: errors.New("lost response")}, remote: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -162,8 +164,8 @@ func TestBurstConnectionFailureFallsBackBeforeIntake(t *testing.T) {
 		local   bool
 	}{
 		{&net.OpError{Op: "dial", Net: "tcp", Err: errors.New("controller unreachable")}, true},
-		{&apierr.Error{Code: apierr.Unavailable, Message: "controller unavailable"}, true},
-		{&apierr.Error{Code: apierr.Forbidden, Message: "invalid profile credential"}, false},
+		{&apierr.Error{Code: hosterr.Unavailable, Message: "controller unavailable"}, true},
+		{&apierr.Error{Code: hosterr.Forbidden, Message: "invalid profile credential"}, false},
 		{context.Canceled, false},
 	} {
 		t.Run(tc.failure.Error(), func(t *testing.T) {
@@ -193,7 +195,7 @@ func TestRoutedRunDeadTokenHintNamesTheRoutingProfile(t *testing.T) {
 			return client.EngineOptions{}, func() {}, nil
 		},
 		probe: func(context.Context, client.EngineOptions) error {
-			return &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}
+			return &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}
 		},
 		local: func(context.Context, string, runFlags, []string) error {
 			t.Fatal("dead credential fell back to a local run")
@@ -236,7 +238,7 @@ func TestInvocationRoutingRequiresExplicitCloudAndPreservesMachineApprovals(t *t
 
 func TestExplicitCloudRouteDetachesAndNeverFallsBack(t *testing.T) {
 	for _, detached := range []bool{false, true} {
-		for _, failure := range []error{nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("offline")}, &burstBeforeIntakeError{&apierr.Error{Code: apierr.Unavailable, Message: "offline"}}} {
+		for _, failure := range []error{nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("offline")}, &burstBeforeIntakeError{&apierr.Error{Code: hosterr.Unavailable, Message: "offline"}}} {
 			flags, _ := parseRunFlagsArgs([]string{"--sw-route=cloud", "--profile=work", fmt.Sprintf("--sw-detached=%t", detached)})
 			called := false
 			err := runRoutedCommand(t.Context(), "gate", flags, nil, userconfig.RunRouting{Route: new("cloud"), Profile: new("work")}, io.Discard, burstRunDependencies{

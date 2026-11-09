@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -14,12 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	strictjson "sigs.k8s.io/json"
 )
@@ -37,7 +39,7 @@ type engineClient struct {
 func (c *engineClient) request(ctx context.Context, method, pattern, path, key string, input, output any) error {
 	policy, ok := capability.LookupRoute(method, pattern)
 	if !ok {
-		return &apierr.Error{Code: apierr.PolicyMissing, Message: "controller route has no policy"}
+		return &apierr.Error{Code: hosterr.PolicyMissing, Message: "controller route has no policy"}
 	}
 	var body []byte
 	if input != nil {
@@ -158,7 +160,7 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 	if output != nil {
 		resultType = reflect.TypeOf(output).Elem()
 	}
-	if resultType == reflect.TypeFor[*nodeproto.JobFailure]() {
+	if resultType == reflect.TypeFor[*nodewire.JobFailure]() {
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 && bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 			return false, json.Unmarshal(data, output)
 		}
@@ -187,11 +189,11 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 			}
 			failure.Details["request_id"] = id
 		}
-		retry := resp.StatusCode == http.StatusServiceUnavailable && failure.Code == apierr.Unavailable || resp.StatusCode == http.StatusTooManyRequests && failure.Code == apierr.RateLimited
+		retry := resp.StatusCode == http.StatusServiceUnavailable && failure.Code == hosterr.Unavailable || resp.StatusCode == http.StatusTooManyRequests && failure.Code == hosterr.RateLimited
 		return retry, failure
 	}
 	// safety: recovery carries a persisted inner error as part of its successful result.
-	if _, exists := fields["error"]; exists && resultType != reflect.TypeFor[nodeproto.JobFailure]() {
+	if _, exists := fields["error"]; exists && resultType != reflect.TypeFor[nodewire.JobFailure]() {
 		return false, fmt.Errorf("successful controller response contains an error")
 	}
 	if output == nil {

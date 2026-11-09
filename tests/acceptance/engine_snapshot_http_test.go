@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -14,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -22,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type snapshotTransactions struct {
@@ -152,7 +154,7 @@ func TestEngineSnapshotHTTPRefusals(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			b := ownerBoundary()
 			f := snapshotFixture(b)
-			status, code, reads := 401, apierr.Unauthenticated, 0
+			status, code, reads := 401, hosterr.Unauthenticated, 0
 			path := "/api/v1/runs/run/snapshot"
 			switch state {
 			case "absent":
@@ -177,43 +179,43 @@ func TestEngineSnapshotHTTPRefusals(t *testing.T) {
 				b.snapshot.Binding.RunCancelled = true
 			case "wrong grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "wrong run":
 				path = "/api/v1/runs/other/snapshot"
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "work":
 				b = newCredentialBoundary()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.TriggerHost}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "plan":
 				b = planBoundary()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.TriggerHost}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "member":
 				b = authorityMember()
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.TriggerHost}
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "bootstrap":
 				b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
 				b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants()
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "nodehost":
 				b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")
 				b.snapshot.Authorities[0].Principal.Capability.Digest = sha256.Sum256([]byte(b.raw))
 				b.snapshot.Authorities[0].Principal.Capability.Audience = capability.NodeHost
 				b.snapshot.Binding.ProcessAlive = true
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "binding":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "wrong owner"}
-				status, code = 403, apierr.Forbidden
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "wrong owner"}
+				status, code = 403, hosterr.Forbidden
 			case "missing run":
 				f.runReadErr = store.ErrNotFound
 				status, code, reads = 404, apierr.NotFound, 0
 			case "private read":
 				f.runReadErr = errors.New("private-read")
-				status, code, reads = 500, apierr.Internal, 0
+				status, code, reads = 500, hosterr.Internal, 0
 			default:
-				status, code, reads = 500, apierr.Internal, 1
+				status, code, reads = 500, hosterr.Internal, 1
 				switch state {
 				case "projection":
 					f.projectionErr = errors.New("private-projection")
@@ -268,7 +270,7 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			b := ownerBoundary()
 			e := &controller.EngineController{}
-			code := apierr.PolicyMissing
+			code := hosterr.PolicyMissing
 			switch state {
 			case "nil tenant":
 				e.ResolveTenant = func(context.Context, store.Team) (controller.TenantHandle, error) { return nil, nil }
@@ -276,13 +278,13 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 				e.ResolveTenant = func(context.Context, store.Team) (controller.TenantHandle, error) {
 					return nil, errors.New("private-tenant")
 				}
-				code = apierr.Internal
+				code = hosterr.Internal
 			case "lookup error", "dead with lookup error":
 				e.ResolveTenant = selectorTenant("team", errors.New("private-lookup"))
-				code = apierr.Internal
+				code = hosterr.Internal
 				if state == "dead with lookup error" {
 					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-					code = apierr.Unauthenticated
+					code = hosterr.Unauthenticated
 				}
 			}
 			s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e)
@@ -290,7 +292,7 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 				s.WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(b), Bindings: b})
 			}
 			w := snapshotRequest(s.Handler(), b, "GET", "/api/v1/runs/run/snapshot")
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			if strings.Contains(w.Body.String(), "private-") {
 				t.Fatal(w.Body.String())
 			}
@@ -301,7 +303,7 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 func TestEngineSnapshotMethods(t *testing.T) {
 	for _, method := range []string{"HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		w := snapshotRequest(controller.New(nil, nil).Handler(), ownerBoundary(), method, "/api/v1/runs/run/snapshot")
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 		if w.Header().Get("Allow") != "GET" {
 			t.Fatalf("Allow=%q", w.Header().Get("Allow"))
 		}

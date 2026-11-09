@@ -7,13 +7,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestExpansionJobConcurrencyIsIndependentOfAcceptedPlanConcurrency(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
-	group := nodeproto.ConcurrencySpec{Group: "deploy", Capacity: new(3), Cost: new(1), Scope: new("global"), OnLimit: new("queue")}
-	plan := nodeproto.PlanDoc{Concurrency: []nodeproto.ConcurrencySpec{group}, Jobs: []nodeproto.JobSpec{{ID: "job", Closures: nodeproto.ClosureSpec{Generate: []string{"group"}}}}}
+	group := nodewire.ConcurrencySpec{Group: "deploy", Capacity: new(3), Cost: new(1), Scope: new("global"), OnLimit: new("queue")}
+	plan := nodewire.PlanDoc{Concurrency: []nodewire.ConcurrencySpec{group}, Jobs: []nodewire.JobSpec{{ID: "job", Closures: nodewire.ClosureSpec{Generate: []string{"group"}}}}}
 	body, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
@@ -37,11 +37,11 @@ func TestGeneratedDependenciesUseAcceptedTopologyProperty(t *testing.T) {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
 			count := random.IntN(7)
-			jobs := make([]nodeproto.JobSpec, 0, count)
+			jobs := make([]nodewire.JobSpec, 0, count)
 			for i := range count {
-				jobs = append(jobs, nodeproto.JobSpec{ID: fmt.Sprintf("child-%d", i), Groups: []string{"group"}, Needs: []string{"job"}})
+				jobs = append(jobs, nodewire.JobSpec{ID: fmt.Sprintf("child-%d", i), Groups: []string{"group"}, Needs: []string{"job"}})
 			}
-			body, err := json.Marshal(testBodyPlan(nodeproto.PlanDoc{Jobs: jobs}))
+			body, err := json.Marshal(testBodyPlan(nodewire.PlanDoc{Jobs: jobs}))
 			if err != nil {
 				t.Fatal(err)
 			}

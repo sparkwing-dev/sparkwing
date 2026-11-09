@@ -1,5 +1,7 @@
 package nativehost_test
 
+import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 import (
 	"bufio"
 	"bytes"
@@ -16,7 +18,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 )
 
 func TestNativeProtocol(t *testing.T) {
@@ -70,12 +72,12 @@ func TestNativeProtocol(t *testing.T) {
 
 func nativeHello(t *testing.T, h *host) {
 	t.Helper()
-	var hello nodeproto.HelloResult
-	h.call(nodeproto.Request{
-		ID: "hello", Op: nodeproto.OpHello, Protocol: nodeproto.Version,
-		Engine: &nodeproto.EngineIdentity{Version: "v0.71.0"},
-		Runner: &nodeproto.RunnerIdentity{Name: "granted", Type: "runner", Labels: []string{}},
-		Binding: &nodeproto.ProcessBinding{RunID: "run", JobID: "build", Routes: nodeproto.ProcessRoutes{
+	var hello nodewire.HelloResult
+	h.call(nodewire.Request{
+		ID: "hello", Op: nodewire.OpHello, Protocol: nodewire.Version,
+		Engine: &nodewire.EngineIdentity{Version: "v0.71.0"},
+		Runner: &nodewire.RunnerIdentity{Name: "granted", Type: "runner", Labels: []string{}},
+		Binding: &nodewire.ProcessBinding{RunID: "run", JobID: "build", Routes: nodewire.ProcessRoutes{
 			URL: "http://127.0.0.1:1", Bearer: "hello-only-bearer",
 		}},
 	}, &hello)
@@ -95,23 +97,23 @@ func nativeHello(t *testing.T, h *host) {
 	if hello.SDK.Version != "v"+identity.Version {
 		t.Fatalf("hello SDK version %q, package version %q", hello.SDK.Version, identity.Version)
 	}
-	var describe nodeproto.DescribeDoc
-	h.call(nodeproto.Request{ID: "describe", Op: nodeproto.OpDescribe}, &describe)
+	var describe nodewire.DescribeDoc
+	h.call(nodewire.Request{ID: "describe", Op: nodewire.OpDescribe}, &describe)
 	if len(describe.Pipelines) != 1 || describe.Pipelines[0].Name != "native" || len(describe.Pipelines[0].Secrets) != 1 {
 		t.Fatalf("describe: %+v", describe)
 	}
 }
 
-func nativePlan(t *testing.T, h *host) nodeproto.PlanDoc {
+func nativePlan(t *testing.T, h *host) nodewire.PlanDoc {
 	t.Helper()
 	probe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var plan nodeproto.PlanDoc
-	h.call(nodeproto.Request{
-		ID: "plan", Op: nodeproto.OpPlan, Pipeline: "native", Args: map[string]string{"probe": probe, "pipes": h.pipes},
-		Run: &nodeproto.RunContext{RunID: "run", Pipeline: "invoked-alias"},
+	var plan nodewire.PlanDoc
+	h.call(nodewire.Request{
+		ID: "plan", Op: nodewire.OpPlan, Pipeline: "native", Args: map[string]string{"probe": probe, "pipes": h.pipes},
+		Run: &nodewire.RunContext{RunID: "run", Pipeline: "invoked-alias"},
 	}, &plan)
 	if len(plan.Jobs) != 1 || plan.Jobs[0].ID != "build" || len(plan.Jobs[0].Steps) != 2 || plan.Jobs[0].ResultStep != "probe" {
 		t.Fatalf("plan: %+v", plan)
@@ -130,8 +132,8 @@ func nativePlan(t *testing.T, h *host) nodeproto.PlanDoc {
 
 func nativeProbe(t *testing.T, h *host) json.RawMessage {
 	t.Helper()
-	var run nodeproto.RunResult
-	h.call(nodeproto.Request{ID: "probe", Op: nodeproto.OpRunStep, Job: "build", Step: "probe", Attempt: 1, Settled: []string{}}, &run)
+	var run nodewire.RunResult
+	h.call(nodewire.Request{ID: "probe", Op: nodewire.OpRunStep, Job: "build", Step: "probe", Attempt: 1, Settled: []string{}}, &run)
 	if run.Outcome != "success" || run.Error != nil {
 		t.Fatalf("probe: %+v", run)
 	}
@@ -161,7 +163,7 @@ func nativeProbe(t *testing.T, h *host) json.RawMessage {
 	return run.Output
 }
 
-func nativeEvals(t *testing.T, h *host, job nodeproto.JobSpec, output json.RawMessage) {
+func nativeEvals(t *testing.T, h *host, job nodewire.JobSpec, output json.RawMessage) {
 	t.Helper()
 	for _, tc := range []struct{ id, closure, input, want string }{
 		{"skip", job.Closures.SkipIf[0], "", "false"},
@@ -170,15 +172,15 @@ func nativeEvals(t *testing.T, h *host, job nodeproto.JobSpec, output json.RawMe
 		{"after", job.Closures.AfterRun[0], `{"outcome":"success"}`, "null"},
 		{"memo", job.Closures.MemoKey, "", `{"version":"native","enabled":true}`},
 	} {
-		var result nodeproto.EvalResult
-		h.call(nodeproto.Request{ID: tc.id, Op: nodeproto.OpEval, Closure: tc.closure, Input: json.RawMessage(tc.input)}, &result)
+		var result nodewire.EvalResult
+		h.call(nodewire.Request{ID: tc.id, Op: nodewire.OpEval, Closure: tc.closure, Input: json.RawMessage(tc.input)}, &result)
 		if result.Error != nil || string(result.Value) != tc.want {
 			t.Fatalf("%s: %+v", tc.id, result)
 		}
 	}
-	var generated nodeproto.EvalResult
-	h.call(nodeproto.Request{ID: "generate", Op: nodeproto.OpEval, Closure: job.Closures.Generate[0], Input: output}, &generated)
-	var document nodeproto.PlanDoc
+	var generated nodewire.EvalResult
+	h.call(nodewire.Request{ID: "generate", Op: nodewire.OpEval, Closure: job.Closures.Generate[0], Input: output}, &generated)
+	var document nodewire.PlanDoc
 	decode(t, generated.Value, &document)
 	jobs := document.Jobs
 	if generated.Error != nil || len(jobs) != 1 || jobs[0].ID != "generated" || len(jobs[0].Groups) != 1 || jobs[0].Groups[0] != job.Closures.Generate[0] {
@@ -188,11 +190,11 @@ func nativeEvals(t *testing.T, h *host, job nodeproto.JobSpec, output json.RawMe
 
 func nativeCancel(t *testing.T, h *host) {
 	t.Helper()
-	h.send(nodeproto.Request{ID: "wait", Op: nodeproto.OpRunStep, Job: "build", Step: "wait", Attempt: 1, Settled: []string{"probe"}})
+	h.send(nodewire.Request{ID: "wait", Op: nodewire.OpRunStep, Job: "build", Step: "wait", Attempt: 1, Settled: []string{"probe"}})
 	for h.frame().Message != "waiting-for-cancel" {
 	}
-	h.send(nodeproto.Request{ID: "cancel", Op: nodeproto.OpCancel, Job: "build", Step: "wait"})
-	replies := map[string]nodeproto.Reply{}
+	h.send(nodewire.Request{ID: "cancel", Op: nodewire.OpCancel, Job: "build", Step: "wait"})
+	replies := map[string]nodewire.Reply{}
 	for len(replies) < 2 {
 		frame := h.frame()
 		if frame.ID == "" {
@@ -206,7 +208,7 @@ func nativeCancel(t *testing.T, h *host) {
 		}
 		replies[frame.ID] = frame.Reply
 	}
-	var run nodeproto.RunResult
+	var run nodewire.RunResult
 	decode(t, replies["wait"].Result, &run)
 	if run.Outcome != "failed" || run.Error == nil {
 		t.Fatalf("cancelled invocation: %+v", run)
@@ -214,6 +216,7 @@ func nativeCancel(t *testing.T, h *host) {
 }
 
 type host struct {
+	recording                  *conformance.Recording
 	t                          *testing.T
 	command                    *exec.Cmd
 	requests                   *os.File
@@ -264,16 +267,19 @@ func startSDKAt(t *testing.T, node, root, fixture string) *host {
 	return h
 }
 
-func (h *host) send(request nodeproto.Request) {
+func (h *host) send(request nodewire.Request) {
 	h.t.Helper()
+	if h.recording != nil {
+		h.recording.Request(h.t, request)
+	}
 	if err := json.NewEncoder(h.requests).Encode(request); err != nil {
 		h.t.Fatal(err)
 	}
 }
 
 type wireFrame struct {
-	nodeproto.Reply
-	nodeproto.FrameLog
+	nodewire.Reply
+	nodewire.FrameLog
 }
 
 func (h *host) frame() wireFrame {
@@ -283,7 +289,10 @@ func (h *host) frame() wireFrame {
 		h.t.Fatalf("frame EOF: %v\n%s", h.frames.Err(), h.stderr.String())
 	}
 	line := h.frames.Bytes()
-	parsed, err := nodeproto.ParseFrame(line)
+	if h.recording != nil {
+		h.recording.Frame(h.t, line)
+	}
+	parsed, err := nodewire.ParseFrame(line)
 	if err != nil {
 		h.t.Fatalf("frame: %v\n%s", err, line)
 	}
@@ -301,7 +310,7 @@ func (h *host) frame() wireFrame {
 			if !req.Capture || eof {
 				return nil
 			}
-			return write(nodeproto.ExecOutput{ID: req.ID, Stream: stream, Data: data})
+			return write(nodewire.ExecOutput{ID: req.ID, Stream: stream, Data: data})
 		})
 		if err := write(done); err != nil {
 			h.t.Fatal(err)
@@ -320,7 +329,7 @@ func (h *host) frame() wireFrame {
 	return frame
 }
 
-func (h *host) call(request nodeproto.Request, result any) {
+func (h *host) call(request nodewire.Request, result any) {
 	h.t.Helper()
 	h.send(request)
 	for {

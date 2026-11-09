@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
@@ -69,10 +69,10 @@ func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
 
 func TestApprovalTransitionsKeepPendingRequestOrder(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchHost)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "b", Approval: &nodeproto.ApprovalSpec{Message: "second"}},
-		{ID: "a", Approval: &nodeproto.ApprovalSpec{Message: "first"}},
-		{ID: "c", Approval: &nodeproto.ApprovalSpec{Message: "third"}},
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "b", Approval: &nodewire.ApprovalSpec{Message: "second"}},
+		{ID: "a", Approval: &nodewire.ApprovalSpec{Message: "first"}},
+		{ID: "c", Approval: &nodewire.ApprovalSpec{Message: "third"}},
 	}}
 	raw, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {

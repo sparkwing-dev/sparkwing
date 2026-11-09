@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/hex"
@@ -16,17 +18,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixture, client.EngineOptions, string, store.RunRow) {
@@ -164,7 +166,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	input.IdempotencyKey = "second"
 	_, err = control.Retry(t.Context(), "run", input)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.RateLimited {
+	if !errors.As(err, &failure) || failure.Code != hosterr.RateLimited {
 		t.Fatalf("retry past retrier's cap: %v", err)
 	}
 	runs, err := teststore.ForTeam(t, s.store, "a").ListRuns(t.Context(), store.RunFilter{Limit: 10})
@@ -405,7 +407,7 @@ func TestConsoleFailedRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 	s, options, _, _ := retryActionDispatchFixture(t, "private-value", true, runspec.DispatchController, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil
 	}))
-	hash, err := runspec.CanonicalHash(nodeproto.JobSpec{ID: "job"})
+	hash, err := runspec.CanonicalHash(nodewire.JobSpec{ID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,8 +444,8 @@ func TestFailedRetryReusesOnlyReleasedJobsAndStaysClaimable(t *testing.T) {
 		return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil
 	}))
 	// safety: build reruns, check reuses its result, test failed and package reruns behind build.
-	jobs := []nodeproto.JobSpec{{ID: "build"}, {ID: "check", Needs: []string{"build"}}, {ID: "test", Needs: []string{"check"}}, {ID: "package", Needs: []string{"build"}}}
-	plan, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+	jobs := []nodewire.JobSpec{{ID: "build"}, {ID: "check", Needs: []string{"build"}}, {ID: "test", Needs: []string{"check"}}, {ID: "package", Needs: []string{"build"}}}
+	plan, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 	if err != nil {
 		t.Fatal(err)
 	}

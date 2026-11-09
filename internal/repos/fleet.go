@@ -16,8 +16,6 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
-
 type Git func(dir string, args ...string) (string, error)
 
 type RunObservation struct {
@@ -112,12 +110,12 @@ func SDKPin(sparkwingDir string) (pin, replace string) {
 		return "", ""
 	}
 	for _, req := range mf.Require {
-		if req.Mod.Path == sdkModulePath {
+		if req.Mod.Path == engine.GoModule {
 			pin = req.Mod.Version
 		}
 	}
 	for _, rep := range mf.Replace {
-		if rep.Old.Path == sdkModulePath {
+		if rep.Old.Path == engine.GoModule {
 			replace = rep.New.Path
 			if rep.New.Version != "" {
 				replace += "@" + rep.New.Version

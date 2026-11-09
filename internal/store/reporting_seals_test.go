@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
@@ -28,7 +28,7 @@ func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
 			s := storetest.Open(t, store.WithPolicies(sealStorePolicies), teststore.WithClock(func() time.Time { return now }))
 			secret := fmt.Sprintf("private-%x", random.Uint64())
 			public := fmt.Sprintf("visible-%x", random.Uint64())
-			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(in *store.IntakeRequest, _ *nodeproto.PlanDoc) {
+			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(in *store.IntakeRequest, _ *nodewire.PlanDoc) {
 				in.Request.RequestedArgs = map[string]string{"secret": secret, "public": public}
 				in.Request.SecretArgs = runspec.Optional[[]string]{Set: i%2 == 0, Value: []string{"secret"}}
 				in.Request.Git.Ref = "main"
@@ -221,7 +221,7 @@ func TestReportingDistinguishesUnknownAndEmptyClassification(t *testing.T) {
 	} {
 		t.Run(classification.name, func(t *testing.T) {
 			s := storetest.Open(t, store.WithPolicies(sealStorePolicies))
-			tenant, request, err := storePlanSealRequestWith(t.Context(), s, func(in *store.IntakeRequest, _ *nodeproto.PlanDoc) {
+			tenant, request, err := storePlanSealRequestWith(t.Context(), s, func(in *store.IntakeRequest, _ *nodewire.PlanDoc) {
 				in.Request.RequestedArgs = map[string]string{"value": "public-when-classified"}
 				in.Request.SecretArgs = runspec.Optional[[]string]{Set: classification.set, Value: classification.names}
 			})

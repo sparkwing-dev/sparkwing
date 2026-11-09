@@ -28,10 +28,10 @@ func TestQATrustBuildRoutesOnlyQAPinsThroughTheQAProxy(t *testing.T) {
 	}{
 		{"release pin", engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}, nil, nil},
 		{"replacement", engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0-qa.3", Replacement: "../sdk"}, nil, nil},
-		{"defaults", qa, nil, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=github.com/sparkwing-dev/sparkwing"}},
-		{"go env -w", qa, []string{"GOENV=" + written}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://corp.example/proxy", "GONOSUMDB=github.com/sparkwing-dev/sparkwing"}},
-		{"GOPRIVATE seeds the exemption", qa, []string{"GOPRIVATE=example.com/private"}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=example.com/private,github.com/sparkwing-dev/sparkwing"}},
-		{"explicit GONOSUMDB", qa, []string{"GOPRIVATE=example.com/private", "GONOSUMDB=example.com/other"}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=example.com/other,github.com/sparkwing-dev/sparkwing"}},
+		{"defaults", qa, nil, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=github.com/sparkwing-dev/sparkwing/sparkwing"}},
+		{"go env -w", qa, []string{"GOENV=" + written}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://corp.example/proxy", "GONOSUMDB=github.com/sparkwing-dev/sparkwing/sparkwing"}},
+		{"GOPRIVATE seeds the exemption", qa, []string{"GOPRIVATE=example.com/private"}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=example.com/private,github.com/sparkwing-dev/sparkwing/sparkwing"}},
+		{"explicit GONOSUMDB", qa, []string{"GOPRIVATE=example.com/private", "GONOSUMDB=example.com/other"}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=example.com/other,github.com/sparkwing-dev/sparkwing/sparkwing"}},
 		{"offline", qa, []string{"GOPROXY=off"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

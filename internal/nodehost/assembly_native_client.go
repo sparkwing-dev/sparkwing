@@ -8,9 +8,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // WithClient binds native services to the authenticated controller's common transports.
@@ -34,17 +34,17 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 		return StorageBinding{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority}, err
 	}
 	cfg.Logs = c.LogUploader
-	cfg.Services = func(ctx context.Context, p capability.Principal, job nodeproto.JobSpec) (ProcessServices, error) {
+	cfg.Services = func(ctx context.Context, p capability.Principal, job nodewire.JobSpec) (ProcessServices, error) {
 		remote, err := c.ProcessClient(ctx, p, job.ID)
 		if err != nil {
 			return ProcessServices{}, err
 		}
 		// perf: the process client already read this run's snapshot; a second read cost a controller round trip per job.
 		service := ProcessServices{RunID: p.Capability.Binding.RunID, Job: job, Secrets: remote.SecretNames()}
-		service.Annotation = func(ctx context.Context, _ capability.Authorized, body nodeproto.AnnotationRequest) error {
+		service.Annotation = func(ctx context.Context, _ capability.Authorized, body nodewire.AnnotationRequest) error {
 			return remote.Annotation(ctx, body)
 		}
-		service.Summary = func(ctx context.Context, _ capability.Authorized, body nodeproto.SummaryRequest) error {
+		service.Summary = func(ctx context.Context, _ capability.Authorized, body nodewire.SummaryRequest) error {
 			return remote.Summary(ctx, body)
 		}
 		service.Secret = func(ctx context.Context, _ capability.Authorized, name string) (string, bool, error) {

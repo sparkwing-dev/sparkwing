@@ -1,12 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -39,7 +40,7 @@ func (o *Operator) LookupCapability(ctx context.Context, digest [32]byte) (capab
 	var prefix string
 	err = tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE digest=?`, hex.EncodeToString(digest[:])).Scan(&prefix)
 	if errors.Is(err, sql.ErrNoRows) {
-		return capability.Principal{}, authorityError(apierr.Unauthenticated, "capability is unavailable")
+		return capability.Principal{}, authorityError(hosterr.Unauthenticated, "capability is unavailable")
 	}
 	if err != nil {
 		return capability.Principal{}, err

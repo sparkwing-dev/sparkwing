@@ -1,13 +1,15 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRunObservationsStopPollersOnARefusedRead(t *testing.T) {
@@ -16,9 +18,9 @@ func TestRunObservationsStopPollersOnARefusedRead(t *testing.T) {
 		want int
 	}{
 		{&apierr.Error{Code: apierr.NotFound, Message: "resource not found"}, exitRefused},
-		{&apierr.Error{Code: apierr.Forbidden, Message: "credential does not authorize this operation"}, exitRefused},
-		{&apierr.Error{Code: apierr.Unauthenticated, Message: "no live credential"}, exitRefused},
-		{&apierr.Error{Code: apierr.Unavailable, Message: "controller restarting"}, 3},
+		{&apierr.Error{Code: hosterr.Forbidden, Message: "credential does not authorize this operation"}, exitRefused},
+		{&apierr.Error{Code: hosterr.Unauthenticated, Message: "no live credential"}, exitRefused},
+		{&apierr.Error{Code: hosterr.Unavailable, Message: "controller restarting"}, 3},
 		{errors.New("connection reset"), 3},
 	} {
 		var out bytes.Buffer
@@ -37,7 +39,7 @@ func TestRunObservationsStopPollersOnARefusedRead(t *testing.T) {
 }
 
 func TestRunListStopsPollersOnARefusalInAnyRead(t *testing.T) {
-	refused := &apierr.Error{Code: apierr.Forbidden, Message: "credential revoked"}
+	refused := &apierr.Error{Code: hosterr.Forbidden, Message: "credential revoked"}
 	failedRun := listedRun("r1", 7)
 	failedRun.Status = "failed"
 	for name, tc := range map[string]struct {

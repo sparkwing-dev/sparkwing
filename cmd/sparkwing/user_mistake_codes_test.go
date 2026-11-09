@@ -1,12 +1,14 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestUserMistakesAreNotReportedAsInternal(t *testing.T) {
@@ -32,7 +34,7 @@ func TestUserMistakesAreNotReportedAsInternal(t *testing.T) {
 			continue
 		}
 		var out bytes.Buffer
-		if werr := writeInvocationError(&out, err, apierr.WriteJSON); werr != nil {
+		if werr := writeInvocationError(&out, err, hosterr.WriteJSON); werr != nil {
 			t.Fatal(werr)
 		}
 		var doc struct {
@@ -44,7 +46,7 @@ func TestUserMistakesAreNotReportedAsInternal(t *testing.T) {
 		if args[0] == "profiles" && doc.Error.Code != apierr.NotFound {
 			t.Errorf("sparkwing %s reports a missing profile as %q, want not_found", strings.Join(args, " "), doc.Error.Code)
 		}
-		if doc.Error.Code == apierr.Internal || doc.Error.Code == "" {
+		if doc.Error.Code == hosterr.Internal || doc.Error.Code == "" {
 			t.Errorf("sparkwing %s reports a user mistake as %q: %s", strings.Join(args, " "), doc.Error.Code, doc.Error.Message)
 		}
 	}

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -9,9 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: a refused flow carries only one of these fixed reasons back to the page, never a person, account or
@@ -67,11 +69,11 @@ func refusalReason(err error) string {
 		}
 		if reason == "" {
 			switch failure.Code {
-			case apierr.RateLimited:
+			case hosterr.RateLimited:
 				reason = refusedRateLimited
-			case apierr.Unauthenticated:
+			case hosterr.Unauthenticated:
 				reason = refusedReauthRequired
-			case apierr.Unavailable, apierr.NotFound:
+			case hosterr.Unavailable, apierr.NotFound:
 				reason = refusedUnavailable
 			}
 		}
@@ -111,7 +113,7 @@ func (s *Server) returnRefusals(e controllerwire.Endpoint, landing func(*http.Re
 			slog.New(CredentialSafeLogHandler(s.logger.Handler())).ErrorContext(r.Context(), "browser flow failed",
 				"route", e.Pattern, "err", requestMasker(r.Context()).Mask(err.Error()))
 		}
-		if delay, ok := apierr.RetryDelay(err); ok {
+		if delay, ok := hosterr.RetryDelay(err); ok {
 			w.Header().Set("Retry-After", strconv.FormatInt(int64(delay/time.Second), 10))
 		}
 		http.Redirect(w, r, landing(r, refusalReason(err)), http.StatusSeeOther)
@@ -126,7 +128,7 @@ func refusalStatus(err error) int {
 	}
 	var failure *apierr.Error
 	if errors.As(err, &failure) {
-		return apierr.Status(failure.Code)
+		return hosterr.Status(failure.Code)
 	}
 	return http.StatusInternalServerError
 }

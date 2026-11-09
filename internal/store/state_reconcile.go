@@ -1,15 +1,17 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (runstate.ReconciledNode, error) {
@@ -81,7 +83,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 			return nil
 		} else {
 			if result.Node.Status != runstate.StatusPending {
-				return authorityError(apierr.IllegalTransition, "job is not executable")
+				return authorityError(hosterr.IllegalTransition, "job is not executable")
 			}
 			if result.Node.ReadyAt == nil {
 				if err := releaseReconciledNodeTx(ctx, tx, t.team, request); err != nil {
@@ -174,5 +176,5 @@ func releaseReconciledNodeTx(ctx context.Context, tx *storeTx, team Team, reques
 			return err
 		}
 	}
-	return authorityError(apierr.IllegalTransition, "job dependencies are not ready for execution")
+	return authorityError(hosterr.IllegalTransition, "job dependencies are not ready for execution")
 }

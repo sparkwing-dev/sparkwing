@@ -40,6 +40,7 @@ type VersionProject struct {
 	SDKReplace   string     `json:"sdk_replace,omitempty"`
 	SDKBehind    bool       `json:"sdk_behind"`
 	Sparks       []SparkPin `json:"sparks,omitempty"`
+	SDKLatest    string     `json:"sdk_latest,omitempty"`
 }
 
 type SparkPin struct {
@@ -51,7 +52,7 @@ const versionLatestURL = "https://github.com/sparkwing-dev/sparkwing/releases/la
 
 const versionFetchTimeout = 3 * time.Second
 
-const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
+const sdkModulePath = "github.com/sparkwing-dev/sparkwing/sparkwing"
 
 func runVersion(inv clisurface.Invocation) error {
 	output := inv.Output(color.IsInteractiveStdout())
@@ -105,13 +106,17 @@ func gatherVersionReport(offline bool) VersionReport {
 	if hold := resolveVersionHold(); hold.Value != "" || hold.Error != "" {
 		r.Hold = &hold
 	}
-	if proj := gatherVersionProject(r.LatestRelease); proj != nil {
+	lookupSDK := fetchLatestSDK
+	if offline {
+		lookupSDK = nil
+	}
+	if proj := gatherVersionProject(lookupSDK); proj != nil {
 		r.Project = proj
 	}
 	return r
 }
 
-func gatherVersionProject(latest string) *VersionProject {
+func gatherVersionProject(lookupSDK func() (string, error)) *VersionProject {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil
@@ -152,8 +157,11 @@ func gatherVersionProject(latest string) *VersionProject {
 		proj.SDKReplace = target
 		break
 	}
-	if proj.SDKReplace == "" && proj.SDKPin != "" && latest != "" && isSemver(proj.SDKPin) {
-		proj.SDKBehind = semver.Compare(proj.SDKPin, latest) < 0
+	if proj.SDKReplace == "" && proj.SDKPin != "" && lookupSDK != nil {
+		proj.SDKLatest, _ = lookupSDK()
+		if proj.SDKLatest != "" && isSemver(proj.SDKPin) {
+			proj.SDKBehind = semver.Compare(proj.SDKPin, proj.SDKLatest) < 0
+		}
 	}
 	sort.Slice(proj.Sparks, func(i, j int) bool { return proj.Sparks[i].Module < proj.Sparks[j].Module })
 	return proj
@@ -292,10 +300,10 @@ func printVersionTable(r VersionReport) {
 	case p.SDKPin != "":
 		label := color.Green("up to date")
 		switch {
-		case r.LatestRelease == "":
+		case p.SDKLatest == "":
 			label = color.Dim("(latest unknown)")
 		case p.SDKBehind:
-			label = color.Yellow("behind") + " " + color.Dim("(latest "+r.LatestRelease+")")
+			label = color.Yellow("behind") + " " + color.Dim("(latest "+p.SDKLatest+")")
 		}
 		fmt.Printf("  sdk:      %s   %s\n", p.SDKPin, label)
 		if p.SDKBehind {

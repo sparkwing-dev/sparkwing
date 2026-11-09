@@ -13,7 +13,7 @@ func TestBootstrapUsesExistingPipelineModule(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	module := "module example.com/existing/pipelines\n\ngo 1.26.0\n\nreplace github.com/sparkwing-dev/sparkwing => /example/sdk\n"
+	module := "module example.com/existing/pipelines\n\ngo 1.26.0\n\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => /example/sdk\n"
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(module), 0o644); err != nil {
 		t.Fatal(err)
 	}

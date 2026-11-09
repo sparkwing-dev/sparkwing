@@ -139,7 +139,7 @@ func (f *localFeatureController) fixture() {
 		f.t.Fatal(err)
 	}
 	featureWrite(f.t, filepath.Join(dir, "main.go"), string(source))
-	featureWrite(f.t, filepath.Join(dir, "go.mod"), fmt.Sprintf("module localfeatures\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing v0.70.0\nreplace github.com/sparkwing-dev/sparkwing => %s\n", strconv.Quote(f.root)))
+	featureWrite(f.t, filepath.Join(dir, "go.mod"), fmt.Sprintf("module localfeatures\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v0.70.0\nreplace github.com/sparkwing-dev/sparkwing/sparkwing => %s\n", strconv.Quote(filepath.Join(f.root, "sparkwing"))))
 	featureWrite(f.t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - {name: lifecycle, entrypoint: Lifecycle}\n  - {name: child, entrypoint: Child}\n  - {name: host-exec, entrypoint: HostExec}\n  - {name: cancellation, entrypoint: Cancellation}\n")
 	cmd := exec.CommandContext(f.ctx, "go", "-C", dir, "mod", "tidy")
 	cmd.Env = f.env

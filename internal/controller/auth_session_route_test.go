@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"net/http"
@@ -9,7 +11,6 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -50,8 +51,8 @@ func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	srv := controller.New(st, nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil))
-	var parsed apierr.Envelope
-	if w.Code != http.StatusUnauthorized || json.Unmarshal(w.Body.Bytes(), &parsed) != nil || parsed.Error == nil || parsed.Error.Code != apierr.Unauthenticated || w.Header().Get("Cache-Control") != "no-store" {
+	var parsed hosterr.Envelope
+	if w.Code != http.StatusUnauthorized || json.Unmarshal(w.Body.Bytes(), &parsed) != nil || parsed.Error == nil || parsed.Error.Code != hosterr.Unauthenticated || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 }

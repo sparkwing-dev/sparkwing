@@ -1,15 +1,17 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // ReleaseSourceCredential returns the sealed credential only after its authorization audit commits.
@@ -51,7 +53,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		request.SSH = credential.Kind == GitCredentialSSH
 		request.SSHHostConfirmed = credential.ConfirmedAt != nil
 		if credential.ConfirmedAt == nil {
-			return apierr.Authorization(apierr.ReasonCredentialUnconfirmed, "git credential host must be confirmed")
+			return hosterr.Authorization(hosterr.ReasonCredentialUnconfirmed, "git credential host must be confirmed")
 		}
 		if credential.Kind != GitCredentialSSH && credential.Kind != GitCredentialHTTPS {
 			return bindingRefusal()
@@ -114,7 +116,7 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	}
 	host, err := sourceurl.Host(run.Request.Request.Source.Location.RemoteURL)
 	if err != nil {
-		return capability.SourceReleaseRequest{}, authorityError(apierr.Forbidden, "sealed source has no credential host")
+		return capability.SourceReleaseRequest{}, authorityError(hosterr.Forbidden, "sealed source has no credential host")
 	}
 	proof := run.Request.Provenance
 	if repo := run.Request.Request.Git.Repository.Key; !(proof.ProvenRepository() != "" && proof.ProvenRepository() == repo && proof.SourceCredentialVerified()) && !(proof.ChildSourceRepository() != "" && proof.ChildSourceRepository() == repo) {
@@ -159,13 +161,13 @@ func (t *Tenant) sourceExecutor(chain []authorityNode, run RunRow) (capability.S
 	}
 	executor := capability.SourceExecutor{Team: string(t.team), MachineID: facts.MachineID, Cloud: facts.Kind == capability.HostCloud, Shared: facts.Kind == capability.HostSelfHosted, OwnerAccountID: facts.OwnerAccountID, AuthorizedRepositories: []string{repo}}
 	if facts.RunnerKind == tierActions {
-		return capability.SourceExecutor{}, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "Actions runners use their own repository credential")
+		return capability.SourceExecutor{}, hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "Actions runners use their own repository credential")
 	}
 	if executor.Cloud {
 		return executor, nil
 	}
 	if !executor.Shared {
-		return capability.SourceExecutor{}, apierr.Authorization(apierr.ReasonPersonalMachine, "team git credentials are released only to shared runners and Cloud work, never to a personal machine")
+		return capability.SourceExecutor{}, hosterr.Authorization(hosterr.ReasonPersonalMachine, "team git credentials are released only to shared runners and Cloud work, never to a personal machine")
 	}
 	return executor, nil
 }

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"net/http"
@@ -7,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestDecodeEngineRequestClassifiesMalformedJSON(t *testing.T) {
@@ -44,7 +46,7 @@ func TestDecodeEngineRequestNamesAnUnknownIdentifierField(t *testing.T) {
 	}
 	err := decodeEngineRequest(request, &body)
 	var api *apierr.Error
-	if !errors.As(err, &api) || api.Code != apierr.BadRequest || api.Details[apierr.DetailUnknownField] != "agent" ||
+	if !errors.As(err, &api) || api.Code != apierr.BadRequest || api.Details[hosterr.DetailUnknownField] != "agent" ||
 		!strings.Contains(api.Message, `field "agent"`) || !strings.Contains(api.Message, "upgrade the controller") {
 		t.Fatalf("got %#v, want a bad request naming the agent field and the upgrade", err)
 	}

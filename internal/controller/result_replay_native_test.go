@@ -14,12 +14,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func nativeClaimPresentation(t *testing.T, e *engineFixture, a capability.Authorized) string {
@@ -163,7 +163,7 @@ func nativePlanBody(t *testing.T, e *engineFixture, tenant *store.Tenant, a capa
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,request_hash=? WHERE team='a' AND id='run'`, request, string(sealed.Hash))
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{}}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: sealed, Declarations: declarations, Plan: plan})
 	if err != nil {

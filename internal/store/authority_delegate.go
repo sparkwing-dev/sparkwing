@@ -1,11 +1,12 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -34,7 +35,7 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 		request := run.Request.Request
 		if request.Mode != runspec.IntakePublish || request.Actor.ID != parent.Capability.Subject.ID || request.Actor.Kind != string(parent.Capability.Subject.Kind) ||
 			string(request.Git.Repository.Key) != spec.Data.RepositoryKey || spec.Data.WriteRef != blob.ScopeFor(run.Request.Provenance).CapabilityScope() || blob.ParseCapabilityScope(spec.Data.WriteRef).Verified {
-			return capability.Capability{}, authorityError(apierr.Forbidden, "publication scope differs from its intake")
+			return capability.Capability{}, authorityError(hosterr.Forbidden, "publication scope differs from its intake")
 		}
 	}
 	if tx.store.delegation != nil {

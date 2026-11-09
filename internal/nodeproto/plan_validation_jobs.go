@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func (v *planValidator) validateJob(job JobSpec, path string) error {
+func (v *planValidator) validateJob(job nodewire.JobSpec, path string) error {
 	if err := v.feature(capabilityJobs, path); err != nil {
 		return err
 	}
@@ -72,8 +74,8 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		if err := v.feature(capabilityCores, path+".cores"); err != nil {
 			return err
 		}
-		if c := *job.Cores; math.IsNaN(c) || math.IsInf(c, 0) || c < MinJobCores {
-			return planInvalid(path+".cores", fmt.Sprintf("core request must be a finite number of at least %g", MinJobCores))
+		if c := *job.Cores; math.IsNaN(c) || math.IsInf(c, 0) || c < nodewire.MinJobCores {
+			return planInvalid(path+".cores", fmt.Sprintf("core request must be a finite number of at least %g", nodewire.MinJobCores))
 		}
 	}
 	if job.Memo != nil {
@@ -219,13 +221,13 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 	return v.validateSteps(job, path)
 }
 
-func (v *planValidator) validateSteps(job JobSpec, path string) error {
+func (v *planValidator) validateSteps(job nodewire.JobSpec, path string) error {
 	if len(job.Steps) > 0 {
 		if err := v.feature(capabilitySteps, path+".steps"); err != nil {
 			return err
 		}
 	}
-	steps := map[string]StepSpec{}
+	steps := map[string]nodewire.StepSpec{}
 	for i, step := range job.Steps {
 		at := fmt.Sprintf("%s.steps[%d]", path, i)
 		if err := v.identifier(step.ID, at+".id"); err != nil {

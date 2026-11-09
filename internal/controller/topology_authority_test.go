@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/hex"
 	"encoding/json"
@@ -10,10 +12,10 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPlanTopologyStrangerLearnsNothingProperty(t *testing.T) {
@@ -42,7 +44,7 @@ func TestPlanTopologyStrangerLearnsNothingProperty(t *testing.T) {
 		}
 		id := "run"
 		want := http.StatusForbidden
-		code := apierr.Forbidden
+		code := hosterr.Forbidden
 		if missing {
 			id, want = "absent", http.StatusNotFound
 			code = apierr.NotFound
@@ -52,7 +54,7 @@ func TestPlanTopologyStrangerLearnsNothingProperty(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
-		var envelope apierr.Envelope
+		var envelope hosterr.Envelope
 		if w.Code != want || json.Unmarshal(w.Body.Bytes(), &envelope) != nil || envelope.Error.Code != code {
 			t.Logf("stranger plan: HTTP %d, want %d: %s", w.Code, want, w.Body)
 			return false

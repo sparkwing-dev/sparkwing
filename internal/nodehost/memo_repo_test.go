@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
@@ -442,7 +443,7 @@ func TestRepoFilesRejectsDirectoryComponentReplacedAfterListing(t *testing.T) {
 	dir := createTestRepository(t, map[string]string{"dir/file": "original"})
 	outside := t.TempDir()
 	writeAll(t, outside, map[string]string{"file": "outside"})
-	environment, err := procenv.Build(procenv.Attempt, procenv.Base{Local: true, Captured: testgit.Env(os.Environ())}, procenv.Runtime{})
+	environment, err := procenv.Build(procenv.Attempt, procenv.Base{Local: true, Captured: gitcontrol.Env(os.Environ())}, procenv.Runtime{})
 	if err != nil {
 		t.Fatal(err)
 	}

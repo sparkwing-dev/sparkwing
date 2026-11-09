@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestSDKPlanningIntakeSecretDefaultsAreMaskedBeforeLogRelease(t *testing.T) {
@@ -30,10 +30,10 @@ func checkIntakeSecretDefault(t *testing.T, value string) {
 	planner, input, fixture, _ := sdkPlanningFixture(t)
 	input.SecretArgs = []string{"token"}
 	var logs strings.Builder
-	planner.Log = func(_ context.Context, frame nodeproto.FrameLog) error { logs.WriteString(frame.Message); return nil }
+	planner.Log = func(_ context.Context, frame nodewire.FrameLog) error { logs.WriteString(frame.Message); return nil }
 	start := planner.Start
-	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-		if err := log(ctx, nodeproto.FrameLog{Message: value}); err != nil {
+	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
+		if err := log(ctx, nodewire.FrameLog{Message: value}); err != nil {
 			return nil, err
 		}
 		process, err := start(ctx, input, log)
@@ -42,9 +42,9 @@ func checkIntakeSecretDefault(t *testing.T, value string) {
 		}
 		scripted := process.(*executorProcess)
 		answer := scripted.answer
-		scripted.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpDescribe {
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Default: &value}}}}}, nil
+		scripted.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpDescribe {
+				return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "build", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Default: &value}}}}}, nil
 			}
 			return answer(ctx, request)
 		}

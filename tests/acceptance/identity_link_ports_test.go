@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"net/http/httptest"
@@ -7,9 +9,9 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestIdentityLinkHTTPAddressDoesNotSelectAccountProperty(t *testing.T) {
@@ -69,14 +71,14 @@ func TestAccountUnlinkHTTPPreservesLastMethodAndReauthenticationRefusals(t *test
 		reason string
 	}{
 		{store.ErrLastSignInMethod, apierr.Conflict, "last_sign_in_method"},
-		{&apierr.Error{Code: apierr.Forbidden, Message: "sign in again", Details: map[string]any{"reason": apierr.ReasonReauthRequired}}, apierr.Forbidden, string(apierr.ReasonReauthRequired)},
+		{&apierr.Error{Code: hosterr.Forbidden, Message: "sign in again", Details: map[string]any{"reason": hosterr.ReasonReauthRequired}}, hosterr.Forbidden, string(hosterr.ReasonReauthRequired)},
 	} {
 		writes.err = tc.err
 		before, expiry := f.state(t)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, f.request("DELETE", "/api/v1/me/identities/github", ""))
-		assertEngineError(t, w, apierr.Status(tc.code), tc.code)
-		var result apierr.Envelope
+		assertEngineError(t, w, hosterr.Status(tc.code), tc.code)
+		var result hosterr.Envelope
 		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}

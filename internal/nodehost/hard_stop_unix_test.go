@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
@@ -49,7 +49,7 @@ func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
 			ctx, stop := keeper.Run(t.Context())
 			defer stop()
 			<-ready
-			session, err := startProtocolSession(ctx, ProtocolSessionConfig{Command: []string{os.Args[0]}, Environment: testProcessEnv(t, append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0")...), grace: time.Minute, Log: func(_ context.Context, log nodeproto.FrameLog) error {
+			session, err := startProtocolSession(ctx, ProtocolSessionConfig{Command: []string{os.Args[0]}, Environment: testProcessEnv(t, append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0")...), grace: time.Minute, Log: func(_ context.Context, log nodewire.FrameLog) error {
 				if pid, err := strconv.Atoi(log.Message); err == nil {
 					entered <- pid
 				}
@@ -59,13 +59,13 @@ func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = session.Close() }()
-			var hello nodeproto.HelloResult
-			if err := ask(ctx, session, nodeproto.Request{Op: nodeproto.OpHello, Protocol: 2, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, &hello); err != nil {
+			var hello nodewire.HelloResult
+			if err := ask(ctx, session, nodewire.Request{Op: nodewire.OpHello, Protocol: 2, Engine: &nodewire.EngineIdentity{Version: "test"}, Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, &hello); err != nil {
 				t.Fatal(err)
 			}
 			finished := make(chan error, 1)
 			go func() {
-				_, err := session.Request(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: "grandchild", Step: "body", Attempt: 1, Settled: []string{}})
+				_, err := session.Request(ctx, nodewire.Request{Op: nodewire.OpRunStep, Job: "grandchild", Step: "body", Attempt: 1, Settled: []string{}})
 				finished <- err
 			}()
 			var pid int

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -8,11 +10,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
@@ -88,11 +90,11 @@ func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (clai
 	return searchClaimTx(ctx, tx, demand, &q)
 }
 
-var errRankingHold = authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
+var errRankingHold = authorityError(hosterr.LockHeld, "work is waiting for a preferred runner")
 
 func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKind, error) {
 	if c.Audience != capability.Controller || c.Subject.ID == "" {
-		return nil, authorityError(apierr.Forbidden, "claim requires controller authority")
+		return nil, authorityError(hosterr.Forbidden, "claim requires controller authority")
 	}
 	kinds := slices.Clone(demand.Kinds)
 	if demand.Target != nil && len(kinds) == 0 {
@@ -125,7 +127,7 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 			allowed = kind == capability.UnitTrigger && demand.Target != nil && string(demand.Target.RunID) == c.Binding.RunID && slices.Contains(c.Grants, capability.TriggerHost)
 		}
 		if !allowed {
-			return nil, authorityError(apierr.Forbidden, "claimant lacks the unit claim grant")
+			return nil, authorityError(hosterr.Forbidden, "claimant lacks the unit claim grant")
 		}
 	}
 	return kinds, nil

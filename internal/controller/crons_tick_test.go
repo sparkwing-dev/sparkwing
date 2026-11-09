@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -15,7 +17,6 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
@@ -23,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func newStoreForTick(t *testing.T) *store.Store {
@@ -314,13 +316,13 @@ func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
 	_, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due)
 	var missing *apierr.Error
-	if !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing {
+	if !errors.As(err, &missing) || missing.Code != hosterr.PolicyMissing {
 		t.Fatalf("missing backend: %v", err)
 	}
 	other := teststore.ForTeam(t, st, store.DefaultTeam)
 	testOnlyTenantPort[scheduledRunWriter](srv, func(context.Context, store.Team) (scheduledRunWriter, error) { return other, nil })
 	sched.Team = "other"
-	if _, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due); !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing {
+	if _, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due); !errors.As(err, &missing) || missing.Code != hosterr.PolicyMissing {
 		t.Fatalf("wrong-team backend = %v", err)
 	}
 	if runs, err := other.ListRuns(t.Context(), store.RunFilter{}); err != nil || len(runs) != 0 {

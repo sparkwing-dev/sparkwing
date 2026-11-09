@@ -1,91 +1,89 @@
-// Package apierr defines the error body shared by HTTP, node protocol and JSON CLI output.
+// Package apierr owns host error policy and HTTP error encoding.
 package apierr
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	"io"
 	"math"
 	"strconv"
 	"time"
 )
 
-// Code is the sole wire error discriminator. Clients branch on it rather than status or message.
-type Code string
-
-// Registered codes are additive within a protocol major.
 const (
-	BadRequest            Code = "bad_request"
-	InvalidArgs           Code = "invalid_args"
-	Unauthenticated       Code = "unauthenticated"
-	Forbidden             Code = "forbidden"
-	NotFound              Code = "not_found"
-	UnsupportedRoute      Code = "unsupported_route"
-	MethodNotAllowed      Code = "method_not_allowed"
-	LockHeld              Code = "lock_held"
-	IllegalTransition     Code = "illegal_transition"
-	Conflict              Code = "conflict"
-	SpecDrift             Code = "spec_drift"
-	PlanDrift             Code = "plan_drift"
-	PayloadTooLarge       Code = "payload_too_large"
-	PlanInvalid           Code = "plan_invalid"
-	PlanFailed            Code = "plan_failed"
-	IsolatedHomeRequired  Code = "isolated_home_required"
-	LimitExceeded         Code = "limit_exceeded"
-	CapabilityUnsupported Code = "capability_unsupported"
-	SecretInIdentifier    Code = "secret_in_identifier"
-	InsufficientCredit    Code = "insufficient_credit"
-	QuotaExceeded         Code = "quota_exceeded"
-	RateLimited           Code = "rate_limited"
-	Unavailable           Code = "unavailable"
-	Internal              Code = "internal"
-	PolicyMissing         Code = "policy_missing"
-	IntegrityFailure      Code = "integrity_failure"
-	BlobMissing           Code = "blob_missing"
-	ProtocolMismatch      Code = "protocol_mismatch"
-	ProtocolError         Code = "protocol_error"
-	UnknownOp             Code = "unknown_op"
-	UnknownPipeline       Code = "unknown_pipeline"
-	UnknownJob            Code = "unknown_job"
-	UnknownStep           Code = "unknown_step"
-	UnknownClosure        Code = "unknown_closure"
-	NoPlan                Code = "no_plan"
-	SDKExited             Code = "sdk_exited"
-	FramesClosed          Code = "frames_closed"
-	SDKError              Code = "sdk_error"
-	Cancelled             Code = "cancelled"
-	DeadlineExceeded      Code = "deadline_exceeded"
-	VersionRevoked        Code = "version_revoked"
-	VersionUnsupported    Code = "version_unsupported"
+	Unauthenticated       apierr.Code = "unauthenticated"
+	Forbidden             apierr.Code = "forbidden"
+	UnsupportedRoute      apierr.Code = "unsupported_route"
+	MethodNotAllowed      apierr.Code = "method_not_allowed"
+	LockHeld              apierr.Code = "lock_held"
+	IllegalTransition     apierr.Code = "illegal_transition"
+	SpecDrift             apierr.Code = "spec_drift"
+	PlanDrift             apierr.Code = "plan_drift"
+	PayloadTooLarge       apierr.Code = "payload_too_large"
+	LimitExceeded         apierr.Code = "limit_exceeded"
+	CapabilityUnsupported apierr.Code = "capability_unsupported"
+	SecretInIdentifier    apierr.Code = "secret_in_identifier"
+	InsufficientCredit    apierr.Code = "insufficient_credit"
+	QuotaExceeded         apierr.Code = "quota_exceeded"
+	RateLimited           apierr.Code = "rate_limited"
+	Unavailable           apierr.Code = "unavailable"
+	Internal              apierr.Code = "internal"
+	PolicyMissing         apierr.Code = "policy_missing"
+	IntegrityFailure      apierr.Code = "integrity_failure"
+	BlobMissing           apierr.Code = "blob_missing"
+	SDKExited             apierr.Code = "sdk_exited"
+	FramesClosed          apierr.Code = "frames_closed"
+	Cancelled             apierr.Code = "cancelled"
+	DeadlineExceeded      apierr.Code = "deadline_exceeded"
+	VersionRevoked        apierr.Code = "version_revoked"
+	VersionUnsupported    apierr.Code = "version_unsupported"
+)
+
+const (
+	ReasonMissingGrant           apierr.Reason = "missing_grant"
+	ReasonAudience               apierr.Reason = "audience"
+	ReasonBinding                apierr.Reason = "binding"
+	ReasonTeam                   apierr.Reason = "team"
+	ReasonNoTeam                 apierr.Reason = "no_team"
+	ReasonCancelled              apierr.Reason = "cancel_requested"
+	ReasonSecretUndeclared       apierr.Reason = "secret_undeclared"
+	ReasonDigestNotReadable      apierr.Reason = "digest_not_readable"
+	ReasonRepositoryUnauthorized apierr.Reason = "repository_unauthorized"
+	ReasonReadOnly               apierr.Reason = "read_only"
+	ReasonPersonalMachine        apierr.Reason = "personal_machine"
+	ReasonCredentialUnconfirmed  apierr.Reason = "credential_unconfirmed"
+	ReasonReauthRequired         apierr.Reason = "reauth_required"
+	ReasonSecretsKeyRequired     apierr.Reason = "secrets_key_required"
+	ReasonExchangeUsed           apierr.Reason = "exchange_used"
 )
 
 // Definition drives error reference documentation and HTTP status selection.
 type Definition struct {
-	Code       Code
+	Code       apierr.Code
 	HTTPStatus int
 	Purpose    string
 }
 
 // Codes is the complete target registry. Job outcome reasons are not API error codes.
 var Codes = []Definition{
-	{BadRequest, 400, "Malformed or invalid request."},
-	{InvalidArgs, 400, "Pipeline arguments do not validate."},
+	{apierr.BadRequest, 400, "Malformed or invalid request."},
+	{apierr.InvalidArgs, 400, "Pipeline arguments do not validate."},
 	{Unauthenticated, 401, "No live credential for the route liveness class."},
 	{Forbidden, 403, "A live credential lacks authority; details.reason identifies the refusal."},
-	{NotFound, 404, "The authorized resource does not exist."},
+	{apierr.NotFound, 404, "The authorized resource does not exist."},
 	{UnsupportedRoute, 404, "The server does not register this route."},
 	{MethodNotAllowed, 405, "The path exists but does not accept this method."},
 	{LockHeld, 409, "A transaction lost its holder or generation fence."},
 	{IllegalTransition, 409, "The state edge or replay payload is not legal."},
-	{Conflict, 409, "An existing resource conflicts with the requested change."},
+	{apierr.Conflict, 409, "An existing resource conflicts with the requested change."},
 	{SpecDrift, 409, "A sealed spec differs from the submitted spec."},
 	{PlanDrift, 409, "Reconstructed code differs from the persisted job specification."},
 	{PayloadTooLarge, 413, "The request exceeds the named size limit."},
-	{PlanInvalid, 422, "A plan or expansion violates its contract."},
-	{PlanFailed, 422, "Pipeline planning failed."},
-	{IsolatedHomeRequired, 422, "Pipeline requires a temporary home; the host supplies fixed recovery text before secret discovery completes."},
+	{apierr.PlanInvalid, 422, "A plan or expansion violates its contract."},
+	{apierr.PlanFailed, 422, "Pipeline planning failed."},
+	{apierr.IsolatedHomeRequired, 422, "Pipeline requires a temporary home; the host supplies fixed recovery text before secret discovery completes."},
 	{LimitExceeded, 422, "An explicit setting exceeds its ceiling."},
 	{CapabilityUnsupported, 422, "The placement capability table refuses a declaration."},
 	{SecretInIdentifier, 422, "A stored identifier contains a registered secret value."},
@@ -97,175 +95,35 @@ var Codes = []Definition{
 	{PolicyMissing, 500, "A registered route has no policy row."},
 	{IntegrityFailure, 422, "Transferred bytes fail size or digest verification."},
 	{BlobMissing, 404, "An authorized blob is absent or tombstoned."},
-	{ProtocolMismatch, 400, "Hello cannot agree on a protocol major."},
-	{ProtocolError, 400, "A protocol frame violates the negotiated contract."},
-	{UnknownOp, 400, "The protocol operation is not supported."},
-	{UnknownPipeline, 404, "The SDK did not declare the requested pipeline."},
-	{UnknownJob, 404, "The SDK did not declare the requested job."},
-	{UnknownStep, 404, "The SDK did not declare the requested step."},
-	{UnknownClosure, 404, "The SDK did not declare the requested closure."},
-	{NoPlan, 409, "The process has not accepted a plan for this operation."},
+	{apierr.ProtocolMismatch, 400, "Hello cannot agree on a protocol major."},
+	{apierr.ProtocolError, 400, "A protocol frame violates the negotiated contract."},
+	{apierr.UnknownOp, 400, "The protocol operation is not supported."},
+	{apierr.UnknownPipeline, 404, "The SDK did not declare the requested pipeline."},
+	{apierr.UnknownJob, 404, "The SDK did not declare the requested job."},
+	{apierr.UnknownStep, 404, "The SDK did not declare the requested step."},
+	{apierr.UnknownClosure, 404, "The SDK did not declare the requested closure."},
+	{apierr.NoPlan, 409, "The process has not accepted a plan for this operation."},
 	{SDKExited, 502, "The SDK process exited before replying."},
 	{FramesClosed, 502, "The protocol stream closed before replying."},
-	{SDKError, 422, "An SDK or user function reported an unclassified failure."},
+	{apierr.SDKError, 422, "An SDK or user function reported an unclassified failure."},
 	{Cancelled, 409, "The operation was cancelled."},
 	{DeadlineExceeded, 408, "The applicable execution, queue or approval deadline passed."},
 	{VersionRevoked, 422, "Signed policy revoked the pinned engine; details give version and reason, hint names sparkwing pipeline upgrade."},
 	{VersionUnsupported, 422, "An effective signed minimum refuses the engine or runner; details give the minimum, reason and update action."},
 }
 
-// Reason supplies stable forbidden details without reviving the old auth error envelopes.
-type Reason string
-
-const (
-	ReasonMissingGrant           Reason = "missing_grant"
-	ReasonAudience               Reason = "audience"
-	ReasonBinding                Reason = "binding"
-	ReasonTeam                   Reason = "team"
-	ReasonNoTeam                 Reason = "no_team"
-	ReasonCancelled              Reason = "cancel_requested"
-	ReasonSecretUndeclared       Reason = "secret_undeclared"
-	ReasonDigestNotReadable      Reason = "digest_not_readable"
-	ReasonRepositoryUnauthorized Reason = "repository_unauthorized"
-	ReasonReadOnly               Reason = "read_only"
-	ReasonPersonalMachine        Reason = "personal_machine"
-	ReasonCredentialUnconfirmed  Reason = "credential_unconfirmed"
-	ReasonReauthRequired         Reason = "reauth_required"
-	ReasonSecretsKeyRequired     Reason = "secrets_key_required"
-	ReasonNotReady               Reason = "not_ready"
-	ReasonNoOutput               Reason = "no_output"
-	ReasonExchangeUsed           Reason = "exchange_used"
-)
-
-// DetailUnknownField names, in Error.Details, a request field a controller refused because it does not know it.
-const DetailUnknownField = "unknown_field"
-
-// Error emits Message, Hint and Details as given, so callers must supply safe, masked values.
-// For secret_in_identifier, identify the identifier's field/path, never echo its value.
-type Error struct {
-	Code    Code           `json:"code"`
-	Message string         `json:"message"`
-	Hint    string         `json:"hint,omitempty"`
-	Details map[string]any `json:"details,omitempty"`
-}
-
-// IsolatedHomeRefusal supplies recovery text without echoing SDK error payloads.
-func IsolatedHomeRefusal() *Error {
-	return &Error{Code: IsolatedHomeRequired, Message: `pipeline requires an isolated Sparkwing home; retry with HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" before the sparkwing command`}
-}
-
 // Authorization constructs a forbidden error with its required reason.
-func Authorization(reason Reason, message string) *Error {
-	return &Error{Code: Forbidden, Message: message, Details: map[string]any{"reason": reason}}
+func Authorization(reason apierr.Reason, message string) *apierr.Error {
+	return &apierr.Error{Code: Forbidden, Message: message, Details: map[string]any{"reason": reason}}
 }
-
-// Error lets transport-neutral errors pass through normal Go error paths.
-func (e *Error) Error() string { return e.Message }
 
 // Envelope is the one outer error object. Protocol replies embed its Error beside reply and ok.
 type Envelope struct {
-	Error *Error `json:"error"`
-}
-
-// DecodeInner validates the one inner error object used by every transport.
-// It rejects null, duplicate keys, trailing JSON, missing or wrongly typed code/message,
-// invalid hint/details and an outer {error:...} envelope. Additive fields and unknown
-// nonempty codes remain readable by older engines; producers use Codes membership.
-// Protocol replies, body failures, eval failures and recovery inputs all use this
-// decoder before accepting an Error. HTTP/CLI readers unwrap Envelope exactly once.
-func DecodeInner(data []byte) (*Error, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	value, err := decodeValue(decoder)
-	if err != nil {
-		return nil, errors.New("invalid error JSON")
-	}
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("trailing error JSON")
-	}
-	object, ok := value.(map[string]any)
-	if !ok {
-		return nil, errors.New("error must be an object")
-	}
-	if _, nested := object["error"]; nested {
-		return nil, errors.New("expected inner error, received envelope")
-	}
-	code, codeOK := object["code"].(string)
-	message, messageOK := object["message"].(string)
-	if !codeOK || code == "" || !messageOK {
-		return nil, errors.New("error requires string code and message")
-	}
-	failure := &Error{Code: Code(code), Message: message}
-	if hint, exists := object["hint"]; exists {
-		if failure.Hint, ok = hint.(string); !ok {
-			return nil, errors.New("error hint must be a string")
-		}
-	}
-	if details, exists := object["details"]; exists {
-		if failure.Details, ok = details.(map[string]any); !ok {
-			return nil, errors.New("error details must be an object")
-		}
-	}
-	return failure, nil
-}
-
-// UnmarshalJSON validates inner errors with the same codec used by protocol replies.
-func (e *Error) UnmarshalJSON(data []byte) error {
-	failure, err := DecodeInner(data)
-	if err != nil {
-		return err
-	}
-	*e = *failure
-	return nil
-}
-
-func decodeValue(decoder *json.Decoder) (any, error) {
-	token, err := decoder.Token()
-	if err != nil {
-		return nil, err
-	}
-	delim, compound := token.(json.Delim)
-	if !compound {
-		return token, nil
-	}
-	if delim == '{' {
-		object := map[string]any{}
-		for decoder.More() {
-			key, err := decoder.Token()
-			if err != nil {
-				return nil, err
-			}
-			name, ok := key.(string)
-			if !ok {
-				return nil, errors.New("invalid object key")
-			}
-			if _, exists := object[name]; exists {
-				return nil, errors.New("duplicate object key")
-			}
-			object[name], err = decodeValue(decoder)
-			if err != nil {
-				return nil, err
-			}
-		}
-		_, err = decoder.Token()
-		return object, err
-	}
-	if delim == '[' {
-		var values []any
-		for decoder.More() {
-			value, err := decodeValue(decoder)
-			if err != nil {
-				return nil, err
-			}
-			values = append(values, value)
-		}
-		_, err = decoder.Token()
-		return values, err
-	}
-	return nil, errors.New("unexpected JSON delimiter")
+	Error *apierr.Error `json:"error"`
 }
 
 // Status returns the registry status; an unregistered code is an internal failure.
-func Status(code Code) int {
+func Status(code apierr.Code) int {
 	for _, definition := range Codes {
 		if definition.Code == code {
 			return definition.HTTPStatus
@@ -275,7 +133,7 @@ func Status(code Code) int {
 }
 
 // WriteJSON emits one newline-terminated Envelope for CLI stderr and other JSON streams.
-func WriteJSON(w io.Writer, failure *Error) error {
+func WriteJSON(w io.Writer, failure *apierr.Error) error {
 	encoded, err := encode(failure)
 	if err != nil {
 		return err
@@ -287,7 +145,7 @@ func WriteJSON(w io.Writer, failure *Error) error {
 	return err
 }
 
-func encode(failure *Error) ([]byte, error) {
+func encode(failure *apierr.Error) ([]byte, error) {
 	if failure == nil {
 		return nil, errors.New("missing error")
 	}
@@ -309,7 +167,7 @@ func encode(failure *Error) ([]byte, error) {
 }
 
 // RetryAfter returns the Retry-After seconds for failure's details.retry_after_ms, or "" when it names none.
-func RetryAfter(failure *Error) string {
+func RetryAfter(failure *apierr.Error) string {
 	if failure == nil {
 		return ""
 	}
@@ -330,7 +188,7 @@ func retryAfter(value any) string {
 
 // RetryDelay returns the whole-second wait a rate-limited or unavailable failure names in details.retry_after_ms.
 func RetryDelay(err error) (time.Duration, bool) {
-	var failure *Error
+	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != RateLimited && failure.Code != Unavailable {
 		return 0, false
 	}
@@ -340,3 +198,6 @@ func RetryDelay(err error) (time.Duration, bool) {
 	}
 	return time.Duration(min(seconds, int64(time.Hour/time.Second))) * time.Second, true
 }
+
+// DetailUnknownField names, in Error.Details, a request field a controller refused because it does not know it.
+const DetailUnknownField = "unknown_field"

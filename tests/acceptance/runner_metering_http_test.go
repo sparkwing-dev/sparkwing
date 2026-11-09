@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -10,9 +12,9 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type runnerMeteringWriter func(context.Context, capability.Authorized, string, bool) error
@@ -51,7 +53,7 @@ func TestRunnerMeteringHTTPRefusals(t *testing.T) {
 	for _, name := range []string{"bearer", "member", "peer", "revoked", "csrf", "unlicensed", "writer", "private", "race", "unknown runner", "absent", "null", "wrong type", "unknown field"} {
 		t.Run(name, func(t *testing.T) {
 			b, calls := consoleBoundary(), 0
-			want, body := apierr.Forbidden, `{"metered":true}`
+			want, body := hosterr.Forbidden, `{"metered":true}`
 			var failure error
 			switch name {
 			case "bearer":
@@ -65,15 +67,15 @@ func TestRunnerMeteringHTTPRefusals(t *testing.T) {
 				p := &b.snapshot.Authorities[0].Principal
 				p.Class, p.Authority, p.Capability.Subject = capability.CredentialPeer, capability.AuthorityRef{}, capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}
 			case "revoked":
-				b.snapshot.Authorities[0].Principal.Capability.RevokedAt, want = &b.snapshot.Now, apierr.Unauthenticated
+				b.snapshot.Authorities[0].Principal.Capability.RevokedAt, want = &b.snapshot.Now, hosterr.Unauthenticated
 			case "unlicensed":
 				want = apierr.NotFound
 			case "writer":
-				want = apierr.PolicyMissing
+				want = hosterr.PolicyMissing
 			case "private":
-				failure, want = errors.New("private database credential"), apierr.Internal
+				failure, want = errors.New("private database credential"), hosterr.Internal
 			case "race":
-				failure, want = &apierr.Error{Code: apierr.LockHeld, Message: "authority changed"}, apierr.LockHeld
+				failure, want = &apierr.Error{Code: hosterr.LockHeld, Message: "authority changed"}, hosterr.LockHeld
 			case "unknown runner":
 				failure, want = &apierr.Error{Code: apierr.NotFound, Message: "runner not found"}, apierr.NotFound
 			case "absent":
@@ -90,7 +92,7 @@ func TestRunnerMeteringHTTPRefusals(t *testing.T) {
 				a := consoleAuthorization(b)
 				a.CheckCSRF = nil
 				s.WithAuthorization(a)
-				want = apierr.PolicyMissing
+				want = hosterr.PolicyMissing
 			}
 			if name == "unlicensed" {
 				s = controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
@@ -99,7 +101,7 @@ func TestRunnerMeteringHTTPRefusals(t *testing.T) {
 				s.WithRunnerMeteringWriter(runnerMeteringWriter(func(context.Context, capability.Authorized, string, bool) error { calls++; return failure }))
 			}
 			w := authorityHTTP(s.Handler(), b, "POST", "/api/v1/operator/runners/swk_ABCDEFGHIJKL/metered", body)
-			assertEngineError(t, w, apierr.Status(want), want)
+			assertEngineError(t, w, hosterr.Status(want), want)
 			expected := 0
 			if failure != nil {
 				expected = 1

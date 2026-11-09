@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -10,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -21,6 +22,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestHostLifecycleEvents(t *testing.T) {
@@ -118,10 +121,10 @@ func TestHostStepPersistence(t *testing.T) {
 			var fixture *storeHostFixture
 			var trace []string
 			var processes []*scriptedSDK
-			var diagnostics []nodeproto.FrameLog
+			var diagnostics []nodewire.FrameLog
 			_, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
 				fixture = executionStoreFixture(t, deps)
-				deps.Log = func(ctx context.Context, in NodeInput, log nodeproto.FrameLog) error {
+				deps.Log = func(ctx context.Context, in NodeInput, log nodewire.FrameLog) error {
 					row, err := fixture.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(in.Accepted.RunID), NodeID: "job"})
 					if err != nil || row.Generation != in.Generation || row.Attempt != in.Attempt || row.ClaimedBy != in.Authority.Holder || row.CapabilityPrefix != in.Authority.CapabilityPrefix {
 						t.Fatalf("diagnostic differs from committed attempt: %+v, %v", row, err)
@@ -283,7 +286,7 @@ func TestClaimedHostForeignAwards(t *testing.T) {
 			}
 			err = host.Execute(ctx, input)
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.LockHeld || observed || acquired || len(processes) != 0 {
+			if !errors.As(err, &failure) || failure.Code != hosterr.LockHeld || observed || acquired || len(processes) != 0 {
 				t.Fatalf("foreign award reached execution: renewed=%v acquired=%v processes=%d error=%v", observed, acquired, len(processes), err)
 			}
 			after, err := fixture.Tenant.ReadSnapshot(ctx, input.Accepted.RunID)
@@ -310,7 +313,7 @@ func executionStoreFixture(t *testing.T, deps *ExecutorDependencies) *storeHostF
 	request.Options.JobDefaults.Retry = fake.snapshot.Nodes[0].Execution.Retry
 	request.Options.JobDefaults.Retry.Origin.Layer = runspec.LayerFlag
 	request.Options.AllowRisk.Origin.Layer = runspec.LayerFlag
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(fake.snapshot.Run.Plan, &plan); err != nil {
 		t.Fatal(err)
 	}

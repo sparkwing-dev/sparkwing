@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -18,11 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type fixtureTransport struct {
@@ -125,7 +127,7 @@ func TestIndexFirstUseFailure(t *testing.T) {
 	r, transport, _, _, now := fixtureResolver(t)
 	transport.failure = true
 	_, err := r.Index(context.Background(), now)
-	requireCode(t, err, apierr.Unavailable)
+	requireCode(t, err, hosterr.Unavailable)
 }
 
 func fixtureExecutable(t *testing.T, version string, target releaseasset.Target) []byte {
@@ -138,7 +140,7 @@ func fixtureExecutableSource(t *testing.T, version string, target releaseasset.T
 	if err := os.MkdirAll(filepath.Join(dir, "cmd", string(target.Binary)), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, dir, "go.mod", []byte("module "+GoModule+"\ngo 1.26\n"))
+	writeFixture(t, dir, "go.mod", []byte("module "+HostModule+"\ngo 1.26\n"))
 	writeFixture(t, dir, filepath.Join("cmd", string(target.Binary), "main.go"), []byte(source))
 	out := filepath.Join(dir, "fixture.bin")
 	cmd := exec.Command("go", "build", "-p", "2", "-ldflags", "-X main.Version="+version, "-o", out, "./cmd/"+string(target.Binary))
@@ -248,7 +250,7 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 			requests := len(transport.requests)
 			r.config.Mode = toolchain.ModeLocal
 			_, err := r.Ensure(ctx, cold.Identity, target)
-			requireCode(t, err, apierr.Unavailable)
+			requireCode(t, err, hosterr.Unavailable)
 			if len(transport.requests) != requests {
 				t.Fatal("local mode fetched a corrupt engine")
 			}
@@ -269,15 +271,15 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 	if _, err := r.Resolve(ctx, pin, target); err == nil {
 		t.Fatal("warm revoked engine accepted")
 	} else {
-		requireCode(t, err, apierr.VersionRevoked)
+		requireCode(t, err, hosterr.VersionRevoked)
 	}
 	for _, minimum := range []bool{false, true} {
 		policy.PublishedAt = policy.PublishedAt.Add(time.Minute)
-		code := apierr.VersionRevoked
+		code := hosterr.VersionRevoked
 		if minimum {
 			policy.Minimum = Restriction{Version: "v0.20.0", Reason: "security minimum", Security: true, AnnouncedAt: now, EffectiveAt: now}
 			policy.Revoked = nil
-			code = apierr.VersionUnsupported
+			code = hosterr.VersionUnsupported
 		}
 		transport.policy(t, key, policy)
 		r.checkedAt = time.Time{}
@@ -453,10 +455,10 @@ func TestPreEnginePinNamesTheUpgradeButTamperingStaysAnIntegrityFailure(t *testi
 		mutate func(b *ReleaseBundle)
 		want   apierr.Code
 	}{
-		{"legacy layout", func(*ReleaseBundle) {}, apierr.VersionUnsupported},
-		{"manifest signature", func(b *ReleaseBundle) { b.ManifestSignature = ed25519.Sign(other, b.Manifest) }, apierr.IntegrityFailure},
-		{"asset signature", func(b *ReleaseBundle) { b.AssetSignature = ed25519.Sign(other, b.Asset) }, apierr.IntegrityFailure},
-		{"corrupted asset", func(b *ReleaseBundle) { b.Asset = append(bytes.Clone(b.Asset), 'x') }, apierr.IntegrityFailure},
+		{"legacy layout", func(*ReleaseBundle) {}, hosterr.VersionUnsupported},
+		{"manifest signature", func(b *ReleaseBundle) { b.ManifestSignature = ed25519.Sign(other, b.Manifest) }, hosterr.IntegrityFailure},
+		{"asset signature", func(b *ReleaseBundle) { b.AssetSignature = ed25519.Sign(other, b.Asset) }, hosterr.IntegrityFailure},
+		{"corrupted asset", func(b *ReleaseBundle) { b.Asset = append(bytes.Clone(b.Asset), 'x') }, hosterr.IntegrityFailure},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, transport, key, _, _ := fixtureResolver(t)
@@ -471,7 +473,7 @@ func TestPreEnginePinNamesTheUpgradeButTamperingStaysAnIntegrityFailure(t *testi
 			if !errors.As(err, &failure) || failure.Code != tc.want || resolved.Executable != "" {
 				t.Fatalf("resolve = %+v, %v; want %s", resolved, err, tc.want)
 			}
-			if upgrade := strings.Contains(failure.Hint, "`sparkwing pipeline upgrade`"); upgrade != (tc.want == apierr.VersionUnsupported) {
+			if upgrade := strings.Contains(failure.Hint, "`sparkwing pipeline upgrade`"); upgrade != (tc.want == hosterr.VersionUnsupported) {
 				t.Fatalf("hint %q", failure.Hint)
 			}
 			name, _ := target.NameForVersion(version)

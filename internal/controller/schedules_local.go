@@ -1,18 +1,20 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"net/http"
 	"path/filepath"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // LocalScheduleProver compiles selected checkout code with captured host inputs.
@@ -36,10 +38,10 @@ func (s *Server) ScheduleLauncher() crons.Launcher { return cronLauncher{server:
 func (s *Server) localScheduleService(r *http.Request, a capability.Authorized) (*crons.Service, error) {
 	_, peer := localhostwire.LocalPeer(r.Context())
 	if !peer || a.Principal.Capability.Subject.Kind != capability.SubjectLocal || a.Target.Team != string(store.DefaultTeam) {
-		return nil, &apierr.Error{Code: apierr.Forbidden, Message: "schedule operation requires the verified local peer"}
+		return nil, &apierr.Error{Code: hosterr.Forbidden, Message: "schedule operation requires the verified local peer"}
 	}
 	if s.localSchedules == nil || s.localSchedules.Operator == nil || s.operator == nil || *s.localSchedules.Operator != *s.operator || s.localScheduleEnvironments == nil || s.localScheduleProver == nil {
-		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "local schedule service is unavailable"}
+		return nil, &apierr.Error{Code: hosterr.Unavailable, Message: "local schedule service is unavailable"}
 	}
 	return s.localSchedules, nil
 }

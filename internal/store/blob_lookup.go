@@ -1,16 +1,17 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLookup) (hit blob.RecordLookupResult, err error) {
@@ -116,7 +117,7 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 		if err != nil {
 			return result, err
 		}
-		if size > limits.NodeOutputBytes {
+		if size > protolimits.NodeOutputBytes {
 			return result, blob.ErrIntegrity
 		}
 	}
@@ -174,7 +175,7 @@ func (r *blobRecords) readMembers(ctx context.Context, tx *storeTx, record blob.
 		return nil, nil
 	}
 	if r.manifests == nil {
-		return nil, authorityError(apierr.Unavailable, "verified manifest reader is not configured")
+		return nil, authorityError(hosterr.Unavailable, "verified manifest reader is not configured")
 	}
 	members, err := tx.blobIO.read("read:"+string(manifest.Value), func(ctx context.Context) ([]blob.Member, error) {
 		return r.manifests.ReadBlobManifest(ctx, r.tenant.team, manifest.Value)

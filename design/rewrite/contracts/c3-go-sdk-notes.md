@@ -84,7 +84,7 @@ driver validates those jobs against the initial plan and compares their canonica
 hash with that vector. Repeated evaluation and a fresh process reconstruct the
 same expansion. The fresh process carries the generated job's delegated binding
 and executes its body after reconstruction. Every eval also checks its declared
-value kind through `EvalResult.ValidateValue`.
+value kind through `nodeproto.ValidateEvalValue`.
 
 ## Acceptance evidence required
 
@@ -196,10 +196,10 @@ Each row names one exported type or function. Retain means its declared signatur
 | `sparkwing.Mask` | `sparkwing/sdk_contract.go` | Mask returns only after host registration so subsequent output cannot race masking. |
 | `sparkwing.Variable` | `sparkwing/sdk_contract.go` | Variable distinguishes a declared unmasked value from a secret. |
 | `sparkwing.MustVariable` | `sparkwing/sdk_contract.go` | MustVariable makes a missing required plain value fail the job. |
-| `sparkwingtest.Secret` | `sparkwing/sparkwingtest/host_contract.go` | Secret preserves masking classification so tests cannot substitute plain variables for secrets. |
-| `sparkwingtest.Options` | `sparkwing/sparkwingtest/host_contract.go` | Options injects external results without exporting runtime plumbing from the author SDK. |
-| `sparkwingtest.Host` | `sparkwing/sparkwingtest/host_contract.go` | Host exercises author code through the same plan and operation contract as a real host. |
-| `sparkwingtest.New` | `sparkwing/sparkwingtest/host_contract.go` | New isolates fixtures so concurrent tests cannot share secrets, outputs or protocol state. |
+| `sparkwingtest.Secret` | `sparkwingtest/host_contract.go` | Secret preserves masking classification so tests cannot substitute plain variables for secrets. |
+| `sparkwingtest.Options` | `sparkwingtest/host_contract.go` | Options injects external results without exporting runtime plumbing from the author SDK. |
+| `sparkwingtest.Host` | `sparkwingtest/host_contract.go` | Host exercises author code through the same plan and operation contract as a real host. |
+| `sparkwingtest.New` | `sparkwingtest/host_contract.go` | New isolates fixtures so concurrent tests cannot share secrets, outputs or protocol state. |
 
 ### Retain
 

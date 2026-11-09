@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -7,13 +9,13 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type delayedCancellationReport struct {
@@ -24,7 +26,7 @@ type delayedCancellationReport struct {
 
 func TestOwnerFinishesCancellationAfterACommittedPolicyResult(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
-	state.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, Spec: marshalEventFixture(t, nodeproto.JobSpec{ID: "job"})}}
+	state.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, Spec: marshalEventFixture(t, nodewire.JobSpec{ID: "job"})}}
 	host.Decide = store.Decide
 	project := host.Project
 	host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
@@ -45,7 +47,7 @@ func TestOwnerFinishesCancellationAfterACommittedPolicyResult(t *testing.T) {
 		default:
 		}
 		<-ctx.Done()
-		return ownerLayerResult{}, errors.Join(context.Cause(ctx), &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"})
+		return ownerLayerResult{}, errors.Join(context.Cause(ctx), &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"})
 	})
 	completion, err := host.Run(t.Context(), input)
 	if err != nil || completion.Outcome != "cancelled" || state.finished.Transition.RunID != "run" {
@@ -92,7 +94,7 @@ func TestCancellationReportsUseTheLiveClaimLifetime(t *testing.T) {
 					defer stop()
 					var err error
 					if setup {
-						err = claimSetupFailure(ctx, input, &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}, deps.Masker.Mask, reports.TransitionNode)
+						err = claimSetupFailure(ctx, input, &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}, deps.Masker.Mask, reports.TransitionNode)
 					} else {
 						host, createErr := NewNodeExecutor(deps)
 						if createErr != nil {

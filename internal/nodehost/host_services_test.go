@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type processServiceRoutes struct {
@@ -29,18 +29,18 @@ func TestHostServices(t *testing.T) {
 	t.Helper()
 	masker := secrets.NewMasker()
 	registry := NewMaskRegistry(masker)
-	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "step"}}}
-	if err := registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}, func() error { return nil }); err != nil {
+	job := nodewire.JobSpec{ID: "job", Steps: []nodewire.StepSpec{{ID: "step"}}}
+	if err := registry.acceptPlan(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	service := &ProcessServices{RunID: "run", Job: job, Masks: registry}
-	var annotation nodeproto.AnnotationRequest
-	var summary nodeproto.SummaryRequest
-	service.Annotation = func(_ context.Context, _ capability.Authorized, request nodeproto.AnnotationRequest) error {
+	var annotation nodewire.AnnotationRequest
+	var summary nodewire.SummaryRequest
+	service.Annotation = func(_ context.Context, _ capability.Authorized, request nodewire.AnnotationRequest) error {
 		annotation = request
 		return nil
 	}
-	service.Summary = func(_ context.Context, _ capability.Authorized, request nodeproto.SummaryRequest) error {
+	service.Summary = func(_ context.Context, _ capability.Authorized, request nodewire.SummaryRequest) error {
 		summary = request
 		return nil
 	}
@@ -75,31 +75,31 @@ func TestHostServices(t *testing.T) {
 		}
 		return nil
 	}
-	if err := call("/node/v1/masks", nodeproto.MaskRequest{Value: "private-secret"}); err != nil {
+	if err := call("/node/v1/masks", nodewire.MaskRequest{Value: "private-secret"}); err != nil {
 		t.Fatal(err)
 	}
 	if masker.Mask("private-secret") != "***" || !registry.ContainsSecret("private-secret-job") {
 		t.Fatal("acknowledged mask was absent from sinks or validation")
 	}
-	if err := call("/node/v1/masks", nodeproto.MaskRequest{Value: "j"}); err != nil {
+	if err := call("/node/v1/masks", nodewire.MaskRequest{Value: "j"}); err != nil {
 		t.Fatal(err)
 	}
 	if masker.Mask("j") != "j" {
 		t.Fatal("short value was masked")
 	}
-	if err := call("/node/v1/annotations", nodeproto.AnnotationRequest{Step: "step", Annotation: nodeproto.Annotation{Level: "warn", Message: "private-secret", File: "private-secret.go", Line: 2, EndLine: 4, Column: 1}}); err != nil {
+	if err := call("/node/v1/annotations", nodewire.AnnotationRequest{Step: "step", Annotation: nodewire.Annotation{Level: "warn", Message: "private-secret", File: "private-secret.go", Line: 2, EndLine: 4, Column: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	if annotation.Message != "***" || annotation.File != "***.go" || annotation.EndLine != 4 || annotation.Step != "step" {
 		t.Fatalf("annotation=%+v", annotation)
 	}
-	if err := call("/node/v1/summary", nodeproto.SummaryRequest{Markdown: "# private-secret", Step: "step"}); err != nil {
+	if err := call("/node/v1/summary", nodewire.SummaryRequest{Markdown: "# private-secret", Step: "step"}); err != nil {
 		t.Fatal(err)
 	}
 	if summary.Markdown != "# ***" || summary.Step != "step" {
 		t.Fatalf("summary=%+v", summary)
 	}
-	if err := call("/node/v1/summary", nodeproto.SummaryRequest{Markdown: "unknown step", Step: "other"}); err == nil {
+	if err := call("/node/v1/summary", nodewire.SummaryRequest{Markdown: "unknown step", Step: "other"}); err == nil {
 		t.Fatal("record attributed to an undeclared step")
 	}
 	checkRegisteredServiceReads(t, routes, service, auth)

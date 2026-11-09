@@ -1,9 +1,9 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // Unselected memberships need the same immutable fence as the active team.
@@ -48,7 +48,7 @@ func authenticateSessionTeamTx(ctx context.Context, tx *storeTx, session string,
 		return err
 	}
 	if authenticated != epoch {
-		return authorityError(apierr.Unauthenticated, "session membership has ended; sign in again")
+		return authorityError(hosterr.Unauthenticated, "session membership has ended; sign in again")
 	}
 	return nil
 }

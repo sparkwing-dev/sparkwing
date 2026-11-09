@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -12,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type credentialIssuer struct {
@@ -96,16 +98,16 @@ func TestCredentialIssuanceHTTPRefusesInvalidAndDeadAuthority(t *testing.T) {
 	for _, state := range []string{"anonymous", "revoked", "membership", "machine", "claim", "grant", "binding", "csrf", "transaction", "private error", "missing issuer"} {
 		t.Run(state, func(t *testing.T) {
 			b, issuer := issuanceSession(), &credentialIssuer{}
-			status, code, calls := 403, apierr.Forbidden, 0
+			status, code, calls := 403, hosterr.Forbidden, 0
 			switch state {
 			case "anonymous":
-				b.raw, status, code = "", 401, apierr.Unauthenticated
+				b.raw, status, code = "", 401, hosterr.Unauthenticated
 			case "revoked":
 				b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 			case "membership":
 				b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-				status, code = 401, apierr.Unauthenticated
+				status, code = 401, hosterr.Unauthenticated
 			case "machine":
 				b = authorityMember()
 				b.snapshot.Authorities[0].Principal.Capability.Subject.Kind = capability.SubjectMachine
@@ -114,15 +116,15 @@ func TestCredentialIssuanceHTTPRefusesInvalidAndDeadAuthority(t *testing.T) {
 			case "grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil
 			case "binding":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "outside team"}
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "outside team"}
 			case "transaction":
-				issuer.err = &apierr.Error{Code: apierr.Unauthenticated, Message: "membership changed"}
-				status, code, calls = 401, apierr.Unauthenticated, 1
+				issuer.err = &apierr.Error{Code: hosterr.Unauthenticated, Message: "membership changed"}
+				status, code, calls = 401, hosterr.Unauthenticated, 1
 			case "private error":
 				issuer.err = errors.New("private credential")
-				status, code, calls = 500, apierr.Internal, 1
+				status, code, calls = 500, hosterr.Internal, 1
 			case "missing issuer":
-				status, code = 500, apierr.PolicyMissing
+				status, code = 500, hosterr.PolicyMissing
 			}
 			server := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
 			if state != "missing issuer" {
@@ -132,7 +134,7 @@ func TestCredentialIssuanceHTTPRefusesInvalidAndDeadAuthority(t *testing.T) {
 				a := consoleAuthorization(b)
 				a.CheckCSRF = nil
 				server.WithAuthorization(a)
-				status, code = 500, apierr.PolicyMissing
+				status, code = 500, hosterr.PolicyMissing
 			}
 			w := authorityHTTP(server.Handler(), b, "POST", "/api/v1/tokens", `{"grants":["runs.read"]}`)
 			assertEngineError(t, w, status, code)

@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"io"
@@ -9,10 +11,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func runWingdRun(inv clisurface.Invocation) error {
@@ -40,7 +42,7 @@ func runWingdRunCommand(ctx context.Context, inv clisurface.Invocation, out io.W
 		return err
 	}
 	if runtime == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "foreground local controller runtime is unavailable"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "foreground local controller runtime is unavailable"}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -56,7 +58,7 @@ func foregroundOptions(inv clisurface.Invocation, options wingd.LocalStartOption
 	}
 	for _, name := range []string{"budget", "headroom", "state-db"} {
 		if inv.Has(name) {
-			return options, &apierr.Error{Code: apierr.Unavailable, Message: "foreground runtime cannot receive --" + name, Hint: "the local runtime contract requires this option before it can be used"}
+			return options, &apierr.Error{Code: hosterr.Unavailable, Message: "foreground runtime cannot receive --" + name, Hint: "the local runtime contract requires this option before it can be used"}
 		}
 	}
 	if inv.Has("home") {

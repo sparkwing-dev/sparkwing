@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -7,11 +9,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func meteredPlacement(claimant, root capability.Capability) bool {
@@ -26,7 +28,7 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	var reservedSeconds int64
 	if c.Billing.Metered {
 		if selected == nil {
-			return authorityError(apierr.IntegrityFailure, "metered award is missing its selected size price")
+			return authorityError(hosterr.IntegrityFailure, "metered award is missing its selected size price")
 		}
 		price = *selected
 		l, err := lockLedgerTx(ctx, tx, Team(c.Team))

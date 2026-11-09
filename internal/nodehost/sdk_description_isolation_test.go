@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSDKShortSecretArgumentsAndDefaultsStayUnmaskedWithoutWarning(t *testing.T) {
@@ -19,8 +19,8 @@ func TestSDKShortSecretArgumentsAndDefaultsStayUnmaskedWithoutWarning(t *testing
 		t.Run(kind, func(t *testing.T) {
 			planner, input, fixture, _ := sdkPlanningFixture(t)
 			var logs strings.Builder
-			planner.Log = func(_ context.Context, frame nodeproto.FrameLog) error { logs.WriteString(frame.Message); return nil }
-			argument := nodeproto.ArgumentDescription{Name: "token", Type: "string", Secret: true}
+			planner.Log = func(_ context.Context, frame nodewire.FrameLog) error { logs.WriteString(frame.Message); return nil }
+			argument := nodewire.ArgumentDescription{Name: "token", Type: "string", Secret: true}
 			value := "abc"
 			if kind == "default" {
 				argument.Default = &value
@@ -32,16 +32,16 @@ func TestSDKShortSecretArgumentsAndDefaultsStayUnmaskedWithoutWarning(t *testing
 				input.Args["token"] = "abc,long-token"
 			}
 			start := planner.Start
-			planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, in, log)
 				if err != nil {
 					return process, err
 				}
 				proc := process.(*executorProcess)
 				answer := proc.answer
-				proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-					if request.Op == nodeproto.OpDescribe {
-						return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: input.Run.Pipeline, Args: []nodeproto.ArgumentDescription{argument}}}}, nil
+				proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+					if request.Op == nodewire.OpDescribe {
+						return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: input.Run.Pipeline, Args: []nodewire.ArgumentDescription{argument}}}}, nil
 					}
 					return answer(ctx, request)
 				}
@@ -70,31 +70,31 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 		for _, selected := range []string{"build", "broken"} {
 			p, input, fixture, processes := sdkPlanningFixture(t)
 			input.Run.Pipeline = selected
-			healthy := nodeproto.PipelineDescription{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &secret}}, Secrets: []nodeproto.SecretDeclaration{{Name: "HEALTHY_TOKEN"}}}
-			broken := nodeproto.PipelineDescription{Name: "broken", Args: []nodeproto.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.PlanFailed, Message: "describe pipeline broken: missing deployment setting"}}
-			entries := []nodeproto.PipelineDescription{healthy, broken}
+			healthy := nodewire.PipelineDescription{Name: "build", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &secret}}, Secrets: []nodewire.SecretDeclaration{{Name: "HEALTHY_TOKEN"}}}
+			broken := nodewire.PipelineDescription{Name: "broken", Args: []nodewire.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.PlanFailed, Message: "describe pipeline broken: missing deployment setting"}}
+			entries := []nodewire.PipelineDescription{healthy, broken}
 			if reversed {
 				entries[0], entries[1] = entries[1], entries[0]
 			}
 			var logs []string
 			var failurePhase string
-			p.Log = func(_ context.Context, log nodeproto.FrameLog) error { logs = append(logs, log.Message); return nil }
+			p.Log = func(_ context.Context, log nodewire.FrameLog) error { logs = append(logs, log.Message); return nil }
 			start := p.Start
-			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, in, log)
 				proc := process.(*executorProcess)
 				answer := proc.answer
-				proc.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
-					if req.Op == nodeproto.OpDescribe || req.Op == nodeproto.OpPlan {
-						if err := log(ctx, nodeproto.FrameLog{Message: unclassified}); err != nil {
+				proc.answer = func(ctx context.Context, req nodewire.Request) (any, error) {
+					if req.Op == nodewire.OpDescribe || req.Op == nodewire.OpPlan {
+						if err := log(ctx, nodewire.FrameLog{Message: unclassified}); err != nil {
 							return nil, err
 						}
 					}
-					if req.Op == nodeproto.OpPlan && failurePhase == "plan" {
+					if req.Op == nodewire.OpPlan && failurePhase == "plan" {
 						return nil, errors.New(unclassified)
 					}
-					if req.Op == nodeproto.OpDescribe {
-						return nodeproto.DescribeDoc{Pipelines: entries}, nil
+					if req.Op == nodewire.OpDescribe {
+						return nodewire.DescribeDoc{Pipelines: entries}, nil
 					}
 					return answer(ctx, req)
 				}
@@ -106,7 +106,7 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 					t.Fatalf("healthy pipeline lost its complete declarations: %+v: %v", prepared, err)
 				}
 				raw, err := prepared.Plan(t.Context())
-				var plan nodeproto.PlanDoc
+				var plan nodewire.PlanDoc
 				if err != nil || json.Unmarshal(raw, &plan) != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "job" {
 					t.Fatalf("healthy pipeline did not plan: %s: %v", raw, err)
 				}
@@ -165,20 +165,20 @@ func TestWithheldPlanningOutputExplainsIncompleteDiscovery(t *testing.T) {
 			p, input, fixture, _ := sdkPlanningFixture(t)
 			input.Run.Pipeline = "build"
 			var logs []string
-			p.Log = func(_ context.Context, log nodeproto.FrameLog) error { logs = append(logs, log.Message); return nil }
+			p.Log = func(_ context.Context, log nodewire.FrameLog) error { logs = append(logs, log.Message); return nil }
 			start := p.Start
-			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 				process, err := start(ctx, in, log)
 				proc := process.(*executorProcess)
 				answer := proc.answer
-				proc.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
-					if req.Op == nodeproto.OpDescribe {
-						if err := log(ctx, nodeproto.FrameLog{Message: private}); err != nil {
+				proc.answer = func(ctx context.Context, req nodewire.Request) (any, error) {
+					if req.Op == nodewire.OpDescribe {
+						if err := log(ctx, nodewire.FrameLog{Message: private}); err != nil {
 							return nil, err
 						}
-						return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-							{Name: "build", Args: []nodeproto.ArgumentDescription{}},
-							{Name: "release", Args: []nodeproto.ArgumentDescription{}, Error: &apierr.Error{Code: tc.code, Message: private}},
+						return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+							{Name: "build", Args: []nodewire.ArgumentDescription{}},
+							{Name: "release", Args: []nodewire.ArgumentDescription{}, Error: &apierr.Error{Code: tc.code, Message: private}},
 						}}, nil
 					}
 					return answer(ctx, req)

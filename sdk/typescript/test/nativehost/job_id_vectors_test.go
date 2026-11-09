@@ -1,5 +1,7 @@
 package nativehost_test
 
+import nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+
 import (
 	"context"
 	"encoding/json"
@@ -10,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 type jobIDVectors struct {
@@ -81,9 +83,9 @@ func TestJobIDVectorsTypeScript(t *testing.T) {
 	checkJobIDVectors(t, func(t *testing.T, id string) json.RawMessage {
 		h := startSDKAt(t, node, root, "job-ids.mjs")
 		var hello json.RawMessage
-		h.call(nodeproto.Request{ID: "hello", Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, &hello)
+		h.call(nodewire.Request{ID: "hello", Op: nodewire.OpHello, Protocol: nodewire.Version, Engine: &nodewire.EngineIdentity{Version: "fixture"}, Runner: &nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, &hello)
 		var plan json.RawMessage
-		h.call(nodeproto.Request{ID: "plan", Op: nodeproto.OpPlan, Pipeline: "job-ids", Args: map[string]string{"id": id}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: "job-ids"}}, &plan)
+		h.call(nodewire.Request{ID: "plan", Op: nodewire.OpPlan, Pipeline: "job-ids", Args: map[string]string{"id": id}, Run: &nodewire.RunContext{RunID: "r", Pipeline: "job-ids"}}, &plan)
 		h.finish()
 		return plan
 	})

@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	strictjson "sigs.k8s.io/json"
 )
@@ -224,11 +224,8 @@ func (r Resolved) verifyInstalledEngine(ctx context.Context) error {
 		}
 		return err
 	}
-	version, err := VersionForPin(r.Identity.Pin)
-	if err != nil {
-		return err
-	}
-	if version != r.Identity.Version || !validDigest(r.Identity.ManifestDigest) || !validDigest(r.AssetDigest) || !filepath.IsAbs(r.Executable) || r.Target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
+	version := r.Identity.Version
+	if r.Identity != r.verifiedIdentity || !releaseVersion(version) || !validDigest(r.Identity.ManifestDigest) || !validDigest(r.AssetDigest) || !filepath.IsAbs(r.Executable) || r.Target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		return integrity(errors.New("SDK installation requires this machine's exact verified Sparkwing engine"))
 	}
 	release, err := readCachedRelease(version, r.Target, r.Executable, r.trustedKeys)

@@ -5,11 +5,10 @@ package settings
 import (
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // Source preserves the origin needed to explain a refusal without leaking values.
@@ -84,7 +83,7 @@ type OperatorValues struct {
 	MaxMemoryBytes            *int64
 	MaxPriority               *int
 	AllowedAdmissionClasses   []string
-	AllowedSources            []nodeproto.SourceSpec
+	AllowedSources            []nodewire.SourceSpec
 	MaxClaimWait              *time.Duration
 	MaxConcurrentRunners      *int
 	MaxGlobalRunners          *int
@@ -163,14 +162,14 @@ type Error struct {
 type PlanInputs struct {
 	Request      runspec.SealedRequest
 	Declarations runspec.CheckoutDeclarations
-	Plan         nodeproto.PlanDoc
+	Plan         nodewire.PlanDoc
 	Context      Context
 }
 
 // ExpansionInputs prevents generated jobs from consulting new host preferences.
 type ExpansionInputs struct {
 	Spec    runspec.Spec
-	Plan    nodeproto.PlanDoc
+	Plan    nodewire.PlanDoc
 	Context Context
 }
 

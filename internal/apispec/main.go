@@ -1,6 +1,8 @@
 // Command apispec generates the controller policy inventory and shared JSON shapes.
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"fmt"
@@ -13,7 +15,6 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -111,7 +112,7 @@ func operationDocument(builder *schemaBuilder, route capability.RoutePolicy, pat
 	if route.Retry == capability.RetryIdempotencyKey {
 		params = append(params, schema{"name": "Idempotency-Key", "in": "header", "schema": schema{"type": "string"}, "description": "Retain one key and the exact body when replaying a request."})
 	}
-	responses := schema{"default": schema{"description": "Canonical API failure.", "content": jsonContent(builder.value(reflect.TypeFor[apierr.Envelope]()))}}
+	responses := schema{"default": schema{"description": "Canonical API failure.", "content": jsonContent(builder.value(reflect.TypeFor[hosterr.Envelope]()))}}
 	if known {
 		op["summary"] = body.summary
 		if body.request != nil {
@@ -149,7 +150,7 @@ func operationDocument(builder *schemaBuilder, route capability.RoutePolicy, pat
 
 func errorDefinitions() []schema {
 	result := []schema{}
-	for _, code := range apierr.Codes {
+	for _, code := range hosterr.Codes {
 		result = append(result, schema{"code": code.Code, "http_status": code.HTTPStatus, "purpose": code.Purpose})
 	}
 	return result

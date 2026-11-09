@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
@@ -28,8 +28,8 @@ func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					f := newStoreRecoveryFixtureSetup(t, true, dialect.target(t), string(acceptanceTeam), highTrust, func(doc *nodeproto.PlanDoc) {
-						doc.Jobs[0].Memo = &nodeproto.MemoSpec{}
+					f := newStoreRecoveryFixtureSetup(t, true, dialect.target(t), string(acceptanceTeam), highTrust, func(doc *nodewire.PlanDoc) {
+						doc.Jobs[0].Memo = &nodewire.MemoSpec{}
 						doc.Jobs[0].Closures.MemoKey = "memo"
 					})
 					row, err := f.tenant.ReadNode(t.Context(), f.ref)

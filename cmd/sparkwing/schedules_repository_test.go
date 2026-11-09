@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -11,11 +13,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const scheduleProject = `pipelines:
@@ -249,7 +252,7 @@ func TestLocalScheduleBindingsRefuseBeforeControllerOrMutationEffects(t *testing
 				err = runScheduleCommandArgs(t.Context(), args, &out, f.command)
 			}
 			var refusal *apierr.Error
-			if !errors.As(err, &refusal) || refusal.Code != apierr.PolicyMissing || out.Len() != 0 {
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.PolicyMissing || out.Len() != 0 {
 				t.Fatalf("missing binding: %v %s", err, out.String())
 			}
 			for _, call := range f.calls {
@@ -372,7 +375,7 @@ func TestScheduleUninstallUsesManagerAndRemovesLastNativeTimer(t *testing.T) {
 func gitInRepo(t *testing.T, root string, args ...string) {
 	t.Helper()
 	cmd := testgit.Command("git", append([]string{"-C", root}, args...)...)
-	cmd.Env = append(testgit.Env(os.Environ()), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	cmd.Env = append(gitcontrol.Env(os.Environ()), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
 	}

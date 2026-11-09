@@ -1,16 +1,19 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type expansionAcceptance struct {
@@ -20,7 +23,7 @@ type expansionAcceptance struct {
 	bodyHash      string
 	body, failure []byte
 	registration  []byte
-	plan          nodeproto.PlanDoc
+	plan          nodewire.PlanDoc
 }
 
 func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, snapshot RunSnapshot) (expansionAcceptance, error) {
@@ -46,7 +49,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		if existing.Source != request.Source {
 			continue
 		}
-		var plan nodeproto.PlanDoc
+		var plan nodewire.PlanDoc
 		if err := json.Unmarshal(existing.Body, &plan); err != nil {
 			return result, err
 		}
@@ -68,7 +71,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		return result, authorityError(apierr.PlanInvalid, err.Error())
 	}
 	if len(request.Registration.Values) > 0 && !slices.Equal(request.Registration.Values, registration.Values) {
-		return result, authorityError(apierr.SpecDrift, "expansion secret registration differs from declarations")
+		return result, authorityError(hosterr.SpecDrift, "expansion secret registration differs from declarations")
 	}
 	for _, value := range registration.Values {
 		if err := secrets.Register(value); err != nil {
@@ -79,7 +82,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	if err != nil {
 		return result, err
 	}
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := decodeScheduleDeclaration(snapshot.Run.Plan, &plan); err != nil {
 		return result, err
 	}
@@ -88,7 +91,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		if priorJobs[string(node.Ref.NodeID)] {
 			continue
 		}
-		var job nodeproto.JobSpec
+		var job nodewire.JobSpec
 		if err := json.Unmarshal(node.Spec, &job); err != nil {
 			return result, err
 		}
@@ -102,7 +105,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		return result, authorityError(apierr.PlanInvalid, "expansion requires an explicit jobs array")
 	}
 	result.body, err = json.Marshal(struct {
-		Jobs []nodeproto.JobSpec `json:"jobs"`
+		Jobs []nodewire.JobSpec `json:"jobs"`
 	}{result.plan.Jobs})
 	if err != nil {
 		return result, err
@@ -120,7 +123,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	return result, err
 }
 
-func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]runstate.NodeRow, error) {
+func acceptedExpansionNodes(snapshot RunSnapshot, plan nodewire.PlanDoc) ([]runstate.NodeRow, error) {
 	var result []runstate.NodeRow
 	for _, job := range plan.Jobs {
 		index := slices.IndexFunc(snapshot.Nodes, func(node runstate.NodeRow) bool { return node.Ref.NodeID == runspec.NodeID(job.ID) })
@@ -200,14 +203,14 @@ func checkExpansionSecretPoolsTx(ctx context.Context, tx *storeTx, team Team, sp
 			continue
 		}
 		if spec.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
-			return authorityError(apierr.Forbidden, "restricted secret requires an authorized pool")
+			return authorityError(hosterr.Forbidden, "restricted secret requires an authorized pool")
 		}
 		allowed, _, err := runPoolsTx(ctx, tx, team, spec.Request.Provenance)
 		if err != nil {
 			return err
 		}
 		if !slices.Contains(allowed, pool) {
-			return authorityError(apierr.Forbidden, "restricted secret requires an authorized pool")
+			return authorityError(hosterr.Forbidden, "restricted secret requires an authorized pool")
 		}
 		for _, job := range jobs {
 			if !slices.Contains(job.Requires.Value, "pool="+pool) {

@@ -1,9 +1,10 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -11,7 +12,7 @@ import (
 func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, team Team) (ComputeLimits, bool, error) {
 	tx, ok := resolver.(*storeTx)
 	if !ok {
-		return ComputeLimits{}, false, authorityError(apierr.Unavailable, "intake settings require the admission transaction")
+		return ComputeLimits{}, false, authorityError(hosterr.Unavailable, "intake settings require the admission transaction")
 	}
 	guards, err := computeLimitsTx(ctx, tx)
 	if err != nil {
@@ -28,7 +29,7 @@ func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, 
 func ChildAdmissionKey(ctx context.Context, resolver capability.AuthorityResolver, team Team, parent string) (string, error) {
 	tx, ok := resolver.(*storeTx)
 	if !ok {
-		return "", authorityError(apierr.Unavailable, "child root requires the admission transaction")
+		return "", authorityError(hosterr.Unavailable, "child root requires the admission transaction")
 	}
 	run, err := readRunTx(ctx, tx, team, parent)
 	return run.admission.AdmissionKey, err
@@ -37,7 +38,7 @@ func ChildAdmissionKey(ctx context.Context, resolver capability.AuthorityResolve
 func IntakeQueueDepth(ctx context.Context, resolver capability.AuthorityResolver, team Team) (int, error) {
 	tx, ok := resolver.(*storeTx)
 	if !ok {
-		return 0, authorityError(apierr.Unavailable, "queue depth requires the admission transaction")
+		return 0, authorityError(hosterr.Unavailable, "queue depth requires the admission transaction")
 	}
 	var depth int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM triggers WHERE team=? AND status=?`, team, triggerStatusPending).Scan(&depth)

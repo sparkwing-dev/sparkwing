@@ -22,7 +22,7 @@ func writeSparkwingPin(t *testing.T, root, pin string) {
 	if err := os.MkdirAll(sw, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "module example.com/pipes\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing " + pin + "\n"
+	body := "module example.com/pipes\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing " + pin + "\n"
 	if err := os.WriteFile(filepath.Join(sw, "go.mod"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

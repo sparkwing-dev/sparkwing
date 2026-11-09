@@ -6,12 +6,12 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Plan accepts a controller-owned run's plan under its planning lease and leaves scheduling to the controller.
@@ -89,7 +89,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 			break
 		}
 	}
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	if json.Unmarshal(row.Spec, &job) != nil {
 		return errors.New("evaluation requires accepted declaration")
 	}
@@ -147,7 +147,7 @@ func (h *OwnerHost) commitExpansion(ctx context.Context, row runstate.NodeRow, a
 		return err
 	}
 	if h.Masks != nil && failure == nil {
-		var plan nodeproto.PlanDoc
+		var plan nodewire.PlanDoc
 		if err := json.Unmarshal(body, &plan); err != nil {
 			return err
 		}

@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -20,12 +22,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 const featureVersion = "commit-feature-e2e"
@@ -50,7 +52,7 @@ func TestFeatureE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
+	revision := testgit.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
 	if output, err := revision.Output(); err == nil {
 		t.Logf("controller/CLI source revision=%s", strings.TrimSpace(string(output)))
 	}
@@ -60,7 +62,7 @@ func TestFeatureE2E(t *testing.T) {
 	}
 	build := exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-ldflags", "-X=main.Version="+featureVersion, "-o", bin, "./cmd/sparkwing-controller")
 	build.Dir = root
-	build.Env = append(os.Environ(), "GOWORK=off", "GOMAXPROCS=2")
+	build.Env = append(os.Environ(), "GOWORK=auto", "GOMAXPROCS=2")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build controller: %v\n%s", err, output)
 	}
@@ -69,7 +71,7 @@ func TestFeatureE2E(t *testing.T) {
 		cli += ".exe"
 	}
 	build = exec.CommandContext(t.Context(), "go", "build", "-p", "1", "-o", cli, "./cmd/sparkwing")
-	build.Dir, build.Env = root, append(os.Environ(), "GOWORK=off", "GOMAXPROCS=2")
+	build.Dir, build.Env = root, append(os.Environ(), "GOWORK=auto", "GOMAXPROCS=2")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
@@ -130,6 +132,10 @@ func newFeatureController(t *testing.T, bin, scenario string) *featureController
 	issuer := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: fmt.Sprintf("%x", sha256.Sum256([]byte("fixture-session:default:actor-one")))}
 	for name, dest := range map[string]*string{"fast": &f.fast, "slow": &f.slow} {
 		spec := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &issuer, Team: string(store.DefaultTeam), RegistrationID: "runner:default:" + name, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TriggersClaim, capability.NodesClaim}}
+		spec.AllowedLabels = []string{"lane=" + name, "mid-hold"}
+		if name == "slow" {
+			spec.AllowedLabels = append(spec.AllowedLabels, "lane=late", "keep-parent")
+		}
 		var issued capability.Issued
 		if reusable {
 			spec.Personal = false
@@ -247,7 +253,7 @@ func (f *featureController) await(what string, condition func() bool) {
 	}
 }
 
-func (f *featureController) plan(request runspec.Request, jobs []nodeproto.JobSpec) string {
+func (f *featureController) plan(request runspec.Request, jobs []nodewire.JobSpec) string {
 	f.t.Helper()
 	if request.Version == 0 {
 		request.Version = 1
@@ -275,7 +281,7 @@ func (f *featureController) plan(request runspec.Request, jobs []nodeproto.JobSp
 	return created.RunID
 }
 
-func (f *featureController) accept(run string, jobs []nodeproto.JobSpec) {
+func (f *featureController) accept(run string, jobs []nodewire.JobSpec) {
 	f.t.Helper()
 	var award *controllerwire.ClaimedUnit
 	f.await("planning award", func() bool {
@@ -290,9 +296,9 @@ func (f *featureController) accept(run string, jobs []nodeproto.JobSpec) {
 		f.t.Fatalf("planner took run %s, want %s", award.RunID, run)
 	}
 	for i := range jobs {
-		jobs[i].Steps = []nodeproto.StepSpec{{ID: "body"}}
+		jobs[i].Steps = []nodewire.StepSpec{{ID: "body"}}
 	}
-	doc := nodeproto.PlanDoc{Jobs: jobs}
+	doc := nodewire.PlanDoc{Jobs: jobs}
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		f.t.Fatal(err)

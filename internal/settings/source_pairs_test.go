@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type sourceProbe func(Inputs) (any, Origin, error)
@@ -99,7 +99,7 @@ func TestRunSettingSourcePairs(t *testing.T) {
 
 func setFixture(values *Values, field string, value any) {
 	if field == "Checkout" {
-		values.Checkout = sourceSetting(value.(nodeproto.SourceSpec), Origin{})
+		values.Checkout = sourceSetting(value.(nodewire.SourceSpec), Origin{})
 		return
 	}
 	names := map[string]string{"RunnerSelection": "Runner", "OwnerExecution": "OwnerExecutionTimeout", "JobTimeout": "Timeout"}
@@ -183,7 +183,7 @@ func setOperatorFixture(values *OperatorValues, field string, far bool) any {
 			}
 			target.Set(reflect.ValueOf(v))
 		case "AllowedSources":
-			target.Set(reflect.ValueOf([]nodeproto.SourceSpec{{FullHistory: ptr(false), Depth: ptr(int(n)), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}}))
+			target.Set(reflect.ValueOf([]nodewire.SourceSpec{{FullHistory: ptr(false), Depth: ptr(int(n)), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}}))
 		}
 	} else {
 		v := reflect.New(target.Type().Elem())

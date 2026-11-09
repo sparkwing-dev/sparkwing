@@ -1,16 +1,18 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"net/http"
 	"net/url"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type oauthProofKey struct{}
@@ -69,7 +71,7 @@ func (s *Server) verifyOAuthCallback(r *http.Request) error {
 		if len(values) != 1 || values[0] == "" || len(query["code"]) != 0 {
 			return invalidEngineBody("invalid sign-in callback")
 		}
-		return reasonedRefusal(apierr.Unauthenticated, refusedCancelled, "sign-in was not completed")
+		return reasonedRefusal(hosterr.Unauthenticated, refusedCancelled, "sign-in was not completed")
 	}
 	if len(query["code"]) != 1 || query.Get("code") == "" {
 		return invalidEngineBody("sign-in code is required")
@@ -95,10 +97,10 @@ func (s *Server) verifyOAuthCallback(r *http.Request) error {
 
 func oauthFlowError(err error) error {
 	if errors.Is(err, store.ErrNotMember) {
-		return apierr.Authorization(apierr.ReasonNoTeam, "account has no active team membership")
+		return hosterr.Authorization(hosterr.ReasonNoTeam, "account has no active team membership")
 	}
 	if refused, ok := refusalOf(err); ok {
-		codes := map[int]apierr.Code{400: apierr.BadRequest, 401: apierr.Unauthenticated, 403: apierr.Forbidden, 404: apierr.NotFound, 409: apierr.Conflict}
+		codes := map[int]apierr.Code{400: apierr.BadRequest, 401: hosterr.Unauthenticated, 403: hosterr.Forbidden, 404: apierr.NotFound, 409: apierr.Conflict}
 		if code, ok := codes[refused.status]; ok {
 			failure := &apierr.Error{Code: code, Message: refused.message}
 			if refused.code != "" {
@@ -107,5 +109,5 @@ func oauthFlowError(err error) error {
 			return failure
 		}
 	}
-	return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "sign-in service unavailable; start again"}, err)
+	return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "sign-in service unavailable; start again"}, err)
 }

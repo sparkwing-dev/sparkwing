@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -14,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: these cells exercise the HTTP authorization boundary with committed-fact fakes.
@@ -63,7 +65,7 @@ func (b *credentialBoundary) ReadAuthentication(_ context.Context, lookup capabi
 		return b.snapshot, nil
 	}
 	if lookup.Digest != b.snapshot.Authorities[0].Principal.Capability.Digest {
-		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown credential"}
+		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "unknown credential"}
 	}
 	return b.snapshot, nil
 }
@@ -97,7 +99,7 @@ func (b *credentialBoundary) router(t *testing.T) http.Handler {
 			},
 			Handle: func(w http.ResponseWriter, _ *http.Request, auth capability.Authorized) error {
 				if b.race {
-					return &apierr.Error{Code: apierr.LockHeld, Message: "claim changed during transaction"}
+					return &apierr.Error{Code: hosterr.LockHeld, Message: "claim changed during transaction"}
 				}
 				if auth.Binding.Generation != 4 {
 					t.Fatal("request fence replaced capability fence")
@@ -139,14 +141,14 @@ func (b *credentialBoundary) request(t *testing.T, path, body string, want int, 
 	if b.handled != before {
 		t.Fatal("refused cell reached handler")
 	}
-	var envelope apierr.Envelope
+	var envelope hosterr.Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
 	if envelope.Error == nil || envelope.Error.Code != code {
 		t.Fatalf("response = %s, want %s", w.Body.String(), code)
 	}
-	if code == apierr.Forbidden && envelope.Error.Details["reason"] == nil {
+	if code == hosterr.Forbidden && envelope.Error.Details["reason"] == nil {
 		t.Fatal("forbidden response omitted reason")
 	}
 }
@@ -160,24 +162,24 @@ func TestCredentialHTTPAuthenticationBoundary(t *testing.T) {
 		code   apierr.Code
 	}{
 		{"live", func(*credentialBoundary) {}, 204, ""},
-		{"absent", func(b *credentialBoundary) { b.raw = "" }, 401, apierr.Unauthenticated},
+		{"absent", func(b *credentialBoundary) { b.raw = "" }, 401, hosterr.Unauthenticated},
 		{"unknown", func(b *credentialBoundary) {
-			b.readErr = &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown"}
-		}, 401, apierr.Unauthenticated},
+			b.readErr = &apierr.Error{Code: hosterr.Unauthenticated, Message: "unknown"}
+		}, 401, hosterr.Unauthenticated},
 		{"expired", func(b *credentialBoundary) {
 			b.snapshot.Authorities[0].Principal.Capability.ExpiresAt = &b.snapshot.Now
-		}, 401, apierr.Unauthenticated},
+		}, 401, hosterr.Unauthenticated},
 		{"revoked parent", func(b *credentialBoundary) {
 			b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
-		}, 401, apierr.Unauthenticated},
+		}, 401, hosterr.Unauthenticated},
 		{"membership removed", func(b *credentialBoundary) {
 			b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-		}, 401, apierr.Unauthenticated},
-		{"missing grant", func(b *credentialBoundary) { b.snapshot.Authorities[0].Principal.Capability.Grants = nil }, 403, apierr.Forbidden},
-		{"other team", func(b *credentialBoundary) { b.snapshot.Authorities[0].Principal.Capability.Team = "other" }, 403, apierr.Forbidden},
-		{"ended claim", func(b *credentialBoundary) { b.snapshot.Binding.FinishedAt = &b.snapshot.Now }, 401, apierr.Unauthenticated},
-		{"stale generation", func(b *credentialBoundary) { b.snapshot.Binding.Current.Generation++ }, 401, apierr.Unauthenticated},
-		{"transaction fence race", func(b *credentialBoundary) { b.race = true }, 409, apierr.LockHeld},
+		}, 401, hosterr.Unauthenticated},
+		{"missing grant", func(b *credentialBoundary) { b.snapshot.Authorities[0].Principal.Capability.Grants = nil }, 403, hosterr.Forbidden},
+		{"other team", func(b *credentialBoundary) { b.snapshot.Authorities[0].Principal.Capability.Team = "other" }, 403, hosterr.Forbidden},
+		{"ended claim", func(b *credentialBoundary) { b.snapshot.Binding.FinishedAt = &b.snapshot.Now }, 401, hosterr.Unauthenticated},
+		{"stale generation", func(b *credentialBoundary) { b.snapshot.Binding.Current.Generation++ }, 401, hosterr.Unauthenticated},
+		{"transaction fence race", func(b *credentialBoundary) { b.race = true }, 409, hosterr.LockHeld},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := newCredentialBoundary()
@@ -186,7 +188,7 @@ func TestCredentialHTTPAuthenticationBoundary(t *testing.T) {
 		})
 	}
 	t.Run("wrong path job", func(t *testing.T) {
-		newCredentialBoundary().request(t, "/api/v1/runs/run/jobs/sibling/transition", `{"status":"success"}`, 403, apierr.Forbidden)
+		newCredentialBoundary().request(t, "/api/v1/runs/run/jobs/sibling/transition", `{"status":"success"}`, 403, hosterr.Forbidden)
 	})
 	t.Run("wrong audience", func(t *testing.T) {
 		b := newCredentialBoundary()
@@ -194,7 +196,7 @@ func TestCredentialHTTPAuthenticationBoundary(t *testing.T) {
 		b.snapshot.Authorities[0].Principal.Capability.Digest = sha256.Sum256([]byte(b.raw))
 		b.snapshot.Authorities[0].Principal.Capability.Audience = capability.NodeHost
 		b.snapshot.Binding.ProcessAlive = true
-		b.request(t, path, `{"status":"success"}`, 403, apierr.Forbidden)
+		b.request(t, path, `{"status":"success"}`, 403, hosterr.Forbidden)
 	})
 }
 
@@ -208,16 +210,16 @@ func TestCredentialHTTPTerminalGrace(t *testing.T) {
 	b.snapshot.Binding.LeaseExpiresAt = finish
 	b.snapshot.Binding.Result = &capability.RecordedResult{Actor: b.snapshot.Authorities[0].Principal.Authority, Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/transition", RunID: "run", NodeID: "job", Generation: 4, Attempt: 2, Digest: hex.EncodeToString(digest[:])}
 	b.request(t, path, body, 204, "")
-	b.request(t, path, `{"status":"failed"}`, 401, apierr.Unauthenticated)
+	b.request(t, path, `{"status":"failed"}`, 401, hosterr.Unauthenticated)
 	b.request(t, "/api/v1/runs/run/jobs/job/log-manifest", `{}`, 204, "")
 	b.snapshot.Now = finish.Add(limits.LogSealGrace)
-	b.request(t, "/api/v1/runs/run/jobs/job/log-manifest", `{}`, 401, apierr.Unauthenticated)
+	b.request(t, "/api/v1/runs/run/jobs/job/log-manifest", `{}`, 401, hosterr.Unauthenticated)
 }
 
 func TestCredentialHTTPCancelDrainsReporting(t *testing.T) {
 	b := newCredentialBoundary()
 	b.snapshot.Binding.RunCancelled = true
-	b.request(t, "/api/v1/runs/run/source-credential", `{}`, 401, apierr.Unauthenticated)
+	b.request(t, "/api/v1/runs/run/source-credential", `{}`, 401, hosterr.Unauthenticated)
 	b.request(t, "/api/v1/runs/run/jobs/job/transition", `{"status":"cancelled"}`, 204, "")
 	b.request(t, "/api/v1/runs/run/jobs/job/log-manifest", `{}`, 204, "")
 }

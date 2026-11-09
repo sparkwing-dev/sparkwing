@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,12 +15,12 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
@@ -115,7 +117,7 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	assertEngineError(t, w, 401, apierr.Unauthenticated)
+	assertEngineError(t, w, 401, hosterr.Unauthenticated)
 	if strings.Contains(f.logs.String(), root.Raw) || strings.Contains(f.logs.String(), raw) || strings.Contains(f.logs.String(), session.CSRFToken) {
 		t.Fatal("credential entered audit")
 	}
@@ -148,7 +150,7 @@ func TestLoginHTTPProofProperty(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		after, renewed := f.state(t)
-		var result apierr.Envelope
+		var result hosterr.Envelope
 		return (w.Code == 400 || w.Code == 401 || w.Code == 403 || w.Code == 429) && before == after && expiry == renewed && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && len(w.Result().Cookies()) == 0 && !strings.Contains(w.Body.String(), root.Raw)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 28}); err != nil {
@@ -177,8 +179,8 @@ func TestLoginHTTPRefusesDataScopeProperty(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, loginRequest(root.Raw, "browser-proof", "/"))
 		after, renewed := f.state(t)
-		var result apierr.Envelope
-		ok := w.Code == 403 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && result.Error.Code == apierr.Forbidden && before == after && expiry == renewed && len(w.Result().Cookies()) == 0
+		var result hosterr.Envelope
+		ok := w.Code == 403 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && result.Error.Code == hosterr.Forbidden && before == after && expiry == renewed && len(w.Result().Cookies()) == 0
 		if !ok {
 			t.Logf("scoped sign-in: status=%d body=%s sessions=%d->%d", w.Code, w.Body.String(), before, after)
 		}
@@ -225,7 +227,7 @@ func TestLoginHTTPPageAndMethods(t *testing.T) {
 	for _, method := range []string{"HEAD", "PUT", "DELETE"} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(method, "https://controller.test/login", nil))
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://controller.test/sparkwing-runtime.js", nil))
@@ -240,7 +242,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 			f := newSessionFlow(t)
 			root := loginCapability(t, f)
 			r := loginRequest(root.Raw, "browser-proof", "/")
-			code := apierr.Unauthenticated
+			code := hosterr.Unauthenticated
 			switch state {
 			case "unknown":
 				r = loginRequest("swk_"+strings.Repeat("a", 43), "browser-proof", "/")
@@ -249,7 +251,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				r, code = loginRequest(raw, "browser-proof", "/"), apierr.Forbidden
+				r, code = loginRequest(raw, "browser-proof", "/"), hosterr.Forbidden
 			case "machine":
 				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
 					t.Fatal(err)
@@ -261,7 +263,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				r, code = loginRequest(issued.Raw, "browser-proof", "/"), apierr.Forbidden
+				r, code = loginRequest(issued.Raw, "browser-proof", "/"), hosterr.Forbidden
 			case "session presentation":
 				r = loginRequest(f.raw, "browser-proof", "/")
 			case "membership":
@@ -282,13 +284,13 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 				if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `DROP TABLE capabilities`); err != nil {
 					t.Fatal(err)
 				}
-				code = apierr.Unavailable
+				code = hosterr.Unavailable
 			}
 			before, expiry := f.state(t)
 			w := httptest.NewRecorder()
 			f.server.WithDashboard(controller.Dashboard{}).Handler().ServeHTTP(w, r)
 			after, renewed := f.state(t)
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			if before != after || expiry != renewed || len(w.Result().Cookies()) != 0 || strings.Contains(w.Body.String(), root.Raw) || strings.Contains(f.logs.String(), root.Raw) {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}

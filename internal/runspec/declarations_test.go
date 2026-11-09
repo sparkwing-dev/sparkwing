@@ -7,18 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestDeclarationAcceptsShortDefaults(t *testing.T) {
 	for _, value := range []string{"a", "ab***cd", ""} {
 		t.Run(value, func(t *testing.T) {
 			masker := secrets.NewMasker()
-			gate, err := NewDeclarationGate(nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-				{Name: "selected", Args: []nodeproto.ArgumentDescription{}},
-				{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &value}}},
+			gate, err := NewDeclarationGate(nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+				{Name: "selected", Args: []nodewire.ArgumentDescription{}},
+				{Name: "other", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &value}}},
 			}}, masker)
 			if err != nil {
 				t.Fatal(err)
@@ -36,9 +36,9 @@ func TestDeclarationAcceptsShortDefaults(t *testing.T) {
 
 func TestDeclarationProjectionRetainsValidSiblingDefaults(t *testing.T) {
 	value := "private-sibling"
-	gate, err := NewDeclarationGate(nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-		{Name: "selected", Args: []nodeproto.ArgumentDescription{}},
-		{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &value}}},
+	gate, err := NewDeclarationGate(nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+		{Name: "selected", Args: []nodewire.ArgumentDescription{}},
+		{Name: "other", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &value}}},
 	}}, secrets.NewMasker())
 	if err != nil {
 		t.Fatal(err)
@@ -64,9 +64,9 @@ func TestDeclarationProjectionRetainsValidSiblingDefaults(t *testing.T) {
 func TestDeclarationPresentationHidesUnselectedSecretDefaults(t *testing.T) {
 	for _, value := range []string{"abc", "prefix-***-suffix"} {
 		t.Run(value, func(t *testing.T) {
-			doc := nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-				{Name: "selected", Args: []nodeproto.ArgumentDescription{}},
-				{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &value}}},
+			doc := nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+				{Name: "selected", Args: []nodewire.ArgumentDescription{}},
+				{Name: "other", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &value}}},
 			}}
 			gate, err := NewDeclarationGate(doc, secrets.NewMasker())
 			if err != nil {
@@ -89,9 +89,9 @@ func TestDeclarationPresentationHidesUnselectedSecretDefaults(t *testing.T) {
 func TestUnselectedListDefaultRegistersEveryValidCandidate(t *testing.T) {
 	value := "x, legitimate-private-token ,second-private-token"
 	masker := secrets.NewMasker()
-	gate, err := NewDeclarationGate(nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-		{Name: "selected", Args: []nodeproto.ArgumentDescription{}},
-		{Name: "other", Args: []nodeproto.ArgumentDescription{{Name: "tokens", Type: "[]string", Secret: true, Default: &value}}},
+	gate, err := NewDeclarationGate(nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+		{Name: "selected", Args: []nodewire.ArgumentDescription{}},
+		{Name: "other", Args: []nodewire.ArgumentDescription{{Name: "tokens", Type: "[]string", Secret: true, Default: &value}}},
 	}}, masker)
 	if err != nil {
 		t.Fatal(err)
@@ -123,8 +123,8 @@ func TestUnselectedListDefaultRegistersEveryValidCandidate(t *testing.T) {
 
 func TestIncompleteDiscoveryWithholdsEveryPresentationField(t *testing.T) {
 	private := "undiscovered-private-value"
-	gate, err := NewDeclarationGate(nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
-		{Name: private, Args: []nodeproto.ArgumentDescription{{Name: private, Short: private, JobID: private, Type: private, Description: private, Default: &private, Enum: []string{private}}}, Short: private, Help: private, Examples: []nodeproto.UsageExample{{Command: private, Comment: private}}},
+	gate, err := NewDeclarationGate(nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+		{Name: private, Args: []nodewire.ArgumentDescription{{Name: private, Short: private, JobID: private, Type: private, Description: private, Default: &private, Enum: []string{private}}}, Short: private, Help: private, Examples: []nodewire.UsageExample{{Command: private, Comment: private}}},
 		{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: private}},
 	}}, secrets.NewMasker())
 	if err != nil {
@@ -146,7 +146,7 @@ func TestEmptySecretArgumentIsNoValue(t *testing.T) {
 	for _, kind := range []string{"string", "[]string"} {
 		t.Run(kind, func(t *testing.T) {
 			defaultValue := "private-default"
-			resolved, err := RegisterArguments([]nodeproto.ArgumentDescription{{Name: "token", Type: kind, Secret: true, Default: &defaultValue}}, map[string]string{"token": ""}, nil, secrets.NewMasker())
+			resolved, err := RegisterArguments([]nodewire.ArgumentDescription{{Name: "token", Type: kind, Secret: true, Default: &defaultValue}}, map[string]string{"token": ""}, nil, secrets.NewMasker())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -160,11 +160,11 @@ func TestEmptySecretArgumentIsNoValue(t *testing.T) {
 func TestRiskRefusalNamesLabelsWhileDiscoveryIsIncomplete(t *testing.T) {
 	private := "undiscovered-private-value"
 	for _, complete := range []bool{false, true} {
-		pipelines := []nodeproto.PipelineDescription{{Name: "land", Args: []nodeproto.ArgumentDescription{}}}
+		pipelines := []nodewire.PipelineDescription{{Name: "land", Args: []nodewire.ArgumentDescription{}}}
 		if !complete {
-			pipelines = append(pipelines, nodeproto.PipelineDescription{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: private}})
+			pipelines = append(pipelines, nodewire.PipelineDescription{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: private}})
 		}
-		gate, err := NewDeclarationGate(nodeproto.DescribeDoc{Pipelines: pipelines}, secrets.NewMasker())
+		gate, err := NewDeclarationGate(nodewire.DescribeDoc{Pipelines: pipelines}, secrets.NewMasker())
 		if err != nil {
 			t.Fatal(err)
 		}

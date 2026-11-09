@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -15,12 +17,12 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type rootIssuer struct {
@@ -73,7 +75,7 @@ func TestRootProvisioningHTTPOrigin(t *testing.T) {
 			f := &rootIssuer{}
 			w := authorityHTTP(rootServer(b, f), b, "POST", path+"?team=foreign", body)
 			if !service && !session {
-				assertEngineError(t, w, http.StatusForbidden, apierr.Forbidden)
+				assertEngineError(t, w, http.StatusForbidden, hosterr.Forbidden)
 				if len(f.specs) != 0 {
 					t.Fatal("bearer reached enrollment issuer")
 				}
@@ -106,20 +108,20 @@ func TestRootProvisioningHTTPRefusals(t *testing.T) {
 		for _, fault := range []string{"absent", "expired", "revoked", "membership", "grant", "non-admin", "machine", "claim", "nodehost", "binding", "transaction", "private", "missing issuer"} {
 			b, path, body := rootFixture(service)
 			f := &rootIssuer{}
-			code, calls := apierr.Forbidden, 0
+			code, calls := hosterr.Forbidden, 0
 			p := &b.snapshot.Authorities[0].Principal
 			switch fault {
 			case "absent":
-				b.raw, code = "", apierr.Unauthenticated
+				b.raw, code = "", hosterr.Unauthenticated
 			case "expired":
-				p.Capability.ExpiresAt, code = &b.snapshot.Now, apierr.Unauthenticated
+				p.Capability.ExpiresAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 			case "revoked":
-				p.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+				p.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 			case "membership":
 				if service {
 					b = issuanceSession()
 				}
-				b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+				b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 			case "grant":
 				p.Capability.Grants = nil
 			case "non-admin":
@@ -127,7 +129,7 @@ func TestRootProvisioningHTTPRefusals(t *testing.T) {
 			case "machine":
 				p.Capability.Subject.Kind = capability.SubjectMachine
 				if !service {
-					code = apierr.Unauthenticated
+					code = hosterr.Unauthenticated
 				}
 			case "claim":
 				b = newCredentialBoundary()
@@ -139,23 +141,23 @@ func TestRootProvisioningHTTPRefusals(t *testing.T) {
 				p.Capability.Digest = sha256.Sum256([]byte(b.raw))
 				b.snapshot.Binding.ProcessAlive = true
 			case "binding":
-				b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "binding refused"}
+				b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "binding refused"}
 			case "transaction":
-				f.err, calls, code = &apierr.Error{Code: apierr.Unauthenticated, Message: "origin ended before commit"}, 1, apierr.Unauthenticated
+				f.err, calls, code = &apierr.Error{Code: hosterr.Unauthenticated, Message: "origin ended before commit"}, 1, hosterr.Unauthenticated
 			case "private":
-				f.err, calls, code = errors.New("private provider credential"), 1, apierr.Internal
+				f.err, calls, code = errors.New("private provider credential"), 1, hosterr.Internal
 			case "missing issuer":
-				code = apierr.PolicyMissing
+				code = hosterr.PolicyMissing
 			}
 			h := rootServer(b, f)
 			if fault == "missing issuer" {
 				h = controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).Handler()
 			}
 			w := authorityHTTP(h, b, "POST", path, body)
-			if w.Code != apierr.Status(code) {
+			if w.Code != hosterr.Status(code) {
 				t.Fatalf("service=%v fault=%s HTTP %d %s", service, fault, w.Code, w.Body.String())
 			}
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 			if len(f.specs) != calls || strings.Contains(w.Body.String(), "private") {
 				t.Fatalf("service=%v fault=%s calls=%d HTTP %d %s", service, fault, len(f.specs), w.Code, w.Body.String())
 			}
@@ -239,11 +241,11 @@ func TestRootProvisioningHTTPExpiryAndCSRF(t *testing.T) {
 		}
 		a := consoleAuthorization(b)
 		a.CheckCSRF = func(*http.Request, capability.Principal) error {
-			return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+			return &apierr.Error{Code: hosterr.Forbidden, Message: "invalid CSRF token"}
 		}
 		f = &rootIssuer{}
 		h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(a).WithCredentialIssuer(f).Handler()
-		assertEngineError(t, authorityHTTP(h, b, "POST", path, body), 403, apierr.Forbidden)
+		assertEngineError(t, authorityHTTP(h, b, "POST", path, body), 403, hosterr.Forbidden)
 		if len(f.specs) != 0 {
 			t.Fatal("CSRF refusal reached issuer")
 		}
@@ -258,9 +260,9 @@ func TestRootProvisioningHTTPEnrollmentConflicts(t *testing.T) {
 			w := authorityHTTP(rootServer(b, issuer), b, "POST", path, body)
 			code := apierr.Conflict
 			if errors.Is(err, store.ErrRunnerTokenLimit) {
-				code = apierr.QuotaExceeded
+				code = hosterr.QuotaExceeded
 			}
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 		}
 	}
 }
@@ -326,7 +328,7 @@ func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, f.request("POST", "/api/v1/runners", `{"name":"second","repos":["github.com/acme/*"]}`))
 		if status == 403 {
-			assertEngineError(t, w, 403, apierr.Forbidden)
+			assertEngineError(t, w, 403, hosterr.Forbidden)
 			var count int
 			if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("count=%d err=%v", count, err)
@@ -351,7 +353,7 @@ func TestRootProvisioningHTTPMethodsAndRetry(t *testing.T) {
 		}
 		f := &rootIssuer{}
 		for _, method := range []string{"HEAD", "PUT", "PATCH"} {
-			assertEngineError(t, authorityHTTP(rootServer(b, f), b, method, path, `{}`), 405, apierr.MethodNotAllowed)
+			assertEngineError(t, authorityHTTP(rootServer(b, f), b, method, path, `{}`), 405, hosterr.MethodNotAllowed)
 		}
 		if len(f.specs) != 0 {
 			t.Fatal("unsupported method reached issuer")

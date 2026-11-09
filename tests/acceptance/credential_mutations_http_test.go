@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -18,13 +20,13 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
@@ -274,16 +276,16 @@ func TestCredentialMutationsHTTPRefuseUnrelatedAuthorityBeforeStorage(t *testing
 			t.Run(route.method+route.path+"/"+identity, func(t *testing.T) {
 				b := authorityMember()
 				p := &b.snapshot.Authorities[0].Principal
-				code := apierr.Forbidden
+				code := hosterr.Forbidden
 				switch identity {
 				case "anonymous":
-					b.raw, code = "", apierr.Unauthenticated
+					b.raw, code = "", hosterr.Unauthenticated
 				case "revoked":
-					p.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "expired":
-					p.Capability.ExpiresAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					p.Capability.ExpiresAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "membership":
-					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, apierr.Unauthenticated
+					b.snapshot.Authorities[0].Principal.Capability.RevokedAt, code = &b.snapshot.Now, hosterr.Unauthenticated
 				case "read only":
 					p.Capability.Grants = []capability.Grant{capability.RunsRead}
 				case "machine":
@@ -298,10 +300,10 @@ func TestCredentialMutationsHTTPRefuseUnrelatedAuthorityBeforeStorage(t *testing
 						b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
 					}
 				case "binding":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "outside team"}
+					b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "outside team"}
 				}
 				w := authorityHTTP(mutationServer(t, nil, nil, b), b, route.method, route.path, route.body)
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				if w.Header().Get("Cache-Control") != "no-store" {
 					t.Fatal("credential refusal is cacheable")
 				}
@@ -320,7 +322,7 @@ func TestCredentialMutationsHTTPSessionsRequireCSRFBeforeStorage(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		mutationServer(t, nil, nil, b).ServeHTTP(w, r)
-		assertEngineError(t, w, 403, apierr.Forbidden)
+		assertEngineError(t, w, 403, hosterr.Forbidden)
 	}
 }
 
@@ -335,23 +337,23 @@ func TestCredentialMutationsHTTPTransactionBoundary(t *testing.T) {
 			t.Run(route.method+route.path+"/"+failure, func(t *testing.T) {
 				b := authorityMember()
 				f := &credentialMutationFake{Tenant: tenant}
-				code, writes := apierr.Internal, 1
+				code, writes := hosterr.Internal, 1
 				var resolveErr error
 				var writer controller.CredentialWriter = f
 				switch failure {
 				case "revoked":
-					code = apierr.Unauthenticated
+					code = hosterr.Unauthenticated
 					f.err = &apierr.Error{Code: code, Message: "authority revoked before commit"}
 				case "missing grant":
-					code = apierr.Forbidden
-					f.err = &apierr.Error{Code: code, Message: "membership changed before commit", Details: map[string]any{"reason": apierr.ReasonMissingGrant}}
+					code = hosterr.Forbidden
+					f.err = &apierr.Error{Code: code, Message: "membership changed before commit", Details: map[string]any{"reason": hosterr.ReasonMissingGrant}}
 				case "missing":
 					code, f.err = apierr.NotFound, store.ErrNotFound
 				case "quota":
 					if strings.Contains(route.path, "/git-credentials") {
 						code, f.err = apierr.Conflict, store.ErrGitCredentialLimit
 					} else {
-						code, f.err = apierr.PayloadTooLarge, store.ErrSecretLimit
+						code, f.err = hosterr.PayloadTooLarge, store.ErrSecretLimit
 					}
 				case "private":
 					f.err = errors.New("private credential diagnostic")
@@ -362,11 +364,11 @@ func TestCredentialMutationsHTTPTransactionBoundary(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					code, writes = apierr.PolicyMissing, 0
+					code, writes = hosterr.PolicyMissing, 0
 				case "nil":
-					writer, code, writes = nil, apierr.PolicyMissing, 0
+					writer, code, writes = nil, hosterr.PolicyMissing, 0
 				case "default":
-					writer, code, writes = nil, apierr.Unauthenticated, 0
+					writer, code, writes = nil, hosterr.Unauthenticated, 0
 				}
 				server := bindTenantPort[controller.CredentialWriter](mutationServerConfig(t, s, cipher, b), func(_ context.Context, team store.Team) (controller.CredentialWriter, error) {
 					if team != "team" {
@@ -380,7 +382,7 @@ func TestCredentialMutationsHTTPTransactionBoundary(t *testing.T) {
 					})
 				}
 				w := authorityHTTP(server.Handler(), b, route.method, route.path, route.body)
-				assertEngineError(t, w, apierr.Status(code), code)
+				assertEngineError(t, w, hosterr.Status(code), code)
 				if f.calls != writes {
 					t.Fatalf("transaction calls=%d want %d", f.calls, writes)
 				}
@@ -515,18 +517,18 @@ func TestCredentialMutationsHTTPEncryptionFailuresStoreNothing(t *testing.T) {
 		for _, failure := range []string{"missing", "unbound", "key refusal", "private"} {
 			b := authorityMember()
 			var cipher controller.Cipher
-			code := apierr.Unavailable
+			code := hosterr.Unavailable
 			switch failure {
 			case "unbound":
 				cipher = plainCipher{}
 			case "key refusal":
 				cipher, code = mutationSealFailure{secrets.ErrKeyRefused}, apierr.Conflict
 			case "private":
-				cipher, code = mutationSealFailure{errors.New("private credential cipher diagnostic")}, apierr.Internal
+				cipher, code = mutationSealFailure{errors.New("private credential cipher diagnostic")}, hosterr.Internal
 			}
 			request := credentialMutationRequests[route]
 			w := authorityHTTP(mutationServer(t, s, cipher, b), b, request.method, request.path, request.body)
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 		}
 	}
 	tenant, err := s.ForTeam(t.Context(), "team")

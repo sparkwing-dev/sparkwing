@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -8,15 +10,15 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec, retryAllowed bool) (result runstate.NodeResult, err error) {
+func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodewire.JobSpec, retryAllowed bool) (result runstate.NodeResult, err error) {
 	parent := ctx
 	ctx, cancel, err := h.deps.ChildContext(ctx, input.Execution.Timeout.Value, 0)
 	if err != nil {
@@ -75,7 +77,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		return h.failure(err), err
 	}
 	if !reflect.DeepEqual(resolved.Identity, spec.Resolved.Engine) {
-		err = executorError(apierr.SpecDrift, "engine resolution changed the sealed release")
+		err = executorError(hosterr.SpecDrift, "engine resolution changed the sealed release")
 		return h.failure(err), err
 	}
 	input.Engine = resolved
@@ -124,7 +126,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(readErr), readErr
 		}
 		if row.Ref != source || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeFailed {
-			err = executorError(apierr.SpecDrift, "recovery source is not a failed job")
+			err = executorError(hosterr.SpecDrift, "recovery source is not a failed job")
 			return h.failure(err), err
 		}
 		failure, readErr := h.deps.ReadFailure(ctx, source, int64(row.Generation))
@@ -132,7 +134,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(readErr), readErr
 		}
 		if failure == nil || failure.Job != job.OnFailureOf || failure.Error == nil {
-			err = executorError(apierr.SpecDrift, "recovery failure does not match its source")
+			err = executorError(hosterr.SpecDrift, "recovery failure does not match its source")
 			return h.failure(err), err
 		}
 		session.failure = failure
@@ -201,12 +203,12 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	return result, err
 }
 
-func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec, result runstate.NodeResult) error {
-	after := nodeproto.RunResult{Outcome: string(result.Outcome)}
+func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, input NodeInput, job nodewire.JobSpec, result runstate.NodeResult) error {
+	after := nodewire.RunResult{Outcome: string(result.Outcome)}
 	if result.Outcome == runstate.NodeFailed {
 		code := apierr.SDKError
-		if result.Reason == string(apierr.DeadlineExceeded) {
-			code = apierr.DeadlineExceeded
+		if result.Reason == string(hosterr.DeadlineExceeded) {
+			code = hosterr.DeadlineExceeded
 		}
 		after.Error = &apierr.Error{Code: code, Message: result.MaskedError}
 	}
@@ -231,7 +233,7 @@ func executorContains(values []string, value string) bool {
 	return false
 }
 
-func executorResultFailure(result nodeproto.RunResult) error {
+func executorResultFailure(result nodewire.RunResult) error {
 	if result.Outcome == "success" && result.Error == nil {
 		return nil
 	}
@@ -255,7 +257,7 @@ func (h *nodeExecutor) withholdOutput(ctx context.Context, input NodeInput) erro
 	attrs := map[string]any{}
 	if h.deps.Annotate == nil {
 		attrs["annotation_error"] = "annotation persistence is unavailable"
-	} else if err := h.deps.Annotate(ctx, input, nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Level: "warn", Message: outputWithheld}}); err != nil {
+	} else if err := h.deps.Annotate(ctx, input, nodewire.AnnotationRequest{Annotation: nodewire.Annotation{Level: "warn", Message: outputWithheld}}); err != nil {
 		attrs["annotation_error"] = err.Error()
 	}
 	return h.diagnostic(ctx, input, "warn", "output_withheld", "", outputWithheld, attrs)

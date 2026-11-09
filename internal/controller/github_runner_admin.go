@@ -1,16 +1,18 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"net/http"
 	"strconv"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // GitHubRunnerRegistry commits repository enrollment and root revocation with live authority checks.
@@ -123,9 +125,9 @@ func (s *Server) resolveGitHubRunnerIdentity(ctx context.Context, team string, r
 	case errors.Is(err, store.ErrInvalidInput):
 		return 0, invalidEngineBody("repository identity is invalid")
 	case errors.Is(err, store.ErrNotFound):
-		return 0, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "the team's GitHub App installation does not cover this repository")
+		return 0, hosterr.Authorization(hosterr.ReasonRepositoryUnauthorized, "the team's GitHub App installation does not cover this repository")
 	case err != nil:
-		return 0, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository coverage could not be verified"}, err)
+		return 0, errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "GitHub repository coverage could not be verified"}, err)
 	}
 	if request.RepositoryID != 0 && request.RepositoryID != repo.ID || request.RepositoryOwnerID != 0 && request.RepositoryOwnerID != repo.Owner.ID {
 		return 0, invalidEngineBody("repository identity differs from GitHub")

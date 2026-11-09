@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -7,11 +9,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type debugResumer struct {
@@ -51,7 +53,7 @@ func runDebugResume(ctx context.Context, inv clisurface.Invocation, out io.Write
 		defer func() { resultErr = errors.Join(resultErr, runtime.close()) }()
 	}
 	if runtime.control == nil || runtime.close == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "debug resume requires controller observation, release and cleanup bindings"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "debug resume requires controller observation, release and cleanup bindings"}
 	}
 	pause, err := runtime.control.ReadDebugPause(ctx, inv.Value("run"), inv.Value("job"))
 	if err != nil {

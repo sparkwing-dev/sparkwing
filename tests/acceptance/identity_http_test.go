@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/json"
@@ -12,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 )
@@ -107,7 +108,7 @@ func TestIdentityHTTPRejectsBootstrapAndEval(t *testing.T) {
 			b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *p.Capability.Binding.Expansion, ExpiresAt: expires}
 		}
 		w := discoveryRequest(identityServer(b), b, "GET", "/api/v1/auth/whoami")
-		assertEngineError(t, w, 403, apierr.Forbidden)
+		assertEngineError(t, w, 403, hosterr.Forbidden)
 	}
 }
 
@@ -120,7 +121,7 @@ func TestIdentityHTTPDoesNotTrustLocalHeaders(t *testing.T) {
 		r.Header.Set(header, "uid:1000")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		assertEngineError(t, w, 401, apierr.Unauthenticated)
+		assertEngineError(t, w, 401, hosterr.Unauthenticated)
 	}
 }
 
@@ -128,7 +129,7 @@ func TestIdentityHTTPRefusesInvalidCredentials(t *testing.T) {
 	for _, state := range []string{"absent", "malformed", "unknown", "revoked", "expired", "parent revoked", "membership removed", "wrong audience", "private backend error", "missing policy"} {
 		t.Run(state, func(t *testing.T) {
 			b := newCredentialBoundary()
-			code := apierr.Unauthenticated
+			code := hosterr.Unauthenticated
 			switch state {
 			case "absent":
 				b.raw = ""
@@ -149,11 +150,11 @@ func TestIdentityHTTPRefusesInvalidCredentials(t *testing.T) {
 				b.snapshot.Authorities[0].Principal.Capability.Digest = sha256.Sum256([]byte(b.raw))
 				b.snapshot.Authorities[0].Principal.Capability.Audience = capability.NodeHost
 				b.snapshot.Binding.ProcessAlive = true
-				code = apierr.Forbidden
+				code = hosterr.Forbidden
 			case "private backend error":
-				b.readErr, code = io.ErrUnexpectedEOF, apierr.Internal
+				b.readErr, code = io.ErrUnexpectedEOF, hosterr.Internal
 			case "missing policy":
-				code = apierr.PolicyMissing
+				code = hosterr.PolicyMissing
 			}
 			var h http.Handler = identityServer(b)
 			if state == "missing policy" {
@@ -165,7 +166,7 @@ func TestIdentityHTTPRefusesInvalidCredentials(t *testing.T) {
 			}
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertEngineError(t, w, hosterr.Status(code), code)
 		})
 	}
 }
@@ -174,7 +175,7 @@ func TestIdentityHTTPMethods(t *testing.T) {
 	for _, method := range []string{"HEAD", "POST", "PATCH", "DELETE", "PUT", "OPTIONS", "TRACE"} {
 		w := httptest.NewRecorder()
 		controller.New(nil, nil).Handler().ServeHTTP(w, httptest.NewRequest(method, "/api/v1/auth/whoami", nil))
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 		if w.Header().Get("Allow") != "GET" {
 			t.Fatalf("Allow = %q", w.Header().Get("Allow"))
 		}

@@ -1,10 +1,12 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // RequiredAuthority describes grant alternatives without consulting resource state.
@@ -35,5 +37,5 @@ func RequiredAuthority(reason apierr.Reason, alternatives ...[]Grant) *apierr.Er
 			message += "; use a job credential with repository authority or ask a team editor or owner with repository authority to mint a repository cache reader through POST /api/v1/tokens with a remote_cache data scope"
 		}
 	}
-	return apierr.Authorization(reason, message)
+	return hosterr.Authorization(reason, message)
 }

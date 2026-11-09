@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/gitcontrol"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -56,7 +57,7 @@ func TestPipelineDescribe_ReportsThePin(t *testing.T) {
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := testgit.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(testgit.Env(os.Environ()), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+	cmd.Env = append(gitcontrol.Env(os.Environ()), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -94,7 +95,7 @@ func TestRun_SwRefReadsThePinAtTheExecutedRevision(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "sparkwing.yaml"), []byte(pinnedProject), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	selected, err := selectLocalRunSource(t.Context(), t.TempDir(), dir, "release", runFlags{ref: "unpinned"}, testgit.Env(os.Environ()), secrets.NewMasker())
+	selected, err := selectLocalRunSource(t.Context(), t.TempDir(), dir, "release", runFlags{ref: "unpinned"}, gitcontrol.Env(os.Environ()), secrets.NewMasker())
 	if err != nil {
 		t.Fatal(err)
 	}

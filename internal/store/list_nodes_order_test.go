@@ -4,21 +4,21 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func checkNodeOrderAfterStarts(t *testing.T, target *storetest.Target) {
 	t.Helper()
 	st := target.Open(t, store.WithPolicies(sealStorePolicies))
 	ids := []string{"zulu", "yankee", "xray", "whiskey", "victor"}
-	tenant, plan, err := storePlanSealRequestWith(t.Context(), st, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+	tenant, plan, err := storePlanSealRequestWith(t.Context(), st, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
 		doc.Jobs = nil
 		for _, id := range ids {
-			doc.Jobs = append(doc.Jobs, nodeproto.JobSpec{ID: id, Steps: []nodeproto.StepSpec{{ID: "body"}}})
+			doc.Jobs = append(doc.Jobs, nodewire.JobSpec{ID: id, Steps: []nodewire.StepSpec{{ID: "body"}}})
 		}
 	})
 	if err != nil {

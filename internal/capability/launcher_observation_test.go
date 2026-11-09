@@ -3,8 +3,8 @@ package capability
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestLauncherCapacityFailureValidateRefusesBothReasons(t *testing.T) {

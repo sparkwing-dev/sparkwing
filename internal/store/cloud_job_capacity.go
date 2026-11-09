@@ -1,12 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -28,7 +29,7 @@ func recordCloudCapacityGrantTx(ctx context.Context, tx *storeTx, award Launcher
 	var waited bool
 	err := tx.QueryRowContext(ctx, `SELECT requested_class,granted_class,waited_for_fresh_node FROM cloud_job_capacity WHERE team=? AND reservation_id=?`, c.Team, c.Billing.ReservationID).Scan(&requested, &prior, &waited)
 	if errors.Is(err, sql.ErrNoRows) {
-		return authorityError(apierr.IntegrityFailure, "Cloud award has no capacity record")
+		return authorityError(hosterr.IntegrityFailure, "Cloud award has no capacity record")
 	}
 	if err != nil {
 		return err

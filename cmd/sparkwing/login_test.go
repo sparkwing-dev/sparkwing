@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -13,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -22,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type deviceLoginFixture struct {
@@ -223,11 +225,11 @@ func TestLoginWarnsOnlyWhenPreviousTokenRevocationIsUnconfirmed(t *testing.T) {
 	}{
 		{name: "already revoked", revoked: true},
 		{name: "live revoked"},
-		{name: "not live", method: http.MethodGet, code: apierr.Unauthenticated},
+		{name: "not live", method: http.MethodGet, code: hosterr.Unauthenticated},
 		{name: "lookup absent", method: http.MethodGet, code: apierr.NotFound},
-		{name: "ended during revoke", method: http.MethodDelete, code: apierr.Unauthenticated},
+		{name: "ended during revoke", method: http.MethodDelete, code: hosterr.Unauthenticated},
 		{name: "absent during revoke", method: http.MethodDelete, code: apierr.NotFound},
-		{name: "live revoke failed", method: http.MethodDelete, code: apierr.Unavailable, warn: true},
+		{name: "live revoke failed", method: http.MethodDelete, code: hosterr.Unavailable, warn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			writeProfilesFixture(t, "profiles: {}\n")
@@ -259,11 +261,11 @@ func TestLoginWarnsOnlyWhenPreviousTokenRevocationIsUnconfirmed(t *testing.T) {
 					if tc.code == apierr.NotFound {
 						status = http.StatusNotFound
 					}
-					if tc.code == apierr.Unauthenticated {
+					if tc.code == hosterr.Unauthenticated {
 						status = http.StatusUnauthorized
 					}
 					w.WriteHeader(status)
-					_ = json.NewEncoder(w).Encode(apierr.Envelope{Error: &apierr.Error{Code: tc.code, Message: "token cleanup refused"}})
+					_ = json.NewEncoder(w).Encode(hosterr.Envelope{Error: &apierr.Error{Code: tc.code, Message: "token cleanup refused"}})
 					return
 				}
 				original.ServeHTTP(w, r)

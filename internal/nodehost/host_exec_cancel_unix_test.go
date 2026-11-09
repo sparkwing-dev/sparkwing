@@ -10,10 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/sys/unix"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"golang.org/x/sys/unix"
 )
 
 func TestHostCommandCancellationJoinsEscapedChildren(t *testing.T) {
@@ -25,7 +24,7 @@ func TestHostCommandCancellationJoinsEscapedChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	const children = 16
-	req := nodeproto.ExecRequest{
+	req := nodewire.ExecRequest{
 		ID: "cancel", Dir: dir, Capture: true,
 		Argv: []string{"sh", "-c", `exec 3<> "$D/ready"
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do

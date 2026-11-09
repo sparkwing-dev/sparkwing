@@ -10,10 +10,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 var _ controller.ConcurrencyStore = (*store.Tenant)(nil)
@@ -25,9 +25,9 @@ func slotFixture(t *testing.T) *storeRecoveryFixture {
 
 func slotFixtureAt(t *testing.T, target *storetest.Target) *storeRecoveryFixture {
 	t.Helper()
-	return newStoreRecoveryFixtureAt(t, true, target, func(doc *nodeproto.PlanDoc) {
+	return newStoreRecoveryFixtureAt(t, true, target, func(doc *nodewire.PlanDoc) {
 		scope, capacity, cost, policy := "global", 3, 2, "queue"
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "deploy", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}
 	})
 }
 

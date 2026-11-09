@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -12,10 +14,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSurfaceErrorsUseSharedEnvelope(t *testing.T) {
@@ -24,7 +26,7 @@ func TestSurfaceErrorsUseSharedEnvelope(t *testing.T) {
 	calls := 0
 	encode := func(w io.Writer, failure *apierr.Error) error {
 		calls++
-		return json.NewEncoder(w).Encode(apierr.Envelope{Error: failure})
+		return json.NewEncoder(w).Encode(hosterr.Envelope{Error: failure})
 	}
 	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: parseErr}, encode); err != nil {
 		t.Fatal(err)
@@ -32,14 +34,14 @@ func TestSurfaceErrorsUseSharedEnvelope(t *testing.T) {
 	if calls != 1 || strings.Count(out.String(), "\n") != 1 || strings.Contains(out.String(), "private-value") {
 		t.Fatalf("diagnostic: %s", &out)
 	}
-	var envelope apierr.Envelope
+	var envelope hosterr.Envelope
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil || envelope.Error.Code != apierr.BadRequest {
 		t.Fatalf("envelope: %s %v", &out, err)
 	}
 }
 
 func TestSurfaceErrorsPreserveStructuredHintAndCode(t *testing.T) {
-	want := &apierr.Error{Code: apierr.LockHeld, Message: "claim expired", Hint: "claim again", Details: map[string]any{"reason": "lease"}}
+	want := &apierr.Error{Code: hosterr.LockHeld, Message: "claim expired", Hint: "claim again", Details: map[string]any{"reason": "lease"}}
 	for _, format := range []string{"plain", "pretty", "json"} {
 		inv, err := clisurface.Parse("sparkwing", []string{"runs", "status", "--run=r1", "-o", format})
 		if err != nil {
@@ -50,7 +52,7 @@ func TestSurfaceErrorsPreserveStructuredHintAndCode(t *testing.T) {
 			if got != want {
 				t.Fatalf("structured error was replaced: %#v", got)
 			}
-			return json.NewEncoder(w).Encode(apierr.Envelope{Error: got})
+			return json.NewEncoder(w).Encode(hosterr.Envelope{Error: got})
 		}
 		if err := writeInvocationError(&out, &invocationError{inv: inv, cause: want}, encode); err != nil {
 			t.Fatal(err)
@@ -76,11 +78,11 @@ func TestSurfaceConfigErrorIsBadRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err = writeInvocationError(&out, &invocationError{inv: inv, cause: userconfig.Invalid("profiles", "invalid configuration")}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(apierr.Envelope{Error: e}) })
+	err = writeInvocationError(&out, &invocationError{inv: inv, cause: userconfig.Invalid("profiles", "invalid configuration")}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(hosterr.Envelope{Error: e}) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got apierr.Envelope
+	var got hosterr.Envelope
 	if json.Unmarshal(out.Bytes(), &got) != nil || got.Error.Code != apierr.BadRequest {
 		t.Fatalf("error: %s", &out)
 	}
@@ -100,10 +102,10 @@ func TestSurfaceConfigErrorsThroughProfiles(t *testing.T) {
 		t.Fatal("invalid config accepted")
 	}
 	var out bytes.Buffer
-	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(apierr.Envelope{Error: e}) }); err != nil {
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(hosterr.Envelope{Error: e}) }); err != nil {
 		t.Fatal(err)
 	}
-	var got apierr.Envelope
+	var got hosterr.Envelope
 	if json.Unmarshal(out.Bytes(), &got) != nil || got.Error.Code != apierr.BadRequest {
 		t.Fatalf("config error: %s", &out)
 	}
@@ -116,11 +118,11 @@ func TestSurfaceOperatorCeilingErrorKeepsCanonicalCode(t *testing.T) {
 	}
 	failure := &settings.Error{Key: "duration", CeilingFrom: &settings.Origin{}, Reason: "above ceiling"}
 	var out bytes.Buffer
-	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(apierr.Envelope{Error: e}) }); err != nil {
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(hosterr.Envelope{Error: e}) }); err != nil {
 		t.Fatal(err)
 	}
-	var got apierr.Envelope
-	if json.Unmarshal(out.Bytes(), &got) != nil || got.Error.Code != apierr.LimitExceeded {
+	var got hosterr.Envelope
+	if json.Unmarshal(out.Bytes(), &got) != nil || got.Error.Code != hosterr.LimitExceeded {
 		t.Fatalf("ceiling error: %s", &out)
 	}
 }
@@ -131,9 +133,9 @@ func TestRevokedTokenRefusalExplainsSignInAndProfileReplacement(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		failure := &apierr.Error{Code: apierr.Unauthenticated, Message: "authority has ended"}
+		failure := &apierr.Error{Code: hosterr.Unauthenticated, Message: "authority has ended"}
 		var out bytes.Buffer
-		if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, apierr.WriteJSON); err != nil {
+		if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, hosterr.WriteJSON); err != nil {
 			t.Fatal(err)
 		}
 		for _, want := range []string{"Sign in again", "dashboard", "replacement token", "sparkwing profiles set --profile 'expired' --token-stdin"} {
@@ -150,7 +152,7 @@ func TestRevokedTokenRefusalExplainsSignInAndProfileReplacement(t *testing.T) {
 func TestDefaultProfileRevokedTokenNamesItsReplacementCommand(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		if err := apierr.WriteJSON(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "authority has ended"}); err != nil {
+		if err := hosterr.WriteJSON(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: "authority has ended"}); err != nil {
 			t.Error(err)
 		}
 	}))
@@ -177,7 +179,7 @@ func TestRunErrorsRenderInTheRunsResolvedOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: errors.New("no pipeline named missing")}, apierr.WriteJSON); err != nil {
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: errors.New("no pipeline named missing")}, hosterr.WriteJSON); err != nil {
 		t.Fatal(err)
 	}
 	if !json.Valid(out.Bytes()) {

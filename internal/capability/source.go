@@ -1,12 +1,12 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/rand"
 	"encoding/hex"
 	"slices"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // SourceExecutor comes from registration and award records, never advertised runner labels.
@@ -55,27 +55,27 @@ func AuthorizeSourceRelease(request SourceReleaseRequest, now time.Time) (Source
 	c := a.Principal.Capability
 	if !isClaim(a.Principal) || a.Access.Liveness != LiveSensitive || a.Access.Binding != BindSource ||
 		a.ResultReplay || a.LogTailAttempt != 0 || !slices.Contains(a.Access.Grants, SourceRead) || !slices.Contains(c.Grants, SourceRead) {
-		return SourceReleaseAudit{}, forbidden(apierr.ReasonMissingGrant)
+		return SourceReleaseAudit{}, forbidden(hosterr.ReasonMissingGrant)
 	}
 	if c.Audience != Controller {
-		return SourceReleaseAudit{}, forbidden(apierr.ReasonAudience)
+		return SourceReleaseAudit{}, forbidden(hosterr.ReasonAudience)
 	}
 	if !CredentialAlive(c, now) {
 		return SourceReleaseAudit{}, unauthenticated()
 	}
 	executor := request.Executor
 	if c.Team == "" || executor.Team != c.Team || a.Target.Team != c.Team {
-		return SourceReleaseAudit{}, forbidden(apierr.ReasonTeam)
+		return SourceReleaseAudit{}, forbidden(hosterr.ReasonTeam)
 	}
 	if request.RepositoryKey == "" || !slices.Contains(c.Repositories, request.RepositoryKey) ||
 		!slices.Contains(executor.AuthorizedRepositories, request.RepositoryKey) {
-		return SourceReleaseAudit{}, forbidden(apierr.ReasonRepositoryUnauthorized)
+		return SourceReleaseAudit{}, forbidden(hosterr.ReasonRepositoryUnauthorized)
 	}
 	if executor.MachineID == "" || !executor.Cloud && !executor.Shared {
-		return SourceReleaseAudit{}, forbidden(apierr.ReasonPersonalMachine)
+		return SourceReleaseAudit{}, forbidden(hosterr.ReasonPersonalMachine)
 	}
 	if request.SSH && !request.SSHHostConfirmed {
-		return SourceReleaseAudit{}, forbidden(apierr.ReasonCredentialUnconfirmed)
+		return SourceReleaseAudit{}, forbidden(hosterr.ReasonCredentialUnconfirmed)
 	}
 	if request.CredentialID == "" || request.Host == "" || c.Prefix == "" {
 		return SourceReleaseAudit{}, policyFailure()

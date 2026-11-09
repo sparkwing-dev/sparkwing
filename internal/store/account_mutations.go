@@ -1,12 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -134,7 +135,7 @@ func (o *Operator) UnlinkAccountIdentity(ctx context.Context, a capability.Autho
 		}
 		now := tx.now(ctx)
 		if now.Before(p.Capability.IssuedAt) || now.Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
-			return apierr.Authorization(apierr.ReasonReauthRequired, "sign in again before changing sign-in methods")
+			return hosterr.Authorization(hosterr.ReasonReauthRequired, "sign in again before changing sign-in methods")
 		}
 		out, err = tx.operator.unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now(ctx))
 		return err

@@ -1,11 +1,8 @@
 package apierr_test
 
 import (
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
 
-func TestMain(m *testing.M) {
-	testleak.Main(m)
-}
+func TestMain(m *testing.M) { testleak.Main(m) }

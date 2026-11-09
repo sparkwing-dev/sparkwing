@@ -132,7 +132,7 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string) err
 		for _, p := range plans {
 			for _, command := range p.commands(currentHost()) {
 				script := productTestScript(fmt.Sprintf("cd %q && %s", p.module, command), home)
-				if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+				if _, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run(); err != nil {
 					failures = append(failures, describeModuleFailure(p.module, err))
 				}
 			}
@@ -230,7 +230,7 @@ func runAffectedCompileFiles(ctx context.Context, verb string, files []string) e
 			args = "-o " + shellQuote(os.DevNull) + " " + args
 		}
 		script := fmt.Sprintf("env -C %s %s", shellQuote(dir), boundedGoCommand(currentHost(), verb, args))
-		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+		if _, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run(); err != nil {
 			failures = append(failures, describeModuleFailure(p.module, err))
 		}
 		sparkwing.Info(ctx, "affected go %s: %s: %d package(s)", verb, p.module, len(packages))
@@ -386,7 +386,7 @@ func owningPackage(rel string, byDir map[string]string) string {
 
 func listModulePackages(ctx context.Context, module string) ([]modulePackage, error) {
 	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}{{"\t"}}{{if or .GoFiles .CgoFiles}}1{{else}}0{{end}}`
-	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).String()
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).Env("GOWORK", "auto").String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
 	}
@@ -574,7 +574,7 @@ func frontendChange(ctx context.Context, browser bool) (string, error) {
 	for _, pkg := range packages {
 		byDir[pkg.dir] = pkg.importPath
 	}
-	deps, err := sparkwing.Bash(ctx, "go list -deps "+browserFixturePackage).String()
+	deps, err := sparkwing.Bash(ctx, "go list -deps "+browserFixturePackage).Env("GOWORK", "auto").String()
 	if err != nil {
 		return "", fmt.Errorf("list the browser fixture's packages: %w", err)
 	}

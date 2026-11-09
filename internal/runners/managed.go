@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -8,10 +10,10 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // SoftwarePolicy is the engine resolver's signed runner-update boundary.
@@ -61,7 +63,7 @@ func (r ManagedRunner) checkVersion(ctx context.Context, version string) error {
 	}
 	if policyErr != nil {
 		var denial *apierr.Error
-		if !errors.As(policyErr, &denial) || (denial.Code != apierr.VersionRevoked && denial.Code != apierr.VersionUnsupported) {
+		if !errors.As(policyErr, &denial) || (denial.Code != hosterr.VersionRevoked && denial.Code != hosterr.VersionUnsupported) {
 			return policyErr
 		}
 		if r.Loop.Config.VersionPinned {

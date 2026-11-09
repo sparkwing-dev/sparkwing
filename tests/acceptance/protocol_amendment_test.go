@@ -1,15 +1,17 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func testGoSDKRefusesEmptyOIDCToken(t *testing.T) {
@@ -73,7 +75,7 @@ func testGoSDKRefusesCollidingMasks(t *testing.T) {
 				}
 			} else {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), secret) {
+				if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || strings.Contains(err.Error(), secret) {
 					t.Fatalf("colliding mask = %v", err)
 				}
 			}
@@ -138,7 +140,7 @@ func testGoSDKMaskRegistryGuardsLaterDeclarations(t *testing.T) {
 			_, err := host.Eval(t.Context(), plan, "source", generator.ID(), nil)
 			if registrationFirst {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), "mask-value") {
+				if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || strings.Contains(err.Error(), "mask-value") {
 					t.Fatalf("failed generator = %v", err)
 				}
 				if records := host.Records(); len(records) != 1 || records[0].Msg != "before declaration ***" {
@@ -151,7 +153,7 @@ func testGoSDKMaskRegistryGuardsLaterDeclarations(t *testing.T) {
 			}
 			err = sparkwing.Mask(host.Context(t.Context()), "mask-value")
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier || strings.Contains(err.Error(), "mask-value") {
+			if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier || strings.Contains(err.Error(), "mask-value") {
 				t.Fatalf("late collision = %v", err)
 			}
 		})

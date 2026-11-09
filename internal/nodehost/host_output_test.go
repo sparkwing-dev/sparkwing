@@ -15,13 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 var outputRefused = errors.New("output backend refused")
@@ -107,9 +107,9 @@ func TestOutputRecordCommit(t *testing.T) {
 			case "invalid_seal":
 				input.Accepted.SpecHash = "changed"
 			case "oversized":
-				b.value = []byte(`"` + strings.Repeat("x", int(limits.NodeOutputBytes)) + `"`)
+				b.value = []byte(`"` + strings.Repeat("x", int(protolimits.NodeOutputBytes)) + `"`)
 			case "at_limit":
-				b.value = []byte(`"` + strings.Repeat("x", int(limits.NodeOutputBytes)-2) + `"`)
+				b.value = []byte(`"` + strings.Repeat("x", int(protolimits.NodeOutputBytes)-2) + `"`)
 			case "foreign_attempt":
 				b.upload.Identity.Attempt.Value.Attempt++
 			case "foreign_generation":
@@ -170,10 +170,10 @@ func TestOutputRecordRead(t *testing.T) {
 				b.value = []byte("bad JSON")
 			}
 			if mode == "oversized" {
-				b.value = []byte(`"` + strings.Repeat("x", int(limits.NodeOutputBytes)-1) + `"`)
+				b.value = []byte(`"` + strings.Repeat("x", int(protolimits.NodeOutputBytes)-1) + `"`)
 			}
 			if mode == "at_limit" {
-				b.value = []byte(`"` + strings.Repeat("x", int(limits.NodeOutputBytes)-2) + `"`)
+				b.value = []byte(`"` + strings.Repeat("x", int(protolimits.NodeOutputBytes)-2) + `"`)
 			}
 			request := blob.RecordLookup{Authority: b.upload.Authority, Key: b.upload.Key}
 			value, err := adapter.readOutput(t.Context(), request)

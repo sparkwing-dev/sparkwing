@@ -1,15 +1,17 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestOperatorSettingsHTTPCommitAuthorityProperty(t *testing.T) {
@@ -37,7 +39,7 @@ func TestOperatorSettingsHTTPCommitAuthorityProperty(t *testing.T) {
 					s.operatorSettingsWrites = nil
 					want = 500
 				case 3:
-					writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "authority changed"}
+					writer.failure = &apierr.Error{Code: hosterr.Forbidden, Message: "authority changed"}
 					want = 403
 				case 4:
 					authority.principal.Capability.RevokedAt = &base.Capability.IssuedAt

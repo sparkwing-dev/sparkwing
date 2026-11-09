@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"fmt"
@@ -11,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
@@ -60,14 +62,14 @@ func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
 		team   store.Team
 		status int
 		code   apierr.Code
-	}{{"", http.StatusInternalServerError, apierr.PolicyMissing}, {"missing", http.StatusNotFound, apierr.NotFound}} {
+	}{{"", http.StatusInternalServerError, hosterr.PolicyMissing}, {"missing", http.StatusNotFound, apierr.NotFound}} {
 		team := tc.team
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/sizing", nil)
 		rec := httptest.NewRecorder()
 		if err := handler(rec, req, capability.Authorized{Target: capability.Target{Team: string(team)}}); err != nil {
 			routepolicy.WritePolicyError(rec, err)
 		}
-		var failure apierr.Envelope
+		var failure hosterr.Envelope
 		if rec.Code != tc.status || json.Unmarshal(rec.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != tc.code {
 			t.Fatalf("unregistered team %q read profiles: %d %s", team, rec.Code, rec.Body)
 		}

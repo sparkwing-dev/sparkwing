@@ -7,31 +7,12 @@ components:
       properties:
         error:
           anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
+            - $ref: '#/components/schemas/sparkwing.protocol.apierr.Error'
             - type: "null"
       required:
         - error
       type: object
       x-sparkwing-go-type: apierr.Envelope
-    internal.apierr.Error:
-      additionalProperties: true
-      properties:
-        code:
-          type: string
-        details:
-          anyOf:
-            - additionalProperties: {}
-              type: object
-            - type: "null"
-        hint:
-          type: string
-        message:
-          type: string
-      required:
-        - code
-        - message
-      type: object
-      x-sparkwing-go-type: apierr.Error
     internal.blob.LogSource:
       additionalProperties: true
       properties:
@@ -988,7 +969,7 @@ components:
         run_id:
           type: string
         runner:
-          $ref: '#/components/schemas/internal.nodeproto.RunnerIdentity'
+          $ref: '#/components/schemas/sparkwing.protocol.RunnerIdentity'
         source_generation:
           type: integer
         submitted_env:
@@ -1792,7 +1773,7 @@ components:
         annotations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.nodeproto.Annotation'
+                $ref: '#/components/schemas/sparkwing.protocol.Annotation'
               type: array
             - type: "null"
         application_retries:
@@ -1905,7 +1886,7 @@ components:
         execution:
           $ref: '#/components/schemas/internal.runspec.JobExecutionSettings'
         job:
-          $ref: '#/components/schemas/internal.nodeproto.JobSpec'
+          $ref: '#/components/schemas/sparkwing.protocol.JobSpec'
         spec_hash:
           type: string
       required:
@@ -1946,7 +1927,7 @@ components:
         body: {}
         failure:
           anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
+            - $ref: '#/components/schemas/sparkwing.protocol.apierr.Error'
             - type: "null"
         registration:
           $ref: '#/components/schemas/internal.runspec.SecretRegistration'
@@ -1961,7 +1942,7 @@ components:
       properties:
         error:
           anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
+            - $ref: '#/components/schemas/sparkwing.protocol.apierr.Error'
             - type: "null"
         reason:
           type: string
@@ -2075,7 +2056,7 @@ components:
         annotations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.nodeproto.Annotation'
+                $ref: '#/components/schemas/sparkwing.protocol.Annotation'
               type: array
             - type: "null"
         approval:
@@ -2157,7 +2138,7 @@ components:
             - type: "null"
         failure:
           anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.JobFailure'
+            - $ref: '#/components/schemas/sparkwing.protocol.JobFailure'
             - type: "null"
         manifest:
           anyOf:
@@ -3752,7 +3733,7 @@ components:
         annotations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.nodeproto.Annotation'
+                $ref: '#/components/schemas/sparkwing.protocol.Annotation'
               type: array
             - type: "null"
         approval:
@@ -3767,7 +3748,7 @@ components:
         claimed:
           type: boolean
         declaration:
-          $ref: '#/components/schemas/internal.nodeproto.JobSpec'
+          $ref: '#/components/schemas/sparkwing.protocol.JobSpec'
         error:
           type: string
         expansion:
@@ -4455,7 +4436,7 @@ components:
         annotations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.nodeproto.Annotation'
+                $ref: '#/components/schemas/sparkwing.protocol.Annotation'
               type: array
             - type: "null"
         attempt:
@@ -4780,6 +4761,8 @@ components:
           type: string
         reason:
           type: string
+        sdk:
+          type: string
         support_until:
           anyOf:
             - format: date-time
@@ -4890,555 +4873,6 @@ components:
         - StoreNow
       type: object
       x-sparkwing-go-type: localhostwire.LocalNodeSnapshot
-    internal.nodeproto.Annotation:
-      additionalProperties: true
-      properties:
-        column:
-          type: integer
-        end_line:
-          type: integer
-        file:
-          type: string
-        level:
-          type: string
-        line:
-          type: integer
-        message:
-          type: string
-      required:
-        - level
-        - message
-      type: object
-      x-sparkwing-go-type: nodeproto.Annotation
-    internal.nodeproto.AnnotationRequest:
-      additionalProperties: true
-      properties:
-        column:
-          type: integer
-        end_line:
-          type: integer
-        file:
-          type: string
-        level:
-          type: string
-        line:
-          type: integer
-        message:
-          type: string
-        step:
-          type: string
-      required:
-        - level
-        - message
-      type: object
-      x-sparkwing-go-type: nodeproto.AnnotationRequest
-    internal.nodeproto.ApprovalSpec:
-      additionalProperties: true
-      properties:
-        message:
-          type: string
-        on_timeout:
-          type: string
-        timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: nodeproto.ApprovalSpec
-    internal.nodeproto.ArgumentDescription:
-      additionalProperties: true
-      properties:
-        default:
-          anyOf:
-            - type: string
-            - type: "null"
-        desc:
-          type: string
-        enum:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        job_id:
-          type: string
-        name:
-          type: string
-        required:
-          type: boolean
-        secret:
-          type: boolean
-        short:
-          type: string
-        type:
-          type: string
-      required:
-        - name
-        - type
-        - required
-      type: object
-      x-sparkwing-go-type: nodeproto.ArgumentDescription
-    internal.nodeproto.ArtifactInput:
-      additionalProperties: true
-      properties:
-        into:
-          type: string
-        producer:
-          type: string
-      required:
-        - producer
-      type: object
-      x-sparkwing-go-type: nodeproto.ArtifactInput
-    internal.nodeproto.CacheSpec:
-      additionalProperties: true
-      properties:
-        key_files:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        key_scope:
-          type: string
-        name:
-          type: string
-        path:
-          type: string
-        resolver:
-          type: string
-      required:
-        - name
-        - key_files
-      type: object
-      x-sparkwing-go-type: nodeproto.CacheSpec
-    internal.nodeproto.ChildPipeline:
-      additionalProperties: true
-      properties:
-        pipeline:
-          type: string
-        repository:
-          type: string
-      required:
-        - pipeline
-      type: object
-      x-sparkwing-go-type: nodeproto.ChildPipeline
-    internal.nodeproto.ClosureSpec:
-      additionalProperties: true
-      properties:
-        after_run:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        before_run:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        generate:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        memo_key:
-          type: string
-        skip_if:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        verify:
-          type: string
-      type: object
-      x-sparkwing-go-type: nodeproto.ClosureSpec
-    internal.nodeproto.ConcurrencySpec:
-      additionalProperties: true
-      properties:
-        capacity:
-          anyOf:
-            - type: integer
-            - type: "null"
-        cost:
-          anyOf:
-            - type: integer
-            - type: "null"
-        group:
-          type: string
-        on_limit:
-          anyOf:
-            - type: string
-            - type: "null"
-        queue_timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-        scope:
-          anyOf:
-            - type: string
-            - type: "null"
-      required:
-        - group
-      type: object
-      x-sparkwing-go-type: nodeproto.ConcurrencySpec
-    internal.nodeproto.EnvValue:
-      additionalProperties: true
-      properties:
-        startup:
-          type: boolean
-        value:
-          type: string
-      required:
-        - value
-      type: object
-      x-sparkwing-go-type: nodeproto.EnvValue
-    internal.nodeproto.JobFailure:
-      additionalProperties: true
-      properties:
-        error:
-          anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
-            - type: "null"
-        job:
-          type: string
-        stage:
-          type: string
-      required:
-        - job
-        - stage
-        - error
-      type: object
-      x-sparkwing-go-type: nodeproto.JobFailure
-    internal.nodeproto.JobSpec:
-      additionalProperties: true
-      properties:
-        approval:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.ApprovalSpec'
-            - type: "null"
-        arguments:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.ArgumentDescription'
-              type: array
-            - type: "null"
-        artifacts:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        caches:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.CacheSpec'
-              type: array
-            - type: "null"
-        children:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.ChildPipeline'
-              type: array
-            - type: "null"
-        closures:
-          $ref: '#/components/schemas/internal.nodeproto.ClosureSpec'
-        concurrency:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.ConcurrencySpec'
-              type: array
-            - type: "null"
-        consumes:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.ArtifactInput'
-              type: array
-            - type: "null"
-        continue_on_error:
-          type: boolean
-        cores:
-          anyOf:
-            - type: number
-            - type: "null"
-        deps:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        deps_if_present:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        env:
-          anyOf:
-            - additionalProperties:
-                $ref: '#/components/schemas/internal.nodeproto.EnvValue'
-              type: object
-            - type: "null"
-        failure_policy:
-          type: string
-        groups:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        id:
-          type: string
-        inline:
-          type: boolean
-        memo:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.MemoSpec'
-            - type: "null"
-        needs_generated:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        no_progress_timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-        on_failure_of:
-          type: string
-        optional:
-          type: boolean
-        pipeline_refs:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.PipelineReference'
-              type: array
-            - type: "null"
-        prefers:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        requires:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        result_step:
-          type: string
-        retry:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.RetrySpec'
-            - type: "null"
-        skip_if_budget_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-        steps:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.StepSpec'
-              type: array
-            - type: "null"
-        timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-      required:
-        - id
-      type: object
-      x-sparkwing-go-type: nodeproto.JobSpec
-    internal.nodeproto.MaskRequest:
-      additionalProperties: true
-      properties:
-        value:
-          type: string
-      required:
-        - value
-      type: object
-      x-sparkwing-go-type: nodeproto.MaskRequest
-    internal.nodeproto.MemoInput:
-      additionalProperties: true
-      properties:
-        inputs:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.MemoInput'
-              type: array
-            - type: "null"
-        kind:
-          type: string
-        names:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        parts:
-          anyOf:
-            - items: {}
-              type: array
-            - type: "null"
-        patterns:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        root:
-          type: string
-        value:
-          type: string
-      required:
-        - kind
-      type: object
-      x-sparkwing-go-type: nodeproto.MemoInput
-    internal.nodeproto.MemoSpec:
-      additionalProperties: true
-      properties:
-        input:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.MemoInput'
-            - type: "null"
-        ttl_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: nodeproto.MemoSpec
-    internal.nodeproto.PipelineReference:
-      additionalProperties: true
-      properties:
-        from_any_run:
-          type: boolean
-        from_proven_run:
-          type: boolean
-        job:
-          type: string
-        pipeline:
-          type: string
-      required:
-        - pipeline
-        - job
-      type: object
-      x-sparkwing-go-type: nodeproto.PipelineReference
-    internal.nodeproto.RetrySpec:
-      additionalProperties: true
-      properties:
-        attempts:
-          type: integer
-        backoff_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-      required:
-        - attempts
-      type: object
-      x-sparkwing-go-type: nodeproto.RetrySpec
-    internal.nodeproto.RunnerIdentity:
-      additionalProperties: true
-      properties:
-        labels:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        name:
-          type: string
-        type:
-          type: string
-      required:
-        - name
-        - type
-        - labels
-      type: object
-      x-sparkwing-go-type: nodeproto.RunnerIdentity
-    internal.nodeproto.ServiceAcknowledged:
-      additionalProperties: true
-      properties: {}
-      type: object
-      x-sparkwing-go-type: nodeproto.ServiceAcknowledged
-    internal.nodeproto.SourceSpec:
-      additionalProperties: true
-      properties:
-        depth:
-          anyOf:
-            - type: integer
-            - type: "null"
-        full_history:
-          anyOf:
-            - type: boolean
-            - type: "null"
-        lfs:
-          anyOf:
-            - type: boolean
-            - type: "null"
-        submodules:
-          anyOf:
-            - type: boolean
-            - type: "null"
-        tags:
-          anyOf:
-            - type: boolean
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: nodeproto.SourceSpec
-    internal.nodeproto.StepSpec:
-      additionalProperties: true
-      properties:
-        closures:
-          $ref: '#/components/schemas/internal.nodeproto.ClosureSpec'
-        continue_on_error:
-          type: boolean
-        finally:
-          type: boolean
-        groups:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        has_dry_run:
-          type: boolean
-        id:
-          type: string
-        needs:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        optional:
-          type: boolean
-        risks:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        safe_without_dry_run:
-          type: boolean
-      required:
-        - id
-      type: object
-      x-sparkwing-go-type: nodeproto.StepSpec
-    internal.nodeproto.SummaryRequest:
-      additionalProperties: true
-      properties:
-        markdown:
-          type: string
-        step:
-          type: string
-      required:
-        - markdown
-      type: object
-      x-sparkwing-go-type: nodeproto.SummaryRequest
     internal.runspec.Actor:
       additionalProperties: true
       properties:
@@ -5535,7 +4969,7 @@ components:
         allowed_admission_classes:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
         allowed_sources:
-          $ref: '#/components/schemas/internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.internal.nodeproto.SourceSpec.'
+          $ref: '#/components/schemas/internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.sparkwing.protocol.SourceSpec.'
         claim_wait:
           $ref: '#/components/schemas/internal.runspec.Setting.time.Duration.'
         memo_ttl:
@@ -5605,7 +5039,7 @@ components:
               type: object
             - type: "null"
         policy:
-          $ref: '#/components/schemas/internal.nodeproto.SourceSpec'
+          $ref: '#/components/schemas/sparkwing.protocol.SourceSpec'
       required:
         - policy
         - origins
@@ -6352,7 +5786,7 @@ components:
         argument_declarations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.nodeproto.ArgumentDescription'
+                $ref: '#/components/schemas/sparkwing.protocol.ArgumentDescription'
               type: array
             - type: "null"
         default_branch:
@@ -6554,7 +5988,7 @@ components:
         - raw
       type: object
       x-sparkwing-go-type: runspec.SecretValue
-    internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.internal.nodeproto.SourceSpec.:
+    internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.sparkwing.protocol.SourceSpec.:
       additionalProperties: true
       properties:
         origin:
@@ -6564,7 +5998,7 @@ components:
         value:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.nodeproto.SourceSpec'
+                $ref: '#/components/schemas/sparkwing.protocol.SourceSpec'
               type: array
             - type: "null"
       required:
@@ -6572,7 +6006,7 @@ components:
         - value
         - origin
       type: object
-      x-sparkwing-go-type: runspec.Setting[[]github.com/sparkwing-dev/sparkwing/internal/nodeproto.SourceSpec]
+      x-sparkwing-go-type: runspec.Setting[[]github.com/sparkwing-dev/sparkwing/sparkwing/protocol.SourceSpec]
     internal.runspec.Setting...string.:
       additionalProperties: true
       properties:
@@ -7066,7 +6500,7 @@ components:
             - type: "null"
         Failure:
           anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.JobFailure'
+            - $ref: '#/components/schemas/sparkwing.protocol.JobFailure'
             - type: "null"
         ManifestRecord:
           anyOf:
@@ -7833,6 +7267,574 @@ components:
         - resources
       type: object
       x-sparkwing-go-type: wingwire.Waiter
+    sparkwing.protocol.Annotation:
+      additionalProperties: true
+      properties:
+        column:
+          type: integer
+        end_line:
+          type: integer
+        file:
+          type: string
+        level:
+          type: string
+        line:
+          type: integer
+        message:
+          type: string
+      required:
+        - level
+        - message
+      type: object
+      x-sparkwing-go-type: nodeproto.Annotation
+    sparkwing.protocol.AnnotationRequest:
+      additionalProperties: true
+      properties:
+        column:
+          type: integer
+        end_line:
+          type: integer
+        file:
+          type: string
+        level:
+          type: string
+        line:
+          type: integer
+        message:
+          type: string
+        step:
+          type: string
+      required:
+        - level
+        - message
+      type: object
+      x-sparkwing-go-type: nodeproto.AnnotationRequest
+    sparkwing.protocol.ApprovalSpec:
+      additionalProperties: true
+      properties:
+        message:
+          type: string
+        on_timeout:
+          type: string
+        timeout_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: nodeproto.ApprovalSpec
+    sparkwing.protocol.ArgumentDescription:
+      additionalProperties: true
+      properties:
+        default:
+          anyOf:
+            - type: string
+            - type: "null"
+        desc:
+          type: string
+        enum:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        job_id:
+          type: string
+        name:
+          type: string
+        required:
+          type: boolean
+        secret:
+          type: boolean
+        short:
+          type: string
+        type:
+          type: string
+      required:
+        - name
+        - type
+        - required
+      type: object
+      x-sparkwing-go-type: nodeproto.ArgumentDescription
+    sparkwing.protocol.ArtifactInput:
+      additionalProperties: true
+      properties:
+        into:
+          type: string
+        producer:
+          type: string
+      required:
+        - producer
+      type: object
+      x-sparkwing-go-type: nodeproto.ArtifactInput
+    sparkwing.protocol.CacheSpec:
+      additionalProperties: true
+      properties:
+        key_files:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        key_scope:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        resolver:
+          type: string
+      required:
+        - name
+        - key_files
+      type: object
+      x-sparkwing-go-type: nodeproto.CacheSpec
+    sparkwing.protocol.ChildPipeline:
+      additionalProperties: true
+      properties:
+        pipeline:
+          type: string
+        repository:
+          type: string
+      required:
+        - pipeline
+      type: object
+      x-sparkwing-go-type: nodeproto.ChildPipeline
+    sparkwing.protocol.ClosureSpec:
+      additionalProperties: true
+      properties:
+        after_run:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        before_run:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        generate:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        memo_key:
+          type: string
+        skip_if:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        verify:
+          type: string
+      type: object
+      x-sparkwing-go-type: nodeproto.ClosureSpec
+    sparkwing.protocol.ConcurrencySpec:
+      additionalProperties: true
+      properties:
+        capacity:
+          anyOf:
+            - type: integer
+            - type: "null"
+        cost:
+          anyOf:
+            - type: integer
+            - type: "null"
+        group:
+          type: string
+        on_limit:
+          anyOf:
+            - type: string
+            - type: "null"
+        queue_timeout_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+        scope:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - group
+      type: object
+      x-sparkwing-go-type: nodeproto.ConcurrencySpec
+    sparkwing.protocol.EnvValue:
+      additionalProperties: true
+      properties:
+        startup:
+          type: boolean
+        value:
+          type: string
+      required:
+        - value
+      type: object
+      x-sparkwing-go-type: nodeproto.EnvValue
+    sparkwing.protocol.JobFailure:
+      additionalProperties: true
+      properties:
+        error:
+          anyOf:
+            - $ref: '#/components/schemas/sparkwing.protocol.apierr.Error'
+            - type: "null"
+        job:
+          type: string
+        stage:
+          type: string
+      required:
+        - job
+        - stage
+        - error
+      type: object
+      x-sparkwing-go-type: nodeproto.JobFailure
+    sparkwing.protocol.JobSpec:
+      additionalProperties: true
+      properties:
+        approval:
+          anyOf:
+            - $ref: '#/components/schemas/sparkwing.protocol.ApprovalSpec'
+            - type: "null"
+        arguments:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/sparkwing.protocol.ArgumentDescription'
+              type: array
+            - type: "null"
+        artifacts:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        caches:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/sparkwing.protocol.CacheSpec'
+              type: array
+            - type: "null"
+        children:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/sparkwing.protocol.ChildPipeline'
+              type: array
+            - type: "null"
+        closures:
+          $ref: '#/components/schemas/sparkwing.protocol.ClosureSpec'
+        concurrency:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/sparkwing.protocol.ConcurrencySpec'
+              type: array
+            - type: "null"
+        consumes:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/sparkwing.protocol.ArtifactInput'
+              type: array
+            - type: "null"
+        continue_on_error:
+          type: boolean
+        cores:
+          anyOf:
+            - type: number
+            - type: "null"
+        deps:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        deps_if_present:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        env:
+          anyOf:
+            - additionalProperties:
+                $ref: '#/components/schemas/sparkwing.protocol.EnvValue'
+              type: object
+            - type: "null"
+        failure_policy:
+          type: string
+        groups:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        id:
+          type: string
+        inline:
+          type: boolean
+        memo:
+          anyOf:
+            - $ref: '#/components/schemas/sparkwing.protocol.MemoSpec'
+            - type: "null"
+        needs_generated:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        no_progress_timeout_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+        on_failure_of:
+          type: string
+        optional:
+          type: boolean
+        pipeline_refs:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/sparkwing.protocol.PipelineReference'
+              type: array
+            - type: "null"
+        prefers:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        requires:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        result_step:
+          type: string
+        retry:
+          anyOf:
+            - $ref: '#/components/schemas/sparkwing.protocol.RetrySpec'
+            - type: "null"
+        skip_if_budget_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+        steps:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/sparkwing.protocol.StepSpec'
+              type: array
+            - type: "null"
+        timeout_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+      required:
+        - id
+      type: object
+      x-sparkwing-go-type: nodeproto.JobSpec
+    sparkwing.protocol.MaskRequest:
+      additionalProperties: true
+      properties:
+        value:
+          type: string
+      required:
+        - value
+      type: object
+      x-sparkwing-go-type: nodeproto.MaskRequest
+    sparkwing.protocol.MemoInput:
+      additionalProperties: true
+      properties:
+        inputs:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/sparkwing.protocol.MemoInput'
+              type: array
+            - type: "null"
+        kind:
+          type: string
+        names:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        parts:
+          anyOf:
+            - items: {}
+              type: array
+            - type: "null"
+        patterns:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        root:
+          type: string
+        value:
+          type: string
+      required:
+        - kind
+      type: object
+      x-sparkwing-go-type: nodeproto.MemoInput
+    sparkwing.protocol.MemoSpec:
+      additionalProperties: true
+      properties:
+        input:
+          anyOf:
+            - $ref: '#/components/schemas/sparkwing.protocol.MemoInput'
+            - type: "null"
+        ttl_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: nodeproto.MemoSpec
+    sparkwing.protocol.PipelineReference:
+      additionalProperties: true
+      properties:
+        from_any_run:
+          type: boolean
+        from_proven_run:
+          type: boolean
+        job:
+          type: string
+        pipeline:
+          type: string
+      required:
+        - pipeline
+        - job
+      type: object
+      x-sparkwing-go-type: nodeproto.PipelineReference
+    sparkwing.protocol.RetrySpec:
+      additionalProperties: true
+      properties:
+        attempts:
+          type: integer
+        backoff_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+      required:
+        - attempts
+      type: object
+      x-sparkwing-go-type: nodeproto.RetrySpec
+    sparkwing.protocol.RunnerIdentity:
+      additionalProperties: true
+      properties:
+        labels:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        name:
+          type: string
+        type:
+          type: string
+      required:
+        - name
+        - type
+        - labels
+      type: object
+      x-sparkwing-go-type: nodeproto.RunnerIdentity
+    sparkwing.protocol.ServiceAcknowledged:
+      additionalProperties: true
+      properties: {}
+      type: object
+      x-sparkwing-go-type: nodeproto.ServiceAcknowledged
+    sparkwing.protocol.SourceSpec:
+      additionalProperties: true
+      properties:
+        depth:
+          anyOf:
+            - type: integer
+            - type: "null"
+        full_history:
+          anyOf:
+            - type: boolean
+            - type: "null"
+        lfs:
+          anyOf:
+            - type: boolean
+            - type: "null"
+        submodules:
+          anyOf:
+            - type: boolean
+            - type: "null"
+        tags:
+          anyOf:
+            - type: boolean
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: nodeproto.SourceSpec
+    sparkwing.protocol.StepSpec:
+      additionalProperties: true
+      properties:
+        closures:
+          $ref: '#/components/schemas/sparkwing.protocol.ClosureSpec'
+        continue_on_error:
+          type: boolean
+        finally:
+          type: boolean
+        groups:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        has_dry_run:
+          type: boolean
+        id:
+          type: string
+        needs:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        optional:
+          type: boolean
+        risks:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        safe_without_dry_run:
+          type: boolean
+      required:
+        - id
+      type: object
+      x-sparkwing-go-type: nodeproto.StepSpec
+    sparkwing.protocol.SummaryRequest:
+      additionalProperties: true
+      properties:
+        markdown:
+          type: string
+        step:
+          type: string
+      required:
+        - markdown
+      type: object
+      x-sparkwing-go-type: nodeproto.SummaryRequest
+    sparkwing.protocol.apierr.Error:
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        details:
+          anyOf:
+            - additionalProperties: {}
+              type: object
+            - type: "null"
+        hint:
+          type: string
+        message:
+          type: string
+      required:
+        - code
+        - message
+      type: object
+      x-sparkwing-go-type: apierr.Error
 info:
   description: The shared policy defines HTTP and local API socket authorization. x-sparkwing-policy preserves each complete access alternative; every grant within one alternative is required. Bindings, liveness and external proofs remain mandatory. JSON schemas describe serialization shapes, while the shared validators enforce semantic constraints. Unmapped success bodies are marked explicitly. Native runtime conformance requires separate acceptance evidence.
   title: Sparkwing controller API
@@ -13028,7 +13030,7 @@ paths:
             application/json:
               schema:
                 anyOf:
-                  - $ref: '#/components/schemas/internal.nodeproto.JobFailure'
+                  - $ref: '#/components/schemas/sparkwing.protocol.JobFailure'
                   - type: "null"
           description: Successful response.
         default:
@@ -18121,14 +18123,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.nodeproto.AnnotationRequest'
+              $ref: '#/components/schemas/sparkwing.protocol.AnnotationRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.nodeproto.ServiceAcknowledged'
+                $ref: '#/components/schemas/sparkwing.protocol.ServiceAcknowledged'
           description: Successful response.
         default:
           content:
@@ -18399,14 +18401,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.nodeproto.MaskRequest'
+              $ref: '#/components/schemas/sparkwing.protocol.MaskRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.nodeproto.ServiceAcknowledged'
+                $ref: '#/components/schemas/sparkwing.protocol.ServiceAcknowledged'
           description: Successful response.
         default:
           content:
@@ -18551,14 +18553,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.nodeproto.SummaryRequest'
+              $ref: '#/components/schemas/sparkwing.protocol.SummaryRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.nodeproto.ServiceAcknowledged'
+                $ref: '#/components/schemas/sparkwing.protocol.ServiceAcknowledged'
           description: Successful response.
         default:
           content:

@@ -1,12 +1,14 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type standingRequestFixtureState struct {
@@ -127,7 +129,7 @@ func TestConsoleDeclineNeedsTheCurrentOperator(t *testing.T) {
 	for _, a := range []capability.Authorized{f.op, forged} {
 		_, err := f.console.ConsoleDeclineStandingRequest(t.Context(), a, req.ID, "no")
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || f.state(t, req.ID) != StandingRequestOpen {
+		if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden || f.state(t, req.ID) != StandingRequestOpen {
 			t.Fatalf("unauthorized decline: %v state=%s", err, f.state(t, req.ID))
 		}
 	}

@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -30,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 
@@ -175,7 +175,7 @@ func testCloudWorkingTreeDispatch(t *testing.T, direct bool) {
 	cloud := newCloudDispatchLauncher(t, f)
 	planned := cloud.launch(t, capability.UnitPlan, "")
 	engineID := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "source", Steps: []nodeproto.StepSpec{{ID: "run"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"expand"}}}}}
+	doc := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "source", Steps: []nodewire.StepSpec{{ID: "run"}}, Closures: nodewire.ClosureSpec{Generate: []string{"expand"}}}}}
 	body, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
@@ -546,7 +546,7 @@ func TestCloudJobReportsThroughTheNodeHostRoute(t *testing.T) {
 	cloud := newCloudDispatchLauncher(t, f)
 	planned := cloud.launch(t, capability.UnitPlan, "")
 	engineID := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "greet", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	doc := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "greet", Steps: []nodewire.StepSpec{{ID: "run"}}}}}
 	body, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)

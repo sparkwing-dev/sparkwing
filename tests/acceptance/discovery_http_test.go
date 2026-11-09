@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -13,12 +15,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func discoveryDataController() *controller.DataController {
@@ -101,7 +103,7 @@ func TestDiscoveryHTTPRefusesInvalidAuthorityBeforeAvailability(t *testing.T) {
 			for _, state := range []string{"absent", "malformed", "expired", "revoked parent", "membership removed", "ended claim", "stale generation", "bootstrap", "teamless", "backend error"} {
 				t.Run(path+"/"+state+"/configured="+map[bool]string{false: "false", true: "true"}[configured], func(t *testing.T) {
 					b := newCredentialBoundary()
-					code := apierr.Unauthenticated
+					code := hosterr.Unauthenticated
 					switch state {
 					case "absent":
 						b.raw = ""
@@ -120,15 +122,15 @@ func TestDiscoveryHTTPRefusesInvalidAuthorityBeforeAvailability(t *testing.T) {
 					case "bootstrap":
 						b.snapshot.Authorities[0].Principal.Capability.Delivery = capability.DeliveryBootstrap
 						b.snapshot.Authorities[0].Principal.Capability.Grants = capability.BootstrapGrants()
-						code = apierr.Forbidden
+						code = hosterr.Forbidden
 					case "teamless":
 						b = deploymentBoundary(capability.OperatorTokens)
-						code = apierr.Forbidden
+						code = hosterr.Forbidden
 					case "backend error":
-						b.readErr, code = io.ErrUnexpectedEOF, apierr.Internal
+						b.readErr, code = io.ErrUnexpectedEOF, hosterr.Internal
 					}
 					w := discoveryRequest(discoveryServer(b, configured), b, "GET", path)
-					assertEngineError(t, w, apierr.Status(code), code)
+					assertEngineError(t, w, hosterr.Status(code), code)
 				})
 			}
 		}
@@ -139,10 +141,10 @@ func TestDiscoveryHTTPAvailabilityAndMethods(t *testing.T) {
 	for _, path := range []string{"/api/v1/services", "/api/v1/data/capabilities"} {
 		b := authorityMember()
 		assertEngineError(t, discoveryRequest(discoveryServer(b, false), b, "GET", path), 404, apierr.NotFound)
-		assertEngineError(t, discoveryRequest(controller.New(nil, nil).Handler(), b, "GET", path), 500, apierr.PolicyMissing)
+		assertEngineError(t, discoveryRequest(controller.New(nil, nil).Handler(), b, "GET", path), 500, hosterr.PolicyMissing)
 		for _, method := range []string{"HEAD", "POST", "PATCH", "DELETE", "PUT", "OPTIONS", "TRACE"} {
 			w := discoveryRequest(discoveryServer(b, true), b, method, path)
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+			assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 			if w.Header().Get("Allow") != "GET" {
 				t.Fatalf("Allow = %q", w.Header().Get("Allow"))
 			}

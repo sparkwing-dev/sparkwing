@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -11,9 +13,9 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestOperatorTeamCreationNeverReplaysOneTimeCredential(t *testing.T) {
@@ -177,7 +179,7 @@ func TestOperatorManagementKeepsCanonicalRefusals(t *testing.T) {
 	})
 	_, err := c.ReadOperatorLimits(t.Context())
 	var canonical *apierr.Error
-	if !errors.As(err, &canonical) || canonical.Code != apierr.Forbidden || canonical.Hint != "select a deployment credential" || !strings.Contains(err.Error(), "deployment scope") {
+	if !errors.As(err, &canonical) || canonical.Code != hosterr.Forbidden || canonical.Hint != "select a deployment credential" || !strings.Contains(err.Error(), "deployment scope") {
 		t.Fatalf("refusal changed: %v", err)
 	}
 }

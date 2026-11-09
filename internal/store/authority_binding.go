@@ -1,12 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -58,7 +59,7 @@ func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Princi
 }
 
 func bindingRefusal() error {
-	return apierr.Authorization(apierr.ReasonBinding, "resource is outside the authorized binding")
+	return hosterr.Authorization(hosterr.ReasonBinding, "resource is outside the authorized binding")
 }
 
 func bindingRunExistsTx(ctx context.Context, tx *storeTx, team, run string) error {

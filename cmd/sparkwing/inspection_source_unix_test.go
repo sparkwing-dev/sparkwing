@@ -38,7 +38,7 @@ func inspectionSourceRepo(t *testing.T) (string, string) {
 	t.Helper()
 	repo := initSnapshotRepo(t)
 	dir := filepath.Join(repo, ".sparkwing")
-	writeRepoFile(t, filepath.Join(dir, "go.mod"), "module fixture\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing v1.2.3\n")
+	writeRepoFile(t, filepath.Join(dir, "go.mod"), "module fixture\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n")
 	writeRepoFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: demo\n    entrypoint: demo\n")
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-qm", "selected Go source")

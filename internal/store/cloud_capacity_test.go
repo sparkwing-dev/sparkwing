@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"errors"
@@ -7,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 var capacityFailures = []struct {
@@ -128,7 +130,7 @@ func TestSelfHostedLauncherCannotReportCloudCapacityFailure(t *testing.T) {
 			root, fence := launcherMeteredFence(t, s, demand, claim, capability.UnitNode)
 			_, _, err = s.AsOperator().ReconcileLauncherAwards(t.Context(), root, []capability.LauncherObservation{failure.observe(fence)}, nil, nil, nil, nil)
 			var refusal *apierr.Error
-			if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden {
 				t.Fatalf("self-hosted capacity report must be refused: %v", err)
 			}
 			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)

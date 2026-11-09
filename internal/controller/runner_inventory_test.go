@@ -19,8 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type runnerInventoryFake struct {
@@ -65,12 +65,12 @@ func TestRunnerInventoryHTTPUsesCommittedSnapshot(t *testing.T) {
 	now := time.Unix(1800000000, 123).UTC()
 	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{
 		{
-			Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, Location: "machine", LastSeen: now, ActiveJobs: []string{"run/job", "run/job"}, MaxConcurrent: 2,
+			Team: "a", Runner: nodewire.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, Location: "machine", LastSeen: now, ActiveJobs: []string{"run/job", "run/job"}, MaxConcurrent: 2,
 			Headroom: &capability.RunnerHeadroom{Cores: 1.5, MemoryBytes: 1024, QueueDepth: 3, ObservedAt: now},
 		},
-		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner"}, Location: "machine", LastSeen: now.Add(-3 * time.Minute)},
+		{Team: "a", Runner: nodewire.RunnerIdentity{Name: "same", Type: "runner"}, Location: "machine", LastSeen: now.Add(-3 * time.Minute)},
 		{
-			Team: "a", Runner: nodeproto.RunnerIdentity{Name: "idle", Type: "runner"}, Location: "machine", LastSeen: now,
+			Team: "a", Runner: nodewire.RunnerIdentity{Name: "idle", Type: "runner"}, Location: "machine", LastSeen: now,
 			Headroom: &capability.RunnerHeadroom{Cores: 1, ObservedAt: now.Add(-2 * time.Hour)},
 		},
 	}}}
@@ -108,7 +108,7 @@ func TestRunnerInventoryPagesDistinctEnrollmentsWithTheSameName(t *testing.T) {
 	now := time.Unix(1800000000, 0).UTC()
 	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now}}
 	for _, id := range []string{"c", "a", "b"} {
-		f.snapshot.Runners = append(f.snapshot.Runners, capability.RunnerObservation{ID: id, Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{id}}, LastSeen: now})
+		f.snapshot.Runners = append(f.snapshot.Runners, capability.RunnerObservation{ID: id, Team: "a", Runner: nodewire.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{id}}, LastSeen: now})
 	}
 	h, raw := runnerInventoryFixture(t, f)
 	cursor := ""
@@ -137,8 +137,8 @@ func TestRunnerInventoryHTTPTenantProperty(t *testing.T) {
 		if team == "" || team == "a" {
 			team = "foreign" + team
 		}
-		foreign := capability.RunnerObservation{Team: team, Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Location: "machine", LastSeen: now}
-		own := capability.RunnerObservation{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "allowed", Type: "runner"}, Location: "machine", LastSeen: now}
+		foreign := capability.RunnerObservation{Team: team, Runner: nodewire.RunnerIdentity{Name: name, Type: "runner"}, Location: "machine", LastSeen: now}
+		own := capability.RunnerObservation{Team: "a", Runner: nodewire.RunnerIdentity{Name: "allowed", Type: "runner"}, Location: "machine", LastSeen: now}
 		f.snapshot = capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{own, foreign}}
 		if first {
 			f.snapshot.Runners[0], f.snapshot.Runners[1] = foreign, own
@@ -160,8 +160,8 @@ func TestRunnerInventoryHTTPNameProperty(t *testing.T) {
 			name = "runner"
 		}
 		f.snapshot = capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{
-			{Team: "a", Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, LastSeen: now, ActiveJobs: []string{"own/job"}},
-			{Team: "a", Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, LastSeen: now.Add(-time.Hour), ActiveJobs: []string{}},
+			{Team: "a", Runner: nodewire.RunnerIdentity{Name: name, Type: "runner"}, LastSeen: now, ActiveJobs: []string{"own/job"}},
+			{Team: "a", Runner: nodewire.RunnerIdentity{Name: name, Type: "runner"}, LastSeen: now.Add(-time.Hour), ActiveJobs: []string{}},
 		}}
 		w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 200)
 		var response struct {
@@ -221,10 +221,10 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 		func() { f.snapshot.Now = time.Time{} },
 		func() { f.snapshot.Runners = []capability.RunnerObservation{{Team: "a"}} },
 		func() {
-			f.snapshot.Runners = []capability.RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "bad", Type: "runner"}, MaxConcurrent: -1}}
+			f.snapshot.Runners = []capability.RunnerObservation{{Team: "a", Runner: nodewire.RunnerIdentity{Name: "bad", Type: "runner"}, MaxConcurrent: -1}}
 		},
 		func() {
-			f.snapshot.Runners = []capability.RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "bad", Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: math.NaN(), ObservedAt: now}}}
+			f.snapshot.Runners = []capability.RunnerObservation{{Team: "a", Runner: nodewire.RunnerIdentity{Name: "bad", Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: math.NaN(), ObservedAt: now}}}
 		},
 	} {
 		f.team, f.err, f.snapshot = "a", nil, capability.RunnerSnapshot{Now: now}
@@ -324,7 +324,7 @@ func TestRunnerInventoryMetricsPreservesSamplesOnReadFailure(t *testing.T) {
 
 func TestRunnerInventoryRealClient(t *testing.T) {
 	now := time.Now().UTC()
-	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "box", Type: "runner", Labels: []string{"gpu"}}, Location: "machine", LastSeen: now, ActiveJobs: []string{"run/build/linux"}}}}}
+	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: "a", Runner: nodewire.RunnerIdentity{Name: "box", Type: "runner", Labels: []string{"gpu"}}, Location: "machine", LastSeen: now, ActiveJobs: []string{"run/build/linux"}}}}}
 	h, raw := runnerInventoryFixture(t, f)
 	reader, err := client.NewRunnerReader(client.EngineOptions{URL: "https://controller", Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: &http.Client{Transport: inventoryRoundTrip{h}}})
 	if err != nil {

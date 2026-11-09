@@ -1,14 +1,16 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func holderResp(h store.ConcurrencyHolder) controllerwire.QueueGroupHolder {
@@ -58,7 +60,7 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request, 
 func concurrencyError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrLockHeld):
-		return &apierr.Error{Code: apierr.LockHeld, Message: "concurrency holder changed"}
+		return &apierr.Error{Code: hosterr.LockHeld, Message: "concurrency holder changed"}
 	case errors.Is(err, store.ErrConcurrencySuperseded):
 		return &apierr.Error{Code: apierr.Conflict, Message: "concurrency work superseded", Details: map[string]any{"reason": "concurrency_superseded"}}
 	default:

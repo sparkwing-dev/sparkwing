@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -10,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // GitHubSourceGrant captures the repositories authorized before a token is minted.
@@ -47,7 +49,7 @@ func (t *Tenant) CommitGitHubSourceRelease(ctx context.Context, authorized capab
 			return bindingRefusal()
 		}
 		if !expires.After(tx.now(ctx)) {
-			return authorityError(apierr.Unavailable, "GitHub returned no live source token")
+			return authorityError(hosterr.Unavailable, "GitHub returned no live source token")
 		}
 		audit, err := capability.AuthorizeSourceRelease(current.request, tx.now(ctx))
 		if err != nil {

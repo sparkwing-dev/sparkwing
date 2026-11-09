@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -8,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func FuzzMachineClaimsCannotSelectLocalVersionPolicy(f *testing.F) {
@@ -20,7 +22,7 @@ func FuzzMachineClaimsCannotSelectLocalVersionPolicy(f *testing.F) {
 		checked, exempted := false, false
 		e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error {
 			checked = true
-			return &apierr.Error{Code: apierr.Unavailable, Message: "verified policy unavailable"}
+			return &apierr.Error{Code: hosterr.Unavailable, Message: "verified policy unavailable"}
 		})
 		e.LocalRunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { exempted = true; return nil })
 		body, err := json.Marshal(map[string]any{"runner_version": "version-" + version, "kinds": []string{"node"}, "labels": []string{label, "type=local"}})

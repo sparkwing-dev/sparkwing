@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -14,17 +16,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type localHostRoundTripper struct{ handler http.Handler }
@@ -50,9 +52,9 @@ func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
 		}
 		switch operation % 8 {
 		case 0:
-			err = process.Annotation(t.Context(), nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Level: "info", Message: value}})
+			err = process.Annotation(t.Context(), nodewire.AnnotationRequest{Annotation: nodewire.Annotation{Level: "info", Message: value}})
 		case 1:
-			err = process.Summary(t.Context(), nodeproto.SummaryRequest{Markdown: value})
+			err = process.Summary(t.Context(), nodewire.SummaryRequest{Markdown: value})
 		case 2:
 			_, _, err = process.Secret(t.Context(), "secret")
 		case 3:
@@ -283,7 +285,7 @@ func TestLocalHostPrivateTransportRejectsForeignCredentialProbesAndUnauthenticat
 	} {
 		_, err := host.ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+		if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden {
 			t.Fatalf("foreign probe: %v", err)
 		}
 	}

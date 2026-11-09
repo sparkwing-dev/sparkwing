@@ -1,0 +1,27 @@
+# sparkwing/services
+
+type Addr struct {
+	Name string
+
+	HostPort int
+}
+const AutoPort = -1
+const DefaultReadyTimeout = 30 * time.Second
+var ErrDockerUnavailable = docker.ErrDockerUnavailable
+type Service struct {
+	Image string
+
+	Name string
+
+	Port int
+
+	HostPort int
+
+	Env map[string]string
+
+	ReadyCmd string
+
+	ReadyTimeout time.Duration
+}
+func WithServices(ctx context.Context, specs []Service, fn func(context.Context) error) error
+func WithServicesAddrs(ctx context.Context, specs []Service, fn func(context.Context, []Addr) error) (err error)

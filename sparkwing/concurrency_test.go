@@ -2,14 +2,7 @@ package sparkwing
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestJobConcurrencyReachesPlanDocument(t *testing.T) {
@@ -19,26 +12,6 @@ func TestJobConcurrencyReachesPlanDocument(t *testing.T) {
 	memberships := planDocument(plan).Jobs[0].Concurrency
 	if len(memberships) != 1 || memberships[0].Group != "db" || *memberships[0].Cost != 4 || *memberships[0].Capacity != 8 {
 		t.Fatalf("job concurrency = %+v", memberships)
-	}
-}
-
-func TestGoConcurrencyCapacityMustBeExplicit(t *testing.T) {
-	for _, capacity := range []int{0, 1} {
-		plan := NewPlan()
-		Job(plan, "deploy", func(context.Context) error { return nil }).Concurrency(NewConcurrencyGroup("deploys", ConcurrencyLimit{Capacity: capacity}))
-		raw, err := json.Marshal(planDocument(plan))
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()})
-		if capacity == 0 {
-			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid {
-				t.Fatalf("zero capacity = %v, want plan_invalid", err)
-			}
-		} else if err != nil {
-			t.Fatalf("capacity %d: %v", capacity, err)
-		}
 	}
 }
 
@@ -60,21 +33,5 @@ func TestGoConcurrencyKeepsOptionalPoliciesUnset(t *testing.T) {
 	spec := planDocument(plan).Jobs[0].Concurrency[0]
 	if spec.Scope != nil || spec.OnLimit != nil || spec.Cost != nil || spec.Capacity == nil || *spec.Capacity != 2 {
 		t.Fatalf("Go declaration presence: %+v", spec)
-	}
-}
-
-func TestHostRefusesUnknownConcurrencyPolicy(t *testing.T) {
-	for _, limit := range []ConcurrencyLimit{{Capacity: 1, OnLimit: "qeue"}, {Capacity: 1, Scope: "globl"}} {
-		plan := NewPlan()
-		Job(plan, "deploy", func(context.Context) error { return nil }).Concurrency(NewConcurrencyGroup("g", limit))
-		raw, err := json.Marshal(planDocument(plan))
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()})
-		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid {
-			t.Fatalf("%+v = %v, want plan_invalid", limit, err)
-		}
 	}
 }

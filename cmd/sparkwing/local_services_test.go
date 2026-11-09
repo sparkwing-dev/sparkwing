@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -17,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -27,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestLocalServicesRejectInvalidAdmissionBeforeConstruction(t *testing.T) {
@@ -451,7 +453,7 @@ func TestProductionLocalQueueRefusesASilentDaemonPromptly(t *testing.T) {
 			defer cancel()
 			_, err = queue.ReadQueue(ctx)
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || !strings.Contains(failure.Message, "did not answer") {
+			if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || !strings.Contains(failure.Message, "did not answer") {
 				t.Fatalf("queue with a silent daemon = %v, want the public unavailable refusal", err)
 			}
 			select {

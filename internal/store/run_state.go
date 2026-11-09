@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -9,11 +11,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Run causes let the store select a lifecycle event and completion desired state.
@@ -141,7 +143,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 				change.MaskedError = "run preparation failed"
 			}
 			if row.CancelRequestedAt != nil {
-				change.Reason, change.MaskedError = string(apierr.ReasonCancelled), "cancellation requested"
+				change.Reason, change.MaskedError = string(hosterr.ReasonCancelled), "cancellation requested"
 			}
 		}
 	}

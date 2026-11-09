@@ -1,6 +1,8 @@
 // Package sdkinstall builds SDK entries inside their selected engine.
 package sdkinstall
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -17,7 +19,6 @@ import (
 
 	"golang.org/x/mod/modfile"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -25,10 +26,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-// Run serves __sdk-install with the selected engine's build stamp and filtered environment.
-func Run(ctx context.Context, version string, input io.Reader, output, diagnostics io.Writer) error {
+// Run serves __sdk-install with the selected engine's filtered environment.
+func Run(ctx context.Context, input io.Reader, output, diagnostics io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -47,13 +49,6 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	pin, err := engine.ReadPin(dir, request.SDK)
 	if err != nil {
 		return err
-	}
-	selected, err := engine.VersionForPin(pin)
-	if err != nil {
-		return err
-	}
-	if pin.Replacement == "" && selected != version {
-		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "SDK pin does not match the installing engine"}
 	}
 	masker := secrets.NewMasker()
 	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{})
@@ -160,7 +155,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		}
 	}
 	if module.Version != pin.Version || replacement != pin.Replacement {
-		return nil, "", &apierr.Error{Code: apierr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
+		return nil, "", &apierr.Error{Code: hosterr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
 	}
 	if uncached {
 		return []string{path}, "", nil
@@ -263,7 +258,7 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 	}
 	var installed struct{ Version string }
 	if err := json.Unmarshal(body, &installed); err != nil || installed.Version != pin.Version {
-		return nil, &apierr.Error{Code: apierr.IntegrityFailure, Message: "installed TypeScript SDK differs from the native lockfile pin"}
+		return nil, &apierr.Error{Code: hosterr.IntegrityFailure, Message: "installed TypeScript SDK differs from the native lockfile pin"}
 	}
 	main := filepath.Join(dir, manifest.Main)
 	if _, err := os.Stat(main); err != nil {

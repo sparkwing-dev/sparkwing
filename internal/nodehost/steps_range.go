@@ -5,13 +5,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // safety: a bound naming no step anywhere in the plan is a typo, and running
 // the whole pipeline in its place could deploy what the author meant to skip.
-func validateStepRange(doc nodeproto.PlanDoc, start, stop string) error {
+func validateStepRange(doc nodewire.PlanDoc, start, stop string) error {
 	if start == "" && stop == "" {
 		return nil
 	}
@@ -58,7 +58,7 @@ func validateStepRange(doc nodeproto.PlanDoc, start, stop string) error {
 
 // safety: a node holding neither bound runs every step, since the window may
 // name another node's steps.
-func rangeSkips(steps []nodeproto.StepSpec, children map[string][]string, start, stop string) map[string]string {
+func rangeSkips(steps []nodewire.StepSpec, children map[string][]string, start, stop string) map[string]string {
 	parents := make(map[string][]string, len(steps))
 	for _, st := range steps {
 		parents[st.ID] = st.Needs

@@ -4,9 +4,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func defaultBranchSeals() error {
@@ -47,7 +47,7 @@ func independentJobTimeouts() error {
 		return err
 	}
 	for _, quiet := range []int64{0, 1000, 90000} {
-		plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "work", TimeoutMS: boundaryPointer(int64(60000)), NoProgressTimeoutMS: boundaryPointer(quiet)}}}
+		plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "work", TimeoutMS: boundaryPointer(int64(60000)), NoProgressTimeoutMS: boundaryPointer(quiet)}}}
 		execution, err := settings.ResolvePlan(settings.PlanInputs{Request: spec.Request, Declarations: spec.Declarations, Plan: plan, Context: settings.Context{Local: true}})
 		if err != nil {
 			return err

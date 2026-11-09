@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -21,14 +21,14 @@ func testGoSDKEntrypointAlias(t *testing.T) {
 	defer cleanup()
 	process := startProtocolProbe(t, bin)
 	sendProtocolProbe(t, process, probeHello())
-	var hello nodeproto.HelloResult
+	var hello nodewire.HelloResult
 	decodeProtocolProbe(t, protocolProbeReply(t, process, "hello"), &hello)
-	sendProtocolProbe(t, process, nodeproto.Request{
-		ID: "plan", Op: nodeproto.OpPlan,
+	sendProtocolProbe(t, process, nodewire.Request{
+		ID: "plan", Op: nodewire.OpPlan,
 		Pipeline: protocolgo.Name, Args: map[string]string{"name": "alias"},
-		Run: &nodeproto.RunContext{RunID: "r", Pipeline: alias},
+		Run: &nodewire.RunContext{RunID: "r", Pipeline: alias},
 	})
-	var planned nodeproto.PlanDoc
+	var planned nodewire.PlanDoc
 	decodeProtocolProbe(t, protocolProbeReply(t, process, "plan"), &planned)
 	if err := process.Finish(); err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func testGoSDKEntrypointAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, doc := range []nodeproto.PlanDoc{planned, fake} {
+	for _, doc := range []nodewire.PlanDoc{planned, fake} {
 		found := false
 		for _, job := range doc.Jobs {
 			found = found || job.ID == "invoked-"+alias

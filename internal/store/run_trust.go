@@ -1,7 +1,8 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -13,7 +14,7 @@ const (
 
 func checkRunHost(c capability.Capability, p runspec.Provenance) error {
 	if p.ProvenRepository() != "" && (c.Host == nil || !c.Host.Kind.AllowsProvenRepository()) {
-		return authorityError(apierr.Forbidden, "repository-proven runs require a shared runner or Cloud host")
+		return authorityError(hosterr.Forbidden, "repository-proven runs require a shared runner or Cloud host")
 	}
 	return nil
 }

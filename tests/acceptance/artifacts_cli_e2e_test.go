@@ -17,11 +17,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestArtifactsCLIRealMembersAndInterrupt(t *testing.T) {
@@ -40,7 +40,7 @@ func TestArtifactsCLIRealMembersAndInterrupt(t *testing.T) {
 	}
 	f := newFeatureController(t, controller, "artifact-cli")
 	f.cli = cli
-	run := f.plan(runspec.Request{}, []nodeproto.JobSpec{{ID: "producer", Artifacts: []string{"*"}}})
+	run := f.plan(runspec.Request{}, []nodewire.JobSpec{{ID: "producer", Artifacts: []string{"*"}}})
 	award := f.mustClaim(f.slow, run, "producer")
 	f.start(award)
 	host := f.host(award)

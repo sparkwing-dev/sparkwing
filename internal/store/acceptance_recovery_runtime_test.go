@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type storeRecoveryFixture struct {
@@ -35,17 +35,17 @@ func newStoreRecoveryFixture(t *testing.T, started bool) *storeRecoveryFixture {
 	return newStoreRecoveryFixtureAt(t, started, storetest.NewSQLite(t))
 }
 
-func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Target, edits ...func(*nodeproto.PlanDoc)) *storeRecoveryFixture {
+func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Target, edits ...func(*nodewire.PlanDoc)) *storeRecoveryFixture {
 	return newStoreRecoveryFixtureForAt(t, started, target, string(acceptanceTeam), edits...)
 }
 
-func newStoreRecoveryFixtureForAt(t *testing.T, started bool, target *storetest.Target, identity string, edits ...func(*nodeproto.PlanDoc)) *storeRecoveryFixture {
+func newStoreRecoveryFixtureForAt(t *testing.T, started bool, target *storetest.Target, identity string, edits ...func(*nodewire.PlanDoc)) *storeRecoveryFixture {
 	t.Helper()
 	return newStoreRecoveryFixtureSetup(t, started, target, identity, nil, edits...)
 }
 
 // newStoreRecoveryFixtureSetup runs setup on the team before its runner claims the job.
-func newStoreRecoveryFixtureSetup(t *testing.T, started bool, target *storetest.Target, identity string, setup func(*store.Store, store.Team), edits ...func(*nodeproto.PlanDoc)) *storeRecoveryFixture {
+func newStoreRecoveryFixtureSetup(t *testing.T, started bool, target *storetest.Target, identity string, setup func(*store.Store, store.Team), edits ...func(*nodewire.PlanDoc)) *storeRecoveryFixture {
 	t.Helper()
 	ctx := t.Context()
 	f := &storeRecoveryFixture{target: target}
@@ -63,8 +63,8 @@ func newStoreRecoveryFixtureSetup(t *testing.T, started bool, target *storetest.
 	f.now = now
 	f.s.SetTestClock(t, func() time.Time { return now })
 	var plan store.PlanAcceptance
-	f.tenant, plan, err = storePlanSealRequestFor(ctx, f.s, identity, false, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-		doc.Jobs = []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}, Retry: &nodeproto.RetrySpec{Attempts: 2}}}
+	f.tenant, plan, err = storePlanSealRequestFor(ctx, f.s, identity, false, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
+		doc.Jobs = []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}, Retry: &nodewire.RetrySpec{Attempts: 2}}}
 		for _, edit := range edits {
 			edit(doc)
 		}

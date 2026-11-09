@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 var placementSHA = strings.Repeat("a", 40)
@@ -20,7 +20,7 @@ func cloudTier() runspec.RepositoryTier {
 	return runspec.RepositoryTier{Target: runspec.PlacementCloud}
 }
 
-func placementRow(t *testing.T, job nodeproto.JobSpec, requires ...string) runstate.NodeRow {
+func placementRow(t *testing.T, job nodewire.JobSpec, requires ...string) runstate.NodeRow {
 	t.Helper()
 	spec, err := json.Marshal(job)
 	if err != nil {
@@ -42,13 +42,13 @@ func TestJobPlacementBindsIDsAndRefusesUnplaceableJobs(t *testing.T) {
 		row  runstate.NodeRow
 		want string
 	}{
-		"override for a job this plan omits is inert": {placementRow(t, nodeproto.JobSpec{ID: "pre-release"}), ""},
-		"listed dispatched job":                       {placementRow(t, nodeproto.JobSpec{ID: "macos"}, "os=darwin"), ""},
-		"inline job cannot move":                      {placementRow(t, nodeproto.JobSpec{ID: "setup", Inline: true}), "is inline"},
-		"inline job with a cleared list":              {placementRow(t, nodeproto.JobSpec{ID: "cleared", Inline: true}), ""},
-		"darwin job on a Cloud-only list":             {placementRow(t, nodeproto.JobSpec{ID: "docs"}, "os=darwin"), "no tier of its placement"},
-		"darwin job on a Windows team tier":           {placementRow(t, nodeproto.JobSpec{ID: "macos"}, "os=windows"), "no tier of its placement"},
-		"Linux job on a Cloud-only list":              {placementRow(t, nodeproto.JobSpec{ID: "docs"}, "os=linux,os=darwin"), ""},
+		"override for a job this plan omits is inert": {placementRow(t, nodewire.JobSpec{ID: "pre-release"}), ""},
+		"listed dispatched job":                       {placementRow(t, nodewire.JobSpec{ID: "macos"}, "os=darwin"), ""},
+		"inline job cannot move":                      {placementRow(t, nodewire.JobSpec{ID: "setup", Inline: true}), "is inline"},
+		"inline job with a cleared list":              {placementRow(t, nodewire.JobSpec{ID: "cleared", Inline: true}), ""},
+		"darwin job on a Cloud-only list":             {placementRow(t, nodewire.JobSpec{ID: "docs"}, "os=darwin"), "no tier of its placement"},
+		"darwin job on a Windows team tier":           {placementRow(t, nodewire.JobSpec{ID: "macos"}, "os=windows"), "no tier of its placement"},
+		"Linux job on a Cloud-only list":              {placementRow(t, nodewire.JobSpec{ID: "docs"}, "os=linux,os=darwin"), ""},
 	} {
 		err := checkJobPlacement(policy, test.row)
 		if (test.want == "") != (err == nil) || err != nil && !strings.Contains(err.Error(), test.want) {

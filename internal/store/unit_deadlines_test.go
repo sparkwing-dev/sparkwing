@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
@@ -63,7 +63,7 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchController)
 	request.Seal.Plan = []byte(`{"claim_wait_ms":60000,"jobs":[{"id":"job","steps":[{"id":"step"}]}]}`)
-	var plan nodeproto.PlanDoc
+	var plan nodewire.PlanDoc
 	if err := json.Unmarshal(request.Seal.Plan, &plan); err != nil {
 		t.Fatal(err)
 	}

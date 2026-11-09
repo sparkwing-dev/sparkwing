@@ -13,8 +13,7 @@
 /verify-release
 
 # Go workspace
-go.work
-go.work.sum
+/go.work.sum
 
 # IDE / OS
 .idea/

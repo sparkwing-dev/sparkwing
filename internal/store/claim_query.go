@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -11,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -111,7 +112,7 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	// never takes verified default-branch work; an enrollment that does not say so
 	// would let it, so the runner stops until it is enrolled correctly.
 	if demand.Kubernetes && root.Subject.Kind == capability.SubjectMachine && root.Parent == nil && root.Binding.Kind == capability.BindingNone && !capability.Launcher(root) && !observed.PersistentKubernetes {
-		return f, authorityError(apierr.Forbidden, kubernetesEnrollmentRefusal)
+		return f, authorityError(hosterr.Forbidden, kubernetesEnrollmentRefusal)
 	}
 	profile := match.Profile{}
 	if tx.store.claimProfiles != nil {

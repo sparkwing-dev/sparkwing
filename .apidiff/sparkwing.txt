@@ -95,7 +95,7 @@ type EnvVarDocer interface {
 var ErrIsolatedHomeRequired error = apierr.IsolatedHomeRefusal()
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
-var ErrSecretMissing = secrets.ErrSecretMissing
+var ErrSecretMissing = secretvalue.ErrSecretMissing
 func Error(ctx context.Context, format string, args ...any)
 type Example struct {
 	Comment string
@@ -432,7 +432,6 @@ type Workable interface {
 
 # methods on un-declared receiver types (likely a bug)
 func (c *jobFn) Work(w *Work) (*WorkStep, error)
-func (noHostSecrets) ContainsSecret(string) bool
 func (nopLogger) Emit(LogRecord)
 func (nopLogger) Log(level, msg string)
 func (l protocolLogger) Emit(r LogRecord)

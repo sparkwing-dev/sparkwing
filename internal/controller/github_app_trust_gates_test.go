@@ -1,15 +1,17 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Anyone who can push a tag can publish a release on it, so a release runs
@@ -87,7 +89,7 @@ func TestChildCannotPairAnotherRefWithItsOwnCommit(t *testing.T) {
 		attack := request
 		mutate(&attack)
 		var refusal *apierr.Error
-		if err := server.resolveChildRevisions(t.Context(), e.EngineController, a, &attack); !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+		if err := server.resolveChildRevisions(t.Context(), e.EngineController, a, &attack); !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden {
 			t.Fatalf("child with another %s was not refused: %v", name, err)
 		}
 	}

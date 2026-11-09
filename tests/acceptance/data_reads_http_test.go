@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -26,13 +28,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type dataHTTPFixture struct {
@@ -150,13 +152,13 @@ func TestDataReadHTTPHasMany(t *testing.T) {
 				digests, want = []blob.Digest{denied, missing}, []blob.Digest{}
 			case "private error":
 				f.edges.err = errors.New("private-readset-database")
-				status, code = 500, apierr.Internal
+				status, code = 500, hosterr.Internal
 			case "revoked":
-				f.edges.err = &apierr.Error{Code: apierr.Unauthenticated, Message: "revoked"}
-				status, code = 401, apierr.Unauthenticated
+				f.edges.err = &apierr.Error{Code: hosterr.Unauthenticated, Message: "revoked"}
+				status, code = 401, hosterr.Unauthenticated
 			case "expired budget":
 				deadline = time.Unix(1, 0)
-				status, code = 408, apierr.DeadlineExceeded
+				status, code = 408, hosterr.DeadlineExceeded
 			}
 			body, _ := json.Marshal(map[string]any{"digests": digests, "deadline": deadline})
 			w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/has-many", string(body))
@@ -184,7 +186,7 @@ func TestDataReadHTTPRefusals(t *testing.T) {
 				f := newDataHTTPFixture()
 				b := f.boundary
 				p := &b.snapshot.Authorities[0].Principal
-				status, code := 401, apierr.Unauthenticated
+				status, code := 401, hosterr.Unauthenticated
 				switch state {
 				case "missing":
 					b.raw = ""
@@ -204,7 +206,7 @@ func TestDataReadHTTPRefusals(t *testing.T) {
 					b.snapshot.Binding.FinishedAt = &b.snapshot.Now
 				case "cancelled run":
 					b.snapshot.Binding.RunCancelled = true
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "stale generation":
 					b.snapshot.Binding.Current.Generation++
 				case "wrong audience":
@@ -212,45 +214,45 @@ func TestDataReadHTTPRefusals(t *testing.T) {
 					p.Capability.Audience = capability.NodeHost
 					p.Capability.Digest = sha256.Sum256([]byte(b.raw))
 					b.snapshot.Binding.ProcessAlive = true
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "no grant":
 					p.Capability.Grants = nil
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "machine root":
 					p.Capability.Unit = ""
 					p.Capability.Issuance = capability.Delegate
 					p.Capability.Parent = nil
 					b.snapshot.Authorities = b.snapshot.Authorities[:1]
 					p.Capability.Binding = capability.Binding{Kind: capability.BindingNone}
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "member":
 					b = authorityMember()
 					f.boundary = b
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "foreign team":
 					p.Capability.Team = "foreign"
-					status, code = 403, apierr.Forbidden
+					status, code = 403, hosterr.Forbidden
 				case "binding refused":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "scope refused"}
-					status, code = 403, apierr.Forbidden
+					b.bindingErr = &apierr.Error{Code: hosterr.Forbidden, Message: "scope refused"}
+					status, code = 403, hosterr.Forbidden
 				case "no resolver":
 					f.data.ResolveAuthority = nil
-					status, code = 500, apierr.PolicyMissing
+					status, code = 500, hosterr.PolicyMissing
 				case "no controller":
 					f.data = nil
-					status, code = 500, apierr.PolicyMissing
+					status, code = 500, hosterr.PolicyMissing
 				case "resolver error":
 					f.data.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) {
 						return blob.Authority{}, errors.New("private-resolver")
 					}
-					status, code = 500, apierr.Internal
+					status, code = 500, hosterr.Internal
 				case "resolver revoked":
 					f.data.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) {
-						return blob.Authority{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "revoked"}
+						return blob.Authority{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "revoked"}
 					}
 				case "no edges":
 					f.data.Access = nil
-					status, code = 500, apierr.PolicyMissing
+					status, code = 500, hosterr.PolicyMissing
 				}
 				body := `{"digest":"` + string(dataDigest()) + `"}`
 				if operation == "has-many" {
@@ -282,13 +284,13 @@ func TestDataReadHTTPInvalidBodiesAndMethods(t *testing.T) {
 				}
 				f.boundary.raw = ""
 				w = authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation, body)
-				assertEngineError(t, w, 401, apierr.Unauthenticated)
+				assertEngineError(t, w, 401, hosterr.Unauthenticated)
 			})
 		}
 		for _, method := range []string{"GET", "HEAD", "PUT", "DELETE"} {
 			f := newDataHTTPFixture()
 			w := authorityHTTP(f.handler(), f.boundary, method, "/api/v1/data/"+operation, valid)
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+			assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 		}
 	}
 }
@@ -297,16 +299,16 @@ func TestDataReadHTTPDownloadFailures(t *testing.T) {
 	for _, state := range []string{"unreadable", "missing", "foreign metadata", "bad digest", "negative size", "no reader", "no signer", "no meter", "meter cap", "meter error", "sign error"} {
 		t.Run(state, func(t *testing.T) {
 			f := newDataHTTPFixture()
-			status, code := 500, apierr.Internal
+			status, code := 500, hosterr.Internal
 			switch state {
 			case "unreadable":
 				f.edges.err = blob.ErrDigestNotReadable
-				status, code = 403, apierr.Forbidden
+				status, code = 403, hosterr.Forbidden
 			case "missing":
 				f.data.ReadBlob = func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error) {
 					return blob.Blob{}, blob.ErrNotFound
 				}
-				status, code = 404, apierr.BlobMissing
+				status, code = 404, hosterr.BlobMissing
 			case "foreign metadata", "bad digest", "negative size":
 				f.data.ReadBlob = func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error) {
 					metadata := blob.Blob{Team: "team", Digest: dataDigest(), Size: 14}
@@ -323,16 +325,16 @@ func TestDataReadHTTPDownloadFailures(t *testing.T) {
 				}
 			case "no reader":
 				f.data.ReadBlob = nil
-				code = apierr.PolicyMissing
+				code = hosterr.PolicyMissing
 			case "no signer":
 				f.data.Objects = nil
-				code = apierr.PolicyMissing
+				code = hosterr.PolicyMissing
 			case "no meter":
 				f.data.ChargeDownload = nil
-				code = apierr.PolicyMissing
+				code = hosterr.PolicyMissing
 			case "meter cap":
 				f.chargeErr = &store.DownloadCapError{RetryAfter: time.Minute, Team: "team", UsedBytes: 100, CapBytes: 100, Remedy: "contact support@sparkwing.dev to raise this limit"}
-				status, code = 429, apierr.RateLimited
+				status, code = 429, hosterr.RateLimited
 			case "meter error":
 				f.chargeErr = errors.New("private-ledger")
 			case "sign error":
@@ -388,7 +390,7 @@ func FuzzDataReadHTTPReadSet(f *testing.F) {
 				t.Fatalf("HTTP %d %s object=%+v", w.Code, w.Body.String(), fixture.objects.signed)
 			}
 		} else {
-			assertEngineError(t, w, 403, apierr.Forbidden)
+			assertEngineError(t, w, 403, hosterr.Forbidden)
 			if len(fixture.reads) != 0 || len(fixture.charges) != 0 || fixture.objects.signed.Key != "" {
 				t.Fatal("unreadable digest reached metadata, metering or signing")
 			}
@@ -446,7 +448,7 @@ func TestDataReadHTTPRepoReadersAndOwner(t *testing.T) {
 				}
 				w := authorityHTTP(h, b, "POST", "/api/v1/data/"+operation, body)
 				if class == "peer repo reader" {
-					assertEngineError(t, w, 403, apierr.Forbidden)
+					assertEngineError(t, w, 403, hosterr.Forbidden)
 					continue
 				}
 				if w.Code != 200 {

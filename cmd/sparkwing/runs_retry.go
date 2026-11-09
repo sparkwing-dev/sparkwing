@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/rand"
@@ -9,12 +11,12 @@ import (
 	"io"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type retryConnection struct {
@@ -105,7 +107,7 @@ func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, 
 		}
 		if err == nil && response.Here {
 			if connection.here == nil {
-				err = incompleteHereHandoff(response.RunID, &apierr.Error{Code: apierr.Unavailable, Message: "here hosting is unavailable in this build"})
+				err = incompleteHereHandoff(response.RunID, &apierr.Error{Code: hosterr.Unavailable, Message: "here hosting is unavailable in this build"})
 			} else {
 				err = connection.here(ctx, response, format)
 			}
@@ -113,7 +115,7 @@ func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, 
 		if err != nil {
 			failures = append(failures, fmt.Errorf("retry run %s: %w", id, err))
 			if !errors.As(err, &result.Error) {
-				result.Error = &apierr.Error{Code: apierr.Internal, Message: err.Error()}
+				result.Error = &apierr.Error{Code: hosterr.Internal, Message: err.Error()}
 			}
 		}
 		if err := writeRetryResult(out, result, format); err != nil {

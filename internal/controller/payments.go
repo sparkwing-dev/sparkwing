@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -7,11 +9,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // PaymentSettler commits verified provider outcomes against stored billing records and resolves event ownership.
@@ -52,11 +54,11 @@ func (s *Server) paymentHandler() http.Handler {
 
 func (s *Server) verifyPaymentRequest(r *http.Request) error {
 	if s.paymentVerifier == nil || s.paymentLedger == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "payment settlement is not configured"}
+		return &apierr.Error{Code: hosterr.Unavailable, Message: "payment settlement is not configured"}
 	}
 	signatures := r.Header.Values("Stripe-Signature")
 	if len(signatures) != 1 || signatures[0] == "" {
-		return &apierr.Error{Code: apierr.Unauthenticated, Message: "payment signature required"}
+		return &apierr.Error{Code: hosterr.Unauthenticated, Message: "payment signature required"}
 	}
 	if r.Body == nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "payment event required"}
@@ -66,7 +68,7 @@ func (s *Server) verifyPaymentRequest(r *http.Request) error {
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			return &apierr.Error{Code: apierr.PayloadTooLarge, Message: "payment event exceeds the JSON body limit"}
+			return &apierr.Error{Code: hosterr.PayloadTooLarge, Message: "payment event exceeds the JSON body limit"}
 		}
 		return &apierr.Error{Code: apierr.BadRequest, Message: "payment event could not be read"}
 	}
@@ -74,7 +76,7 @@ func (s *Server) verifyPaymentRequest(r *http.Request) error {
 	var conflict *apierr.Error
 	if errors.As(err, &conflict) && conflict.Details["reason"] == capability.PaymentOwnershipReason {
 		s.logger.Error("stripe event names another deployment for an object recorded here; not settled, Stripe retries", "alert", "payment_ownership_conflict", "object", conflict.Details["object"], "stamp", conflict.Details["stamp"], "deployment", s.paymentDeployment)
-		return &apierr.Error{Code: apierr.Internal, Message: "payment event ownership conflicts with committed records"}
+		return &apierr.Error{Code: hosterr.Internal, Message: "payment event ownership conflicts with committed records"}
 	}
 	if err != nil {
 		return err

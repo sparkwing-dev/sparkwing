@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -10,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type foregroundRuntimeFake struct {
@@ -104,7 +106,7 @@ func TestWingdRunRefusesUnrepresentedRuntimeOptions(t *testing.T) {
 			return nil, nil
 		})
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || called {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || called {
 			t.Fatalf("%s was silently discarded: called=%v err=%v", flag, called, err)
 		}
 	}
@@ -145,7 +147,7 @@ func TestWingdRunRejectsMissingRuntimeAndKeepsDefaults(t *testing.T) {
 		})
 		if absent {
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.Unavailable {
+			if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable {
 				t.Fatalf("missing runtime error = %v", err)
 			}
 			continue
@@ -195,7 +197,7 @@ func TestWingdRunRequiresControllerBeforeOpeningHome(t *testing.T) {
 		return nil, nil
 	})
 	var structured *apierr.Error
-	if !errors.As(err, &structured) || structured.Code != apierr.Unavailable {
+	if !errors.As(err, &structured) || structured.Code != hosterr.Unavailable {
 		t.Fatalf("run without controller = %v", err)
 	}
 	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {

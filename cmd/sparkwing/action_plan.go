@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -22,6 +21,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type planPreviewDoc struct {
@@ -194,7 +195,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 	}
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base}}
 	inspection := pipelineInspection{
-		planner: nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: masker, Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
+		planner: nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: masker, Log: func(ctx context.Context, frame nodewire.FrameLog) error {
 			if err := context.Cause(ctx); err != nil {
 				return err
 			}
@@ -203,7 +204,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 		}},
 		input: nodehost.PlanningProcessInput{
 			Entry: entry, Entrypoint: selection.identity.Entrypoint, Environment: environment,
-			Run: nodeproto.RunContext{RunID: "inspection", Pipeline: pipeline}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+			Run: nodewire.RunContext{RunID: "inspection", Pipeline: pipeline}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		},
 	}
 	return fn(ctx, inspection, filepath.Dir(selection.execution.Directory))
@@ -234,7 +235,7 @@ type planned struct {
 	pipeline string
 	dryRun   bool
 	args     map[string]string
-	doc      nodeproto.PlanDoc
+	doc      nodewire.PlanDoc
 }
 
 func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline string, args []string) (planned, error) {
@@ -337,7 +338,7 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 	return doc, nil
 }
 
-func checkStepRange(doc nodeproto.PlanDoc, startAt, stopAt string) error {
+func checkStepRange(doc nodewire.PlanDoc, startAt, stopAt string) error {
 	known := map[string]bool{}
 	for _, n := range doc.Jobs {
 		if len(n.Steps) > 0 {
@@ -360,7 +361,7 @@ func checkStepRange(doc nodeproto.PlanDoc, startAt, stopAt string) error {
 	return nil
 }
 
-func rangeSkips(steps []nodeproto.StepSpec, startAt, stopAt string) map[string]string {
+func rangeSkips(steps []nodewire.StepSpec, startAt, stopAt string) map[string]string {
 	parents := map[string][]string{}
 	children := map[string][]string{}
 	for _, s := range steps {

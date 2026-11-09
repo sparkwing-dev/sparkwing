@@ -6,10 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestPipelineJSON_SurfacesRisks(t *testing.T) {
@@ -17,7 +16,7 @@ func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 		PipelinePresentation: runspec.PipelinePresentation{
 			Name:  "cluster-down",
 			Risks: []string{"destructive", "prod"},
-			RisksByStep: []nodeproto.StepRisks{
+			RisksByStep: []nodewire.StepRisks{
 				{JobID: "cluster-down", StepID: "terraform-destroy-eks", Labels: []string{"destructive", "prod"}},
 				{JobID: "cluster-down", StepID: "terraform-destroy-nat", Labels: []string{"destructive"}},
 			},
@@ -54,11 +53,11 @@ func TestPipelineJSON_OmitsEmptyRisks(t *testing.T) {
 }
 
 func TestCatalogCopy_PreservesRisks(t *testing.T) {
-	dp := nodeproto.PipelineDescription{
+	dp := nodewire.PipelineDescription{
 		Name:  "cluster-down",
 		Short: "tear down the cluster",
 		Risks: []string{"destructive", "prod"},
-		RisksByStep: []nodeproto.StepRisks{
+		RisksByStep: []nodewire.StepRisks{
 			{JobID: "cluster-down", StepID: "destroy", Labels: []string{"destructive", "prod"}},
 		},
 	}

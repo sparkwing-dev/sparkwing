@@ -20,12 +20,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type billingCloudProfile struct{}
@@ -109,7 +109,7 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 				t.Fatalf("standing-limited team blocked eligible work: %s", w.Body)
 			}
 			claim := response.Claim
-			var plan nodeproto.PlanDoc
+			var plan nodewire.PlanDoc
 			if claim.Request.RunID != "later" || claim.Request.Request.Team != "b" || claim.Accepted == nil ||
 				claim.Accepted.Spec.Request.RunID != "later" || claim.Accepted.Spec.Request.Request.Team != "b" ||
 				json.Unmarshal(claim.Accepted.Plan, &plan) != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "job" {

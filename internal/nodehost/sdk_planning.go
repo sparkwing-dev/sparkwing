@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -10,15 +12,15 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // PlanningProcessInput holds acquired code and host-resolved inputs. Args contains
@@ -27,8 +29,8 @@ type PlanningProcessInput struct {
 	output      *planningLogs
 	Entry       *source.Entry
 	Entrypoint  string
-	Runner      nodeproto.RunnerIdentity
-	Run         nodeproto.RunContext
+	Runner      nodewire.RunnerIdentity
+	Run         nodewire.RunContext
 	Args        map[string]string
 	Environment runspec.EnvSnapshot
 	Debug       bool
@@ -42,7 +44,7 @@ type PlanningProcessInput struct {
 type PreparedPlanning struct {
 	SecretRegistration runspec.SecretRegistration
 	Declarations       *runspec.DeclarationGate
-	Description        nodeproto.PipelineDescription
+	Description        nodewire.PipelineDescription
 	Args               map[string]string
 	SecretArgs         []string
 	Input              PlanningInput
@@ -54,11 +56,11 @@ type PreparedPlanning struct {
 // any acquired process even when setup fails. Log must honor its context. The
 // owner evaluates guards from the returned arguments before starting planning.
 type SDKPlanner struct {
-	Start        func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error)
+	Start        func(context.Context, PlanningProcessInput, func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error)
 	EnsureEngine func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error)
 	Masker       *secrets.Masker
 	Masks        *MaskRegistry
-	Log          func(context.Context, nodeproto.FrameLog) error
+	Log          func(context.Context, nodewire.FrameLog) error
 }
 
 // Prepare describes the selected entry, registers defaults from every pipeline
@@ -94,7 +96,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	var raw json.RawMessage
 	var prepared PreparedPlanning
 	err := p.process(ctx, input, &logs, true, func(ctx context.Context, session *executorSession) error {
-		if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpDescribe}, &raw, ""); err != nil {
+		if err := session.call(ctx, nodewire.Request{Op: nodewire.OpDescribe}, &raw, ""); err != nil {
 			return err
 		}
 		var err error
@@ -124,7 +126,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: declarationsKnown}
 		var raw json.RawMessage
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
-			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
+			return session.call(ctx, nodewire.Request{Op: nodewire.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
 			return nil, p.planningError(ctx, nil, err, logs.known, input.Entrypoint)
@@ -171,7 +173,7 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 		return err
 	}
 	if !reflect.DeepEqual(resolved.Identity, input.Entry.Engine.Identity) {
-		return executorError(apierr.SpecDrift, "planning engine differs from the acquired release")
+		return executorError(hosterr.SpecDrift, "planning engine differs from the acquired release")
 	}
 	input = clonePlanningProcessInput(input)
 	input.Entry.Engine = resolved
@@ -218,13 +220,13 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 	if errors.As(err, &structured) {
 		code = structured.Code
 	} else if errors.Is(err, context.DeadlineExceeded) {
-		code = apierr.DeadlineExceeded
+		code = hosterr.DeadlineExceeded
 	}
 	if code == apierr.IsolatedHomeRequired {
 		// safety: unknown declarations permit only host text, never the SDK's payload.
 		return errors.Join(context.Cause(ctx), apierr.IsolatedHomeRefusal())
 	}
-	if !known && !slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == code }) {
+	if !known && !slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == code }) {
 		code = apierr.SDKError
 	}
 	message := "describe failed: " + string(code) + " (details withheld: secrets not yet known)"

@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -13,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (t *Tenant) teamMutationTx(ctx context.Context, a capability.Authorized, operation, subject string, write func(*storeTx, capability.Principal) error) error {
@@ -214,7 +216,7 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 				return err
 			}
 			if p.Capability.Subject.Kind != capability.SubjectAccount || kind != string(capability.SubjectAccount) || creator != p.Capability.Subject.ID {
-				return authorityError(apierr.Forbidden, "deleting a run created by someone else requires team.admin; ask a team administrator to delete it")
+				return authorityError(hosterr.Forbidden, "deleting a run created by someone else requires team.admin; ask a team administrator to delete it")
 			}
 		}
 		if run.FinishedAt == nil {
@@ -243,7 +245,7 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		}
 		if deleteLogs != nil {
 			if err := deleteLogs(ctx); err != nil {
-				return &apierr.Error{Code: apierr.Unavailable, Message: "run logs could not be deleted; the run is kept, try again"}
+				return &apierr.Error{Code: hosterr.Unavailable, Message: "run logs could not be deleted; the run is kept, try again"}
 			}
 		}
 		if _, err := tx.execContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, a.Target.RunID); err != nil {

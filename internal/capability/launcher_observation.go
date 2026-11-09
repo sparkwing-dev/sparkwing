@@ -5,8 +5,8 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Validate checks the award fence without granting authority to its reported state.

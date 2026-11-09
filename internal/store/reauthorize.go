@@ -1,10 +1,11 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"reflect"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -14,7 +15,7 @@ import (
 func (t *Tenant) Reauthorize(ctx context.Context, a capability.Authorized, method, pattern string) error {
 	route, ok := capability.LookupRoute(method, pattern)
 	if !ok {
-		return authorityError(apierr.PolicyMissing, "route policy is unavailable")
+		return authorityError(hosterr.PolicyMissing, "route policy is unavailable")
 	}
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {

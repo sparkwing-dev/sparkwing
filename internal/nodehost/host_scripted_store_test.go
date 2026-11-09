@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -7,12 +9,12 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type scriptedHostStore struct {
@@ -210,7 +212,7 @@ func newClaimedHostStore(snapshot store.RunSnapshot, mode string) *claimedHostFi
 		beats := s.beats.Add(1)
 		switch {
 		case s.mode == "rejected" || s.mode == "lost_during_work" && beats > 1:
-			return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
+			return runstate.LeaseBeat{}, &apierr.Error{Code: hosterr.LockHeld}
 		case s.mode == "cancelled":
 			return runstate.LeaseBeat{CancelRequested: true, CancelReason: "operator requested stop"}, nil
 		case s.mode == "silent":
@@ -264,7 +266,7 @@ func newExpansionHostStore(row store.RunRow, node runstate.NodeRow) *expansionHo
 		if in.Failure != nil {
 			s.node.Expansion = runstate.ExpansionFailed
 		} else {
-			var plan nodeproto.PlanDoc
+			var plan nodewire.PlanDoc
 			if err := json.Unmarshal(in.Body, &plan); err != nil {
 				return store.AcceptedExpansion{}, err
 			}

@@ -1,5 +1,7 @@
 package engine
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -9,20 +11,39 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"time"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+// safety: development policy exemptions carry no signed SDK-to-engine authority.
+func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, error) {
+	if r.config.BuildVersion == "" || releaseBuild(r.config.BuildVersion) {
+		return r.Index(ctx, now)
+	}
+	config := r.config
+	config.BuildVersion = ""
+	mapping, err := NewResolver(config)
+	if err != nil {
+		return IndexResult{}, err
+	}
+	return mapping.Index(ctx, now)
+}
 
 // Index refreshes signed policy and retains verified fallback without an age cutoff.
 func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error) {
+	return r.indexPolicy(ctx, now, true)
+}
+
+func (r *Resolver) indexPolicy(ctx context.Context, now time.Time, persist bool) (IndexResult, error) {
 	if err := ctx.Err(); err != nil {
 		return IndexResult{}, err
 	}
@@ -52,7 +73,7 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	if err == nil {
 		err = checkPolicyAdvance(r.index, candidate)
 	}
-	if err == nil {
+	if err == nil && persist {
 		err = r.saveIndex(candidate)
 	}
 	if err == nil {
@@ -74,7 +95,7 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	}
 	err = errors.Join(err, cacheErr)
 	if r.index.index.Format == 0 {
-		return IndexResult{}, &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("Cannot obtain a verified version policy: %v", err), Hint: "Check connectivity to sparkwing.dev and retry before running the pipeline."}
+		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("Cannot obtain a verified version policy: %v", err), Hint: "Check connectivity to sparkwing.dev and retry before running the pipeline."}
 	}
 	r.checkedAt = now
 	r.indexErr = err
@@ -178,8 +199,22 @@ func checkPolicyAdvance(previous, next VerifiedIndex) error {
 		records[record.Version] = record
 	}
 	for _, record := range previous.index.Versions {
-		if current, ok := records[record.Version]; !ok || current != record {
+		if current, ok := records[record.Version]; !ok || !reflect.DeepEqual(current, record) {
 			return fmt.Errorf("version index changed or removed a retained release record")
+		}
+	}
+	for _, old := range previous.index.SDKs {
+		found := false
+		for _, current := range next.index.SDKs {
+			if old.Language == current.Language && old.Version == current.Version {
+				found = true
+				if old.Protocol != current.Protocol || old.SourceDigest != current.SourceDigest {
+					return fmt.Errorf("version index changed a retained SDK entry")
+				}
+			}
+		}
+		if !found {
+			return fmt.Errorf("version index removed a retained SDK entry")
 		}
 	}
 	return nil

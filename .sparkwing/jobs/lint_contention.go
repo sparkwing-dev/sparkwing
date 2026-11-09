@@ -145,6 +145,7 @@ func lintModules(ctx context.Context, deadline time.Duration, command func(base 
 		sparkwing.Info(lintCtx, "golangci-lint: %s %s (deadline %s)", dir, doing, deadline)
 		cmd := sparkwing.Bash(lintCtx, script).
 			Dir(dir).
+			Env("GOWORK", "auto").
 			Env("GOLANGCI_LINT_CACHE", cacheDir)
 		if _, runErr := cmd.Run(); runErr != nil {
 			failures = append(failures,

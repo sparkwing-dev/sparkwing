@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -11,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type debugReaderFake struct {
@@ -84,7 +86,7 @@ func TestDebugEnvReadsSharedProjectionInEveryFormat(t *testing.T) {
 }
 
 func TestDebugEnvDoesNotHidePauseReadFailures(t *testing.T) {
-	denial := &apierr.Error{Code: apierr.Forbidden, Message: "refused"}
+	denial := &apierr.Error{Code: hosterr.Forbidden, Message: "refused"}
 	for _, change := range []func(*debugReaderFake){
 		func(f *debugReaderFake) { f.jobErr = denial },
 		func(f *debugReaderFake) { f.pauseErr = denial },
@@ -180,7 +182,7 @@ func TestDebugAttachRunningCloudJobExplainsInspectionAlternative(t *testing.T) {
 		return nil
 	})
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.CapabilityUnsupported || !strings.Contains(refusal.Message, "Cloud jobs do not support shell attachment") || !strings.Contains(refusal.Hint, "sparkwing debug env") || !strings.Contains(refusal.Hint, "sparkwing runs logs") {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.CapabilityUnsupported || !strings.Contains(refusal.Message, "Cloud jobs do not support shell attachment") || !strings.Contains(refusal.Hint, "sparkwing debug env") || !strings.Contains(refusal.Hint, "sparkwing runs logs") {
 		t.Fatalf("running Cloud refusal lacks supported inspection alternatives: %v", err)
 	}
 	if out.Len() != 0 || len(fake.calls) != 1 {

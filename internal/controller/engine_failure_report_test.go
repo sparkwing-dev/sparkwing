@@ -6,12 +6,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestEngineReportedFailureReachesRecovery(t *testing.T) {
@@ -40,7 +39,7 @@ func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 		`{"job":"job","stage":"step:verify","error":null}`,
 		`{"job":"job","stage":"step:verify","error":{"code":"","message":"masked"}}`,
 	} {
-		var failure nodeproto.JobFailure
+		var failure nodewire.JobFailure
 		if err := json.Unmarshal([]byte(raw), &failure); err != nil {
 			continue
 		}
@@ -63,7 +62,7 @@ func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 	}
 	owner.Target.SourceGeneration = claim.Claim.Binding.Generation
 	failure, err := server.readFailure(t.Context(), owner)
-	want := &nodeproto.JobFailure{Job: "job", Stage: "step:verify", Error: &apierr.Error{Code: "future_failure", Message: "masked failure", Hint: "retry verification", Details: map[string]any{"exit_code": float64(7)}}}
+	want := &nodewire.JobFailure{Job: "job", Stage: "step:verify", Error: &apierr.Error{Code: "future_failure", Message: "masked failure", Hint: "retry verification", Details: map[string]any{"exit_code": float64(7)}}}
 	if err != nil || !reflect.DeepEqual(failure, want) {
 		t.Fatalf("recovery failure: %+v, %v", failure, err)
 	}
@@ -73,7 +72,7 @@ func FuzzEngineReportedFailureProjection(f *testing.F) {
 	f.Add("build", "step:verify", "sdk_error", "masked failure", "retry verification", "exit_code", "7")
 	f.Add("generated/build", "approval", "future_failure", "", "", "nested", "value")
 	f.Fuzz(func(t *testing.T, job, stage, code, message, hint, key, value string) {
-		input := controllerwire.JobTransitionRequest{To: "failed", Cause: "report", Result: &controllerwire.JobResult{Outcome: "failed", Failure: &nodeproto.JobFailure{Job: job, Stage: stage, Error: &apierr.Error{Code: apierr.Code(code), Message: message, Hint: hint, Details: map[string]any{key: value}}}}}
+		input := controllerwire.JobTransitionRequest{To: "failed", Cause: "report", Result: &controllerwire.JobResult{Outcome: "failed", Failure: &nodewire.JobFailure{Job: job, Stage: stage, Error: &apierr.Error{Code: apierr.Code(code), Message: message, Hint: hint, Details: map[string]any{key: value}}}}}
 		raw, err := json.Marshal(input)
 		if err != nil {
 			t.Fatal(err)

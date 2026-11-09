@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
@@ -17,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func FuzzCapacityIdentityRefusalIsLocal(f *testing.F) {
@@ -74,13 +76,13 @@ func FuzzCapacityIdentityRefusalIsLocal(f *testing.F) {
 			return false, nil, nil
 		})
 		failures := []error{
-			apierr.Authorization(apierr.ReasonBinding, "unknown award fence"),
-			&apierr.Error{Code: apierr.Forbidden, Message: "unknown award fence", Details: map[string]any{"reason": "binding"}},
-			&apierr.Error{Code: apierr.LockHeld, Message: "claim fence lost"},
-			&apierr.Error{Code: apierr.Unavailable, Message: "try again"},
-			&apierr.Error{Code: apierr.RateLimited, Message: "poll later"},
-			&apierr.Error{Code: apierr.Unauthenticated, Message: "service credential expired"},
-			apierr.Authorization(apierr.ReasonMissingGrant, "missing scope"),
+			hosterr.Authorization(hosterr.ReasonBinding, "unknown award fence"),
+			&apierr.Error{Code: hosterr.Forbidden, Message: "unknown award fence", Details: map[string]any{"reason": "binding"}},
+			&apierr.Error{Code: hosterr.LockHeld, Message: "claim fence lost"},
+			&apierr.Error{Code: hosterr.Unavailable, Message: "try again"},
+			&apierr.Error{Code: hosterr.RateLimited, Message: "poll later"},
+			&apierr.Error{Code: hosterr.Unauthenticated, Message: "service credential expired"},
+			hosterr.Authorization(hosterr.ReasonMissingGrant, "missing scope"),
 			errors.New("transport failure"),
 		}
 		kind %= uint8(len(failures))
@@ -158,7 +160,7 @@ func TestRunClaimsAfterRefusingRestartedCapacityIdentity(t *testing.T) {
 		}
 		claimed := make(chan struct{})
 		restarted := &Launcher{Kube: kube, Config: l.Config, Boundary: boundary, Control: claimSignalControl{CloudControl: publicationControl{CloudControl: control, sync: func([]CloudJobObservation) ([]CloudJobState, error) {
-			return nil, apierr.Authorization(apierr.ReasonBinding, "forged holder")
+			return nil, hosterr.Authorization(hosterr.ReasonBinding, "forged holder")
 		}}, claimed: claimed}}
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()

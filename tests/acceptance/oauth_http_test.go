@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/base64"
 	"encoding/hex"
@@ -15,7 +17,6 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
@@ -296,7 +297,7 @@ func TestOAuthHTTPWaitlistedSessionHasNoTeamAuthority(t *testing.T) {
 		r.Header.Set("Authorization", "Session "+cookie.Value)
 		denied := httptest.NewRecorder()
 		f.handler.ServeHTTP(denied, r)
-		assertEngineError(t, denied, 403, apierr.Forbidden)
+		assertEngineError(t, denied, 403, hosterr.Forbidden)
 		if strings.Contains(denied.Body.String(), cookie.Value) {
 			t.Fatal("refusal disclosed session")
 		}
@@ -421,7 +422,7 @@ func TestOAuthHTTPMethodsAndUnknownProvider(t *testing.T) {
 		for _, method := range []string{"HEAD", "POST", "PUT"} {
 			w := httptest.NewRecorder()
 			f.handler.ServeHTTP(w, httptest.NewRequest(method, oauthOrigin+path, nil))
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+			assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 		}
 	}
 	w := httptest.NewRecorder()

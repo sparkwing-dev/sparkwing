@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"fmt"
@@ -10,11 +12,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type dashboardServices struct {
@@ -43,7 +45,7 @@ func requireDashboardBundle(inv clisurface.Invocation, verify func() error) erro
 	}
 	if err := verify(); err != nil {
 		return &apierr.Error{
-			Code:    apierr.Unavailable,
+			Code:    hosterr.Unavailable,
 			Message: "this sparkwing build carries no dashboard bundle",
 			Hint:    "install a release binary, or from a sparkwing checkout run bash bin/build-web.sh and then go install ./cmd/sparkwing",
 		}
@@ -52,7 +54,7 @@ func requireDashboardBundle(inv clisurface.Invocation, verify func() error) erro
 }
 
 func dashboardUnavailable(dependency string) error {
-	return &apierr.Error{Code: apierr.Unavailable, Message: "dashboard requires " + dependency, Hint: "the local controller integration is unavailable in this build"}
+	return &apierr.Error{Code: hosterr.Unavailable, Message: "dashboard requires " + dependency, Hint: "the local controller integration is unavailable in this build"}
 }
 
 func runDashboardCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, goos string, resolve func(context.Context) (dashboardServices, error)) error {

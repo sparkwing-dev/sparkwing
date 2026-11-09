@@ -1,12 +1,14 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestAuthorityToleratesBackwardClockStep(t *testing.T) {
@@ -49,7 +51,7 @@ func TestAuthorityToleratesBackwardClockStep(t *testing.T) {
 					}
 				} else {
 					var refusal *apierr.Error
-					if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+					if !errors.As(err, &refusal) || refusal.Code != hosterr.Unauthenticated {
 						t.Fatalf("invalid authority: %v", err)
 					}
 				}

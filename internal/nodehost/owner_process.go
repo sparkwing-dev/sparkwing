@@ -1,11 +1,12 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"reflect"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -30,7 +31,7 @@ func (h *OwnerEvaluator) evaluateProcess(ctx context.Context, input EvaluationIn
 		return err
 	}
 	if !reflect.DeepEqual(resolved.Identity, spec.Resolved.Engine) {
-		return executorError(apierr.SpecDrift, "engine resolution changed the sealed release")
+		return executorError(hosterr.SpecDrift, "engine resolution changed the sealed release")
 	}
 	input.Engine = resolved
 	if h.deps.Bind != nil {

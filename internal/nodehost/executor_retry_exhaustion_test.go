@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestNodeExecutorExplainsExhaustedApplicationAttempts(t *testing.T) {
@@ -19,7 +19,7 @@ func TestNodeExecutorExplainsExhaustedApplicationAttempts(t *testing.T) {
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, progress ExecutorActivity) (ExecutorProcess, error) {
 				process, err := start(ctx, in, progress)
-				process.(*executorProcess).result = nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: fmt.Sprintf("application attempt %d failed: private", tc.previous+len(*processes))}}
+				process.(*executorProcess).result = nodewire.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: fmt.Sprintf("application attempt %d failed: private", tc.previous+len(*processes))}}
 				return process, err
 			}
 			host, err := NewNodeExecutor(deps)

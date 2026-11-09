@@ -1,5 +1,7 @@
 package store_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -7,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type matchingEnrollment struct{ profile match.Profile }
@@ -41,7 +43,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	ctx := t.Context()
 	enrollment := &matchingEnrollment{profile: match.Profile{}}
 	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: enrollment}))
-	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	job := nodewire.JobSpec{ID: "job", Steps: []nodewire.StepSpec{{ID: "body"}}}
 	labels := []string(nil)
 	pools := []string(nil)
 	switch scenario {
@@ -67,8 +69,8 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	}
 	expectedProfile := enrollment.profile
 	enrollment.profile = match.Profile{}
-	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-		doc.Jobs = []nodeproto.JobSpec{job}
+	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodewire.PlanDoc) {
+		doc.Jobs = []nodewire.JobSpec{job}
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +164,7 @@ func assertMatchingRefusal(t *testing.T, err error, named bool) {
 		if errors.As(err, &holder) && holder.Reason == store.ReasonHolderRights {
 			return
 		}
-		if !errors.As(err, &denied) || denied.Code != apierr.Forbidden && denied.Code != apierr.LockHeld {
+		if !errors.As(err, &denied) || denied.Code != hosterr.Forbidden && denied.Code != hosterr.LockHeld {
 			t.Fatalf("named claim failed outside matching: %v", err)
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {

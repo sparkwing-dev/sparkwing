@@ -68,7 +68,7 @@ func withGoTestJSON(script string) (string, bool) {
 func (t *goTestTimings) run(ctx context.Context, script string) error {
 	jsonScript, ok := withGoTestJSON(script)
 	if !ok {
-		_, err := sparkwing.Bash(ctx, script).Run()
+		_, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run()
 		return err
 	}
 	f, err := os.CreateTemp("", "sparkwing-go-test-*.jsonl")
@@ -89,7 +89,7 @@ func (t *goTestTimings) run(ctx context.Context, script string) error {
 	done := make(chan struct{})
 	followed := make(chan error, 1)
 	go func() { followed <- followLines(path, done, tr.add) }()
-	_, runErr := sparkwing.Bash(ctx, jsonScript+" > "+shellQuote(path)).Run()
+	_, runErr := sparkwing.Bash(ctx, jsonScript+" > "+shellQuote(path)).Env("GOWORK", "auto").Run()
 	close(done)
 	followErr := <-followed
 	t.merge(tr)
@@ -107,7 +107,7 @@ func (t *goTestTimings) run(ctx context.Context, script string) error {
 
 func runModuleCommand(ctx context.Context, script string, timings *goTestTimings) error {
 	if timings == nil {
-		_, err := sparkwing.Bash(ctx, script).Run()
+		_, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run()
 		return err
 	}
 	return timings.run(ctx, script)

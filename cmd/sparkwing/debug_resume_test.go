@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -11,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type debugControlFake struct {
@@ -103,7 +105,7 @@ func TestDebugResumeUnknownProfileHasNoStoreFallback(t *testing.T) {
 }
 
 func TestDebugResumePreservesWriterFailure(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.Forbidden, Message: "scope missing"}
+	failure := &apierr.Error{Code: hosterr.Forbidden, Message: "scope missing"}
 	var out bytes.Buffer
 	err := runDebugResumeArgs(t.Context(), []string{"--run=412", "--job=build", "-o=json"}, &out, func(context.Context, string) (debugResumer, error) {
 		return debugResumer{control: debugControlFake{DebugReader: debugReaderFixture(), resume: func(context.Context, string, string) error { return failure }}, close: func() error { return nil }}, nil

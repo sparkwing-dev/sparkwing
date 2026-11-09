@@ -1,5 +1,7 @@
 package client
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,8 +11,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // MintDashboardLogin asks the running controller over api.sock for a one-time dashboard sign-in link.
@@ -27,7 +29,7 @@ func MintDashboardLogin(ctx context.Context, home, host string) (wingd.Dashboard
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return wingd.DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the local controller did not answer on api.sock: " + err.Error(), Hint: "run sparkwing dashboard open, which starts the controller"}
+		return wingd.DashboardLogin{}, &apierr.Error{Code: hosterr.Unavailable, Message: "the local controller did not answer on api.sock: " + err.Error(), Hint: "run sparkwing dashboard open, which starts the controller"}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))

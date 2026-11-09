@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
 func TestReleasePushKeepsTheChosenSourceWhileMainMoves(t *testing.T) {

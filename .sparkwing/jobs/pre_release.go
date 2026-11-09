@@ -71,7 +71,7 @@ func runReleaseBinaryVulnerabilityScan(jobContext context.Context) (resultErr er
 	for _, binary := range publicBinaries {
 		artifact := filepath.Join(scanDirectory, binary)
 		if _, err := sparkwing.Exec(jobContext, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
-			Env("GOWORK", "off").Run(); err != nil {
+			Env("GOWORK", "auto").Run(); err != nil {
 			return fmt.Errorf("build release vulnerability artifact %s: %w", binary, err)
 		}
 		if _, err := sparkwing.Exec(jobContext, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {
@@ -154,7 +154,7 @@ func addPreReleaseChecks(work *sparkwing.Work, checks []preReleaseCheck) {
 func preReleaseChecks(part raceStorePart) []preReleaseCheck {
 	return []preReleaseCheck{
 		{id: "no-replace", run: checkNoReplaceDirectivesInCommittedGoMods},
-		{id: "no-go-work", run: checkNoCommittedGoWorkFiles},
+		{id: "workspace-check", run: checkCommittedWorkspaceFiles},
 		{id: "module-tidy", run: checkPreReleaseModuleTidy},
 		{id: "sparkwing-pin", run: checkPreReleaseSparkwingPin},
 		{id: "version-freshness", run: func(ctx context.Context) error {
@@ -331,29 +331,36 @@ func checkNoReplaceDirectivesInCommittedGoMods(jobContext context.Context) error
 }
 
 func isSparkwingDogfoodReplace(path string, replacement *modfile.Replace) bool {
-	return path == ".sparkwing/go.mod" &&
-		replacement.Old.Path == "github.com/sparkwing-dev/sparkwing" &&
-		replacement.Old.Version == "" &&
-		replacement.New.Path == ".." &&
-		replacement.New.Version == ""
+	if path != ".sparkwing/go.mod" || replacement.Old.Version != "" || replacement.New.Version != "" {
+		return false
+	}
+	switch replacement.Old.Path {
+	case "github.com/sparkwing-dev/sparkwing":
+		return replacement.New.Path == ".."
+	case "github.com/sparkwing-dev/sparkwing/sparkwing":
+		return replacement.New.Path == "../sparkwing"
+	default:
+		return false
+	}
 }
 
-func checkNoCommittedGoWorkFiles(jobContext context.Context) error {
+func checkCommittedWorkspaceFiles(jobContext context.Context) error {
 	output, err := sparkwing.Bash(jobContext,
-		`git ls-files | grep -E '(^|/)go\.work(\.sum)?$' || true`,
-	).String()
+		`git -C "$SPARKWING_WORKDIR" ls-files -- go.work go.work.sum '**/go.work' '**/go.work.sum'`,
+	).Env("SPARKWING_WORKDIR", sparkwing.WorkDir()).String()
 	if err != nil {
-		return fmt.Errorf("scan go.work files: %w", err)
+		return fmt.Errorf("scan workspace files: %w", err)
 	}
-	output = strings.TrimSpace(output)
-	if output == "" {
+	var files []string
+	for _, name := range strings.Split(strings.TrimSpace(output), "\n") {
+		if name != "" && name != "go.work" {
+			files = append(files, name)
+		}
+	}
+	if len(files) == 0 {
 		return nil
 	}
-	files := strings.Split(output, "\n")
-	return fmt.Errorf(
-		"refusing to push: %d committed go.work file(s) (remove and add to .gitignore):\n    %s",
-		len(files), strings.Join(files, "\n    "),
-	)
+	return fmt.Errorf("refusing to push: %d disallowed workspace file(s) (only root go.work may be committed):\n    %s", len(files), strings.Join(files, "\n    "))
 }
 
 func init() {

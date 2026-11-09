@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 type nativeState struct {
@@ -219,7 +220,7 @@ func TestNativeOwnerClassifiesAcquiredCodeInsteadOfLiveCheckout(t *testing.T) {
 		t.Run(fmt.Sprint(selectedGo), func(t *testing.T) {
 			cfg, state := nativeConfigFixture(t)
 			root, _ := sourcetest.Repository(t)
-			sourcetest.Write(t, filepath.Join(root, ".sparkwing", "go.mod"), "module pipeline\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing v1.2.3\n")
+			sourcetest.Write(t, filepath.Join(root, ".sparkwing", "go.mod"), "module pipeline\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n")
 			sourcetest.Git(t, root, "add", ".")
 			sourcetest.Git(t, root, "commit", "-qm", "go pipeline")
 			old := sourcetest.Git(t, root, "rev-parse", "HEAD")
@@ -359,7 +360,7 @@ func TestNativeOwnerEvaluationUsesItsOwnBinderBeforeAnyWorkAward(t *testing.T) {
 	calls := 0
 	cfg.Evaluate = func(_ context.Context, input EvaluationInput) (ProcessGrant, error) {
 		calls++
-		return ProcessGrant{Binding: nodeproto.ProcessBinding{RunID: input.Accepted.RunID, JobID: input.NodeID}, Revoke: func() error { return nil }}, nil
+		return ProcessGrant{Binding: nodewire.ProcessBinding{RunID: input.Accepted.RunID, JobID: input.NodeID}, Revoke: func() error { return nil }}, nil
 	}
 	listener := &processListener{closed: make(chan struct{})}
 	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })

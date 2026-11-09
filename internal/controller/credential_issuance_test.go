@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -15,11 +17,11 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func credentialSessionServer(t *testing.T, opts ...store.Option) (*serverFixture, string) {
@@ -51,7 +53,7 @@ func credentialSessionServerWith(t *testing.T, configure func(*Server), opts ...
 	a.Authenticator = capability.NewAuthenticator(s.AsOperator())
 	a.CheckCSRF = func(r *http.Request, _ capability.Principal) error {
 		if !validAPIRequestCSRF(r, "session-csrf", true) {
-			return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+			return &apierr.Error{Code: hosterr.Forbidden, Message: "invalid CSRF token"}
 		}
 		return nil
 	}
@@ -97,8 +99,8 @@ func TestCredentialIssuancePersistsMemberRootAndDelegation(t *testing.T) {
 		t.Fatalf("delegate=%+v err=%v", delegated, err)
 	}
 	w = credentialRequestHTTP(t, h, root.Capability, `{"grants":["runs.write"]}`, true)
-	var failure apierr.Envelope
-	if w.Code != 403 || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error.Code != apierr.Forbidden {
+	var failure hosterr.Envelope
+	if w.Code != 403 || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error.Code != hosterr.Forbidden {
 		t.Fatalf("widened HTTP %d %s", w.Code, w.Body.String())
 	}
 	digest := sha256.Sum256([]byte(session))
@@ -137,8 +139,8 @@ func TestCredentialIssuanceRechecksMembershipInTransaction(t *testing.T) {
 				}
 			}})
 			w := credentialRequestHTTP(t, s.Handler(), raw, `{"grants":["runs.write"]}`, false)
-			var result apierr.Envelope
-			if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Error == nil || change == "demoted" && (w.Code != 403 || result.Error.Code != apierr.Forbidden) || change != "demoted" && (w.Code != 401 || result.Error.Code != apierr.Unauthenticated) {
+			var result hosterr.Envelope
+			if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Error == nil || change == "demoted" && (w.Code != 403 || result.Error.Code != hosterr.Forbidden) || change != "demoted" && (w.Code != 401 || result.Error.Code != hosterr.Unauthenticated) {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}
 			var count int
@@ -170,7 +172,7 @@ func TestCredentialIssuanceValidatesEveryGrant(t *testing.T) {
 	}
 	for _, body := range []string{`{}`, `{"grants":null}`, `{"grants":[null]}`, `{"grants":["runs.read","runs.read"]}`, `{"grants":[" runs.read "]}`, `{"grants":[""]}`, `{"grants":["runs.read","jobs:write","runs.admin"]}`, `{"scopes":["runs.read"]}`} {
 		w := credentialRequestHTTP(t, h, raw, body, false)
-		var failure apierr.Envelope
+		var failure hosterr.Envelope
 		if w.Code != 400 || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != apierr.BadRequest {
 			t.Fatalf("HTTP %d %s", w.Code, w.Body)
 		}
@@ -200,7 +202,7 @@ func TestCredentialIssuanceRefusedGrantProperty(t *testing.T) {
 		if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
-		var failure apierr.Envelope
+		var failure hosterr.Envelope
 		return w.Code == 400 && json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == apierr.BadRequest && count == 0 && !strings.Contains(w.Body.String(), grant)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {

@@ -7,19 +7,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func approvalFixture(t *testing.T, gate nodeproto.ApprovalSpec) *storeHostFixture {
+func approvalFixture(t *testing.T, gate nodewire.ApprovalSpec) *storeHostFixture {
 	t.Helper()
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
 		{ID: "gate", Approval: &gate},
-		{ID: "deploy", Needs: []string{"gate"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "rollback", OnFailureOf: "gate", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "deploy", Needs: []string{"gate"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "rollback", OnFailureOf: "gate", Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}})
 	row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"})
 	if err != nil {
@@ -56,7 +56,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			timeout := int64(1000)
-			f := approvalFixture(t, nodeproto.ApprovalSpec{Message: "ship it?", TimeoutMS: &timeout, OnTimeout: tc.policy})
+			f := approvalFixture(t, nodewire.ApprovalSpec{Message: "ship it?", TimeoutMS: &timeout, OnTimeout: tc.policy})
 			ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
 			var change store.NodeCommand = store.ResolveApprovalNode{Ref: ref, Actor: f.Control, Outcome: tc.outcome, Approval: &runstate.ApprovalResolution{Decision: tc.resolution, Comment: "looks good"}}
 			if tc.resolution == "timed_out" {
@@ -103,7 +103,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 }
 
 func TestApprovalGateCancelledWithTheRun(t *testing.T) {
-	f := approvalFixture(t, nodeproto.ApprovalSpec{})
+	f := approvalFixture(t, nodewire.ApprovalSpec{})
 	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
 	if _, err := f.State.TransitionNode(t.Context(), store.CancelNode{Ref: ref, Actor: f.Control}); err != nil {
 		t.Fatal(err)
@@ -120,7 +120,7 @@ func TestApprovalGateCancelledWithTheRun(t *testing.T) {
 
 func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 	timeout := int64(1000)
-	f := approvalFixture(t, nodeproto.ApprovalSpec{TimeoutMS: &timeout})
+	f := approvalFixture(t, nodewire.ApprovalSpec{TimeoutMS: &timeout})
 	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
 	if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 }
 
 func TestApprovalGateFailsOnAStoreThatCannotRecover(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}}}})
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "gate", Approval: &nodewire.ApprovalSpec{}}}})
 	if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), `CREATE TRIGGER refuse_approval BEFORE INSERT ON approvals BEGIN SELECT RAISE(ABORT,'locking protocol'); END`); err != nil {
 		t.Fatal(err)
 	}

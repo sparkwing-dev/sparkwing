@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -8,12 +10,13 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAcceptance) error {
@@ -63,7 +66,7 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 			}
 			if digest != "" {
 				if digest != proof.Digest {
-					return authorityError(apierr.IllegalTransition, "accepted plan payload differs")
+					return authorityError(hosterr.IllegalTransition, "accepted plan payload differs")
 				}
 				return validateResultProofTx(ctx, tx, team, request.Actor, runspec.NodeRef{RunID: runspec.RunID(request.RunID)}, 0)
 			}
@@ -93,7 +96,7 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 		return runspec.Spec{}, nil, err
 	}
 	if requested != stored {
-		return runspec.Spec{}, nil, authorityError(apierr.SpecDrift, "request seal cannot change")
+		return runspec.Spec{}, nil, authorityError(hosterr.SpecDrift, "request seal cannot change")
 	}
 	input.Request = run.Request
 	input.Now = tx.now(ctx)
@@ -123,7 +126,7 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 		return runspec.Spec{}, nil, err
 	}
 	if !reflect.DeepEqual(resolved, input.Resolved.Settings) {
-		return runspec.Spec{}, nil, authorityError(apierr.SpecDrift, "submitted settings differ from resolved declarations")
+		return runspec.Spec{}, nil, authorityError(hosterr.SpecDrift, "submitted settings differ from resolved declarations")
 	}
 	if len(resolved.Jobs) != len(plan.Jobs) {
 		return runspec.Spec{}, nil, authorityError(apierr.PlanInvalid, "resolved settings do not match plan jobs")
@@ -175,19 +178,19 @@ func validateResolvedIntake(input *runspec.SealInput) error {
 	if err != nil {
 		return err
 	}
-	args, err := nodeproto.ResolveArguments(nodeproto.PipelineDescription{Args: input.Resolved.ArgumentDeclarations, Extra: true}, raw)
+	args, err := nodeproto.ResolveArguments(nodewire.PipelineDescription{Args: input.Resolved.ArgumentDeclarations, Extra: true}, raw)
 	if err != nil {
 		return authorityError(apierr.InvalidArgs, err.Error())
 	}
 	if !maps.Equal(args, input.Resolved.Args) {
-		return authorityError(apierr.SpecDrift, "resolved arguments differ from declared inputs")
+		return authorityError(hosterr.SpecDrift, "resolved arguments differ from declared inputs")
 	}
 	if !reflect.DeepEqual(request.Env, input.Resolved.Env) {
-		return authorityError(apierr.SpecDrift, "resolved environment changed the intake snapshot")
+		return authorityError(hosterr.SpecDrift, "resolved environment changed the intake snapshot")
 	}
 	if request.Git.App.Set {
 		if !input.Resolved.DefaultBranch.Set || input.Resolved.DefaultBranch.Value != request.Git.App.Value.DefaultBranch || input.Resolved.DefaultBranchSource != runspec.DefaultBranchApp {
-			return authorityError(apierr.SpecDrift, "resolved default branch changed verified App facts")
+			return authorityError(hosterr.SpecDrift, "resolved default branch changed verified App facts")
 		}
 	} else if input.Resolved.DefaultBranch.Set && input.Resolved.DefaultBranchSource != runspec.DefaultBranchOriginHEAD {
 		return authorityError(apierr.PlanInvalid, "default branch must come from origin HEAD")

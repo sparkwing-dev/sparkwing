@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/rand"
 	"crypto/sha256"
@@ -12,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -101,7 +103,7 @@ func (s *Server) handleStartDeviceLogin(w http.ResponseWriter, r *http.Request, 
 		})
 		return nil
 	}
-	return &apierr.Error{Code: apierr.Unavailable, Message: "could not choose a free device code; try again"}
+	return &apierr.Error{Code: hosterr.Unavailable, Message: "could not choose a free device code; try again"}
 }
 
 func (s *Server) handlePollDeviceLogin(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
@@ -248,7 +250,7 @@ func (s *Server) deviceLoginAvailable() error {
 		return routepolicy.MissingEndpointPolicy()
 	}
 	if !s.deployment.MultiTeam() {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "a local controller has no account sign-in; the CLI reaches it over its socket without a token"}
+		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "a local controller has no account sign-in; the CLI reaches it over its socket without a token"}
 	}
 	return nil
 }
@@ -314,7 +316,7 @@ func deviceLoginGrants(request deviceLoginRequest, approver capability.Principal
 
 func deviceTeamMatches(request deviceLoginRequest, a capability.Authorized) error {
 	if request.Team != "" && request.Team != a.Target.Team {
-		return apierr.Authorization(apierr.ReasonBinding, "this device asked to join team "+request.Team+"; switch to that team to approve it, or deny it")
+		return hosterr.Authorization(hosterr.ReasonBinding, "this device asked to join team "+request.Team+"; switch to that team to approve it, or deny it")
 	}
 	return nil
 }

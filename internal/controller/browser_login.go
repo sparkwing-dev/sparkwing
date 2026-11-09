@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const loginHTML = `<!doctype html>
@@ -122,7 +124,7 @@ func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request, data lo
 	if token == "" {
 		var err error
 		if token, err = newCSRFToken(); err != nil {
-			return errors.Join(&apierr.Error{Code: apierr.Internal, Message: "could not create the sign-in form"}, err)
+			return errors.Join(&apierr.Error{Code: hosterr.Internal, Message: "could not create the sign-in form"}, err)
 		}
 	}
 	data.CSRFToken = token

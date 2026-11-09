@@ -23,7 +23,7 @@ const (
 func (Test) ShortHelp() string { return "Run the Go test suite (go test ./...)" }
 
 func (Test) Help() string {
-	return "Runs the Go test suite for the public sparkwing module (`go test ./...`)."
+	return "Runs the Go test suites for the engine and Go SDK modules (`go test ./...` in each)."
 }
 
 func (Test) Examples() []sparkwing.Example {
@@ -50,9 +50,10 @@ func (p *Test) run(cmd string) func(context.Context) error {
 		command := cmd
 		if command == "" {
 			command = testGoCommand(currentHost())
+			command += " && " + strings.Replace(command, "go test", "go -C sparkwing test", 1)
 		}
 		return withStableProductTestHome("test", func(home string) error {
-			if _, err := sparkwing.Bash(ctx, productTestScript(command, home)).Run(); err != nil {
+			if _, err := sparkwing.Bash(ctx, productTestScript(command, home)).Env("GOWORK", "auto").Run(); err != nil {
 				return err
 			}
 			sparkwing.Info(ctx, "go test: all packages passed")

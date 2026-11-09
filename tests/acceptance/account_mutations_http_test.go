@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/sha256"
@@ -14,11 +16,11 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 var accountMutations = [][3]string{
@@ -177,7 +179,7 @@ func TestAccountMutationHTTPProofProperty(t *testing.T) {
 	property := func(input []byte, mode uint8) bool {
 		for _, action := range accountMutations {
 			r := f.request(action[0], action[1], action[2])
-			want := apierr.Forbidden
+			want := hosterr.Forbidden
 			switch mode % 4 {
 			case 0:
 				r.Header.Set("X-CSRF-Token", hex.EncodeToString(input))
@@ -185,17 +187,17 @@ func TestAccountMutationHTTPProofProperty(t *testing.T) {
 				r.Header.Set("Origin", "https://foreign.test")
 			case 2:
 				r.Header.Set("Authorization", "Bearer "+hex.EncodeToString(input))
-				want = apierr.Unauthenticated
+				want = hosterr.Unauthenticated
 			case 3:
 				r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: hex.EncodeToString(input)})
-				want = apierr.Unauthenticated
+				want = hosterr.Unauthenticated
 			}
 			before, expiry := f.state(t)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
 			after, expires := f.state(t)
-			var result apierr.Envelope
-			if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Error == nil || result.Error.Code != want || w.Code != apierr.Status(want) || before != after || expiry != expires || len(writes.actors) != 0 {
+			var result hosterr.Envelope
+			if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Error == nil || result.Error.Code != want || w.Code != hosterr.Status(want) || before != after || expiry != expires || len(writes.actors) != 0 {
 				return false
 			}
 		}
@@ -212,7 +214,7 @@ func TestAccountMutationHTTPAuthorityRefusals(t *testing.T) {
 			t.Run(action[1]+"/"+kind, func(t *testing.T) {
 				b, writes := accountReadBoundary(), &accountWrites{}
 				p := &b.snapshot.Authorities[0].Principal
-				want := apierr.Forbidden
+				want := hosterr.Forbidden
 				switch kind {
 				case "bearer", "machine":
 					p.Class = capability.CredentialBearer
@@ -229,10 +231,10 @@ func TestAccountMutationHTTPAuthorityRefusals(t *testing.T) {
 					b = newCredentialBoundary()
 				case "dead":
 					p.Capability.RevokedAt = &b.snapshot.Now
-					want = apierr.Unauthenticated
+					want = hosterr.Unauthenticated
 				case "backend":
-					b.readErr = &apierr.Error{Code: apierr.Unavailable, Message: "authentication unavailable"}
-					want = apierr.Unavailable
+					b.readErr = &apierr.Error{Code: hosterr.Unavailable, Message: "authentication unavailable"}
+					want = hosterr.Unavailable
 				}
 				h := controller.New(nil, nil).WithAuthorization(consoleAuthorization(b)).WithAccountWriter(writes).Handler()
 				r := httptest.NewRequest(action[0], action[1], strings.NewReader(action[2]))
@@ -243,7 +245,7 @@ func TestAccountMutationHTTPAuthorityRefusals(t *testing.T) {
 				}
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, r)
-				assertEngineError(t, w, apierr.Status(want), want)
+				assertEngineError(t, w, hosterr.Status(want), want)
 				if len(writes.actors) != 0 {
 					t.Fatal("unrelated authority reached mutation")
 				}
@@ -265,15 +267,15 @@ func TestAccountMutationHTTPTransactionRefusals(t *testing.T) {
 		{store.ErrSlugTaken, apierr.Conflict},
 		{store.ErrInvitationClosed, apierr.Conflict},
 		{store.ErrLastSignInMethod, apierr.Conflict},
-		{&apierr.Error{Code: apierr.Forbidden, Message: "sign in again", Details: map[string]any{"reason": apierr.ReasonReauthRequired}}, apierr.Forbidden},
-		{&apierr.Error{Code: apierr.Unauthenticated, Message: "session ended before commit"}, apierr.Unauthenticated},
-		{errors.New("private-database-detail"), apierr.Internal},
+		{&apierr.Error{Code: hosterr.Forbidden, Message: "sign in again", Details: map[string]any{"reason": hosterr.ReasonReauthRequired}}, hosterr.Forbidden},
+		{&apierr.Error{Code: hosterr.Unauthenticated, Message: "session ended before commit"}, hosterr.Unauthenticated},
+		{errors.New("private-database-detail"), hosterr.Internal},
 	} {
 		writes.err = tc.err
 		for _, action := range accountMutations {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, f.request(action[0], action[1], action[2]))
-			assertEngineError(t, w, apierr.Status(tc.code), tc.code)
+			assertEngineError(t, w, hosterr.Status(tc.code), tc.code)
 			if strings.Contains(w.Body.String(), "private-") {
 				t.Fatal("private transaction error returned")
 			}
@@ -302,6 +304,6 @@ func TestAccountMutationHTTPInputAndMethods(t *testing.T) {
 	for _, action := range accountMutations {
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, f.request("HEAD", action[1], ""))
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		assertEngineError(t, w, 405, hosterr.MethodNotAllowed)
 	}
 }

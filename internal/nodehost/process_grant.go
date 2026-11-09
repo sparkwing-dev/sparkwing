@@ -3,17 +3,17 @@ package nodehost
 import (
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // ProcessGrant transfers a delegated bearer and its idempotent revoker to the host.
 type ProcessGrant struct {
 	masks   *MaskRegistry
-	Binding nodeproto.ProcessBinding
+	Binding nodewire.ProcessBinding
 	Revoke  func() error
 }
 
-func (g ProcessGrant) validate(parent nodeproto.ProcessBinding) error {
+func (g ProcessGrant) validate(parent nodewire.ProcessBinding) error {
 	if g.Revoke == nil {
 		return errors.New("process binding requires a revocation callback")
 	}

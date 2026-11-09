@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestEngineClientMixedClaimsUseOneQueue(t *testing.T) {
@@ -105,7 +105,7 @@ func TestEngineClientOneTimeAuthorityDoesNotReplay(t *testing.T) {
 }
 
 func TestEngineClientRecoveryAndLauncherMethods(t *testing.T) {
-	failure := &nodeproto.JobFailure{Job: "source/build", Stage: "body", Error: &apierr.Error{Code: "future_error", Message: "masked", Details: map[string]any{"reason": "source"}}}
+	failure := &nodewire.JobFailure{Job: "source/build", Stage: "body", Error: &apierr.Error{Code: "future_error", Message: "masked", Details: map[string]any{"reason": "source"}}}
 	for _, tt := range []struct {
 		name, method, path string
 		response           any
@@ -174,7 +174,7 @@ func TestEngineClientReconcilePreservesExecutionState(t *testing.T) {
 	job.Execution.Retry.Value = 5
 	job.Execution.Timeout.Value = time.Minute
 	claim := &controllerwire.ClaimedUnit{
-		Unit: capability.UnitNode, RunID: "r1", JobID: "build", UnitID: "unit-1", Capability: "private-award", Runner: nodeproto.RunnerIdentity{Name: "granted-runner", Type: "agent", Labels: []string{"linux"}},
+		Unit: capability.UnitNode, RunID: "r1", JobID: "build", UnitID: "unit-1", Capability: "private-award", Runner: nodewire.RunnerIdentity{Name: "granted-runner", Type: "agent", Labels: []string{"linux"}},
 		SourceGeneration: 3, OwnerDeadline: &now, AttemptDeadline: &now, ParentCapabilityExpiry: &now, LeaseExpiresAt: now,
 		Engine: &engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"}, Execution: &job.Execution,
 	}
@@ -205,7 +205,7 @@ func TestEngineClientReconcilePreservesExecutionState(t *testing.T) {
 
 func TestEngineClientExpansionReplayPreservesTopologyAndLifecycle(t *testing.T) {
 	current := controllerwire.ExecutionJob{JobDetail: controllerwire.JobDetail{ID: "generated/build", Status: "finished", Outcome: "success", Generation: 2, Attempt: 3, StateSeq: 9, Expansion: "accepted"}, Spec: json.RawMessage(`{"id":"generated/build"}`), SpecHash: "accepted-spec", ApplicationRetries: 2, Disruptions: 1}
-	expanded := controllerwire.ExpansionAccepted{SourceGeneration: 6, State: "accepted", BodyHash: "accepted-body", Replayed: true, Jobs: []controllerwire.ExpandedJob{{Job: nodeproto.JobSpec{ID: "generated/build"}, SpecHash: "accepted-spec", Current: current}}}
+	expanded := controllerwire.ExpansionAccepted{SourceGeneration: 6, State: "accepted", BodyHash: "accepted-body", Replayed: true, Jobs: []controllerwire.ExpandedJob{{Job: nodewire.JobSpec{ID: "generated/build"}, SpecHash: "accepted-spec", Current: current}}}
 	snapshot := controllerwire.ScheduleSnapshot{RunID: "r1", Generators: []controllerwire.ScheduleGenerator{{ID: "empty", SourceJob: "source", State: "accepted", Members: []string{}}}, Expansions: []controllerwire.AcceptedExpansion{{SourceJob: "source", SourceGeneration: 6, Body: json.RawMessage(`{"jobs":[]}`), BodyHash: "empty-hash"}}}
 	for _, tt := range []struct {
 		result any

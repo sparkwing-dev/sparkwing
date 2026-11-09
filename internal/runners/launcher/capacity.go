@@ -1,5 +1,7 @@
 package launcher
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -15,9 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -359,7 +361,7 @@ func (l *Launcher) syncCapacity(ctx context.Context) error {
 
 func capacityIdentityRefused(err error) bool {
 	var failure *apierr.Error
-	return errors.As(err, &failure) && failure.Code == apierr.LockHeld || bindingRefused(err)
+	return errors.As(err, &failure) && failure.Code == hosterr.LockHeld || bindingRefused(err)
 }
 
 func (l *Launcher) wait(award *CloudJobAward) {

@@ -3,12 +3,12 @@ package settings
 import (
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // resolveConcurrency preserves declarations and fills omitted policy fields.
-func resolveConcurrency(declarations []nodeproto.ConcurrencySpec) ([]runspec.Concurrency, error) {
+func resolveConcurrency(declarations []nodewire.ConcurrencySpec) ([]runspec.Concurrency, error) {
 	result := make([]runspec.Concurrency, 0, len(declarations))
 	seen := map[string]bool{}
 	for i, declaration := range declarations {

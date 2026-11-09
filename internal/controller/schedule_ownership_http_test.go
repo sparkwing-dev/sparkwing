@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestScheduleHTTPClientExplainsAppDeclarationRefusal(t *testing.T) {
@@ -50,7 +52,7 @@ func TestScheduleHTTPClientExplainsAppDeclarationRefusal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := mutate()
 			var refusal *apierr.Error
-			if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || !strings.Contains(refusal.Message, "edit the declaration in the repository") {
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.Forbidden || !strings.Contains(refusal.Message, "edit the declaration in the repository") {
 				t.Errorf("App declaration refusal lacks repository remedy: %v", err)
 			}
 			after, err := f.writer.GetCronSchedule(t.Context(), row.ID)

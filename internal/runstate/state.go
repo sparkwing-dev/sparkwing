@@ -7,8 +7,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // CapacityBinding names durable work. Generation authenticates the current award;
@@ -207,7 +207,7 @@ type NodeResult struct {
 	ExitCode       *int
 	OutputRecord   *blob.RecordKey
 	ManifestRecord *blob.RecordKey
-	Failure        *nodeproto.JobFailure
+	Failure        *nodewire.JobFailure
 }
 
 // MaterializeSource preserves the read edge that permits copying another result.

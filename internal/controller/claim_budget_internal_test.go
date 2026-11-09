@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"net/http/httptest"
@@ -8,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestClaimBudgetAnAwardDoesNotSpendBudget(t *testing.T) {
@@ -33,10 +35,10 @@ func TestClaimBudgetAnAwardDoesNotSpendBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	failure, err := apierr.DecodeInner(envelope.Error)
-	if err != nil || failure.Code != apierr.RateLimited || refused.Header().Get("Retry-After") == "" {
+	if err != nil || failure.Code != hosterr.RateLimited || refused.Header().Get("Retry-After") == "" {
 		t.Fatalf("refusal is not the standard envelope: %s %v", refused.Body, err)
 	}
-	if delay, ok := apierr.RetryDelay(failure); !ok || delay <= 0 || strconv.FormatInt(int64(delay/time.Second), 10) != refused.Header().Get("Retry-After") {
+	if delay, ok := hosterr.RetryDelay(failure); !ok || delay <= 0 || strconv.FormatInt(int64(delay/time.Second), 10) != refused.Header().Get("Retry-After") {
 		t.Fatalf("retry delay %s %t disagrees with Retry-After %q", delay, ok, refused.Header().Get("Retry-After"))
 	}
 }

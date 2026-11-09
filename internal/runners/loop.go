@@ -1,5 +1,7 @@
 package runners
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -10,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	controllerclient "github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -381,7 +382,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			} else {
 				transportSince = time.Time{}
 			}
-			if delay, ok := apierr.RetryDelay(outcome.err); ok {
+			if delay, ok := hosterr.RetryDelay(outcome.err); ok {
 				backoffUntil = time.Now().Add(max(delay, l.Config.PollInterval))
 				continue
 			}

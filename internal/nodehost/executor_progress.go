@@ -1,12 +1,12 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"sync"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 var errExecutorNoProgress = errors.New("job made no progress")
@@ -14,9 +14,9 @@ var errExecutorNoProgress = errors.New("job made no progress")
 func executorAttemptTimeout(ctx context.Context) error {
 	switch cause := context.Cause(ctx); {
 	case errors.Is(cause, errExecutorNoProgress):
-		return executorError(apierr.DeadlineExceeded, "job attempt exceeded its no-progress deadline")
+		return executorError(hosterr.DeadlineExceeded, "job attempt exceeded its no-progress deadline")
 	case errors.Is(cause, context.DeadlineExceeded):
-		return executorError(apierr.DeadlineExceeded, "job attempt exceeded its execution deadline")
+		return executorError(hosterr.DeadlineExceeded, "job attempt exceeded its execution deadline")
 	default:
 		return nil
 	}

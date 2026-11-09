@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestPoolClaimsLaunchFreshPodsWithoutThePoolCredential(t *testing.T) {
@@ -135,7 +135,7 @@ func poolControllerStore(t *testing.T) (*store.Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := encode(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job-a"}, {ID: "job-b"}}})
+	plan := encode(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job-a"}, {ID: "job-b"}}})
 	spec, err := runspec.SealSpec(runspec.SealInput{Request: sealed, Plan: plan, Now: time.Unix(1, 0), Resolved: runspec.Resolved{SecretArgs: []string{}, Engine: *unit.Engine, Guards: runspec.Guards{Passed: true}}})
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func poolControllerStore(t *testing.T) (*store.Store, string) {
 	exec(`INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('team','deploy','deploy','gh:1','fixture',1)`)
 	exec(`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('team','run','trigger',1,1,?,?,?)`, time.Now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	for _, id := range []string{"job-a", "job-b"} {
-		exec(`INSERT INTO nodes(team,run_id,node_id,status,ready_at,queue_started_at,spec_json,execution_json) VALUES ('team','run',?,'pending',1,1,?,?)`, id, encode(nodeproto.JobSpec{ID: id}), []byte(`{"requires":{"set":true,"value":["pool=deploy"]}}`))
+		exec(`INSERT INTO nodes(team,run_id,node_id,status,ready_at,queue_started_at,spec_json,execution_json) VALUES ('team','run',?,'pending',1,1,?,?)`, id, encode(nodewire.JobSpec{ID: id}), []byte(`{"requires":{"set":true,"value":["pool=deploy"]}}`))
 	}
 	return st, raw
 }

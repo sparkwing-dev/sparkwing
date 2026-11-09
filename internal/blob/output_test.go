@@ -10,8 +10,8 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 type outputRecords struct {
@@ -76,7 +76,7 @@ func newOutputData(t *testing.T) (OutputData, *outputRecords, *signer) {
 }
 
 func TestOutputRecordRoundTrip(t *testing.T) {
-	for _, body := range []string{"", "null", `{"answer":42}`, strings.Repeat("x", int(limits.NodeOutputBytes))} {
+	for _, body := range []string{"", "null", `{"answer":42}`, strings.Repeat("x", int(protolimits.NodeOutputBytes))} {
 		t.Run(string(digest(body))[:8], func(t *testing.T) {
 			data, records, signer := newOutputData(t)
 			record, err := data.Put(t.Context(), []byte(body))
@@ -103,7 +103,7 @@ func TestOutputWriteRefusals(t *testing.T) {
 			defer cancel()
 			switch fault {
 			case "output_limit":
-				body = strings.Repeat("x", int(limits.NodeOutputBytes)+1)
+				body = strings.Repeat("x", int(protolimits.NodeOutputBytes)+1)
 			case "wrong_attempt":
 				data.Identity.Attempt.Value.Attempt++
 			case "wrong_principal":

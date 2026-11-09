@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 //go:generate go run . --write-protocol-schemas ../../docs
@@ -94,17 +95,17 @@ func protocolFields(t reflect.Type) []reflect.StructField {
 
 func protocolSchemaName(t reflect.Type) string {
 	names := map[reflect.Type]string{
-		reflect.TypeFor[nodeproto.SDKIdentity](): "sdk",
-		reflect.TypeFor[nodeproto.DescribeDoc](): "describe", reflect.TypeFor[nodeproto.PipelineDescription](): "pipeline",
-		reflect.TypeFor[nodeproto.ArgumentDescription](): "arg", reflect.TypeFor[nodeproto.EnvironmentDescription](): "envVar",
-		reflect.TypeFor[nodeproto.UsageExample](): "example", reflect.TypeFor[nodeproto.SecretDeclaration](): "secret",
-		reflect.TypeFor[nodeproto.PlanDoc](): "plan", reflect.TypeFor[nodeproto.JobSpec](): "job",
-		reflect.TypeFor[nodeproto.StepSpec](): "step", reflect.TypeFor[nodeproto.ClosureSpec](): "closures",
-		reflect.TypeFor[nodeproto.ConcurrencySpec](): "concurrency",
-		reflect.TypeFor[nodeproto.SourceSpec]():      "source", reflect.TypeFor[nodeproto.RetrySpec](): "retry",
-		reflect.TypeFor[nodeproto.MemoSpec](): "memo", reflect.TypeFor[nodeproto.CacheSpec](): "cache",
-		reflect.TypeFor[nodeproto.ApprovalSpec](): "approval", reflect.TypeFor[nodeproto.ArtifactInput](): "consume",
-		reflect.TypeFor[nodeproto.PipelineReference](): "pipelineRef", reflect.TypeFor[nodeproto.JobFailure](): "failure",
+		reflect.TypeFor[nodewire.SDKIdentity](): "sdk",
+		reflect.TypeFor[nodewire.DescribeDoc](): "describe", reflect.TypeFor[nodewire.PipelineDescription](): "pipeline",
+		reflect.TypeFor[nodewire.ArgumentDescription](): "arg", reflect.TypeFor[nodewire.EnvironmentDescription](): "envVar",
+		reflect.TypeFor[nodewire.UsageExample](): "example", reflect.TypeFor[nodewire.SecretDeclaration](): "secret",
+		reflect.TypeFor[nodewire.PlanDoc](): "plan", reflect.TypeFor[nodewire.JobSpec](): "job",
+		reflect.TypeFor[nodewire.StepSpec](): "step", reflect.TypeFor[nodewire.ClosureSpec](): "closures",
+		reflect.TypeFor[nodewire.ConcurrencySpec](): "concurrency",
+		reflect.TypeFor[nodewire.SourceSpec]():      "source", reflect.TypeFor[nodewire.RetrySpec](): "retry",
+		reflect.TypeFor[nodewire.MemoSpec](): "memo", reflect.TypeFor[nodewire.CacheSpec](): "cache",
+		reflect.TypeFor[nodewire.ApprovalSpec](): "approval", reflect.TypeFor[nodewire.ArtifactInput](): "consume",
+		reflect.TypeFor[nodewire.PipelineReference](): "pipelineRef", reflect.TypeFor[nodewire.JobFailure](): "failure",
 		reflect.TypeFor[apierr.Error](): "replyError",
 	}
 	if name, found := names[t]; found {
@@ -126,7 +127,7 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 	case "request":
 		nonempty("id", "pipeline", "job", "step", "closure", "target")
 		enum("op", "hello", "describe", "plan", "run_step", "eval", "cancel")
-		props["protocol"].(protocolSchema)["const"] = nodeproto.Version
+		props["protocol"].(protocolSchema)["const"] = nodewire.Version
 		minimum("attempt", 1)
 		def["allOf"] = requestSchemaRules()
 	case "reply":
@@ -139,7 +140,7 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 		nonempty("code")
 		def["not"] = protocolSchema{"required": []string{"error"}}
 	case "helloResult":
-		props["protocol"].(protocolSchema)["const"] = nodeproto.Version
+		props["protocol"].(protocolSchema)["const"] = nodewire.Version
 	case "engineIdentity", "sdk":
 		nonempty("version")
 	case "runContext":
@@ -165,7 +166,7 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 		for _, f := range []string{"timeout_ms", "no_progress_timeout_ms", "skip_if_budget_ms"} {
 			minimum(f, 0)
 		}
-		props["cores"].(protocolSchema)["minimum"] = nodeproto.MinJobCores
+		props["cores"].(protocolSchema)["minimum"] = nodewire.MinJobCores
 	case "step":
 		nonempty("id")
 	case "concurrency":
@@ -196,19 +197,19 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 
 func requestSchemaRules() []any {
 	rules := []any{}
-	for _, op := range []nodeproto.Op{nodeproto.OpHello, nodeproto.OpDescribe, nodeproto.OpPlan, nodeproto.OpRunStep, nodeproto.OpEval, nodeproto.OpCancel} {
-		operation := nodeproto.RequestFields(op)
+	for _, op := range []nodewire.Op{nodewire.OpHello, nodewire.OpDescribe, nodewire.OpPlan, nodewire.OpRunStep, nodewire.OpEval, nodewire.OpCancel} {
+		operation := nodewire.RequestFields(op)
 		then := protocolSchema{}
 		checks := []any{}
 		if len(operation.Required) > 0 {
 			then["required"] = operation.Required
 		}
-		for _, field := range nodeproto.RequestFieldNames() {
+		for _, field := range nodewire.RequestFieldNames() {
 			if !slices.Contains(operation.Allowed, field) {
 				checks = append(checks, protocolSchema{"not": protocolSchema{"required": []string{field}}})
 			}
 		}
-		if op == nodeproto.OpCancel {
+		if op == nodewire.OpCancel {
 			checks = append(checks, protocolSchema{"oneOf": []any{
 				protocolSchema{"required": []string{"target"}, "not": protocolSchema{"anyOf": []any{protocolSchema{"required": []string{"job"}}, protocolSchema{"required": []string{"step"}}}}},
 				protocolSchema{"required": []string{"job"}, "not": protocolSchema{"required": []string{"target"}}},
@@ -228,11 +229,11 @@ func buildProtocolSchemas() map[string]protocolSchema {
 		}
 		return b
 	}
-	doc := builder(false, reflect.TypeFor[nodeproto.DescribeDoc]())
+	doc := builder(false, reflect.TypeFor[nodewire.DescribeDoc]())
 	doc.strict = true
-	doc.value(reflect.TypeFor[nodeproto.PlanDoc]())
-	wire := builder(false, reflect.TypeFor[nodeproto.Request](), reflect.TypeFor[nodeproto.Reply](), reflect.TypeFor[nodeproto.HelloResult](), reflect.TypeFor[nodeproto.RunResult](), reflect.TypeFor[nodeproto.EvalResult](), reflect.TypeFor[nodeproto.AnnotationRequest](), reflect.TypeFor[nodeproto.SummaryRequest](), reflect.TypeFor[nodeproto.MaskRequest]())
-	logs := builder(false, reflect.TypeFor[nodeproto.FrameLog]())
+	doc.value(reflect.TypeFor[nodewire.PlanDoc]())
+	wire := builder(false, reflect.TypeFor[nodewire.Request](), reflect.TypeFor[nodewire.Reply](), reflect.TypeFor[nodewire.HelloResult](), reflect.TypeFor[nodewire.RunResult](), reflect.TypeFor[nodewire.EvalResult](), reflect.TypeFor[nodewire.AnnotationRequest](), reflect.TypeFor[nodewire.SummaryRequest](), reflect.TypeFor[nodewire.MaskRequest]())
+	logs := builder(false, reflect.TypeFor[nodewire.FrameLog]())
 	wrap := func(title, description string, b *protocolSchemaBuilder) protocolSchema {
 		return protocolSchema{"$schema": "https://json-schema.org/draft/2020-12/schema", "title": title, "description": description, "$defs": b.defs}
 	}

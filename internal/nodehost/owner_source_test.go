@@ -2,6 +2,8 @@
 
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -11,7 +13,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -30,7 +31,7 @@ type ownerSourceEngine struct {
 func (r *ownerSourceEngine) Resolve(_ context.Context, pin engineid.Pin, target releaseasset.Target) (engine.Resolved, error) {
 	r.resolvedPins++
 	if pin != r.resolved.Identity.Pin || target != r.resolved.Target {
-		return engine.Resolved{}, executorError(apierr.SpecDrift, "planning source changed its engine pin or target")
+		return engine.Resolved{}, executorError(hosterr.SpecDrift, "planning source changed its engine pin or target")
 	}
 	return r.resolved, nil
 }

@@ -10,8 +10,9 @@ import (
 	"os"
 	"sort"
 
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // RunOptions configures a one-shot container invocation. The intended

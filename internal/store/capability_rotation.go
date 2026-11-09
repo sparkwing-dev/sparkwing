@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -7,9 +9,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // RotateCapability replaces an owned tenant credential and commits its grace deadline.
@@ -64,7 +66,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 			return err
 		}
 		if c.RevokedAt != nil || c.ExpiresAt != nil && !tx.now(ctx).Before(*c.ExpiresAt) {
-			return authorityError(apierr.LockHeld, "credential has ended or already has a successor")
+			return authorityError(hosterr.LockHeld, "credential has ended or already has a successor")
 		}
 		if expires == nil {
 			expires = c.ExpiresAt
@@ -78,7 +80,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 				return err
 			}
 			if requested != nil && ceiling != nil && requested.After(*ceiling) {
-				return authorityError(apierr.Forbidden, "only an account or console session can extend a credential's expiry")
+				return authorityError(hosterr.Forbidden, "only an account or console session can extend a credential's expiry")
 			}
 			if ceiling != nil && (expires == nil || expires.After(*ceiling)) {
 				expires = ceiling
@@ -135,7 +137,7 @@ func rotationOwnerTx(ctx context.Context, tx *storeTx, p capability.Principal, c
 			return nil
 		}
 	}
-	return authorityError(apierr.Forbidden, "only a token's owner can rotate it; a team admin can revoke it instead")
+	return authorityError(hosterr.Forbidden, "only a token's owner can rotate it; a team admin can revoke it instead")
 }
 
 func rotationExpiryCeilingTx(ctx context.Context, tx *storeTx, caller capability.AuthorityRef, old *time.Time) (*time.Time, error) {
@@ -162,7 +164,7 @@ func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal,
 		return capability.IssueRequest{Kind: capability.Delegate, Delegate: &spec}, nil
 	}
 	if record.Origin == nil {
-		return capability.IssueRequest{}, authorityError(apierr.IntegrityFailure, "credential provisioning origin is unavailable")
+		return capability.IssueRequest{}, authorityError(hosterr.IntegrityFailure, "credential provisioning origin is unavailable")
 	}
 	origin := record.Origin
 	spec := capability.ProvisionSpec{AllowTeamAdmin: slices.Contains(c.Grants, capability.TeamAdmin), AllowedLabels: slices.Clone(origin.AllowedLabels), Personal: origin.Personal, Platform: origin.Platform, Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Trust: c.Trust, Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
@@ -175,7 +177,7 @@ func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 		return err
 	}
 	if record.Value.ExpiresAt != nil && !tx.now(ctx).Before(*record.Value.ExpiresAt) {
-		return authorityError(apierr.LockHeld, "credential expired during rotation")
+		return authorityError(hosterr.LockHeld, "credential expired during rotation")
 	}
 	record.Value.RevokedAt = &deadline
 	body, err := json.Marshal(record)

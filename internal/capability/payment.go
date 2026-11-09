@@ -1,5 +1,7 @@
 package capability
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/hmac"
@@ -15,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // PaymentMode selects provider credentials without changing verification or settlement code.
@@ -208,7 +210,7 @@ func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentat
 		return nil, invalidPaymentEvent()
 	}
 	if event.LiveMode == nil || *event.LiveMode != (a.mode == PaymentLive) {
-		return nil, forbidden(apierr.ReasonBinding)
+		return nil, forbidden(hosterr.ReasonBinding)
 	}
 	for _, policy := range paymentEventPolicies {
 		if policy.ProviderType != event.Type {

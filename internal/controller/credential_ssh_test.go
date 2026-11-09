@@ -1,5 +1,7 @@
 package controller_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -14,12 +16,12 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type credentialPutCapture struct {
@@ -75,7 +77,7 @@ func TestCredentialSSHWritePinsHostAndKeepsKeyPrivate(t *testing.T) {
 			case "invalid key":
 				body["private_key"], status, code = "private credential diagnostic", 400, apierr.BadRequest
 			case "scan failure":
-				status, code = 503, apierr.Unavailable
+				status, code = 503, hosterr.Unavailable
 			}
 			controller.SetHostKeyScan(server, func(_ context.Context, host string, gotPort int) (ssh.PublicKey, error) {
 				scans++
@@ -100,7 +102,7 @@ func TestCredentialSSHWritePinsHostAndKeepsKeyPrivate(t *testing.T) {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}
 			if code != "" {
-				var result apierr.Envelope
+				var result hosterr.Envelope
 				if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Error == nil || result.Error.Code != code || writer.calls != 0 || name != "scan failure" && scans != 0 {
 					t.Fatalf("HTTP %d %s writes=%d scans=%d", w.Code, w.Body.String(), writer.calls, scans)
 				}

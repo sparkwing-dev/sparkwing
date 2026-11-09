@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -7,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -18,6 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestPlanningDefaults(t *testing.T) {
@@ -47,7 +50,7 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
-	job := nodeproto.JobSpec{ID: "safe-job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	job := nodewire.JobSpec{ID: "safe-job", Steps: []nodewire.StepSpec{{ID: "body"}}}
 	switch field {
 	case "job":
 		job.ID = "job-" + secret
@@ -56,9 +59,9 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 	case "step":
 		job.Steps[0].ID = "step-" + secret
 	case "concurrency":
-		job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "group-" + secret}}
+		job.Concurrency = []nodewire.ConcurrencySpec{{Group: "group-" + secret}}
 	}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}
 	f := newStoreOwnerFixture(t, openStore(t), runspec.Request{
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "build", Mode: runspec.IntakeExecute,
 		Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
@@ -76,11 +79,11 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 	f.Host.Planning.Validation.Placement = nodeproto.PlacementLocal
 	var processes []*scriptedSDK
 	f.Host.Planner = &SDKPlanner{
-		Masker: masks, Log: func(context.Context, nodeproto.FrameLog) error { return nil },
+		Masker: masks, Log: func(context.Context, nodewire.FrameLog) error { return nil },
 		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
-		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
 			process := newPlanningSDK(plan, secret)
 			processes = append(processes, process)
 			return process, nil
@@ -108,7 +111,7 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 		}
 	} else {
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+		if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier {
 			t.Fatalf("secret identifier was not refused by the shared validator: %v", err)
 		}
 		if strings.Contains(err.Error()+failure.Message+failure.Hint+fmt.Sprint(failure.Details), secret) {

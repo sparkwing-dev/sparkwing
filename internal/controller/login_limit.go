@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"fmt"
 	"net/http"
@@ -7,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -32,14 +34,14 @@ func newLoginLimiter() *loginLimiter {
 // safety: device user codes are short, so a signed-in account may try only a few per minute.
 func (l *loginLimiter) admitAccount(account string) error {
 	if !l.accounts.Allow(account, l.now()) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("device code entry is limited to %d attempts per account per minute; wait a minute and enter the code again", deviceAccountBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
+		return &apierr.Error{Code: hosterr.RateLimited, Message: fmt.Sprintf("device code entry is limited to %d attempts per account per minute; wait a minute and enter the code again", deviceAccountBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
 	}
 	return nil
 }
 
 func (l *loginLimiter) admit(r *http.Request) error {
 	if !l.clients.Allow(loginClientKey(ratelimit.ClientIP(r)), l.now()) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("login attempt limit is %d per client per minute; current budget usage is %d attempts; wait a minute or contact support@sparkwing.dev to raise this limit", loginClientBurst, loginClientBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
+		return &apierr.Error{Code: hosterr.RateLimited, Message: fmt.Sprintf("login attempt limit is %d per client per minute; current budget usage is %d attempts; wait a minute or contact support@sparkwing.dev to raise this limit", loginClientBurst, loginClientBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
 	}
 	return nil
 }
@@ -75,9 +77,9 @@ func retryAfterWholeSeconds(after time.Duration) int64 {
 }
 
 func writeRetryAfterStatus(w http.ResponseWriter, status int, after time.Duration, message string) {
-	code := apierr.RateLimited
+	code := hosterr.RateLimited
 	if status == http.StatusServiceUnavailable {
-		code = apierr.Unavailable
+		code = hosterr.Unavailable
 	}
 	routepolicy.WritePolicyError(w, &apierr.Error{Code: code, Message: message, Details: map[string]any{"retry_after_ms": retryAfterWholeSeconds(after) * 1000}})
 }

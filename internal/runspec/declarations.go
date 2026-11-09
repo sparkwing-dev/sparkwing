@@ -1,5 +1,7 @@
 package runspec
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
@@ -7,15 +9,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // DeclarationGate owns discovery completeness and the registration of declarations.
 // Diagnostics remain private until every pipeline has supplied its declarations.
 type DeclarationGate struct {
-	doc      nodeproto.DescribeDoc
+	doc      nodewire.DescribeDoc
 	masker   *secrets.Masker
 	complete bool
 	defaults []SecretValue
@@ -26,13 +29,13 @@ type DeclarationGate struct {
 
 // DeclaredArguments is the resolved argument set and its sealing projection.
 type DeclaredArguments struct {
-	Description  nodeproto.PipelineDescription
+	Description  nodewire.PipelineDescription
 	Args         map[string]string
 	SecretArgs   []string
 	Registration SecretRegistration
 }
 
-func NewDeclarationGate(doc nodeproto.DescribeDoc, masker *secrets.Masker) (*DeclarationGate, error) {
+func NewDeclarationGate(doc nodewire.DescribeDoc, masker *secrets.Masker) (*DeclarationGate, error) {
 	if doc.Pipelines == nil || masker == nil {
 		return nil, declarationError("SDK describe requires a pipelines array and host masker")
 	}
@@ -80,7 +83,7 @@ func (g *DeclarationGate) IncompleteReason() string {
 		}
 		failed++
 		code := apierr.SDKError
-		if slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == pipeline.Error.Code }) {
+		if slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == pipeline.Error.Code }) {
 			code = pipeline.Error.Code
 		}
 		if !slices.Contains(codes, string(code)) {
@@ -141,7 +144,7 @@ func (g *DeclarationGate) resolve(name string, args map[string]string, secretArg
 }
 
 // RegisterArguments is the argument registration projection for every host entrypoint.
-func RegisterArguments(arguments []nodeproto.ArgumentDescription, args map[string]string, secretArgs []string, masker *secrets.Masker) (DeclaredArguments, error) {
+func RegisterArguments(arguments []nodewire.ArgumentDescription, args map[string]string, secretArgs []string, masker *secrets.Masker) (DeclaredArguments, error) {
 	resolved, err := projectArguments(arguments, args, secretArgs)
 	if err != nil {
 		return resolved, err
@@ -154,7 +157,7 @@ func RegisterArguments(arguments []nodeproto.ArgumentDescription, args map[strin
 	return resolved, nil
 }
 
-func projectArguments(arguments []nodeproto.ArgumentDescription, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
+func projectArguments(arguments []nodewire.ArgumentDescription, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
 	resolved := DeclaredArguments{Args: nodeproto.ApplyArgumentDefaults(arguments, args), SecretArgs: append([]string{}, secretArgs...)}
 	projection := SecretRegistration{}
 	for _, argument := range arguments {
@@ -245,7 +248,7 @@ func (g *DeclarationGate) Error(err error) error {
 	if !g.Complete() {
 		code := apierr.SDKError
 		var canonical *apierr.Error
-		if errors.As(err, &canonical) && slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == canonical.Code }) {
+		if errors.As(err, &canonical) && slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == canonical.Code }) {
 			code = canonical.Code
 		}
 		return &apierr.Error{Code: code, Message: "pipeline discovery failed (details withheld: secrets not yet known)"}
@@ -257,7 +260,7 @@ func (g *DeclarationGate) Error(err error) error {
 }
 
 // PipelinePresentation is sanitized metadata for display, never execution routing.
-type PipelinePresentation nodeproto.PipelineDescription
+type PipelinePresentation nodewire.PipelineDescription
 
 // DescribePresentation contains public discovery metadata safe for display and caching.
 type DescribePresentation struct {
@@ -265,8 +268,8 @@ type DescribePresentation struct {
 }
 
 // Declarations returns private metadata for pipeline lookup and argument parsing.
-func (g *DeclarationGate) Declarations() nodeproto.DescribeDoc {
-	doc := nodeproto.DescribeDoc{Pipelines: slices.Clone(g.doc.Pipelines)}
+func (g *DeclarationGate) Declarations() nodewire.DescribeDoc {
+	doc := nodewire.DescribeDoc{Pipelines: slices.Clone(g.doc.Pipelines)}
 	for i := range doc.Pipelines {
 		if doc.Pipelines[i].Error != nil {
 			doc.Pipelines[i].Error = g.Error(doc.Pipelines[i].Error).(*apierr.Error)
@@ -286,7 +289,7 @@ func (g *DeclarationGate) Presentation() DescribePresentation {
 			pipeline.Error = g.Error(source.Error).(*apierr.Error)
 		}
 		if !g.Complete() {
-			doc.Pipelines[i] = PipelinePresentation{Args: []nodeproto.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.SDKError, Message: "pipeline discovery incomplete (details withheld: secrets not yet known)"}}
+			doc.Pipelines[i] = PipelinePresentation{Args: []nodewire.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.SDKError, Message: "pipeline discovery incomplete (details withheld: secrets not yet known)"}}
 			continue
 		}
 		pipeline.Help, pipeline.Short = g.masker.Mask(source.Help), g.masker.Mask(source.Short)

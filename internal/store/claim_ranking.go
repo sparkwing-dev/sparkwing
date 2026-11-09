@@ -1,14 +1,16 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Claim tiers order run-anywhere claimants in a team's claim ranking.
@@ -82,7 +84,7 @@ func sealedRequestTx(ctx context.Context, tx *storeTx, team Team, run string) (r
 	return seal, json.Unmarshal(body, &seal)
 }
 
-var errTierOutsideRanking = authorityError(apierr.Forbidden, "claimant tier is outside the team's claim ranking")
+var errTierOutsideRanking = authorityError(hosterr.Forbidden, "claimant tier is outside the team's claim ranking")
 
 func claimRankTx(ctx context.Context, tx *storeTx, team Team, chain []authorityNode, request runspec.Request) (int, error) {
 	ranking, err := claimRankingTx(ctx, tx, team)

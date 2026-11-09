@@ -1,12 +1,14 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 // MaskRegistry serializes run-local registrations and topology acceptance.
@@ -104,11 +106,11 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 
 // acceptPlan checks initial or generated identifiers, commits under the registration
 // lock, then retains their names. A refused commit changes no registry state.
-func (r *MaskRegistry) acceptPlan(plan nodeproto.PlanDoc, commit func() error) error {
+func (r *MaskRegistry) acceptPlan(plan nodewire.PlanDoc, commit func() error) error {
 	return r.accept(plan, commit, r.masker)
 }
 
-func (r *MaskRegistry) accept(plan nodeproto.PlanDoc, commit func() error, matcher *secrets.Masker) error {
+func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matcher *secrets.Masker) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.masker == nil || commit == nil {
@@ -134,7 +136,7 @@ func (r *MaskRegistry) accept(plan nodeproto.PlanDoc, commit func() error, match
 }
 
 func identifierMaskError(path string) error {
-	return executorError(apierr.SecretInIdentifier, "registered secret conflicts with identifier at "+path)
+	return executorError(hosterr.SecretInIdentifier, "registered secret conflicts with identifier at "+path)
 }
 
 func (r *MaskRegistry) mask(text string) string { return r.masker.Mask(text) }

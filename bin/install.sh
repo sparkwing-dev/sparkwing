@@ -77,7 +77,7 @@ fi
 echo "build $NAME $VERSION"
 # -trimpath and -s -w are the flags .github/workflows/release.yaml passes, so a
 # local install and a released binary strip and trim the same way.
-GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/$NAME$exe_suffix" ./cmd/sparkwing
+GOWORK=auto go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/$NAME$exe_suffix" ./cmd/sparkwing
 if [ "$NAME" != sparkwing ]; then
   echo
   echo "Installed to $DEST/$NAME$exe_suffix (the sparkwing beside it is untouched)"
@@ -85,7 +85,7 @@ if [ "$NAME" != sparkwing ]; then
 fi
 
 echo "build sparkwing-runner $VERSION"
-GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/sparkwing-runner$exe_suffix" ./cmd/sparkwing-runner
+GOWORK=auto go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/sparkwing-runner$exe_suffix" ./cmd/sparkwing-runner
 
 declare -a STALE=(
   sparkwing-cache

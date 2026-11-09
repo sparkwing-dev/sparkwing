@@ -17,14 +17,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/depcachekey"
 )
 
 func TestStorageSeededAuthorityUsesStoreClock(t *testing.T) {
@@ -142,7 +142,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	cache := nodehost.DepcacheRecords{Budget: data.Budget, Warn: func(warning string) { warnings = append(warnings, warning) }, Bind: func(_ context.Context, _ nodehost.NodeInput, k blob.DepcacheKey) (nodehost.JobUpload, error) {
 		return nodehost.JobUpload{Identity: identity, Authority: authority, Key: blob.RecordKey{Team: identity.Team, Kind: blob.KindDepcache, Scope: blob.Scope{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: attempt.NodeID, Key: k.Key}, Name: k.Name}}, nil
 	}}
-	job := nodeproto.JobSpec{ID: attempt.NodeID, Caches: []nodeproto.CacheSpec{{Name: "modules", Path: "deps", KeyFiles: []string{"lockfile"}}}}
+	job := nodewire.JobSpec{ID: attempt.NodeID, Caches: []nodewire.CacheSpec{{Name: "modules", Path: "deps", KeyFiles: []string{"lockfile"}}}}
 	destination := filepath.Join(root, "deps")
 	finish, err := cache.Prepare(ctx, input, job)
 	if err != nil || finish == nil {
@@ -222,7 +222,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	return nil
 }
 
-func restoreDepcache(ctx context.Context, cache nodehost.DepcacheRecords, input nodehost.NodeInput, job nodeproto.JobSpec, destination string) (restored, warned bool, err error) {
+func restoreDepcache(ctx context.Context, cache nodehost.DepcacheRecords, input nodehost.NodeInput, job nodewire.JobSpec, destination string) (restored, warned bool, err error) {
 	if err := os.RemoveAll(destination); err != nil {
 		return false, false, err
 	}
@@ -234,7 +234,7 @@ func restoreDepcache(ctx context.Context, cache nodehost.DepcacheRecords, input 
 	return statErr == nil, warned, nil
 }
 
-func checkDepcacheScopes(ctx context.Context, cache nodehost.DepcacheRecords, input nodehost.NodeInput, job nodeproto.JobSpec, destination string, seed [16]byte) error {
+func checkDepcacheScopes(ctx context.Context, cache nodehost.DepcacheRecords, input nodehost.NodeInput, job nodewire.JobSpec, destination string, seed [16]byte) error {
 	for _, field := range []string{"repo", "attempt", "ref"} {
 		bad := input
 		switch field {

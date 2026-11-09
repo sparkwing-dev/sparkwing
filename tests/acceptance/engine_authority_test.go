@@ -1,15 +1,17 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func expansionAuthority() capability.Authorized {
@@ -31,7 +33,7 @@ func TestEngineExpansionAuthorityAdapter(t *testing.T) {
 		body := controllerwire.ExpansionSubmission{SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[]}`)}
 		if failed {
 			body.Body = nil
-			body.Failure = &apierr.Error{Code: apierr.Unavailable, Message: "generator failed"}
+			body.Failure = &apierr.Error{Code: hosterr.Unavailable, Message: "generator failed"}
 		}
 		got, err := controller.ExpansionForStore(a, body)
 		if err != nil {
@@ -45,7 +47,7 @@ func TestEngineExpansionAuthorityAdapter(t *testing.T) {
 			t.Fatalf("authority was lost: %+v", got)
 		}
 		if failed {
-			if got.Failure == nil || got.Failure.Code != apierr.Unavailable || got.Failure.MaskedError != "generator failed" || len(got.Body) != 0 {
+			if got.Failure == nil || got.Failure.Code != hosterr.Unavailable || got.Failure.MaskedError != "generator failed" || len(got.Body) != 0 {
 				t.Fatalf("structured failure = %+v", got)
 			}
 		} else if got.Failure != nil || string(got.Body) != `{"jobs":[]}` {
@@ -59,7 +61,7 @@ func TestEngineExpansionAuthorityAdapter(t *testing.T) {
 		{SourceGeneration: 4, Body: json.RawMessage(`{}`)},
 		{SourceGeneration: 4, Body: json.RawMessage(`[]`)},
 		{SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[]} {}`)},
-		{SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[]}`), Failure: &apierr.Error{Code: apierr.Internal, Message: "failed"}},
+		{SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[]}`), Failure: &apierr.Error{Code: hosterr.Internal, Message: "failed"}},
 		{SourceGeneration: 4, Failure: &apierr.Error{Message: "missing code"}},
 	} {
 		if _, err := controller.ExpansionForStore(a, body); err == nil {

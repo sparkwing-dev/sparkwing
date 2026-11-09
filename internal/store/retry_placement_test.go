@@ -1,14 +1,16 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"errors"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // RetryPlacementRegressions checks sealed writer placement in the supplied dialect.
@@ -52,7 +54,7 @@ func retryLocalPlacementRequiresWriter(t *testing.T, open func(*testing.T) *Stor
 					want = "only account/alice can retry a local run; start a new run instead"
 				}
 				var canonical *apierr.Error
-				if !errors.As(err, &canonical) || canonical.Code != apierr.Forbidden || canonical.Message != want || refused.RunID != "" || len(refused.HereBearer) != 0 {
+				if !errors.As(err, &canonical) || canonical.Code != hosterr.Forbidden || canonical.Message != want || refused.RunID != "" || len(refused.HereBearer) != 0 {
 					t.Fatalf("other principal's retry run=%q, bearer issued=%v: %v, want %q", refused.RunID, len(refused.HereBearer) != 0, err, want)
 				}
 			})

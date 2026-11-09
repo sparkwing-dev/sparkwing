@@ -14,13 +14,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 const splitSecret = "hunter2-straddles-the-split"
@@ -67,7 +67,7 @@ func checkMaskedNativeFailure(t *testing.T, f *storeHostFixture, input NodeInput
 
 func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, ExecutorDependencies) {
 	t.Helper()
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", ResultStep: "body", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "build", ResultStep: "body", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 	releaseRemote(t, f, "build")
 	_, input := claimRemote(t, f, "build")
 	entry, err := f.Host.Acquire(t.Context(), f.Input)
@@ -87,14 +87,14 @@ func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, Executo
 		return input.Engine, nil
 	}
 	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
-		return &executorProcess{plan: f.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`{"v":1}`)}}, nil
+		return &executorProcess{plan: f.Accepted.Plan, result: nodewire.RunResult{Outcome: "success", Output: json.RawMessage(`{"v":1}`)}}, nil
 	}
 	return f, input, deps
 }
 
 func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
 	f, input, deps := maskingExecutorFixture(t)
-	setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+	setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error) {
 		return nil, outerLayerFailure()
 	})
 	host, err := NewNodeExecutor(deps)

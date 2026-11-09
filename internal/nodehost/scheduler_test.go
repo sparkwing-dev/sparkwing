@@ -15,12 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 const testRunID = "run-sched"
@@ -50,11 +50,11 @@ func TestStoreHostFixtureUsesStoreClock(t *testing.T) {
 }
 
 func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "d", Needs: deps("b", "c"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "c", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "d", Needs: deps("b", "c"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "b", Needs: deps("a"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "c", Needs: deps("a"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "a", Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}})
 	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
@@ -98,18 +98,18 @@ func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 }
 
 func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "deploy", Needs: deps("test"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "build-recover", OnFailureOf: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "docs", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "docs-recover", OnFailureOf: "docs", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "lint", ContinueOnError: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "after-lint", Needs: deps("lint"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "flaky", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "after-flaky", NeedsIfPresent: deps("flaky", "absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "maybe", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "test", Needs: deps("build"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "deploy", Needs: deps("test"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "build-recover", OnFailureOf: "build", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "docs", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "docs-recover", OnFailureOf: "docs", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "lint", ContinueOnError: true, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "after-lint", Needs: deps("lint"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "flaky", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "after-flaky", NeedsIfPresent: deps("flaky", "absent"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "maybe", Optional: true, Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}})
 	var mu sync.Mutex
 	ran := map[string]bool{}
@@ -143,9 +143,9 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 }
 
 func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "maybe", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "after", NeedsIfPresent: deps("absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "maybe", Optional: true, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "after", NeedsIfPresent: deps("absent"), Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}})
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		outcome := runstate.NodeSuccess
@@ -175,9 +175,9 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 }
 
 func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "base", Requires: []string{"linux"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}})
 	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
@@ -190,7 +190,7 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 			t.Errorf("initial row=%+v", row)
 		}
 		if row.Ref.NodeID == "gpu" {
-			var job nodeproto.JobSpec
+			var job nodewire.JobSpec
 			if err := json.Unmarshal(row.Spec, &job); err != nil {
 				t.Fatal(err)
 			}
@@ -202,10 +202,10 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 }
 
 func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "later", Needs: deps("next"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+		{ID: "slow", Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "next", Needs: deps("slow"), Steps: []nodewire.StepSpec{{ID: "body"}}},
+		{ID: "later", Needs: deps("next"), Steps: []nodewire.StepSpec{{ID: "body"}}},
 	}})
 	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
@@ -248,9 +248,9 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
 	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
 		t.Run(cause.Error(), func(t *testing.T) {
-			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-				{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+				{ID: "slow", Steps: []nodewire.StepSpec{{ID: "body"}}},
+				{ID: "next", Needs: deps("slow"), Steps: []nodewire.StepSpec{{ID: "body"}}},
 			}})
 			bounded, stop := context.WithTimeout(t.Context(), limits.DefaultLease)
 			defer stop()
@@ -276,7 +276,7 @@ func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
 }
 
 func TestSchedulerWithoutAnExecutorFailsLoudly(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "a", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	_, err := f.Host.Run(ctx, f.Input)
@@ -292,14 +292,14 @@ func TestSchedulerWithoutAnExecutorFailsLoudly(t *testing.T) {
 func TestSchedulerARefusedOutputFailsTheNodeAndDependants(t *testing.T) {
 	for _, message := range []string{"output refused", strings.Repeat("upload refused\n", 200<<10)} {
 		t.Run(fmt.Sprintf("%d-bytes", len(message)), func(t *testing.T) {
-			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-				{ID: "big", ResultStep: "body", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "after", Needs: deps("big"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
+				{ID: "big", ResultStep: "body", Steps: []nodewire.StepSpec{{ID: "body"}}},
+				{ID: "after", Needs: deps("big"), Steps: []nodewire.StepSpec{{ID: "body"}}},
 			}})
 			_, _, dependencies, _ := executorFixture(t)
 			dependencies.Store = f.State
 			dependencies.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
-				return &executorProcess{plan: f.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"huge"`)}}, nil
+				return &executorProcess{plan: f.Accepted.Plan, result: nodewire.RunResult{Outcome: "success", Output: json.RawMessage(`"huge"`)}}, nil
 			}
 			refused := errors.New(message)
 			dependencies.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) { return nil, refused }

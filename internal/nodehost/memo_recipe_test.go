@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -10,18 +12,20 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func typescriptMemoPlan(t *testing.T, declarations string) nodeproto.PlanDoc {
+func typescriptMemoPlan(t *testing.T, declarations string) nodewire.PlanDoc {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -39,7 +43,7 @@ func typescriptMemoPlan(t *testing.T, declarations string) nodeproto.PlanDoc {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc nodeproto.PlanDoc
+	var doc nodewire.PlanDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +56,7 @@ func TestMemoRecipeGoTypeScriptPipelinesUseExecutingHost(t *testing.T) {
 	recipe := inputs.Compose(inputs.Files("**/*.txt"), inputs.RepoFiles(inputs.Ignore("cache/")), inputs.Tree("tree"), inputs.Env("MODE", "ABSENT"), inputs.Const("v1"), inputs.Parts(map[string]any{"a": []any{"<秘密>", true}, "z": 2}, 3))
 	sparkwing.Job(plan, "job", func(context.Context) error { return nil }).Memo(recipe)
 	goJob := sdkserve.DefaultOperations.Document(plan).Jobs[0]
-	for _, job := range []nodeproto.JobSpec{goJob, ts.Jobs[0]} {
+	for _, job := range []nodewire.JobSpec{goJob, ts.Jobs[0]} {
 		if job.Closures.MemoKey != "" || job.Memo == nil || job.Memo.Input == nil {
 			t.Fatalf("SDK computed a memo key: %+v", job)
 		}
@@ -66,7 +70,7 @@ func TestMemoRecipeGoTypeScriptPipelinesUseExecutingHost(t *testing.T) {
 	host.deps.memoEnvironment = func(context.Context, NodeInput) (procenv.Env, error) {
 		return procenv.Build(procenv.Attempt, procenv.Base{Local: true, Captured: append([]string{"PATH=" + os.Getenv("PATH")}, effective...)}, procenv.Runtime{})
 	}
-	key := func(job nodeproto.JobSpec) string {
+	key := func(job nodewire.JobSpec) string {
 		t.Helper()
 		key, err := host.memoKey(t.Context(), session, input, job)
 		if err != nil || key == "" {
@@ -90,9 +94,9 @@ func TestMemoRecipeGoTypeScriptPipelinesUseExecutingHost(t *testing.T) {
 	if err := os.Remove(filepath.Join(workspace, "a.txt")); err != nil {
 		t.Fatal(err)
 	}
-	for _, job := range []nodeproto.JobSpec{goJob, ts.Jobs[0]} {
+	for _, job := range []nodewire.JobSpec{goJob, ts.Jobs[0]} {
 		key, err := host.memoKey(t.Context(), session, input, job)
-		if key != "" || !errors.Is(err, os.ErrNotExist) || host.failure(err).Failure.Error.Code != apierr.Internal {
+		if key != "" || !errors.Is(err, os.ErrNotExist) || host.failure(err).Failure.Error.Code != hosterr.Internal {
 			t.Fatalf("filesystem error became key %q, %v", key, err)
 		}
 	}
@@ -108,7 +112,7 @@ func mustMemoJSON(t *testing.T, value any) []byte {
 }
 
 func TestMemoEnvironmentIncludesStartupAndBody(t *testing.T) {
-	env, _, err := projectJobEnvironment(procenv.StepTool, map[string]nodeproto.EnvValue{
+	env, _, err := projectJobEnvironment(procenv.StepTool, map[string]nodewire.EnvValue{
 		"START": {Value: "startup", Startup: true}, "MODE": {Value: "body"},
 	}, procenv.Runtime{}, false, nil, func(kind procenv.Kind, runtime procenv.Runtime) (procenv.Env, error) {
 		return procenv.Build(kind, procenv.Base{Local: true, Captured: []string{"MODE=captured", "PATH=/bin"}}, runtime)
@@ -145,7 +149,7 @@ func TestMemoCallbackCanonicalJSONAndKeyInvalidation(t *testing.T) {
 func TestMemoLiteralNumbersSurvivePlanRoundTrip(t *testing.T) {
 	keys := map[string]bool{}
 	for _, raw := range []string{`{"kind":"parts","parts":[9007199254740992]}`, `{"kind":"parts","parts":[9007199254740993]}`} {
-		var recipe nodeproto.MemoInput
+		var recipe nodewire.MemoInput
 		if err := json.Unmarshal([]byte(raw), &recipe); err != nil {
 			t.Fatal(err)
 		}
@@ -162,8 +166,8 @@ func TestMemoLiteralNumbersSurvivePlanRoundTrip(t *testing.T) {
 }
 
 func TestExecutorMemoRecipeErrorStopsBody(t *testing.T) {
-	input, state, deps, processes := executorPolicyFixture(t, func(job *nodeproto.JobSpec) {
-		job.Memo = &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "tree", Root: "missing"}}
+	input, state, deps, processes := executorPolicyFixture(t, func(job *nodewire.JobSpec) {
+		job.Memo = &nodewire.MemoSpec{Input: &nodewire.MemoInput{Kind: "tree", Root: "missing"}}
 	})
 	input.Entry.Directory = createTestRepository(t, map[string]string{"file": "content"})
 	deps.memoEnvironment = func(context.Context, NodeInput) (procenv.Env, error) {
@@ -177,12 +181,12 @@ func TestExecutorMemoRecipeErrorStopsBody(t *testing.T) {
 		t.Fatalf("missing start or failure report: %+v", state.changes)
 	}
 	result := state.changes[1].Extra.Result
-	if result.Failure == nil || result.Failure.Error.Code != apierr.Internal {
+	if result.Failure == nil || result.Failure.Error.Code != hosterr.Internal {
 		t.Fatalf("recipe failed as author code: %+v", result)
 	}
 	for _, process := range *processes {
 		for _, request := range process.requests {
-			if request.Op == nodeproto.OpRunStep {
+			if request.Op == nodewire.OpRunStep {
 				t.Fatal("body ran after recipe error")
 			}
 		}
@@ -204,8 +208,8 @@ func TestMemoConstantsSurviveTransportAndEmptyFailsAtHost(t *testing.T) {
 		if string(mustMemoJSON(t, tsJob.Memo)) != string(mustMemoJSON(t, goJob.Memo)) {
 			t.Fatalf("constant transport differs: Go %+v, TS %+v", goJob.Memo, tsJob.Memo)
 		}
-		for _, job := range []nodeproto.JobSpec{goJob, tsJob} {
-			_, err := nodeproto.ValidatePlan(mustMemoJSON(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}), nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()})
+		for _, job := range []nodewire.JobSpec{goJob, tsJob} {
+			_, err := nodeproto.ValidatePlan(mustMemoJSON(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}), nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()})
 			if job.ID == "empty" {
 				var failure *apierr.Error
 				if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid {

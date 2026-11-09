@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"crypto/hmac"
@@ -10,8 +12,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Identity is one sign-in method attached to an account: an identity
@@ -163,7 +165,7 @@ func identityLinkAuthorityTx(ctx context.Context, tx *storeTx, claim capability.
 		return identityLinkInvalid()
 	}
 	if now.Before(c.IssuedAt) || now.Sub(c.IssuedAt) > IdentityChangeSignInWindow {
-		return apierr.Authorization(apierr.ReasonReauthRequired, "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
+		return hosterr.Authorization(hosterr.ReasonReauthRequired, "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
 	}
 	return nil
 }
@@ -174,7 +176,7 @@ func identityLinkBinding(claim capability.IdentityLink) string {
 }
 
 func identityLinkInvalid() error {
-	return &apierr.Error{Code: apierr.Forbidden, Message: "this link could not be verified; start linking again", Details: map[string]any{"reason": "link_state_invalid"}}
+	return &apierr.Error{Code: hosterr.Forbidden, Message: "this link could not be verified; start linking again", Details: map[string]any{"reason": "link_state_invalid"}}
 }
 
 func linkIdentityTx(ctx context.Context, tx *storeTx, accountID string, p SignInProfile, now time.Time) (Identity, error) {

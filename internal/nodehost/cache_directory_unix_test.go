@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCacheDirectoryOnASharedHostNeverRunsTheJobsTools(t *testing.T) {
@@ -32,10 +32,10 @@ func TestCacheDirectoryOnASharedHostNeverRunsTheJobsTools(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(tools, name), []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{"PATH": {Value: "tools"}, "RESOLVER_INPUT": {Value: "sealed"}}}
+			job := nodewire.JobSpec{ID: input.NodeID, Env: map[string]nodewire.EnvValue{"PATH": {Value: "tools"}, "RESOLVER_INPUT": {Value: "sealed"}}}
 			state.row.Spec, _ = json.Marshal(job)
 			environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{"PATH=/nonexistent", "HOME=/nonexistent"}, Masker: secrets.NewMasker()}}
-			dir, err := environments.cacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
+			dir, err := environments.cacheDirectory(t.Context(), input, nodewire.CacheSpec{Resolver: resolver})
 			if err != nil || strings.HasPrefix(dir, workspace) {
 				t.Fatalf("a shared host ran the job's %s to pick its cache: %q, %v", name, dir, err)
 			}

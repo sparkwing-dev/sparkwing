@@ -301,8 +301,8 @@ Capabilities remain declarative; owner and executor operations encode lifecycle 
 
 | Concern | Owner and source |
 |---|---|
-| Hello, operations, frames, describe, flat plan and shared validation | `internal/nodeproto/*_contract.go` |
-| Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
+| Hello, operations, frames, describe, flat plan and shared validation | `sparkwing/protocol/*_contract.go` and `internal/nodeproto/plan_contract.go` |
+| Windows inherited-handle argv spelling | `sparkwing/protocol/protofd/transport_contract.go` |
 | Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host.go` |
 | Pure graph decisions, selection dependency closure and consistent snapshot projection | `internal/store/scheduling_contract.go`, `internal/store/scheduling_selection.go` |
 | Every unit's renewal loop | `internal/lease/keeper.go` |
@@ -310,7 +310,7 @@ Capabilities remain declarative; owner and executor operations encode lifecycle 
 | SDK planning, canonical validation and hashing | `internal/nodehost/planning.go` |
 | Exact engines, verified releases and signed version policy | `internal/engine` |
 | Go declarations and services | `sparkwing/sdk_contract.go`, `sparkwing/inputs/memo_contract.go`, retained API inventory below |
-| Author test host | `sparkwing/sparkwingtest/host_contract.go` |
+| Author test host | `sparkwingtest/host_contract.go` |
 | TypeScript author API | `sdk/typescript/index.d.ts` |
 
 The detailed inventories are part of this contract:

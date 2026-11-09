@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -9,11 +11,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func parseRunPrune(inv clisurface.Invocation) (time.Duration, error) {
@@ -96,7 +98,7 @@ func pruneObservedRuns(ctx context.Context, inv clisurface.Invocation, c control
 			if err := c.DeleteRun(ctx, id); err != nil {
 				failures = append(failures, fmt.Errorf("prune %s: %w", id, err))
 				if !errors.As(err, &record.Error) {
-					record.Error = &apierr.Error{Code: apierr.Internal, Message: err.Error()}
+					record.Error = &apierr.Error{Code: hosterr.Internal, Message: err.Error()}
 				}
 			}
 		}

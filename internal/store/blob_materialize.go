@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -8,12 +10,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	protolimits "github.com/sparkwing-dev/sparkwing/sparkwing/protocol/limits"
 )
 
 func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, ref runspec.NodeRef, source runstate.MaterializeSource) (materializedRecords, error) {
@@ -81,7 +82,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 				if err != nil {
 					return result, err
 				}
-				if size > limits.NodeOutputBytes {
+				if size > protolimits.NodeOutputBytes {
 					return result, blob.ErrIntegrity
 				}
 			}
@@ -129,7 +130,7 @@ func (r *blobRecords) verifyMaterializedBlobs(ctx context.Context, tx *storeTx, 
 		VerifyBlob(context.Context, blob.Blob) error
 	})
 	if !ok {
-		return authorityError(apierr.Unavailable, "verified result byte reader is not configured")
+		return authorityError(hosterr.Unavailable, "verified result byte reader is not configured")
 	}
 	digests := map[blob.Digest]bool{}
 	for _, change := range batch {
@@ -162,7 +163,7 @@ func materializedKey(team Team, a blobActor, row runstate.NodeRow, kind blob.Kin
 
 func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobActor, target runstate.NodeRow, source runstate.MaterializeSource) ([]blob.RecordKey, error) {
 	if source.Kind == runstate.SourceCoalesced {
-		return nil, authorityError(apierr.Unavailable, "coalesced source read-edge authority is not configured")
+		return nil, authorityError(hosterr.Unavailable, "coalesced source read-edge authority is not configured")
 	}
 	ref, err := materializationRef(team, source)
 	if err != nil {

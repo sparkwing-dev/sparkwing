@@ -1,5 +1,7 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"database/sql"
@@ -8,7 +10,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -34,7 +35,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	}{{request, &v.Request}, {spec, &v.Spec}, {lineage, &execution}, {actor, &v.StateActor}} {
 		if len(item.raw) > 0 {
 			if err := json.Unmarshal(item.raw, item.dst); err != nil {
-				return v, authorityError(apierr.IntegrityFailure, "invalid persisted run: "+err.Error())
+				return v, authorityError(hosterr.IntegrityFailure, "invalid persisted run: "+err.Error())
 			}
 		}
 	}
@@ -99,17 +100,17 @@ func scanNode(row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
 	}{{output, &v.OutputRecord}, {manifest, &v.ManifestRecord}} {
 		if len(part.raw) > 0 {
 			if err := json.Unmarshal(part.raw, part.key); err != nil {
-				return v, authorityError(apierr.IntegrityFailure, "invalid persisted job record: "+err.Error())
+				return v, authorityError(hosterr.IntegrityFailure, "invalid persisted job record: "+err.Error())
 			}
 		}
 	}
 	if len(actor) > 0 {
 		if err = json.Unmarshal(actor, &v.StateActor); err != nil {
-			return v, authorityError(apierr.IntegrityFailure, "invalid persisted job actor: "+err.Error())
+			return v, authorityError(hosterr.IntegrityFailure, "invalid persisted job actor: "+err.Error())
 		}
 	}
 	if err = json.Unmarshal(execution, &v.Execution); err != nil {
-		return v, authorityError(apierr.IntegrityFailure, "invalid persisted execution: "+err.Error())
+		return v, authorityError(hosterr.IntegrityFailure, "invalid persisted execution: "+err.Error())
 	}
 	v.ReadyAt, v.QueueStartedAt, v.LeaseExpiresAt, v.StartedAt, v.FinishedAt, v.CancelRequestedAt = stateTime(ready), stateTime(queued), stateTime(lease), stateTime(start), stateTime(finish), stateTime(cancel)
 	if _, err = nodeState(v); err != nil {

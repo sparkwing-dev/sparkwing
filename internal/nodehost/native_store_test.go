@@ -35,14 +35,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeHostFromIntakeThroughSDKAndPersistedCompletion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	bin := buildNativeSDKFixture(t, ctx, "stepsfixture")
-	runner := nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}
-	hello, _ := planNativeSDKFixture(t, ctx, bin, "steps", map[string]string{"set": "output"}, nodeproto.RunContext{RunID: "describe", Pipeline: "steps"}, runner)
+	runner := nodewire.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}
+	hello, _ := planNativeSDKFixture(t, ctx, bin, "steps", map[string]string{"set": "output"}, nodewire.RunContext{RunID: "describe", Pipeline: "steps"}, runner)
 	for _, role := range []string{"owner", "claimed"} {
 		t.Run(role, func(t *testing.T) { nativeStoreHost(t, ctx, bin, hello.SDK.Version, role) })
 	}
@@ -86,7 +87,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	var logs []string
 	processes := &NativeProcesses{
 		Authorities: authorities, URL: "http://host",
-		Log: func(_ context.Context, run, job string, frame nodeproto.FrameLog) error {
+		Log: func(_ context.Context, run, job string, frame nodewire.FrameLog) error {
 			if run != f.Input.RunID || job != "output" {
 				return errors.New("native log lost its run or job identity")
 			}
@@ -143,7 +144,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 				return engine.SDKCommand{Directory: root, Command: []string{bin}}, nil
 			},
 		},
-		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
+		PlanningLog: func(context.Context, nodewire.FrameLog) error { return nil },
 		Executor:    ExecutionOperations{Bind: bind, PublishOutput: outputs.PublishOutput},
 		ReadOutput: func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) {
 			return nil, errors.New("unexpected source output read")

@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/json"
@@ -18,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -26,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const scheduleOperationTimeout = 2 * time.Minute
@@ -327,7 +329,7 @@ func renderScheduleInstallation(out io.Writer, result scheduleInstallation, form
 }
 
 func scheduleUnavailable(dependency string) error {
-	return &apierr.Error{Code: apierr.PolicyMissing, Message: "local schedules require " + dependency, Hint: "the local controller schedule binding is unavailable in this build"}
+	return &apierr.Error{Code: hosterr.PolicyMissing, Message: "local schedules require " + dependency, Hint: "the local controller schedule binding is unavailable in this build"}
 }
 
 func fleetRepoRoots(git repos.Git) ([]string, error) {

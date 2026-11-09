@@ -20,7 +20,7 @@ type versionPolicyStatus struct {
 
 // safety: local runs never fetch the signed policy, so update is the command that fills the cache they read.
 func refreshVersionPolicy(ctx context.Context) versionPolicyStatus {
-	resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion()})
+	resolver, err := engine.NewResolver(engine.Config{})
 	if err != nil {
 		return versionPolicyStatus{Status: "unavailable", Reason: err.Error()}
 	}

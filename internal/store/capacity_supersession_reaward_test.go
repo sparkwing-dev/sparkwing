@@ -4,11 +4,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestCapacitySupersessionCancelsCurrentAwardAfterReclaim(t *testing.T) {
@@ -18,8 +18,8 @@ func TestCapacitySupersessionCancelsCurrentAwardAfterReclaim(t *testing.T) {
 	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
 		t.Run(dialect.name, func(t *testing.T) {
 			ctx := t.Context()
-			f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(plan *nodeproto.PlanDoc) {
-				plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("cancel_others")}}
+			f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(plan *nodewire.PlanDoc) {
+				plan.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("cancel_others")}}
 			})
 			binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 			if result, err := f.tenant.MayStart(ctx, binding, f.holder); err != nil || result.Kind != runstate.AcquireGranted {

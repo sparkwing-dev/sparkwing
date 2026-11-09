@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	nodeproto "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestChildTargetsComposeRepositories(t *testing.T) {

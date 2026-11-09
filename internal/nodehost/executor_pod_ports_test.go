@@ -1,5 +1,7 @@
 package nodehost
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"encoding/hex"
@@ -11,17 +13,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 	input, state, deps, _, _ := recordedReplayFixture(t)
-	var job nodeproto.JobSpec
+	var job nodewire.JobSpec
 	if err := json.Unmarshal(state.row.Spec, &job); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +38,7 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.SpecHash, state.row.SpecHash = string(hash), string(hash)
-	expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+	expansion := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}}
 	state.expansions[1].Body, err = json.Marshal(expansion)
 	if err != nil {
 		t.Fatal(err)
@@ -47,8 +49,8 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 	}
 	state.expansions[1].BodyHash = string(hash)
 	state.nodes["failed"] = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "failed"}, Status: runstate.StatusDone, Outcome: runstate.NodeFailed, Generation: 9, Spec: json.RawMessage(`{"id":"failed"}`)}
-	failure := &nodeproto.JobFailure{Job: "failed", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded source failure"}}
-	deps.ReadFailure = func(_ context.Context, ref runspec.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+	failure := &nodewire.JobFailure{Job: "failed", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded source failure"}}
+	deps.ReadFailure = func(_ context.Context, ref runspec.NodeRef, generation int64) (*nodewire.JobFailure, error) {
 		if ref != state.nodes["failed"].Ref || generation != 9 {
 			t.Fatalf("failure source: %+v generation %d", ref, generation)
 		}
@@ -59,12 +61,12 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 		process, err := start(ctx, input, activity)
 		fake := process.(*executorProcess)
 		answer := fake.answer
-		fake.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpEval && request.Closure == "children" {
-				raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
-				return nodeproto.EvalResult{Value: raw}, err
+		fake.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpEval && request.Closure == "children" {
+				raw, err := json.Marshal(nodewire.PlanDoc{Jobs: []nodewire.JobSpec{job}})
+				return nodewire.EvalResult{Value: raw}, err
 			}
-			if request.Op == nodeproto.OpRunStep {
+			if request.Op == nodewire.OpRunStep {
 				executed = true
 				if !reflect.DeepEqual(request.Failure, failure) {
 					t.Fatalf("recovery failure: %+v", request.Failure)
@@ -97,7 +99,7 @@ func FuzzNodeExecutorMasksOuterAndPublicationFailures(f *testing.F) {
 		deps.Masker = masker
 		failure := errors.New(strings.Repeat("h", nodeErrTextHeadBytes-10) + secret + "\n" + strings.Repeat("y", 2*nodeErrTextMaxBytes))
 		if outer {
-			setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+			setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error) {
 				return nil, failure
 			})
 		} else {
@@ -142,7 +144,7 @@ func TestNodeExecutorGeneratedReplayRunsEachAncestorOnce(t *testing.T) {
 	var evaluated []string
 	for _, process := range *processes {
 		for _, request := range process.requests {
-			if request.Op == nodeproto.OpEval {
+			if request.Op == nodewire.OpEval {
 				evaluated = append(evaluated, request.Closure)
 			}
 		}
@@ -169,8 +171,8 @@ func TestNodeExecutorGeneratedReplayUsesAttemptTimeout(t *testing.T) {
 	deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, input, activity)
 		answer := process.(*executorProcess).answer
-		process.(*executorProcess).answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpEval {
+		process.(*executorProcess).answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+			if request.Op == nodewire.OpEval {
 				expire(context.DeadlineExceeded)
 				return nil, context.Cause(ctx)
 			}
@@ -189,12 +191,12 @@ func TestNodeExecutorGeneratedReplayUsesAttemptTimeout(t *testing.T) {
 		t.Fatal("timed out generator process was not joined")
 	}
 	for _, request := range (*processes)[0].requests {
-		if request.Op == nodeproto.OpRunStep {
+		if request.Op == nodewire.OpRunStep {
 			t.Fatal("body ran after generator timeout")
 		}
 	}
 	last := state.changes[len(state.changes)-1]
-	if last.To != runstate.NodeFailed || last.Extra.Result == nil || last.Extra.Result.Reason != string(apierr.DeadlineExceeded) {
+	if last.To != runstate.NodeFailed || last.Extra.Result == nil || last.Extra.Result.Reason != string(hosterr.DeadlineExceeded) {
 		t.Fatalf("timeout report: %+v", last)
 	}
 }
@@ -202,9 +204,9 @@ func TestNodeExecutorGeneratedReplayUsesAttemptTimeout(t *testing.T) {
 func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 	input, state, deps, _ := executorFixture(t)
 	const depth = 70
-	jobs := make([]nodeproto.JobSpec, depth+1)
+	jobs := make([]nodewire.JobSpec, depth+1)
 	for i := range jobs {
-		jobs[i] = nodeproto.JobSpec{ID: fmt.Sprintf("n%d", i), Closures: nodeproto.ClosureSpec{Generate: []string{fmt.Sprintf("g%d", i)}}}
+		jobs[i] = nodewire.JobSpec{ID: fmt.Sprintf("n%d", i), Closures: nodewire.ClosureSpec{Generate: []string{fmt.Sprintf("g%d", i)}}}
 	}
 	state.nodes = make(map[string]runstate.NodeRow)
 	for i := range jobs[:depth] {
@@ -217,7 +219,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 			t.Fatal(err)
 		}
 		state.nodes[jobs[i].ID] = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobs[i].ID)}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: runspec.ClaimGeneration(i + 1), Spec: body, SpecHash: string(hash)}
-		expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{jobs[i+1]}}
+		expansion := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{jobs[i+1]}}
 		body, err = json.Marshal(expansion)
 		if err != nil {
 			t.Fatal(err)

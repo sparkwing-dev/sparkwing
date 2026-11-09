@@ -1,12 +1,14 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRequestTenantSharesOneHandleAcrossPorts(t *testing.T) {
@@ -50,8 +52,8 @@ func TestRequestTenantRejectsForeignOrMissingHandle(t *testing.T) {
 		err    error
 		code   apierr.Code
 	}{
-		{"foreign", queueTeamReader{team: "other"}, nil, apierr.PolicyMissing},
-		{"missing", nil, nil, apierr.PolicyMissing},
+		{"foreign", queueTeamReader{team: "other"}, nil, hosterr.PolicyMissing},
+		{"missing", nil, nil, hosterr.PolicyMissing},
 		{"unknown", nil, store.ErrUnknownTeam, apierr.NotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

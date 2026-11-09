@@ -1,5 +1,7 @@
 package main
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -10,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type operatorManagerFake struct {
@@ -139,7 +141,7 @@ func TestOperatorCommandPreflightHasNoSideEffects(t *testing.T) {
 }
 
 func TestOperatorCommandsReturnReadAndWriteFailures(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.Forbidden, Message: "deployment scope required"}
+	failure := &apierr.Error{Code: hosterr.Forbidden, Message: "deployment scope required"}
 	for _, write := range []bool{false, true} {
 		manager := &operatorManagerFake{err: failure}
 		var out bytes.Buffer

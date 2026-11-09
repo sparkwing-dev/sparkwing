@@ -1,5 +1,7 @@
 package acceptance_test
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"encoding/hex"
 	"errors"
@@ -10,8 +12,6 @@ import (
 	"testing/quick"
 
 	"github.com/jackc/pgx/v5/pgconn"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestEngineTransactionContentionProperty(t *testing.T) {
@@ -26,9 +26,9 @@ func TestEngineTransactionContentionProperty(t *testing.T) {
 		}
 		f := &engineTransactions{err: failure}
 		w := engineHTTP(t, newCredentialBoundary(), f, "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start"}`)
-		status, code, retry := http.StatusServiceUnavailable, apierr.Unavailable, "1"
+		status, code, retry := http.StatusServiceUnavailable, hosterr.Unavailable, "1"
 		if state%4 == 3 {
-			status, code, retry = http.StatusInternalServerError, apierr.Internal, ""
+			status, code, retry = http.StatusInternalServerError, hosterr.Internal, ""
 		}
 		assertEngineError(t, w, status, code)
 		return f.writes == 1 && w.Header().Get("Retry-After") == retry && !strings.Contains(w.Body.String(), secret)

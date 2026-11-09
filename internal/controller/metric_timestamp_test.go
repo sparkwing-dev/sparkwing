@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -11,9 +13,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type metricWriterFake struct {
@@ -121,7 +123,7 @@ func TestMetricsHTTPAuthorityProperty(t *testing.T) {
 					f.facts.snapshot.Authorities[0].Principal.Capability.Grants = nil
 					want = 403
 				case 2:
-					writer.err = &apierr.Error{Code: apierr.LockHeld, Message: "holder changed"}
+					writer.err = &apierr.Error{Code: hosterr.LockHeld, Message: "holder changed"}
 					want = 409
 				case 3:
 					writer.err = errors.New("private-backend-secret")

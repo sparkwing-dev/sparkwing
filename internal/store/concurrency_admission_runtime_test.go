@@ -6,21 +6,21 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func admissionGroup(capacity, cost int) nodeproto.ConcurrencySpec {
-	return nodeproto.ConcurrencySpec{Group: "key", Scope: new("global"), Capacity: new(capacity), Cost: new(cost), OnLimit: new("queue")}
+func admissionGroup(capacity, cost int) nodewire.ConcurrencySpec {
+	return nodewire.ConcurrencySpec{Group: "key", Scope: new("global"), Capacity: new(capacity), Cost: new(cost), OnLimit: new("queue")}
 }
 
 func admissionFixture(t *testing.T, target *storetest.Target, capacity, cost int) *storeRecoveryFixture {
 	t.Helper()
-	return newStoreRecoveryFixtureAt(t, false, target, func(doc *nodeproto.PlanDoc) {
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{admissionGroup(capacity, cost)}
+	return newStoreRecoveryFixtureAt(t, false, target, func(doc *nodewire.PlanDoc) {
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{admissionGroup(capacity, cost)}
 	})
 }
 
@@ -161,8 +161,8 @@ func TestAdmissionWeightedCapacityAndBackfill(t *testing.T) {
 					bindings := []runstate.CapacityBinding{admissionBinding(f)}
 					actors := []runstate.Actor{f.holder}
 					for _, d := range tc.declarations {
-						b, a := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) {
-							doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{admissionGroup(d[0], d[1])}
+						b, a := admissionPolicyBlocker(t, f, func(doc *nodewire.PlanDoc) {
+							doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{admissionGroup(d[0], d[1])}
 						})
 						bindings = append(bindings, b)
 						actors = append(actors, a)
@@ -275,7 +275,7 @@ func TestAdmissionExpiredCapacityCannotReviveOnClaimRenewal(t *testing.T) {
 func TestAdmissionPlanWaitingHandoffPreservesFIFO(t *testing.T) {
 	for name, target := range map[string]func(*testing.T) *storetest.Target{"sqlite": storetest.NewSQLite, "postgres": storetest.NewPostgres} {
 		t.Run(name, func(t *testing.T) {
-			f := newStoreRecoveryFixtureAt(t, false, target(t), func(doc *nodeproto.PlanDoc) { doc.Concurrency = []nodeproto.ConcurrencySpec{admissionGroup(1, 1)} })
+			f := newStoreRecoveryFixtureAt(t, false, target(t), func(doc *nodewire.PlanDoc) { doc.Concurrency = []nodewire.ConcurrencySpec{admissionGroup(1, 1)} })
 			now, err := f.s.TestOnlyDatabaseTime(t.Context())
 			if err != nil {
 				t.Fatal(err)
@@ -327,8 +327,8 @@ func TestAdmissionPlanWaitingHandoffPreservesFIFO(t *testing.T) {
 
 func TestAdmissionTenantScopesRemainIndependent(t *testing.T) {
 	target := storetest.NewSQLite(t)
-	edit := func(doc *nodeproto.PlanDoc) {
-		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{admissionGroup(1, 1)}
+	edit := func(doc *nodewire.PlanDoc) {
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{admissionGroup(1, 1)}
 	}
 	a := newStoreRecoveryFixtureForAt(t, false, target, "alpha", edit)
 	b := newStoreRecoveryFixtureForAt(t, false, target, "beta", edit)
@@ -357,10 +357,10 @@ func TestAdmissionAcrossSQLiteConnectionsSerializes(t *testing.T) {
 	}
 	for _, policy := range []string{"queue", "fail"} {
 		t.Run(policy, func(t *testing.T) {
-			f := newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), func(doc *nodeproto.PlanDoc) {
+			f := newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), func(doc *nodewire.PlanDoc) {
 				group := admissionGroup(1, 1)
 				group.OnLimit = new(policy)
-				doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group}
+				doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{group}
 			})
 			bindings := []runstate.CapacityBinding{admissionBinding(f)}
 			actors := []runstate.Actor{f.holder}

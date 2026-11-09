@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
@@ -8,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // sourceTransactions commits source authorization and its release audit.
@@ -45,10 +47,10 @@ func (s *SourceController) releaseGitHubSource(ctx context.Context, a capability
 		return SourceCredentialResponse{}, &apierr.Error{Code: apierr.Conflict, Message: "install the team's GitHub App on the approved repositories or update the owner's extras: " + strings.Join(grant.Names, ", ")}
 	}
 	if err != nil {
-		return SourceCredentialResponse{}, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub source token mint failed"}, err)
+		return SourceCredentialResponse{}, errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "GitHub source token mint failed"}, err)
 	}
 	if token.Token == "" {
-		return SourceCredentialResponse{}, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub returned no live source token"}
+		return SourceCredentialResponse{}, &apierr.Error{Code: hosterr.Unavailable, Message: "GitHub returned no live source token"}
 	}
 	if err := tenant.CommitGitHubSourceRelease(ctx, a, grant, token.ExpiresAt); err != nil {
 		return SourceCredentialResponse{}, err

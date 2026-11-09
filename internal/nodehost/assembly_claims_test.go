@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func localClaimsFixture(t testing.TB) (*nodeClaims, *nativeAuthentication, runstate.ReconciledNode, *bool) {
@@ -164,7 +164,7 @@ func TestLocalAdoptedClaimDelegatesMatchingSDKProcess(t *testing.T) {
 	processes := &NativeProcesses{Authorities: authorities, Masks: NewMaskRegistry(claims.masker), URL: "http://host"}
 	row := award.Node
 	row.Attempt = 1
-	row.Spec, err = json.Marshal(nodeproto.JobSpec{ID: string(row.Ref.NodeID)})
+	row.Spec, err = json.Marshal(nodewire.JobSpec{ID: string(row.Ref.NodeID)})
 	if err != nil {
 		t.Fatal(err)
 	}

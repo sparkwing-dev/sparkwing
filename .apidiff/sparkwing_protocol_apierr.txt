@@ -1,0 +1,32 @@
+# sparkwing/protocol/apierr
+
+const BadRequest Code = "bad_request"
+type Code string
+const Conflict Code = "conflict"
+func DecodeInner(data []byte) (*Error, error)
+type Error struct {
+	Code    Code
+	Message string
+	Hint    string
+	Details map[string]any
+}
+func (e *Error) Error() string
+func (e *Error) UnmarshalJSON(data []byte) error
+const InvalidArgs Code = "invalid_args"
+func IsolatedHomeRefusal() *Error
+const IsolatedHomeRequired Code = "isolated_home_required"
+const NoPlan Code = "no_plan"
+const NotFound Code = "not_found"
+const PlanFailed Code = "plan_failed"
+const PlanInvalid Code = "plan_invalid"
+const ProtocolError Code = "protocol_error"
+const ProtocolMismatch Code = "protocol_mismatch"
+type Reason string
+const ReasonNoOutput Reason = "no_output"
+const ReasonNotReady Reason = "not_ready"
+const SDKError Code = "sdk_error"
+const UnknownClosure Code = "unknown_closure"
+const UnknownJob Code = "unknown_job"
+const UnknownOp Code = "unknown_op"
+const UnknownPipeline Code = "unknown_pipeline"
+const UnknownStep Code = "unknown_step"

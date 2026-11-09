@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"context"
@@ -15,10 +17,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestRunnerPolicyBuildKinds(t *testing.T) {
@@ -83,7 +85,7 @@ func TestOnlyTheDeploymentLauncherSkipsRunnerVersionPolicy(t *testing.T) {
 	var checked []string
 	server.RunnerPolicy = runnerAdmissionFunc(func(_ context.Context, version string) error {
 		checked = append(checked, version)
-		return &apierr.Error{Code: apierr.VersionUnsupported, Message: "Release is not listed in the verified version index"}
+		return &apierr.Error{Code: hosterr.VersionUnsupported, Message: "Release is not listed in the verified version index"}
 	})
 	insert := func(prefix, team, kind string, pools []string) {
 		root := capability.Capability{Prefix: prefix, Team: team, Subject: capability.Subject{Kind: capability.SubjectKind(kind), ID: prefix}, Audience: capability.Controller, Grants: []capability.Grant{capability.ClaimsLaunch}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, ReservedPools: pools, Repositories: []string{"gh:1"}, IssuedAt: time.Unix(0, 1).UTC()}
@@ -107,7 +109,7 @@ func TestOnlyTheDeploymentLauncherSkipsRunnerVersionPolicy(t *testing.T) {
 	insert("pool-launcher", "a", "machine", []string{"pool"})
 	principal, err := server.CheckRunner(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "pool-launcher"}, "v0.68.6-3-gabc1234")
 	var failure *apierr.Error
-	if !capability.Launcher(principal.Capability) || capability.CloudLauncher(principal.Capability) || !errors.As(err, &failure) || failure.Code != apierr.VersionUnsupported {
+	if !capability.Launcher(principal.Capability) || capability.CloudLauncher(principal.Capability) || !errors.As(err, &failure) || failure.Code != hosterr.VersionUnsupported {
 		t.Fatalf("team-pool launcher at an unlisted version: launcher=%v cloud=%v: %v", capability.Launcher(principal.Capability), capability.CloudLauncher(principal.Capability), err)
 	}
 	principal, err = server.CheckRunner(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"}, "v0.68.6-3-gabc1234")

@@ -1,5 +1,7 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"bytes"
 	"encoding/json"
@@ -9,10 +11,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // safety: recent spend beside the balance is what says how long the balance lasts.
@@ -359,7 +361,7 @@ func creditsRefusal(refused *store.InsufficientCreditsError) *apierr.Error {
 	if refused.Hold != "" {
 		reason = creditsFrozenCode
 	}
-	return &apierr.Error{Code: apierr.InsufficientCredit, Message: refused.Error(), Details: map[string]any{"reason": reason, "hold": refused.Hold}}
+	return &apierr.Error{Code: hosterr.InsufficientCredit, Message: refused.Error(), Details: map[string]any{"reason": reason, "hold": refused.Hold}}
 }
 
 // unpricedCPUClassCode identifies a claim whose CPU class has no rate.

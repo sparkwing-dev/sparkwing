@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -18,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -28,6 +26,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
@@ -262,7 +262,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base, Snapshots: snapshots}}
 	planner := nodehost.SDKPlanner{
 		Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: masker,
-		Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
+		Log: func(ctx context.Context, frame nodewire.FrameLog) error {
 			if err := context.Cause(ctx); err != nil {
 				return err
 			}
@@ -272,8 +272,8 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	}
 	prepared, err := planner.Inspect(ctx, nodehost.PlanningProcessInput{
 		Entry: entry, Entrypoint: identity.Entrypoint,
-		Environment: seal, Args: map[string]string{}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
-		Run: nodeproto.RunContext{RunID: rand.Text(), Pipeline: pipeline},
+		Environment: seal, Args: map[string]string{}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+		Run: nodewire.RunContext{RunID: rand.Text(), Pipeline: pipeline},
 	})
 	if err != nil {
 		return localRunPreparation{}, err

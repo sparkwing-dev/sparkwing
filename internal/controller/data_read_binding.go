@@ -1,17 +1,19 @@
 package controller
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob.SignedTransfer, error) {
@@ -118,11 +120,11 @@ func dataAbsent(err error) bool {
 	if !errors.As(err, &failure) {
 		return false
 	}
-	if failure.Code == apierr.BlobMissing || failure.Code == apierr.NotFound {
+	if failure.Code == hosterr.BlobMissing || failure.Code == apierr.NotFound {
 		return true
 	}
 	reason := failure.Details["reason"]
-	return failure.Code == apierr.Forbidden && (reason == apierr.ReasonDigestNotReadable || reason == string(apierr.ReasonDigestNotReadable))
+	return failure.Code == hosterr.Forbidden && (reason == hosterr.ReasonDigestNotReadable || reason == string(hosterr.ReasonDigestNotReadable))
 }
 
 func dataBudgetError(err error, budget blob.Budget) error {

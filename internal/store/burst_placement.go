@@ -1,12 +1,13 @@
 package store
 
+import hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 import (
 	"context"
 	"errors"
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -90,14 +91,14 @@ func checkPersonalMachineTx(ctx context.Context, tx *storeTx, chain []authorityN
 	}
 	owner := facts.OwnerAccount
 	if automated, err := automatedLineageTx(ctx, tx, Team(root.Team), run); err != nil || automated {
-		return errors.Join(err, authorityError(apierr.Forbidden, "personal machines take only their owner's manual runs"))
+		return errors.Join(err, authorityError(hosterr.Forbidden, "personal machines take only their owner's manual runs"))
 	}
 	requester, err := runRequesterAccountTx(ctx, tx, Team(root.Team), run)
 	if err != nil {
 		return err
 	}
 	if owner == "" || owner != requester {
-		return authorityError(apierr.Forbidden, "personal machine is reserved for its owner's runs")
+		return authorityError(hosterr.Forbidden, "personal machine is reserved for its owner's runs")
 	}
 	return nil
 }
@@ -137,7 +138,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 		}
 	}
 	if !eligible {
-		return authorityError(apierr.Forbidden, "burst work is reserved for the requester and selected Cloud executors")
+		return authorityError(hosterr.Forbidden, "burst work is reserved for the requester and selected Cloud executors")
 	}
 	if here && unit.Kind != capability.UnitNode {
 		return nil
@@ -145,7 +146,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 	profile := authenticatedClaimProfile(root, match.Profile{}, here)
 	if cloud {
 		if !slices.ContainsFunc(burst.Preferences, func(step runspec.PlacementStep) bool { return step.Target == TierCloud }) {
-			return authorityError(apierr.Forbidden, "Cloud is outside the sealed burst preference set")
+			return authorityError(hosterr.Forbidden, "Cloud is outside the sealed burst preference set")
 		}
 		profile.Class = match.ClassCloud
 	}
@@ -154,7 +155,7 @@ func checkBurstClaimantTx(ctx context.Context, tx *storeTx, team Team, chain []a
 		return err
 	}
 	if placementRank(profile, match.Demand{AllowedPools: profile.ReservedPools}, preferences) == len(preferences) {
-		return authorityError(apierr.Forbidden, "claimant is outside the sealed burst preference set")
+		return authorityError(hosterr.Forbidden, "claimant is outside the sealed burst preference set")
 	}
 	return nil
 }
