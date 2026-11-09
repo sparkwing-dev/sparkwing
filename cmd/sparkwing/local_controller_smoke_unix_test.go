@@ -73,6 +73,7 @@ var localSmokeSteps = []localSmokeStep{
 	{args: []string{"runs", "timing", "--pipeline", "missing"}},
 	{args: []string{"runs", "approvals", "list"}},
 	{args: []string{"runs", "status", "--run", "missing"}, want: "not_found"},
+	{args: []string{"runs", "artifacts", "--run", "missing"}, want: "not_found"},
 	{args: []string{"runs", "logs", "--run", "missing"}, want: "not_found"},
 	{args: []string{"runs", "cancel", "--run", "missing"}, want: "not_found"},
 	{args: []string{"runs", "annotations", "list", "--run", "missing"}, want: "not_found"},

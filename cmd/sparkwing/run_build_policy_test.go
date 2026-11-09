@@ -5,6 +5,7 @@ import (
 	"debug/buildinfo"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -153,7 +154,7 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 					t.Fatal(err)
 				}
 				for _, setting := range info.Settings {
-					if setting.Key == "-trimpath" && setting.Value == "true" {
+					if setting.Key == "-ldflags" && (slices.Contains(strings.Fields(setting.Value), "-s") || slices.Contains(strings.Fields(setting.Value), "-w")) {
 						t.Fatal("retained source reused a stripped binary")
 					}
 				}

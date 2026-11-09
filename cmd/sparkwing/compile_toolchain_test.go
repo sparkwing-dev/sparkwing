@@ -90,11 +90,15 @@ func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
 			script := `#!/bin/sh
 if [ "$1" = env ]; then
  printf 'probe\n' >> "$PROBE_LOG"
+ if [ "$2" = -json ]; then printf '{"GOVERSION":"go1.26.8","GOTOOLCHAIN":"go1.26.8","GOWORK":"off"}\n'; exit 0; fi
  printf 'go1.26.6\ngo1.26.6\noff\n'
  exit 0
 fi
 if [ "$1" = list ]; then
- if [ "$2" = -deps ]; then printf '%s\n' "$GOTOOLCHAIN" >> "$PREPARE_LOG"; else printf '%s\n' "$FIXTURE_SELECTED_MODULE"; fi
+ case " $* " in
+  *' -deps '*) printf '%s\n' "$GOTOOLCHAIN" >> "$PREPARE_LOG"; printf '{}\n' ;;
+  *) printf '%s\n' "$FIXTURE_SELECTED_MODULE" ;;
+ esac
  exit 0
 fi
 printf '%s\n' "$GOTOOLCHAIN" >> "$BUILD_LOG"
@@ -139,7 +143,7 @@ exit 1
 				if !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("uncached preparation = %q, %v", prepared, err)
 				}
-			} else if err != nil || strings.TrimSpace(string(prepared)) != "go1.26.8" {
+			} else if lines := strings.Fields(string(prepared)); err != nil || len(lines) == 0 || slices.ContainsFunc(lines, func(line string) bool { return line != "go1.26.8" }) {
 				t.Fatalf("cached preparation = %q, %v", prepared, err)
 			}
 			for path, want := range map[string]string{buildLog: "go1.26.8", probeLog: "probe"} {

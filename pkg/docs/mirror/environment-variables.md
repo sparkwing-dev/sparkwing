@@ -85,6 +85,7 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `AWS_ENDPOINT_URL` | AWS SDK; see [deployment-modes](deployment-modes.md) |
 | `AWS_ENDPOINT_URL_S3` | AWS SDK; see [deployment-modes](deployment-modes.md) |
 | `GITHUB_REPOSITORY` | GitHub Actions |
+| `INVOCATION_ID` | systemd; on Linux, a daemon started from a service or timer uses a separate user scope so it survives the invoking unit's exit |
 | `KUBERNETES_SERVICE_HOST` | Kubernetes, in every pod; a runner reports it to the controller, see [runner bundle](../charts/sparkwing-runner-bundle/README.md) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry; see [observability](observability.md) |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | OpenTelemetry |
