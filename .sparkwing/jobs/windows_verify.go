@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecError_|WindowsHostCommand|WindowsCapturedEnvironment|LookupCommandWindows|SDKCommandWindows|NPMCommand|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|BuildEnv|OverlayFloor|LocalBlockedSources|ExplainDependencyMismatch|InvalidModule|CanceledProbe|FailedProbeLeavesEnvUnchanged|ExplicitSessionEnvironment|ResolveAndWrite|ResolverWithDir|CompilePipelineOverridesFixedPin|CompilePipelineExplainsLocalDependencyFloor|ResolveSparksToolchainFailure|PipelineScaffoldDoesNotRequireGoPatch|DiscoveryRefusesTheDefaultStateDirWhenTheHomeIsRedirected|QueryReportsNoDaemonForFreshWindowsHome)`
+const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecError_|WindowsShellLauncher|WindowsHostCommand|WindowsCapturedEnvironment|LookupCommandWindows|SDKCommandWindows|NPMCommand|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|BuildEnv|OverlayFloor|LocalBlockedSources|ExplainDependencyMismatch|InvalidModule|CanceledProbe|FailedProbeLeavesEnvUnchanged|ExplicitSessionEnvironment|ResolveAndWrite|ResolverWithDir|CompilePipelineOverridesFixedPin|CompilePipelineExplainsLocalDependencyFloor|ResolveSparksToolchainFailure|PipelineScaffoldDoesNotRequireGoPatch|DiscoveryRefusesTheDefaultStateDirWhenTheHomeIsRedirected|QueryReportsNoDaemonForFreshWindowsHome)`
 
 const windowsVerifyTimeout = 20 * time.Minute
 
@@ -77,7 +77,7 @@ func runWindowsVerifyRuntime(ctx context.Context) error {
 	}
 	command := shellQuoteAll([]string{
 		"go", "test", "-race", "-p", "2", "-timeout", "5m", "-count=1", "-run", windowsVerifyRuntimeTests,
-		"./internal/gotoolchain", "./internal/sparks", "./internal/bincache", "./cmd/sparkwing",
+		"./internal/testshell", "./internal/gotoolchain", "./internal/sparks", "./internal/bincache", "./cmd/sparkwing",
 		"./sparkwing", "./internal/nodehost", "./internal/procenv", "./internal/pipelineentry", "./internal/wingd/client", "./internal/orchestrator",
 	})
 	return runPlatformIsolated(ctx, withPinned(command, []string{"CGO_ENABLED=1", "GOOS=windows", "GOARCH=" + shellQuote(runtime.GOARCH)}))

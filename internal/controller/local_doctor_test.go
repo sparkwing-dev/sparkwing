@@ -22,6 +22,11 @@ import (
 )
 
 func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
+	for _, tool := range []string{"true", "false"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("local session fixture requires %s: %v", tool, err)
+		}
+	}
 	for _, scope := range []string{"pruned", "local", "foreign"} {
 		for _, command := range []string{"true", "false"} {
 			for _, dry := range []bool{true, false} {

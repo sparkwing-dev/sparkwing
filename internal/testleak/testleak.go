@@ -32,6 +32,10 @@ var sandbox = enterSandbox()
 func markHost() bool {
 	host := os.Args[0]
 	inherited := os.Getenv(hostEnv) == host
+	if marker := os.Getenv("SPARKWING_TEST_SHELL_EXE"); marker != "" {
+		executable, err := os.Executable()
+		inherited = inherited || err == nil && filepath.Clean(executable) == filepath.Clean(marker)
+	}
 	if err := os.Setenv(hostEnv, host); err != nil {
 		fmt.Fprintf(os.Stderr, "testleak: cannot mark this test binary (%v); processes "+
 			"it re-execs will run the leak check on themselves\n", err)
