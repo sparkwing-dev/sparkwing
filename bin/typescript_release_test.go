@@ -168,3 +168,28 @@ func TestTypeScriptReleaseDecision(t *testing.T) {
 		t.Fatalf("%v\n%s", err, output)
 	}
 }
+
+func TestTypeScriptDecisionUsesCurrentPublicationToolsForRecovery(t *testing.T) {
+	body, err := os.ReadFile("../.github/workflows/release.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct{ Jobs map[string]sdkReleaseJob }
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	decision := workflow.Jobs["typescript-decision"]
+	currentTools := false
+	for _, step := range decision.Steps {
+		if step.Name == "Checkout publication tools" {
+			currentTools = step.If == "github.event_name == 'workflow_dispatch'" && step.With["ref"] == "${{ github.sha }}" && step.With["path"] == ".release-tools" && !step.Allow
+		}
+	}
+	if !currentTools {
+		t.Fatal("recovery must load current publication tools separately from the tagged SDK source")
+	}
+	checkSDKStep(t, decision, "Select publication tools", "RELEASE_TOOLS=$GITHUB_WORKSPACE/.release-tools", "RELEASE_TOOLS=$GITHUB_WORKSPACE")
+	checkSDKStep(t, decision, "Select TypeScript SDK release", `go -C "$RELEASE_TOOLS" run ./cmd/verify-release`, `node "$RELEASE_TOOLS/bin/typescript-release.mjs" "$GITHUB_WORKSPACE"`)
+	checkSDKAction(t, workflow.Jobs["release"], "actions/download-artifact@", "name", "release-typescript-entry")
+	checkSDKAction(t, workflow.Jobs["release"], "actions/download-artifact@", "path", "dist")
+}

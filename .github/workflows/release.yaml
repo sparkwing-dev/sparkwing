@@ -206,6 +206,20 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.validate-tag.outputs.source_sha }}
+      - name: Checkout publication tools
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-tools
+      - name: Select publication tools
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "RELEASE_TOOLS=$GITHUB_WORKSPACE/.release-tools" >>"$GITHUB_ENV"
+          else
+            echo "RELEASE_TOOLS=$GITHUB_WORKSPACE" >>"$GITHUB_ENV"
+          fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.10"
@@ -221,8 +235,8 @@ jobs:
           mkdir -p "$previous" typescript-entry
           curl --fail --silent --show-error https://sparkwing.dev/versions.json -o "$previous/versions.json"
           curl --fail --silent --show-error https://sparkwing.dev/versions.json.sig -o "$previous/versions.json.sig"
-          GOWORK=off GOFLAGS=-trimpath go run ./cmd/verify-release --index-out "$previous" --verify
-          node bin/typescript-release.mjs "$GITHUB_WORKSPACE" "$previous/versions.json" typescript-entry/sdk-entry-typescript.json
+          GOWORK=off GOFLAGS=-trimpath go -C "$RELEASE_TOOLS" run ./cmd/verify-release --index-out "$previous" --verify
+          node "$RELEASE_TOOLS/bin/typescript-release.mjs" "$GITHUB_WORKSPACE" "$previous/versions.json" typescript-entry/sdk-entry-typescript.json "$RELEASE_TOOLS"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-typescript-entry

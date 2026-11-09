@@ -38,8 +38,8 @@ Declare allowed child runs with `job.startsChildren("deploy")` for the parent
 repository or `job.startsChildrenIn("gh:123", "publish")` for an explicit canonical
 repository key. Calls append targets and can be chained.
 
-Use an exact package version in `.sparkwing/package.json`. Its version selects
-the matching engine. The package requires Node.js 22.18 or later. The public
+Use an exact package version in `.sparkwing/package.json`. Its SDK version resolves through the signed SDK-to-engine mapping to a permitted
+engine that accepts its protocol. The package requires Node.js 22.18 or later. The public
 API is [index.d.ts](index.d.ts).
 
 Numeric duration options use milliseconds. Memory uses bytes. Omitted options
@@ -153,7 +153,7 @@ npm ci
 npm run pack:local -- --version <sdk-version> --destination <output-directory>
 ```
 
-This command builds the SDK and stamps a temporary package with the exact engine
+This command builds the SDK and stamps a temporary package with the selected SDK
 release version. It leaves the source manifests unchanged. The tarball carries
 `private: true`, so npm refuses publication even with `--ignore-scripts`.
 Use `release:pack` with verified Windows bridges for published packages.
@@ -161,15 +161,17 @@ Local packages support Linux and macOS. They cannot run on Windows.
 
 In the pipeline's package manifest, pin the tarball with
 `"@sparkwing/sdk": "file:vendor/sparkwing-sdk-<sdk-version>.tgz"` and run
-`npm install` to record it in the lockfile. The tarball's package version selects
-the exact engine, including any prerelease suffix. Commit the tarball inside the
+`npm install` to record it in the lockfile. The tarball's SDK version selects
+a permitted engine through the signed SDK-to-engine mapping. Commit the tarball inside the
 repository if fetched checkouts need it. An editable SDK directory can use
 `file:../sdk` after building and stamping that directory's package version.
 
 For development, run `npm ci`, `npm run typecheck`, `npm test` and `npm run build`.
 The build emits ESM into `dist/`; package exports expose only the public root.
-The release process stamps `package.json` and its lockfile with the engine
-release version. Hello reads that package version.
+`package.json` and its lockfile carry the SDK's own version. Engine releases
+retain it when the SDK source and native bridge build inputs have not changed.
+Changed source requires a new SDK version and both Windows bridge checks before
+npm publication. Hello reports the SDK version separately from the engine.
 
 Run `npm run test:native` from this directory with the repository's Go toolchain
 installed and `GOWORK=off` when a parent workspace points at another checkout.

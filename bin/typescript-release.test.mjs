@@ -48,6 +48,13 @@ test("digest covers source and bridge build inputs, excludes engine and version 
     });
     assert.deepEqual(JSON.parse(readFileSync(join(root, "entry.json"))), [{ ...previous, source_digest: first }]);
     assert.equal(readFileSync(join(root, "outputs"), "utf8"), "publish=true\nversion=0.1.0\n");
+    put("policy.json", JSON.stringify({ sdks: JSON.parse(readFileSync(join(root, "entry.json"))) }));
+    put("outputs", "");
+    const retained = execFileSync(process.execPath, [fileURLToPath(new URL("./typescript-release.mjs", import.meta.url)), root, join(root, "policy.json"), join(root, "entry.json"), root], {
+      env: { ...env, GITHUB_OUTPUT: join(root, "outputs") },
+    });
+    assert.equal(JSON.parse(retained).publish, false);
+    assert.equal(readFileSync(join(root, "outputs"), "utf8"), "publish=false\nversion=0.1.0\n");
     put("sdk/typescript/package.json", '{"version":"0.2.0"}');
     put(".github/workflows/release.yaml", "engine: two\n  typescript-native: node22\n  typescript-package: pack\n  release: engine2");
     assert.equal(sdkDigest(root), first);

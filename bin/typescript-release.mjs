@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export function sdkDigest(root) {
+export function sdkDigest(root, tools = root) {
   const paths = execFileSync("git", ["-C", root, "ls-files", "-z", "--", "sdk/typescript"], { encoding: "utf8" })
     .split("\0").filter(Boolean).filter(path => !/\/(node_modules|dist|win32-x64|win32-arm64)\//.test(path)).sort();
   const hash = createHash("sha256");
@@ -18,8 +18,10 @@ export function sdkDigest(root) {
     }
     hash.update(path + "\0" + bytes.length + "\0").update(bytes);
   }
-  const workflow = readFileSync(resolve(root, ".github/workflows/release.yaml"), "utf8");
-  const jobs = workflow.slice(workflow.indexOf("  typescript-native:"), workflow.indexOf("\n  release:"));
+  const workflow = readFileSync(resolve(tools, ".github/workflows/release.yaml"), "utf8");
+  const start = workflow.indexOf("  typescript-native:"), end = workflow.indexOf("\n  release:", start);
+  if (start < 0 || end < start) throw new Error("publication workflow has no TypeScript native build jobs");
+  const jobs = workflow.slice(start, end);
   hash.update("native-build-inputs\0").update(jobs);
   return hash.digest("hex");
 }
@@ -60,11 +62,11 @@ export function decideRelease(version, digest, entries) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [root, policy, output] = process.argv.slice(2);
-  if (!root || !policy || !output) throw new Error("usage: typescript-release.mjs <source-root> <verified-policy.json> <entry.json>");
+  const [root, policy, output, tools = root] = process.argv.slice(2);
+  if (!root || !policy || !output) throw new Error("usage: typescript-release.mjs <source-root> <verified-policy.json> <entry.json> [publication-tools-root]");
   const manifest = JSON.parse(readFileSync(resolve(root, "sdk/typescript/package.json")));
   const index = JSON.parse(readFileSync(policy));
-  const decision = decideRelease(manifest.version, sdkDigest(root), index.sdks ?? []);
+  const decision = decideRelease(manifest.version, sdkDigest(root, tools), index.sdks ?? []);
   writeFileSync(output, JSON.stringify([decision.entry]) + "\n");
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT,
     `publish=${decision.publish}\nversion=${decision.entry.version.slice(1)}\n`);
