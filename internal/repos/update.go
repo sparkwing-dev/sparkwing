@@ -295,17 +295,6 @@ func commitMessage(target string) string {
 	return "chore: bump sparkwing SDK to " + target
 }
 
-func pinsDiverge(repos []Repo) bool {
-	seen := map[string]bool{}
-	for _, r := range repos {
-		if r.Primary == "" || r.Pin == "" {
-			continue
-		}
-		seen[r.Pin] = true
-	}
-	return len(seen) > 1
-}
-
 func RenderDiff(pd PipelineDiff) []string {
 	var out []string
 	d := pd.Diff

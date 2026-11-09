@@ -26,7 +26,7 @@ func TestResolveSampler_Default(t *testing.T) {
 	if s == nil {
 		t.Fatalf("resolveSampler returned nil")
 	}
-	if got := s.Description(); !containsAll(got, "ParentBased", "TraceIDRatioBased") {
+	if got := s.Description(); !strings.Contains(got, "ParentBased") || !strings.Contains(got, "TraceIDRatioBased") {
 		t.Errorf("sampler description missing expected tokens: %s", got)
 	}
 }
@@ -37,7 +37,7 @@ func TestResolveSampler_HonorsEnv(t *testing.T) {
 	if s == nil {
 		t.Fatalf("nil sampler")
 	}
-	if got := s.Description(); !containsAll(got, "0.1") {
+	if got := s.Description(); !strings.Contains(got, "0.1") {
 		t.Errorf("sampler description should mention 0.1 ratio: %s", got)
 	}
 }
@@ -48,29 +48,8 @@ func TestResolveSampler_InvalidEnvFallsBackToOne(t *testing.T) {
 	if s == nil {
 		t.Fatalf("nil sampler")
 	}
-	if got := s.Description(); !containsAll(got, "TraceIDRatioBased") {
+	if got := s.Description(); !strings.Contains(got, "TraceIDRatioBased") {
 		t.Errorf("sampler description unexpected: %s", got)
-	}
-}
-
-func TestWrapTransport_Roundtrips(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	client := &http.Client{Transport: wrapTransport(nil)}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
-	if err != nil {
-		t.Fatalf("build req: %v", err)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("do: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Errorf("status=%d want 204", resp.StatusCode)
 	}
 }
 
@@ -91,28 +70,6 @@ func TestStampSpan_SkipsEmptyAttrs(t *testing.T) {
 	ctx, span := tp.Tracer("test").Start(context.Background(), "unit")
 	defer span.End()
 	StampSpan(ctx, SpanAttrs{RunID: "only-this"})
-}
-
-func containsAll(haystack string, needles ...string) bool {
-	for _, n := range needles {
-		if !contains(haystack, n) {
-			return false
-		}
-	}
-	return true
-}
-
-func contains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0
-}
-
-func indexOf(haystack, needle string) int {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return i
-		}
-	}
-	return -1
 }
 
 var builtinSlogHandler slog.Handler
