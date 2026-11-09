@@ -18,5 +18,5 @@ func fuzzSeeds(t *testing.T) []int64 {
 	if testing.Short() {
 		return []int64{1}
 	}
-	return []int64{1, 2, 3, 4, 5}
+	return []int64{1, 2, 3, 4, 5, 106}
 }
