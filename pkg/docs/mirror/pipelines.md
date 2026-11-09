@@ -25,7 +25,8 @@ TypeScript pipelines use the same `pipeline list`, `pipeline describe`,
 [TypeScript scaffold](getting-started.md#quick-start), including its
 npm lockfile setup. `pipeline plan` renders the resolved DAG without dispatching
 jobs. `pipeline lint` checks Go source only, and reports that TypeScript lint is unsupported without failing. JSON output includes
-`status: "unsupported"` and a `notice`. The TypeScript scaffold prints the npm
+`status: "unsupported"` and a `notice`. The notice exits zero and does not
+certify TypeScript source as linted. The TypeScript scaffold prints the npm
 lockfile setup command before the first run (`setup_command` in JSON).
 The Go API examples below describe the Go SDK.
 

@@ -37,6 +37,10 @@ func TestTypeScriptLintReportsUnsupported(t *testing.T) {
 			t.Fatalf("output = %q", output)
 		}
 	}
+	captureStdout(t, func() { err = runSparkwing([]string{"pipeline", "lint", "--pipeline", "missing", "-o", "json"}) })
+	if err == nil || !strings.Contains(err.Error(), "no pipeline named") {
+		t.Fatalf("unknown pipeline error = %v", err)
+	}
 }
 
 func TestTypeScriptScaffoldPrintsLockfileSetup(t *testing.T) {
