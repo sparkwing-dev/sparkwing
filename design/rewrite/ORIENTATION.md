@@ -404,6 +404,10 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 
 ## Test and gate workflow
 
+`windows-verify` races host command execution in `internal/nodehost` alongside
+the SDK and runtime packages. `.sparkwing/jobs/windows_verify_test.go` guards
+both the selected fixture names and the package passed to Go.
+
 The shared test sandbox and the pipeline module's TestMain scrub Git bindings
 before production code can inherit them. Git fixtures use `pkg/gitenv/testgit`
 for commands and custom environments.

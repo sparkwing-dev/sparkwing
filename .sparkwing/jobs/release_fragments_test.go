@@ -12,14 +12,6 @@ import (
 )
 
 func TestReleaseCollectsAndConsumesFragments(t *testing.T) {
-	for key, value := range map[string]string{
-		"GIT_CONFIG_COUNT": "3",
-		"GIT_CONFIG_KEY_0": "user.name", "GIT_CONFIG_VALUE_0": "Test",
-		"GIT_CONFIG_KEY_1": "user.email", "GIT_CONFIG_VALUE_1": "test@example.invalid",
-		"GIT_CONFIG_KEY_2": "commit.gpgsign", "GIT_CONFIG_VALUE_2": "false",
-	} {
-		t.Setenv(key, value)
-	}
 	old := twoBreakingChangelog[strings.Index(twoBreakingChangelog, "## [v0.8.0]"):]
 	repo := atomicReleaseRepo(t, "# Changelog\n\n## [Unreleased]\n\n"+old)
 	notes := twoBreakingChangelog[strings.Index(twoBreakingChangelog, "### Changed"):strings.Index(twoBreakingChangelog, "## [v0.8.0]")]

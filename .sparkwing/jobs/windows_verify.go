@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecWindows|ExecError_|NPMCommand|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|QueryReportsNoDaemonForFreshWindowsHome)`
+const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecError_|WindowsHostCommand|WindowsCapturedEnvironment|NPMCommand|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|QueryReportsNoDaemonForFreshWindowsHome)`
 
 const windowsVerifyTimeout = 20 * time.Minute
 
@@ -77,7 +77,7 @@ func runWindowsVerifyRuntime(ctx context.Context) error {
 	}
 	command := shellQuoteAll([]string{
 		"go", "test", "-race", "-p", "2", "-timeout", "5m", "-count=1", "-run", windowsVerifyRuntimeTests,
-		"./sparkwing", "./internal/pipelineentry", "./internal/wingd/client", "./internal/orchestrator",
+		"./sparkwing", "./internal/nodehost", "./internal/pipelineentry", "./internal/wingd/client", "./internal/orchestrator",
 	})
 	return runPlatformIsolated(ctx, withPinned(command, []string{"CGO_ENABLED=1", "GOOS=windows", "GOARCH=" + shellQuote(runtime.GOARCH)}))
 }
