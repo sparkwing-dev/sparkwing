@@ -89,6 +89,8 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 // push after every node returned, so a job added to the gate here is one the
 // push waits for.
 func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.JobNode {
+	history, tags := true, true
+	plan.Checkout(sparkwing.Checkout{FullHistory: &history, Tags: &tags})
 	p.mode = gateAffected
 	if full {
 		p.mode = gateFull

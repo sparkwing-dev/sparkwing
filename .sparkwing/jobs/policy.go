@@ -57,7 +57,7 @@ var policySteps = []policyStep{
 	{"cli-docs", checkCLIDocs},
 	{"markdownlint", runMarkdownlint},
 	{"config-reference", preReleaseShell("bash bin/gen-config-docs.sh --check")},
-	{"wire-cut-coverage", preReleaseShell("go -C .sparkwing test -p 2 ./jobs -run ^TestRepositoryUnreleasedSectionDeclaresEveryWireCut$ -count=1")},
+	{"wire-cut-coverage", preReleaseShell("git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD >/dev/null && go -C .sparkwing test -p 2 ./jobs -run ^TestRepositoryUnreleasedSectionDeclaresEveryWireCut$ -count=1")},
 }
 
 func checkCLIDocs(ctx context.Context) error {

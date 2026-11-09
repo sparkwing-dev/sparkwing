@@ -59,6 +59,8 @@ with `GOWORK=off GOFLAGS=-trimpath GOMAXPROCS=2` after one warm-up run:
 | Config reference | `bash bin/gen-config-docs.sh --check` | 0.27 s |
 | Wire-cut coverage | `go -C .sparkwing test -p 2 ./jobs -run ^TestRepositoryUnreleasedSectionDeclaresEveryWireCut$ -count=1` | 1.49 s |
 
+Gate and land request full source history and tags. Wire-cut coverage refuses
+a checkout without a reachable release tag before invoking the existing test.
 The policy job keeps its ten-minute cold-build deadline. Once it passes, the rest of
 the gate (the same jobs as `sparkwing run gate`) starts while review continues.
 Review is the same job as `sparkwing run review`, under `.review.yaml`. A focused

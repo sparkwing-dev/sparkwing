@@ -39,6 +39,9 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 
+	if plan.Source.FullHistory == nil || !*plan.Source.FullHistory || plan.Source.Tags == nil || !*plan.Source.Tags {
+		t.Fatal("gate requires full source history and tags for wire-cut coverage")
+	}
 	nodes := plan.Jobs
 	if len(nodes) != 4 {
 		t.Fatalf("gate plan nodes = %d, want policy, broad checks, touched-package race and the tree record", len(nodes))
