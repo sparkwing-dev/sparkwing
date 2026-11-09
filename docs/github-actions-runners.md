@@ -260,3 +260,25 @@ restart never resends the generation. An operator can make an audited retry with
 `{"reason":"provider recovery checked"}`. This invalidates the old receipt before
 opening a new generation and refuses while a live award exists. A delayed old
 workflow can still spend GitHub startup minutes.
+
+### Verify fallback routing
+
+Use a test repository and team runners enrolled for that repository. Record the
+Sparkwing run and job IDs, policy revision, dispatch receipts, provider run IDs,
+claim holder and timestamps from run status for each case:
+
+- Keep a matching team runner online and confirm it wins inside its hold with
+  zero fallback dispatches.
+- Stop that runner and confirm one workflow dispatch for the waiting job's queue
+  generation. Check the provider link once the workflow registers.
+- Start the team runner during an outstanding dispatch and confirm only one
+  worker wins. Check the lost-race count and cancellation of the idle fallback.
+- Cancel while dispatch is outstanding and confirm a late workflow cannot claim
+  the job and a known provider run is cancelled.
+- Restart the controller during an outstanding send. Confirm the hold keeps its
+  original ready time and the same generation is not dispatched again. A lost
+  response may leave an uncertain receipt requiring operator investigation.
+
+Repeat against each controller deployment you operate. A fake-provider test
+checks dispatch contracts; live provider IDs and timings establish actual
+routing and provider startup costs.
