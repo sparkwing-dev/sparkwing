@@ -20,6 +20,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
+	strictjson "sigs.k8s.io/json"
 )
 
 // ErrResponseNotObject marks a reply with no usable controller envelope.
@@ -114,11 +116,18 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 	}
 }
 
+// safety: scheduling snapshots repeat plan declarations and accepted expansions, so
+// allow ample space beyond the 4 MiB plan while bounding a faulty peer.
+const maxEngineResponseBytes = 64 << 20
+
 func (c *engineClient) readResponse(resp *http.Response, output any) (bool, error) {
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxEngineResponseBytes+1))
 	closeErr := resp.Body.Close()
 	if err != nil {
 		return false, fmt.Errorf("read controller response: %w", err)
+	}
+	if len(data) > maxEngineResponseBytes {
+		return false, fmt.Errorf("controller response exceeds %d bytes", maxEngineResponseBytes)
 	}
 	if closeErr != nil {
 		return false, fmt.Errorf("close controller response: %w", closeErr)
@@ -185,35 +194,17 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 }
 
 func responseObject(data []byte) (map[string]json.RawMessage, error) {
-	d := json.NewDecoder(bytes.NewReader(data))
-	start, err := d.Token()
-	if err != nil || start != json.Delim('{') {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || data[0] != '{' {
 		return nil, ErrResponseNotObject
 	}
-	fields := make(map[string]json.RawMessage)
-	for d.More() {
-		token, err := d.Token()
-		if err != nil {
-			return nil, fmt.Errorf("malformed controller response")
-		}
-		name, ok := token.(string)
-		if !ok {
-			return nil, fmt.Errorf("malformed controller response field")
-		}
-		if _, duplicate := fields[name]; duplicate {
-			return nil, fmt.Errorf("duplicate controller response field")
-		}
-		var raw json.RawMessage
-		if err := d.Decode(&raw); err != nil {
-			return nil, fmt.Errorf("malformed controller response value")
-		}
-		fields[name] = raw
+	var fields map[string]json.RawMessage
+	failures, err := strictjson.UnmarshalStrict(data, &fields, strictjson.DisallowDuplicateFields)
+	if err != nil {
+		return nil, fmt.Errorf("malformed controller response")
 	}
-	if _, err := d.Token(); err != nil {
-		return nil, fmt.Errorf("incomplete controller response")
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return nil, fmt.Errorf("trailing controller response data")
+	if len(failures) != 0 {
+		return nil, fmt.Errorf("duplicate controller response field")
 	}
 	return fields, nil
 }
