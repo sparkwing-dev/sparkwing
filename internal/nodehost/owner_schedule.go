@@ -387,10 +387,10 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 
 	result, err := followReconciliation(ctx, h.Store, request, h.WaitNode)
 	if err != nil {
-		// safety: cancellation can commit while reconciliation is in flight.
+		// safety: completion or cancellation can commit while reconciliation is in flight.
 		snapshot, readErr := h.Store.ReadSnapshot(ctx, run.RunID)
 		row, ok := ownerNode(snapshot, string(request.Ref.NodeID))
-		if readErr == nil && ok && row.CancelRequestedAt != nil {
+		if readErr == nil && ok && (row.CancelRequestedAt != nil || row.Status == runstate.StatusDone) {
 			return nil
 		}
 		return errors.Join(err, readErr)

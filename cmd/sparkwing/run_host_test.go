@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"testing/synctest"
 	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -1182,6 +1183,11 @@ func TestLocalRunRequestReservesOnlyCLIHosting(t *testing.T) {
 }
 
 func TestLocalRunInterruptCancelsAndWaitsForTerminalRun(t *testing.T) {
+	synctest.Test(t, testLocalRunInterruptCancelsAndWaitsForTerminalRun)
+}
+
+func testLocalRunInterruptCancelsAndWaitsForTerminalRun(t *testing.T) {
+	started := time.Now()
 	var calls []string
 	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 	signals := make(chan os.Signal, 1)
@@ -1230,6 +1236,9 @@ func TestLocalRunInterruptCancelsAndWaitsForTerminalRun(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "incomplete") || !strings.Contains(out.String(), `"status":"cancelled"`) {
 		t.Fatalf("interrupt did not finish cancelled run: output=%s error=%v", &out, err)
 	}
+	if elapsed := time.Since(started); elapsed != 0 {
+		t.Fatalf("interrupt waited %s after cancellation", elapsed)
+	}
 }
 
 type localInterruptController struct {
@@ -1242,6 +1251,11 @@ func (c localInterruptController) Cancel(ctx context.Context, run string, reques
 }
 
 func TestLocalRunSecondInterruptStopsObservationAfterDurableCancel(t *testing.T) {
+	synctest.Test(t, testLocalRunSecondInterruptStopsObservationAfterDurableCancel)
+}
+
+func testLocalRunSecondInterruptStopsObservationAfterDurableCancel(t *testing.T) {
+	started := time.Now()
 	var calls []string
 	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 	signals := make(chan os.Signal, 1)
@@ -1273,5 +1287,8 @@ func TestLocalRunSecondInterruptStopsObservationAfterDurableCancel(t *testing.T)
 	err := runLocalCommand(t.Context(), "ci", runFlags{}, []string{"--password", "private-value"}, io.Discard, deps)
 	if !errors.Is(err, context.Canceled) || !cancelled || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "create", "close"}) {
 		t.Fatalf("second interrupt: cancelled=%t calls=%v err=%v", cancelled, calls, err)
+	}
+	if elapsed := time.Since(started); elapsed != 0 {
+		t.Fatalf("interrupt waited %s after cancellation", elapsed)
 	}
 }
