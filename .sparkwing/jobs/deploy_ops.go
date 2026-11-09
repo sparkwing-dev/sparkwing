@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -55,6 +56,7 @@ type deployRegistry interface {
 }
 
 type deployTools struct {
+	awaitChild func(context.Context, string) (string, error)
 	startChild func(context.Context, string, map[string]string) (string, error)
 	run        func(context.Context, deployCommand) (string, error)
 	registry   deployRegistry
@@ -69,6 +71,7 @@ type deployTools struct {
 func realDeployTools() deployTools {
 	return deployTools{
 		startChild: sparkwing.StartChild,
+		awaitChild: sparkwing.AwaitChild,
 		run:        runDeployCommand,
 		registry:   ecrRegistry{},
 		oidc:       sparkwing.OIDCToken,
@@ -133,6 +136,7 @@ type deployer struct {
 	tmp       string
 	aws       map[string]string
 	resolved  map[string]string
+	gate      stagingGateRecord
 	awsExpiry time.Time
 	ecrPass   string
 }
@@ -1074,13 +1078,17 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	}
 	var err error
 	rec.ScanRun, err = d.submitScan(ctx, d.cfg.Staging, images)
+	if err == nil {
+		rec.CLIDigest = d.cacheCLI(ctx)
+		rec.CLIPlatform = runtime.GOOS + "/" + runtime.GOARCH
+	}
 	return rec, err
 }
 
 // safety: nodes outlive a run only briefly, so NodeClaims are sampled while
 // the smoke runs rather than counted afterwards.
 func (d *deployer) productionSmoke(ctx context.Context, images deployImages, since string) error {
-	if err := d.buildCLI(ctx); err != nil {
+	if err := d.productionCLI(ctx, images.Commit); err != nil {
 		return err
 	}
 	env := d.cfg.Production

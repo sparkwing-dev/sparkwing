@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"sync/atomic"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -281,7 +282,9 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if input.Accepted != nil {
 		return AcceptedRun{}, errors.New("resume has no persisted acceptance")
 	}
+	started := time.Now()
 	prepared, err := h.prepare(ctx, input, row.Request, entry)
+	h.Source.RecordTiming(ctx, "describe", started, err == nil, false)
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
@@ -295,7 +298,9 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if h.Masks != nil {
 		prepared.Planning.Validation.Secrets = planningSecrets{prior: prepared.Planning.Validation.Secrets, masker: h.Masks.masker}
 	}
+	started = time.Now()
 	plan, err := planInitial(ctx, prepared.Planning, prepared.Plan)
+	h.Source.RecordTiming(ctx, "plan", started, err == nil, false)
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
