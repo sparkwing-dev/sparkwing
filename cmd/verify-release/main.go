@@ -33,6 +33,8 @@ func run(args []string) error {
 	indexOut := fs.String("index-out", "", "write the signed stable version index to this directory")
 	previousIndex := fs.String("previous-index", "", "directory containing the current public index and signature")
 	requireVersion := fs.String("require-version", "", "published stable version that must appear in the index")
+	sdkEntries := fs.String("sdk-entries", "", "JSON array of independently published SDK entries to include in the signed index")
+	acceptedProtocols := fs.String("accepted-sdk-protocols", "2", "comma-separated SDK protocol versions accepted by the required engine")
 	bootstrapIndex := fs.Bool("bootstrap-index", false, "replace the legacy unsigned documentation index once")
 	latest := fs.String("latest-tag", "", "report whether this tag outranks the published stable releases")
 	if err := fs.Parse(args); err != nil {
@@ -47,7 +49,7 @@ func run(args []string) error {
 			_, err = readReleaseIndex(*indexOut, false, keys, time.Now().UTC())
 			return err
 		}
-		return publishReleaseIndex(*previousIndex, *indexOut, *requireVersion, *bootstrapIndex)
+		return publishReleaseIndex(*previousIndex, *indexOut, *requireVersion, *bootstrapIndex, *sdkEntries, *acceptedProtocols)
 	}
 	if *latest != "" {
 		body, err := publishedReleasePages()

@@ -121,12 +121,12 @@ func runRunsRetryCommandArgs(ctx context.Context, args []string, input io.Reader
 	return runRunsRetryCommand(ctx, inv, input, out, func(string) string { return "" }, resolve)
 }
 
-func runSDKInstallCommandArgs(ctx context.Context, args []string, version string, input io.Reader, out, diagnostics io.Writer, install func(context.Context, string, io.Reader, io.Writer, io.Writer) error) error {
+func runSDKInstallCommandArgs(ctx context.Context, args []string, input io.Reader, out, diagnostics io.Writer, install func(context.Context, io.Reader, io.Writer, io.Writer) error) error {
 	inv, err := clisurface.Parse("sparkwing", append([]string{"__sdk-install"}, args...))
 	if err != nil {
 		return err
 	}
-	return runSDKInstallCommand(ctx, inv, version, input, out, diagnostics, install)
+	return runSDKInstallCommand(ctx, inv, input, out, diagnostics, install)
 }
 
 func runWingdRunCommandArgs(ctx context.Context, args []string, out io.Writer, options wingd.LocalStartOptions, resolve func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error)) error {

@@ -57,7 +57,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			if err := Run(t.Context(), "v0.20.0", bytes.NewReader(body), &stdout, &stderr); err != nil {
+			if err := Run(t.Context(), bytes.NewReader(body), &stdout, &stderr); err != nil {
 				t.Fatal(err)
 			}
 			var command engine.SDKCommand
@@ -79,7 +79,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := Run(t.Context(), "v0.20.0", bytes.NewReader(body), &stdout, &stderr); err != nil {
+				if err := Run(t.Context(), bytes.NewReader(body), &stdout, &stderr); err != nil {
 					t.Fatalf("local binary cache: %v", err)
 				}
 				if err := json.Unmarshal(stdout.Bytes(), &command); err != nil || first == command.Command[0] {
@@ -88,13 +88,9 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 			}
 			for _, input := range [][]byte{[]byte(`{"directory":"a","directory":"b"}`), []byte(`{"directory":"a","Directory":"b","sdk":"go"}`), []byte(`{"sdk":"go","SDK":"typescript"}`), []byte(`{"environment":["TOKEN=credential"]}`), append(bytes.Clone(body), []byte(" {}")...)} {
 				stdout.Reset()
-				if err := Run(t.Context(), "v0.20.0", bytes.NewReader(input), &stdout, &stderr); err == nil || stdout.Len() != 0 {
+				if err := Run(t.Context(), bytes.NewReader(input), &stdout, &stderr); err == nil || stdout.Len() != 0 {
 					t.Fatalf("invalid installation returned a command: %v", err)
 				}
-			}
-			stdout.Reset()
-			if err := Run(t.Context(), "v0.10.0", bytes.NewReader(body), &stdout, &stderr); err == nil || stdout.Len() != 0 {
-				t.Fatalf("wrong engine version returned a command: %v", err)
 			}
 		})
 	}

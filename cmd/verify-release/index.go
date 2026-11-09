@@ -10,6 +10,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/mod/semver"
@@ -20,7 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
 
-func publishReleaseIndex(previous, out, required string, bootstrap bool) error {
+func publishReleaseIndex(previous, out, required string, bootstrap bool, sdkEntries, acceptedProtocols string) error {
 	if previous == "" || !stableIndexVersion(required) {
 		return errors.New("--previous-index and --require-version v0.X.Y are required")
 	}
@@ -40,6 +43,7 @@ func publishReleaseIndex(previous, out, required string, bootstrap bool) error {
 	if err != nil {
 		return err
 	}
+	previousPolicy := index
 	pages, err := publishedReleasePages()
 	if err != nil {
 		return err
@@ -47,6 +51,33 @@ func publishReleaseIndex(previous, out, required string, bootstrap bool) error {
 	index, err = nextReleaseIndex(index, pages, required, now)
 	if err != nil {
 		return err
+	}
+	if sdkEntries != "" {
+		body, err := os.ReadFile(sdkEntries)
+		if err != nil {
+			return err
+		}
+		if index, err = engine.MergeSDKEntries(index, body); err != nil {
+			return err
+		}
+	}
+	var protocols []int
+	for _, value := range strings.Split(acceptedProtocols, ",") {
+		protocol, err := strconv.Atoi(value)
+		if err != nil || protocol < 1 {
+			return errors.New("accepted SDK protocols must be positive integers")
+		}
+		protocols = append(protocols, protocol)
+	}
+	for _, record := range previousPolicy.Versions {
+		if record.Version == required && !slices.Equal(record.AcceptedSDKProtocols, protocols) {
+			return fmt.Errorf("engine %s accepted SDK protocols are immutable", required)
+		}
+	}
+	for i := range index.Versions {
+		if index.Versions[i].Version == required {
+			index.Versions[i].AcceptedSDKProtocols = protocols
+		}
 	}
 	return writeReleaseIndex(out, index, key, keys, now)
 }

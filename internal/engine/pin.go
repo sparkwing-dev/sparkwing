@@ -40,7 +40,7 @@ func ReadPin(checkout string, sdk engineid.SDKKind) (engineid.Pin, error) {
 	return pin, err
 }
 
-// VersionForPin selects the exact release or installed engine for an SDK replacement.
+// VersionForPin normalizes the SDK release spelling or identifies a local replacement.
 func VersionForPin(pin engineid.Pin) (string, error) {
 	if pin.Replacement != "" && pin.Version != "" {
 		return installedEngineVersion()

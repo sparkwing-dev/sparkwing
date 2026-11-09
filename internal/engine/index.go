@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"time"
 
@@ -20,6 +21,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
+
+// sdkIndex requires signed mapping data even when the invoking host is a development build.
+func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, error) {
+	if r.config.BuildVersion == "" || releaseBuild(r.config.BuildVersion) {
+		return r.Index(ctx, now)
+	}
+	config := r.config
+	config.BuildVersion = ""
+	mapping, err := NewResolver(config)
+	if err != nil {
+		return IndexResult{}, err
+	}
+	return mapping.Index(ctx, now)
+}
 
 // Index refreshes signed policy and retains verified fallback without an age cutoff.
 func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error) {
@@ -178,8 +193,22 @@ func checkPolicyAdvance(previous, next VerifiedIndex) error {
 		records[record.Version] = record
 	}
 	for _, record := range previous.index.Versions {
-		if current, ok := records[record.Version]; !ok || current != record {
+		if current, ok := records[record.Version]; !ok || !reflect.DeepEqual(current, record) {
 			return fmt.Errorf("version index changed or removed a retained release record")
+		}
+	}
+	for _, old := range previous.index.SDKs {
+		found := false
+		for _, current := range next.index.SDKs {
+			if old.Language == current.Language && old.Version == current.Version {
+				found = true
+				if old.Protocol != current.Protocol || old.SourceDigest != current.SourceDigest {
+					return fmt.Errorf("version index changed a retained SDK entry")
+				}
+			}
+		}
+		if !found {
+			return fmt.Errorf("version index removed a retained SDK entry")
 		}
 	}
 	return nil

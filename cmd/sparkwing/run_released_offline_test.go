@@ -78,7 +78,7 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 		fmt.Fprintf(&manifest, "%x  %s\n", sha256.Sum256(body), entry)
 	}
 	now := time.Now().UTC().Add(-time.Minute)
-	policy, err := json.Marshal(engine.VersionIndex{Format: 1, PublishedAt: now, Latest: version, Versions: []engineid.VersionInfo{{Version: version, PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)}}})
+	policy, err := json.Marshal(engine.VersionIndex{SDKs: []engine.SDKRelease{{Language: engineid.GoSDK, Version: version, Protocol: 2, SourceDigest: strings.Repeat("a", 64)}}, Format: engine.VersionIndexFormat, PublishedAt: now, Latest: version, Versions: []engineid.VersionInfo{{AcceptedSDKProtocols: []int{2}, Version: version, PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)}}})
 	if err != nil {
 		t.Fatal(err)
 	}

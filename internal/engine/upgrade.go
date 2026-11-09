@@ -26,7 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// UpgradeRequest chooses an exact release or the signed index's latest permitted release.
+// UpgradeRequest chooses an exact SDK release or the latest permitted SDK entry.
 type UpgradeRequest struct {
 	Checkout string
 	SDK      engineid.SDKKind
@@ -72,9 +72,9 @@ type UpgradeResult struct {
 // any other verification failure leaves the original pins unchanged.
 var ErrPipelineIncompatible = errors.New("the pipeline code needs changes for this SDK")
 
-// MigrationGuides names where the code changes between two pins are documented.
-func MigrationGuides(before, after string) string {
-	return fmt.Sprintf("`sparkwing docs migrations --from %s --to %s`, or https://github.com/sparkwing-dev/sparkwing/tree/%s/docs/migrations", before, after, after)
+// MigrationGuides points to the selected engine release documentation.
+func MigrationGuides(engineVersion string) string {
+	return fmt.Sprintf("`sparkwing docs migrations`, or https://github.com/sparkwing-dev/sparkwing/tree/%s/docs/migrations", engineVersion)
 }
 
 // SoftwareUpdate keeps a verified runner replacement separate from an SDK-matched pipeline engine.
@@ -156,23 +156,19 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest, p
 	if err != nil {
 		return "", plan, resolved, err
 	}
-	policy, err := r.Index(ctx, time.Now())
+	policy, err := r.sdkIndex(ctx, time.Now())
 	if err != nil {
 		return "", plan, resolved, err
 	}
 	version := request.Version
-	if version == "" {
-		version = policy.Index.index.Latest
-		if policy.Index.Development() {
-			return "", plan, resolved, invalid("development builds require an explicit upgrade version", "Use sparkwing pipeline upgrade --version vMAJOR.MINOR.PATCH.")
-		}
-	}
-	if !strings.HasPrefix(version, "v") {
+	if version != "" && !strings.HasPrefix(version, "v") {
 		version = "v" + version
 	}
-	if _, err := Evaluate(policy.Index, version, time.Now()); err != nil {
+	sdk, _, err := SelectSDK(policy.Index, request.SDK, version, time.Now())
+	if err != nil {
 		return "", plan, resolved, err
 	}
+	version = sdk.Version
 	stage, err = os.MkdirTemp(r.config.CacheDirectory, "upgrade-")
 	if err != nil {
 		return "", plan, resolved, err

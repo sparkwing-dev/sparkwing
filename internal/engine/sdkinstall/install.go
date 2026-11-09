@@ -27,8 +27,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// Run serves __sdk-install with the selected engine's build stamp and filtered environment.
-func Run(ctx context.Context, version string, input io.Reader, output, diagnostics io.Writer) error {
+// Run serves __sdk-install with the selected engine's filtered environment.
+func Run(ctx context.Context, input io.Reader, output, diagnostics io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -47,13 +47,6 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	pin, err := engine.ReadPin(dir, request.SDK)
 	if err != nil {
 		return err
-	}
-	selected, err := engine.VersionForPin(pin)
-	if err != nil {
-		return err
-	}
-	if pin.Replacement == "" && selected != version {
-		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "SDK pin does not match the installing engine"}
 	}
 	masker := secrets.NewMasker()
 	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{})

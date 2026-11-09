@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ func TestPublicIndexRetainsPolicyAndDeletedReleaseHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if index.Minimum != previous.Minimum || index.Revoked[0] != previous.Revoked[0] || index.Versions[0] != previous.Versions[0] {
+	if index.Minimum != previous.Minimum || index.Revoked[0] != previous.Revoked[0] || !reflect.DeepEqual(index.Versions[0], previous.Versions[0]) {
 		t.Fatal("lost signed policy or release history")
 	}
 	if _, err := nextReleaseIndex(index, []byte(releasedVersions), "v0.67.0", now.Add(time.Second)); err != nil {
@@ -113,5 +114,30 @@ func TestIndexBootstrapRefusesSignedOrPolicyShapedInput(t *testing.T) {
 	}
 	if _, err := readReleaseIndex(dir, true, keys, time.Now()); err == nil {
 		t.Fatal("bootstrap ignored an existing invalid signature")
+	}
+}
+
+func TestMergeIndependentSDKEntries(t *testing.T) {
+	index, err := engine.MergeSDKEntries(engine.VersionIndex{}, []byte(`[{"language":"typescript","version":"v0.1.0","protocol":2,"source_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]`))
+	if err != nil || len(index.SDKs) != 1 {
+		t.Fatalf("merge: %+v %v", index, err)
+	}
+	same, _ := json.Marshal(index.SDKs)
+	unchanged, err := engine.MergeSDKEntries(index, same)
+	if err != nil || len(unchanged.SDKs) != 1 {
+		t.Fatalf("unchanged entry: %+v %v", unchanged, err)
+	}
+	entry := index.SDKs[0]
+	entry.Protocol++
+	changed, _ := json.Marshal([]engine.SDKRelease{entry})
+	if _, err := engine.MergeSDKEntries(index, changed); err == nil {
+		t.Fatal("SDK version mutation accepted")
+	}
+	entry = index.SDKs[0]
+	entry.Version = "v0.2.0"
+	changed, _ = json.Marshal([]engine.SDKRelease{entry})
+	next, err := engine.MergeSDKEntries(index, changed)
+	if err != nil || len(next.SDKs) != 2 || next.SDKs[0].Version != "v0.1.0" {
+		t.Fatalf("new version lost history: %+v %v", next, err)
 	}
 }
