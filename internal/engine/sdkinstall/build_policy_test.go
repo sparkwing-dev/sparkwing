@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestSDKInstallUncachedUsesRealCompilerWithoutPublishingCacheEntry(t *testin
 		t.Fatal(err)
 	}
 	for _, setting := range info.Settings {
-		if setting.Key == "-trimpath" && setting.Value == "true" || setting.Key == "-ldflags" && strings.Contains(setting.Value, "-s -w") {
+		if setting.Key == "-ldflags" && (slices.Contains(strings.Fields(setting.Value), "-s") || slices.Contains(strings.Fields(setting.Value), "-w")) {
 			t.Fatalf("uncached build lost debug information: %+v", setting)
 		}
 	}

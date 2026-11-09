@@ -92,14 +92,12 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	command, err := install(gotoolchain.WithSession(ctx, environment, nil), entry.Engine, engine.SDKInstallRequest{
 		Directory: entry.pipelineCheckout, PipelineDir: relative, SDK: options.SDK, Environment: environment, Masker: options.Base.Masker,
 		NoBincache: spec.NoBincache, HashAllFiles: spec.HashAllFiles,
-		ExportHandoff: options.ExportHandoff && spec.LocalCheckout != "", Handoff: spec.Installation,
 	})
-	options.RecordTiming(ctx, "sdk_install", started, err == nil, command.Reused)
+	options.RecordTiming(ctx, "sdk_install", started, err == nil, false)
 	if err != nil {
 		return entry, fmt.Errorf("install source entry: %w", err)
 	}
 	entry.releaseSDK = command.Close
-	entry.Installation = command.Handoff
 	if err := context.Cause(ctx); err != nil {
 		return entry, err
 	}

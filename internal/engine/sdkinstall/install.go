@@ -60,10 +60,6 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	if err != nil {
 		return err
 	}
-	var inputs *bincache.InputWitness
-	if request.ExportHandoff && request.SDK == engineid.GoSDK && !request.NoBincache {
-		ctx, inputs = bincache.WithInputWitness(ctx)
-	}
 	var command []string
 	var cachedExecutable string
 	if request.SDK == engineid.GoSDK {
@@ -74,11 +70,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	if err != nil {
 		return err
 	}
-	result := engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable}
-	if inputs != nil {
-		result.Handoff = engine.WriteSDKHandoff(dir, request, environment, result, inputs)
-	}
-	return json.NewEncoder(output).Encode(result)
+	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable})
 }
 
 // GoEnvironment applies the native SDK compiler settings used by installation and cache diagnostics.

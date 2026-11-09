@@ -25,19 +25,11 @@ func effectiveBuildInputs(ctx context.Context, dir string, env []string) ([]byte
 		env = os.Environ()
 	}
 	env = pipelineBuildEnvironment(env)
-	if witness := inputWitness(ctx); witness != nil {
-		work, _ := gotoolchain.LookupEnv(env, "GOWORK")
-		if work != "off" {
-			witness.Disabled = true
-		}
-	}
-
 	tool, err := gotoolchain.Executable(env)
 	if err != nil {
 		// safety: no compiler can publish under this identity; a compiler's arrival changes the key.
 		return nil, nil, nil //nolint:nilerr // Missing Go has a distinct identity and cannot publish a binary.
 	}
-	inputWitness(ctx).file(tool)
 	env, err = gotoolchain.BuildEnv(ctx, dir, env, EffectiveOverlay(dir, env))
 	if err != nil {
 		return nil, nil, err
@@ -64,27 +56,6 @@ func effectiveBuildInputs(ctx context.Context, dir string, env []string) ([]byte
 	if err := json.Unmarshal(settings, &effective); err != nil {
 		return nil, nil, fmt.Errorf("read effective Go environment: %w", err)
 	}
-	if witness := inputWitness(ctx); witness != nil && !witness.Disabled {
-		if effective["CGO_ENABLED"] != "0" {
-			witness.Disabled = true
-		}
-
-		witness.Directory, witness.Environment, witness.Tool, witness.Settings = dir, append([]string(nil), env...), tool, append([]byte(nil), settings...)
-		witness.file(tool)
-		if path := effective["GOTOOLDIR"]; path != "" {
-			witness.tree(path)
-		}
-		if root := effective["GOROOT"]; root != "" {
-			witness.file(filepath.Join(root, "bin", "go"))
-		}
-
-		if path := effective["GOENV"]; path != "" && path != "off" {
-			witness.file(path)
-		}
-		if path := effective["GOWORK"]; path != "" && path != "off" {
-			witness.file(path)
-		}
-	}
 	resolved := append([]string(nil), env...)
 	for _, name := range buildEnvironmentNames {
 		// perf: -trimpath and content digests make the default module-cache location irrelevant.
@@ -98,28 +69,16 @@ func effectiveBuildInputs(ctx context.Context, dir string, env []string) ([]byte
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, ".")
-	compiled, err := compiledInputDigestWithWitness(func() ([]byte, error) { return output(args...) }, dir, effective["GOFLAGS"], effective["GOWORK"], inputWitness(ctx))
+	compiled, err := compiledInputDigest(func() ([]byte, error) { return output(args...) }, dir, effective["GOFLAGS"], effective["GOWORK"])
 	return buildEnvironmentKey(resolved), compiled, err
 }
 
 func compiledInputDigest(list func() ([]byte, error), dir, flags, workspace string) ([]byte, error) {
-	return compiledInputDigestWithWitness(list, dir, flags, workspace, nil)
-}
-
-func compiledInputDigestWithWitness(list func() ([]byte, error), dir, flags, workspace string, witness *InputWitness) ([]byte, error) {
-	var firstListing []byte
 	var previous []byte
 	for range 2 {
 		raw, err := list()
 		if err != nil {
 			return nil, err
-		}
-		if witness != nil {
-			if firstListing == nil {
-				firstListing = append([]byte(nil), raw...)
-			} else if !bytes.Equal(firstListing, raw) {
-				witness.Disabled = true
-			}
 		}
 		var digest bytes.Buffer
 		replacements, selected, err := selectedBuildFiles(dir, flags)
@@ -128,9 +87,6 @@ func compiledInputDigestWithWitness(list func() ([]byte, error), dir, flags, wor
 		}
 		if replacement := replacements[workspace]; replacement != "" {
 			selected = append(selected, replacement)
-		}
-		for _, path := range selected {
-			witness.file(path)
 		}
 		if _, err := hashFilesInto(&digest, dir, selected); err != nil {
 			return nil, err
@@ -151,16 +107,6 @@ func compiledInputDigestWithWitness(list func() ([]byte, error), dir, flags, wor
 				break
 			} else if err != nil {
 				return nil, err
-			}
-			if witness != nil && previous == nil && !witness.Disabled {
-				witness.tree(pkg.Dir)
-				if pkg.Module != nil {
-					if pkg.Module.Replace != nil {
-						witness.file(pkg.Module.Replace.GoMod)
-					} else {
-						witness.file(pkg.Module.GoMod)
-					}
-				}
 			}
 			// safety: Go emits requested empty fields as null, while unrestricted JSON omits them.
 			if string(pkg.Error) == "null" {
@@ -200,9 +146,6 @@ func compiledInputDigestWithWitness(list func() ([]byte, error), dir, flags, wor
 						files = append(files, path)
 					}
 				}
-			}
-			for _, path := range files {
-				witness.file(path)
 			}
 			sort.Strings(files)
 			if _, err := hashFilesInto(&digest, pkg.Dir, files); err != nil {
