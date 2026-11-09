@@ -24,6 +24,11 @@ func checkLinks(contentDir string) bool {
 			return rerr
 		}
 		rel, _ := filepath.Rel(contentDir, path)
+		linkDir := filepath.Dir(path)
+		if filepath.Dir(rel) == "changes" {
+			// hack: fragments are collected into the repository-root CHANGELOG.md, which owns their relative links.
+			linkDir = filepath.Dir(contentDir)
+		}
 		for ln, line := range strings.Split(string(data), "\n") {
 			for _, m := range mdLinkRE.FindAllStringSubmatch(line, -1) {
 				target := m[1]
@@ -39,7 +44,7 @@ func checkLinks(contentDir string) bool {
 					continue
 				}
 				checked++
-				resolved := filepath.Join(filepath.Dir(path), file)
+				resolved := filepath.Join(linkDir, file)
 				// #nosec G703 -- a build-time tool reading paths the operator names
 				if _, statErr := os.Stat(resolved); statErr != nil {
 					broken = append(broken, fmt.Sprintf("%s:%d: %q -> missing %s", rel, ln+1, target, file))
