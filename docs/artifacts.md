@@ -1,5 +1,6 @@
 # Node artifacts
 
+
 Artifacts move **files** between nodes. A producer node declares the
 files it emits; a consumer node declares which producers it draws from,
 and the orchestrator stages those files into the consumer's workspace
@@ -12,6 +13,47 @@ Use artifacts for files. Use [`Ref[T]`](sdk.md) for data values --- a
 number, a struct, a computed string passed as a typed output. The two
 are complementary: a node can return a typed `Ref[T]` *and* publish
 artifacts in the same run.
+
+## Inspect and download
+
+List the files a run committed, or select one job:
+
+```sh
+sparkwing runs artifacts --run 42
+sparkwing runs artifacts --run 42 --job build --limit 20 -o json
+sparkwing runs artifacts --run 42 --job build --path dist/app.tar.gz --dest app.tar.gz
+```
+
+Add `--profile NAME` for a remote controller. JSON emits one object per file
+with `run_id`, `job_id`, `path`, `digest` (SHA-256), `size` (bytes), and `mode`,
+followed by a `kind: "page"` record with `returned`, `limit`, `truncated`, and
+`next_cursor` when more files exist. Listings default to 40 files in job and
+path order. Set a positive `--limit` and pass `--cursor` the previous
+`next_cursor` with the same run and job filters to continue. An empty listing
+still emits its page record. Plain output prints one manifest path per line
+and sends continuation guidance to stderr. Text listings quote paths
+containing control characters. A download prints a receipt
+with `saved_to` in JSON, or its destination in plain output.
+
+Downloads select an exact path from the job's committed manifest, verify its
+size and digest, and refuse an existing destination. Downloads stay in a temporary
+file created exclusively beside the destination until verification succeeds,
+then publish with an atomic hard link that refuses a competing destination.
+The destination filesystem must support hard links.
+Ctrl-C cancels the transfer and removes the temporary file.
+The destination's parent must exist. An unfinished job or an absent or expired
+manifest lists no files.
+A missing or corrupt retained manifest fails listing. Missing or corrupt file
+bytes fail download. Each request checks current team membership with
+`runs.read`. Execution claims and cache-only credentials
+cannot use this command. Local runs read their local controller's blob store.
+Artifact contents are not secret-masked and are readable by any team member
+with `runs.read`, as with GitHub Actions artifacts.
+Signed storage URLs stay inside the download client. Transfer failures expose
+no storage credentials. `--limit` and `--cursor` apply only to listings.
+
+Artifacts carry files. To read typed job values inside a pipeline, use `Ref[T]`.
+
 
 ## The model
 

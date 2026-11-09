@@ -97,7 +97,11 @@ func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, targe
 			return resolved, err
 		}
 		if r.config.LocalBuildDirectory == "" {
-			return Resolved{}, integrity(errors.New("installed engine differs from the accepted replacement-pin engine"))
+			return Resolved{}, &apierr.Error{
+				Code: apierr.IntegrityFailure,
+				Message: fmt.Sprintf("planned on engine %s (sha256 %s), this host has %s (sha256 %s); route planning to the executing host (repository runner requirements) or install %s (sha256 %s)",
+					identity.Version, identity.ManifestDigest, resolved.Identity.Version, resolved.Identity.ManifestDigest, identity.Version, identity.ManifestDigest),
+			}
 		}
 		if !validDigest(identity.ManifestDigest) {
 			return Resolved{}, integrity(errors.New("accepted local engine digest is invalid"))

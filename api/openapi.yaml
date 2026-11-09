@@ -83,6 +83,24 @@ components:
         - generation
       type: object
       x-sparkwing-go-type: blob.LogUnit
+    internal.blob.ManifestEntry:
+      additionalProperties: true
+      properties:
+        digest:
+          type: string
+        mode:
+          type: integer
+        path:
+          type: string
+        size:
+          type: integer
+      required:
+        - path
+        - digest
+        - size
+        - mode
+      type: object
+      x-sparkwing-go-type: blob.ManifestEntry
     internal.blob.Member:
       additionalProperties: true
       properties:
@@ -287,6 +305,32 @@ components:
         - Key
       type: object
       x-sparkwing-go-type: blob.Scope
+    internal.blob.SignedTransfer:
+      additionalProperties: true
+      properties:
+        Digest:
+          type: string
+        ExpiresAt:
+          format: date-time
+          type: string
+        Headers:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
+        Size:
+          type: integer
+        URL:
+          type: string
+      required:
+        - URL
+        - Headers
+        - ExpiresAt
+        - Digest
+        - Size
+      type: object
+      x-sparkwing-go-type: blob.SignedTransfer
     internal.blob.UploadIdentity:
       additionalProperties: true
       properties:
@@ -770,6 +814,25 @@ components:
         - approvals
       type: object
       x-sparkwing-go-type: controllerwire.Approvals
+    internal.controllerwire.ArtifactPage:
+      additionalProperties: true
+      properties:
+        artifacts:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.blob.ManifestEntry'
+              type: array
+            - type: "null"
+        next_cursor:
+          type: string
+        truncated:
+          type: boolean
+      required:
+        - artifacts
+        - next_cursor
+        - truncated
+      type: object
+      x-sparkwing-go-type: controllerwire.ArtifactPage
     internal.controllerwire.AttemptDetail:
       additionalProperties: true
       properties:
@@ -1995,6 +2058,24 @@ components:
         - remedy
       type: object
       x-sparkwing-go-type: controllerwire.HealthView
+    internal.controllerwire.JobArtifacts:
+      additionalProperties: true
+      properties:
+        artifacts:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.blob.ManifestEntry'
+              type: array
+            - type: "null"
+        download:
+          anyOf:
+            - $ref: '#/components/schemas/internal.blob.SignedTransfer'
+            - type: "null"
+      required:
+        - artifacts
+        - download
+      type: object
+      x-sparkwing-go-type: controllerwire.JobArtifacts
     internal.controllerwire.JobDetail:
       additionalProperties: true
       properties:
@@ -12605,6 +12686,64 @@ paths:
             binding: data
             liveness: credential
         retry: exact_body
+  /api/v1/runs/{run}/jobs/{job}/artifacts:
+    get:
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: job
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: path
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/internal.controllerwire.ArtifactPage'
+                  - $ref: '#/components/schemas/internal.controllerwire.JobArtifacts'
+          description: Response selected by the request operation.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: List committed job artifacts or sign an exact path download
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/runs/{run}/jobs/{job}/artifacts
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/runs/{run}/jobs/{job}/attempts:
     get:
       parameters:

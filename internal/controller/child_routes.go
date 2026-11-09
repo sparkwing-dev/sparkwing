@@ -17,6 +17,7 @@ func (s *Server) childEndpoints(e *EngineController) []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/children", Authentication: capability.AuthCapability, Decode: e.childIntakeTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleIntake(e)},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}", Authentication: capability.AuthCapability, Decode: e.childTarget, ResolveTarget: e.resolveRunSelector, Handle: e.handleChild},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/artifacts", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobArtifacts},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobOutput},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: e.childTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleChildOutput},
 	}

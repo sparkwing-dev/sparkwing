@@ -46,8 +46,6 @@ func LocalSubject(peer, owner localhostwire.LocalPeerIdentity) (string, error) {
 type LocalStartOptions struct {
 	Home, Executable, Version string
 	Standalone                bool
-	// ScheduleTick lets a timer-started controller leave the timer's process group and cgroup.
-	ScheduleTick bool
 }
 
 // LocalRuntime uses the same internal/controller implementation, route policy and state owner.

@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-func TestTimerDaemonLeavesCallerCgroup(t *testing.T) {
+func TestServiceDaemonLeavesCallerCgroup(t *testing.T) {
 	if err := procenv.ControlCommandContext(t.Context(), os.Environ(), "systemctl", "--user", "show-environment").Run(); err != nil {
 		t.Skip("systemd user manager unavailable")
 	}
@@ -22,7 +22,7 @@ func TestTimerDaemonLeavesCallerCgroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := spawnDetached(bin, home, "", true); err != nil {
+	if err := spawnDetached(bin, home, ""); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.ReadFile(filepath.Join(home, "cgroup"))
@@ -34,8 +34,8 @@ func TestTimerDaemonLeavesCallerCgroup(t *testing.T) {
 	}
 }
 
-func TestTimerDaemonFallbackAndOrdinaryOwnership(t *testing.T) {
-	for _, mode := range []string{"ordinary", "outside-systemd", "missing-manager", "unavailable-bus"} {
+func TestServiceDaemonRefusesUnsafeFallback(t *testing.T) {
+	for _, mode := range []string{"outside-systemd", "missing-manager", "unavailable-bus"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("INVOCATION_ID", "timer-test")
 			home := shortHome(t)
@@ -52,7 +52,14 @@ func TestTimerDaemonFallbackAndOrdinaryOwnership(t *testing.T) {
 				t.Setenv("XDG_RUNTIME_DIR", home)
 				t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "missing-bus"))
 			}
-			if err := spawnDetached(bin, home, "", mode != "ordinary"); err != nil {
+			err := spawnDetached(bin, home, "")
+			if mode != "outside-systemd" {
+				if err == nil {
+					t.Fatal("daemon fell back into a service cgroup after scope creation failed")
+				}
+				return
+			}
+			if err != nil {
 				t.Fatal(err)
 			}
 			before, err := os.ReadFile("/proc/self/cgroup")
