@@ -121,14 +121,6 @@ func TerminateSession(identity SessionIdentity) error {
 	return nil
 }
 
-func DiagnosticSession(identity SessionIdentity) error {
-	empty, err := inspectSession(identity)
-	if err != nil || empty {
-		return err
-	}
-	return signalDiagnosticSession(identity.SessionID)
-}
-
 func KillSession(identity SessionIdentity) error {
 	empty, err := inspectSession(identity)
 	if err != nil || empty {

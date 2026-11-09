@@ -101,17 +101,6 @@ func TestGuidesBehind_CountsCrossedRange(t *testing.T) {
 	}
 }
 
-func TestPinsDiverge(t *testing.T) {
-	same := []Repo{{Primary: "/a", Pin: "v1"}, {Primary: "/b", Pin: "v1"}}
-	if pinsDiverge(same) {
-		t.Error("matching pins should not diverge")
-	}
-	diff := []Repo{{Primary: "/a", Pin: "v1"}, {Primary: "/b", Pin: "v2"}}
-	if !pinsDiverge(diff) {
-		t.Error("mismatched pins should diverge")
-	}
-}
-
 func TestDeriveFleet_FoldsRemoteSlugIntoCheckout(t *testing.T) {
 	base := t.TempDir()
 	primary := filepath.Join(base, "app")

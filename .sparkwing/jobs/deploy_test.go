@@ -745,7 +745,7 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return testRendered(c.Args[1], pins, "new-chart") + testClusterScoped, nil
+		return testRendered(c.Args[1], pins, "new-chart") + testClusterScoped + testClusterAdmission, nil
 	case name == "bash":
 		if strings.Contains(joined, "build-release-target") {
 			dist := filepath.Join(c.Dir, "dist")
@@ -798,6 +798,10 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 	joined := strings.Join(c.Args, " ")
 	envDir := map[string]string{"sparkwing-staging": "sparkwing-staging", "sparkwing": "sparkwing"}
 	switch {
+	case strings.HasPrefix(joined, "get ValidatingAdmissionPolicy "):
+		return testLiveAdmissionPolicy, nil
+	case strings.HasPrefix(joined, "get ValidatingAdmissionPolicyBinding "):
+		return testLiveAdmissionBinding, nil
 	case strings.Contains(joined, "annotate application"):
 		return "", nil
 	case strings.Contains(joined, "rollout status"):
@@ -946,10 +950,10 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	}
 	if final := deployGitIn(t, f.bare, "show", "main:sparkwing-staging/rendered.yaml"); !strings.Contains(final, "chart: new-chart") || strings.Contains(final, "@"+f.old.Runner.Digest) {
 		t.Fatalf("the launcher commit did not carry the rest of the chart:\n%s", final)
-	} else if strings.Contains(final, "kind: ClusterRole") || strings.Contains(final, "kind: Namespace") {
+	} else if strings.Contains(final, "kind: ClusterRole") || strings.Contains(final, "kind: Namespace") || strings.Contains(final, "kind: ValidatingAdmissionPolicy") {
 		t.Fatalf("the render kept cluster-scoped objects:\n%s", final)
 	}
-	if !slices.Contains(f.said, "left out of sparkwing-staging/rendered.yaml, applied through kikd-infra k8s/sparkwing-cluster/: Namespace/sparkwing-cloud-jobs, ClusterRole/sparkwing-runner-boundary") {
+	if !slices.Contains(f.said, "left out of sparkwing-staging/rendered.yaml, applied through kikd-infra k8s/sparkwing-cluster/: Namespace/sparkwing-cloud-jobs, ClusterRole/sparkwing-runner-boundary, ValidatingAdmissionPolicy/sparkwing-cloud-capacity, ValidatingAdmissionPolicyBinding/sparkwing-cloud-capacity") {
 		t.Fatalf("the deploy did not name the cluster-scoped objects it left out: %q", f.said)
 	}
 
@@ -1141,14 +1145,14 @@ func TestDeployRollbackOutlivesCancelTimeoutAndSession(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newFakeDeploy(t)
-			ctx := setup(f)
-			_, err := f.deployer(false).promote(ctx, f.candidate())
-			if err == nil || !strings.Contains(err.Error(), "rolled back") {
-				t.Fatalf("promote = %v, want a rollback", err)
-			}
-			if got := f.pinsOnMain("sparkwing"); got.Controller != f.old.Controller || got.Launcher != f.old.Runner {
-				t.Fatalf("production after rollback = %+v", got)
+			for _, schema := range []int{34, 35} {
+				t.Run(fmt.Sprintf("schema=%d", schema), func(t *testing.T) {
+					f := newFakeDeploy(t)
+					setDeployCandidateSchema(t, f, schema)
+					ctx := setup(f)
+					_, err := f.deployer(false).promote(ctx, f.candidate())
+					assertProductionRecovery(t, f, err, schema)
+				})
 			}
 		})
 	}
@@ -1229,22 +1233,55 @@ func TestDeployRollsBackFailedProductionSmoke(t *testing.T) {
 		"warning logs": func(f *fakeDeploy) { f.dirtyLogs = true },
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newFakeDeploy(t)
-			breakIt(f)
-			_, err := f.deployer(false).promote(t.Context(), f.candidate())
-			if err == nil || !strings.Contains(err.Error(), "rolled back") {
-				t.Fatalf("promote = %v, want a rollback", err)
-			}
-			if got := f.pinsOnMain("sparkwing"); got.Controller != f.old.Controller || got.Launcher != f.old.Runner || got.Job != f.old.Runner {
-				t.Fatalf("production after rollback = %+v", got)
-			}
-			subjects := f.subjects()
-			for i, want := range []string{`Revert "deploy(production): controller`, `Revert "deploy(production): launcher`, "deploy(production): launcher", "deploy(production): controller"} {
-				if !strings.HasPrefix(subjects[i], want) {
-					t.Fatalf("GitOps history = %q", subjects)
-				}
+			for _, schema := range []int{34, 35} {
+				t.Run(fmt.Sprintf("schema=%d", schema), func(t *testing.T) {
+					f := newFakeDeploy(t)
+					setDeployCandidateSchema(t, f, schema)
+					breakIt(f)
+					_, err := f.deployer(false).promote(t.Context(), f.candidate())
+					assertProductionRecovery(t, f, err, schema)
+				})
 			}
 		})
+	}
+}
+
+func setDeployCandidateSchema(t *testing.T, f *fakeDeploy, schema int) {
+	t.Helper()
+	if schema == 34 {
+		return
+	}
+	writeFile(t, filepath.Join(f.repo, "internal/store/store.go"), fmt.Sprintf("package store\nconst expectedSchemaVersion = %d\n", schema))
+	deployGitIn(t, f.repo, "add", "internal/store/store.go")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "candidate schema")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+}
+
+func assertProductionRecovery(t *testing.T, f *fakeDeploy, err error, schema int) {
+	t.Helper()
+	want := f.old
+	message := "rolled back"
+	subjects := []string{`Revert "deploy(production): controller`, `Revert "deploy(production): launcher`, "deploy(production): launcher", "deploy(production): controller", "seed"}
+	if schema > 34 {
+		want = f.candidate()
+		message = "candidate images retained, production requires roll forward"
+		subjects = subjects[2:]
+	}
+	if err == nil || !strings.Contains(err.Error(), message) {
+		t.Fatalf("promote with schema 34 -> %d = %v, want %q", schema, err, message)
+	}
+	if got := f.pinsOnMain("sparkwing"); got.Controller != want.Controller || got.Launcher != want.Runner || got.Job != want.Runner {
+		t.Fatalf("production with schema 34 -> %d = %+v, want %+v", schema, got, want)
+	}
+	got := f.subjects()
+	if len(got) != len(subjects) {
+		t.Fatalf("GitOps history = %q, want %q", got, subjects)
+	}
+	for i, prefix := range subjects {
+		if !strings.HasPrefix(got[i], prefix) {
+			t.Fatalf("GitOps history = %q, want %q", got, subjects)
+		}
 	}
 }
 

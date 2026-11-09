@@ -28,7 +28,7 @@ func (DeployScan) ShortHelp() string {
 }
 
 func (DeployScan) Help() string {
-	return "Started as a detached child after production smoke, inheriting its verified repository and revision. All scans share one concurrency slot, leaving the desktop runner's other slot for deploys. An hourly revision receipt suppresses repeated scans even after failure. Superseded revisions stop before scanning. The full example and its children run on self-hosted runners labeled deploy-kikd-prod. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Each failed example job upserts a finding. Bitwing promotes sustained findings to tickets, and later failures append run links to the linked ticket. Clean observations resolve unpromoted findings. Unavailable observations preserve earlier findings."
+	return "Started as a detached child after production smoke, inheriting its verified repository and revision. All scans share one concurrency slot, leaving the desktop runner's other slot for deploys. Only full scans marked for the same controller supply an hourly revision receipt, suppressing repeated scans even after failure. Superseded revisions stop before scanning. The full example and its children run on self-hosted runners labeled deploy-kikd-prod. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Each failed example job upserts a finding. Bitwing promotes sustained findings to tickets, and later failures append run links to the linked ticket. Clean observations resolve unpromoted findings. Unavailable observations preserve earlier findings."
 }
 
 type deployScanSecrets struct {
@@ -153,6 +153,7 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 		return rec, err
 	}
 	var priorFinished bool
+	var priorStatus string
 	if err = d.act(ctx, "run full example scan on our hardware", func() error {
 		out, err := d.sw(ctx, "", "runs", "list", "--profile", profile, "--pipeline", "example", "--repo", "sparkwing-dev/sparkwing", "--sha", images.Commit, "--limit", "1", "-o", "json")
 		if err != nil {
@@ -170,12 +171,20 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 			return errors.New("previous example scan listing returned no run or page")
 		}
 		if prior.ID != "" && (prior.FinishedAt.IsZero() || prior.FinishedAt.After(d.tools.now().Add(-time.Hour))) {
-			rec.ExampleRun = prior.ID
-			coalesced = prior.FinishedAt.IsZero()
-			priorFinished = !coalesced
-			return nil
+			out, err := d.sw(ctx, "", "runs", "status", "--run", prior.ID, "--profile", profile, "--exit-zero", "-o", "json")
+			var receipt struct {
+				ID, Status string
+				Inputs     struct{ Args map[string]string }
+			}
+			if err == nil && json.Unmarshal([]byte(out), &receipt) == nil && receipt.ID == prior.ID && receipt.Inputs.Args["scan-receipt"] == env.ControllerURL {
+				rec.ExampleRun = prior.ID
+				coalesced = prior.FinishedAt.IsZero()
+				priorFinished = !coalesced
+				priorStatus = receipt.Status
+				return nil
+			}
 		}
-		rec.ExampleRun, err = d.tools.startChild(ctx, "example", map[string]string{"api-controller": env.ControllerURL, "post-deploy": "true"})
+		rec.ExampleRun, err = d.tools.startChild(ctx, "example", map[string]string{"api-controller": env.ControllerURL, "post-deploy": "true", "scan-receipt": env.ControllerURL})
 		if err != nil {
 			return err
 		}
@@ -195,21 +204,8 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 		return rec, nil
 	}
 	err = d.act(ctx, "observe full example scan on "+profile, func() error {
-		var status string
-		if priorFinished {
-			out, err := d.sw(ctx, "", "runs", "status", "--run", rec.ExampleRun, "--profile", profile, "--exit-zero", "-o", "json")
-			if err != nil {
-				return err
-			}
-			detail, err := exampleDecodeStatus(out)
-			if err != nil {
-				return err
-			}
-			if detail.ID != rec.ExampleRun {
-				return fmt.Errorf("scan returned run %s, want %s", detail.ID, rec.ExampleRun)
-			}
-			status = detail.Status
-		} else {
+		status := priorStatus
+		if !priorFinished {
 			runCtx, cancel := context.WithTimeout(ctx, d.cfg.RunTimeout)
 			defer cancel()
 			var err error

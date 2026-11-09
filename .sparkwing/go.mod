@@ -12,6 +12,7 @@ require (
 	github.com/sparkwing-dev/sparkwing v0.71.0
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.41.0
+	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
 )
 
@@ -45,7 +46,6 @@ require (
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	k8s.io/apimachinery v0.36.0 // indirect

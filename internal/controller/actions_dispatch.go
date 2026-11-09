@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -65,6 +66,19 @@ func (s *Server) actionsRepair(ctx context.Context, d store.ActionsDispatch, err
 	return "GitHub workflow unavailable; check the App installation, repository access and approved workflow"
 }
 
+func (s *Server) actionsWorkflowMatchesDefault(ctx context.Context, d store.ActionsDispatch, sha string) bool {
+	repo, ok := store.ParseGitHubRepo(d.Repository)
+	if !ok {
+		return false
+	}
+	workflow, present, err := s.githubApp.client.FileAtCommit(ctx, d.InstallationID, d.RepositoryID, repo.Owner, repo.Name, sha, d.Workflow)
+	if err != nil || !present || int64(len(workflow)) > limits.ProjectConfigBytes {
+		return false
+	}
+	defaultWorkflow, err := s.githubApp.client.FileAtDefaultHead(ctx, d.InstallationID, d.RepositoryID, repo.Owner, repo.Name, d.Workflow)
+	return err == nil && defaultWorkflow.RepositoryID == d.RepositoryID && defaultWorkflow.Found && int64(len(defaultWorkflow.Content)) <= limits.ProjectConfigBytes && bytes.Equal(workflow, defaultWorkflow.Content)
+}
+
 func (s *Server) processActionsDispatch(ctx context.Context) (bool, error) {
 	d, err := s.operator.NextActionsDispatch(ctx)
 	if err != nil || d == nil {
@@ -85,9 +99,8 @@ func (s *Server) processActionsDispatch(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, s.operator.FinishActionsDispatch(ctx, d.Receipt, "refused", "approved workflow ref cannot be resolved; check the branch or tag")
 	}
-	_, present, err := s.githubApp.client.FileAtCommit(ctx, d.InstallationID, d.RepositoryID, repo.Owner, repo.Name, sha, d.Workflow)
-	if err != nil || !present {
-		return true, s.operator.FinishActionsDispatch(ctx, d.Receipt, "refused", "commit the approved workflow with workflow_dispatch to the default branch and approved ref")
+	if !s.actionsWorkflowMatchesDefault(ctx, *d, sha) {
+		return true, s.operator.FinishActionsDispatch(ctx, d.Receipt, "refused", fmt.Sprintf("cannot verify %s; sync the fallback branch's workflow with the default branch %s", d.Workflow, repository.DefaultBranch))
 	}
 	begun, err := s.operator.BeginActionsDispatch(ctx, *d, sha)
 	if err != nil {
@@ -193,7 +206,7 @@ func (s *Server) actionsReceiptProvision(ctx context.Context, team store.Team, r
 		return capability.ProvisionSpec{}, actionsExchangeRefusal()
 	}
 	token, repository, err := s.actionsToken(ctx, d, "read")
-	if err != nil || actionsFallbackRefProblem(d.WorkflowRef, repository) != "" {
+	if err != nil || actionsFallbackRefProblem(d.WorkflowRef, repository) != "" || !s.actionsWorkflowMatchesDefault(ctx, d, d.WorkflowSHA) {
 		return capability.ProvisionSpec{}, actionsExchangeRefusal()
 	}
 	run, err := s.githubApp.client.ActionsRun(ctx, token.Token, d.Repository, claims.RunID)

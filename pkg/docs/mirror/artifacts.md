@@ -38,8 +38,7 @@ with `saved_to` in JSON, or its destination in plain output.
 Downloads select an exact path from the job's committed manifest, verify its
 size and digest, and refuse an existing destination. Downloads stay in a temporary
 file created exclusively beside the destination until verification succeeds,
-then publish with an atomic hard link that refuses a competing destination.
-The destination filesystem must support hard links.
+then check that the destination is absent and rename the verified file into place.
 Ctrl-C cancels the transfer and removes the temporary file.
 The destination's parent must exist. An unfinished job or an absent or expired
 manifest lists no files.

@@ -192,8 +192,18 @@ excludes shows as unavailable instead of spending minutes on an idle workflow.
 `DELETE` on the same endpoint withdraws an
 approval using the repository ID, workflow and runner fields. Replacing or
 withdrawing approval invalidates its earlier receipts. The repository's default
-branch must contain the workflow. The approved branch supplies the workflow
-revision, while the original event supplies the workload revision.
+branch must contain the workflow. Before dispatch, the controller reads the
+workflow at the approved branch head and the default branch head and requires
+byte-identical content. A missing or different file refuses dispatch and names
+the file to sync. Registration repeats the comparison at the dispatched commit
+and binds GitHub's reported workflow SHA to that commit before granting hosted
+runner trust. The approved branch supplies the workflow revision, while the
+original event supplies the workload revision.
+
+The fallback workflow must stay self-contained. Do not use `uses: ./...` local
+actions, relative reusable workflows, or check out the repository and then run
+its scripts. Those dependencies can change behavior on the fallback branch
+without changing the workflow bytes that the controller verifies.
 
 The approved ref must be a dedicated branch such as
 `refs/heads/sparkwing-fallback`. GitHub signs the fallback job's OIDC token

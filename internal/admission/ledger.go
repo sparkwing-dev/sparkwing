@@ -288,36 +288,6 @@ func (l *Ledger) terminalClaimDecision(s spec) (Decision, bool) {
 	return Decision{}, false
 }
 
-func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	s, err := l.normalize(req)
-	if err != nil {
-		return nil, err
-	}
-	for _, le := range l.leases {
-		if _, ok := le.members[s.id]; ok {
-			return nil, ErrDuplicateID
-		}
-	}
-	for _, w := range l.waiters {
-		if w.spec.id != s.id {
-			continue
-		}
-		s.admit = w.spec.admit
-		s.ownerID = w.spec.ownerID
-		s.ownerAdmit = w.spec.ownerAdmit
-		l.applyPriorityOverride(&s)
-		w.spec = s
-		l.sortWaiters()
-		events := l.promote()
-		l.mustHoldInvariants()
-		return events, nil
-	}
-	return nil, errUnknownMember
-}
-
 func (l *Ledger) CancelWaiter(id string) []Event {
 	l.mu.Lock()
 	defer l.mu.Unlock()

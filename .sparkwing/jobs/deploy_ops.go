@@ -775,6 +775,9 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 		if err != nil {
 			return err
 		}
+		if err := d.verifyClusterAdmission(ctx, out); err != nil {
+			return err
+		}
 		if phase.name == deployPhaseController {
 			previous, err := os.ReadFile(filepath.Join(dir, rendered))
 			if err != nil {
@@ -867,7 +870,7 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 			if !d.tools.now().Before(deadline) {
 				return fmt.Errorf("still %s after %s", last, d.cfg.ArgoTimeout)
 			}
-			if err := d.tools.wait(ctx, d.cfg.PollInterval); err != nil {
+			if err := d.tools.wait(ctx, time.Second); err != nil {
 				return err
 			}
 		}
