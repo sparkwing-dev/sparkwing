@@ -194,6 +194,8 @@ type envDeployment struct {
 }
 
 type stagingGateRecord struct {
+	CLIPlatform  string       `json:"cli_platform,omitempty"`
+	CLIDigest    string       `json:"cli_digest,omitempty"`
 	ScanRun      string       `json:"scan_run"`
 	Images       deployImages `json:"images"`
 	RunID        string       `json:"run_id"`

@@ -471,6 +471,15 @@ digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
 same for the launcher with every other chart change. Each GitOps push requests a hard
 Argo refresh before waiting, requiring patch permission on the named Application.
+
+The successful staging gate records the candidate CLI's SHA-256 and native platform.
+It retains only those executable bytes in a content-addressed temporary directory,
+using the deploy scratch expiry. Production copies them into its own private job
+directory after checking the gate's source SHA, platform and binary digest.
+Missing or mismatched bytes rebuild from the production job's candidate checkout.
+A runner without the staging runner's temporary filesystem rebuilds too.
+CLI profiles, credentials and stores stay private to each job.
+
 `staging-gate` starts `deploy-smoke` and the `sparkwing-ci-smoke` reference pipeline
 before waiting for both on staging Cloud. `production`
 requires a staging-gate record for the same digests and deploys the same images. It runs
