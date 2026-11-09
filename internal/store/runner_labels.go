@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// ValidateRunnerLabels bounds enrollment and claim metadata before it is stored or shown for approval.
+// ValidateRunnerLabels validates label count, length and characters for enrollment, admin updates and claims.
 // Labels are trimmed like matching input and may contain ASCII letters, digits, '-', '_', '.', ':', '/' and '='.
 func ValidateRunnerLabels(labels []string) error {
 	if len(labels) > 32 {

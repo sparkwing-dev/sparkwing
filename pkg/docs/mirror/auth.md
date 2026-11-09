@@ -833,8 +833,9 @@ subset. Fixed identity keys still come from the controller.
 
 Enrollment and admin updates accept at most 32 labels. After trimming whitespace,
 each label must be 1 to 128 ASCII characters from letters, digits, `-`, `_`, `.`,
-`:`, `/` and `=`. Claims enforce the same bounds. Browser enrollment approval
-shows the complete effective allowed set, or None, before the account approves.
+`:`, `/` and `=`. Claims enforce the same bounds. Browser approval accepts
+personal runners with an empty allowed set. Enroll labels through `--session-stdin` using a team
+administrator's session.
 
 To change the allowed set on Sparkwing Cloud, a team administrator revokes the
 existing enrollment and re-enrolls the runner with
