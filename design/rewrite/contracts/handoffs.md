@@ -1452,3 +1452,20 @@ Korey directed executive speed: "make these process changes, push them through a
 ## 2026-11-04 Korey decision 97: an agent's retry says why it should pass
 
 Recorded from Korey's session decision 26. `runs retry` takes an optional `--reason`, recorded on the new run as `lineage.retry_reason` and shown by `runs status`, `runs list`, the API and the console run view. It is required when the retry is started by an agent, detected as for decision 94 (`--agent`, `SPARKWING_AGENT`, `CODEX_THREAD_ID`, `GEMINI_CLI=1`, `CLAUDECODE=1`); people are never required. The store's retry intake (`retryIntakeTx`) owns the rule, so the retry route and an intake request carrying `retry_of` enforce it alike; the CLI checks the same rule before connecting. The retry request carries the requester's agent label as an additive field, because the source run's label says who started the source, not who is retrying: requiring a reason from every retry of an agent-started run would ask people too. Consequently a CLI older than the field, which sends no label, is not required to give a reason; the controller cannot tell it apart from a person. A controller older than the field refuses it before writing, and the CLI resends without the reason and label and prints a notice. The label stays display-only for authority: it decides only whether a reason is required.
+
+## 2026-11-09 lead amendment to decision 87: narrow Argo refresh permission
+
+Tonight's lead decision supersedes decision 87's removal of Argo application
+`patch`. The deploy role may `get` and `patch` only the named `sparkwing` and
+`sparkwing-staging` Applications in `argocd`. The rollout uses patch to set
+`argocd.argoproj.io/refresh=hard` after each GitOps push, then waits for the exact
+revision to be Synced and Healthy. A refused patch fails the phase with a
+permission remedy.
+
+The live rollout requires this refresh to avoid waiting for Argo polling. This
+records the implemented narrow get/patch contract; it changes no permissions.
+The dedicated GitOps repository, AppProject confinement and infrastructure-owned
+RBAC from decision 87 remain. Assumption: that confinement remains the intended
+boundary while the rollout requests refresh. Korey can confirm or reverse this
+amendment. Reversal removes the refresh action, restores polling and removes
+patch permission in the owning infrastructure repository.
