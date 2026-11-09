@@ -735,3 +735,19 @@ func (h *host) StartChild(ctx context.Context, r sdkserve.ChildRequest) (string,
 	defer cancel()
 	return h.opts.StartChild(ctx, r.Pipeline, r.Args)
 }
+
+func (h *host) AwaitChild(ctx context.Context, run string) (string, error) {
+	if err := h.executionError(ctx); err != nil {
+		return "", err
+	}
+	if h.opts.AwaitChild == nil {
+		return "", errors.New("fake host has no child await handler")
+	}
+	if err := h.begin(ctx); err != nil {
+		return "", err
+	}
+	defer h.work.Done()
+	ctx, cancel := h.linkedContext(ctx)
+	defer cancel()
+	return h.opts.AwaitChild(ctx, run)
+}

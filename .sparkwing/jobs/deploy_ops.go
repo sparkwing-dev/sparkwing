@@ -55,6 +55,7 @@ type deployRegistry interface {
 }
 
 type deployTools struct {
+	awaitChild func(context.Context, string) (string, error)
 	startChild func(context.Context, string, map[string]string) (string, error)
 	run        func(context.Context, deployCommand) (string, error)
 	registry   deployRegistry
@@ -69,6 +70,7 @@ type deployTools struct {
 func realDeployTools() deployTools {
 	return deployTools{
 		startChild: sparkwing.StartChild,
+		awaitChild: sparkwing.AwaitChild,
 		run:        runDeployCommand,
 		registry:   ecrRegistry{},
 		oidc:       sparkwing.OIDCToken,

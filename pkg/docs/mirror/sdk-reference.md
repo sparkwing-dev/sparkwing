@@ -18,6 +18,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 ## Functions
 
 - `func Annotate(ctx context.Context, annotation Annotation)` -- Annotate emits a located annotation during execution.
+- `func AwaitChild(ctx context.Context, runID string) (string, error)` -- AwaitChild waits for a child started by this job and returns its terminal status.
 - `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug record; the host decides whether to retain it.
 - `func Error(ctx context.Context, format string, args ...any)` -- Error emits an error-level message.
 - `func GithubOwnerRepo(slug string) (owner, repo string)` -- GithubOwnerRepo splits a "owner/name" slug into its parts.
