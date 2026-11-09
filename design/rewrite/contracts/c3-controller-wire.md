@@ -347,7 +347,6 @@ one envelope and use `apierr.DecodeInner`.
 
 | Export | Contract |
 | --- | --- |
-| `Compatibility`, `CompatibilityFor`, `APIMajor` | API identity and per-engine compatibility window, served by `/api/v1/capabilities?engine_version=` from verified release metadata. |
 | `CreateRunRequest`, `CreateRunResponse` | Shared intake, allocated team number, display inputs, write scope, replay and one-time here bearer. |
 | `PlanSubmission`, `PlanAccepted` | Second-seal proposal and committed plan/spec hashes. Restricted `CheckoutDeclarations` retain pipeline/default layers and origins; the store resolves them against its own request overrides and ceilings. |
 | `ClaimRequest`, `ClaimResponse`, `ClaimedUnit` | Queue or named selection and a server-derived unit award. Granted identity, pools and billing never come from the request. Runner software version is checked by `engine.EvaluateRunner` before new awards; draining renewals stay available. |

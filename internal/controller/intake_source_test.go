@@ -365,7 +365,8 @@ func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
 	head, pinned, fork := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("f", 40)
 	refs := map[string]string{"refs/heads/main": head, "refs/tags/v1": head, "refs/heads/release": pinned, "refs/heads/pinned": head}
 	configs := map[string]string{head: "pipelines:\n  - name: ci\n    entrypoint: CI\n  - name: deploy\n    entrypoint: Deploy\n    source: release\n"}
-	selectSource := func(ctx context.Context, request runspec.Request) (runspec.Git, runspec.Source, error) {
+	selectSource := func(ctx context.Context, request *runspec.Request) (runspec.Git, runspec.Source, error) {
+		request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"configured-runner"}}}
 		git, code, _, err := source.Select(ctx, source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL}, request.Pipeline, request.Git, request.Source, "", source.Options{
 			ResolveRef: func(_ context.Context, ref string) (string, error) { return refs[ref], nil },
 			ReadFile: func(_ context.Context, sha, _ string) ([]byte, bool, error) {
@@ -399,7 +400,7 @@ func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
 		tc.change(&request)
 		ref := request.Git.Ref
 		got, err := app.selectFetchedSource(t.Context(), &request, selectSource)
-		if err != nil || got.ID != 701 || !strings.EqualFold(request.Git.SHA, head) || request.Git.Ref != ref || got.Ref != tc.ref || (got.SHA == head) != (tc.ref != "") {
+		if err != nil || got.ID != 701 || !request.Options.Requires.Set || !strings.EqualFold(request.Git.SHA, head) || request.Git.Ref != ref || got.Ref != tc.ref || (got.SHA == head) != (tc.ref != "") {
 			t.Errorf("%s = %+v %v %+v", name, got, err, request.Git)
 		}
 	}
@@ -423,7 +424,7 @@ func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
 	} {
 		request := cli
 		change(&request)
-		if got, _ := app.selectFetchedSource(t.Context(), &request, selectSource); got.ID != 0 {
+		if got, _ := app.selectFetchedSource(t.Context(), &request, selectSource); got.ID != 0 || request.Options.Requires.Set {
 			t.Errorf("%s proved repository %+v", name, got)
 		}
 	}

@@ -14,12 +14,6 @@ import (
 
 var _ controllerwire.Controller = (*engineClient)(nil)
 
-func (c *engineClient) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error) {
-	var result controllerwire.Compatibility
-	err := c.request(ctx, "GET", "/api/v1/capabilities", "/api/v1/capabilities?engine_version="+url.QueryEscape(version), "", nil, &result)
-	return result, err
-}
-
 func (c *engineClient) ReadRun(ctx context.Context, run string) (controllerwire.RunDetail, error) {
 	var result controllerwire.RunDetail
 	if !validSelector(run) {

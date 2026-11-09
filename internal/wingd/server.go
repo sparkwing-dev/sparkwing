@@ -403,8 +403,6 @@ func (d *Daemon) initLedger() error {
 
 func (d *Daemon) now() time.Time { return d.cfg.now() }
 
-func (d *Daemon) isDrainingLocked() bool { return d.draining }
-
 func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	if r.Cores == 0 && r.MemoryBytes == 0 {
 		return wingwire.HostResources{Cores: admission.DefaultChargeCores}

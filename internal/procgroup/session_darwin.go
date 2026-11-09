@@ -35,7 +35,3 @@ func signalGuardSession(sessionID int, kill bool) error {
 	}
 	return signalSession(sessionID, signal)
 }
-
-func signalDiagnosticSession(sessionID int) error {
-	return signalSession(sessionID, syscall.SIGQUIT)
-}

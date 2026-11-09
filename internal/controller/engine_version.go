@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
@@ -19,9 +18,7 @@ type SignedEngineVersionPolicy struct {
 
 type engineVersionContracts interface {
 	Index(context.Context, *engine.Resolver, time.Time) (engine.IndexResult, error)
-	Policy(engine.VerifiedIndex) engine.VersionIndex
 	Evaluate(engine.VerifiedIndex, string, time.Time) ([]engineid.Notice, error)
-	CompatibilityFor(engineid.VersionInfo) controllerwire.Compatibility
 }
 
 type sharedEngineVersionContracts struct{}
@@ -30,16 +27,8 @@ func (sharedEngineVersionContracts) Index(ctx context.Context, resolver *engine.
 	return resolver.Index(ctx, now)
 }
 
-func (sharedEngineVersionContracts) Policy(index engine.VerifiedIndex) engine.VersionIndex {
-	return index.Policy()
-}
-
 func (sharedEngineVersionContracts) Evaluate(index engine.VerifiedIndex, version string, now time.Time) ([]engineid.Notice, error) {
 	return engine.Evaluate(index, version, now)
-}
-
-func (sharedEngineVersionContracts) CompatibilityFor(release engineid.VersionInfo) controllerwire.Compatibility {
-	return controllerwire.CompatibilityFor(release)
 }
 
 func (p SignedEngineVersionPolicy) services() (engineVersionContracts, error) {
@@ -50,30 +39,6 @@ func (p SignedEngineVersionPolicy) services() (engineVersionContracts, error) {
 		return p.contracts, nil
 	}
 	return sharedEngineVersionContracts{}, nil
-}
-
-// compatibility uses the exact verified release without applying execution eligibility.
-func (p SignedEngineVersionPolicy) compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error) {
-	if version == "" {
-		return controllerwire.Compatibility{}, invalidEngineBody("engine_version is required")
-	}
-	services, err := p.services()
-	if err != nil {
-		return controllerwire.Compatibility{}, err
-	}
-	index, err := services.Index(ctx, p.Resolver, time.Now().UTC())
-	if err != nil {
-		return controllerwire.Compatibility{}, err
-	}
-	if index.Index.Development() || index.Index.Offline() {
-		return controllerwire.Compatibility{APIMajor: controllerwire.APIMajor, EngineRelease: version}, nil
-	}
-	for _, release := range services.Policy(index.Index).Versions {
-		if release.Version == version {
-			return services.CompatibilityFor(release), nil
-		}
-	}
-	return controllerwire.Compatibility{}, &apierr.Error{Code: apierr.NotFound, Message: "engine release is absent from verified metadata"}
 }
 
 // CheckRunner applies local execution policy for authenticated local subjects.
