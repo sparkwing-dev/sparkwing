@@ -239,23 +239,6 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 	return out
 }
 
-func (d *Daemon) queuedDeliveryLockedFromSnapshot(c *conn, snap admission.Snapshot, runID string) *delivery {
-	qlen := len(snap.Waiters)
-	for i, waiter := range snap.Waiters {
-		if waiter.RequestID != runID {
-			continue
-		}
-		return &delivery{c, &wingwire.Queued{
-			RunID:          runID,
-			Key:            blockingSemaphoreKey(snap, waiter),
-			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
-			QueueLength:    qlen,
-			BlockingReason: d.hostBlockingReasonLocked(c),
-		}}
-	}
-	return nil
-}
-
 func blockingSemaphoreKeyForRun(snap admission.Snapshot, runID string) string {
 	for _, waiter := range snap.Waiters {
 		if waiter.RequestID == runID {
@@ -328,10 +311,6 @@ func waiterResources(waiter admission.WaiterState) map[string]struct{} {
 		resources["semaphore:"+claim.Key] = struct{}{}
 	}
 	return resources
-}
-
-func (d *Daemon) cancelWaiterLocked(runID string) []admission.Event {
-	return d.ledger.CancelWaiter(runID)
 }
 
 func (d *Daemon) waiterCountLocked() int {
