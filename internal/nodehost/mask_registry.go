@@ -4,7 +4,6 @@ import (
 	"errors"
 	"sync"
 
-	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 
@@ -96,7 +95,7 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 	}
 	for identifier, path := range r.identifiers {
 		if candidate.ContainsSecret(identifier) {
-			return identifierMaskError(path)
+			return nodeproto.SecretIdentifierError(path, identifier, candidate)
 		}
 	}
 	r.masker.Merge(candidate)
@@ -119,7 +118,7 @@ func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matche
 	identifiers := map[string]string{}
 	if err := nodeproto.VisitPlanIdentifiers(plan, func(identifier, path string) error {
 		if matcher.ContainsSecret(identifier) {
-			return identifierMaskError(path)
+			return nodeproto.SecretIdentifierError(path, identifier, matcher)
 		}
 		identifiers[identifier] = path
 		return nil
@@ -135,8 +134,9 @@ func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matche
 	return nil
 }
 
-func identifierMaskError(path string) error {
-	return executorError(hosterr.SecretInIdentifier, "registered secret conflicts with identifier at "+path)
+// ContainsSecretLine identifies the line origin of an identifier collision.
+func (r *MaskRegistry) ContainsSecretLine(identifier string) bool {
+	return r.masker.ContainsSecretLine(identifier)
 }
 
 func (r *MaskRegistry) mask(text string) string { return r.masker.Mask(text) }

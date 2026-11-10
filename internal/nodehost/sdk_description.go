@@ -44,3 +44,10 @@ func (s planningSecrets) ContainsSecret(identifier string) bool {
 	}
 	return s.masker.ContainsSecret(identifier)
 }
+
+func (s planningSecrets) ContainsSecretLine(identifier string) bool {
+	if prior, ok := s.prior.(interface{ ContainsSecretLine(string) bool }); ok && prior.ContainsSecretLine(identifier) {
+		return true
+	}
+	return s.masker.ContainsSecretLine(identifier)
+}

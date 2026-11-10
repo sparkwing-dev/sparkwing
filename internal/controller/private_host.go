@@ -105,6 +105,9 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 	ctx := s.placementContext(r.Context())
 	var snapshot store.RunSnapshot
 	if a.Access.Credential == capability.CredentialLocalPeer {
+		if _, ok := localhostwire.LocalSocketPeer(r.Context()); !ok {
+			return hosterr.Authorization(hosterr.ReasonBinding, "local publication export requires the local API socket")
+		}
 		publication, err := tenant.ReadLocalPublication(ctx, a.Target.RunID)
 		if err != nil {
 			return engineLookupError(err)

@@ -115,6 +115,10 @@ Embedded local controllers use `Server.HTTP()` for the API and dashboard
 handlers in `wingd.LocalHTTP`. The API reads the verified socket identity from
 Wingd's connection context. Explicit credentials keep precedence. Browser
 requests supply their own authentication. These handlers expose the same capability policy routes as the network controller.
+The local publication export at `GET /api/v1/runs/{run}/local-host/snapshot`
+requires a kernel-verified local API socket when read as a local peer.
+Dashboard sessions cannot export it because publication includes private argument
+values. Run execution owners retain their run-bound snapshot access.
 
 Schedule, invitation, billing and storage reads use member
 capability policy. The same holds for GitHub App installation, repository,

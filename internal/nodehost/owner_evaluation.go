@@ -228,7 +228,7 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 	}
 	if err := nodeproto.VisitPlanIdentifiers(plan, func(value, path string) error {
 		if matcher.ContainsSecret(value) {
-			return identifierMaskError(path)
+			return nodeproto.SecretIdentifierError(path, value, matcher)
 		}
 		return nil
 	}); err != nil {
