@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -254,6 +255,39 @@ func TestGitHubRunnerExchangeReadsOnlyATokenSizedBody(t *testing.T) {
 		_ = response.Body.Close()
 		if want := map[bool]int{true: http.StatusCreated, false: http.StatusBadRequest}[padding == 0]; response.StatusCode != want {
 			t.Fatalf("padding %d: HTTP %d, want %d", padding, response.StatusCode, want)
+		}
+	}
+}
+
+func TestGitHubRunnerExchangeHidesTeamExistence(t *testing.T) {
+	f := newGHFixture(t)
+	owner := f.user("o", "olga@example.com")
+	token := f.gh.Token(widgetsJob, ghAudience)
+	var knownBody string
+	for _, team := range []string{owner.team, "nonexistent-team-for-exchange"} {
+		body, err := json.Marshal(map[string]string{"id_token": token, "team": team})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.Post(f.url+"/api/v1/runners/github/exchange", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusForbidden {
+			t.Errorf("team %q: HTTP %d, body %s; want 403", team, response.StatusCode, raw)
+		}
+		if team == owner.team {
+			knownBody = string(raw)
+			if !strings.Contains(knownBody, "repository enrollment is missing") {
+				t.Fatalf("unexpected enrollment refusal: %s", raw)
+			}
+		} else if string(raw) != knownBody {
+			t.Errorf("missing team body %s differs from unenrolled team body %s", raw, knownBody)
 		}
 	}
 }
