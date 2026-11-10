@@ -60,7 +60,7 @@ func TestWindowsHostCommandBatchArguments(t *testing.T) {
 			})
 		}
 		for _, arg := range []string{"x\ry", "x\ny"} {
-			req := nodeproto.ExecRequest{ID: "batch", Argv: []string{tool, "safe", arg}, Dir: dir, Env: os.Environ(), Capture: true}
+			req := nodewire.ExecRequest{ID: "batch", Argv: []string{tool, "safe", arg}, Dir: dir, Env: os.Environ(), Capture: true}
 			var output strings.Builder
 			done, session := runHostCommand(req, nil, nil, nil, func(_ string, chunk []byte, _ bool) error {
 				output.Write(chunk)
