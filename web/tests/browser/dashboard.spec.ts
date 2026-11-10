@@ -67,6 +67,15 @@ test("keeps activity rows exactly two lines with long metadata and errors", asyn
       height: el.getBoundingClientRect().height,
       overflow: el.scrollHeight - el.clientHeight,
     }))));
+    const metadataOverflow = await long.evaluate((row) => {
+      const values = Array.from(row.querySelectorAll<HTMLElement>("span.relative.inline-flex"));
+      return values.some((value) => {
+        const text = value.querySelector<HTMLElement>(".truncate");
+        if (!text) return false;
+        return text.getBoundingClientRect().right > value.getBoundingClientRect().right + 1;
+      });
+    });
+    expect(metadataOverflow).toBe(false);
     expect(sizes[0].height).toBe(sizes[1].height);
     expect(sizes[0].height).toBe(56);
     expect(sizes[0].overflow).toBeLessThanOrEqual(0);
