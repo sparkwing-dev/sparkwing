@@ -227,7 +227,7 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 
 func (s preparedTriggerSource) checkProfile(profile string) error {
 	if s.profile != "" && s.profile != profile {
-		return fmt.Errorf("pipeline trigger: pipeline %s is pinned to profile %s; pass --profile %s", s.pipeline, s.profile, s.profile)
+		return fmt.Errorf("pipeline trigger: pipeline %s is pinned to a controller profile; pass --profile <profile-from-sparkwing.yaml>", s.pipeline)
 	}
 	return nil
 }

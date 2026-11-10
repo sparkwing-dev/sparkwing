@@ -36,7 +36,7 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 	if err := ownerRequestMatches(input, snapshot.Run); err != nil {
 		return accepted, err
 	}
-	if err := h.Masks.initialize(snapshot.Run.Request, nil, nil, nil); err != nil {
+	if err := h.Masks.initialize(snapshot.Run.Request, nil, nil, nil, nil); err != nil {
 		return accepted, err
 	}
 	entry, err := h.acquire(ctx, input, snapshot.Run)

@@ -37,7 +37,12 @@ func inspectionCommand(command pipelineentry.Command, directory, pipeline string
 		return pipelineInspection{}, err
 	}
 	sessions := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: base}}
+	project, projectFile, err := nodehost.ReadCheckoutProject(context.Background(), directory, filepath.Join(directory, ".sparkwing"))
+	if err != nil {
+		return pipelineInspection{}, err
+	}
 	return pipelineInspection{
+		project: project, projectFile: projectFile,
 		planner: nodehost.SDKPlanner{Start: sessions.StartPlanning, Masker: base.Masker, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		}, Log: func(context.Context, nodewire.FrameLog) error { return nil }},

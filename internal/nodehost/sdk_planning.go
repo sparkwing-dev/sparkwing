@@ -88,7 +88,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	if p.Masks == nil {
 		p.Masks = NewMaskRegistry(p.Masker)
 	}
-	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, nil, nil, nil); err != nil {
+	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, nil, nil, nil, nil); err != nil {
 		return PreparedPlanning{}, err
 	}
 	declarationsKnown := false

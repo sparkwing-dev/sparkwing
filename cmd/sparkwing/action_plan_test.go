@@ -423,3 +423,94 @@ func TestPlanDryRunJSON(t *testing.T) {
 		t.Fatalf("dry-run JSON: %s", raw)
 	}
 }
+
+func TestPlanRejectsUnsupportedJobSize(t *testing.T) {
+	plan := strings.Replace(fixturePlan, `"id":"build"`, `"id":"build","requires":["sparkwing-3cpu"]`, 1)
+	bin, _ := fakePlanSDK(t, fixtureDescribe, plan, fixtureEval)
+	_, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), t.TempDir(), "demo", []string{"--env", "prod"}, "plan")
+	if err == nil || !strings.Contains(err.Error(), "sparkwing-3cpu") {
+		t.Fatalf("unsupported job size must refuse preview, got %v", err)
+	}
+}
+
+func TestPlanUsesEffectiveCheckoutRequirements(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml, label string
+		refused           bool
+	}{
+		{"default unsupported", "defaults: {requires: [sparkwing-3cpu]}", "", true},
+		{"default supported", "defaults: {requires: [sparkwing-2cpu]}", "sparkwing-2cpu", false},
+		{"pipeline override", "defaults: {requires: [sparkwing-3cpu]}\npipelines: [{name: demo, entrypoint: demo, requires: [sparkwing-4cpu]}]", "sparkwing-4cpu", false},
+		{"custom alternative", "defaults: {requires: ['pool=custom, sparkwing-2cpu']}", "pool=custom, sparkwing-2cpu", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			directory := t.TempDir()
+			if err := os.Mkdir(filepath.Join(directory, ".sparkwing"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(directory, ".sparkwing", "sparkwing.yaml"), []byte(tc.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bin, _ := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
+			got, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), directory, "demo", []string{"--env", "prod"}, "plan")
+			if tc.refused {
+				if err == nil || !strings.Contains(err.Error(), "sparkwing-3cpu") {
+					t.Fatalf("unsupported defaults: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc, err := previewPlan(got, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, job := range doc.Jobs {
+				if !slices.Equal(job.Requires, []string{tc.label}) {
+					t.Fatalf("job %s requires %v, want %s", job.ID, job.Requires, tc.label)
+				}
+			}
+		})
+	}
+}
+
+func TestPlanRejectsSecretCheckoutLabels(t *testing.T) {
+	const secret = "private-inspection-token"
+	describe := `"ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"token","type":"string","required":true,"secret":true}]}]}}`
+	for _, layer := range []string{"defaults", "pipeline", "losing-defaults"} {
+		for _, label := range []string{"requires", "prefers", "profile"} {
+			if label == "profile" && layer != "pipeline" {
+				continue
+			}
+			t.Run(layer+"/"+label, func(t *testing.T) {
+				directory := t.TempDir()
+				if err := os.Mkdir(filepath.Join(directory, ".sparkwing"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				value, safe := "[pool="+secret+"]", "[linux]"
+				if label == "profile" {
+					value, safe = secret, "safe"
+				}
+				config := "defaults: {" + label + ": " + value + "}"
+				if layer == "pipeline" {
+					config = "pipelines: [{name: demo, entrypoint: demo, " + label + ": " + value + "}]"
+				} else if layer == "losing-defaults" {
+					config += "\npipelines: [{name: demo, entrypoint: demo, " + label + ": " + safe + "}]"
+				}
+				if err := os.WriteFile(filepath.Join(directory, ".sparkwing", "sparkwing.yaml"), []byte(config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				bin, _ := fakePlanSDK(t, describe, fixturePlan, fixtureEval)
+				_, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), directory, "demo", []string{"--token", secret}, "plan")
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier {
+					t.Fatalf("effective secret label must refuse with secret_in_identifier, got %v", err)
+				}
+				if strings.Contains(err.Error(), secret) {
+					t.Fatal("secret escaped through refusal")
+				}
+			})
+		}
+	}
+}

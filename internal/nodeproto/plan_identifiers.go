@@ -146,3 +146,14 @@ func visitClosureIdentifiers(c nodewire.ClosureSpec, path string, visit func(str
 	}
 	return nil
 }
+
+// ValidateIdentifierSecret keeps registered values out of identifier diagnostics and metadata.
+func ValidateIdentifierSecret(value, path string, matcher SecretMatcher) error {
+	if matcher == nil {
+		return planInvalid("plan", "secret matcher is required")
+	}
+	if matcher.ContainsSecret(value) {
+		return SecretIdentifierError(path, value, matcher)
+	}
+	return nil
+}

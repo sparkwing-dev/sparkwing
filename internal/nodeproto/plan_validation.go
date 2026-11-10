@@ -35,7 +35,7 @@ func SecretIdentifierError(path, identifier string, matcher SecretMatcher) error
 	if lines, ok := matcher.(interface{ ContainsSecretLine(string) bool }); ok && lines.ContainsSecretLine(identifier) {
 		kind = "line of a multi-line secret"
 	}
-	return &apierr.Error{Code: hosterr.SecretInIdentifier, Message: fmt.Sprintf("%s in identifier at %s", kind, path), Details: map[string]any{"field": path}}
+	return sanitizePlanError(&apierr.Error{Code: hosterr.SecretInIdentifier, Message: fmt.Sprintf("%s in identifier at %s", kind, path), Details: map[string]any{"field": path}}, matcher)
 }
 
 func validatePlan(raw json.RawMessage, context ValidationContext) (nodewire.PlanDoc, error) {
@@ -47,10 +47,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (nodewire.Plan
 		return nodewire.PlanDoc{}, err
 	}
 	checkSecret := func(value, path string) error {
-		if context.Secrets.ContainsSecret(value) {
-			return SecretIdentifierError(path, value, context.Secrets)
-		}
-		return nil
+		return ValidateIdentifierSecret(value, path, context.Secrets)
 	}
 	if err := VisitPlanIdentifiers(plan, checkSecret); err != nil {
 		return nodewire.PlanDoc{}, err

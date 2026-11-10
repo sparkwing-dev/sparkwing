@@ -26,7 +26,7 @@ func TestRun_RefusesAPinnedPipelineAndNamesTrigger(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  prod: { controller: { url: http://127.0.0.1:1 } }\n")
 	projectAt(t, pinnedProject)
 	err := dispatchRunArgs([]string{"release"})
-	if err == nil || !strings.Contains(err.Error(), "pipeline release is pinned to profile prod; use sparkwing pipeline trigger release --profile prod") {
+	if err == nil || !strings.Contains(err.Error(), "pipeline release is pinned to a controller profile; use sparkwing pipeline trigger release --profile <profile-from-sparkwing.yaml>") {
 		t.Fatalf("dispatchRunArgs(release) = %v, want the pin refusal", err)
 	}
 }
@@ -88,7 +88,7 @@ func TestRun_SwRefReadsThePinAtTheExecutedRevision(t *testing.T) {
 	gitIn(t, root, "tag", "unpinned")
 
 	err = dispatchRunArgs([]string{"release", "--sw-ref", "pinned"})
-	if err == nil || !strings.Contains(err.Error(), "pinned to profile prod") {
+	if err == nil || !strings.Contains(err.Error(), "pinned to a controller profile") {
 		t.Fatalf("--sw-ref to a pinned revision from an unpinned checkout = %v, want the pin refusal", err)
 	}
 	dir := filepath.Join(root, ".sparkwing")
@@ -129,5 +129,17 @@ func TestPinRefusal_SuggestsACommandTriggerParses(t *testing.T) {
 		if perr != nil || flags.pipeline != args[0] || flags.profile == "" {
 			t.Fatalf("suggested %q parses to %+v, %v; want pipeline %s with a --profile", suggested, flags, perr, args[0])
 		}
+	}
+}
+
+func TestTriggerPinRefusalDoesNotEchoUncheckedProfile(t *testing.T) {
+	const value = "private-profile-canary"
+	selected := preparedTriggerSource{pipeline: "probe", profile: value}
+	err := selected.checkProfile("other")
+	if err == nil || strings.Contains(err.Error(), value) || !strings.Contains(err.Error(), "--profile") || !strings.Contains(err.Error(), "sparkwing.yaml") {
+		t.Fatalf("pin refusal must give a value-free repair: %v", err)
+	}
+	if err := selected.checkProfile(value); err != nil {
+		t.Fatal("matching profile was refused")
 	}
 }

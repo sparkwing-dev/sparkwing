@@ -5,7 +5,9 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
@@ -94,8 +96,8 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 		return errors.New("mask registration requires a shared masker")
 	}
 	for identifier, path := range r.identifiers {
-		if candidate.ContainsSecret(identifier) {
-			return nodeproto.SecretIdentifierError(path, identifier, candidate)
+		if err := nodeproto.ValidateIdentifierSecret(identifier, path, candidate); err != nil {
+			return err
 		}
 	}
 	r.masker.Merge(candidate)
@@ -106,24 +108,39 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 // acceptPlan checks initial or generated identifiers, commits under the registration
 // lock, then retains their names. A refused commit changes no registry state.
 func (r *MaskRegistry) acceptPlan(plan nodewire.PlanDoc, commit func() error) error {
-	return r.accept(plan, commit, r.masker)
+	return r.accept(plan, commit, r.masker, nil, nil)
 }
 
-func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matcher *secrets.Masker) error {
+func (r *MaskRegistry) acceptResolvedPlan(plan nodewire.PlanDoc, declarations runspec.CheckoutDeclarations, resolved runspec.ExecutionSettings, commit func() error) error {
+	return r.accept(plan, commit, r.masker, &declarations, &resolved)
+}
+
+func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matcher *secrets.Masker, declarations *runspec.CheckoutDeclarations, resolved *runspec.ExecutionSettings) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.masker == nil || commit == nil {
 		return errors.New("identifier acceptance requires masker and commit")
 	}
 	identifiers := map[string]string{}
-	if err := nodeproto.VisitPlanIdentifiers(plan, func(identifier, path string) error {
-		if matcher.ContainsSecret(identifier) {
-			return nodeproto.SecretIdentifierError(path, identifier, matcher)
+	visit := func(identifier, path string) error {
+		if err := nodeproto.ValidateIdentifierSecret(identifier, path, matcher); err != nil {
+			return err
 		}
 		identifiers[identifier] = path
 		return nil
-	}); err != nil {
+	}
+	if err := nodeproto.VisitPlanIdentifiers(plan, visit); err != nil {
 		return err
+	}
+	if declarations != nil {
+		if err := settings.VisitDeclarationIdentifiers(*declarations, visit); err != nil {
+			return err
+		}
+	}
+	if resolved != nil {
+		if err := settings.VisitExecutionIdentifiers(*resolved, visit); err != nil {
+			return err
+		}
 	}
 	if err := commit(); err != nil {
 		return err

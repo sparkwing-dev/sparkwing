@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func successfulExpansionFixture(t *testing.T) (*Tenant, ExpansionSubmission) {
@@ -71,7 +74,7 @@ func TestExpansionEmptySuccessPreservesEmptyGroup(t *testing.T) {
 }
 
 func TestExpansionRefusalRollsBackAllJobsAndBarrier(t *testing.T) {
-	for _, problem := range []string{"duplicate_job", "wrong_group", "missing_jobs", "null_jobs", "secret_identifier"} {
+	for _, problem := range []string{"duplicate_job", "wrong_group", "missing_jobs", "null_jobs", "secret_identifier", "secret_effective_requires", "secret_effective_prefers"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
 			switch problem {
@@ -83,22 +86,43 @@ func TestExpansionRefusalRollsBackAllJobsAndBarrier(t *testing.T) {
 				request.Body = []byte(`{}`)
 			case "null_jobs":
 				request.Body = []byte(`{"jobs":null}`)
-			case "secret_identifier":
+			case "secret_identifier", "secret_effective_requires", "secret_effective_prefers":
 				request.Body = []byte(`{"jobs":[{"id":"job-secret-42","steps":[{"id":"step"}],"groups":["group"]}]}`)
 				var spec runspec.Spec
 				spec.Declarations.Version = 1
 				spec.Request.Request.Pipeline = "p"
 				spec.Resolved.SecretArgs = []string{"token"}
 				spec.Resolved.Args = map[string]string{"token": "secret-42"}
+				if problem != "secret_identifier" {
+					request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"step"}],"groups":["group"]}]}`)
+					label := "requires"
+					if problem == "secret_effective_prefers" {
+						label = "prefers"
+					}
+					var err error
+					spec.Declarations, err = settings.ProjectCheckoutDeclarations([]byte("defaults: {"+label+": [pool=secret-42]}"), ".sparkwing/sparkwing.yaml", "p")
+					if err != nil {
+						t.Fatal(err)
+					}
+
+				}
 				raw, err := json.Marshal(spec)
 				if err != nil {
 					t.Fatal(err)
 				}
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=? WHERE id='run'`, raw)
 			}
-			if _, err := tenant.AcceptExpansion(t.Context(), request); err == nil {
+			_, err := tenant.AcceptExpansion(t.Context(), request)
+			if err == nil {
 				t.Fatal("invalid expansion accepted")
 			}
+			if problem == "secret_identifier" || problem == "secret_effective_requires" || problem == "secret_effective_prefers" {
+				var refusal *apierr.Error
+				if !errors.As(err, &refusal) || refusal.Code != hosterr.SecretInIdentifier {
+					t.Fatalf("wrong refusal: %v", err)
+				}
+			}
+
 			var count int
 			if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM nodes WHERE run_id='run'`).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("partial insertion: %d, %v", count, err)

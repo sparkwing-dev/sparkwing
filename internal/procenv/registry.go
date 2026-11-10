@@ -32,6 +32,7 @@ var Registry = []Var{
 	{Name: "SPARKWING_TESTLEAK_HOST", Prefix: false, Class: Protocol, Owner: "engine", Doc: "CLI or test marker; no pipeline inheritance."},
 	{Name: "PATH", Prefix: false, Class: tool, Owner: "tool", RemoteBase: true, Doc: "Minimal process base."},
 	{Name: "HOME", Prefix: false, Class: tool, Owner: "tool", RemoteBase: true, Doc: "Minimal process base."},
+	{Name: "USERPROFILE", Prefix: false, Class: tool, Owner: "tool", RemoteBase: true, Doc: "Windows home directory for native tools."},
 	{Name: "TMPDIR", Prefix: false, Class: tool, Owner: "tool", RemoteBase: true, Doc: "Minimal process base."},
 	{Name: "LANG", Prefix: false, Class: tool, Owner: "tool", RemoteBase: true, Doc: "Minimal process base."},
 	{Name: "LC_", Prefix: true, Class: tool, Owner: "tool", RemoteBase: true, Doc: "Minimal process base."},
