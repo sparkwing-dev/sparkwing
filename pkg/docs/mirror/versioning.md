@@ -85,8 +85,10 @@ release, minimum version, individual revocations and per-release support windows
 Its detached signature is `versions.json.sig`. Clients verify the exact bytes,
 refuse rollback and retain the last verified copy when refresh fails. There is
 no fallback-age cutoff. Local-only execution reads cached policy without any
-network refresh. Without a verified cached policy, or for a release newer than
-the cached one lists, it proceeds with a warning.
+network refresh. A published SDK pin needs a verified SDK-to-engine mapping.
+When that cache is empty, the first run fetches and verifies the signed index,
+caches it, and proceeds. If fetching or verification fails, the run refuses with
+the cause and asks you to run `sparkwing update` once online.
 `sparkwing update` refreshes the policy into `<sparkwing home>/engines`, the one
 cache local runs, the local controller, `upgrade` and `cache warm` share.
 `sparkwing update --dry-run` and `sparkwing doctor` report the cached policy's
