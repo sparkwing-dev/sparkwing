@@ -36,7 +36,7 @@ const ShortValueWarning = "Secret values shorter than 4 characters cannot be mas
 // Maskable reports whether a value is long enough to mask without hiding ordinary log text.
 func Maskable(value string) bool { return utf8.RuneCountInString(value) >= 4 }
 
-// Register protects one secret and its encoded spellings. Short values are skipped.
+// Register protects a secret, its maskable lines and their encoded spellings.
 func (m *Masker) Register(value string) error {
 	if !Maskable(value) {
 		return nil
@@ -46,6 +46,25 @@ func (m *Masker) Register(value string) error {
 	if _, ok := m.raw[value]; ok {
 		return nil
 	}
+	m.registerValue(value)
+	if strings.Contains(value, "\n") {
+		lf := strings.ReplaceAll(value, "\r\n", "\n")
+		m.registerValue(lf)
+		m.registerValue(strings.ReplaceAll(lf, "\n", "\r\n"))
+		for _, line := range strings.Split(lf, "\n") {
+			m.registerValue(line)
+		}
+	}
+	return nil
+}
+
+func (m *Masker) registerValue(value string) {
+	if !Maskable(value) {
+		return
+	}
+	if _, ok := m.raw[value]; ok {
+		return
+	}
 	if m.raw == nil {
 		m.raw = map[string]struct{}{}
 	}
@@ -54,7 +73,6 @@ func (m *Masker) Register(value string) error {
 	for _, encoded := range encodedForms(value) {
 		m.add(encoded)
 	}
-	return nil
 }
 
 func (m *Masker) add(value string) {

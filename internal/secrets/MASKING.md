@@ -21,7 +21,11 @@ Explicit secret and mask registrations still apply to every matching value.
 Each registered value is matched literally and through its JSON/Go quoted, URL
 query/path/component, standard and URL-safe base64, and embedded base64
 spellings. Percent escape hex digits match regardless of case. Encoded forms
-are not recursively derived. The marker is `***`. Overlapping matches merge,
+are not recursively derived. Multi-line secrets register the original value,
+its LF and CRLF spellings, and each line of at least four Unicode code points.
+Each eligible line gets the same encoded spellings. CRLF separators do not count
+toward a line's minimum length. Empty and shorter lines stay readable when
+printed alone. The marker is `***`. Overlapping matches merge,
 and replacement closure uses at most four passes. If ambiguity remains, the
 remaining payload is replaced as a whole. Secrets containing `***` are accepted
 under decision 49. Replacement can form a registered value containing `***`,
