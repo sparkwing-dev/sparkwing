@@ -43,6 +43,12 @@ func runPipelineNew(inv clisurface.Invocation) error {
 		return scaffoldTypeScriptPipeline(cwd, inv, mode)
 	}
 
+	shape, ok := builtinShapeByName(template)
+	if !ok {
+		return fmt.Errorf("new: unknown shape %q -- pipeline new takes a shape, one of: %s\n"+
+			"  a worked pipeline to read instead: sparkwing examples --example %s --body",
+			template, strings.Join(append(builtinShapeNames(), "typescript", "merge-queue-typescript"), ", "), template)
+	}
 	sparkwingDir, ok := walkUpForSparkwing(cwd)
 	bootstrapped := !ok
 	if !ok {
@@ -66,12 +72,6 @@ func runPipelineNew(inv clisurface.Invocation) error {
 		fmt.Fprintln(os.Stderr)
 	}
 
-	shape, ok := builtinShapeByName(template)
-	if !ok {
-		return fmt.Errorf("new: unknown shape %q -- pipeline new takes a shape, one of: %s\n"+
-			"  a worked pipeline to read instead: sparkwing examples --example %s --body",
-			template, strings.Join(append(builtinShapeNames(), "typescript", "merge-queue-typescript"), ", "), template)
-	}
 	trigger, err := resolveTrigger(shape, parseOnFlag(inv.Flags["on"]), inv.Has("on"))
 	if err != nil {
 		return err
