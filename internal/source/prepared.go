@@ -14,7 +14,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -100,6 +102,13 @@ func (p *Prepared) inputs(ctx context.Context, spec Spec, options Options, ident
 	tools, err := preparedTools(ctx, environment, identity.Pin.SDK, directory)
 	if err != nil {
 		return preparedInputs{}, err
+	}
+	if options.Base.TempDir != "" {
+		// safety: award-local storage must not invalidate prepared source reused by another award.
+		environment = slices.DeleteFunc(environment, func(entry string) bool {
+			name, _, _ := strings.Cut(entry, "=")
+			return slices.Contains([]string{"TMPDIR", "TMP", "TEMP"}, procenv.NameKey(name, runtime.GOOS))
+		})
 	}
 	environmentHash, err := hashJSON(environment)
 	if err != nil {

@@ -155,7 +155,12 @@ func TestAcquirePreparedRestoresExecutableWithoutSourceOrInstaller(t *testing.T)
 	for _, sdk := range []engineid.SDKKind{engineid.GoSDK, engineid.TypeScriptSDK} {
 		t.Run(string(sdk), func(t *testing.T) {
 			f := newPreparedFixture(t, sdk)
+			f.options.Base.TempDir = t.TempDir()
 			f.publish(t)
+			if err := os.RemoveAll(f.options.Base.TempDir); err != nil {
+				t.Fatal(err)
+			}
+			f.options.Base.TempDir = t.TempDir()
 			if sdk == engineid.TypeScriptSDK {
 				f.options.SDK = ""
 			}
