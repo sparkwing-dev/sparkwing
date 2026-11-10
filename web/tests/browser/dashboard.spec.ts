@@ -76,6 +76,12 @@ test("keeps activity rows exactly two lines with long metadata and errors", asyn
       });
     });
     expect(metadataOverflow).toBe(false);
+    const identityWidth = await short.locator("div.grid").first().evaluate((grid) => ({
+      available: grid.getBoundingClientRect().width,
+      metadata: grid.firstElementChild!.getBoundingClientRect().width,
+    }));
+    expect(identityWidth.metadata).toBeGreaterThan(identityWidth.available * 0.75);
+
     expect(sizes[0].height).toBe(sizes[1].height);
     expect(sizes[0].height).toBe(56);
     expect(sizes[0].overflow).toBeLessThanOrEqual(0);
