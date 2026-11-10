@@ -19,11 +19,12 @@ import (
 // RunView keeps status, attempt history and committed log identities in one snapshot.
 // Snapshot contains private execution inputs; public adapters must project its seals.
 type RunView struct {
-	Snapshot RunSnapshot
-	Reason   string
-	Attempts []runstate.NodeAttempt
-	Logs     []blob.LogSubject
-	Failures []RunFailure
+	Snapshot               RunSnapshot
+	Reason                 string
+	SecretPreflightRefusal string
+	Attempts               []runstate.NodeAttempt
+	Logs                   []blob.LogSubject
+	Failures               []RunFailure
 	// JobResults holds each job's masked summary and annotations from its current attempt.
 	JobResults []JobResult
 	Waiting    *UnclaimedUnit
@@ -85,6 +86,22 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 				return RunView{}, err
 			}
 			view.Reason = event.Reason
+		}
+	}
+	if view.Snapshot.Run.Spec == nil {
+		var payload []byte
+		err := tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE team=? AND run_id=? AND kind=? ORDER BY seq DESC LIMIT 1`, team, runID, runstate.EventSecretPreflightRefused).Scan(&payload)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return RunView{}, err
+		}
+		if len(payload) != 0 {
+			var refusal struct {
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(payload, &refusal); err != nil {
+				return RunView{}, err
+			}
+			view.SecretPreflightRefusal = refusal.Message
 		}
 	}
 	if view.Failures, err = readRunFailuresTx(ctx, tx, team, runID); err != nil {

@@ -107,3 +107,16 @@ func TestTriggeredOutcomeUsesSharedReadRetryPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestTriggeredOutcomePrintsSecretRefusalOnce(t *testing.T) {
+	const repair = "unique-secret-repair: sparkwing secrets set --secret MISSING --file <path>"
+	reader := &statusReader{details: []controllerwire.RunDetail{{ID: "run-outcome", Status: "failed", Notices: []engineid.Notice{{Kind: engineid.NoticeSecretPreflightRefused, Reason: repair}}}}}
+	var out bytes.Buffer
+	status, err := triggeredRunOutcome(t.Context(), reader, "run-outcome", &out)
+	if err != nil || status != "failed" {
+		t.Fatalf("status=%q error=%v", status, err)
+	}
+	if strings.Count(out.String(), repair) != 1 {
+		t.Fatalf("secret repair must appear once: %s", &out)
+	}
+}

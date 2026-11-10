@@ -30,13 +30,14 @@ import (
 // carry engine version policy and unclaimed-work observations. Private fields
 // stay here until the public display projection.
 type RunStatusFacts struct {
-	Reason     string
-	Snapshot   store.RunSnapshot
-	Attempts   []runstate.NodeAttempt
-	Logs       []blob.LogSubject
-	Failures   []store.RunFailure
-	JobResults []store.JobResult
-	Notices    []engineid.Notice
+	Reason                 string
+	SecretPreflightRefusal string
+	Snapshot               store.RunSnapshot
+	Attempts               []runstate.NodeAttempt
+	Logs                   []blob.LogSubject
+	Failures               []store.RunFailure
+	JobResults             []store.JobResult
+	Notices                []engineid.Notice
 	// HostIneligible explains ready jobs a local run's hosting machine cannot execute.
 	HostIneligible map[string]string
 }
@@ -70,7 +71,15 @@ func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorize
 		}
 		return controllerwire.RunDetail{}, engineLookupError(err)
 	}
-	return runDetailResponse(a.Target, facts)
+	detail, err := runDetailResponse(a.Target, facts)
+	if err != nil {
+		return controllerwire.RunDetail{}, err
+	}
+	// safety: the repair names team secret scopes that planning and job claims cannot read.
+	if a.Access.Credential == capability.CredentialMember && facts.SecretPreflightRefusal != "" {
+		detail.Notices = append(detail.Notices, engineid.Notice{Kind: engineid.NoticeSecretPreflightRefused, Reason: facts.SecretPreflightRefusal})
+	}
+	return detail, nil
 }
 
 func runDetailResponse(target capability.Target, facts RunStatusFacts) (controllerwire.RunDetail, error) {
@@ -305,7 +314,7 @@ func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.T
 }
 
 func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView) (RunStatusFacts, error) {
-	facts := RunStatusFacts{Reason: view.Reason, Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults, HostIneligible: view.HostIneligible}
+	facts := RunStatusFacts{Reason: view.Reason, SecretPreflightRefusal: view.SecretPreflightRefusal, Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults, HostIneligible: view.HostIneligible}
 	if spec := view.Snapshot.Run.Spec; spec != nil && spec.Resolved.Engine.Pin.SDK == engineid.GoSDK && spec.Resolved.Engine.Pin.Replacement != "" {
 		// bug: a replacement runs the installed engine, which Resolve never holds to release policy, and a main
 		// build's engine version is a pseudo-version that Evaluate refuses as an invalid release.

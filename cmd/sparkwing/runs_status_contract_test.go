@@ -353,3 +353,25 @@ func TestRunStatusMissingRunNamesDiscoveryCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestRunStatusShowsSecretRepairInEveryDiagnosticView(t *testing.T) {
+	const repair = "DEPLOY_TOKEN is unavailable: only shared team-wide secrets are readable. Fix: sparkwing secrets set --secret DEPLOY_TOKEN --file <path> --profile <profile> --shared"
+	for _, format := range []string{"json", "plain", "pretty"} {
+		for _, view := range []string{"summary", "errors"} {
+			t.Run(format+"/"+view, func(t *testing.T) {
+				detail := controllerwire.RunDetail{ID: "r1", Status: "failed", Reason: "plan_failed", Failure: "required secret missing", Notices: []engineid.Notice{{Kind: "secret_preflight_refused", Reason: repair}}}
+				reader := &statusReader{details: []controllerwire.RunDetail{detail}}
+				var out bytes.Buffer
+				err := observeRunStatus(t.Context(), statusInvocation(t, "-o", format, "--view", view), reader, &out, nil)
+				if exitCodeFor(err) != 1 {
+					t.Fatalf("exit: %v", err)
+				}
+				for _, want := range []string{"DEPLOY_TOKEN is unavailable", "sparkwing secrets set --secret DEPLOY_TOKEN", "--shared"} {
+					if !strings.Contains(out.String(), want) {
+						t.Fatalf("status lacks repair %q: %s", want, &out)
+					}
+				}
+			})
+		}
+	}
+}

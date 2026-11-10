@@ -100,13 +100,31 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w = reviewSessionRequest(t, server, session, csrf, "GET", "/api/v1/runs/run/events", "", http.StatusOK)
-
-	for _, line := range []string{"DEPLOY_TOKEN is unavailable: this run's code did not come from a repository Sparkwing fetched", "ELSEWHERE is unavailable", "sparkwing secrets set --secret DEPLOY_TOKEN", "--shared"} {
-		if !strings.Contains(w.Body.String(), line) {
-			t.Fatalf("team diagnostic lacks %q: %s", line, w.Body)
+	w = reviewSessionRequest(t, server, session, csrf, "GET", "/api/v1/runs/run", "", http.StatusOK)
+	var detail controllerwire.RunDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	var repair string
+	for _, notice := range detail.Notices {
+		if notice.Kind == "secret_preflight_refused" {
+			repair = notice.Reason
 		}
 	}
+	for _, line := range []string{"DEPLOY_TOKEN is unavailable: this run's code did not come from a repository Sparkwing fetched", "ELSEWHERE is unavailable", "sparkwing secrets set --secret DEPLOY_TOKEN --file <path> --profile <profile> --shared"} {
+		if !strings.Contains(repair, line) {
+			t.Fatalf("member status lacks scoped repair %q: %s", line, w.Body)
+		}
+	}
+	for _, token := range []string{raw, child.Raw} {
+		response := engineClaimHTTP(t, h, token, "GET", "/api/v1/runs/run", "", http.StatusOK)
+		for _, private := range []string{"secret_preflight_refused", "--shared", "release", "private-team", "private-elsewhere", "private-outsider"} {
+			if strings.Contains(response.Body.String(), private) {
+				t.Fatalf("claim status discloses %q: %s", private, response.Body)
+			}
+		}
+	}
+
 	snapshot, err := tenant.ReadSnapshot(t.Context(), "run")
 	if err != nil || snapshot.Run.Spec != nil || len(snapshot.Nodes) != 0 {
 		t.Fatalf("refused plan persisted work: %+v: %v", snapshot, err)

@@ -42,6 +42,20 @@ func renderObservedRun(ctx context.Context, reader controllerwire.RunReader, out
 		return err
 	}
 	if opts.view == "errors" {
+		for _, notice := range detail.Notices {
+			if notice.Kind != engineid.NoticeSecretPreflightRefused {
+				continue
+			}
+			var err error
+			if opts.format == "json" {
+				err = json.NewEncoder(out).Encode(notice)
+			} else {
+				err = writeEngineNotices(out, []engineid.Notice{notice})
+			}
+			if err != nil {
+				return err
+			}
+		}
 		return writeRunErrors(out, detail, opts.format)
 	}
 	if opts.format == "json" {
