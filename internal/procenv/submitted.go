@@ -60,7 +60,7 @@ func submittable(name string) bool {
 var (
 	safeToolNames  = []string{"AWS_REGION", "AWS_DEFAULT_REGION", "NO_COLOR", "CLICOLOR_FORCE", "TERM"}
 	goEnvName      = regexp.MustCompile(`^GO[A-Z0-9]*$`)
-	loaderNames    = []string{"ENV", "BASH_ENV", "CDPATH", "IFS", "PROMPT_COMMAND", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "RUBYOPT", "PERL5OPT", "PERL5LIB", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME"}
+	loaderNames    = []string{"ENV", "BASH_ENV", "CDPATH", "IFS", "PROMPT_COMMAND", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "RUBYOPT", "PERL5OPT", "PERL5LIB", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PSMODULEPATH"}
 	loaderPrefixes = []string{"LD_", "DYLD_", "GIT_", "SSH_", "CGO_", "NODE_", "NPM_", "YARN_", "PIP_", "PNPM_", "BUN_", "CARGO_", "RUSTC", "BUNDLE_", "GEM_", "MAVEN_", "GRADLE_"}
 )
 

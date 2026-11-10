@@ -152,7 +152,7 @@ than `AWS_REGION`, `AWS_DEFAULT_REGION`, `NO_COLOR`, `CLICOLOR_FORCE` and
 `TERM`, any `SPARKWING_*` or Go toolchain name (`GOAUTH`, `GOCACHEPROG`, and
 similar), and any name that loads code into a job or tool, in any case:
 `LD_*`, `DYLD_*`, `GIT_*`, `SSH_*`, `CGO_*`, `NODE_*`, npm, yarn, pip and other
-package-manager settings, `BASH_ENV`, `ENV`, `PYTHONPATH`, `JAVA_TOOL_OPTIONS`,
+package-manager settings, `BASH_ENV`, `ENV`, `PYTHONPATH`, `PSModulePath`, `JAVA_TOOL_OPTIONS`,
 and similar. Submitted names reach a shared runner only when its operator also
 lists them, never replace a value the host sets itself, and never reach the
 pipeline compile. Remote builds on a host the
@@ -176,6 +176,11 @@ compile, which otherwise runs with `CGO_ENABLED=0`; see
 | `SPARKWING_TEST_*` | Protocol | CLI or test marker; no pipeline inheritance. |
 | `HOME` | Tool | Minimal process base. |
 | `USERPROFILE` | Tool | Windows home directory for native tools. |
+| `APPDATA` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `HOMEDRIVE` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `HOMEPATH` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `XDG_DATA_HOME` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `PSModulePath` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
 | `TMPDIR` | Tool | Minimal process base. |
 | `LANG` | Tool | Minimal process base. |
 | `LC_*` | Tool | Minimal process base. |
