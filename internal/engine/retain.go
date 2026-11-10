@@ -5,11 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 // RetainExecutable copies an executable into directory under its SHA-256, verifying acceptedBuild when supplied.

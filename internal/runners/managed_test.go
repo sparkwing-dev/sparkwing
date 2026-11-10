@@ -334,7 +334,8 @@ func TestManagedRunnerUpdateKeepsClaimsLiveForAwaitedChild(t *testing.T) {
 				policy := &awaitUpdatePolicy{initial: initial, latest: signedRunnerPolicy(t, func(*engine.VersionIndex) {}), started: started, finished: finished, published: published, update: engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release}, t: t}
 				installation := &installationFixture{}
 				claims := 0
-				runner := ManagedRunner{Loop: &Loop{Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1},
+				runner := ManagedRunner{Loop: &Loop{
+					Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1},
 					Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 						claims++
 						id, run := "parent", "run"
@@ -395,6 +396,7 @@ func (p *awaitUpdatePolicy) Index(context.Context, time.Time) (engine.IndexResul
 	}
 	return engine.IndexResult{Index: p.latest}, nil
 }
+
 func (p *awaitUpdatePolicy) PrepareRunnerUpdate(context.Context, string, releaseasset.Target) (engine.SoftwareUpdate, error) {
 	select {
 	case <-p.finished:
