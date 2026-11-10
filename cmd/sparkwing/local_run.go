@@ -283,7 +283,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		return localRunPreparation{}, prepared.Declarations.Error(err)
 	}
 	return localRunPreparation{
-		identity: identity, declarations: prepared.Declarations,
+		identity: identity, project: selection.project, declarations: prepared.Declarations,
 		git:         selection.git,
 		source:      selection.source,
 		environment: seal, localSecrets: localSecrets, machine: machine, machineFile: configFile,

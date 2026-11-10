@@ -29,6 +29,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	var grant ProcessGrant
 	var session *executorSession
 	afterRun := false
+	callbacksStarted := false
 	stage := "action"
 	defer func() {
 		timeout := executorAttemptTimeout(ctx)
@@ -45,6 +46,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 				err = nil
 			}
 			if !retryAllowed && !afterRun && session != nil && parent.Err() == nil && !writeFailed {
+				afterRun = true
 				afterCtx, afterCancel := context.WithTimeout(parent, limits.CleanupTimeout)
 				afterErr := h.afterRun(afterCtx, session, input, job, result)
 				afterCancel()
@@ -53,6 +55,14 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 					result = h.failure(errors.Join(timeout, err))
 				}
 			}
+		}
+		var requested *lease.CancelError
+		if callbacksStarted && !afterRun && errors.As(context.Cause(parent), &requested) && executorLostAuthority(parent) == nil {
+			afterCtx, afterCancel := context.WithTimeout(lease.ExecutionContext(parent), limits.CleanupTimeout)
+			// safety: published SDKs accept only success or failed; this cleanup result cannot change cancellation.
+			afterErr := h.afterRun(afterCtx, session, input, job, h.failure(fmt.Errorf("run cancelled: %w", requested)))
+			afterCancel()
+			err = errors.Join(err, afterErr)
 		}
 		if grant.Revoke != nil {
 			if revokeErr := grant.Revoke(); revokeErr != nil {
@@ -139,6 +149,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		}
 		session.failure = failure
 	}
+	callbacksStarted = true
 	if input.Attempt == 1 {
 		for _, closure := range job.Closures.BeforeRun {
 			if _, err = h.eval(ctx, session, input, closure, "before_run", nil, nil); err != nil {
@@ -175,9 +186,18 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	}
 	if executorAttemptTimeout(ctx) == nil && (result.Outcome != runstate.NodeFailed || !retryAllowed) {
 		stage = "action"
+		afterCtx := ctx
+		var requested *lease.CancelError
+		if errors.As(context.Cause(parent), &requested) {
+			cleanupCtx, stopCleanup := context.WithTimeout(lease.ExecutionContext(parent), limits.CleanupTimeout)
+			defer stopCleanup()
+			afterCtx = cleanupCtx
+			result = h.failure(fmt.Errorf("run cancelled: %w", requested))
+			err = errors.Join(err, requested)
+		}
 		afterRun = true
-		if afterErr := h.afterRun(ctx, session, input, job, result); afterErr != nil {
-			return h.failure(afterErr), afterErr
+		if afterErr := h.afterRun(afterCtx, session, input, job, result); afterErr != nil {
+			return h.failure(afterErr), errors.Join(err, afterErr)
 		}
 	}
 	if result.Outcome == runstate.NodeSuccess && len(output) > 0 && h.deps.Masks.ContainsSecret(string(output)) {

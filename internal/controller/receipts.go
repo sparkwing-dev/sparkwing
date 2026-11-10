@@ -27,6 +27,17 @@ func (s *Server) handleGetRunReceipt(w http.ResponseWriter, r *http.Request, aut
 	if err != nil {
 		return engineLookupError(err)
 	}
+	observed, err := tenant.ListNodes(r.Context(), runID)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	digests := make(map[string]string, len(observed))
+	for _, node := range observed {
+		digests[node.NodeID] = node.OutputDigest
+	}
+	for _, node := range nodes {
+		node.OutputDigest = digests[node.NodeID]
+	}
 	rec := receipt.BuildReceipt(run, nodes, s.costPerRunnerHour, s.costRateSource)
 	writeJSON(w, http.StatusOK, rec)
 	return nil
