@@ -38,6 +38,21 @@ func CachedEngineVersion(ctx context.Context, pin engineid.Pin) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	reader.config.LocalOnly = true
-	return reader.EngineVersion(ctx, pin)
+	version, err := SDKVersionForPin(pin)
+	if err != nil {
+		return "", err
+	}
+	if pin.Replacement != "" {
+		return installedEngineVersion()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	now := time.Now()
+	policy := reader.localIndex(now)
+	sdk, _, err := SelectSDK(policy.Index, pin.SDK, version, now)
+	if err != nil {
+		return "", err
+	}
+	return SelectEngine(policy.Index, sdk, now)
 }
