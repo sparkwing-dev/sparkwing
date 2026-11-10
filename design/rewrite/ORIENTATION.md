@@ -72,6 +72,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Cancellation settles controller-owned runs in the cancellation transaction even when no job was claimed | `internal/store/run_state.go`: `transitionRunTx` | `internal/controller/engine_cancel_unclaimed_test.go`: `TestControllerCancelUnclaimableJobFinishesRun` |
 | Native controller services retain the installing caller's key and config selectors so forced restart opens the same signing key | `cmd/sparkwing/local_services.go`: `localServiceHost`; `internal/wingd/managed_units.go`: `render` | `cmd/sparkwing/daemon_key_linux_test.go`: `TestManagedControllerPreservesKeyAcrossRestart` |
 | Run display readers treat absent proof eligibility as false and reject null or non-booleans; controllers emit explicit false | `internal/controller/client/engine.go`: `requiredResponseFields`; `internal/runspec/contracts.go`: `Display` | `TestReadRunProofEligibility`, `TestDisplayDerivesProofEligibility` |
 | Run selectors resolve a stable ID or canonical positive team number through a tenant-scoped identity lookup, without decoding run contents | `internal/store/run_selector.go`: `ResolveRunID`; `internal/controller/run_selector.go`: `resolveRunSelector` | `internal/store/run_selector_test.go`: `TestResolveRunIDUsesOnlyTheSelectedTeamsIdentity`; `internal/controller/public_selectors_native_test.go`: `TestPublicNumericSelectorsReadAndCommitCanonicalRun` |

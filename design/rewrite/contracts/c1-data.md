@@ -1746,6 +1746,11 @@ version. Active revocation/minimum errors become enforcement notices on stored
 runs. Other policy failures discard the response instead of returning partial
 status. A run without an accepted engine needs no version lookup.
 
+Run cancellation settles controller-owned runs in the same transaction after
+cancelling unclaimed jobs. If no live work remains, the run becomes terminal
+without a runner report or a maintenance tick. Held jobs retain their reporting
+rights and settle the run when they drain.
+
 The controller calls `Operator.ReconcileControllerRuns` on startup and each
 maintenance tick. It pages across all teams. A reconciliation failure stops the
 pass. The hostname is displayed in schedule history. Another process on the same machine
