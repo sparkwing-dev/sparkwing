@@ -20,6 +20,36 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.72.2] - 2026-11-10
+
+### Fixed
+
+- **cli:** Uploaded-source triggers explain how to add the required hosted origin when the checkout has no origin remote
+
+
+- **runner:** Run AfterRun cleanup when active jobs are canceled
+  Cleanup receives a cancellation error and leaves the run canceled.
+
+
+- Interrupted run log followers, run status followers and waiting run lists now return the documented incomplete-observation exit status 3 with a structured diagnostic.
+
+
+- **cli:** Runs and triggers accept omitted optional secret arguments
+  Supplied values remain masked. Missing required arguments are refused before
+  submission with an error naming the flag. Invalid secret classifications
+  receive HTTP 400 instead of HTTP 500.
+
+
+- **Receipts:** Include committed job output digests in run receipts so the receipt checksum changes when outputs change.
+
+
+- **Runners:** Keep accepted replacement engines available after an installed binary upgrade, so later jobs and children use their sealed bytes.
+- **Runners:** Keep claims live during existing work before a routine automatic update, so awaited child jobs can finish. Log update drain entry and exit with versions, held units and the reason.
+
+### Security
+
+- **controller:** GitHub Actions credential exchange returns the same enrollment refusal for unknown teams and unenrolled repositories
+
 ## [v0.72.1] - 2026-11-10
 
 ### Added

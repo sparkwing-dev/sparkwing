@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -43,6 +44,11 @@ func TestReplacementEnsureKeepsAcceptedLocalBuild(t *testing.T) {
 	if err := selected.verifyInstalledEngine(t.Context()); err != nil {
 		t.Fatalf("retained SDK installer verification: %v", err)
 	}
+	currentPath := filepath.Join(t.TempDir(), "sparkwing")
+	if err := os.WriteFile(currentPath, fixtureExecutable(t, "v0.72.1", target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolver.installed = func() (string, error) { return currentPath, nil }
 	installed, err := resolver.Resolve(t.Context(), identity.Pin, target)
 	if err != nil {
 		t.Fatal(err)
@@ -171,4 +177,67 @@ func TestReplacementEnsureRejectsForeignRetainedPlatform(t *testing.T) {
 	}
 	_, err = resolver.Ensure(t.Context(), identity, target)
 	requireCode(t, err, hosterr.IntegrityFailure)
+}
+
+func TestReplacementResolutionSurvivesInstalledEngineSwap(t *testing.T) {
+	for _, binary := range []releaseasset.Binary{releaseasset.Sparkwing, releaseasset.SparkwingRunner} {
+		t.Run(string(binary), func(t *testing.T) {
+			target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+			pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v0.0.0", Replacement: "../sdk"}
+			installed := filepath.Join(t.TempDir(), "sparkwing")
+			fixtureTarget := target
+			fixtureTarget.Binary = binary
+			old := fixtureExecutable(t, "v0.72.0", fixtureTarget)
+			newer := fixtureExecutable(t, "v0.72.1", fixtureTarget)
+			if err := os.WriteFile(installed, old, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			resolver, err := NewResolver(Config{CacheDirectory: t.TempDir(), LocalBuildDirectory: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolver.installed = func() (string, error) { return installed, nil }
+			accepted, err := resolver.Resolve(t.Context(), pin, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(installed, installed+".old"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(installed, newer, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for _, job := range []string{"in-flight", "later-job", "child"} {
+				t.Run(job, func(t *testing.T) {
+					selected, err := resolver.Ensure(t.Context(), accepted.Identity, target)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if selected.Identity != accepted.Identity || selected.AssetDigest != digest(old) {
+						t.Fatalf("sealed engine changed: %+v", selected)
+					}
+					if err := selected.verifyInstalledEngine(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+					output, err := exec.CommandContext(t.Context(), selected.Executable).CombinedOutput()
+					if err != nil || strings.TrimSpace(string(output)) != "v0.72.0" {
+						t.Fatalf("executed replacement: %s %v", output, err)
+					}
+				})
+			}
+			selected, err := resolver.Resolve(t.Context(), pin, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if selected.AssetDigest != digest(newer) {
+				t.Fatalf("new intake selected old engine: %+v", selected)
+			}
+			if err := os.Remove(installed); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := resolver.Ensure(t.Context(), accepted.Identity, target); err != nil {
+				t.Fatalf("accepted engine depends on installed path: %v", err)
+			}
+		})
+	}
 }

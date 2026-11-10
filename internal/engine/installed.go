@@ -60,7 +60,7 @@ func replacementEngineAt(ctx context.Context, pin engineid.Pin, target releaseas
 		for _, setting := range info.Settings {
 			settings[setting.Key] = setting.Value
 		}
-		if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != HostModule+"/cmd/"+string(target.Binary) {
+		if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || (info.Path != HostModule+"/cmd/"+string(target.Binary) && info.Path != HostModule+"/cmd/"+string(releaseasset.SparkwingRunner)) {
 			return Resolved{}, integrity(errors.New("retained executable does not match the native Sparkwing target"))
 		}
 		stat, err := os.Stat(path)
@@ -186,4 +186,24 @@ func writeSelfDigestRecord(record, line string) {
 			slog.Default().Warn("engine: self-digest stage outlived its write", "path", stage.Name(), "error", err)
 		}
 	}
+}
+
+func (r *Resolver) replacementEngine(ctx context.Context, pin engineid.Pin, target releaseasset.Target) (Resolved, error) {
+	installed := r.installed
+	if installed == nil {
+		installed = os.Executable
+	}
+	path, err := installed()
+	if err != nil {
+		return Resolved{}, err
+	}
+	resolved, err := replacementEngineAt(ctx, pin, target, path, false)
+	if err != nil || r.config.LocalBuildDirectory == "" {
+		return resolved, err
+	}
+	path, _, err = RetainExecutable(r.config.LocalBuildDirectory, path, resolved.AssetDigest)
+	if err != nil {
+		return Resolved{}, err
+	}
+	return replacementEngineAt(ctx, pin, target, path, true)
 }

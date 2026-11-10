@@ -32,6 +32,14 @@ type ManagedRunner struct {
 
 var errRunnerUpdate = errors.New("runner software update required")
 
+type runnerUpdate struct {
+	version  string
+	required bool
+}
+
+func (u *runnerUpdate) Error() string { return errRunnerUpdate.Error() }
+func (u *runnerUpdate) Unwrap() error { return errRunnerUpdate }
+
 // Run returns after the loop stops or the installed runner restarts with its verified replacement.
 func (r ManagedRunner) Run(ctx context.Context) error {
 	if r.Loop == nil || r.Versions == nil || r.Target.Binary != releaseasset.SparkwingRunner {
@@ -68,10 +76,10 @@ func (r ManagedRunner) checkVersion(ctx context.Context, version string) error {
 		if r.Loop.Config.VersionPinned {
 			return fmt.Errorf("%w; update github.com/sparkwing-dev/sparkwing in .sparkwing/go.mod to a supported release", policyErr)
 		}
-		return errors.Join(errRunnerUpdate, policyErr)
+		return errors.Join(&runnerUpdate{version: index.Index.Policy().Latest, required: true}, policyErr)
 	}
 	if !r.Loop.Config.VersionPinned && semver.Compare(index.Index.Policy().Latest, version) > 0 {
-		return errRunnerUpdate
+		return &runnerUpdate{version: index.Index.Policy().Latest}
 	}
 	return nil
 }

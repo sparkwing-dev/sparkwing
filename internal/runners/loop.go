@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 	"slices"
@@ -265,6 +266,31 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		return nil
 	}
 	var pending <-chan claimOutcome
+	var updateErr error
+	var updateStarted time.Time
+	var updateTarget string
+	checkPolicy := func() (bool, error) {
+		stop, err := l.checkPolicy(claims)
+		var update *runnerUpdate
+		if errors.As(err, &update) {
+			if updateStarted.IsZero() {
+				updateStarted = time.Now()
+				updateTarget = update.version
+				reason := "new signed release; waiting for idle with claims live"
+				if update.required {
+					reason = "signed policy requires replacement"
+				}
+				slog.Info("runner update drain entered", "reason", reason, "elapsed", time.Duration(0), "current_version", l.Config.Version, "target_version", updateTarget, "held_units", len(active), "required", update.required)
+			}
+			if !update.required && (len(active) > 0 || pending != nil) {
+				// safety: held hosts may await children that need this runner's claims.
+				updateErr = err
+				return false, nil
+			}
+		}
+		return stop, err
+	}
+
 	defer func() {
 		cancelClaims()
 		if l.OnClaimsStopped != nil {
@@ -276,6 +302,13 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		for len(active) > 0 {
 			finish(<-results)
 		}
+		if !updateStarted.IsZero() {
+			reason := "held work finished"
+			if ctx.Err() != nil {
+				reason = "caller cancelled"
+			}
+			slog.Info("runner update drain exited", "reason", reason, "current_version", l.Config.Version, "target_version", updateTarget, "held_units", len(active), "elapsed", time.Since(updateStarted))
+		}
 		runErr = errors.Join(runErr, hostErr, context.Cause(ctx))
 		if l.Config.FailOnFailedWork {
 			runErr = errors.Join(runErr, failed.err())
@@ -283,6 +316,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	}()
 	for {
 		drainResults()
+		if updateErr != nil && len(active) == 0 && pending == nil {
+			return updateErr, nil
+		}
 		select {
 		case <-drain:
 			return nil, nil
@@ -314,7 +350,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			return false
 		})
 		if pending == nil && len(request.Kinds) > 0 && !nextClaim.After(time.Now()) {
-			if stop, err := l.checkPolicy(claims); stop {
+			if stop, err := checkPolicy(); stop {
 				return err, nil
 			}
 
@@ -396,7 +432,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		case result := <-results:
 			finish(result)
 		case <-refresh.C:
-			if stop, err := l.checkPolicy(claims); stop {
+			if stop, err := checkPolicy(); stop {
 				return err, nil
 			}
 		case <-timer.C:
