@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -193,6 +194,7 @@ func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobAc
 			}
 			// safety: a result another host wrote is a miss here, so the job runs again.
 			if !scopeAcceptsCopy(a.authority.Ref.Scope, key.Scope.Ref) {
+				slog.Warn("retry cannot reuse source outputs; record scope is not readable in the retry scope", "team", team, "run", target.Ref.RunID, "job", target.Ref.NodeID, "source_run", ref.RunID, "record_kind", key.Kind)
 				return nil, blob.ErrNotFound
 			}
 			keys = append(keys, *key)

@@ -178,6 +178,10 @@ original seal's identity to match the new run ID.
 
 Retry requires `mode=failed|all` and a nonempty `idempotency_key` in the request
 body. The server rejects a missing or unknown selection before creating a run.
+A failed-only retry carries an approval gate forward only when its transitive
+dependents are also reused in the same transaction. If any dependent must run
+again, the retry requests a fresh approval. Unknown generated descendants also
+require a fresh approval. Run-control grants do not grant approval rights.
 
 Direct store consumers use `Store.ClaimUnit` for launcher and runner awards.
 `Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`

@@ -1,8 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -124,7 +126,7 @@ type retrySource struct {
 }
 
 // safety: a fresh Cloud host writes each result in the scope a retry reads; the last job fails.
-func retrySourceFixture(t *testing.T, jobs []nodewire.JobSpec, artifacts bool) retrySource {
+func retrySourceFixture(t *testing.T, jobs []nodewire.JobSpec, artifacts bool, shape ...func(*capability.Capability)) retrySource {
 	t.Helper()
 	tenant, plan, _ := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: jobs})
 	source := retrySource{tenant: tenant, runID: plan.RunID, reads: fakeBlobManifests{}}
@@ -133,9 +135,16 @@ func retrySourceFixture(t *testing.T, jobs []nodewire.JobSpec, artifacts bool) r
 	source.runner = authorityRoot("runner", "a")
 	source.runner.Grants = []capability.Grant{capability.NodesClaim}
 	source.runner.Host = &capability.HostFacts{Kind: capability.HostCloud, Fresh: true}
+	for _, apply := range shape {
+		apply(&source.runner)
+	}
 	authorityPersist(t, tenant.s, source.runner)
 	fundUnitClaim(t, tenant.s)
 	for index, job := range jobs {
+		if job.Approval != nil {
+			resolveRetryApproval(t, tenant, plan.RunID, job.ID, "approved")
+			continue
+		}
 		ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(job.ID)}
 		claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: source.runner.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}})
 		if err != nil {
@@ -324,5 +333,123 @@ func TestSavepointRollbackForgetsLocksTakenAfterIt(t *testing.T) {
 		return trial.release(t.Context(), tx)
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func resolveRetryApproval(t *testing.T, tenant *Tenant, runID, job, decision string) {
+	t.Helper()
+	approver := authorityRoot("approver-"+runID+"-"+job, "a")
+	approver.Grants = []capability.Grant{capability.Grant("approvals.write")}
+	authorityPersist(t, tenant.s, approver)
+	outcome := runstate.NodeSuccess
+	if decision == "denied" {
+		outcome = runstate.NodeFailed
+	}
+	_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(job)}, To: outcome, Cause: causeApprovalResolve, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: approver.Prefix}}, Extra: transitionExtra{Approval: &runstate.ApprovalResolution{Decision: decision}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestControllerRetryRegatesWhenAnyDependentRunsAgain(t *testing.T) {
+	for _, miss := range []string{"none", "leaf records", "host scope", "all", "nested gates", "failed descendant", "changed descendant"} {
+		t.Run(miss, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			jobs := []nodewire.JobSpec{{ID: "review", Approval: &nodewire.ApprovalSpec{}}, {ID: "job", Needs: []string{"review"}}, {ID: "leaf", Needs: []string{"job"}}, {ID: "failed"}}
+			if miss == "nested gates" {
+				jobs = append(jobs[:1], append([]nodewire.JobSpec{{ID: "second-review", Approval: &nodewire.ApprovalSpec{}, Needs: []string{"review"}}}, jobs[1:]...)...)
+				jobs[2].Needs = []string{"second-review"}
+			}
+			if miss == "failed descendant" {
+				jobs[len(jobs)-1].Needs = []string{"leaf"}
+			}
+			source := retrySourceFixture(t, jobs, false, func(c *capability.Capability) {
+				if miss == "host scope" {
+					c.Host = &capability.HostFacts{Kind: capability.HostSelfHosted, CacheScope: "host-0123456789abcdef", MachineID: "runner"}
+				}
+			})
+			mode := "failed"
+			if miss == "all" {
+				mode = "all"
+			}
+			runID := source.retry(t, mode)
+			if miss == "leaf records" {
+				rewriteSchemaExec(t, source.tenant.s.db, `DELETE FROM blob_records WHERE run_id=? AND node_id='leaf'`, source.runID)
+			}
+			if miss == "changed descendant" {
+				rewriteSchemaExec(t, source.tenant.s.db, `UPDATE nodes SET spec_hash='changed' WHERE run_id=? AND node_id='leaf'`, source.runID)
+			}
+			for range 2 {
+				if _, err := source.tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
+					t.Fatal(err)
+				}
+			}
+			gate, err := source.tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "review"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if miss == "none" || miss == "nested gates" {
+				if gate.Status != runstate.StatusDone {
+					t.Fatalf("fully reused gate: %+v", gate)
+				}
+				for _, id := range []string{"job", "leaf"} {
+					row, err := source.tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(id)})
+					if err != nil || row.Status != runstate.StatusDone || row.Attempt != 0 || row.OutputRecord == nil {
+						t.Fatalf("dependent not reused: %+v %v", row, err)
+					}
+				}
+				return
+			}
+			if miss == "host scope" && (!strings.Contains(logs.String(), "record scope is not readable") || !strings.Contains(logs.String(), source.runID) || !strings.Contains(logs.String(), runID)) {
+				t.Fatalf("scope reuse miss has no diagnostic: %s", &logs)
+			}
+			narrow := authorityRoot("narrow-"+runID, "a")
+			narrow.Grants = []capability.Grant{capability.Grant("runs.write"), capability.Grant("runs.control")}
+			authorityPersist(t, source.tenant.s, narrow)
+			if _, err := source.tenant.TransitionNode(t.Context(), nodeTransition{Ref: gate.Ref, To: runstate.NodeSuccess, Cause: causeApprovalResolve, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: narrow.Prefix}}, Extra: transitionExtra{Approval: &runstate.ApprovalResolution{Decision: "approved"}}}); err == nil {
+				t.Fatal("token without approvals.write resolved retry approval")
+			}
+			if gate.Status != runstate.StatusApprovalPending {
+				t.Fatalf("retry must open a fresh approval: %+v", gate)
+			}
+			ref := runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "job"}
+			row, err := source.tenant.ReadNode(t.Context(), ref)
+			if err != nil || row.Status != runstate.StatusPending || row.ReadyAt != nil || row.Attempt != 0 || row.OutputRecord != nil {
+				t.Fatalf("protected work escaped pending gate: %+v %v", row, err)
+			}
+			if _, err := source.tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: source.runner.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}}); err == nil {
+				t.Fatal("claimed protected work without fresh approval")
+			}
+			resolveRetryApproval(t, source.tenant, runID, "review", "approved")
+			if _, err := source.tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
+				t.Fatal(err)
+			}
+			row, err = source.tenant.ReadNode(t.Context(), ref)
+			if err != nil || row.Status == runstate.StatusPending && row.ReadyAt == nil {
+				t.Fatalf("fresh approval did not release work: %+v %v", row, err)
+			}
+		})
+	}
+}
+
+func TestControllerRetryDeniedRunOpensFreshApproval(t *testing.T) {
+	tenant, plan, _ := controllerPlanFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "review", Approval: &nodewire.ApprovalSpec{}}, {ID: "job", Needs: []string{"review"}}}})
+	records := &blobRecords{manifests: fakeBlobManifests{}}
+	tenant.s.materializations, tenant.s.resultRecords = records, records
+	resolveRetryApproval(t, tenant, plan.RunID, "review", "denied")
+	if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
+		t.Fatal(err)
+	}
+	source := retrySource{tenant: tenant, runID: plan.RunID}
+	runID := source.retry(t, "failed")
+	if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := tenant.GetApproval(t.Context(), runID, "review")
+	if err != nil || gate.ResolvedAt != nil {
+		t.Fatalf("denied retry did not regate: %+v %v", gate, err)
 	}
 }
