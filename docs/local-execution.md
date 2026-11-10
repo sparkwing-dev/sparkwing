@@ -649,6 +649,10 @@ until local and remote jobs finish cancelling. Secret reads remain refused
 during this drain. A second interrupt stops hosting.
 Nodes use the existing claim, lease and
 fencing rules. The local controller supplies this machine's admission only.
+Before submitting a `--runner here` trigger, the CLI starts or waits for that
+local controller, including when a profile selects a remote controller. Resuming
+a here run also waits for local admission readiness before claiming it. If local
+startup fails, a new trigger is refused before the remote run is allocated.
 Other machines register as runners with Cloud. They need `sparkwing-runner`
 beside `sparkwing`, which `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --runner`
 installs from the signed release. `sparkwing runners add --runner NAME

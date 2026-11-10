@@ -67,6 +67,19 @@ func resolveHereRuntime(ctx context.Context, options client.EngineOptions) (here
 	}}, nil
 }
 
+func ensureHereAdmission(ctx context.Context) error {
+	home, err := wingd.HomeDir("")
+	if err == nil {
+		_, err = ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
+			return resolveLocalServicesAt(ctx, home)
+		})
+	}
+	if err != nil {
+		return fmt.Errorf("cannot prepare here host admission: %w; start the local controller with `sparkwing dashboard open` and retry", err)
+	}
+	return nil
+}
+
 func handoffHereRun(ctx context.Context, options client.EngineOptions, response controllerwire.CreateRunResponse, deps hereDependencies) error {
 	if response.Replayed && response.HereBearer != "" {
 		return incompleteHereHandoff(response.RunID, &apierr.Error{Code: apierr.ProtocolError, Message: "controller replay returned one-time here authority"})
