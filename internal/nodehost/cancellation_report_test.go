@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -94,7 +95,7 @@ func TestCancellationReportsUseTheLiveClaimLifetime(t *testing.T) {
 					defer stop()
 					var err error
 					if setup {
-						err = claimSetupFailure(ctx, input, &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}, deps.Masker.Mask, reports.TransitionNode)
+						err = claimSetupFailure(ctx, input, &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}, deps.Masker.Mask, reports.TransitionNode, reports.ReadSnapshot)
 					} else {
 						host, createErr := NewNodeExecutor(deps)
 						if createErr != nil {
@@ -110,6 +111,9 @@ func TestCancellationReportsUseTheLiveClaimLifetime(t *testing.T) {
 					}
 					if !reports.committed || len(state.changes) != 1 || state.changes[0].To != runstate.NodeCancelled {
 						t.Fatalf("live cancellation report did not commit: changes=%+v error=%v", state.changes, err)
+					}
+					if strings.Contains(state.changes[0].Extra.Result.MaskedError, "credential is not live") {
+						t.Fatalf("cancellation recorded an authentication error: %+v", state.changes[0].Extra.Result)
 					}
 				})
 			})
