@@ -175,6 +175,7 @@ compile, which otherwise runs with `CGO_ENABLED=0`; see
 | `SPARKWING_TOOLCHAIN_ACTIVE` | Protocol | CLI or test marker; no pipeline inheritance. |
 | `SPARKWING_TEST_*` | Protocol | CLI or test marker; no pipeline inheritance. |
 | `HOME` | Tool | Minimal process base. |
+| `USERPROFILE` | Tool | Windows home directory for native tools. |
 | `TMPDIR` | Tool | Minimal process base. |
 | `LANG` | Tool | Minimal process base. |
 | `LC_*` | Tool | Minimal process base. |
