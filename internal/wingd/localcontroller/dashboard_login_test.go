@@ -18,13 +18,13 @@ import (
 
 func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	home := t.TempDir()
-	factory := Config{Bind: func(_ context.Context, b Binding) (Services, error) {
+	factory := Config{Bind: func(ctx context.Context, b Binding) (Services, error) {
 		services := serviceFixture(b)
 		raw, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "local-history", Request: runspec.Request{Version: 1, Team: "default", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, RequestedArgs: map[string]string{"token": "publication-canary-token"}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"token"}}}})
 		if err != nil {
 			return Services{}, err
 		}
-		_, err = stateSQL(t, b).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default','local-history',1,'ci','success',?,'request',1,'repo','host','execute','local',1,2,'r30',30) ON CONFLICT DO NOTHING`, raw)
+		_, err = stateSQL(t, b).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default','local-history',1,'ci','success',?,'request',1,'repo','host','execute','local',1,2,'r30',30) ON CONFLICT DO NOTHING`, raw)
 		if err != nil {
 			return Services{}, err
 		}
