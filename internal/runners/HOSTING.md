@@ -57,6 +57,20 @@ policy refresh and shutdown. A policy refresh leaves a pending claim in place.
 Stopping cancels and joins that request, takes responsibility for a late award,
 and joins every held host. Drain and policy denial preserve held host contexts.
 Caller cancellation reaches those hosts and remains in the returned error.
+A newer signed release defers automatic replacement until no units are held.
+Claims stay live while work is held because an awaiting host may need child
+claims, including children in another run. Continuous work can postpone a
+routine update; no drain timeout cancels work. Revocation and minimum-version
+refusals still stop claims immediately. Update drain entry and exit log the
+current and target versions, reason, held units and elapsed time.
+`TestManagedRunnerUpdateKeepsClaimsLiveForAwaitedChild` guards this boundary.
+
+Replacement-pin source resolution retains the selected executable by SHA-256
+under `runners/builds`. Later jobs and children resolve their accepted digest
+there after an installed binary swap; new intake selects the installed bytes.
+Both the CLI and standalone runner use the same retained executable owner.
+`TestReplacementResolutionSurvivesInstalledEngineSwap` guards byte retention
+and rejects substituting the new installation under the accepted identity.
 
 Controller transport failures, including a missing local socket, allow fresh
 claim polls for up to five seconds of consecutive failures. A successful response

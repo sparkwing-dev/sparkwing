@@ -79,7 +79,7 @@ func NewResolver(config Config) (*Resolver, error) {
 // Resolve obtains the exact pin's permitted executable, including on a warm cache.
 func (r *Resolver) Resolve(ctx context.Context, pin engineid.Pin, target releaseasset.Target) (Resolved, error) {
 	if pin.Replacement != "" {
-		return installedEngine(ctx, pin, target)
+		return r.replacementEngine(ctx, pin, target)
 	}
 	version, err := r.EngineVersion(ctx, pin)
 	if err != nil {
@@ -113,11 +113,14 @@ func (r *Resolver) EngineVersion(ctx context.Context, pin engineid.Pin) (string,
 // engine after the installed CLI changes; new resolutions still use the installed CLI.
 func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, error) {
 	if identity.Pin.Replacement != "" {
-		resolved, err := installedEngine(ctx, identity.Pin, target)
-		if err != nil || resolved.Identity == identity {
-			return resolved, err
+		resolved, err := r.replacementEngine(ctx, identity.Pin, target)
+		if err == nil && resolved.Identity == identity {
+			return resolved, nil
 		}
 		if r.config.LocalBuildDirectory == "" {
+			if err != nil {
+				return Resolved{}, err
+			}
 			return Resolved{}, &apierr.Error{
 				Code: hosterr.IntegrityFailure,
 				Message: fmt.Sprintf("planned on engine %s (sha256 %s), this host has %s (sha256 %s); route planning to the executing host (repository runner requirements) or install %s (sha256 %s)",
