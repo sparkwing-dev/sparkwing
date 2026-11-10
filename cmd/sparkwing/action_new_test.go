@@ -626,3 +626,25 @@ func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 		t.Fatalf("TypeScript scaffold wrote a Go module: %v", err)
 	}
 }
+
+func TestPipelineNewUnknownTemplateLeavesCheckoutUntouched(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	err := runSparkwing([]string{"pipeline", "new", "--pipeline", "bad", "--template", "not-a-template", "-o", "json"})
+	if err == nil || !strings.Contains(err.Error(), "unknown shape") || !strings.Contains(err.Error(), "minimal") || !strings.Contains(err.Error(), "typescript") {
+		t.Fatalf("unknown template lost its choices: %v", err)
+	}
+	entries, err := os.ReadDir(repo)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("rejected template changed the checkout: %v, %v", entries, err)
+	}
+	if err := runSparkwing([]string{"pipeline", "new", "--pipeline", "bad", "--template", "minimal", "-o", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	_, cfg, err := projectconfig.Discover(repo)
+	if err != nil || cfg == nil || len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "bad" {
+		t.Fatalf("corrected template did not scaffold its pipeline: %+v, %v", cfg, err)
+	}
+}
