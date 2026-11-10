@@ -99,7 +99,9 @@ secrets. Values shorter than four Unicode characters cannot be masked in logs,
 and the host derives no masking fragments from them. This includes local
 secrets, secret arguments, defaults and each nonempty secret list item.
 Derived proxy credential parts must meet the same length to be masked.
-The CLI prints one warning line after a short secret is saved. The console
+The CLI prints one warning line after a short secret is saved. Its set receipt
+reports `masked: false` for values that cannot be masked; the saved value
+remains encrypted and access-controlled as a secret. The console
 shows the warning once when the save succeeds. Warnings never include the value.
 `POST /api/v1/secrets` returns HTTP 200 with secret metadata and an optional
 `warning`; the value stays private. Secrets containing `***` are accepted.

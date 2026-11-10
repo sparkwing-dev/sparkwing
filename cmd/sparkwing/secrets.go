@@ -92,6 +92,7 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 		if err != nil {
 			return err
 		}
+		result.Secret.Masked = result.Secret.Masked && secrets.Maskable(input.Value)
 		if input.Masked && !secrets.Maskable(input.Value) {
 			result.Warning = secrets.ShortValueWarning
 		}
