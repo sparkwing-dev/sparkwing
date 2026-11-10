@@ -843,3 +843,6 @@ Operator object-store settings use deployment authority. A team-admin credential
 cannot change those ceilings. See [tenant limits](limits.md) and
 [self-hosting](self-hosting.md#bound-storage-growth). Native accounting and
 backend composition require separate acceptance evidence.
+
+If `runs status` cannot find the selected run, run `sparkwing runs list` in the
+same profile and team, then retry with an ID from that list.
