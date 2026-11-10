@@ -15,7 +15,6 @@ import (
 	"sync"
 	"syscall"
 	"testing"
-	"time"
 )
 
 func TestRunObservationProcessInterrupt(t *testing.T) {
@@ -54,21 +53,26 @@ func TestRunObservationProcessInterrupt(t *testing.T) {
 				if err := cmd.Start(); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() {
-					if cmd.ProcessState == nil {
+				exited := make(chan error, 1)
+				go func() { exited <- cmd.Wait() }()
+				finished := false
+				defer func() {
+					if !finished {
 						_ = cmd.Process.Kill()
-						_ = cmd.Wait()
+						<-exited
 					}
-				})
+				}()
 				select {
 				case <-ready:
-				case <-time.After(10 * time.Second):
-					t.Fatalf("CLI did not reach its reader: %s", stderr.String())
+				case err := <-exited:
+					finished = true
+					t.Fatalf("CLI ended before reaching its reader: %v: %s", err, stderr.String())
 				}
 				if err := cmd.Process.Signal(sig); err != nil {
 					t.Fatal(err)
 				}
-				err := cmd.Wait()
+				err := <-exited
+				finished = true
 				var exit *exec.ExitError
 				if !errors.As(err, &exit) || exit.ExitCode() != 3 {
 					t.Fatalf("signal %s: want incomplete exit3, got %v; stderr=%s", sig, err, stderr.String())
