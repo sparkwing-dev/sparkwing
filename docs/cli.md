@@ -220,7 +220,8 @@ Previews redact secret arguments while the SDK receives their execution values.
 With `-o json`, each plan preview job includes its runner requirements in
 `requires` and preferences in `prefers`, after applying checkout defaults and
 pipeline overrides through the same settings resolver as execution. Unsupported
-Cloud size selectors fail preview rather than appearing as `would_run`. The host trims whitespace, removes
+Cloud size selectors fail preview rather than appearing as `would_run`. Effective
+labels containing registered secrets are refused before output. The host trims whitespace, removes
 empty labels and deduplicates each list before returning it. Empty lists are
 omitted. For example, repeated `" sparkwing-2cpu "` requirements appear as
 `"requires":["sparkwing-2cpu"]`.

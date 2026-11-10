@@ -269,9 +269,10 @@ func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline s
 			out.args[name] = "***"
 		}
 	}
+	validation := nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: entry.planner.Masker}
 	raw, err := prepared.Plan(ctx)
 	if err == nil {
-		out.doc, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: entry.planner.Masker})
+		out.doc, err = nodeproto.ValidatePlan(raw, validation)
 	}
 	if err == nil {
 		var declarations runspec.CheckoutDeclarations
@@ -286,6 +287,13 @@ func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline s
 					job.Prefers = slices.Clone(effective.Jobs[job.ID].Prefers.Value)
 				}
 			}
+		}
+	}
+	// safety: checkout labels join identifiers after the SDK plan is validated.
+	if err == nil {
+		raw, err = json.Marshal(out.doc)
+		if err == nil {
+			out.doc, err = nodeproto.ValidatePlan(raw, validation)
 		}
 	}
 	if err != nil {

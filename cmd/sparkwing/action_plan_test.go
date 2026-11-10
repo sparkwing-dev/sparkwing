@@ -474,3 +474,34 @@ func TestPlanUsesEffectiveCheckoutRequirements(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanRejectsSecretCheckoutLabels(t *testing.T) {
+	const secret = "private-inspection-token"
+	describe := `"ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"token","type":"string","required":true,"secret":true}]}]}}`
+	for _, layer := range []string{"defaults", "pipeline"} {
+		for _, label := range []string{"requires", "prefers"} {
+			t.Run(layer+"/"+label, func(t *testing.T) {
+				directory := t.TempDir()
+				if err := os.Mkdir(filepath.Join(directory, ".sparkwing"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				config := "defaults: {" + label + ": [pool=" + secret + "]}"
+				if layer == "pipeline" {
+					config = "pipelines: [{name: demo, entrypoint: demo, " + label + ": [pool=" + secret + "]}]"
+				}
+				if err := os.WriteFile(filepath.Join(directory, ".sparkwing", "sparkwing.yaml"), []byte(config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				bin, _ := fakePlanSDK(t, describe, fixturePlan, fixtureEval)
+				_, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), directory, "demo", []string{"--token", secret}, "plan")
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || failure.Code != hosterr.SecretInIdentifier {
+					t.Fatalf("effective secret label must refuse with secret_in_identifier, got %v", err)
+				}
+				if strings.Contains(err.Error(), secret) {
+					t.Fatal("secret escaped through refusal")
+				}
+			})
+		}
+	}
+}
