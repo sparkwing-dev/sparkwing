@@ -97,7 +97,7 @@ Report local controller status
 
 Stop the local controller
 
-Stops the local controller, its dashboard and its local runner. The runner stops claiming work first: an idle runner exits within seconds, and a runner holding jobs finishes them and exits once a controller accepts their results. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again.
+Stops the local controller, its dashboard and its local runner. The runner stops claiming work first. If it remains alive at the end of the stop wait, the command exits nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let held work finish, then retry `sparkwing daemon stop`. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again.
 
 ### Flags
 

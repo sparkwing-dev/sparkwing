@@ -22,6 +22,12 @@ requested version. Activation or readiness failure reports where
 the handoff stopped. It starts no fallback controller because the managed unit
 may already be active. These checks establish activation and successor identity,
 not the service manager's process ancestry.
+The private native service definition retains the installing caller's home,
+configuration paths and secrets-key file selector. Installation refuses keys
+supplied by value and asks for `SPARKWING_SECRETS_KEY_FILE`. Relative
+configuration and key-file paths become absolute before installation. Startup,
+login activation and forced restart therefore open the same configured key.
+Reinstall the service after changing its key or configuration selectors.
 
 `NewLocalRuntime` implements the process lifetime behind `LocalRuntime`. It
 acquires the admission election before invoking `LocalRuntimeConfig.Open`.

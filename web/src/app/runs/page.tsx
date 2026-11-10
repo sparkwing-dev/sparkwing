@@ -2383,6 +2383,7 @@ const FullRunRow = memo(function FullRunRow({
   const sinceTs = hasTimestamp(r.finished_at) ? r.finished_at : timestamp;
   const repo = repoLabel(r);
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
+  const hasSummary = Boolean(r.error || (r.annotation_count && r.top_annotation));
 
   const meta = (
     <div className="min-w-0 flex flex-col gap-0.5 text-[11px]">
@@ -2523,9 +2524,9 @@ const FullRunRow = memo(function FullRunRow({
   );
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-start min-w-0 overflow-hidden">
+    <div className={`grid ${hasSummary ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-1"} gap-3 items-start min-w-0 overflow-hidden`}>
       {meta}
-      <div className="min-w-0 text-[11px] font-mono">
+      {hasSummary && <div className="min-w-0 text-[11px] font-mono">
         {r.error?.startsWith("run did not start: out of credits:") && (
           <RetryButton
             runId={r.id}
@@ -2569,7 +2570,7 @@ const FullRunRow = memo(function FullRunRow({
             </div>
           </Tooltip>
         ) : null}
-      </div>
+      </div>}
     </div>
   );
 });

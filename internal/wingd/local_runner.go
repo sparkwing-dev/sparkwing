@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -192,8 +193,7 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-			// safety: a runner still holding jobs finishes them; stop must not wait on or kill them.
-			return nil
+			return fmt.Errorf("local runner %s (pid %d) is still running; controller shutdown is incomplete; run sparkwing dashboard open to let held work finish, then retry sparkwing daemon stop: %w", instance.ID, instance.PID, ctx.Err())
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
