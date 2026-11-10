@@ -52,6 +52,9 @@ func (m *Masker) Register(value string) error {
 		m.registerValue(lf)
 		m.registerValue(strings.ReplaceAll(lf, "\n", "\r\n"))
 		for _, line := range strings.Split(lf, "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
 			m.registerValue(line)
 		}
 	}
