@@ -38,7 +38,7 @@ func TestNodeExecutorUserCancelRunsAfterRunAndKeepsCancelledOutcome(t *testing.T
 					return &executorProcess{plan: input.Accepted.Plan, answer: func(call context.Context, request nodewire.Request) (any, error) {
 						switch {
 						case request.Op == nodewire.OpRunStep:
-							if err := os.WriteFile(filepath.Join(directory, "started"), []byte("started"), 0600); err != nil {
+							if err := os.WriteFile(filepath.Join(directory, "started"), []byte("started"), 0o600); err != nil {
 								return nil, err
 							}
 							cancel(&lease.CancelError{Reason: "cancel_requested"})
@@ -55,7 +55,7 @@ func TestNodeExecutorUserCancelRunsAfterRunAndKeepsCancelledOutcome(t *testing.T
 							if result.Outcome != "failed" || result.Error == nil || (!strings.HasPrefix(result.Error.Message, "run cancelled:") || !strings.Contains(result.Error.Message, "cancel_requested")) {
 								t.Errorf("cleanup did not receive cancellation as its final body error: %+v", result)
 							}
-							marker, err := os.OpenFile(filepath.Join(directory, "cleanup"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+							marker, err := os.OpenFile(filepath.Join(directory, "cleanup"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 							if err != nil {
 								return nil, err
 							}
@@ -121,5 +121,60 @@ func TestNodeExecutorLostAuthorityDoesNotRunAfterRun(t *testing.T) {
 	}
 	if cleaned || len(state.changes) != 1 {
 		t.Fatalf("lost authority ran cleanup or reported a result: cleanup=%v changes=%+v", cleaned, state.changes)
+	}
+}
+
+func TestNodeExecutorUserCancelDuringVerifyRunsAfterRun(t *testing.T) {
+	input, state, deps, _ := executorFixture(t)
+	executorRetryBudget(t, &input, state, 0)
+	job := input.Accepted.Plan.Jobs[0]
+	job.Closures.Verify = "verify"
+	job.Closures.AfterRun = []string{"cleanup"}
+	executorChangeJob(t, &input, state, job)
+	directory := t.TempDir()
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
+		return &executorProcess{plan: input.Accepted.Plan, result: nodewire.RunResult{Outcome: "success"}, answer: func(call context.Context, request nodewire.Request) (any, error) {
+			switch {
+			case request.Op == nodewire.OpEval && request.Closure == "verify":
+				if err := os.WriteFile(filepath.Join(directory, "verify"), []byte("started"), 0o600); err != nil {
+					return nil, err
+				}
+				cancel(&lease.CancelError{Reason: "cancel_requested"})
+				return nil, context.Cause(call)
+			case request.Op == nodewire.OpEval && request.Closure == "cleanup":
+				if _, bounded := call.Deadline(); call.Err() != nil || !bounded {
+					t.Errorf("verification cancellation inherited cancelled cleanup context: %v", call.Err())
+				}
+				var final nodewire.RunResult
+				if err := json.Unmarshal(request.Input, &final); err != nil {
+					return nil, err
+				}
+				if final.Outcome != "failed" || final.Error == nil || !strings.HasPrefix(final.Error.Message, "run cancelled:") {
+					t.Errorf("verification cleanup result=%+v", final)
+				}
+				return nodewire.EvalResult{Value: json.RawMessage("null")}, os.WriteFile(filepath.Join(directory, "cleanup"), []byte("cleanup"), 0o600)
+			}
+			return nil, nil
+		}}, nil
+	}
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = host.Execute(ctx, input)
+	var requested *lease.CancelError
+	if !errors.As(err, &requested) {
+		t.Fatalf("verification cancellation lost: %v", err)
+	}
+	for name, want := range map[string]string{"verify": "started", "cleanup": "cleanup"} {
+		data, readErr := os.ReadFile(filepath.Join(directory, name))
+		if readErr != nil || string(data) != want {
+			t.Errorf("%s marker=%q error=%v; want %q", name, data, readErr, want)
+		}
+	}
+	if len(state.changes) != 2 || state.changes[1].To != runstate.NodeCancelled {
+		t.Fatalf("verification cleanup changed canceled outcome: %+v", state.changes)
 	}
 }

@@ -186,9 +186,18 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	}
 	if executorAttemptTimeout(ctx) == nil && (result.Outcome != runstate.NodeFailed || !retryAllowed) {
 		stage = "action"
+		afterCtx := ctx
+		var requested *lease.CancelError
+		if errors.As(context.Cause(parent), &requested) {
+			cleanupCtx, stopCleanup := context.WithTimeout(lease.ExecutionContext(parent), limits.CleanupTimeout)
+			defer stopCleanup()
+			afterCtx = cleanupCtx
+			result = h.failure(fmt.Errorf("run cancelled: %w", requested))
+			err = errors.Join(err, requested)
+		}
 		afterRun = true
-		if afterErr := h.afterRun(ctx, session, input, job, result); afterErr != nil {
-			return h.failure(afterErr), afterErr
+		if afterErr := h.afterRun(afterCtx, session, input, job, result); afterErr != nil {
+			return h.failure(afterErr), errors.Join(err, afterErr)
 		}
 	}
 	if result.Outcome == runstate.NodeSuccess && len(output) > 0 && h.deps.Masks.ContainsSecret(string(output)) {

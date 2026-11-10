@@ -1,4 +1,4 @@
 ### Fixed
 
-- **runner:** Run AfterRun cleanup for started jobs after cancellation
+- **runner:** Run AfterRun cleanup when active jobs are canceled
   Cleanup receives a cancellation error and leaves the run canceled.

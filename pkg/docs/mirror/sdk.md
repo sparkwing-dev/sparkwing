@@ -302,7 +302,9 @@ error, with nil for success. After a started job is canceled, `AfterRun` runs
 within the cleanup budget while the host retains execution authority. Go receives
 a non-nil error whose message starts with `run cancelled:`. TypeScript receives
 `outcome: "failed"` with `failure.message` starting with `run cancelled:`.
-Cleanup success or failure leaves the run canceled.
+Cleanup success or failure leaves the run canceled. A cancel that lands during
+retry backoff does not run `AfterRun`: the previous attempt process has already
+closed.
 
 `OnFailure(id, body)` declares a separate recovery
 job and returns that job, so chained modifiers configure the recovery.
