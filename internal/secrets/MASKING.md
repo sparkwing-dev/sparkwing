@@ -68,7 +68,8 @@ and branch pass the same secret check as typed output before any controller requ
 or admission.
 
 Fresh identifiers are checked against every registered mask, including issued
-values. Issuance does not invalidate identifiers already accepted. That exemption
+values. An identifier collision with a line from a multi-line secret says so,
+without displaying the line or identifier. Issuance does not invalidate identifiers already accepted. That exemption
 applies only to exact replay of accepted topology. New generated job IDs and
 expansions receive the full check.
 

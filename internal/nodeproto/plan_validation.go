@@ -29,6 +29,15 @@ type concurrencyDefinition struct {
 	onLimit  string
 }
 
+// SecretIdentifierError reports a collision's origin and field without revealing values.
+func SecretIdentifierError(path, identifier string, matcher SecretMatcher) error {
+	kind := "registered secret"
+	if lines, ok := matcher.(interface{ ContainsSecretLine(string) bool }); ok && lines.ContainsSecretLine(identifier) {
+		kind = "line of a multi-line secret"
+	}
+	return &apierr.Error{Code: hosterr.SecretInIdentifier, Message: fmt.Sprintf("%s in identifier at %s", kind, path), Details: map[string]any{"field": path}}
+}
+
 func validatePlan(raw json.RawMessage, context ValidationContext) (nodewire.PlanDoc, error) {
 	if context.Secrets == nil {
 		return nodewire.PlanDoc{}, planInvalid("plan", "secret matcher is required")
@@ -39,7 +48,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (nodewire.Plan
 	}
 	checkSecret := func(value, path string) error {
 		if context.Secrets.ContainsSecret(value) {
-			return &apierr.Error{Code: hosterr.SecretInIdentifier, Message: fmt.Sprintf("registered secret in identifier at %s", path), Details: map[string]any{"field": path}}
+			return SecretIdentifierError(path, value, context.Secrets)
 		}
 		return nil
 	}

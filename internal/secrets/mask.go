@@ -19,6 +19,7 @@ type Masker struct {
 	parent        *Masker
 	mu            sync.RWMutex
 	raw           map[string]struct{}
+	lineValues    map[string]struct{}
 	values        []string
 	known         map[string]struct{}
 	compiled      *compiledMatcher
@@ -56,11 +57,22 @@ func (m *Masker) Register(value string) error {
 			if trimmed == "" {
 				continue
 			}
-			m.registerValue(line)
-			m.registerValue(trimmed)
+			m.registerLine(line)
+			m.registerLine(trimmed)
 		}
 	}
 	return nil
+}
+
+func (m *Masker) registerLine(value string) {
+	if !Maskable(value) {
+		return
+	}
+	m.registerValue(value)
+	if m.lineValues == nil {
+		m.lineValues = map[string]struct{}{}
+	}
+	m.lineValues[value] = struct{}{}
 }
 
 func (m *Masker) registerValue(value string) {
@@ -108,6 +120,10 @@ func (m *Masker) Merge(other *Masker) {
 	for entry := range other.raw {
 		raw = append(raw, entry)
 	}
+	lines := make([]string, 0, len(other.lineValues))
+	for line := range other.lineValues {
+		lines = append(lines, line)
+	}
 	other.mu.RUnlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -119,6 +135,12 @@ func (m *Masker) Merge(other *Masker) {
 	}
 	for _, value := range values {
 		m.add(value)
+	}
+	if len(lines) > 0 && m.lineValues == nil {
+		m.lineValues = map[string]struct{}{}
+	}
+	for _, line := range lines {
+		m.lineValues[line] = struct{}{}
 	}
 }
 
@@ -361,6 +383,31 @@ func (m *Masker) ContainsSecret(identifier string) bool {
 	}
 	found, _ := m.matcher().scan(identifier, false)
 	return len(found) > 0
+}
+
+// ContainsSecretLine identifies a collision with a raw or trimmed multi-line
+// secret line, including its encodings, without exposing the matched value.
+func (m *Masker) ContainsSecretLine(identifier string) bool {
+	if m == nil {
+		return false
+	}
+	if m.parent != nil && m.parent.ContainsSecretLine(identifier) {
+		return true
+	}
+	m.mu.RLock()
+	lines := make([]string, 0, len(m.lineValues))
+	for line := range m.lineValues {
+		lines = append(lines, line)
+	}
+	m.mu.RUnlock()
+	if len(lines) == 0 {
+		return false
+	}
+	probe := NewMasker()
+	for _, line := range lines {
+		probe.registerValue(line)
+	}
+	return probe.ContainsSecret(identifier)
 }
 
 // Stream masks an ordered byte stream. One goroutine owns each Stream.
