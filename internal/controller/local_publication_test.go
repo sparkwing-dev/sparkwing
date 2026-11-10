@@ -19,7 +19,7 @@ import (
 func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
 	st := newStoreForAuth(t)
 	s := New(st, nil)
-	raw, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "local-history", Request: runspec.Request{Version: 1, Team: "default", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute}})
+	raw, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "local-history", Request: runspec.Request{Version: 1, Team: "default", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, RequestedArgs: map[string]string{"token": "publication-canary-token"}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"token"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
 	})
 	options := client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: transport}}
 	state, err := client.ReadLocalPublication(t.Context(), options, "local-history")
-	if err != nil || state.Run.ID != "local-history" || state.Run.FinishedAt == nil {
+	if err != nil || state.Run.ID != "local-history" || state.Run.FinishedAt == nil || state.Run.Request.Request.RequestedArgs["token"] != "publication-canary-token" {
 		t.Fatalf("local publication export: %+v %v", state, err)
 	}
 	property := func(value []byte) bool {

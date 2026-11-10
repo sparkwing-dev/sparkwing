@@ -17,7 +17,7 @@ func ServeAPI(ctx context.Context, listener net.Listener, s localhostwire.LocalH
 		return errors.New("wingd: controller HTTP requires a listener")
 	}
 	return serveLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
-		return context.WithValue(localhostwire.WithLocalPeer(ctx, connection.(authenticatedAPIConn).PeerIdentity()), socketPeerContextKey{}, true)
+		return context.WithValue(localhostwire.WithLocalSocketPeer(ctx, connection.(authenticatedAPIConn).PeerIdentity()), socketPeerContextKey{}, true)
 	}, nil, 0)
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
@@ -19,6 +20,14 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	home := t.TempDir()
 	factory := Config{Bind: func(_ context.Context, b Binding) (Services, error) {
 		services := serviceFixture(b)
+		raw, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "local-history", Request: runspec.Request{Version: 1, Team: "default", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, RequestedArgs: map[string]string{"token": "publication-canary-token"}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"token"}}}})
+		if err != nil {
+			return Services{}, err
+		}
+		_, err = stateSQL(t, b).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default','local-history',1,'ci','success',?,'request',1,'repo','host','execute','local',1,2,'r30',30) ON CONFLICT DO NOTHING`, raw)
+		if err != nil {
+			return Services{}, err
+		}
 		services.HTTP = controller.New(b.Store, nil).WithEngineController(b.Controller).HTTP()
 		return services, nil
 	}}
@@ -125,6 +134,10 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 		return grant.Token
 	}
 	session := signIn(code)
+	body := request(http.MethodGet, origin+"/api/v1/runs/local-history/local-host/snapshot", session, http.StatusForbidden)
+	if strings.Contains(string(body), "publication-canary-token") {
+		t.Fatal("dashboard session disclosed publication secret")
+	}
 	base := link.Scheme + "://" + link.Host
 	request(http.MethodGet, base+"/api/v1/runs", "", http.StatusUnauthorized, &http.Cookie{Name: "sw_dashboard", Value: session})
 	request(http.MethodGet, base+"/api/v1/runs", "", http.StatusUnauthorized)
