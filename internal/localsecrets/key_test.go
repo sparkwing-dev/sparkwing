@@ -116,11 +116,13 @@ func TestKeyring_ConcurrentCreatorsAgreeOnOneKey(t *testing.T) {
 		rings[i] = loadRing(t)
 	}
 	envelopes := make([]string, creators)
+	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for i := range rings {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			<-start
 			sealed, err := rings[i].For(st.AsOperator()).Seal("same")
 			if err != nil {
 				t.Errorf("creator %d: %v", i, err)
@@ -128,6 +130,7 @@ func TestKeyring_ConcurrentCreatorsAgreeOnOneKey(t *testing.T) {
 			envelopes[i] = sealed
 		}(i)
 	}
+	close(start)
 	wg.Wait()
 	for i, env := range envelopes {
 		for j, ring := range rings {

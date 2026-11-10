@@ -54,11 +54,11 @@ func openCredential(directory, name string, ownGroupWrite bool) (*os.File, error
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
+	if _, err := root.Lstat(name); err != nil {
+		return nil, err
+	}
 	resolved, err := filepath.EvalSymlinks(filepath.Join(directory, name))
 	if err != nil {
-		if _, absent := root.Lstat(name); errors.Is(absent, os.ErrNotExist) {
-			return nil, absent
-		}
 		return nil, fmt.Errorf("resolve credential %s: %v", name, err)
 	}
 	relative, err := filepath.Rel(directory, resolved)
