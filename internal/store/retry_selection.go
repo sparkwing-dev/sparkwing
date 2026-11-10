@@ -88,7 +88,7 @@ func materializeRetryDependentsTx(ctx context.Context, tx *storeTx, team Team, g
 			return blob.ErrNotFound
 		}
 	}
-	// A gate can cover more jobs than the deferred-read transaction can retry.
+	// safety: a gate can cover more jobs than the deferred-read transaction can retry.
 	if err := prefetchRetryReadsTx(ctx, tx, team, snapshot, gate.Actor); err != nil {
 		return err
 	}
