@@ -96,7 +96,8 @@ func (s *Server) readActionsBinding(ctx context.Context, team store.Team, reposi
 
 func (s *Server) actionsProvision(ctx context.Context, team store.Team, claims githuboidc.Claims) (capability.ProvisionSpec, error) {
 	binding, err := s.readActionsBinding(ctx, team, claims.RepositoryID)
-	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+	var lookupError *apierr.Error
+	if (errors.As(err, &lookupError) && lookupError.Code == apierr.NotFound) || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
 		return capability.ProvisionSpec{}, actionsExchangeRefusal("repository enrollment is missing; have an administrator enroll the repository for this team")
 	}
 	if err != nil {
