@@ -110,6 +110,11 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 	if err := prepareStateActorTx(ctx, tx, team, string(change.RunID), change.Actor); err != nil {
 		return runstate.Applied{}, err
 	}
+	if change.Cause == runstate.RunCancel {
+		if err := lockControllerCapacityTx(ctx, tx, team, string(change.RunID)); err != nil {
+			return runstate.Applied{}, err
+		}
+	}
 	if err := lockStateRunTx(ctx, tx, team, string(change.RunID)); err != nil {
 		return runstate.Applied{}, err
 	}
