@@ -42,7 +42,6 @@ func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
 			if value != "group" && !strings.Contains(failure.Message, "jobs[0]") {
 				t.Fatal("safe field path was lost")
 			}
-
 		})
 	}
 }
@@ -250,7 +249,7 @@ func TestMaskRegistryIssuedValueMayMatchAcceptedIdentifier(t *testing.T) {
 	if m.Mask("private-token") != "***" {
 		t.Fatal("issued value was released without registration")
 	}
-	if err := registry.accept(plan, func() error { return nil }, registry.replayMasks, nil); err != nil {
+	if err := registry.accept(plan, func() error { return nil }, registry.replayMasks, nil, nil); err != nil {
 		t.Fatalf("issued value refused repeat acceptance: %v", err)
 	}
 }

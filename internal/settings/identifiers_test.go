@@ -2,8 +2,9 @@ package settings
 
 import (
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestDeclarationVisitorIncludesOverriddenProfile(t *testing.T) {

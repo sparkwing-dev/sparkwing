@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 
@@ -149,4 +151,65 @@ func TestOwnerRejectsSecretEffectiveLabels(t *testing.T) {
 		}
 	}
 	checkPlanningDefaults(t, secret, "safe", []byte("defaults: {prefers: [pool=public]}"))
+}
+
+func TestOwnerRejectsLosingDeclarationsContainingSourceCredentials(t *testing.T) {
+	const credential = "private-acquisition-credential"
+	for _, field := range []string{"requires", "prefers"} {
+		t.Run(field, func(t *testing.T) {
+			f := newStoreOwnerFixture(t, openStore(t), runspec.Request{
+				Version: 1, Team: string(store.DefaultTeam), Pipeline: "build", Mode: runspec.IntakeExecute,
+				Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost,
+				Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}},
+			})
+			row, err := f.Tenant.ReadRun(t.Context(), f.Input.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected := engineid.Identity{Version: "v0.68.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}}
+			masks := secrets.NewMasker()
+			f.Host.Masker, f.Host.Masks = masks, NewMaskRegistry(masks)
+			f.Host.Acquire = func(context.Context, RunInput) (*source.Entry, error) {
+				if err := masks.Register(credential); err != nil {
+					t.Fatal(err)
+				}
+				return &source.Entry{Engine: engine.Resolved{Identity: selected}}, nil
+			}
+			config := "defaults: {" + field + ": [pool=" + credential + "]}\npipelines: [{name: build, entrypoint: build, " + field + ": [linux]}]"
+			declarations, err := settings.ProjectCheckoutDeclarations([]byte(config), ".sparkwing/sparkwing.yaml", "build")
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.Host.Prepare = func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
+				return OwnerPlanning{
+					Declarations: declarations,
+					Planning:     PlanningInput{Validation: nodeproto.ValidationContext{Secrets: ownerSealSecrets{}, Placement: nodeproto.PlacementLocal}},
+					Plan: func(context.Context) (json.RawMessage, error) {
+						return json.RawMessage(`{"jobs":[{"id":"safe-job","steps":[{"id":"body"}]}]}`), nil
+					},
+					Resolve: func(plan nodewire.PlanDoc) (runspec.Resolved, error) {
+						resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: row.Request, Declarations: declarations, Plan: plan})
+						return runspec.Resolved{Engine: selected, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}, err
+					},
+				}, nil
+			}
+			accepted := errors.New("unexpected accepted plan")
+			f.Host.Project = func(store.RunSnapshot) (store.ScheduleSnapshot, error) { return store.ScheduleSnapshot{}, accepted }
+			_, err = f.Host.Run(t.Context(), f.Input)
+			var refusal *apierr.Error
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.SecretInIdentifier {
+				t.Fatalf("source credential declaration accepted: %v", err)
+			}
+			if strings.Contains(err.Error(), credential) {
+				t.Fatal("refusal exposed credential")
+			}
+			snapshot, err := f.Tenant.ReadSnapshot(t.Context(), f.Input.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.Run.State != runstate.RunFailed || snapshot.Run.Spec != nil || len(snapshot.Run.Plan) != 0 || len(snapshot.Nodes) != 0 {
+				t.Fatal("refused source credential persisted acceptance")
+			}
+		})
+	}
 }

@@ -2,12 +2,12 @@ package nodehost
 
 import (
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
@@ -108,13 +108,14 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 // acceptPlan checks initial or generated identifiers, commits under the registration
 // lock, then retains their names. A refused commit changes no registry state.
 func (r *MaskRegistry) acceptPlan(plan nodewire.PlanDoc, commit func() error) error {
-	return r.accept(plan, commit, r.masker, nil)
+	return r.accept(plan, commit, r.masker, nil, nil)
 }
 
-func (r *MaskRegistry) acceptResolvedPlan(plan nodewire.PlanDoc, resolved runspec.ExecutionSettings, commit func() error) error {
-	return r.accept(plan, commit, r.masker, &resolved)
+func (r *MaskRegistry) acceptResolvedPlan(plan nodewire.PlanDoc, declarations runspec.CheckoutDeclarations, resolved runspec.ExecutionSettings, commit func() error) error {
+	return r.accept(plan, commit, r.masker, &declarations, &resolved)
 }
-func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matcher *secrets.Masker, resolved *runspec.ExecutionSettings) error {
+
+func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matcher *secrets.Masker, declarations *runspec.CheckoutDeclarations, resolved *runspec.ExecutionSettings) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.masker == nil || commit == nil {
@@ -130,6 +131,11 @@ func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matche
 	}
 	if err := nodeproto.VisitPlanIdentifiers(plan, visit); err != nil {
 		return err
+	}
+	if declarations != nil {
+		if err := settings.VisitDeclarationIdentifiers(*declarations, visit); err != nil {
+			return err
+		}
 	}
 	if resolved != nil {
 		if err := settings.VisitExecutionIdentifiers(*resolved, visit); err != nil {

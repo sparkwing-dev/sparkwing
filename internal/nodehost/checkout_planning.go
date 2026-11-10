@@ -93,7 +93,7 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	if p.Masks == nil {
 		p.Masks = NewMaskRegistry(p.Masker)
 	}
-	if err := p.Masks.initialize(input.Request, nil, nil, nil); err != nil {
+	if err := p.Masks.initialize(input.Request, nil, nil, nil, nil); err != nil {
 		return out, err
 	}
 	declarations, err := settings.ProjectCheckoutDeclarations(input.Project, input.ProjectFile, request.Pipeline)

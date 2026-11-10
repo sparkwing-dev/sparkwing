@@ -13,7 +13,7 @@ import (
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runspec.Resolved, plan *nodewire.PlanDoc, nodes []runstate.NodeRow) error {
+func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runspec.Resolved, plan *nodewire.PlanDoc, nodes []runstate.NodeRow, declarations *runspec.CheckoutDeclarations) error {
 	if r == nil {
 		return nil
 	}
@@ -51,7 +51,7 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 	for _, row := range nodes {
 		execution.Jobs[string(row.Ref.NodeID)] = row.Execution
 	}
-	return r.accept(namespace, func() error { return nil }, r.replayMasks, &execution)
+	return r.accept(namespace, func() error { return nil }, r.replayMasks, declarations, &execution)
 }
 
 func (r *MaskRegistry) initializeSeal(accepted AcceptedRun) error {
@@ -72,7 +72,7 @@ func (r *MaskRegistry) initializeSeal(accepted AcceptedRun) error {
 	if !slices.Equal(projection.Values, spec.Resolved.SecretRegistration.Values) {
 		return errors.New("accepted masking projection differs from its sealed inputs")
 	}
-	return r.initialize(spec.Request, &spec.Resolved, nil, nil)
+	return r.initialize(spec.Request, &spec.Resolved, nil, nil, nil)
 }
 
 func (r *MaskRegistry) initializeAccepted(ctx context.Context, state EvaluationStore, accepted AcceptedRun) error {
@@ -118,5 +118,5 @@ func (r *MaskRegistry) initializeSnapshot(snapshot store.RunSnapshot, accepted A
 			}
 		}
 	}
-	return r.initialize(snapshot.Run.Spec.Request, &snapshot.Run.Spec.Resolved, &accepted.Plan, snapshot.Nodes)
+	return r.initialize(snapshot.Run.Spec.Request, &snapshot.Run.Spec.Resolved, &accepted.Plan, snapshot.Nodes, &snapshot.Run.Spec.Declarations)
 }

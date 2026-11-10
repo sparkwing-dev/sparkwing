@@ -126,7 +126,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	}
 	var request runspec.Request
 	if h.Masks != nil && json.Unmarshal(input.SealedRequest, &request) == nil {
-		if err := h.Masks.initialize(runspec.SealedRequest{Request: request}, nil, nil, nil); err != nil {
+		if err := h.Masks.initialize(runspec.SealedRequest{Request: request}, nil, nil, nil, nil); err != nil {
 			return completion, err
 		}
 	}
@@ -148,7 +148,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	if err := ownerRequestMatches(input, snapshot.Run); err != nil {
 		return completion, err
 	}
-	if err := h.Masks.initialize(snapshot.Run.Request, nil, nil, nil); err != nil {
+	if err := h.Masks.initialize(snapshot.Run.Request, nil, nil, nil, nil); err != nil {
 		return completion, err
 	}
 	if snapshot.Run.Spec != nil {
@@ -294,7 +294,7 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if !guards.Passed && (len(guards.When)+len(guards.Unless) != 0 || guards.Reason != "") {
 		prepared.Plan = func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil }
 	}
-	if err := h.Masks.initialize(row.Request, &prepared.Resolved, nil, nil); err != nil {
+	if err := h.Masks.initialize(row.Request, &prepared.Resolved, nil, nil, nil); err != nil {
 		return AcceptedRun{}, err
 	}
 	if h.Masks != nil {
@@ -334,7 +334,7 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 		return err
 	}
 	if h.Masks != nil {
-		err = h.Masks.acceptResolvedPlan(plan.Plan, prepared.Resolved.Settings, commit)
+		err = h.Masks.acceptResolvedPlan(plan.Plan, prepared.Declarations, prepared.Resolved.Settings, commit)
 	} else {
 		err = commit()
 	}
