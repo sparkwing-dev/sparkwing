@@ -2,8 +2,6 @@ package nodeproto
 
 import (
 	"fmt"
-	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	"sort"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
@@ -155,7 +153,7 @@ func ValidateIdentifierSecret(value, path string, matcher SecretMatcher) error {
 		return planInvalid("plan", "secret matcher is required")
 	}
 	if matcher.ContainsSecret(value) {
-		return sanitizePlanError(&apierr.Error{Code: hosterr.SecretInIdentifier, Message: fmt.Sprintf("registered secret in identifier at %s", path), Details: map[string]any{"field": path}}, matcher)
+		return SecretIdentifierError(path, value, matcher)
 	}
 	return nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -71,6 +72,9 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 	if flags.resume != "" {
 		return runHereResumeCommand(ctx, flags, out, connect, client.NewEngineClient,
 			func(ctx context.Context, options client.EngineOptions, run string) (nodehost.RunCompletion, error) {
+				if err := ensureHereAdmission(ctx); err != nil {
+					return nodehost.RunCompletion{}, err
+				}
 				return resumeAttachedHereRun(ctx, options, run, defaultHereDependencies(flags.output))
 			})
 	}
@@ -82,6 +86,11 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 	request, err := prepare(ctx, flags)
 	if err != nil {
 		return err
+	}
+	if request.Request.Options.Runner.Set && request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
+		if err := ensureHereAdmission(ctx); err != nil {
+			return err
+		}
 	}
 	options, closeTransport, err := connect(ctx, flags.profile)
 	if err != nil {

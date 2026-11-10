@@ -273,12 +273,20 @@ func verifyCachedRecord(version string, target releaseasset.Target, executable s
 	if err := decodeUniqueJSON(metadata, &bundle); err != nil {
 		return VerifiedRelease{}, integrity(errors.New("invalid cached release verification record"))
 	}
-	var err error
-	bundle.Asset, err = os.ReadFile(executable)
+	file, err := os.Open(executable)
 	if err != nil {
 		return VerifiedRelease{}, err
 	}
-	return VerifyRelease(version, target, bundle, keys)
+	defer func() { _ = file.Close() }()
+	stat, err := file.Stat()
+	if err != nil {
+		return VerifiedRelease{}, err
+	}
+	if !stat.Mode().IsRegular() {
+		return VerifiedRelease{}, integrity(errors.New("cached release is not a regular file"))
+	}
+	asset, err := releaseasset.VerifyReaderForVersion(keys, version, bundle.Manifest, bundle.ManifestSignature, target, file, stat.Size(), bundle.AssetSignature)
+	return verifiedRelease(version, target, bundle, keys, asset, err)
 }
 
 // storeVerified publishes a complete verified cache entry by an atomic directory rename.
@@ -322,7 +330,12 @@ func (r *Resolver) storeVerified(ctx context.Context, pin engineid.Pin, release 
 	if err := os.WriteFile(filepath.Join(stage, "verification.json"), metadata, 0o600); err != nil {
 		return Resolved{}, err
 	}
-	if err := os.WriteFile(filepath.Join(stage, release.asset.Name()), release.asset.Bytes(), 0o700); err != nil {
+	file, err := os.OpenFile(filepath.Join(stage, release.asset.Name()), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o700)
+	if err != nil {
+		return Resolved{}, err
+	}
+	_, writeErr := release.asset.WriteTo(file)
+	if err := errors.Join(writeErr, file.Close()); err != nil {
 		return Resolved{}, err
 	}
 	if err := ctx.Err(); err != nil {

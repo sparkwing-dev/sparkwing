@@ -19,6 +19,7 @@ type Masker struct {
 	parent        *Masker
 	mu            sync.RWMutex
 	raw           map[string]struct{}
+	lineValues    map[string]struct{}
 	values        []string
 	known         map[string]struct{}
 	compiled      *compiledMatcher
@@ -36,7 +37,7 @@ const ShortValueWarning = "Secret values shorter than 4 characters cannot be mas
 // Maskable reports whether a value is long enough to mask without hiding ordinary log text.
 func Maskable(value string) bool { return utf8.RuneCountInString(value) >= 4 }
 
-// Register protects one secret and its encoded spellings. Short values are skipped.
+// Register protects a secret, its maskable lines and their encoded spellings.
 func (m *Masker) Register(value string) error {
 	if !Maskable(value) {
 		return nil
@@ -46,6 +47,41 @@ func (m *Masker) Register(value string) error {
 	if _, ok := m.raw[value]; ok {
 		return nil
 	}
+	m.registerValue(value)
+	if strings.ContainsAny(value, "\r\n") {
+		lf := strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
+		m.registerValue(lf)
+		m.registerValue(strings.ReplaceAll(lf, "\n", "\r\n"))
+		for _, line := range strings.Split(lf, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			m.registerLine(line)
+			m.registerLine(trimmed)
+		}
+	}
+	return nil
+}
+
+func (m *Masker) registerLine(value string) {
+	if !Maskable(value) {
+		return
+	}
+	m.registerValue(value)
+	if m.lineValues == nil {
+		m.lineValues = map[string]struct{}{}
+	}
+	m.lineValues[value] = struct{}{}
+}
+
+func (m *Masker) registerValue(value string) {
+	if !Maskable(value) {
+		return
+	}
+	if _, ok := m.raw[value]; ok {
+		return
+	}
 	if m.raw == nil {
 		m.raw = map[string]struct{}{}
 	}
@@ -54,7 +90,6 @@ func (m *Masker) Register(value string) error {
 	for _, encoded := range encodedForms(value) {
 		m.add(encoded)
 	}
-	return nil
 }
 
 func (m *Masker) add(value string) {
@@ -85,6 +120,10 @@ func (m *Masker) Merge(other *Masker) {
 	for entry := range other.raw {
 		raw = append(raw, entry)
 	}
+	lines := make([]string, 0, len(other.lineValues))
+	for line := range other.lineValues {
+		lines = append(lines, line)
+	}
 	other.mu.RUnlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -96,6 +135,12 @@ func (m *Masker) Merge(other *Masker) {
 	}
 	for _, value := range values {
 		m.add(value)
+	}
+	if len(lines) > 0 && m.lineValues == nil {
+		m.lineValues = map[string]struct{}{}
+	}
+	for _, line := range lines {
+		m.lineValues[line] = struct{}{}
 	}
 }
 
@@ -338,6 +383,31 @@ func (m *Masker) ContainsSecret(identifier string) bool {
 	}
 	found, _ := m.matcher().scan(identifier, false)
 	return len(found) > 0
+}
+
+// ContainsSecretLine identifies a collision with a raw or trimmed multi-line
+// secret line, including its encodings, without exposing the matched value.
+func (m *Masker) ContainsSecretLine(identifier string) bool {
+	if m == nil {
+		return false
+	}
+	if m.parent != nil && m.parent.ContainsSecretLine(identifier) {
+		return true
+	}
+	m.mu.RLock()
+	lines := make([]string, 0, len(m.lineValues))
+	for line := range m.lineValues {
+		lines = append(lines, line)
+	}
+	m.mu.RUnlock()
+	if len(lines) == 0 {
+		return false
+	}
+	probe := NewMasker()
+	for _, line := range lines {
+		probe.registerValue(line)
+	}
+	return probe.ContainsSecret(identifier)
 }
 
 // Stream masks an ordered byte stream. One goroutine owns each Stream.

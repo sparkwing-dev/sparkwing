@@ -24,13 +24,17 @@ import (
 // VerifyRelease authenticates bytes and inspects their build identity without executing them.
 func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBundle, keys []ed25519.PublicKey) (VerifiedRelease, error) {
 	asset, err := releaseasset.VerifyForVersion(keys, version, bundle.Manifest, bundle.ManifestSignature, target, bundle.Asset, bundle.AssetSignature)
+	return verifiedRelease(version, target, bundle, keys, asset, err)
+}
+
+func verifiedRelease(version string, target releaseasset.Target, bundle ReleaseBundle, keys []ed25519.PublicKey, asset releaseasset.Verified, err error) (VerifiedRelease, error) {
 	if errors.Is(err, releaseasset.ErrUnexpectedLayout) && semver.Compare(version, firstEngineRelease+"-0") < 0 {
 		return VerifiedRelease{}, predatesEngine(version, err)
 	}
 	if err != nil {
 		return VerifiedRelease{}, integrity(err)
 	}
-	info, err := buildinfo.Read(bytes.NewReader(bundle.Asset))
+	info, err := buildinfo.Read(asset)
 	if err != nil {
 		return VerifiedRelease{}, integrity(fmt.Errorf("read executable identity: %w", err))
 	}

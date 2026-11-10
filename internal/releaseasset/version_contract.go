@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sort"
 	"strings"
@@ -79,6 +80,30 @@ var ErrUnexpectedLayout = errors.New("release lists a different set of executabl
 
 // VerifyForVersion authenticates the exact closed release set and selected executable.
 func VerifyForVersion(keys []ed25519.PublicKey, version string, manifest, manifestSignature []byte, target Target, asset, assetSignature []byte) (Verified, error) {
+	return verifyForVersion(keys, version, manifest, manifestSignature, target, asset, assetSignature, false, "")
+}
+
+// VerifyReaderForVersion hashes a sized stream into one private snapshot. Plain
+// Ed25519 requires the message in memory; the snapshot also prevents later reader
+// changes from altering the bytes authorized for installation.
+// The reader must not retain the buffers it is given.
+func VerifyReaderForVersion(keys []ed25519.PublicKey, version string, manifest, manifestSignature []byte, target Target, reader io.Reader, size int64, assetSignature []byte) (Verified, error) {
+	if size < 0 || size > 1<<30 || int64(int(size)) != size {
+		return Verified{}, errors.New("invalid release asset size")
+	}
+	asset := make([]byte, int(size))
+	hash := sha256.New()
+	if _, err := io.ReadFull(io.TeeReader(reader, hash), asset); err != nil {
+		return Verified{}, err
+	}
+	var extra [1]byte
+	if n, err := io.ReadFull(reader, extra[:]); n != 0 || !errors.Is(err, io.EOF) {
+		return Verified{}, errors.New("release asset size changed")
+	}
+	return verifyForVersion(keys, version, manifest, manifestSignature, target, asset, assetSignature, true, hex.EncodeToString(hash.Sum(nil)))
+}
+
+func verifyForVersion(keys []ed25519.PublicKey, version string, manifest, manifestSignature []byte, target Target, asset, assetSignature []byte, owned bool, actualHex string) (Verified, error) {
 	names, err := NamesForVersion(version)
 	if err != nil {
 		return Verified{}, err
@@ -90,7 +115,7 @@ func VerifyForVersion(keys []ed25519.PublicKey, version string, manifest, manife
 	var verified Verified
 	authenticated := false
 	for _, key := range keys {
-		if verified, err = verifyWithKey(key, manifest, manifestSignature, name, asset, assetSignature); err == nil {
+		if verified, err = verifyWithKey(key, manifest, manifestSignature, name, asset, assetSignature, owned, actualHex); err == nil {
 			authenticated = true
 			break
 		}

@@ -24,7 +24,10 @@ type LocalDoctorFinding struct {
 	Code, Unit, Message, Hint string
 }
 
-type localPeerKey struct{}
+type (
+	localPeerKey       struct{}
+	localSocketPeerKey struct{}
+)
 
 // LocalPeer reads the identity verified by the local transport or dashboard login.
 func LocalPeer(ctx context.Context) (LocalPeerIdentity, bool) {
@@ -35,6 +38,18 @@ func LocalPeer(ctx context.Context) (LocalPeerIdentity, bool) {
 // WithLocalPeer attaches a verified transport identity to a request.
 func WithLocalPeer(ctx context.Context, peer LocalPeerIdentity) context.Context {
 	return context.WithValue(ctx, localPeerKey{}, peer.Clone())
+}
+
+// WithLocalSocketPeer records the kernel identity of a local API connection.
+func WithLocalSocketPeer(ctx context.Context, peer LocalPeerIdentity) context.Context {
+	return context.WithValue(WithLocalPeer(ctx, peer), localSocketPeerKey{}, true)
+}
+
+// LocalSocketPeer excludes identities carried by dashboard login sessions.
+func LocalSocketPeer(ctx context.Context) (LocalPeerIdentity, bool) {
+	socket, _ := ctx.Value(localSocketPeerKey{}).(bool)
+	peer, ok := LocalPeer(ctx)
+	return peer, socket && ok
 }
 
 // Clone keeps a request from mutating another request's verified UID.

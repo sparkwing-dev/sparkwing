@@ -145,6 +145,11 @@ func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matche
 	return nil
 }
 
+// ContainsSecretLine identifies the line origin of an identifier collision.
+func (r *MaskRegistry) ContainsSecretLine(identifier string) bool {
+	return r.masker.ContainsSecretLine(identifier)
+}
+
 func (r *MaskRegistry) mask(text string) string { return r.masker.Mask(text) }
 
 // safety: field paths are host-generated; values cannot enter collision diagnostics.

@@ -3,9 +3,11 @@ package store_test
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -117,4 +119,68 @@ func TestPostgresConcurrencyMaintenanceDefersBusyAdmission(t *testing.T) {
 
 func TestPostgresAdmissionLocksFollowTheirStoreSchema(t *testing.T) {
 	store.AdmissionSchemaIsolation(t, func(t *testing.T) *store.Store { return storetest.OpenPostgres(t) })
+}
+
+func TestPostgresControllerCancelLocksCapacityRunsBeforeTarget(t *testing.T) {
+	f := newStoreRecoveryFixtureAt(t, false, storetest.NewPostgres(t), func(plan *nodewire.PlanDoc) {
+		plan.Concurrency = []nodewire.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1)}}
+	})
+	plan, _ := admissionAcceptedPlan(t, f)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	target, earlier := plan.RunID, string(f.ref.RunID)
+	if earlier > target {
+		target, earlier = earlier, target
+	}
+	if _, err := f.s.DB().ExecContext(ctx, `UPDATE runs SET dispatch='controller' WHERE team=$1 AND id=$2`, f.tenant.Team(), target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.DB().ExecContext(ctx, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,claimed_at,lease_expires_at) VALUES ($1,'plan:global:serial','lock-probe',$2,1,$3)`, f.tenant.Team(), earlier, time.Now().Add(time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := f.s.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocked.Rollback()
+	if _, err := blocked.ExecContext(ctx, `SELECT id FROM runs WHERE team=$1 AND id=$2 FOR NO KEY UPDATE`, f.tenant.Team(), earlier); err != nil {
+		t.Fatal(err)
+	}
+	var pid int
+	if err := blocked.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	var cancelErr error
+	go func() {
+		_, err := f.tenant.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(target), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}})
+		cancelErr = err
+		close(done)
+	}()
+	defer func() { cancel(); _ = blocked.Rollback(); <-done }()
+	for waiting := 0; waiting == 0; {
+		select {
+		case <-done:
+			t.Fatalf("cancellation bypassed capacity lock: %v", cancelErr)
+		default:
+		}
+		if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		runtime.Gosched()
+	}
+	if _, err := blocked.ExecContext(ctx, `SELECT id FROM runs WHERE team=$1 AND id=$2 FOR NO KEY UPDATE NOWAIT`, f.tenant.Team(), target); err != nil {
+		t.Fatalf("cancellation holds target before earlier capacity run: %v", err)
+	}
+	if err := blocked.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if cancelErr != nil {
+		t.Fatal(cancelErr)
+	}
+	run, err := f.tenant.ReadRun(ctx, target)
+	if err != nil || run.CancelRequestedAt == nil {
+		t.Fatalf("cancellation: %s %v", run.State, err)
+	}
 }
