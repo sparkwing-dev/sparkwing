@@ -282,7 +282,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				}
 				slog.Info("runner update drain entered", "reason", reason, "elapsed", time.Duration(0), "current_version", l.Config.Version, "target_version", updateTarget, "held_units", len(active), "required", update.required)
 			}
-			if !update.required && len(active) > 0 {
+			if !update.required && (len(active) > 0 || pending != nil) {
 				// safety: held hosts may await children that need this runner's claims.
 				updateErr = err
 				return false, nil
@@ -316,7 +316,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	}()
 	for {
 		drainResults()
-		if updateErr != nil && len(active) == 0 {
+		if updateErr != nil && len(active) == 0 && pending == nil {
 			return updateErr, nil
 		}
 		select {

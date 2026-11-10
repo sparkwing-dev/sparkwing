@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -324,53 +325,63 @@ func signedRunnerPolicy(t *testing.T, edit func(*engine.VersionIndex)) engine.Ve
 }
 
 func TestManagedRunnerUpdateKeepsClaimsLiveForAwaitedChild(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		release := runnerReleaseFixture(t)
-		initial, _ := runnerPolicyFixtures(t)
-		started, childDone, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
-		policy := &awaitUpdatePolicy{initial: initial, latest: signedRunnerPolicy(t, func(*engine.VersionIndex) {}), started: started, finished: finished, update: engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release}, t: t}
-		installation := &installationFixture{}
-		claims := 0
-		runner := ManagedRunner{Loop: &Loop{Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1},
-			Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-				claims++
-				id, run := "parent", "run"
-				if claims == 2 {
-					id, run = "child", "child-run"
+	for _, pendingAward := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pending-award=%t", pendingAward), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				release := runnerReleaseFixture(t)
+				initial, _ := runnerPolicyFixtures(t)
+				started, childDone, finished, published := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+				policy := &awaitUpdatePolicy{initial: initial, latest: signedRunnerPolicy(t, func(*engine.VersionIndex) {}), started: started, finished: finished, published: published, update: engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release}, t: t}
+				installation := &installationFixture{}
+				claims := 0
+				runner := ManagedRunner{Loop: &Loop{Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1},
+					Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+						claims++
+						id, run := "parent", "run"
+						if claims == 1 && pendingAward {
+							close(started)
+							<-published
+						}
+						if claims == 2 {
+							id, run = "child", "child-run"
+						}
+						if claims > 2 {
+							return controllerwire.ClaimResponse{}, nil
+						}
+						return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: id, RunID: run, Capability: "private"}}, nil
+					}),
+					Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+						if unit.UnitID == "child" {
+							close(childDone)
+							return nil
+						}
+						resume := nodehost.AwaitSlot(ctx)()
+						if !pendingAward {
+							close(started)
+						}
+						<-childDone
+						resume(ctx)
+						close(finished)
+						return nil
+					}),
+				}, Versions: policy, Installation: installation, Target: release.Target()}
+				if err := runner.Run(t.Context()); err != nil {
+					t.Fatal(err)
 				}
-				if claims > 2 {
-					return controllerwire.ClaimResponse{}, nil
+				if claims < 2 || !reflect.DeepEqual(installation.calls, []string{"apply"}) {
+					t.Fatalf("claims=%d installation=%v", claims, installation.calls)
 				}
-				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: id, RunID: run, Capability: "private"}}, nil
-			}),
-			Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
-				if unit.UnitID == "child" {
-					close(childDone)
-					return nil
-				}
-				resume := nodehost.AwaitSlot(ctx)()
-				close(started)
-				<-childDone
-				resume(ctx)
-				close(finished)
-				return nil
-			}),
-		}, Versions: policy, Installation: installation, Target: release.Target()}
-		if err := runner.Run(t.Context()); err != nil {
-			t.Fatal(err)
-		}
-		if claims < 2 || !reflect.DeepEqual(installation.calls, []string{"apply"}) {
-			t.Fatalf("claims=%d installation=%v", claims, installation.calls)
-		}
-	})
+			})
+		})
+	}
 }
 
 type awaitUpdatePolicy struct {
-	initial, latest   engine.VerifiedIndex
-	started, finished chan struct{}
-	update            engine.SoftwareUpdate
-	checks            int
-	t                 *testing.T
+	initial, latest              engine.VerifiedIndex
+	started, finished, published chan struct{}
+	update                       engine.SoftwareUpdate
+	checks                       int
+	t                            *testing.T
 }
 
 func (p *awaitUpdatePolicy) Index(context.Context, time.Time) (engine.IndexResult, error) {
@@ -379,6 +390,9 @@ func (p *awaitUpdatePolicy) Index(context.Context, time.Time) (engine.IndexResul
 		return engine.IndexResult{Index: p.initial}, nil
 	}
 	<-p.started
+	if p.checks == 2 {
+		close(p.published)
+	}
 	return engine.IndexResult{Index: p.latest}, nil
 }
 func (p *awaitUpdatePolicy) PrepareRunnerUpdate(context.Context, string, releaseasset.Target) (engine.SoftwareUpdate, error) {
