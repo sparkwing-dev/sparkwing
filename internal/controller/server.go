@@ -45,6 +45,7 @@ type Server struct {
 	logger               *slog.Logger
 	healthMu             sync.Mutex
 	healthFailures       int
+	reapWake             chan struct{}
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
@@ -484,6 +485,13 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	return err
 }
 
+func (s *Server) nudgeReaper() {
+	select {
+	case s.reapWake <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -492,13 +500,14 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reap(ctx)
-			s.reconcileOwnedRuns(ctx)
-			if err := s.ReconcileRunEffects(ctx); err != nil && ctx.Err() == nil {
-				s.logger.Error("run completion failed", "err", err)
-			}
-			s.sampleOperationalSeries(ctx)
+		case <-s.reapWake:
 		}
+		s.reap(ctx)
+		s.reconcileOwnedRuns(ctx)
+		if err := s.ReconcileRunEffects(ctx); err != nil && ctx.Err() == nil {
+			s.logger.Error("run completion failed", "err", err)
+		}
+		s.sampleOperationalSeries(ctx)
 	}
 }
 

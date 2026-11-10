@@ -9,9 +9,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
+const claimCancellationInterval = 3 * time.Second
+
 func waitClaimCancellation(ctx context.Context, read func(context.Context, runspec.NodeRef) (runstate.NodeRow, error), ref runspec.NodeRef, actor runstate.Actor) *lease.CancelError {
-	// safety: The ten-second child sweep leaves two seconds for observation and process cleanup.
-	ticker := time.NewTicker(time.Second)
+	// perf: Point reads at a fixed cadence bound cancellation traffic per awarded claim.
+	ticker := time.NewTicker(claimCancellationInterval)
 	defer ticker.Stop()
 	for {
 		select {

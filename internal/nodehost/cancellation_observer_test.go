@@ -56,7 +56,8 @@ func TestClaimCancellationObservationRejectsOtherClaims(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				result := make(chan *lease.CancelError, 1)
 				go func() { result <- waitClaimCancellation(ctx, state.ReadNode, ref, actor) }()
-				time.Sleep(3 * time.Second)
+				time.Sleep(7 * time.Second)
+				synctest.Wait()
 				select {
 				case cancellation := <-result:
 					t.Fatalf("observed another claim's cancellation: %v", cancellation)
