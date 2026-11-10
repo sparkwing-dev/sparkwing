@@ -187,9 +187,10 @@ sign-in link. When the address is taken, the controller keeps admitting runs
 without a dashboard, and status reports the bind error as `dashboard_error`; it
 never moves to another port. `sparkwing daemon stop` stops the controller and
 its dashboard together and retires the local runner: the runner stops claiming
-work, an idle runner exits within seconds, and a runner holding jobs
-finishes them and exits once a controller accepts their results. `sparkwing
-daemon restart` leaves the runner and its jobs running.
+work. If the runner remains alive when the stop wait ends, the command exits
+nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let
+held work finish, then retry `sparkwing daemon stop`. `sparkwing daemon restart`
+leaves the runner and its jobs running.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful

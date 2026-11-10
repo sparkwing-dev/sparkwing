@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"go/parser"
 	"go/token"
 	"os"
@@ -572,6 +573,16 @@ func TestPipelineNewTypeScriptUpdatesDeclaredEntry(t *testing.T) {
 }
 
 func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
+	manifest, err := os.ReadFile(filepath.Join("..", "..", "sdk", "typescript", "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var published struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(manifest, &published); err != nil {
+		t.Fatal(err)
+	}
 	repo := t.TempDir()
 	t.Chdir(repo)
 	t.Setenv("PATH", t.TempDir())
@@ -589,8 +600,12 @@ func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 	if err != nil || !ts {
 		t.Fatalf("scaffold is not TypeScript: %v", err)
 	}
-	if _, err := engine.ReadPin(dir, engineid.TypeScriptSDK); err != nil {
+	pin, err := engine.ReadPin(dir, engineid.TypeScriptSDK)
+	if err != nil {
 		t.Fatalf("scaffold SDK pin: %v", err)
+	}
+	if pin.Version != published.Version {
+		t.Fatalf("TypeScript scaffold pins %s, want its published SDK %s", pin.Version, published.Version)
 	}
 	cfg, err := projectconfig.Load(filepath.Join(dir, "sparkwing.yaml"))
 	if err != nil || len(cfg.Pipelines) != 2 {
