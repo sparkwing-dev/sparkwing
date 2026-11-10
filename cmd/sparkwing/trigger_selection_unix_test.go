@@ -68,7 +68,7 @@ func TestTriggerCommandGuardsTheSelectedRevision(t *testing.T) {
 				if !connected || !errors.Is(err, boundary) {
 					t.Fatalf("selected source did not finish inspection: %v", err)
 				}
-			} else if connected || err == nil || !strings.Contains(err.Error(), "pinned to profile prod") {
+			} else if connected || err == nil || !strings.Contains(err.Error(), "pinned to a controller profile") {
 				t.Fatalf("HEAD's profile bypassed the selected pin: %v", err)
 			}
 		})
@@ -86,7 +86,7 @@ func TestTriggerSelectedConfigurationIgnoresNestedAndDirtyFiles(t *testing.T) {
 	}
 	t.Chdir(filepath.Dir(nested))
 	_, err := prepareNativeTrigger(t.Context(), triggerFlags{pipeline: "deploy", profile: "dev", ref: "release"})
-	if err == nil || !strings.Contains(err.Error(), "pinned to profile prod") {
+	if err == nil || !strings.Contains(err.Error(), "pinned to a controller profile") {
 		t.Fatalf("nested dirty configuration hid the selected root pin: %v", err)
 	}
 }
