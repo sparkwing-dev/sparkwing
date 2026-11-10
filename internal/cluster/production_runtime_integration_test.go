@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -26,10 +27,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -632,5 +635,57 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				t.Fatalf("scheduling stopped at another boundary: %v", err)
 			}
 		})
+	}
+}
+
+func TestProductionRunnerSourceResolvesRetainedAcceptedEngine(t *testing.T) {
+	build := t.TempDir()
+	directory := filepath.Join(build, "cmd", "sparkwing")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(build, "go.mod"), []byte("module github.com/sparkwing-dev/sparkwing\ngo 1.26.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "main.go"), []byte("package main\nvar Version string\nfunc main(){println(Version)}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(build, "sparkwing")
+	command := exec.CommandContext(t.Context(), "go", "-C", build, "build", "-p", "1", "-ldflags", "-X main.Version=v0.72.0", "-o", executable, "./cmd/sparkwing")
+	command.Env = append(os.Environ(), "GOFLAGS=-buildvcs=false", "GOWORK=off")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build accepted engine: %s %v", output, err)
+	}
+	hosting, unit := productionNativeAward(t, capability.UnitNode)
+	retained, digest, err := engine.RetainExecutable(filepath.Join(os.Getenv("SPARKWING_HOME"), "runners", "builds"), executable, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(executable); err != nil {
+		t.Fatal(err)
+	}
+	controller, err := client.NewEngineClient(client.EngineOptions{URL: hosting.ControllerURL, HTTP: hosting.HTTP, Bearer: fixedBearer(unit.Capability)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	services, _, err := hosting.Bind(t.Context(), unit, controller)
+	if services.Close != nil {
+		t.Cleanup(func() { _ = services.Close() })
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.0.0", Replacement: "../sdk"}, Version: "v0.72.0", ManifestDigest: digest}
+	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	selected, err := services.Config.Source.Engines.Ensure(t.Context(), identity, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Identity != identity || selected.Executable != retained {
+		t.Fatalf("runner source changed its accepted engine: %+v", selected)
+	}
+	output, err := exec.CommandContext(t.Context(), selected.Executable).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != "v0.72.0" {
+		t.Fatalf("runner source executed replacement: %s %v", output, err)
 	}
 }

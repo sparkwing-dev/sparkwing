@@ -321,10 +321,19 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 		return crons.Proof{}, nil
 	}, snapshots)
 	service.Launcher = server.ScheduleLauncher()
-	socket := filepath.Join(home, "api.sock")
 	var listener net.Listener
 	var transport *http.Transport
 	if native {
+		sock, err := wingd.EnsureSocketPath(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		socket := wingd.APISocketBeside(sock)
+		t.Cleanup(func() {
+			if err := os.RemoveAll(filepath.Dir(socket)); err != nil {
+				t.Error(err)
+			}
+		})
 		listener, err = wingd.ListenSocket(socket)
 		if err != nil {
 			t.Fatal(err)

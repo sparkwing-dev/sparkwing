@@ -38,7 +38,7 @@ func productionRuntime(version string) clusterRuntime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines")})
+			engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines"), LocalBuildDirectory: filepath.Join(home, "runners", "builds")})
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
@@ -100,7 +100,7 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 	hosting := runners.NativeHosting(runners.NativeHostingConfig{
 		Home: home, Controller: connection, Admission: machineAdmission, SubmitAccept: accept, PrepareSource: modules != "",
 		Source: func(ctx context.Context, unit controllerwire.ClaimedUnit, options client.EngineOptions) (source.Options, error) {
-			engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines")})
+			engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines"), LocalBuildDirectory: filepath.Join(home, "runners", "builds")})
 			if err != nil {
 				return source.Options{}, err
 			}

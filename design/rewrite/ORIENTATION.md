@@ -31,6 +31,12 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | Optional fields and capability flags never bump the protocol. The engine defaults missing optional fields. Breaking shapes bump it and need an engine-side adapter. Delete an adapter as soon as the signed mapping lists no SDK using that protocol | `internal/nodehost/protocol_adapter.go`, `docs/sdk.md`: Protocol compatibility | `TestRecordedSDKProtocols` |
 | Versioned Go and TypeScript wire recordings survive SDK source changes and replay against the current engine with identical outcomes. Record a version with `bash bin/record-sdk-protocol.sh <protocol>` inside Xwing scratch | `internal/nodeproto/conformance/testdata/recordings/` | `TestRecordedSDKProtocols`, `TestGoSDKConformsV2`, `TestNativeConformance` |
 
+### Run receipts
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Run receipts bind the committed job output digests exposed by tenant reporting | `internal/controller/receipts.go`: `handleGetRunReceipt`; `internal/store/node_output.go`: `populateNodeOutput` | `cmd/sparkwing/receipt_output_unix_test.go`: `TestRunReceiptBindsProducedOutputs` |
+
 ### Store baseline
 
 | Rule | Owner | Guard test |
@@ -61,6 +67,14 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | KEDA owns volume-free placeholders and namespaced scaler credentials in the dedicated warm namespace | `charts/sparkwing-full/templates/warm-capacity.yaml` | `charts/warm_capacity_test.go`: `TestWarmCapacityRendersClassNodesAndSQLScaler` |
 
 ### Run execution
+
+Routine runner updates wait for idle while claims keep awaited children moving;
+revocation and minimum-version denials still stop claims. Owner:
+`internal/runners/loop.go`; guard:
+`TestManagedRunnerUpdateKeepsClaimsLiveForAwaitedChild`.
+Replacement engines selected by runners are retained by executable digest.
+Owner: `internal/engine/retain.go`; guard:
+`TestReplacementResolutionSurvivesInstalledEngineSwap`.
 
 Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckManifestMembers` with staging. `TestManifestAdmissionRejectsUnstageablePaths` guards traversal and file/parent collisions.
 
@@ -347,6 +361,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 | --- | --- | --- |
 | Explicit output modes win; otherwise stdout selects pretty on a terminal and JSON in a pipe, including controller session credentials and internal completion | `internal/clisurface/parse.go`: `OutputFormat`; `cmd/sparkwing-controller/admin.go`: `runAdmin` | `cmd/sparkwing/output_contract_test.go`, `output_contract_linux_test.go`; `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionOutputModes`; `admin_output_linux_test.go`: `TestAdminSessionPipeAndTerminal` |
 | Uploaded trigger snapshots without an origin report the hosted clone URL requirement and an add-origin command | `cmd/sparkwing/trigger_prepare.go`: `prepareTriggerSource` | `TestPrepareUploadedTriggerWithoutOriginExplainsRepair` |
+| Active SDK work and verification invoke AfterRun after requested cancellation within the existing cleanup budget and lease authority; callbacks receive a failed result with a run-cancelled error and the outcome remains canceled. Retry-backoff cancellation has no live callback process | `internal/nodehost/executor_process.go`: `attempt` | `TestNodeExecutorUserCancelRunsAfterRunAndKeepsCancelledOutcome`, `TestNodeExecutorUserCancelDuringVerifyRunsAfterRun` |
 | Trigger preflight accepts both selected commits on origin-tracking refs or in exact-SHA fetch records from origin, including runner source checkouts | `cmd/sparkwing/trigger_prepare.go`: `checkReachable`, `fetchedFromOrigin` | `cmd/sparkwing/trigger_fetched_test.go`: `TestTriggerPreflightFromRunnerSourceCheckout`, `TestTriggerPreflightFromReferenceClone`, `TestTriggerPreflightRequiresBothRevisionsWithFetchEvidence` |
 | Local dashboard sessions authenticate the peer that minted the link without forwarding browser credentials | `internal/wingd/local_login.go`: `serveSession` | `internal/wingd/localcontroller/dashboard_login_test.go`: `TestDashboardLoginAuthorizesControllerAPIAsMintingPeer` |
 | Configured dashboard proxy hosts use HTTPS and socket-minted sign-in codes bound to that exact origin; forwarded identity headers grant no authority | `internal/userconfig/validate.go`: `validDashboardHost`; `internal/wingd/local_login.go`: `mint`, `requestOrigin`; `local_runtime.go`: `guardDashboard` | `internal/userconfig/contract_test.go`: `TestDashboardAllowedHosts`; `internal/wingd/local_dashboard_serve_test.go`: `TestDashboardServeSignInStaysOnItsConfiguredOrigin` |

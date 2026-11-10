@@ -14,6 +14,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
@@ -110,14 +112,14 @@ func TestPinnedLocalRunnerExecutableSurvivesInstallAndRejectsCorruption(t *testi
 	if err := os.WriteFile(source, []byte("first"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	first, build, err := pinLocalRunnerExecutable(home, source, "")
+	first, build, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(source, []byte("next"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	next, nextBuild, err := pinLocalRunnerExecutable(home, source, "")
+	next, nextBuild, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, "")
 	if err != nil || first == next || build == nextBuild {
 		t.Fatalf("install did not preserve builds: %s %s %v", first, next, err)
 	}
@@ -128,7 +130,7 @@ func TestPinnedLocalRunnerExecutableSurvivesInstallAndRejectsCorruption(t *testi
 	if err := os.WriteFile(next, []byte("corrupt"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := pinLocalRunnerExecutable(home, source, ""); err == nil {
+	if _, _, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, ""); err == nil {
 		t.Fatal("reused corrupt image")
 	}
 }
@@ -142,7 +144,7 @@ func TestPinnedLocalRunnerExecutableReusesOnlyIdenticalBytes(t *testing.T) {
 			if err := os.WriteFile(source, []byte(original), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			path, build, err := pinLocalRunnerExecutable(home, source, "")
+			path, build, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +160,7 @@ func TestPinnedLocalRunnerExecutableReusesOnlyIdenticalBytes(t *testing.T) {
 			if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			next, nextBuild, err := pinLocalRunnerExecutable(home, source, "")
+			next, nextBuild, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, "")
 			if change == "unchanged" {
 				if err != nil || path != next || build != nextBuild {
 					t.Fatalf("reuse = %s %s %v", next, nextBuild, err)
@@ -170,7 +172,7 @@ func TestPinnedLocalRunnerExecutableReusesOnlyIdenticalBytes(t *testing.T) {
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
 				}
-				next, nextBuild, err := pinLocalRunnerExecutable(home, source, build)
+				next, nextBuild, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, build)
 				if err != nil || next != path || nextBuild != build {
 					t.Fatalf("restore missing image = %s %s %v", next, nextBuild, err)
 				}
@@ -195,7 +197,7 @@ func TestPinnedLocalRunnerReusesAcceptedImageWithoutDirectoryWrites(t *testing.T
 	if err := os.WriteFile(source, []byte("accepted"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	first, build, err := pinLocalRunnerExecutable(home, source, "")
+	first, build, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +206,7 @@ func TestPinnedLocalRunnerReusesAcceptedImageWithoutDirectoryWrites(t *testing.T
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-	next, nextBuild, err := pinLocalRunnerExecutable(home, source, build)
+	next, nextBuild, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, build)
 	if err != nil || next != first || nextBuild != build {
 		t.Fatalf("reuse without staging = %s %s %v", next, nextBuild, err)
 	}
@@ -222,7 +224,7 @@ func TestPinnedLocalRunnerRefusesChangedAcceptedSource(t *testing.T) {
 				t.Fatal(err)
 			}
 			if retained {
-				path, _, err := pinLocalRunnerExecutable(home, source, build)
+				path, _, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, build)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -237,7 +239,7 @@ func TestPinnedLocalRunnerRefusesChangedAcceptedSource(t *testing.T) {
 			if err := os.Rename(replacement, source); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := pinLocalRunnerExecutable(home, source, build); err == nil {
+			if _, _, err := engine.RetainExecutable(filepath.Join(home, "runners", "builds"), source, build); err == nil {
 				t.Fatal("accepted source replacement")
 			}
 			files, err := os.ReadDir(filepath.Join(home, "runners", "builds"))
