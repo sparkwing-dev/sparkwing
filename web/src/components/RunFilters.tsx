@@ -1326,7 +1326,7 @@ export function FilterableValue({
       }}
     >
       <span
-        className={`cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] hover:underline hover:decoration-dotted hover:decoration-[var(--muted)] hover:underline-offset-4 ${
+        className={`min-w-0 cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] hover:underline hover:decoration-dotted hover:decoration-[var(--muted)] hover:underline-offset-4 ${
           incl
             ? "underline decoration-dotted decoration-2 decoration-current underline-offset-4"
             : excl

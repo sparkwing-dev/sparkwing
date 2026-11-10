@@ -418,7 +418,7 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 	workCtx, stop := keepNode(ctx, h.Lease, h.Store, result.Node.Ref, executorActor(input))
 	defer stop()
 	if err := context.Cause(workCtx); err != nil {
-		err = claimSetupFailure(workCtx, input, err, h.Masker.Mask, h.Store.TransitionNode)
+		err = claimSetupFailure(workCtx, input, err, h.Masker.Mask, h.Store.TransitionNode, h.Store.ReadSnapshot)
 		return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: err})
 	}
 	admitted := false
@@ -427,7 +427,7 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 		return h.Executor.Execute(ctx, input)
 	})
 	if err != nil && !admitted {
-		err = claimSetupFailure(workCtx, input, err, h.Masker.Mask, h.Store.TransitionNode)
+		err = claimSetupFailure(workCtx, input, err, h.Masker.Mask, h.Store.TransitionNode, h.Store.ReadSnapshot)
 	}
 	if err == nil && !admitted {
 		return deferRelease(ctx)

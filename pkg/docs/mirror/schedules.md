@@ -191,3 +191,7 @@ repository. Update that declaration or App automation to change the schedule.
 A later push keeps the schedule's pause state. App-managed schedules follow
 the configured branch and resolve its commit at fire time. An admin-armed default-branch fire
 without overrides carries verified default-branch trust.
+
+Local schedule installation refuses inline `SPARKWING_SECRETS_KEY` and
+`SPARKWING_SECRETS_PREVIOUS_KEY` values because login services cannot retain them.
+Use `SPARKWING_SECRETS_KEY_FILE`, unset both inline variables, then install again.

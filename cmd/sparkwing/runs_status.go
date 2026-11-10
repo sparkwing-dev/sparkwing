@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type runStatusOptions struct {
@@ -89,6 +91,12 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 	for {
 		detail, err := reader.ReadRun(ctx, inv.Value("run"))
 		if err != nil {
+			var failure *apierr.Error
+			if errors.As(err, &failure) && failure.Code == apierr.NotFound && failure.Hint == "" {
+				refusal := *failure
+				refusal.Hint = "run sparkwing runs list to find an available run ID in the selected profile and team, then retry with --run ID"
+				return &refusal
+			}
 			return err
 		}
 		if detail.ID == "" || detail.Status == "" || previous != nil && previous.ID != detail.ID {

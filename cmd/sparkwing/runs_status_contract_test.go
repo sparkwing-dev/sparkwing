@@ -331,3 +331,25 @@ func TestRunStatusDisplaysCloudCapacityWaitAndConfigurationFailure(t *testing.T)
 		}
 	}
 }
+
+func TestRunStatusMissingRunNamesDiscoveryCommand(t *testing.T) {
+	for _, code := range []apierr.Code{apierr.NotFound, apierr.BadRequest} {
+		for _, hint := range []string{"", "select the correct team"} {
+			original := &apierr.Error{Code: code, Message: "run absent", Hint: hint}
+			reader := &statusReader{err: original}
+			var out bytes.Buffer
+			err := observeRunStatus(t.Context(), statusInvocation(t), reader, &out, nil)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != code || failure.Message != original.Message || exitCodeFor(err) != exitRefused || out.Len() != 0 {
+				t.Fatalf("missing run refusal changed: %v, output %q", err, out.String())
+			}
+			want := hint
+			if code == apierr.NotFound && want == "" {
+				want = "run sparkwing runs list to find an available run ID in the selected profile and team, then retry with --run ID"
+			}
+			if failure.Hint != want || original.Hint != hint {
+				t.Fatalf("hint=%q, want %q; original=%q", failure.Hint, want, original.Hint)
+			}
+		}
+	}
+}

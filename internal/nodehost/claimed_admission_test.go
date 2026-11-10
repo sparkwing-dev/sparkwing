@@ -4,12 +4,52 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+func TestQueuedClaimCancellationBeforeHeartbeatReportsCancelled(t *testing.T) {
+	for _, cancelled := range []bool{true, false} {
+		t.Run(map[bool]string{true: "cancelled", false: "live"}[cancelled], func(t *testing.T) {
+			input, state, host, processes := claimedNodeFixture(t)
+			input.Attempt, state.row.Attempt = 0, 0
+			polls := 0
+			host.Admission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (runstate.AcquireSlotResponse, error) {
+				polls++
+				if polls == 1 {
+					return runstate.AcquireSlotResponse{Kind: runstate.AcquireQueued}, nil
+				}
+				if cancelled {
+					now := time.Now()
+					state.run.CancelRequestedAt, state.row.CancelRequestedAt = &now, &now
+				}
+				return runstate.AcquireSlotResponse{}, &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is not live"}
+			}}, nil, false)
+			err := host.Execute(t.Context(), input)
+			if polls != 2 || len(*processes) != 0 || len(state.changes) != 1 || state.row.Attempt != 0 {
+				t.Fatalf("polls=%d processes=%d changes=%+v attempt=%d error=%v", polls, len(*processes), state.changes, state.row.Attempt, err)
+			}
+			result := state.changes[0].Extra.Result
+			if !cancelled {
+				if result.Outcome != runstate.NodeFailed || result.Reason != string(hosterr.Unauthenticated) {
+					t.Fatalf("live authentication failure was hidden: %+v error=%v", result, err)
+				}
+				return
+			}
+			var cause *lease.CancelError
+			if result.Outcome != runstate.NodeCancelled || result.Reason != string(hosterr.ReasonCancelled) || result.Failure != nil || !errors.As(err, &cause) {
+				t.Fatalf("queued cancellation became an authentication failure: %+v error=%v", result, err)
+			}
+		})
+	}
+}
 
 func TestClaimedNodeAdmissionCoversSourceAndJoinedExecution(t *testing.T) {
 	input, _, host, processes := claimedNodeFixture(t)

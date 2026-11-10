@@ -766,12 +766,12 @@ New adapters must preserve those outcomes. Retain published recordings when an
 adapter is removed, and update the replay to assert the explicit refusal for
 that retired protocol.
 
-Record a new version from the SDK source being published with one command from
-an Xwing worktree (the TypeScript compiler dependencies are installed by the
-command refuses to overwrite an existing protocol directory):
+Record a new version from the repository root with the SDK source being published.
+The command installs the TypeScript compiler dependencies and refuses to overwrite
+an existing protocol directory:
 
 ```bash
-xwing env exec --session <environment> --repo <worktree> --scratch -- bash bin/record-sdk-protocol.sh 2
+bash bin/record-sdk-protocol.sh 2
 ```
 
 Replace `2` with the SDK's announced protocol version. Review and commit the new

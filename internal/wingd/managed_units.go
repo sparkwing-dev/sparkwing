@@ -319,15 +319,31 @@ func (m *nativeUnits) reloadAgent(ctx context.Context, loaded bool) error {
 
 func (m *nativeUnits) render(executable, version string) string {
 	args := []string{executable, "wingd", "run", "--home", m.host.SparkwingHome}
+	environment := maps.Clone(m.host.Env)
+	if environment == nil {
+		environment = make(map[string]string)
+	}
+	environment["PATH"] = m.host.PathEnv
+	keys := slices.Sorted(maps.Keys(environment))
 	if m.host.GOOS == "linux" {
-		return fmt.Sprintf("# %s\n%s\n[Unit]\nDescription=Sparkwing local controller\n[Service]\nType=simple\nExecStart=%s\nEnvironment=%s\nRestart=on-failure\n[Install]\nWantedBy=default.target\n", crontimer.Marker, unitfile.VersionRecord("linux", version), unitfile.Command(args), unitfile.Assignment("PATH", m.host.PathEnv))
+		var body strings.Builder
+		fmt.Fprintf(&body, "# %s\n%s\n[Unit]\nDescription=Sparkwing local controller\n[Service]\nType=simple\nExecStart=%s\n", crontimer.Marker, unitfile.VersionRecord("linux", version), unitfile.Command(args))
+		for _, key := range keys {
+			fmt.Fprintf(&body, "Environment=%s\n", unitfile.Assignment(key, environment[key]))
+		}
+		body.WriteString("Restart=on-failure\n[Install]\nWantedBy=default.target\n")
+		return body.String()
 	}
 	var body strings.Builder
 	fmt.Fprintf(&body, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- %s -->\n%s\n<plist version=\"1.0\"><dict>\n<key>Label</key><string>%s</string>\n<key>ProgramArguments</key><array>\n", crontimer.Marker, unitfile.VersionRecord("darwin", version), unitfile.XMLText(m.name()))
 	for _, arg := range args {
 		fmt.Fprintf(&body, "<string>%s</string>\n", unitfile.XMLText(arg))
 	}
-	fmt.Fprintf(&body, "</array>\n<key>EnvironmentVariables</key><dict><key>PATH</key><string>%s</string></dict>\n", unitfile.XMLText(m.host.PathEnv))
+	body.WriteString("</array>\n<key>EnvironmentVariables</key><dict>\n")
+	for _, key := range keys {
+		fmt.Fprintf(&body, "<key>%s</key><string>%s</string>\n", unitfile.XMLText(key), unitfile.XMLText(environment[key]))
+	}
+	body.WriteString("</dict>\n")
 	fmt.Fprintf(&body, "<key>StandardOutPath</key><string>%s</string>\n<key>StandardErrorPath</key><string>%s</string>\n", unitfile.XMLText(m.logPath), unitfile.XMLText(m.logPath))
 	body.WriteString("<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n</dict></plist>\n")
 	return body.String()

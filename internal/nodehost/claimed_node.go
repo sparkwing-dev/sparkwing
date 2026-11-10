@@ -163,10 +163,10 @@ func (h *ClaimedNodeHost) sourceSpec(ctx context.Context, input NodeInput) (sour
 }
 
 func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, failure error) error {
-	return claimSetupFailure(ctx, input, failure, h.Masker.Mask, h.Store.TransitionNode)
+	return claimSetupFailure(ctx, input, failure, h.Masker.Mask, h.Store.TransitionNode, h.Store.ReadSnapshot)
 }
 
-func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (runstate.Applied, error)) error {
+func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (runstate.Applied, error), readSnapshot func(context.Context, string) (store.RunSnapshot, error)) error {
 	var decision *admissionFailure
 	if errors.As(failure, &decision) && decision.committed {
 		if decision.Outcome == runstate.NodeSkipped {
@@ -175,11 +175,16 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 		return failure
 	}
 
+	if cancelled := persistedNodeCancellation(ctx, readSnapshot, input, failure); cancelled != nil {
+		failure = cancelled
+	}
+
 	if cause := context.Cause(ctx); cause != nil {
 		var cancelled *lease.CancelError
 		if !errors.As(cause, &cancelled) {
 			return errors.Join(failure, cause)
 		}
+		failure = cause
 	}
 	code := hosterr.Internal
 	var structured *apierr.Error
@@ -191,7 +196,8 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	if errors.As(failure, &refused) && waitFailure(failure, refused) == nil {
 		result.Outcome, result.Reason = refused.Outcome, refused.Reason
 	}
-	if ctx.Err() != nil {
+	var cancelled *lease.CancelError
+	if errors.As(failure, &cancelled) || ctx.Err() != nil {
 		result.Outcome, result.Reason = runstate.NodeCancelled, string(hosterr.ReasonCancelled)
 	}
 	result = recordNodeFailure(input.NodeID, result, mask)
@@ -202,6 +208,9 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 			return err
 		}
 		return errors.Join(failure, err)
+	}
+	if cancelled != nil {
+		return errors.Join(cancelled, err)
 	}
 	return errors.Join(context.Cause(ctx), &apierr.Error{Code: code, Message: result.MaskedError}, err)
 }

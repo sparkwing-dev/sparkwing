@@ -122,7 +122,7 @@ func validateRestriction(r Restriction, p VersionIndex, minimum bool) error {
 	return nil
 }
 
-// PolicyRefreshHint names the command that caches a verified version policy for local runs, which never fetch it.
+// PolicyRefreshHint names the command that caches a verified version policy for local runs.
 const PolicyRefreshHint = "Run `sparkwing update` to cache the verified version policy; controller runners still require one."
 
 // Policy returns an independent policy snapshot.
