@@ -23,6 +23,7 @@ query/path/component, standard and URL-safe base64, and embedded base64
 spellings. Percent escape hex digits match regardless of case. Encoded forms
 are not recursively derived. Multi-line secrets register the original value,
 its LF and CRLF spellings, and each line of at least four Unicode code points.
+Lone CR, LF and CRLF separate lines.
 Each eligible line gets the same encoded spellings. CRLF separators do not count
 toward a line's minimum length. Whitespace-only lines are skipped. Empty and shorter lines stay readable when
 printed alone. The marker is `***`. Overlapping matches merge,

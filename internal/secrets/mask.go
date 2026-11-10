@@ -47,8 +47,8 @@ func (m *Masker) Register(value string) error {
 		return nil
 	}
 	m.registerValue(value)
-	if strings.Contains(value, "\n") {
-		lf := strings.ReplaceAll(value, "\r\n", "\n")
+	if strings.ContainsAny(value, "\r\n") {
+		lf := strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
 		m.registerValue(lf)
 		m.registerValue(strings.ReplaceAll(lf, "\n", "\r\n"))
 		for _, line := range strings.Split(lf, "\n") {
