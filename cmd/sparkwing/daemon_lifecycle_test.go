@@ -326,3 +326,27 @@ func TestDaemonServiceRefusesWindowsBeforeResolvingServices(t *testing.T) {
 		t.Fatal("daemon install accepted the removed --force flag")
 	}
 }
+
+func TestDaemonServiceRefusesInlineKeysBeforeResolvingServices(t *testing.T) {
+	for _, name := range []string{"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("SPARKWING_SECRETS_KEY", "")
+			t.Setenv("SPARKWING_SECRETS_PREVIOUS_KEY", "")
+			secret := "private-key-value-must-not-be-persisted"
+			t.Setenv(name, secret)
+			inv, err := clisurface.Parse("sparkwing", []string{"daemon", "install"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			err = runDaemonLifecycleCommandOn(t.Context(), inv, &out, "linux", func(context.Context) (dashboardServices, error) {
+				t.Fatal("resolved services with an inline secrets key")
+				return dashboardServices{}, nil
+			})
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "SPARKWING_SECRETS_KEY_FILE") || strings.Contains(err.Error(), secret) || out.Len() != 0 {
+				t.Fatalf("inline key install refusal: %v", err)
+			}
+		})
+	}
+}

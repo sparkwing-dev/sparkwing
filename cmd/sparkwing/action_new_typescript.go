@@ -7,11 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
+
+const typeScriptSDKVersion = "0.72.0"
 
 func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode string) error {
 	name := inv.Value("pipeline")
@@ -45,7 +46,7 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 	manifestPath := filepath.Join(dir, "package.json")
 	manifest, err := os.ReadFile(manifestPath)
 	if errors.Is(err, os.ErrNotExist) {
-		manifest = []byte(fmt.Sprintf("{\n  \"private\": true,\n  \"type\": \"module\",\n  \"main\": \"index.ts\",\n  \"dependencies\": {\"@sparkwing/sdk\": %s}\n}\n", strconv.Quote(strings.TrimPrefix(sdkRequirementVersion(), "v"))))
+		manifest = []byte(fmt.Sprintf("{\n  \"private\": true,\n  \"type\": \"module\",\n  \"main\": \"index.ts\",\n  \"dependencies\": {\"@sparkwing/sdk\": %s}\n}\n", strconv.Quote(typeScriptSDKVersion)))
 		if err := os.WriteFile(manifestPath, manifest, 0o644); err != nil {
 			return err
 		}

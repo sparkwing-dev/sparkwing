@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -207,6 +208,29 @@ func TestControllerDrainRetiresTheRunnerOnlyForStop(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestControllerStopRefusesAnUnretiredRunner(t *testing.T) {
+	birth, err := admissionProcessBirth(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+		d.cfg.Runs = &runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{
+			ID: "held-runner", PID: os.Getpid(), ProcessBirth: birth, State: "active",
+		}}
+		w := httptest.NewRecorder()
+		d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(w, controllerHTTPRequest(t, http.MethodPost, "drain?runner=retire", "", true))
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("stop response while its runner was still alive: %d %s", w.Code, w.Body.String())
+		}
+		for _, text := range []string{"held-runner", "shutdown is incomplete", "sparkwing dashboard open", "retry sparkwing daemon stop"} {
+			if !strings.Contains(w.Body.String(), text) {
+				t.Fatalf("incomplete shutdown lost %q: %s", text, w.Body.String())
+			}
+		}
+	})
 }
 
 type runnerSetFixture struct {

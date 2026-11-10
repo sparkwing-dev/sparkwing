@@ -187,9 +187,10 @@ sign-in link. When the address is taken, the controller keeps admitting runs
 without a dashboard, and status reports the bind error as `dashboard_error`; it
 never moves to another port. `sparkwing daemon stop` stops the controller and
 its dashboard together and retires the local runner: the runner stops claiming
-work, an idle runner exits within seconds, and a runner holding jobs
-finishes them and exits once a controller accepts their results. `sparkwing
-daemon restart` leaves the runner and its jobs running.
+work. If the runner remains alive when the stop wait ends, the command exits
+nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let
+held work finish, then retry `sparkwing daemon stop`. `sparkwing daemon restart`
+leaves the runner and its jobs running.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful
@@ -222,6 +223,10 @@ separate `SPARKWING_HOME`.
 
 The controller remains running while idle. `sparkwing daemon stop` stops it.
 Linux and macOS support an installed login service through `daemon install`.
+The service retains the installing caller's home, config and secrets-key file
+paths. Use `SPARKWING_SECRETS_KEY_FILE` for a service. Installation refuses
+`SPARKWING_SECRETS_KEY` and `SPARKWING_SECRETS_PREVIOUS_KEY` values because native
+service definitions are not secret stores. Reinstall after changing those paths.
 Windows supports the foreground controller. Machine updates refresh managed
 controller and schedule units together. See [local dashboard](native-mode.md).
 

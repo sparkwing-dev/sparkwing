@@ -463,3 +463,51 @@ func TestProductionLocalQueueRefusesASilentDaemonPromptly(t *testing.T) {
 		})
 	}
 }
+
+func TestManagedControllerDefinitionKeepsPathsWithoutInlineSecrets(t *testing.T) {
+	user := t.TempDir()
+	t.Setenv("HOME", user)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(user, "selected.yaml"))
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(user, "selected.key"))
+	secret := "private-inline-key-must-not-reach-a-service-file"
+	t.Setenv("SPARKWING_SECRETS_KEY", secret)
+	t.Setenv("SPARKWING_SECRETS_PREVIOUS_KEY", secret+"-previous")
+	host, err := localServiceHost(filepath.Join(user, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			host.GOOS = goos
+			host.Exec = func(_ context.Context, name string, args ...string) (string, error) {
+				if name == "launchctl" && args[0] == "print" {
+					return "Could not find service", errors.New("not registered")
+				}
+				return "", nil
+			}
+			manager, err := wingd.NewManagedUnitManager(host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.InstallController(t.Context(), wingd.LocalStartOptions{Home: host.SparkwingHome, Executable: host.Binary, Version: "v0.1.0"}); err != nil {
+				t.Fatal(err)
+			}
+			units, err := manager.Inspect(t.Context())
+			if err != nil || len(units) != 1 {
+				t.Fatalf("units: %v, %v", units, err)
+			}
+			body, err := os.ReadFile(units[0].Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(body), secret) || !strings.Contains(string(body), "selected.key") || !strings.Contains(string(body), "selected.yaml") {
+				t.Fatal("service definition lost paths or retained an inline key")
+			}
+			info, err := os.Stat(units[0].Name)
+			if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+				t.Fatalf("service file permissions: %v, %v", info, err)
+			}
+		})
+	}
+}

@@ -25,16 +25,33 @@ import (
 
 // safety: development policy exemptions carry no signed SDK-to-engine authority.
 func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, error) {
-	if r.config.BuildVersion == "" || releaseBuild(r.config.BuildVersion) {
-		return r.Index(ctx, now)
-	}
+	mapping := r
 	config := r.config
-	config.BuildVersion = ""
-	mapping, err := NewResolver(config)
+	if config.BuildVersion != "" && !releaseBuild(config.BuildVersion) {
+		config.BuildVersion = ""
+		var err error
+		mapping, err = NewResolver(config)
+		if err != nil {
+			return IndexResult{}, err
+		}
+	}
+	result, err := mapping.Index(ctx, now)
+	if err != nil || !result.Index.Offline() {
+		return result, err
+	}
+	config.LocalOnly = false
+	mapping, err = NewResolver(config)
 	if err != nil {
 		return IndexResult{}, err
 	}
-	return mapping.Index(ctx, now)
+	result, err = mapping.Index(ctx, now)
+	if err != nil {
+		if ctx.Err() != nil {
+			return IndexResult{}, ctx.Err()
+		}
+		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error(), Hint: "Run `sparkwing update` once online to cache the verified version policy."}
+	}
+	return result, nil
 }
 
 // Index refreshes signed policy and retains verified fallback without an age cutoff.
