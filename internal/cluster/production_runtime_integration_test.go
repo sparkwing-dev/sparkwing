@@ -652,6 +652,7 @@ func TestProductionRunnerSourceResolvesRetainedAcceptedEngine(t *testing.T) {
 	}
 	executable := filepath.Join(build, "sparkwing")
 	command := exec.CommandContext(t.Context(), "go", "-C", build, "build", "-p", "1", "-ldflags", "-X main.Version=v0.72.0", "-o", executable, "./cmd/sparkwing")
+	command.Env = append(os.Environ(), "GOFLAGS=-buildvcs=false", "GOWORK=off")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build accepted engine: %s %v", output, err)
 	}
