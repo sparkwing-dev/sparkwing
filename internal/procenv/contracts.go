@@ -47,6 +47,8 @@ type Var struct {
 
 // Base makes inherited input explicit; local children reuse Captured, never the daemon's ambient environment.
 type Base struct {
+	// TempDir is hosting-owned storage applied after inherited input.
+	TempDir        string
 	Local          bool
 	OwnerMachine   bool
 	Captured       []string

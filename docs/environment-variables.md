@@ -6,6 +6,11 @@ including injected `os.Getenv` calls and environment slices. Registry entries
 include emitted runtime values, inherited tool settings and rejected transports.
 A variable remains documented while either owner uses or classifies it.
 
+Hosted execution sets `TMPDIR`, `TMP` and `TEMP` to private temporary storage
+under the hosting state home. The host removes it when execution ends, so
+detached runs survive removal of the submitting shell's temporary directory.
+These names remain tool variables. Explicit job settings can override them.
+
 Kinds:
 
 - **configuration**: an operator or user sets it. Each has a flag or config

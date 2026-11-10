@@ -110,6 +110,11 @@ func build(k Kind, b Base, rt Runtime) ([]string, error) {
 		}
 		env[envKey(name)] = name + "=" + value
 	}
+	if b.TempDir != "" {
+		for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+			env[envKey(name)] = name + "=" + b.TempDir
+		}
+	}
 	if k == Plan || k == Attempt || k == Eval {
 		composeRuntime(env, k, rt)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -146,6 +148,20 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			err = errors.Join(err, closeResources())
 		}
 	}()
+	temporaryRoot := filepath.Join(home, "tmp")
+	if err := fssecure.EnsureDir(temporaryRoot); err != nil {
+		return NativeServices{}, err
+	}
+	temporary, err := fssecure.MkdirPrivateTemp(temporaryRoot, "execution-")
+	if err != nil {
+		return NativeServices{}, err
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, os.RemoveAll(temporary))
+		}
+	}()
+	sourceOptions.Base.TempDir = temporary
 	claims := &nodeClaims{auth: capability.NewAuthenticator(cfg.Parent), bindings: cfg.Bindings, masker: masker, current: current, readNode: cfg.Store.ReadNode, services: cfg.Services}
 	masks := NewMaskRegistry(masker)
 	router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
@@ -244,7 +260,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			},
 		},
 	}
-	return NativeServices{Config: config, Storage: storage, Close: closeResources}, nil
+	return NativeServices{Config: config, Storage: storage, Close: func() error { return errors.Join(closeResources(), os.RemoveAll(temporary)) }}, nil
 }
 
 func localProcessHTTP(ctx context.Context, listener net.Listener, handler http.Handler, release func() error) (func(), func() error) {

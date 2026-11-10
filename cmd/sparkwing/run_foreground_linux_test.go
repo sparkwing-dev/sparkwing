@@ -4,12 +4,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,6 +21,14 @@ import (
 )
 
 func TestForegroundLocalRunUsesDetachedRunnerAndCapturedEnvironment(t *testing.T) {
+	testLocalRunnerEnvironment(t, false)
+}
+
+func TestDetachedLocalRunSurvivesSubmitterTempRemoval(t *testing.T) {
+	testLocalRunnerEnvironment(t, true)
+}
+
+func testLocalRunnerEnvironment(t *testing.T, detached bool) {
 	if testing.Short() {
 		t.Skip("builds a CLI and executes a pipeline through the detached runner")
 	}
@@ -72,6 +82,11 @@ type pipeline struct{sw.Base}
 func(pipeline) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{
  sw.Job(p,"verify",func(context.Context)error{
   fmt.Println("foreground-runner-output")
+  if gate:=os.Getenv("TEMP_GATE");gate!="" {
+   if err:=os.WriteFile(gate+"-ready",[]byte("ready"),0600);err!=nil{return err}
+   if _,err:=os.ReadFile(gate);err!=nil{return err}
+   f,err:=os.CreateTemp("","survivor-");if err!=nil{return err};f.Close();os.Remove(f.Name())
+  }
   return os.WriteFile("foreground-result",[]byte(fmt.Sprintf("%d:%s",os.Getppid(),os.Getenv("FOREGROUND_CAPTURE"))),0600)
  });return nil
 }
@@ -133,10 +148,52 @@ func main(){sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 		t.Fatal(err)
 	}
 	t.Setenv("FOREGROUND_CAPTURE", "from-submitter")
-	command := procenv.ControlCommandContext(ctx, os.Environ(), submitter, "run", "ci", "--sw-no-update", "-o=json")
+	t.Setenv("GOFLAGS", "-trimpath -p=1")
+	args := []string{"run", "ci", "--sw-no-update", "-o=json"}
+	var scratch, gate string
+	if detached {
+		scratch = t.TempDir()
+		gate = filepath.Join(user, "temp-gate")
+		if err := syscall.Mkfifo(gate, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Mkfifo(gate+"-ready", 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("TMPDIR", scratch)
+		t.Setenv("TEMP_GATE", gate)
+		args = append(args, "--sw-detached")
+	}
+	command := procenv.ControlCommandContext(ctx, os.Environ(), submitter, args...)
 	command.Dir = repo
 	output, err := command.CombinedOutput()
-	if err != nil || !strings.Contains(string(output), "foreground-runner-output") || !strings.Contains(string(output), `"event":"run_finish"`) {
+	if detached {
+		if err != nil {
+			t.Fatalf("submit: %v\n%s", err, output)
+		}
+		var receipt struct {
+			RunID string `json:"run_id"`
+		}
+		receiptStart := strings.LastIndex(string(output), `{"run_id"`)
+		if receiptStart < 0 {
+			t.Fatalf("missing receipt: %s", output)
+		}
+		if err := json.Unmarshal(output[receiptStart:], &receipt); err != nil || receipt.RunID == "" {
+			t.Fatalf("receipt: %s (%v)", output, err)
+		}
+		if err := procenv.ControlCommandContext(ctx, os.Environ(), "cat", gate+"-ready").Run(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(scratch); err != nil {
+			t.Fatal(err)
+		}
+		if err := procenv.ControlCommandContext(ctx, os.Environ(), "sh", "-c", `printf continue > "$1"`, "sh", gate).Run(); err != nil {
+			t.Fatal(err)
+		}
+		follow := procenv.ControlCommandContext(ctx, os.Environ(), submitter, "runs", "status", "--run", receipt.RunID, "--follow", "-o=json")
+		output, err = follow.CombinedOutput()
+	}
+	if err != nil || !detached && !strings.Contains(string(output), "foreground-runner-output") || !detached && !strings.Contains(string(output), `"event":"run_finish"`) {
 		t.Fatalf("foreground runner: %v\n%s", err, output)
 	}
 	instance, err := registry.Active(ctx)

@@ -2,6 +2,9 @@ package nodehost
 
 import (
 	"net"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -45,5 +48,45 @@ func TestRemotePreparationKeepsTheHostToolEnvironmentWithoutLocalSecrets(t *test
 	}
 	if !base.Masker.ContainsSecret(secret) {
 		t.Fatal("withheld local secret is not masked")
+	}
+}
+
+func TestNativeHostingOwnsAndCleansTemporaryStorage(t *testing.T) {
+	cfg, _ := nativeConfigFixture(t)
+	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) {
+		return &processListener{closed: make(chan struct{})}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := services.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	base := services.Config.Source.Base
+	var temporary string
+	for _, kind := range []procenv.Kind{procenv.Install, procenv.Git, procenv.Plan, procenv.Attempt, procenv.Eval} {
+		environment, err := procenv.Build(kind, base, procenv.Runtime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		directory := environment.Lookup("TMPDIR")
+		if directory == "" || filepath.Dir(directory) != filepath.Join(cfg.Home, "tmp") {
+			t.Fatalf("kind %v temp directory = %q", kind, directory)
+		}
+		if temporary != "" && temporary != directory {
+			t.Fatal("hosting changed temp directories")
+		}
+		temporary = directory
+		if info, err := os.Stat(directory); err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+			t.Fatalf("private temp storage: %v %v", info, err)
+		}
+	}
+	if err := services.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(temporary); !os.IsNotExist(err) {
+		t.Fatalf("temp storage survived close: %v", err)
 	}
 }
