@@ -9,7 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestClaimCancellationObservationRetriesTransientReads(t *testing.T) {
@@ -17,14 +17,14 @@ func TestClaimCancellationObservationRetriesTransientReads(t *testing.T) {
 		input, state, _, _ := claimedNodeFixture(t)
 		actor := executorActor(input)
 		at := time.Now()
-		state.run.CancelRequestedAt, state.run.CancelReason = &at, "parent cancelled"
+		state.row.CancelRequestedAt, state.row.CancelReason = &at, "parent cancelled"
 		reads := 0
-		read := func(ctx context.Context, run string) (store.RunSnapshot, error) {
+		read := func(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 			reads++
 			if reads == 1 {
-				return store.RunSnapshot{}, errors.New("temporary transport failure")
+				return runstate.NodeRow{}, errors.New("temporary transport failure")
 			}
-			return state.ReadSnapshot(ctx, run)
+			return state.ReadNode(ctx, ref)
 		}
 		result := waitClaimCancellation(t.Context(), read, state.row.Ref, actor)
 		if result == nil || result.Reason != "parent cancelled" || reads != 2 {
@@ -40,10 +40,10 @@ func TestClaimCancellationObservationRejectsOtherClaims(t *testing.T) {
 				input, state, _, _ := claimedNodeFixture(t)
 				actor, ref := executorActor(input), state.row.Ref
 				at := time.Now()
-				state.run.CancelRequestedAt = &at
+				state.row.CancelRequestedAt = &at
 				switch changed {
 				case "run":
-					state.run.ID = "other"
+					state.row.Ref.RunID = "other"
 				case "job":
 					state.row.Ref.NodeID = runspec.NodeID("other")
 				case "generation":
@@ -55,8 +55,8 @@ func TestClaimCancellationObservationRejectsOtherClaims(t *testing.T) {
 				}
 				ctx, cancel := context.WithCancel(t.Context())
 				result := make(chan *lease.CancelError, 1)
-				go func() { result <- waitClaimCancellation(ctx, state.ReadSnapshot, ref, actor) }()
-				time.Sleep(time.Second)
+				go func() { result <- waitClaimCancellation(ctx, state.ReadNode, ref, actor) }()
+				time.Sleep(3 * time.Second)
 				select {
 				case cancellation := <-result:
 					t.Fatalf("observed another claim's cancellation: %v", cancellation)

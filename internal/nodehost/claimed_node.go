@@ -235,7 +235,7 @@ func startHostKeeper(parent context.Context, keeper lease.Keeper) (context.Conte
 
 func keepNode(parent context.Context, keeper lease.Keeper, state interface {
 	RenewNodeClaim(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error)
-	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
+	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 }, ref runspec.NodeRef, actor runstate.Actor,
 ) (context.Context, func()) {
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
@@ -243,7 +243,7 @@ func keepNode(parent context.Context, keeper lease.Keeper, state interface {
 		return lease.Beat{ExpiresAt: beat.ExpiresAt, CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
 	keeper.WaitCancellation = func(ctx context.Context) *lease.CancelError {
-		return waitClaimCancellation(ctx, state.ReadSnapshot, ref, actor)
+		return waitClaimCancellation(ctx, state.ReadNode, ref, actor)
 	}
 	return startHostKeeper(parent, keeper)
 }

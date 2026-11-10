@@ -27,16 +27,18 @@ func (s *cancelledChildClaimStore) ReadSnapshot(ctx context.Context, run string)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snapshot, err := s.acquiredClaimStore.ReadSnapshot(ctx, run)
-	if s.cancelled.Load() {
-		snapshot.Run.CancelRequestedAt = &s.at
-	}
+
 	return snapshot, err
 }
 
 func (s *cancelledChildClaimStore) ReadNode(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.acquiredClaimStore.ReadNode(ctx, ref)
+	row, err := s.acquiredClaimStore.ReadNode(ctx, ref)
+	if s.cancelled.Load() {
+		row.CancelRequestedAt = &s.at
+	}
+	return row, err
 }
 
 func (s *cancelledChildClaimStore) TransitionNode(ctx context.Context, command store.NodeCommand) (runstate.Applied, error) {
