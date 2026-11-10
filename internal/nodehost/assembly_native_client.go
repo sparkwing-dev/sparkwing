@@ -76,7 +76,7 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 				} else {
 					source := child.Inputs.Git.Repository.Display
 					if source == "" {
-						source = child.Inputs.Git.Repository.Key
+						source = string(child.Inputs.Git.Repository.Key)
 					}
 					if child.Inputs.Git.SHA != "" {
 						source += "@" + child.Inputs.Git.SHA
