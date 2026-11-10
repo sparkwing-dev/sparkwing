@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestChildrenSpendTheirRootsFloodBudget(t *testing.T) {
@@ -108,6 +109,7 @@ func TestRetryRecordsAdmissionIdentitySeparatelyFromSource(t *testing.T) {
 			if err := teststore.SeedRunFinish(e.Store, t.Context(), "a", "run", "failed", "boom"); err != nil {
 				t.Fatal(err)
 			}
+			engineAcceptedFixturePlanDoc(t, e, "a", "run", nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Steps: []nodewire.StepSpec{{ID: "run"}}}}})
 			raw, retrier, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, AllowTeamAdmin: true, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "retrier"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsControl, capability.RunsRead, capability.RunsWrite}})
 			if err != nil {
 				t.Fatal(err)

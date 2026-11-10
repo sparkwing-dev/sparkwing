@@ -59,7 +59,7 @@ func retryActionDispatchFixture(t *testing.T, value string, accepted bool, dispa
 	}
 	engineSQL(t, s.store, `UPDATE runs SET status='failed',finished_at=2,request_json=?,request_hash=? WHERE team='a' AND id='run'`, raw, sealed.Hash)
 	if accepted {
-		plan := json.RawMessage(`{"jobs":[{"id":"job"}]}`)
+		plan := json.RawMessage(`{"jobs":[{"id":"job","steps":[{"id":"run"}]}]}`)
 		spec, err := runspec.SealSpec(runspec.SealInput{Request: sealed, Plan: plan, Now: time.Unix(2, 0), Resolved: runspec.Resolved{
 			Engine: engineid.Identity{Version: "v1.2.3"}, Args: sealed.Request.RequestedArgs, SecretArgs: []string{"secret"}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": {Timeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}}}},
 		}})
@@ -407,11 +407,11 @@ func TestConsoleFailedRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 	s, options, _, _ := retryActionDispatchFixture(t, "private-value", true, runspec.DispatchController, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil
 	}))
-	hash, err := runspec.CanonicalHash(nodewire.JobSpec{ID: "job"})
+	hash, err := runspec.CanonicalHash(nodewire.JobSpec{ID: "job", Steps: []nodewire.StepSpec{{ID: "run"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,state_seq,spec_json,spec_hash,execution_json,finished_at) VALUES ('a','run','job','done','success',2,?,?,?,2)`, []byte(`{"id":"job"}`), string(hash), []byte(`{}`))
+	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,state_seq,spec_json,spec_hash,execution_json,finished_at) VALUES ('a','run','job','done','success',2,?,?,?,2)`, []byte(`{"id":"job","steps":[{"id":"run"}]}`), string(hash), []byte(`{}`))
 	control, err := client.NewEngineClient(options)
 	if err != nil {
 		t.Fatal(err)
@@ -445,6 +445,9 @@ func TestFailedRetryReusesOnlyReleasedJobsAndStaysClaimable(t *testing.T) {
 	}))
 	// safety: build reruns, check reuses its result, test failed and package reruns behind build.
 	jobs := []nodewire.JobSpec{{ID: "build"}, {ID: "check", Needs: []string{"build"}}, {ID: "test", Needs: []string{"check"}}, {ID: "package", Needs: []string{"build"}}}
+	for i := range jobs {
+		jobs[i].Steps = []nodewire.StepSpec{{ID: "run"}}
+	}
 	plan, err := json.Marshal(nodewire.PlanDoc{Jobs: jobs})
 	if err != nil {
 		t.Fatal(err)
