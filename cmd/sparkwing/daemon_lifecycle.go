@@ -69,6 +69,9 @@ func runDaemonLifecycleCommandOn(ctx context.Context, inv clisurface.Invocation,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if inv.Command.Path == "sparkwing daemon install" && (os.Getenv("SPARKWING_SECRETS_KEY") != "" || os.Getenv("SPARKWING_SECRETS_PREVIOUS_KEY") != "") {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "controller login services cannot retain secrets keys supplied by value", Hint: "use SPARKWING_SECRETS_KEY_FILE instead, unset SPARKWING_SECRETS_KEY and SPARKWING_SECRETS_PREVIOUS_KEY, then install again"}
+	}
 	services, err := resolve(ctx)
 	if err != nil {
 		return err

@@ -79,10 +79,30 @@ func localServiceHost(home string) (crontimer.Host, error) {
 	if err != nil {
 		return crontimer.Host{}, err
 	}
+	// safety: the service manager must not substitute an inherited inline key.
+	environment := map[string]string{
+		"HOME": userHome, "XDG_CONFIG_HOME": configHome,
+		"SPARKWING_SECRETS_KEY":          "",
+		"SPARKWING_SECRETS_PREVIOUS_KEY": "",
+	}
+	configPath, err := userconfig.Path()
+	if err != nil {
+		return crontimer.Host{}, err
+	}
+	keyPath := os.Getenv(localsecrets.KeyFileEnv)
+	if keyPath == "" {
+		keyPath = filepath.Join(configHome, "sparkwing", "secrets.key")
+	}
+	for name, value := range map[string]string{userconfig.PathEnv: configPath, localsecrets.KeyFileEnv: keyPath} {
+		environment[name], err = filepath.Abs(value)
+		if err != nil {
+			return crontimer.Host{}, err
+		}
+	}
 	return crontimer.Host{
 		GOOS: runtime.GOOS, Home: userHome, ConfigHome: configHome,
 		SparkwingHome: home, Binary: binary, Version: installedVersion(),
-		PathEnv: os.Getenv("PATH"), UID: os.Getuid(), Exec: crontimer.DefaultExec,
+		PathEnv: os.Getenv("PATH"), Env: environment, UID: os.Getuid(), Exec: crontimer.DefaultExec,
 	}, nil
 }
 

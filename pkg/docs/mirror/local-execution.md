@@ -222,6 +222,10 @@ separate `SPARKWING_HOME`.
 
 The controller remains running while idle. `sparkwing daemon stop` stops it.
 Linux and macOS support an installed login service through `daemon install`.
+The service retains the installing caller's home, config and secrets-key file
+paths. Use `SPARKWING_SECRETS_KEY_FILE` for a service. Installation refuses
+`SPARKWING_SECRETS_KEY` and `SPARKWING_SECRETS_PREVIOUS_KEY` values because native
+service definitions are not secret stores. Reinstall after changing those paths.
 Windows supports the foreground controller. Machine updates refresh managed
 controller and schedule units together. See [local dashboard](native-mode.md).
 
