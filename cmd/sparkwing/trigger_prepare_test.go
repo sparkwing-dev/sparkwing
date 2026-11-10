@@ -279,6 +279,17 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 	if !reflect.DeepEqual(request.Request.RequestedArgs, map[string]string{"region": "us-east", "image": "release", "password": password}) || !request.Request.SecretArgs.Set || !reflect.DeepEqual(request.Request.SecretArgs.Value, []string{"password"}) {
 		t.Fatalf("selected schema lost: %+v", request.Request)
 	}
+	input.args = []string{"--region", "us-east", "--image", "release"}
+	request, err = prepareTriggerRequest(input)
+	if err != nil || len(request.Request.SecretArgs.Value) != 0 {
+		t.Fatalf("omitted optional trigger secret: %v", err)
+	}
+	input.args = nil
+	_, err = prepareTriggerRequest(input)
+	var missing *apierr.Error
+	if !errors.As(err, &missing) || missing.Code != apierr.InvalidArgs || !strings.Contains(missing.Message, "--region is required") {
+		t.Fatalf("missing required trigger argument: %v", err)
+	}
 	_, err = prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, declarations: declarationFixture(t, input.declarations.Declarations().Pipelines[:1])})
 	if err == nil || !strings.Contains(err.Error(), "deploy-prod") {
 		t.Fatalf("missing registration used Go type name: %v", err)
@@ -595,5 +606,35 @@ func TestPrepareUploadedTriggerWithoutOriginExplainsRepair(t *testing.T) {
 	}
 	if remotes := runSnapshotGit(t, repo, "remote"); strings.TrimSpace(remotes) != "" {
 		t.Fatalf("diagnostic changed remotes: %s", remotes)
+	}
+}
+
+func TestRequiredSecretFromConfiguredArguments(t *testing.T) {
+	for _, config := range []string{
+		"defaults:\n  args: {token: configured-private-token}\npipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n",
+		"pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n    args: {token: configured-private-token}\n",
+	} {
+		repo, _ := triggerPreparationRepo(t)
+		writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", config, 0o600)
+		runSnapshotGit(t, repo, "add", ".sparkwing/sparkwing.yaml")
+		runSnapshotGit(t, repo, "commit", "--quiet", "-m", "configured input")
+		selected, err := prepareTriggerSource(t.Context(), triggerPreparationInput(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := triggerRequestInput{home: t.TempDir(), source: selected, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}, declarations: declarationFixture(t, []nodewire.PipelineDescription{{Name: "Deploy", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Required: true}}}})}
+		request, err := prepareTriggerRequest(input)
+		if err != nil {
+			t.Fatalf("configured required secret: %v", err)
+		}
+		local := localTestPreparation(t, localTestAward(t))
+		local.identity.Name, local.identity.Entrypoint, local.source.Entrypoint = "deploy-prod", "Deploy", "Deploy"
+		local.project, local.declarations = selected.project, input.declarations
+		if _, err := prepareLocalRunRequest(t.Context(), local, runFlags{}, nil); err != nil {
+			t.Fatalf("configured local required secret: %v", err)
+		}
+		if len(request.Request.RequestedArgs) != 0 || len(request.Request.SecretArgs.Value) != 0 {
+			t.Fatal("configuration was moved into requested arguments")
+		}
 	}
 }

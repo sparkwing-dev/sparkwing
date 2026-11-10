@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"reflect"
 	"slices"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -65,6 +67,8 @@ func runRunsStatus(ctx context.Context, inv clisurface.Invocation) error {
 	if _, err := parseRunStatus(inv); err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	reader, closeTransport, err := resolveRunReader(ctx, inv.Value("profile"))
 	if err != nil {
 		return observationError(err)

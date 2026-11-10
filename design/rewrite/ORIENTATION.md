@@ -16,6 +16,12 @@ credential model in `docs/auth.md`, and the decision log
 
 SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol so policy changes do not require SDK releases.
 
+### Secret argument intake
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Intake classifies supplied secret arguments, preserves optional omission and validates required inputs against configured and supplied arguments before submission. Defaults are classified when resolved. Invalid intake classifications receive HTTP 400 | `cmd/sparkwing/run_prepare.go`, `trigger_prepare.go`; `internal/runspec/seal.go` | `TestOptionalSecretIntake`, `TestMissingRequiredSecretPreparation`, `TestPrepareTriggerRequestBindsAliasArgumentsAndIntake`, `TestRequiredSecretFromConfiguredArguments` |
+
 ### SDK protocol compatibility
 
 | Rule | Owner | Guard test |
@@ -345,6 +351,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 | --- | --- | --- |
 | Explicit output modes win; otherwise stdout selects pretty on a terminal and JSON in a pipe, including controller session credentials and internal completion | `internal/clisurface/parse.go`: `OutputFormat`; `cmd/sparkwing-controller/admin.go`: `runAdmin` | `cmd/sparkwing/output_contract_test.go`, `output_contract_linux_test.go`; `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionOutputModes`; `admin_output_linux_test.go`: `TestAdminSessionPipeAndTerminal` |
 | Uploaded trigger snapshots without an origin report the hosted clone URL requirement and an add-origin command | `cmd/sparkwing/trigger_prepare.go`: `prepareTriggerSource` | `TestPrepareUploadedTriggerWithoutOriginExplainsRepair` |
+| Active SDK work and verification invoke AfterRun after requested cancellation within the existing cleanup budget and lease authority; callbacks receive a failed result with a run-cancelled error and the outcome remains canceled. Retry-backoff cancellation has no live callback process | `internal/nodehost/executor_process.go`: `attempt` | `TestNodeExecutorUserCancelRunsAfterRunAndKeepsCancelledOutcome`, `TestNodeExecutorUserCancelDuringVerifyRunsAfterRun` |
 | Trigger preflight accepts both selected commits on origin-tracking refs or in exact-SHA fetch records from origin, including runner source checkouts | `cmd/sparkwing/trigger_prepare.go`: `checkReachable`, `fetchedFromOrigin` | `cmd/sparkwing/trigger_fetched_test.go`: `TestTriggerPreflightFromRunnerSourceCheckout`, `TestTriggerPreflightFromReferenceClone`, `TestTriggerPreflightRequiresBothRevisionsWithFetchEvidence` |
 | Local dashboard sessions authenticate the peer that minted the link without forwarding browser credentials | `internal/wingd/local_login.go`: `serveSession` | `internal/wingd/localcontroller/dashboard_login_test.go`: `TestDashboardLoginAuthorizesControllerAPIAsMintingPeer` |
 | Configured dashboard proxy hosts use HTTPS and socket-minted sign-in codes bound to that exact origin; forwarded identity headers grant no authority | `internal/userconfig/validate.go`: `validDashboardHost`; `internal/wingd/local_login.go`: `mint`, `requestOrigin`; `local_runtime.go`: `guardDashboard` | `internal/userconfig/contract_test.go`: `TestDashboardAllowedHosts`; `internal/wingd/local_dashboard_serve_test.go`: `TestDashboardServeSignInStaysOnItsConfiguredOrigin` |

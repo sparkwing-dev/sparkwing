@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
@@ -35,6 +36,7 @@ type triggerSourceInput struct {
 }
 
 type preparedTriggerSource struct {
+	project  *projectconfig.Config
 	pipeline string
 	profile  string
 	git      runspec.Git
@@ -220,7 +222,7 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if entry := cfg.Project().Registry().Find(identity.Name); entry != nil {
 		profile = entry.Profile
 	}
-	return preparedTriggerSource{pipeline: identity.Name, profile: profile, git: git, source: selected, checkout: reader}, nil
+	return preparedTriggerSource{pipeline: identity.Name, project: cfg.Project(), profile: profile, git: git, source: selected, checkout: reader}, nil
 }
 
 func (s preparedTriggerSource) checkProfile(profile string) error {
@@ -328,9 +330,12 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
+	if err := validateRequestedPipelineArgs(input.declarations, clisurface.PipelineIdentity{Name: pipeline, Entrypoint: input.source.source.Entrypoint}, input.source.project, args); err != nil {
+		return controllerwire.CreateRunRequest{}, input.declarations.Error(err)
+	}
 	secretArgs := []string{}
 	for _, argument := range schema.Args {
-		if argument.Secret {
+		if _, present := args[argument.Name]; argument.Secret && present {
 			secretArgs = append(secretArgs, argument.Name)
 		}
 	}

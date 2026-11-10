@@ -65,7 +65,10 @@ does the same as `sw.Register[T]`. The invoked pipeline name travels in
 flags use `sw.NoInputs`.
 
 Input structs support `flag`, `short`, `default`, `required`, `enum` and `desc`
-tags. `secret:"true"` classifies a flag value for masking. A `flag:",extra"`
+tags. `secret:"true"` classifies a flag value for masking. Secret arguments are
+optional unless marked `required:"true"`. Omitted optional arguments stay absent,
+and declared defaults are masked when applied. Missing required arguments are
+refused before submission with an error naming the flag. A `flag:",extra"`
 map receives extra flags. Typed job inputs use an embedded `sw.WithArgs[T]` and
 share the pipeline's flag namespace. The host checks required values, types,
 enums and name collisions before execution. An invalid public enum value lists
@@ -298,7 +301,15 @@ bound work that keeps producing output.
 
 `BeforeRun` registers a callback before execution. `Verify` checks the successful
 body and fails the job when it returns an error. `AfterRun` receives the final
-error, with nil for success. `OnFailure(id, body)` declares a separate recovery
+error, with nil for success. After a started job is canceled, `AfterRun` runs
+within the cleanup budget while the host retains execution authority. Go receives
+a non-nil error whose message starts with `run cancelled:`. TypeScript receives
+`outcome: "failed"` with `failure.message` starting with `run cancelled:`.
+Cleanup success or failure leaves the run canceled. A cancel that lands during
+retry backoff does not run `AfterRun`: the previous attempt process has already
+closed.
+
+`OnFailure(id, body)` declares a separate recovery
 job and returns that job, so chained modifiers configure the recovery.
 Recovery callbacks can accept `sw.Failure` to inspect `Stage` and `Err`.
 Local and runner hosts load this failure from the persisted source job.

@@ -8,9 +8,11 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -30,6 +32,8 @@ func runRunsLogs(ctx context.Context, inv clisurface.Invocation) error {
 	if _, err := parseRunLogs(inv); err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	options, closeTransport, err := controllerOptions(ctx, inv.Value("profile"))
 	if err != nil {
 		return observationError(err)
