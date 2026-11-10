@@ -4,11 +4,12 @@ package main
 
 import (
 	"context"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
