@@ -24,7 +24,8 @@ spellings. Percent escape hex digits match regardless of case. Encoded forms
 are not recursively derived. Multi-line secrets register the original value,
 its LF and CRLF spellings, and each line of at least four Unicode code points.
 Lone CR, LF and CRLF separate lines.
-Each eligible line gets the same encoded spellings. CRLF separators do not count
+Both the raw line and its trimmed form receive the same encoded spellings when
+each form has at least four Unicode code points. CRLF separators do not count
 toward a line's minimum length. Whitespace-only lines are skipped. Empty and shorter lines stay readable when
 printed alone. The marker is `***`. Overlapping matches merge,
 and replacement closure uses at most four passes. If ambiguity remains, the
