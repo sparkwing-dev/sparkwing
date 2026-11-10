@@ -24,8 +24,10 @@ type LocalDoctorFinding struct {
 	Code, Unit, Message, Hint string
 }
 
-type localPeerKey struct{}
-type localSocketPeerKey struct{}
+type (
+	localPeerKey       struct{}
+	localSocketPeerKey struct{}
+)
 
 // LocalPeer reads the identity verified by the local transport or dashboard login.
 func LocalPeer(ctx context.Context) (LocalPeerIdentity, bool) {
