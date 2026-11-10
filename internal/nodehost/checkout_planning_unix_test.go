@@ -67,7 +67,7 @@ func FuzzCheckoutProjectBoundary(f *testing.F) {
 		if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
 			t.Fatal(err)
 		}
-		raw, _, err := readCheckoutProject(t.Context(), root, filepath.Join(root, relative))
+		raw, _, err := ReadCheckoutProject(t.Context(), root, filepath.Join(root, relative))
 		if len(raw) > 0 && string(raw) != "inside" || err != nil && len(raw) != 0 {
 			t.Fatal("project discovery returned bytes outside its acquired root")
 		}

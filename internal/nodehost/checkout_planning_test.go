@@ -47,20 +47,20 @@ func TestCheckoutProjectDiscoveryStopsAtAcquiredRoot(t *testing.T) {
 		}
 	}
 	write(filepath.Join(parent, "sparkwing.yaml"), "outside checkout")
-	if raw, file, err := readCheckoutProject(t.Context(), checkout, nested); err != nil || raw != nil || file != "" {
+	if raw, file, err := ReadCheckoutProject(t.Context(), checkout, nested); err != nil || raw != nil || file != "" {
 		t.Fatalf("read an ancestor outside checkout: %q %q %v", raw, file, err)
 	}
 	write(filepath.Join(checkout, "sparkwing.yaml"), "root")
-	if raw, file, err := readCheckoutProject(t.Context(), checkout, nested); err != nil || string(raw) != "root" || file != "sparkwing.yaml" {
+	if raw, file, err := ReadCheckoutProject(t.Context(), checkout, nested); err != nil || string(raw) != "root" || file != "sparkwing.yaml" {
 		t.Fatalf("root project: %q %q %v", raw, file, err)
 	}
 	write(filepath.Join(checkout, "services", "sparkwing.yaml"), "nearest")
-	if raw, file, err := readCheckoutProject(t.Context(), checkout, nested); err != nil || string(raw) != "nearest" || file != "services/sparkwing.yaml" {
+	if raw, file, err := ReadCheckoutProject(t.Context(), checkout, nested); err != nil || string(raw) != "nearest" || file != "services/sparkwing.yaml" {
 		t.Fatalf("nested project: %q %q %v", raw, file, err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, _, err := readCheckoutProject(ctx, checkout, nested); !errors.Is(err, context.Canceled) {
+	if _, _, err := ReadCheckoutProject(ctx, checkout, nested); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled discovery: %v", err)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -95,8 +96,10 @@ func runPipelinePlan(inv clisurface.Invocation) error {
 }
 
 type pipelineInspection struct {
-	planner nodehost.SDKPlanner
-	input   nodehost.PlanningProcessInput
+	project     []byte
+	projectFile string
+	planner     nodehost.SDKPlanner
+	input       nodehost.PlanningProcessInput
 }
 
 func withPipelineEntry(pipeline string, fn func(context.Context, pipelineInspection, string) error) error {
@@ -193,8 +196,13 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 	if err != nil {
 		return err
 	}
+	project, projectFile, err := nodehost.ReadCheckoutProject(ctx, entry.CheckoutDirectory(), filepath.Join(entry.CheckoutDirectory(), selection.source.Location.PipelineDir))
+	if err != nil {
+		return err
+	}
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base}}
 	inspection := pipelineInspection{
+		project: project, projectFile: projectFile,
 		planner: nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: masker, Log: func(ctx context.Context, frame nodewire.FrameLog) error {
 			if err := context.Cause(ctx); err != nil {
 				return err
@@ -264,6 +272,21 @@ func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline s
 	raw, err := prepared.Plan(ctx)
 	if err == nil {
 		out.doc, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: entry.planner.Masker})
+	}
+	if err == nil {
+		var declarations runspec.CheckoutDeclarations
+		declarations, err = settings.ProjectCheckoutDeclarations(entry.project, entry.projectFile, pipeline)
+		if err == nil {
+			var effective runspec.ExecutionSettings
+			effective, err = settings.ResolvePlan(settings.PlanInputs{Declarations: declarations, Plan: out.doc, Context: settings.Context{Local: true}})
+			if err == nil {
+				for i := range out.doc.Jobs {
+					job := &out.doc.Jobs[i]
+					job.Requires = slices.Clone(effective.Jobs[job.ID].Requires.Value)
+					job.Prefers = slices.Clone(effective.Jobs[job.ID].Prefers.Value)
+				}
+			}
+		}
 	}
 	if err != nil {
 		err = &maskedCLIError{err: planError(pipeline, err), masker: entry.planner.Masker}

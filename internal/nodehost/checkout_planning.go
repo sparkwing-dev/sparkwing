@@ -35,14 +35,15 @@ func (h *OwnerHost) prepare(ctx context.Context, input RunInput, request runspec
 	if h.Planner == nil {
 		return OwnerPlanning{}, errors.New("new run requires checkout resolution and planning")
 	}
-	project, file, err := readCheckoutProject(ctx, entry.CheckoutDirectory(), filepath.Join(entry.CheckoutDirectory(), request.Request.Source.Location.PipelineDir))
+	project, file, err := ReadCheckoutProject(ctx, entry.CheckoutDirectory(), filepath.Join(entry.CheckoutDirectory(), request.Request.Source.Location.PipelineDir))
 	if err != nil {
 		return OwnerPlanning{}, err
 	}
 	return h.Planner.PrepareCheckout(ctx, CheckoutPlanningInput{Request: request, Entry: entry, Runner: input.GrantedRunner, Project: project, ProjectFile: file, Planning: h.Planning})
 }
 
-func readCheckoutProject(ctx context.Context, checkout, directory string) ([]byte, string, error) {
+// ReadCheckoutProject bounds preview and execution configuration reads to the acquired checkout.
+func ReadCheckoutProject(ctx context.Context, checkout, directory string) ([]byte, string, error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, "", err
 	}
