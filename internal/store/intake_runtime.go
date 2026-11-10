@@ -488,6 +488,23 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 	}
 	in := runspec.RetryInput{Request: source.Request, Plan: source.Plan, Retrier: runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}, SourceRunID: source.ID, Reason: request.Request.Lineage.RetryReason}
 	if source.Spec != nil {
+		selection, err := runSecretSelection(source.Request)
+		if err != nil {
+			return admittedSnapshot{}, err
+		}
+		matcher, err := planSecretsTx(ctx, tx, team, *source.Spec, selection)
+		if err != nil {
+			return admittedSnapshot{}, err
+		}
+		if err := checkDeclarationIdentifiers(source.Spec.Declarations, matcher); err != nil {
+			return admittedSnapshot{}, err
+		}
+		if err := checkExecutionIdentifiers(source.Spec.Resolved.Settings, matcher); err != nil {
+			return admittedSnapshot{}, err
+		}
+		if _, err := validatePlan(source.Plan, nodeproto.ValidationContext{Placement: placement, Secrets: matcher}); err != nil {
+			return admittedSnapshot{}, err
+		}
 		in.Spec = runspec.Optional[runspec.Spec]{Set: true, Value: *source.Spec}
 	}
 	carried, err := runspec.CarryRetry(in)

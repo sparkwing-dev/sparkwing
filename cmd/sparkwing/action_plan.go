@@ -278,8 +278,18 @@ func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline s
 		var declarations runspec.CheckoutDeclarations
 		declarations, err = settings.ProjectCheckoutDeclarations(entry.project, entry.projectFile, pipeline)
 		if err == nil {
+			err = settings.VisitDeclarationIdentifiers(declarations, func(value, path string) error {
+				return nodeproto.ValidateIdentifierSecret(value, path, entry.planner.Masker)
+			})
+		}
+		if err == nil {
 			var effective runspec.ExecutionSettings
 			effective, err = settings.ResolvePlan(settings.PlanInputs{Declarations: declarations, Plan: out.doc, Context: settings.Context{Local: true}})
+			if err == nil {
+				err = settings.VisitExecutionIdentifiers(effective, func(value, path string) error {
+					return nodeproto.ValidateIdentifierSecret(value, path, entry.planner.Masker)
+				})
+			}
 			if err == nil {
 				for i := range out.doc.Jobs {
 					job := &out.doc.Jobs[i]

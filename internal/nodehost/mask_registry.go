@@ -6,7 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"sync"
 
-	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 
@@ -144,10 +143,6 @@ func (r *MaskRegistry) accept(plan nodewire.PlanDoc, commit func() error, matche
 		r.identifiers[identifier] = path
 	}
 	return nil
-}
-
-func identifierMaskError(path string) error {
-	return executorError(hosterr.SecretInIdentifier, "registered secret conflicts with identifier at "+path)
 }
 
 func (r *MaskRegistry) mask(text string) string { return r.masker.Mask(text) }

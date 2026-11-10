@@ -120,6 +120,9 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	for id, job := range effectiveJobs {
 		execution.Jobs[id] = job
 	}
+	if err := checkDeclarationIdentifiers(snapshot.Run.Spec.Declarations, secrets); err != nil {
+		return result, err
+	}
 	if err := checkExecutionIdentifiers(execution, secrets); err != nil {
 		return result, err
 	}

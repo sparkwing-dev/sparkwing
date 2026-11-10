@@ -302,9 +302,11 @@ below).
 
 ## Runner labels (`runner-label`)
 
-A registered secret cannot appear in a runner requirement or preference. This
-applies to checkout defaults and pipeline entries as well as SDK declarations.
-The host refuses the plan before accepting its resolved settings or jobs.
+A registered secret cannot appear in a runner requirement, preference or profile.
+This applies to checkout defaults and pipeline entries, including declarations
+that lose precedence, as well as SDK declarations. The host refuses the plan
+before accepting its settings or jobs. Retrying a previously accepted run also
+refuses secret-bearing identifiers before copying the sealed spec.
 
 The linter flags blank runner labels on `Requires` and `Prefers`. The host trims
 outer whitespace, drops empty labels and keeps the first copy of each label

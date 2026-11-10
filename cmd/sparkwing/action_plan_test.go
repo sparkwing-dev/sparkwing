@@ -478,16 +478,25 @@ func TestPlanUsesEffectiveCheckoutRequirements(t *testing.T) {
 func TestPlanRejectsSecretCheckoutLabels(t *testing.T) {
 	const secret = "private-inspection-token"
 	describe := `"ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"token","type":"string","required":true,"secret":true}]}]}}`
-	for _, layer := range []string{"defaults", "pipeline"} {
-		for _, label := range []string{"requires", "prefers"} {
+	for _, layer := range []string{"defaults", "pipeline", "losing-defaults"} {
+		for _, label := range []string{"requires", "prefers", "profile"} {
+			if label == "profile" && layer != "pipeline" {
+				continue
+			}
 			t.Run(layer+"/"+label, func(t *testing.T) {
 				directory := t.TempDir()
 				if err := os.Mkdir(filepath.Join(directory, ".sparkwing"), 0o700); err != nil {
 					t.Fatal(err)
 				}
-				config := "defaults: {" + label + ": [pool=" + secret + "]}"
+				value, safe := "[pool="+secret+"]", "[linux]"
+				if label == "profile" {
+					value, safe = secret, "safe"
+				}
+				config := "defaults: {" + label + ": " + value + "}"
 				if layer == "pipeline" {
-					config = "pipelines: [{name: demo, entrypoint: demo, " + label + ": [pool=" + secret + "]}]"
+					config = "pipelines: [{name: demo, entrypoint: demo, " + label + ": " + value + "}]"
+				} else if layer == "losing-defaults" {
+					config += "\npipelines: [{name: demo, entrypoint: demo, " + label + ": " + safe + "}]"
 				}
 				if err := os.WriteFile(filepath.Join(directory, ".sparkwing", "sparkwing.yaml"), []byte(config), 0o600); err != nil {
 					t.Fatal(err)

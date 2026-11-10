@@ -110,8 +110,11 @@ func TestAcceptancePersistsConcurrencyWinnersFromResolutionContract(t *testing.T
 
 func TestAcceptanceRejectsSecretEffectiveLabelsBeforePersistence(t *testing.T) {
 	for _, empty := range []bool{false, true} {
-		for _, layer := range []string{"defaults", "pipeline"} {
-			for _, label := range []string{"requires", "prefers"} {
+		for _, layer := range []string{"defaults", "pipeline", "losing-defaults"} {
+			for _, label := range []string{"requires", "prefers", "profile"} {
+				if label == "profile" && layer != "pipeline" {
+					continue
+				}
 				name := layer + "/" + label
 				if empty {
 					name += "/empty"
@@ -122,9 +125,15 @@ func TestAcceptanceRejectsSecretEffectiveLabelsBeforePersistence(t *testing.T) {
 						plan.Jobs = []nodewire.JobSpec{}
 					}
 					tenant, request := sharedSettingsPlan(t, plan)
-					config := "defaults: {" + label + ": [pool=hello]}"
+					value, safe := "[pool=hello]", "[linux]"
+					if label == "profile" {
+						value, safe = "hello", "safe"
+					}
+					config := "defaults: {" + label + ": " + value + "}"
 					if layer == "pipeline" {
-						config = "pipelines: [{name: p, entrypoint: p, " + label + ": [pool=hello]}]"
+						config = "pipelines: [{name: p, entrypoint: p, " + label + ": " + value + "}]"
+					} else if layer == "losing-defaults" {
+						config += "\npipelines: [{name: p, entrypoint: p, " + label + ": " + safe + "}]"
 					}
 					declarations, err := settings.ProjectCheckoutDeclarations([]byte(config), ".sparkwing/sparkwing.yaml", "p")
 					if err != nil {
@@ -153,5 +162,57 @@ func TestAcceptanceRejectsSecretEffectiveLabelsBeforePersistence(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// The fixture models a correctly sealed row written before identifier validation covered YAML.
+func TestRetryRefusesPreviouslySealedSecretLabels(t *testing.T) {
+	for _, field := range []string{"requires", "prefers", "profile", "resolved-profile"} {
+		t.Run(field, func(t *testing.T) {
+			tenant, request := sharedSettingsPlan(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}})
+			accepted, err := tenant.AcceptPlan(t.Context(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Seal.Resolved = accepted.Spec.Resolved
+			config := "defaults: {" + field + ": [pool=hello]}\npipelines: [{name: p, entrypoint: p, " + field + ": [linux]}]"
+			if field == "profile" {
+				config = "pipelines: [{name: p, entrypoint: p, profile: hello}]"
+			}
+			if field == "resolved-profile" {
+				config = ""
+			}
+			request.Seal.Declarations, err = settings.ProjectCheckoutDeclarations([]byte(config), ".sparkwing/sparkwing.yaml", "p")
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Declarations: request.Seal.Declarations, Plan: nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if field == "resolved-profile" {
+				request.Seal.Resolved.Settings.Options.Profile.Value = "hello"
+				request.Seal.Resolved.Settings.Options.Profile.Set = true
+			}
+			tainted, err := runspec.SealSpec(request.Seal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(tainted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=?,spec_hash=? WHERE team=? AND id=?`, raw, tainted.Hash, tenant.team, request.RunID)
+			_, err = tenant.AdmitRun(t.Context(), IntakeRequest{Authority: request.Seal.Request.AuthorityRef, IdempotencyKey: "tainted-retry", Request: runspec.Request{Pipeline: "p", Lineage: runspec.Lineage{RetryOf: request.RunID}}})
+			var refusal *apierr.Error
+			if !errors.As(err, &refusal) || refusal.Code != hosterr.SecretInIdentifier {
+				t.Fatalf("tainted source was not refused: %v", err)
+			}
+			if strings.Contains(err.Error(), "hello") {
+				t.Fatal("retry refusal disclosed secret")
+			}
+			rewriteSchemaCount(t, tenant.s.db, "runs", 1)
+			rewriteSchemaCount(t, tenant.s.db, "nodes", 1)
+		})
 	}
 }
