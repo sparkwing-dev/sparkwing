@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -108,4 +109,32 @@ func TestReaperCancelNudgesCoalesce(t *testing.T) {
 		t.Fatalf("wake queue capacity=%d length=%d", cap(server.reapWake), len(server.reapWake))
 	}
 	<-server.reapWake
+}
+
+func TestReaperNudgeDoesNotSampleOperationalSeries(t *testing.T) {
+	restoreGlobals(t)
+	before := mustSample(t, scrapeRegistry(t), "sparkwing_pending_nodes")
+	t.Cleanup(func() { setPendingNodes(int(before)) })
+	engine, _ := engineRuntimeStore(t)
+	const sentinel = 123456
+	setPendingNodes(sentinel)
+	synctest.Test(t, func(t *testing.T) {
+		server := New(engine.Store, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { defer close(done); server.runReaper(ctx, 10*time.Second) }()
+		defer func() { cancel(); <-done }()
+		server.nudgeReaper()
+		synctest.Wait()
+		if got := mustSample(t, scrapeRegistry(t), "sparkwing_pending_nodes"); got != sentinel {
+			t.Fatalf("nudge sampled operational series: %v", got)
+		}
+		tick, stop := context.WithTimeout(ctx, 10*time.Second)
+		defer stop()
+		<-tick.Done()
+		synctest.Wait()
+		if got := mustSample(t, scrapeRegistry(t), "sparkwing_pending_nodes"); got != 0 {
+			t.Fatalf("ticker did not sample actual empty queue: %v", got)
+		}
+	})
 }

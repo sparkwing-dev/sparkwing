@@ -496,10 +496,12 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		sample := false
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			sample = true
 		case <-s.reapWake:
 		}
 		s.reap(ctx)
@@ -507,7 +509,9 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		if err := s.ReconcileRunEffects(ctx); err != nil && ctx.Err() == nil {
 			s.logger.Error("run completion failed", "err", err)
 		}
-		s.sampleOperationalSeries(ctx)
+		if sample {
+			s.sampleOperationalSeries(ctx)
+		}
 	}
 }
 
