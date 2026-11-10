@@ -180,6 +180,12 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	}
 	remote, err := read("remote", "get-url", "origin")
 	if err != nil {
+		if input.snapshot != nil && gitExitCode(err, 2) {
+			remotes, listErr := read("remote")
+			if listErr == nil && !slices.Contains(strings.Fields(remotes), "origin") {
+				return result, &apierr.Error{Code: apierr.InvalidArgs, Message: "uploaded source needs a credential-free hosted clone URL as origin", Hint: "add your repository's hosted clone URL: git remote add origin https://HOST/OWNER/REPO.git; then retry"}
+			}
+		}
 		return result, err
 	}
 	repository, err := triggerRepository(ctx, remote, input.githubID)

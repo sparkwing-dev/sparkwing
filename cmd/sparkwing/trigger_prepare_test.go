@@ -570,3 +570,30 @@ func TestPrepareTriggerRequestSaltsEnvironmentWithTheHostKey(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPrepareUploadedTriggerWithoutOriginExplainsRepair(t *testing.T) {
+	repo, _ := triggerPreparationRepo(t)
+	runSnapshotGit(t, repo, "remote", "remove", "origin")
+	snapshot, err := captureWorktreeSnapshot(t.Context(), os.Environ(), repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := snapshot.close(); err != nil {
+			t.Error(err)
+		}
+	})
+	input := triggerPreparationInput(repo)
+	input.snapshot = snapshot
+	_, err = prepareTriggerSource(t.Context(), input)
+	var invalid *apierr.Error
+	if !errors.As(err, &invalid) || invalid.Code != apierr.InvalidArgs {
+		t.Fatalf("want invalid_args missing-origin repair, got %v", err)
+	}
+	if !strings.Contains(invalid.Message, "uploaded source needs a credential-free hosted clone URL as origin") || !strings.Contains(invalid.Hint, "git remote add origin https://HOST/OWNER/REPO.git") {
+		t.Fatalf("missing actionable origin repair: %+v", invalid)
+	}
+	if remotes := runSnapshotGit(t, repo, "remote"); strings.TrimSpace(remotes) != "" {
+		t.Fatalf("diagnostic changed remotes: %s", remotes)
+	}
+}
