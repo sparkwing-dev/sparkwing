@@ -86,8 +86,9 @@ func VerifyForVersion(keys []ed25519.PublicKey, version string, manifest, manife
 // VerifyReaderForVersion hashes a sized stream into one private snapshot. Plain
 // Ed25519 requires the message in memory; the snapshot also prevents later reader
 // changes from altering the bytes authorized for installation.
+// The reader must not retain the buffers it is given.
 func VerifyReaderForVersion(keys []ed25519.PublicKey, version string, manifest, manifestSignature []byte, target Target, reader io.Reader, size int64, assetSignature []byte) (Verified, error) {
-	if size < 0 || int64(int(size)) != size {
+	if size < 0 || size > 1<<30 || int64(int(size)) != size {
 		return Verified{}, errors.New("invalid release asset size")
 	}
 	asset := make([]byte, int(size))

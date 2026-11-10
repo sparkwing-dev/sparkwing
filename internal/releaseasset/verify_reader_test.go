@@ -104,3 +104,12 @@ func BenchmarkVerifyReader(b *testing.B) {
 		})
 	}
 }
+
+func TestVerifyReaderRefusesOversizedSnapshot(t *testing.T) {
+	for _, size := range []int64{1 << 62, (1 << 30) + 1, -1} {
+		_, err := VerifyReaderForVersion(nil, "v0.72.1", nil, nil, Target{}, bytes.NewReader(nil), size, nil)
+		if err == nil || !strings.Contains(err.Error(), "invalid release asset size") {
+			t.Fatalf("size %d: expected size refusal before reading, got %v", size, err)
+		}
+	}
+}
