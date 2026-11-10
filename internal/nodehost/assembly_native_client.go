@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -11,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // WithClient binds native services to the authenticated controller's common transports.
@@ -69,7 +71,26 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 			child, err := remote.Child(ctx, run, wait)
 			result := ProcessChildResult{RunID: child.ID, Status: child.Status}
 			if err == nil && child.FinishedAt != nil && job != "" {
-				result.Output, err = remote.ChildOutput(ctx, run, job)
+				if child.Status == "success" || child.Status == "memoized" {
+					result.Output, err = remote.ChildOutput(ctx, run, job)
+				} else {
+					source := child.Inputs.Git.Repository.Display
+					if source == "" {
+						source = child.Inputs.Git.Repository.Key
+					}
+					if child.Inputs.Git.SHA != "" {
+						source += "@" + child.Inputs.Git.SHA
+					}
+					code := apierr.SDKError
+					if child.Reason == string(apierr.PlanFailed) {
+						code = apierr.PlanFailed
+					}
+					result.Error = &apierr.Error{
+						Code:    code,
+						Message: fmt.Sprintf("child pipeline %q from source %q ended %s: %s", child.Inputs.Pipeline, source, child.Status, child.Failure),
+						Hint:    "Check the pipeline name and definition in the requested source, fix the reported failure, and run the parent again.",
+					}
+				}
 			}
 			return result, err
 		}
