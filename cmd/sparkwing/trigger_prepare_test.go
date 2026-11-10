@@ -279,6 +279,17 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 	if !reflect.DeepEqual(request.Request.RequestedArgs, map[string]string{"region": "us-east", "image": "release", "password": password}) || !request.Request.SecretArgs.Set || !reflect.DeepEqual(request.Request.SecretArgs.Value, []string{"password"}) {
 		t.Fatalf("selected schema lost: %+v", request.Request)
 	}
+	input.args = []string{"--region", "us-east", "--image", "release"}
+	request, err = prepareTriggerRequest(input)
+	if err != nil || len(request.Request.SecretArgs.Value) != 0 {
+		t.Fatalf("omitted optional trigger secret: %v", err)
+	}
+	input.args = nil
+	_, err = prepareTriggerRequest(input)
+	var missing *apierr.Error
+	if !errors.As(err, &missing) || missing.Code != apierr.InvalidArgs || !strings.Contains(missing.Message, "--region is required") {
+		t.Fatalf("missing required trigger argument: %v", err)
+	}
 	_, err = prepareTriggerRequest(triggerRequestInput{home: t.TempDir(), source: selection, declarations: declarationFixture(t, input.declarations.Declarations().Pipelines[:1])})
 	if err == nil || !strings.Contains(err.Error(), "deploy-prod") {
 		t.Fatalf("missing registration used Go type name: %v", err)

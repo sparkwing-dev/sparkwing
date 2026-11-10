@@ -328,9 +328,12 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
+	if _, err := input.declarations.Resolve(input.source.source.Entrypoint, args, nil); err != nil {
+		return controllerwire.CreateRunRequest{}, input.declarations.Error(err)
+	}
 	secretArgs := []string{}
 	for _, argument := range schema.Args {
-		if argument.Secret {
+		if _, present := args[argument.Name]; argument.Secret && present {
 			secretArgs = append(secretArgs, argument.Name)
 		}
 	}

@@ -101,9 +101,12 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 	if err := enforceRiskGate(input.identity.Name, risksIn(schema), riskFlags(options)); err != nil {
 		return controllerwire.CreateRunRequest{}, riskRefusal(input.declarations, err)
 	}
+	if _, err := input.declarations.Resolve(input.identity.Entrypoint, requested, nil); err != nil {
+		return controllerwire.CreateRunRequest{}, input.declarations.Error(err)
+	}
 	secretArgs := []string{}
 	for _, argument := range schema.Args {
-		if argument.Secret {
+		if _, present := requested[argument.Name]; argument.Secret && present {
 			secretArgs = append(secretArgs, argument.Name)
 		}
 	}
