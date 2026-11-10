@@ -716,6 +716,8 @@ regenerate with `go test ./tests/acceptance -run '^TestCurrentContractSymbolInve
 | `RunnerPreferences` | [source](../../../internal/settings/startup.go) |
 | `Source` | [source](../../../internal/settings/contract.go) |
 | `Values` | [source](../../../internal/settings/contract.go) |
+| `VisitDeclarationIdentifiers` | [source](../../../internal/settings/identifiers.go) |
+| `VisitExecutionIdentifiers` | [source](../../../internal/settings/identifiers.go) |
 | `WarmCapacitySettings` | [source](../../../internal/settings/warm_capacity.go) |
 
 The restricted declaration types live in `internal/runspec` to avoid a settings
