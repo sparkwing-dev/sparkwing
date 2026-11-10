@@ -31,6 +31,12 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | Optional fields and capability flags never bump the protocol. The engine defaults missing optional fields. Breaking shapes bump it and need an engine-side adapter. Delete an adapter as soon as the signed mapping lists no SDK using that protocol | `internal/nodehost/protocol_adapter.go`, `docs/sdk.md`: Protocol compatibility | `TestRecordedSDKProtocols` |
 | Versioned Go and TypeScript wire recordings survive SDK source changes and replay against the current engine with identical outcomes. Record a version with `bash bin/record-sdk-protocol.sh <protocol>` inside Xwing scratch | `internal/nodeproto/conformance/testdata/recordings/` | `TestRecordedSDKProtocols`, `TestGoSDKConformsV2`, `TestNativeConformance` |
 
+### Run receipts
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Run receipts bind the committed job output digests exposed by tenant reporting | `internal/controller/receipts.go`: `handleGetRunReceipt`; `internal/store/node_output.go`: `populateNodeOutput` | `cmd/sparkwing/receipt_output_unix_test.go`: `TestRunReceiptBindsProducedOutputs` |
+
 ### Store baseline
 
 | Rule | Owner | Guard test |
@@ -61,6 +67,14 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | KEDA owns volume-free placeholders and namespaced scaler credentials in the dedicated warm namespace | `charts/sparkwing-full/templates/warm-capacity.yaml` | `charts/warm_capacity_test.go`: `TestWarmCapacityRendersClassNodesAndSQLScaler` |
 
 ### Run execution
+
+Routine runner updates wait for idle while claims keep awaited children moving;
+revocation and minimum-version denials still stop claims. Owner:
+`internal/runners/loop.go`; guard:
+`TestManagedRunnerUpdateKeepsClaimsLiveForAwaitedChild`.
+Replacement engines selected by runners are retained by executable digest.
+Owner: `internal/engine/retain.go`; guard:
+`TestReplacementResolutionSurvivesInstalledEngineSwap`.
 
 Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckManifestMembers` with staging. `TestManifestAdmissionRejectsUnstageablePaths` guards traversal and file/parent collisions.
 
