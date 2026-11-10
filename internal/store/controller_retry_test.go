@@ -463,3 +463,21 @@ func TestControllerRetryDeniedRunOpensFreshApproval(t *testing.T) {
 		t.Fatalf("denied retry did not regate: %+v %v", gate, err)
 	}
 }
+
+func TestRetryGateMaterializesLongGroupWithoutControllerPrefetch(t *testing.T) {
+	jobs := []nodewire.JobSpec{{ID: "review", Approval: &nodewire.ApprovalSpec{}}, {ID: "a", Needs: []string{"review"}}, {ID: "b", Needs: []string{"a"}}, {ID: "c", Needs: []string{"b"}}, {ID: "d", Needs: []string{"c"}}, {ID: "failed"}}
+	source := retrySourceFixture(t, jobs, false)
+	runID := source.retry(t, "failed")
+	run := mustReadRun(t, source.tenant, runID)
+	selected := run.Retry.Results["review"]
+	_, err := source.tenant.TransitionNode(t.Context(), materializeNode{Ref: runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "review"}, Actor: controllerActor(runID), Materialize: &runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}})
+	if err != nil {
+		t.Fatalf("materializing a gate exhausted the deferred-read budget: %v", err)
+	}
+	for _, id := range []string{"review", "a", "b", "c", "d"} {
+		row, err := source.tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(id)})
+		if err != nil || row.Status != runstate.StatusDone || row.Attempt != 0 || id != "review" && row.OutputRecord == nil {
+			t.Fatalf("group member not reused: %+v %v", row, err)
+		}
+	}
+}
