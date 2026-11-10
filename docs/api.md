@@ -14,6 +14,10 @@ store locations.
 Job reports expose `output_digest` from the job's committed output record.
 Receipts include that digest as `sha256:<digest>` in `identity.outputs_hash`,
 including outputs copied from a memo. Collected records omit the digest.
+The receipt checksum binds these output digests along with the public input,
+plan and job observations. Receipts do not bind artifact manifests.
+`receipt_sha` is an unsigned checksum, not a signature or an attestation;
+clients display the controller response without verifying it.
 
 Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
 
