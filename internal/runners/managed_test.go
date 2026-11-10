@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
@@ -320,4 +321,71 @@ func signedRunnerPolicy(t *testing.T, edit func(*engine.VersionIndex)) engine.Ve
 		t.Fatal(err)
 	}
 	return verified
+}
+
+func TestManagedRunnerUpdateKeepsClaimsLiveForAwaitedChild(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := runnerReleaseFixture(t)
+		initial, _ := runnerPolicyFixtures(t)
+		started, childDone, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		policy := &awaitUpdatePolicy{initial: initial, latest: signedRunnerPolicy(t, func(*engine.VersionIndex) {}), started: started, finished: finished, update: engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release}, t: t}
+		installation := &installationFixture{}
+		claims := 0
+		runner := ManagedRunner{Loop: &Loop{Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1},
+			Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				claims++
+				id, run := "parent", "run"
+				if claims == 2 {
+					id, run = "child", "child-run"
+				}
+				if claims > 2 {
+					return controllerwire.ClaimResponse{}, nil
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: id, RunID: run, Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+				if unit.UnitID == "child" {
+					close(childDone)
+					return nil
+				}
+				resume := nodehost.AwaitSlot(ctx)()
+				close(started)
+				<-childDone
+				resume(ctx)
+				close(finished)
+				return nil
+			}),
+		}, Versions: policy, Installation: installation, Target: release.Target()}
+		if err := runner.Run(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if claims < 2 || !reflect.DeepEqual(installation.calls, []string{"apply"}) {
+			t.Fatalf("claims=%d installation=%v", claims, installation.calls)
+		}
+	})
+}
+
+type awaitUpdatePolicy struct {
+	initial, latest   engine.VerifiedIndex
+	started, finished chan struct{}
+	update            engine.SoftwareUpdate
+	checks            int
+	t                 *testing.T
+}
+
+func (p *awaitUpdatePolicy) Index(context.Context, time.Time) (engine.IndexResult, error) {
+	p.checks++
+	if p.checks == 1 {
+		return engine.IndexResult{Index: p.initial}, nil
+	}
+	<-p.started
+	return engine.IndexResult{Index: p.latest}, nil
+}
+func (p *awaitUpdatePolicy) PrepareRunnerUpdate(context.Context, string, releaseasset.Target) (engine.SoftwareUpdate, error) {
+	select {
+	case <-p.finished:
+	default:
+		p.t.Error("update before awaited child completed")
+	}
+	return p.update, nil
 }

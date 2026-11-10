@@ -56,6 +56,14 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 
 ### Run execution
 
+Routine runner updates wait for idle while claims keep awaited children moving;
+revocation and minimum-version denials still stop claims. Owner:
+`internal/runners/loop.go`; guard:
+`TestManagedRunnerUpdateKeepsClaimsLiveForAwaitedChild`.
+Replacement engines selected by runners are retained by executable digest.
+Owner: `internal/engine/retain.go`; guard:
+`TestReplacementResolutionSurvivesInstalledEngineSwap`.
+
 Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckManifestMembers` with staging. `TestManifestAdmissionRejectsUnstageablePaths` guards traversal and file/parent collisions.
 
 | Rule | Owner | Guard test |
