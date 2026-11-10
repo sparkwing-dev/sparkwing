@@ -151,6 +151,9 @@ func prepareScheduleTimer(ctx context.Context, services localScheduleServices, g
 }
 
 func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts scheduleOptions, out io.Writer, command scheduleCommand) error {
+	if err := validateServiceSecretsKeys(); err != nil {
+		return err
+	}
 	services, err := command.local(ctx, "")
 	if err != nil {
 		return err

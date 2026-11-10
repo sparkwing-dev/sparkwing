@@ -404,3 +404,24 @@ func TestScheduleProjectValidationKeepsNamedEntriesAndRefusesLegacyShape(t *test
 		t.Fatal("legacy schedule mapping survived the hard cut")
 	}
 }
+
+func TestScheduleInstallRefusesInlineKeysBeforeResolvingServices(t *testing.T) {
+	for _, name := range []string{"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("SPARKWING_SECRETS_KEY", "")
+			t.Setenv("SPARKWING_SECRETS_PREVIOUS_KEY", "")
+			secret := "private-key-value-must-not-be-persisted"
+			t.Setenv(name, secret)
+			command := scheduleCommand{local: func(context.Context, string) (localScheduleServices, error) {
+				t.Fatal("resolved services with an inline secrets key")
+				return localScheduleServices{}, nil
+			}}
+			var out bytes.Buffer
+			err := runScheduleCommandArgs(t.Context(), []string{"install"}, &out, command)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.BadRequest || !strings.Contains(failure.Hint, "SPARKWING_SECRETS_KEY_FILE") || strings.Contains(err.Error(), secret) || out.Len() != 0 {
+				t.Fatalf("inline key install refusal: %v", err)
+			}
+		})
+	}
+}
