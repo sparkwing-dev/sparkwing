@@ -173,6 +173,9 @@ func (m *nativeUnits) InstallController(ctx context.Context, opts LocalStartOpti
 		return err
 	}
 	if m.host.GOOS == "linux" {
+		if err := m.run(ctx, "systemctl", "--user", "link", m.path()); err != nil {
+			return err
+		}
 		if err := m.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 			return err
 		}

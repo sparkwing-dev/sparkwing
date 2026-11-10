@@ -67,6 +67,9 @@ func installLinux(ctx context.Context, h Host) (State, error) {
 	}
 
 	state := commandState(h, timerPath, serviceUnit(h))
+	if err := runRefresh(ctx, h, "systemctl", "--user", "link", servicePath, timerPath); err != nil {
+		return state, err
+	}
 	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 		state.Detail = "the timer's files are written but systemd did not reload them"
 		return state, fmt.Errorf("crontimer: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out))
@@ -102,7 +105,10 @@ func uninstallLinux(ctx context.Context, h Host) (State, error) {
 	var disableErr error
 	loaded := loadedElsewhere(ctx, h, timerPath)
 	if loaded == "" {
-		if out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", h.timerName()); err != nil && !notLoaded(out) {
+		if err := unitfile.CheckSystemdSource(ctx, h.Exec, h.serviceName(), servicePath); err != nil {
+			return State{Path: timerPath}, err
+		}
+		if out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", h.timerName(), h.serviceName()); err != nil && !notLoaded(out) {
 			disableErr = fmt.Errorf("crontimer: systemctl --user disable --now %s: %w: %s", h.timerName(), err, strings.TrimSpace(out))
 		}
 	}
@@ -187,7 +193,7 @@ func loadedElsewhere(ctx context.Context, h Host, timerPath string) string {
 		return ""
 	}
 	loaded := strings.TrimSpace(out)
-	if loaded == "" || loaded == timerPath {
+	if loaded == "" || unitfile.SameSource(loaded, timerPath) {
 		return ""
 	}
 	return loaded

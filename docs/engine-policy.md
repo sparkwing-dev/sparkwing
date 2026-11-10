@@ -20,6 +20,10 @@ The example shows the mapping fields. The full policy also carries `format`, `pu
 
 Local execution reads the cached signed mapping without fetching policy. An unlisted SDK cannot select an engine. Run `sparkwing update` to refresh the policy cache. A verified engine binary alone does not authorize an SDK-to-engine mapping.
 
+Each host process authenticates a cached engine's signatures, release layout, executable version and platform once per trusted key set. Reuse checks the executable SHA-256 and the unchanged verification record before selecting or installing its SDK. Records kept in memory contain digests and identities, never executable bytes. A process restart repeats the signature checks.
+
+A corrupt cache entry fails with an integrity error. Remove the affected release directory named by the error and retry to fetch and verify it again.
+
 ## Publication
 
 Each SDK publication decision retains `sdk-entry-go.json` or `sdk-entry-typescript.json` on the immutable engine release. Each file contains a JSON array of SDK entries. An unchanged source digest retains the prior entry verbatim. A changed digest requires a separately chosen SDK version and successful SDK publication before retaining the entry.

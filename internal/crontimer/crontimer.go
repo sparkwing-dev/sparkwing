@@ -120,7 +120,7 @@ func Status(ctx context.Context, h Host) (State, error) {
 				key, value, _ := strings.Cut(line, "=")
 				properties[key] = value
 			}
-			if properties["FragmentPath"] != state.Path {
+			if !unitfile.SameSource(properties["FragmentPath"], state.Path) {
 				err = errors.New("crontimer: service manager has no matching native timer registration")
 			} else {
 				state.Enabled = properties["ActiveState"] == "active" &&

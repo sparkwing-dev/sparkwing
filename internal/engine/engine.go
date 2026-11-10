@@ -28,7 +28,7 @@ type Resolved struct {
 	AssetDigest        string
 	Executable         string
 	Notices            []engineid.Notice
-	trustedKeys        []ed25519.PublicKey
+	verification       *cacheVerification
 	verifiedIdentity   engineid.Identity
 	retainedExecutable string
 	retainedIdentity   engineid.Identity

@@ -158,6 +158,7 @@ func TestInstallLinuxWritesBothUnitsAndEnablesTheTimer(t *testing.T) {
 	wantCalls := []string{
 		"systemctl --user show -p FragmentPath --value sparkwing-crons.service",
 		"systemctl --user show -p FragmentPath --value sparkwing-crons.timer",
+		"systemctl --user link " + servicePath + " " + timerPath,
 		"systemctl --user daemon-reload",
 		"systemctl --user enable --now sparkwing-crons.timer",
 	}
@@ -421,7 +422,8 @@ func TestUninstallRemovesManagedFilesAndRepeatsCleanly(t *testing.T) {
 			},
 			wantCalls: []string{
 				"systemctl --user show -p FragmentPath --value sparkwing-crons.timer",
-				"systemctl --user disable --now sparkwing-crons.timer",
+				"systemctl --user show -p FragmentPath --value sparkwing-crons.service",
+				"systemctl --user disable --now sparkwing-crons.timer sparkwing-crons.service",
 				"systemctl --user daemon-reload",
 			},
 		},
@@ -700,5 +702,26 @@ func TestInspectReportsATimerThatTicksAnotherHome(t *testing.T) {
 				t.Errorf("Inspect = %+v, want it reported as another home's timer", state)
 			}
 		})
+	}
+}
+
+func TestUninstallRefusesForeignCompanionRegistration(t *testing.T) {
+	e := &fakeExec{}
+	h := linuxHost(t, e)
+	if _, err := Install(t.Context(), h); err != nil {
+		t.Fatal(err)
+	}
+	e.calls = nil
+	e.rules = append(e.rules, rule{prefix: "systemctl --user show -p FragmentPath --value " + h.serviceName(), out: "/other/foreign.service"})
+	if _, err := Uninstall(t.Context(), h); err == nil {
+		t.Fatal("uninstall accepted a foreign companion")
+	}
+	for _, call := range e.calls {
+		if strings.Contains(call, "disable") {
+			t.Fatalf("stopped a foreign companion: %v", e.calls)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(UnitDir(h), h.serviceName())); err != nil {
+		t.Fatal(err)
 	}
 }

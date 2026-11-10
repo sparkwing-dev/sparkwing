@@ -42,6 +42,9 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 			if err := manager.InstallController(t.Context(), LocalStartOptions{Home: host.SparkwingHome, Executable: host.Binary, Version: host.Version}); err != nil {
 				t.Fatal(err)
 			}
+			if goos == "linux" && !slices.Contains(calls, "systemctl --user link "+manager.(*nativeUnits).path()) {
+				t.Fatalf("controller was not linked to its private source: %v", calls)
+			}
 			units, err := manager.Inspect(t.Context())
 			if err != nil || len(units) != 2 {
 				t.Fatalf("installed units = %+v, %v", units, err)
