@@ -142,7 +142,7 @@ esac
 				write(filepath.Join(dir, "allow-swap"), "")
 			} else {
 				write(filepath.Join(tools, "mv"), "#!/bin/bash\nif [[ \"${@: -1}\" == \"$UPDATER_FIXTURE/install/sparkwing-runner\" ]]; then\n while [ ! -e \"$UPDATER_FIXTURE/allow-swap\" ]; do sleep 0.02; done\nfi\nexec /bin/mv \"$@\"\n")
-				write(filepath.Join(repo, ".sparkwing/go.mod"), fmt.Sprintf("module updater-land\ngo 1.26.0\nrequire github.com/sparkwing-dev/sparkwing v0.71.0\nreplace github.com/sparkwing-dev/sparkwing => %s\n", root))
+				write(filepath.Join(repo, ".sparkwing/go.mod"), fmt.Sprintf("module updater-land\ngo 1.26.0\nrequire github.com/sparkwing-dev/sparkwing v0.72.0\nreplace github.com/sparkwing-dev/sparkwing => %s\n", root))
 				write(filepath.Join(repo, ".sparkwing/main.go"), `package main
 import("context";"os"; sw "github.com/sparkwing-dev/sparkwing/sparkwing")
 type Land struct{sw.Base}
