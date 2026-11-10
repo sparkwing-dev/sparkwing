@@ -20,6 +20,72 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.72.1] - 2026-11-10
+
+### Added
+
+- **cli:** Scaffold a no-PR merge queue with `pipeline new --template merge-queue`
+  or `merge-queue-typescript`. Entries require a brief, merge the remote default
+  branch, run repository checks and push only the unchanged checked commit.
+
+
+- **controller:** Expose authenticated team pipeline health at `/api/status` in the Wing status shape
+  The document includes latest default-branch outcomes, queue backlog, runner availability and local daemon reachability.
+
+### Changed
+
+- **deps:** Use sparks-core/templates v0.35.0 in the host and repository pipeline
+- **deps:** Pin repository and k8s author-test modules to Sparkwing host v0.72.0
+  alongside SDK v0.1.0, and update the desktop updater consumer fixture
+- **docs:** Distinguish the Go SDK minimum from the engine build minimum in
+  Getting Started
+
+### Fixed
+
+- **Local controller:** Keep the configured secrets key and configuration paths when installing a login service, so forced restart can reopen its signing key
+  Login services require a key file instead of keys supplied by environment value.
+
+
+- **cli:** Report incomplete shutdown when `sparkwing daemon stop` leaves its runner alive
+  The error names the runner and explains how to restart the controller, let held work finish and retry the stop.
+
+
+- **runner:** Detached local runs keep working after submitter scratch cleanup
+  Hosted execution owns private temporary storage and removes it when execution ends.
+
+
+- **runner:** Reuse signed engine verification without copying the executable for every job attempt
+  Every reuse still checks the executable checksum and verification metadata. Corrupt entries fail with an integrity error instead of being silently replaced.
+
+
+- **cli:** Fetch and verify the signed SDK mapping on the first pipeline run after installation
+
+
+- **cli:** Missing run status errors name `sparkwing runs list` to find a valid run ID
+
+
+- **cli:** Native schedule timers and controller login services work with a private XDG config directory on Linux. macOS login agents use the account home even when `HOME` is overridden.
+
+
+- **web:** Keep run metadata from overlapping on narrow screens
+
+
+- **runner:** Cancelling a queued local job reports cancellation instead of a spurious authentication failure
+
+
+- **runner:** Seed release images from the independently versioned SDK pin
+  Image packaging reads the selected engine source's Go SDK requirement instead
+  of fetching the SDK at the engine version. Bootstrap cache keys retain the
+  engine version.
+
+
+- **cli:** Pin new TypeScript pipelines to the published TypeScript SDK version
+  TypeScript scaffolds no longer inherit the separate Go SDK version.
+
+### Security
+
+- **cli:** Local schedule installation refuses inline secrets keys and names the key-file remedy
+
 ## [v0.72.0] - 2026-11-10
 
 ### Added
