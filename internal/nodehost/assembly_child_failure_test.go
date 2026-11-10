@@ -70,7 +70,7 @@ func TestNativeChildAwaitReportsPlanningFailureBeforeReadingOutput(t *testing.T)
 			t.Errorf("missing %q in %q", want, result.Error.Message)
 		}
 	}
-	if !strings.Contains(result.Error.Hint, "pipeline") || !strings.Contains(result.Error.Hint, "source") {
+	if !strings.Contains(result.Error.Message, "Check the pipeline name") || !strings.Contains(result.Error.Message, "source") {
 		t.Fatalf("no repair advice: %+v", result.Error)
 	}
 

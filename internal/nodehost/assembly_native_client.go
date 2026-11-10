@@ -87,8 +87,7 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 					}
 					result.Error = &apierr.Error{
 						Code:    code,
-						Message: fmt.Sprintf("child pipeline %q from source %q ended %s: %s", child.Inputs.Pipeline, source, child.Status, child.Failure),
-						Hint:    "Check the pipeline name and definition in the requested source, fix the reported failure, and run the parent again.",
+						Message: fmt.Sprintf("child pipeline %q from source %q ended %s: %s. Check the pipeline name and definition in the requested source, then run the parent again.", child.Inputs.Pipeline, source, child.Status, child.Failure),
 					}
 				}
 			}
