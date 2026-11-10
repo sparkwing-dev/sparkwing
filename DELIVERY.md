@@ -93,7 +93,9 @@ with `GOWORK=off GOFLAGS=-trimpath GOMAXPROCS=2` after one warm-up run:
 The `windows-compile` policy step uses the existing changed Go package and
 committed module selection. It compiles tests with `GOOS=windows GOARCH=amd64`
 when a touched package contains eligible Windows filename or build-tag source.
-A package with Windows arm64-specific source also compiles for `GOARCH=arm64`.
+Source eligible for Windows arm64 but not Windows amd64 adds
+`GOARCH=arm64`, including generic arm64 files beside Windows source. A package
+with no eligible amd64 files compiles only for arm64.
 Negative-only `!windows` constraints do not select a package. Outputs use disposable
 scratch, and compilation shares the normal Go build cache. These are cross-compiles;
 native Windows execution remains separate coverage.

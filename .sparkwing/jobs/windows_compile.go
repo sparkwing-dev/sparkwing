@@ -38,7 +38,7 @@ func windowsCompileArchitectures(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	windows, arm64 := false, false
+	windows, amd64, arm64 := false, false, false
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") {
@@ -77,14 +77,18 @@ func windowsCompileArchitectures(dir string) ([]string, error) {
 		if specific && (amd || arm) {
 			windows = true
 		}
-		if specific && arm && !amd {
+		amd64 = amd64 || amd
+		if arm && !amd {
 			arm64 = true
 		}
 	}
 	if !windows {
 		return nil, nil
 	}
-	arches := []string{"amd64"}
+	var arches []string
+	if amd64 {
+		arches = append(arches, "amd64")
+	}
 	if arm64 {
 		arches = append(arches, "arm64")
 	}
@@ -101,14 +105,14 @@ func runWindowsCompileTargets(ctx context.Context, targets map[string][]string) 
 			for _, pkg := range targets[module] {
 				arches, err := windowsCompileArchitectures(filepath.Join(dir, pkg))
 				if err != nil {
-					return fmt.Errorf("Windows source selection %s/%s: %w", module, pkg, err)
+					return fmt.Errorf("windows source selection %s/%s: %w", module, pkg, err)
 				}
 				for _, arch := range arches {
 					binary := filepath.Join(output, "windows-"+arch+".test.exe")
 					script := fmt.Sprintf("env -C %s %s", shellQuote(dir), boundedGoCommand(currentHost(), "test", "-c -o "+shellQuote(binary)+" "+shellQuote(pkg)))
 					sparkwing.Info(ctx, "Windows compile: %s/%s windows/%s (compile only)", module, pkg, arch)
 					if _, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Env("GOOS", "windows").Env("GOARCH", arch).Env("CGO_ENABLED", "0").Run(); err != nil {
-						return fmt.Errorf("Windows test compile %s/%s windows/%s: %w", module, pkg, arch, err)
+						return fmt.Errorf("windows test compile %s/%s windows/%s: %w", module, pkg, arch, err)
 					}
 				}
 			}

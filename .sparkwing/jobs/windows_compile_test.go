@@ -18,8 +18,8 @@ func TestWindowsCompileArchitectures(t *testing.T) {
 		{"negative tag", "p.go", "//go:build !windows\n\npackage p\n", nil},
 		{"filename", "p_windows_test.go", "package p\n", []string{"amd64"}},
 		{"tag", "p.go", "//go:build windows || linux\n\npackage p\n", []string{"amd64"}},
-		{"arm64 filename", "p_windows_arm64.go", "package p\n", []string{"amd64", "arm64"}},
-		{"arm64 tag", "p.go", "//go:build windows && arm64\n\npackage p\n", []string{"amd64", "arm64"}},
+		{"arm64 filename", "p_windows_arm64.go", "package p\n", []string{"arm64"}},
+		{"arm64 tag", "p.go", "//go:build windows && arm64\n\npackage p\n", []string{"arm64"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -60,5 +60,31 @@ func TestWindowsCompileChecksArm64OnlyWhenItsSourceExists(t *testing.T) {
 	err := runWindowsCompile(newTestContext(t))
 	if err == nil || !strings.Contains(err.Error(), "windows/arm64") {
 		t.Fatalf("arm64-specific failure = %v", err)
+	}
+}
+
+func TestWindowsCompileIncludesGenericArm64Source(t *testing.T) {
+	root := gateFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "internal", "p_windows.go"), "package internal\n")
+	writeGoFile(t, filepath.Join(root, "internal", "p_arm64.go"), "package internal\nvar _ = missingGenericArm64Identifier\n")
+	err := runWindowsCompile(newTestContext(t))
+	if err == nil || !strings.Contains(err.Error(), "windows/arm64") {
+		t.Fatalf("generic arm64 failure = %v", err)
+	}
+}
+
+func TestWindowsCompileAcceptsArm64OnlyPackage(t *testing.T) {
+	root := gateFixtureRepo(t)
+	file := filepath.Join(root, "armonly", "p_windows_arm64_test.go")
+	writeGoFile(t, file, "package armonly\nvar _ = missingArmOnlyIdentifier\n")
+	gitAddAll(t, root)
+	ctx := newTestContext(t)
+	err := runWindowsCompile(ctx)
+	if err == nil || !strings.Contains(err.Error(), "windows/arm64") {
+		t.Fatalf("arm-only failure = %v", err)
+	}
+	writeGoFile(t, file, "package armonly\nvar _ = 1\n")
+	if err := runWindowsCompile(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
