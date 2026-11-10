@@ -29,6 +29,9 @@ type Keeper struct {
 	Lease    time.Duration
 	// Observe receives successful watch updates without changing renewal cadence.
 	Observe func(Beat)
+	// WaitCancellation observes requested cancellation without renewing authority.
+	// It blocks until cancellation or context completion and returns nil for the latter.
+	WaitCancellation func(context.Context) *CancelError
 	// ExecutionEnded stops execution surfaces outside the SDK tree. It runs once and must return promptly.
 	ExecutionEnded func()
 }
@@ -67,6 +70,15 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		}
 	})
 	done := make(chan struct{})
+	cancelDone := make(chan struct{})
+	go func() {
+		defer close(cancelDone)
+		if k.WaitCancellation != nil {
+			if requested := k.WaitCancellation(unit); requested != nil {
+				cancel(requested)
+			}
+		}
+	}()
 	watchDone := make(chan struct{})
 	renewed := make(chan time.Time)
 	expires := time.Now().Add(k.Lease)
@@ -147,6 +159,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		hardCancel(context.Canceled)
 		<-done
 		<-watchDone
+		<-cancelDone
 		<-executionDone
 	}
 }
