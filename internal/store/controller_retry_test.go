@@ -352,7 +352,7 @@ func resolveRetryApproval(t *testing.T, tenant *Tenant, runID, job, decision str
 }
 
 func TestControllerRetryRegatesWhenAnyDependentRunsAgain(t *testing.T) {
-	for _, miss := range []string{"none", "leaf records", "host scope", "all", "nested gates", "failed descendant", "changed descendant"} {
+	for _, miss := range []string{"none", "leaf records", "host scope", "all", "nested gates", "joining gates", "failed descendant", "changed descendant"} {
 		t.Run(miss, func(t *testing.T) {
 			var logs bytes.Buffer
 			previous := slog.Default()
@@ -362,6 +362,10 @@ func TestControllerRetryRegatesWhenAnyDependentRunsAgain(t *testing.T) {
 			if miss == "nested gates" {
 				jobs = append(jobs[:1], append([]nodewire.JobSpec{{ID: "second-review", Approval: &nodewire.ApprovalSpec{}, Needs: []string{"review"}}}, jobs[1:]...)...)
 				jobs[2].Needs = []string{"second-review"}
+			}
+			if miss == "joining gates" {
+				jobs = append(jobs[:1], append([]nodewire.JobSpec{{ID: "second-review", Approval: &nodewire.ApprovalSpec{}}}, jobs[1:]...)...)
+				jobs[2].Needs = []string{"review", "second-review"}
 			}
 			if miss == "failed descendant" {
 				jobs[len(jobs)-1].Needs = []string{"leaf"}
@@ -391,9 +395,15 @@ func TestControllerRetryRegatesWhenAnyDependentRunsAgain(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if miss == "none" || miss == "nested gates" {
+			if miss == "none" || miss == "nested gates" || miss == "joining gates" {
 				if gate.Status != runstate.StatusDone {
 					t.Fatalf("fully reused gate: %+v", gate)
+				}
+				if miss == "nested gates" || miss == "joining gates" {
+					second, err := source.tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "second-review"})
+					if err != nil || second.Status != runstate.StatusDone || second.Attempt != 0 {
+						t.Fatalf("second gate not reused: %+v %v", second, err)
+					}
 				}
 				for _, id := range []string{"job", "leaf"} {
 					row, err := source.tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(id)})

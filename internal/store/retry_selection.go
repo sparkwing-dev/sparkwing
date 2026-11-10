@@ -58,30 +58,34 @@ func materializeRetryDependentsTx(ctx context.Context, tx *storeTx, team Team, g
 	}
 	deps := graph.Dependencies()
 	group := map[string]bool{string(gate.Ref.NodeID): true}
+	protected := map[string]bool{string(gate.Ref.NodeID): true}
 	for changed := true; changed; {
 		changed = false
-		for id, needs := range deps {
-			if !group[id] && slices.ContainsFunc(needs, func(dep string) bool { return group[dep] }) {
-				group[id], changed = true, true
+		for _, node := range graph.Nodes {
+			if group[node.ID] {
+				if node.Kind == "approval" && !protected[node.ID] {
+					protected[node.ID], changed = true, true
+				}
+				for _, dep := range deps[node.ID] {
+					if !group[dep] {
+						group[dep], changed = true, true
+					}
+				}
+			}
+			if !protected[node.ID] && slices.ContainsFunc(deps[node.ID], func(dep string) bool { return protected[dep] }) {
+				protected[node.ID], group[node.ID], changed = true, true, true
 			}
 		}
 	}
-	rows := make(map[string]runstate.NodeRow, len(snapshot.Nodes))
 	for _, row := range snapshot.Nodes {
 		// safety: an outstanding expansion can introduce a new dependent on the gate.
 		if row.Expansion == runstate.ExpansionExpected {
 			return blob.ErrNotFound
 		}
-		rows[string(row.Ref.NodeID)] = row
 	}
 	for id := range group {
 		if _, selected := snapshot.Run.Retry.Results[id]; !selected {
 			return blob.ErrNotFound
-		}
-		for _, dep := range deps[id] {
-			if !group[dep] && (rows[dep].Status != runstate.StatusDone || rows[dep].Attempt != 0 || !scheduleSucceeded(string(rows[dep].Outcome))) {
-				return blob.ErrNotFound
-			}
 		}
 	}
 	for _, row := range snapshot.Nodes {
