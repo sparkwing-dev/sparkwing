@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -42,7 +43,7 @@ func Verify(publicKeys []ed25519.PublicKey, manifest, manifestSignature []byte, 
 		return Verified{}, err
 	}
 	for _, publicKey := range publicKeys {
-		verified, verifyErr := verifyWithKey(publicKey, manifest, manifestSignature, name, asset, assetSignature)
+		verified, verifyErr := verifyWithKey(publicKey, manifest, manifestSignature, name, asset, assetSignature, false, "")
 		if verifyErr == nil {
 			return verified, nil
 		}
@@ -50,7 +51,7 @@ func Verify(publicKeys []ed25519.PublicKey, manifest, manifestSignature []byte, 
 	return Verified{}, errors.New("release signatures do not match the updater trust set")
 }
 
-func verifyWithKey(publicKey ed25519.PublicKey, manifest, manifestSignature []byte, name string, asset, assetSignature []byte) (Verified, error) {
+func verifyWithKey(publicKey ed25519.PublicKey, manifest, manifestSignature []byte, name string, asset, assetSignature []byte, owned bool, actualHex string) (Verified, error) {
 	if len(publicKey) != ed25519.PublicKeySize {
 		return Verified{}, errors.New("release public key is invalid")
 	}
@@ -64,14 +65,19 @@ func verifyWithKey(publicKey ed25519.PublicKey, manifest, manifestSignature []by
 	if err != nil {
 		return Verified{}, err
 	}
-	actual := sha256.Sum256(asset)
-	actualHex := hex.EncodeToString(actual[:])
+	if actualHex == "" {
+		actual := sha256.Sum256(asset)
+		actualHex = hex.EncodeToString(actual[:])
+	}
 	if digest != actualHex {
 		return Verified{}, fmt.Errorf("checksum mismatch for %s", name)
 	}
+	if !owned {
+		asset = bytes.Clone(asset)
+	}
 	return Verified{
 		name:              name,
-		bytes:             bytes.Clone(asset),
+		bytes:             asset,
 		digest:            digest,
 		manifest:          bytes.Clone(manifest),
 		manifestSignature: bytes.Clone(manifestSignature),
@@ -111,4 +117,14 @@ func manifestDigest(manifest []byte, assetName string) (string, error) {
 		return "", errors.New(assetName + " not listed in SHA256SUMS")
 	}
 	return digest, nil
+}
+
+// ReadAt permits build identity inspection without exposing mutable verified bytes.
+func (asset Verified) ReadAt(p []byte, off int64) (int, error) {
+	return bytes.NewReader(asset.bytes).ReadAt(p, off)
+}
+
+// WriteTo installs the authenticated snapshot without allocating another asset copy.
+func (asset Verified) WriteTo(w io.Writer) (int64, error) {
+	return io.Copy(w, io.NewSectionReader(asset, 0, int64(len(asset.bytes))))
 }
