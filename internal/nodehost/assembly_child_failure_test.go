@@ -21,8 +21,10 @@ import (
 func TestNativeChildAwaitReportsPlanningFailureBeforeReadingOutput(t *testing.T) {
 	f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "parent", Steps: []nodewire.StepSpec{{ID: "body"}}}}})
 	now := time.Now()
-	child := controllerwire.RunDetail{ID: "child", Status: "failed", Reason: "plan_failed", Failure: "unknown pipeline matrix-missing-child", FinishedAt: &now,
-		Inputs: runspec.Display{Pipeline: "matrix-missing-child", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "acme/pipelines"}, SHA: "source-commit"}}}
+	child := controllerwire.RunDetail{
+		ID: "child", Status: "failed", Reason: "plan_failed", Failure: "unknown pipeline matrix-missing-child", FinishedAt: &now,
+		Inputs: runspec.Display{Pipeline: "matrix-missing-child", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "acme/pipelines"}, SHA: "source-commit"}},
+	}
 	outputReads := 0
 	original := controller.New(f.Store, nil).Handler()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
