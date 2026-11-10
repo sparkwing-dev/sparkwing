@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,7 +18,7 @@ func TestWindowsPinnedLocalRunnerExecutableStarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pinned, _, err := pinLocalRunnerExecutable(t.TempDir(), executable, "")
+	pinned, _, err := engine.RetainExecutable(filepath.Join(t.TempDir(), "runners", "builds"), executable, "")
 	if err != nil {
 		t.Fatal(err)
 	}
