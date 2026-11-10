@@ -65,7 +65,10 @@ does the same as `sw.Register[T]`. The invoked pipeline name travels in
 flags use `sw.NoInputs`.
 
 Input structs support `flag`, `short`, `default`, `required`, `enum` and `desc`
-tags. `secret:"true"` classifies a flag value for masking. A `flag:",extra"`
+tags. `secret:"true"` classifies a flag value for masking. Secret arguments are
+optional unless marked `required:"true"`. Omitted optional arguments stay absent,
+and declared defaults are masked when applied. Missing required arguments are
+refused before submission with an error naming the flag. A `flag:",extra"`
 map receives extra flags. Typed job inputs use an embedded `sw.WithArgs[T]` and
 share the pipeline's flag namespace. The host checks required values, types,
 enums and name collisions before execution. An invalid public enum value lists

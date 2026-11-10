@@ -16,7 +16,7 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 	for _, name := range request.SecretArgs.Value {
 		_, present := request.RequestedArgs[name]
 		if !present {
-			return SealedRequest{}, errors.New("secret argument classification names an absent argument")
+			return SealedRequest{}, &apierr.Error{Code: apierr.InvalidArgs, Message: "secret argument classification names an absent argument; supply the argument or omit its classification"}
 		}
 	}
 	if request.Burst != nil {
