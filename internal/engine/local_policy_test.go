@@ -2,15 +2,18 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
@@ -157,5 +160,55 @@ func TestUpdateRefreshFillsThePolicyCacheLocalRunsRead(t *testing.T) {
 	cached, err := local.Index(t.Context(), now)
 	if err != nil || cached.Index.Offline() || !cached.Index.Policy().PublishedAt.Equal(policy.PublishedAt) || len(transport.requests) != 0 {
 		t.Fatalf("local run did not read the refreshed policy offline: %+v %v requests=%v", cached, err, transport.requests)
+	}
+}
+
+func TestFreshLocalSDKMappingBootstrapsVerifiedPolicy(t *testing.T) {
+	for _, pin := range []engineid.Pin{{SDK: engineid.GoSDK, Version: "v0.20.0"}, {SDK: engineid.TypeScriptSDK, Version: "0.20.0"}} {
+		t.Run(string(pin.SDK), func(t *testing.T) {
+			for _, failure := range []string{"", "offline", "signature"} {
+				t.Run(failure, func(t *testing.T) {
+					r, transport, _, policy, _ := fixtureResolver(t)
+					t.Setenv("SPARKWING_HOME", t.TempDir())
+					r.config.CacheDirectory = ""
+					r.config.LocalOnly = true
+					if failure == "offline" {
+						transport.failure = true
+					}
+					if failure == "signature" {
+						transport.policy(t, testSigningKey(t), policy)
+					}
+					local, err := NewResolver(r.config)
+					if err != nil {
+						t.Fatal(err)
+					}
+					version, err := local.EngineVersion(t.Context(), pin)
+					if failure != "" {
+						requireCode(t, err, hosterr.Unavailable)
+						var refusal *apierr.Error
+						if !errors.As(err, &refusal) || !strings.Contains(refusal.Message, failure) || !strings.Contains(refusal.Hint, "sparkwing update") {
+							t.Fatalf("missing cause or recovery: %v", err)
+						}
+						cached, cacheErr := local.Index(t.Context(), time.Now())
+						if cacheErr != nil || !cached.Index.Offline() {
+							t.Fatalf("unverified policy cached: %+v %v", cached, cacheErr)
+						}
+						return
+					}
+					if err != nil || version != "v0.20.0" {
+						t.Fatalf("fresh mapping: %s %v", version, err)
+					}
+					transport.failure, transport.requests = true, nil
+					again, err := NewResolver(r.config)
+					if err != nil {
+						t.Fatal(err)
+					}
+					version, err = again.EngineVersion(t.Context(), pin)
+					if err != nil || version != "v0.20.0" || len(transport.requests) != 0 {
+						t.Fatalf("cached mapping: %s %v requests=%v", version, err, transport.requests)
+					}
+				})
+			}
+		})
 	}
 }
