@@ -48,7 +48,7 @@ func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBun
 	if embedded != version {
 		return VerifiedRelease{}, integrity(fmt.Errorf("embedded release version %q does not match %s", embedded, version))
 	}
-	copyBundle := ReleaseBundle{Manifest: bytes.Clone(bundle.Manifest), ManifestSignature: bytes.Clone(bundle.ManifestSignature), Asset: bytes.Clone(bundle.Asset), AssetSignature: bytes.Clone(bundle.AssetSignature)}
+	copyBundle := ReleaseBundle{Manifest: bytes.Clone(bundle.Manifest), ManifestSignature: bytes.Clone(bundle.ManifestSignature), AssetSignature: bytes.Clone(bundle.AssetSignature)}
 	trusted := make([]ed25519.PublicKey, len(keys))
 	for i, key := range keys {
 		trusted[i] = bytes.Clone(key)

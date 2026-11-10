@@ -243,17 +243,20 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 			if err := corruption.mutate(cold.Executable); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok, err := r.cached(ctx, cold.Identity, target); err != nil || ok {
-				t.Fatalf("corrupt cache accepted: hit=%t err=%v", ok, err)
+			if _, ok, err := r.cached(ctx, cold.Identity, target); err == nil || ok {
+				t.Fatalf("corrupt cache was not refused: hit=%t err=%v", ok, err)
 			}
 			requests := len(transport.requests)
 			r.config.Mode = toolchain.ModeLocal
 			_, err := r.Ensure(ctx, cold.Identity, target)
-			requireCode(t, err, hosterr.Unavailable)
+			requireCode(t, err, hosterr.IntegrityFailure)
 			if len(transport.requests) != requests {
 				t.Fatal("local mode fetched a corrupt engine")
 			}
 			r.config.Mode = toolchain.ModeAuto
+			if err := os.RemoveAll(filepath.Dir(cold.Executable)); err != nil {
+				t.Fatal(err)
+			}
 			repaired, err := r.Ensure(ctx, cold.Identity, target)
 			if err != nil || repaired.Identity != cold.Identity {
 				t.Fatalf("repair changed accepted engine: %+v %v", repaired, err)

@@ -228,12 +228,12 @@ func (r Resolved) verifyInstalledEngine(ctx context.Context) error {
 	if r.Identity != r.verifiedIdentity || !releaseVersion(version) || !validDigest(r.Identity.ManifestDigest) || !validDigest(r.AssetDigest) || !filepath.IsAbs(r.Executable) || r.Target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		return integrity(errors.New("SDK installation requires this machine's exact verified Sparkwing engine"))
 	}
-	release, err := readCachedRelease(version, r.Target, r.Executable, r.trustedKeys)
-	if err != nil {
-		return integrity(err)
-	}
-	if digest(release.bundle.Manifest) != r.Identity.ManifestDigest || release.Asset().Digest() != r.AssetDigest {
+	verified := r.verification
+	if verified == nil || verified.executable != r.Executable || verified.version != version || verified.target != r.Target || verified.manifestDigest != r.Identity.ManifestDigest || verified.assetDigest != r.AssetDigest {
 		return integrity(errors.New("installed engine differs from the selected release"))
+	}
+	if err := verified.check(ctx); err != nil {
+		return cachedIntegrity(r.Executable, err)
 	}
 	return nil
 }

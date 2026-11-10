@@ -219,7 +219,6 @@ func (r *Resolver) findCached(ctx context.Context, identity engineid.Identity, t
 	return Resolved{}, false, nil
 }
 
-// cached re-verifies signatures, metadata and executable bytes; it grants no policy permission.
 func (r *Resolver) cached(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, false, err
@@ -246,20 +245,16 @@ func (r *Resolver) cached(ctx context.Context, identity engineid.Identity, targe
 		return Resolved{}, false, err
 	}
 	if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0) {
-		return Resolved{}, false, nil
+		return Resolved{}, false, cachedIntegrity(executable, errors.New("cached engine is not an executable regular file"))
 	}
-	release, err := readCachedRelease(version, target, executable, r.config.TrustedKeys)
-	var failure *apierr.Error
-	if errors.Is(err, os.ErrNotExist) || errors.As(err, &failure) && failure.Code == hosterr.IntegrityFailure {
-		return Resolved{}, false, nil
-	}
+	verified, err := r.verifyCached(ctx, version, target, executable)
 	if err != nil {
-		return Resolved{}, false, err
+		return Resolved{}, false, cachedIntegrity(executable, err)
 	}
-	if digest(release.bundle.Manifest) != identity.ManifestDigest {
-		return Resolved{}, false, nil
+	if verified.manifestDigest != identity.ManifestDigest {
+		return Resolved{}, false, cachedIntegrity(executable, errors.New("cached release manifest differs from the accepted engine"))
 	}
-	return Resolved{trustedKeys: r.config.TrustedKeys, verifiedIdentity: identity, Identity: identity, Target: target, AssetDigest: release.asset.Digest(), Executable: executable}, true, nil
+	return Resolved{verifiedIdentity: identity, Identity: identity, Target: target, AssetDigest: verified.assetDigest, Executable: executable, verification: verified}, true, nil
 }
 
 func readCachedRelease(version string, target releaseasset.Target, executable string, keys []ed25519.PublicKey) (VerifiedRelease, error) {
@@ -267,10 +262,15 @@ func readCachedRelease(version string, target releaseasset.Target, executable st
 	if err != nil {
 		return VerifiedRelease{}, err
 	}
+	return verifyCachedRecord(version, target, executable, keys, metadata)
+}
+
+func verifyCachedRecord(version string, target releaseasset.Target, executable string, keys []ed25519.PublicKey, metadata []byte) (VerifiedRelease, error) {
 	var bundle ReleaseBundle
 	if err := decodeUniqueJSON(metadata, &bundle); err != nil {
 		return VerifiedRelease{}, integrity(errors.New("invalid cached release verification record"))
 	}
+	var err error
 	bundle.Asset, err = os.ReadFile(executable)
 	if err != nil {
 		return VerifiedRelease{}, err
@@ -337,7 +337,15 @@ func (r *Resolver) storeVerified(ctx context.Context, pin engineid.Pin, release 
 			return Resolved{}, err
 		}
 	}
-	return Resolved{trustedKeys: r.config.TrustedKeys, verifiedIdentity: identity, Identity: identity, Target: release.target, AssetDigest: release.asset.Digest(), Executable: filepath.Join(destination, release.asset.Name())}, nil
+	executable := filepath.Join(destination, release.asset.Name())
+	verified := &cacheVerification{executable: executable, version: version, target: release.target, manifestDigest: identity.ManifestDigest, assetDigest: release.asset.Digest(), metadataDigest: digest(metadata)}
+	if err := verified.check(ctx); err != nil {
+		return Resolved{}, cachedIntegrity(executable, err)
+	}
+	verifiedReleases.Lock()
+	rememberVerifiedLocked(r.verificationKey(version, release.target, executable), verified)
+	verifiedReleases.Unlock()
+	return Resolved{verifiedIdentity: identity, Identity: identity, Target: release.target, AssetDigest: release.asset.Digest(), Executable: executable, verification: verified}, nil
 }
 
 func (r *Resolver) targetDirectory(version string, target releaseasset.Target) (string, error) {
