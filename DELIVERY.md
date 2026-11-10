@@ -76,7 +76,7 @@ itself, a CHANGELOG.md that repeats a `###` heading within a release, and a
 branch whose merge with a freshly fetched `origin/main`
 conflicts, and names the command that fixes each; a branch behind main that
 merges cleanly goes ahead. The gate's `policy` job runs next, alongside review: gofmt,
-the formatters, em dashes, tracker IDs, comments, test sleeps, tracked
+the formatters, changed-package Windows test compilation, em dashes, tracker IDs, comments, test sleeps, tracked
 binaries, home resolution, the docs mirror, changelog lint and links, the
 required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
 generated CLI reference (`bin/gen-cli-docs.sh --check`), Markdown lint, config-reference
@@ -89,6 +89,25 @@ with `GOWORK=off GOFLAGS=-trimpath GOMAXPROCS=2` after one warm-up run:
 | Markdown lint | `npx --yes markdownlint-cli2@0.23.2` | 2.90 s |
 | Config reference | `bash bin/gen-config-docs.sh --check` | 0.27 s |
 | Wire-cut coverage | `go -C .sparkwing test -p 2 ./jobs -run ^TestRepositoryUnreleasedSectionDeclaresEveryWireCut$ -count=1` | 1.49 s |
+
+The `windows-compile` policy step uses the existing changed Go package and
+committed module selection. It compiles tests with `GOOS=windows GOARCH=amd64`
+when a touched package contains eligible Windows filename or build-tag source.
+A package with Windows arm64-specific source also compiles for `GOARCH=arm64`.
+Negative-only `!windows` constraints do not select a package. Outputs use disposable
+scratch, and compilation shares the normal Go build cache. These are cross-compiles;
+native Windows execution remains separate coverage.
+
+For the Windows host-execution package, the first observed amd64 compile took
+11.01 s and an arm64 compile with cold architecture dependencies took 124.51 s.
+Independent warm-cache repeats took 2.98 s and 2.57 s respectively, on the desktop
+with `GOFLAGS='-trimpath -p=1'`. The arm64 cost is charged only when its source
+requires that target. Raw commands and timings are retained in the
+Windows test-compilation evidence under `~/evidence/sparkwing/`.
+The guard itself compiling both `internal/nodehost` and `cmd/sparkwing` took
+169.76 s on its first pass with uncached CLI dependencies; subsequent passes
+were 11.30 s and 13.79 s (median 12.54 s), sharing that cache. These timings
+include target selection and scratch cleanup.
 
 Gate and land request full source history and tags. Wire-cut coverage refuses
 a checkout without a reachable release tag before invoking the existing test.

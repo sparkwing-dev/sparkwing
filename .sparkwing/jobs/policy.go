@@ -41,6 +41,7 @@ type policyStep struct {
 // safety: every heavy job waits for these cheap checks.
 var policySteps = []policyStep{
 	{"gofmt", runGofmt},
+	{"windows-compile", runWindowsCompile},
 	{"formatters", runFormatters},
 	{"em-dashes", checkEmDashes},
 	{"tracker-ids", checkTrackerIDs},
