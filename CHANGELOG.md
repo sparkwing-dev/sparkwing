@@ -20,6 +20,417 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.72.0] - 2026-11-10
+
+### Added
+
+- **cache control:** `ShareWithHome` lets a private Sparkwing home reuse the host's pipeline binary cache while keeping configuration, credentials and stores private. Deploy smoke submission uses it to avoid recompiling unchanged pipeline inputs.
+
+
+- Go SDK: `AwaitChild` observes a child started by the current job and returns its terminal status while releasing runner capacity.
+
+
+- **landing:** Queue focused owned-hardware lands as detached Sparkwing runs
+  Use `sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --queued --brief 'Goal'`.
+  Entries share a serial slot, merge main before checks, and retain dashboard
+  status, logs and a run ID that lanes can follow. Failed entries release the
+  slot for the next land; changed checkouts and refused pushes fail safely.
+
+
+- **runner:** Retain source fetch, SDK installation, publication and planning stage timings in run logs even when SDK discovery withholds output
+
+
+- **CLI:** List and download committed job files with `sparkwing runs artifacts`
+  Listings default to 40 files and support `--limit` and `--cursor`. JSON emits
+  one record per file followed by continuation metadata. Downloads verify size
+  and SHA-256 and write to a new destination.
+
+
+- **sdk:** Replay Go and TypeScript protocol recordings against the engine
+  Engines select an adapter using the SDK's hello protocol version. Protocol 2
+  uses the identity adapter. Optional fields keep the same protocol version.
+
+
+- **Template verification:** `template-verify -- --only NAME` checks one template during authoring and reports the selected scope
+
+### Changed
+
+- **cli (Breaking):** Controller admin actions select pretty output on a terminal and JSON when piped
+  Enrollment pipes must request `--output plain` to pass the raw session to `sparkwing runners add --session-stdin`.
+  See the [migration guide](docs/migrations/v0.72.0.md#admin-session-output) for before/after commands.
+  Freeze, unfreeze and grant accept all output modes. Admin help validates output flags and renders to stdout.
+  Internal `__complete` output also follows the stdout terminal default. Generated shell callers already request plain output.
+
+
+- **cli:** Remove duplicate version-hold logic and unused command-parser test scaffolding
+
+
+- **docs:** Generate the CLI reference without linking the execution runtime
+
+
+- **deploy:** Build and stage the next candidate during production promotion
+  Separate job queues protect staging rollout plus gate and production promotion.
+  Stale staging waiters stop before credentials or rollout. Concurrent GitOps
+  writes preserve both environments and production rollback commits.
+
+
+- **release:** Publish the Go SDK only when its tracked module source changes
+  SDK tags use independent v0 minor versions and record a source digest. SDK
+  tests and Go/TypeScript conformance run before publication. Engine cuts wait
+  until the Go proxy serves the selected SDK version before updating their pins.
+
+
+- **sdk:** (Breaking) Resolve independent SDK versions through signed protocol acceptance
+  `pipeline upgrade --version` selects an SDK release, then the newest permitted engine accepting its protocol. Upgrade output reports both versions. SDK revocations apply to one language and SDK version. Engine updates remain engine-version operations. Repository Go SDK updates and version checks use signed SDK entries.
+  Plain upgrade output reports `sdk=VERSION` and `engine=VERSION` on separate lines. Local runs require a cached signed SDK mapping. See the [migration guide](../migrations/_unreleased.md#independent-sdk-and-engine-policy).
+
+
+- **delivery:** Focused queue lands can run the pre-push checks alongside review, cancelling siblings on failure and waiting for both before pushing
+
+
+- **sdk + api (Breaking):** Split the Go SDK into its own module with a Go 1.25 minimum
+  Pipeline import paths stay the same. SDK versions are independent of engine
+  versions. Host-backed author tests import `github.com/sparkwing-dev/sparkwing/sparkwingtest`.
+  Move `pkg/match.ToolPrefix` imports to `sparkwing/protocol/labels.ToolPrefix`.
+  See the [migration guide](docs/migrations/v0.72.0.md#lean-go-sdk-module).
+
+
+- **landing:** Default and security reviews run concurrently, retaining separate sessions, findings and blocking rules.
+
+
+- **controller (Breaking):** Object presence requests require an explicit deadline and return no partial result after cancellation. See [the migration guide](docs/migrations/v0.72.0.md#bound-object-presence-requests).
+
+- **controller (Breaking):** Remove the ineffective `trust_local_builds` setting and its team API.
+  The schema baseline advances to version 37. Existing configured data upgrades
+  in place. See [the migration guide](docs/migrations/v0.72.0.md#upgrade-the-store-in-place-to-schema-baseline-37).
+  Execution trust continues to use sealed provenance and host facts.
+- **runs:** Select latest pipeline observations through one store owner. CLI
+  repository status and dashboard summaries use the same start-time, run-number
+  and run-ID order. Reference authorization and success-pin policy stay unchanged.
+
+
+- **releases:** `sparkwing run release -- --commit SHA` cuts a selected source in a detached worktree while main keeps accepting lands. Publication tags the prepared release commit and merges its metadata into fresh main, preserving newer code and unreleased fragments.
+
+
+- **runner:** Reuse image-seeded Go standard-library compilation across SDK versions during cold planning
+
+
+- **maintenance:** Remove unused controller fixtures and fields
+
+
+- **maintenance:** Remove unused daemon peer inspection and legacy socket lookup helpers
+
+
+- **review:** Send standards rule bodies without routing metadata or vault backlink lists
+
+
+- **controller:** Resolve run IDs without decoding the complete stored run on every request
+
+
+- **runner:** Trim Go's regression assets from the image and reuse pinned tool layers across package refreshes
+
+
+- **release:** Run local release checks in sequence
+  Build, lint, short tests and published-version checks no longer compete for
+  temporary build storage during a release cut.
+
+
+- **cli:** Use the shared output selector across pipeline, cache and info commands
+
+
+- **release:** Publish the TypeScript SDK only when its source or native bridge build inputs change, using its own version and signed SDK entry
+
+
+- **cli:** Remove unused internal declarations and share byte-size formatting
+
+
+- **SDK (Breaking):** Windows runs Go and TypeScript commands in the host, with Job Object tree cleanup, masked 64 KiB `Run` tails and full `Capture` relay. Upgrade SDK pins with the host. See [the migration guide](docs/migrations/v0.72.0.md#windows-commands-run-in-the-host).
+
+### Fixed
+
+- **cli:** Queue ETA follows the admission scheduler's backfill budgets, workload aging, CPU policy and semaphore capacity
+
+
+- **artifacts:** Manifest admission rejects paths that artifact staging cannot consume
+
+
+- **cli:** Artifact downloads work on destination filesystems without hard-link support
+
+
+- **runner:** Jobs reacquire runner capacity before continuing after child awaits
+
+
+- **runner:** Cancelled local runs settle when a final job report races reconciliation
+
+
+- **orchestrator:** Keep cancelled jobs in their concurrency slots while cleanup drains
+  A following deploy waits for rollback to finish instead of racing its GitOps pins.
+
+
+- **release:** Changelog collection, lint, release rewriting and embedded reading share section parsing, including optional release brackets, heading whitespace and CRLF
+
+
+- **verification:** Windows checks run the host command regressions after execution moved out of the SDK
+
+
+- **Helm:** Pull the Cloud example's pinned Docker sidecar from public ECR so Docker Hub's anonymous pull limit cannot block planning on fresh nodes
+
+
+- **cache:** Refuse to publish compiled pipelines when their build inputs changed during compilation
+
+
+- **controller:** Console runs retain repository runner requirements before planning
+
+
+- Runner: bound controller JSON responses to 64 MiB and report oversized replies instead of reading without a memory bound.
+
+
+- Local controllers started from systemd services survive the calling unit's
+  exit. Desktop updates preserve each controller's existing secrets key and
+  configuration while restarting it, including selectors left unset to use default locations.
+
+
+- **deployment:** Skip superseded queued builds before credentials or Cloud smoke, and let staging-verified ancestors of main finish promotion while both production image revisions only advance. Recheck source ancestry immediately before each production GitOps push.
+
+
+- Post-deploy scans preserve deploy provenance through native child execution, share one work slot on owned runners, and coalesce full examples per revision and hour. Deploys continue while scans await their children. Automatic full scans follow production, and superseded waiting scans stop before build work.
+
+
+- **desktop updater:** Name up to five blocking runs with their pipelines and an inspection command while waiting for active work
+
+
+- **local execution:** Replayable keyed run intake waits through controller restarts for up to 30 seconds, so a land starting during a desktop update can still be admitted
+
+
+- **release:** Lint and pre-release formatting checks handle literal filenames and large file sets through the shared formatter batches
+
+
+- **ci:** Lands block Markdown lint, config-reference drift and undeclared wire cuts in the policy tier
+
+
+- **delivery:** Land review reassesses a clarified explicit goal even when the source tree is unchanged
+  Pass `-- --brief 'ticket keys and intent'` to override the branch ticket.
+
+
+- **store:** Check metric sample limits in bounded batches to reduce insert overhead
+
+
+- **sdk:** Keep the minimum Go version at 1.26.0 while building Sparkwing with the patched Go 1.26.10 toolchain
+
+
+- **run status:** Retry receipts list only completed reuse, excluding successful source jobs that had to execute again because their results could not be reused.
+- **runner:** Child awaits pace controller reads with jittered backoff and reuse the authorized host request while waiting
+- **Local onboarding:** the welcome card calls out the initial commit, and the quick start explains run inspection, managed schedules and the daemon-owned dashboard.
+- **cli:** Show one admission-wait progress stream with holder charges, held and free capacity, external load and expected clear time. Print updates only for material queue changes at increasing intervals.
+- **template verification:** Accept unused failure recovery after a successful deploy. Skipped dry-run bodies and steps still prevent reusable proof.
+
+- **schedules:** Timer-started Linux controllers leave the timer's cgroup when the systemd user manager is available
+- **scheduling:** Run status and the run page keep GitHub Actions dispatch receipts, provider links and lost-race counts after award, cancellation and completion.
+- **billing:** Refuse checkout and card setup sessions whose Stripe mode differs from the controller's payment mode
+- **Security CI:** Identify the updater's private staging files to avoid path traversal false positives.
+- **Cloud execution:** Exact-source child runs can reuse their direct parent's verified source and installed pipeline. Changed build inputs log the mismatch and prepare fresh. Corrupt artifacts fail, and host logs separate source preparation stages.
+- **deployment:** Smoke observation wakes when all runs finish and takes a final NodeClaim sample before checking claims and logs. Deploy status follows poll every second.
+
+- **controller:** Runner claims succeed when another run waits for the same plan concurrency slot
+- **local execution:** Command cancellation waits for cleanup of children in separate process groups before returning a result.
+
+- **Go SDK:** Windows commands honor their own `PATH` and `PATHEXT` and strip engine credentials from child environments. Pipeline tests no longer pull controller dependencies into the SDK module closure.
+
+
+- **releases:** Manual cuts run local verification when exact-source CI evidence cannot be reused. Release-cut discovery accepts default arguments and keeps the SDK pin stable until the final commit job starts.
+
+
+- Pipeline binary caches rebuild when effective Go settings, including FIPS mode, Git-ignored compiled and embedded inputs, Go file overlays or PGO profiles change. Writers sharing a linked cache leave automatic pruning to its owner; symlinked state homes retain owner limits.
+
+
+- **cache:** Reduce warm pipeline startup work by asking Go only for compiler input metadata, while preserving cache keys and mutation checks
+
+
+- **cli:** Restore dry-run previews with `sparkwing pipeline plan --sw-dry-run` in plain and JSON output
+
+
+- **controller:** Apply repository runner requirements before planning SDK pipelines that have no YAML entry
+
+
+- **runner:** Honor the shutdown deadline when a planning log sink blocks
+- **logs:** Report withheld and dropped planning output as records, including multiline chunks
+
+
+- **controller:** Apply repository runner requirements before planning App and scheduled runs
+  Deploy and detached scan planning stay on the owned deployment runner.
+
+
+- Sustained post-deploy scan failures now create and update Bitwing tickets with run links, including when job details are unavailable. Production deploys flag the latest scan before rollout and report planning failures or scan jobs that failed before starting, while allowing repair deploys to continue.
+
+
+- **delivery:** Reuse only full post-deploy scans marked for the target controller, preserving findings when no complete scan can run
+
+
+- **cli:** Publish completed local working-tree runs with `--publish PROFILE`
+  without requiring the controller to access the local checkout.
+
+
+- **release:** Queued landing refusals show an explicit `--brief` example.
+  Missing and whitespace-only goals are refused before submission.
+
+
+- **cli:** Refusal messages identify failed checks and give repair commands or support guidance for Actions enrollment, controller replies, artifacts, Windows Bash and release downloads
+
+
+- **release:** Prepare dashboard and SDK dependencies before local release tests
+  Detached release checkouts now install the frozen web and TypeScript SDK
+  lockfiles and run the SDK suite before the Go acceptance tests.
+  Serial verification can run for one hour while retaining its 40-minute budget
+  warning and lint deadline.
+
+
+- **delivery:** Concurrent changes keep release notes in separate fragments, so ordinary lands no longer edit shared changelog and migration sections.
+
+
+- **runner:** Replacement-engine mismatch errors identify the planned and executing engine versions and digests, with routing and installation remedies
+
+
+- **cli:** Remove invocation-local SDK handoffs because their validation slowed warm local runs
+
+
+- **cli:** Following successful detached and scheduled run logs completes when the engine omits the proof eligibility display hint
+
+
+- **runs:** Keep run details and lists readable after a runner label is removed
+  Placement refusal remains visible and prevents new execution, including in
+  already-owned runs.
+
+
+- **CLI:** Remove partial artifact downloads when Ctrl-C interrupts the transfer.
+- **CLI:** Keep signed storage URLs out of transfer errors and publish verified
+  downloads atomically.
+- **API:** Bound artifact listings and document the exact-path download selector.
+
+
+- **deploy:** Full scans reuse only complete runs targeting the same controller
+
+
+- **cli + runner:** Signed-download HTTP 403 errors explain expiry and how to request a fresh link
+
+
+- **logs + source:** Signed log uploads and source downloads share blob transfer validation, redirect refusal and credential-free errors. Log retries still verify existing bytes after a create-only refusal.
+
+
+- **controller + runner:** Reduce duplicate authorization reads and JSON object parsing work when following execution snapshots
+
+
+- **docs:** Align runner-label enrollment guidance and dispatch metadata contracts with the controller. Include required risk flags in the land verification example.
+
+
+- **cli:** Report unsupported TypeScript pipeline lint in plain and JSON output, and print the npm lockfile setup command after scaffolding
+
+
+- **Schedules:** Pin TypeScript entries during default local registration
+  Node, the resolved entry and installed pipeline files participate in the pin.
+  Changed entries refuse a fire with re-pin guidance. Preparation failures name
+  the cause and explain how to repair or skip proof.
+
+
+- **schedules:** TypeScript pins select pipeline source from committed configuration and detect retargeted dependency links
+
+
+- **runner:** Concurrent TypeScript jobs keep their SDK packages available during startup.
+  SDK preparation serializes incremental npm installs using the selected native lockfile.
+  npm owns installed-tree reuse and workspace configuration, so verbose diagnostics cannot trigger a destructive reinstall.
+  A non-destructive npm check preserves frozen-lockfile validation before installation.
+
+
+- **runner:** Windows host Bash errors explain how to select Git Bash instead of the WSL launcher
+
+
+- **Windows CLI:** Native shell drive-directory metadata no longer blocks environment capture, so commands launched through `cmd.exe` can submit pipelines.
+- **Windows controller:** Reused named-pipe HTTP connections keep requests alive, so local runners can claim work and reconnect after daemon restart.
+- **Windows credentials:** Created and rotated credential-epoch files receive private access lists, so the controller can reopen its state.
+- **CLI:** Standalone runs close unused API connections before controller shutdown, preventing an intermittent exit failure after a successful pipeline on Windows.
+
+
+- **tests:** Run fake Go toolchain fixtures through native Windows executable launchers and include them in `windows-verify`
+
+### Removed
+
+- **config (Breaking):** Remove runner requirements from dispatch metadata because settings owns their precedence. Read the source declarations from `projectconfig.Config`. See the [migration guide](docs/migrations/v0.72.0.md#dispatch-requirement-metadata).
+
+
+- **controller (Breaking):** Remove the unused engine compatibility query
+  `/api/v1/capabilities` returns deployment features. The `engine_version` query
+  no longer selects an engine release or its support window. Engine selection,
+  signed version enforcement and runner policy keep their existing behavior.
+  See the [migration guide](docs/migrations/v0.72.0.md#engine-compatibility-query).
+
+### Security
+
+- **controller:** Require GitHub Actions fallback workflows to match the default branch
+  Dispatch refuses missing or different workflow files and names the file to sync.
+  Receipt exchange rechecks the workflow and requires GitHub's reported workflow
+  SHA to match the verified dispatch commit before granting hosted runner trust.
+
+
+- **artifacts:** Reject non-regular output files without blocking capture on a FIFO
+
+
+- **controller:** Reject allowed labels in browser-approved runner enrollment
+  Set runner labels through admin enrollment.
+
+
+- **deploy:** Refuse deployments when cluster admission policies or bindings are missing or differ from the chart
+- **charts:** Use a valid CEL variable name so Kubernetes accepts the launcher capacity policy
+
+
+- **CLI:** Browser login requests the saved profile token's team by default, so another team cannot approve the code. First-time login keeps unrestricted team approval; `--team` selects a team explicitly.
+
+
+- **Helm:** Confine launcher node updates and NodeClaim deletes to its Sparkwing capacity, allow only binding-label additions and reservation/quarantine taint changes, and disable API token automount on its ServiceAccount
+- **Helm:** Disable token automount on controller and runner ServiceAccounts, including Pods that omit their own automount setting
+
+
+- **runner:** Bind advertised labels to admin enrollment
+  `runners add --label` records the allowed set. Extra claim labels are refused
+  with an admin update command. `sparkwing-controller admin runner-labels` views
+  and replaces the set. Existing runners keep their last stored labels on upgrade.
+  Browser approval accepts only an empty allowed set. Labels are bounded
+  to 32 entries of 1 to 128 ASCII characters, including `host=...` and `tool:...`.
+
+
+- **runner (Breaking):** Host commands refuse the System32 WSL Bash launcher with Git Bash guidance; an empty Git Bash program succeeds
+- **runner (Breaking):** Windows batch commands run through cmd.exe with escaped arguments, and executable lookup searches only PATH or an explicit path
+  Arguments to `.cmd`/`.bat` files are quoted and escaped the way Rust's
+  standard library does after CVE-2024-24576, so cmd.exe metacharacters and
+  `%VAR%` reach the batch file literally. Only arguments containing CR, LF or
+  NUL are refused. Lookup no longer lets checkout-planted tools shadow PATH. See
+  the [migration guide](docs/migrations/v0.72.0.md#windows-batch-arguments).
+
+### Docs
+
+- **oidc:** Clarify that the hosted Actions warm runner preserves signed App push provenance
+
+
+- **cli:** Document systemd invocation detection for daemon startup
+
+
+- **docs:** Clarify process environment lookup, runner platform-label fallback and offline changelog fragments in API comments
+
+
+- **scheduling:** Explain enrolled labels, personal runner scope and placement status
+  Clarify the controller-approved label set and how to update it. Add placement
+  fields to the generated configuration reference and link the routing guides.
+
+
+- **cli:** Describe the controller runner-labels flags in command help
+
+
+- **cli + docs:** Correct TypeScript scaffold guidance and agent discovery
+  requirements, execution paths and unsupported lint status. Cover TypeScript
+  authoring alongside Go, including steps, outputs, runtime callbacks, placement,
+  memoization, generation, guards and child-run differences.
+
+
+- **pipelines:** Document TypeScript lockfile setup, inspection commands and the Go-only lint boundary.
+
 ## [v0.71.0] - 2026-11-08
 ### Changed
 
