@@ -27,7 +27,11 @@ Lone CR, LF and CRLF separate lines.
 Both the raw line and its trimmed form receive the same encoded spellings when
 each form has at least four Unicode code points. CRLF separators do not count
 toward a line's minimum length. Whitespace-only lines are skipped. Empty and shorter lines stay readable when
-printed alone. The marker is `***`. Overlapping matches merge,
+printed alone. Lines from a run secret are masked wherever they appear in that
+run's logs. Common lines such as `-----BEGIN PRIVATE KEY-----`,
+`-----END PRIVATE KEY-----` or `apiVersion: v1` therefore show as `***` when they
+belong to a secret, including when other tools print them as ordinary output.
+The marker is `***`. Overlapping matches merge,
 and replacement closure uses at most four passes. If ambiguity remains, the
 remaining payload is replaced as a whole. Secrets containing `***` are accepted
 under decision 49. Replacement can form a registered value containing `***`,
