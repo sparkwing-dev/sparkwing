@@ -46,7 +46,11 @@ func FuzzPlanningDefaultsRefuseSecretIdentifiers(f *testing.F) {
 	})
 }
 
-func checkPlanningDefaults(t *testing.T, secret, field string) {
+func checkPlanningDefaults(t *testing.T, secret, field string, projects ...[]byte) {
+	var project []byte
+	if len(projects) > 0 {
+		project = projects[0]
+	}
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
@@ -94,7 +98,7 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 		if err != nil {
 			return OwnerPlanning{}, err
 		}
-		return f.Host.Planner.PrepareCheckout(ctx, CheckoutPlanningInput{Request: row.Request, Entry: entry, Runner: input.GrantedRunner, Planning: f.Host.Planning})
+		return f.Host.Planner.PrepareCheckout(ctx, CheckoutPlanningInput{Request: row.Request, Entry: entry, Runner: input.GrantedRunner, Project: project, ProjectFile: ".sparkwing/sparkwing.yaml", Planning: f.Host.Planning})
 	}
 	_, err := f.Host.Run(ctx, f.Input)
 	snapshot, readErr := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
@@ -129,4 +133,20 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 			t.Fatal("planner leaked its process")
 		}
 	}
+}
+
+func TestOwnerRejectsSecretEffectiveLabels(t *testing.T) {
+	const secret = "private-sdk-default"
+	for _, layer := range []string{"defaults", "pipeline"} {
+		for _, label := range []string{"requires", "prefers"} {
+			t.Run(layer+"/"+label, func(t *testing.T) {
+				config := "defaults: {" + label + ": [pool=" + secret + "]}"
+				if layer == "pipeline" {
+					config = "pipelines: [{name: build, entrypoint: build, " + label + ": [pool=" + secret + "]}]"
+				}
+				checkPlanningDefaults(t, secret, "yaml", []byte(config))
+			})
+		}
+	}
+	checkPlanningDefaults(t, secret, "safe", []byte("defaults: {prefers: [pool=public]}"))
 }

@@ -71,7 +71,7 @@ func TestExpansionEmptySuccessPreservesEmptyGroup(t *testing.T) {
 }
 
 func TestExpansionRefusalRollsBackAllJobsAndBarrier(t *testing.T) {
-	for _, problem := range []string{"duplicate_job", "wrong_group", "missing_jobs", "null_jobs", "secret_identifier"} {
+	for _, problem := range []string{"duplicate_job", "wrong_group", "missing_jobs", "null_jobs", "secret_identifier", "secret_effective_requires", "secret_effective_prefers"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
 			switch problem {
@@ -83,13 +83,24 @@ func TestExpansionRefusalRollsBackAllJobsAndBarrier(t *testing.T) {
 				request.Body = []byte(`{}`)
 			case "null_jobs":
 				request.Body = []byte(`{"jobs":null}`)
-			case "secret_identifier":
+			case "secret_identifier", "secret_effective_requires", "secret_effective_prefers":
 				request.Body = []byte(`{"jobs":[{"id":"job-secret-42","steps":[{"id":"step"}],"groups":["group"]}]}`)
 				var spec runspec.Spec
 				spec.Declarations.Version = 1
 				spec.Request.Request.Pipeline = "p"
 				spec.Resolved.SecretArgs = []string{"token"}
 				spec.Resolved.Args = map[string]string{"token": "secret-42"}
+				if problem != "secret_identifier" {
+					request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"step"}],"groups":["group"]}]}`)
+					label := runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"pool=secret-42"}}}
+					if problem == "secret_effective_requires" {
+						spec.Declarations.Defaults.Requires = label
+						spec.Resolved.Settings.Options.Requires = label
+					} else {
+						spec.Declarations.Defaults.Prefers = label
+						spec.Resolved.Settings.Options.Prefers = label
+					}
+				}
 				raw, err := json.Marshal(spec)
 				if err != nil {
 					t.Fatal(err)

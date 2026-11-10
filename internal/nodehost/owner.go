@@ -334,13 +334,13 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 		return err
 	}
 	if h.Masks != nil {
-		err = h.Masks.acceptPlan(plan.Plan, commit)
+		err = h.Masks.acceptResolvedPlan(plan.Plan, prepared.Resolved.Settings, commit)
 	} else {
 		err = commit()
 	}
 	if err != nil {
 		var refusal *apierr.Error
-		if errors.As(err, &refusal) && refusal.Code == apierr.PlanInvalid {
+		if errors.As(err, &refusal) && (refusal.Code == apierr.PlanInvalid || refusal.Code == hosterr.SecretInIdentifier) {
 			return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 		}
 		return AcceptedRun{}, err

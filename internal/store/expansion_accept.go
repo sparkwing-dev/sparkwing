@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -103,6 +104,24 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	}
 	if result.plan.Jobs == nil {
 		return result, authorityError(apierr.PlanInvalid, "expansion requires an explicit jobs array")
+	}
+	effectiveJobs, err := settings.ResolveExpansion(settings.ExpansionInputs{Spec: *snapshot.Run.Spec, Plan: result.plan, Context: settings.Context{Local: RequestPlacement(snapshot.Run.Request.Request) == nodeproto.PlacementLocal}})
+	if err != nil {
+		return result, err
+	}
+	execution := snapshot.Run.Spec.Resolved.Settings
+	execution.Jobs = maps.Clone(execution.Jobs)
+	if execution.Jobs == nil {
+		execution.Jobs = map[string]runspec.JobExecutionSettings{}
+	}
+	for _, node := range snapshot.Nodes {
+		execution.Jobs[string(node.Ref.NodeID)] = node.Execution
+	}
+	for id, job := range effectiveJobs {
+		execution.Jobs[id] = job
+	}
+	if err := checkExecutionIdentifiers(execution, secrets); err != nil {
+		return result, err
 	}
 	result.body, err = json.Marshal(struct {
 		Jobs []nodewire.JobSpec `json:"jobs"`

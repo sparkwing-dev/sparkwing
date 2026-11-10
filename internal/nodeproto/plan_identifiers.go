@@ -2,6 +2,8 @@ package nodeproto
 
 import (
 	"fmt"
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	"sort"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
@@ -143,6 +145,17 @@ func visitClosureIdentifiers(c nodewire.ClosureSpec, path string, visit func(str
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateIdentifierSecret keeps registered values out of identifier diagnostics and metadata.
+func ValidateIdentifierSecret(value, path string, matcher SecretMatcher) error {
+	if matcher == nil {
+		return planInvalid("plan", "secret matcher is required")
+	}
+	if matcher.ContainsSecret(value) {
+		return sanitizePlanError(&apierr.Error{Code: hosterr.SecretInIdentifier, Message: fmt.Sprintf("registered secret in identifier at %s", path), Details: map[string]any{"field": path}}, matcher)
 	}
 	return nil
 }

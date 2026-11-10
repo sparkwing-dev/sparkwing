@@ -38,10 +38,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (nodewire.Plan
 		return nodewire.PlanDoc{}, err
 	}
 	checkSecret := func(value, path string) error {
-		if context.Secrets.ContainsSecret(value) {
-			return &apierr.Error{Code: hosterr.SecretInIdentifier, Message: fmt.Sprintf("registered secret in identifier at %s", path), Details: map[string]any{"field": path}}
-		}
-		return nil
+		return ValidateIdentifierSecret(value, path, context.Secrets)
 	}
 	if err := VisitPlanIdentifiers(plan, checkSecret); err != nil {
 		return nodewire.PlanDoc{}, err

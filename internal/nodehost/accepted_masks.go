@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -42,7 +43,15 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 		namespace.Jobs = append(namespace.Jobs, job)
 	}
 	// The snapshot and seal supply accepted topology, never fresh declarations.
-	return r.accept(namespace, func() error { return nil }, r.replayMasks)
+	execution := inputs.Settings
+	execution.Jobs = maps.Clone(execution.Jobs)
+	if len(nodes) > 0 && execution.Jobs == nil {
+		execution.Jobs = map[string]runspec.JobExecutionSettings{}
+	}
+	for _, row := range nodes {
+		execution.Jobs[string(row.Ref.NodeID)] = row.Execution
+	}
+	return r.accept(namespace, func() error { return nil }, r.replayMasks, &execution)
 }
 
 func (r *MaskRegistry) initializeSeal(accepted AcceptedRun) error {

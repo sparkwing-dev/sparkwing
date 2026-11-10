@@ -2,8 +2,12 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,5 +105,53 @@ func TestAcceptancePersistsConcurrencyWinnersFromResolutionContract(t *testing.T
 	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
 	if err != nil || !reflect.DeepEqual(row.Execution.Concurrency, want) {
 		t.Fatalf("persisted concurrency winners: %+v, %v", row.Execution.Concurrency, err)
+	}
+}
+
+func TestAcceptanceRejectsSecretEffectiveLabelsBeforePersistence(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		for _, layer := range []string{"defaults", "pipeline"} {
+			for _, label := range []string{"requires", "prefers"} {
+				name := layer + "/" + label
+				if empty {
+					name += "/empty"
+				}
+				t.Run(name, func(t *testing.T) {
+					plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job"}}}
+					if empty {
+						plan.Jobs = []nodewire.JobSpec{}
+					}
+					tenant, request := sharedSettingsPlan(t, plan)
+					config := "defaults: {" + label + ": [pool=hello]}"
+					if layer == "pipeline" {
+						config = "pipelines: [{name: p, entrypoint: p, " + label + ": [pool=hello]}]"
+					}
+					declarations, err := settings.ProjectCheckoutDeclarations([]byte(config), ".sparkwing/sparkwing.yaml", "p")
+					if err != nil {
+						t.Fatal(err)
+					}
+					request.Seal.Declarations = declarations
+					request.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Declarations: declarations, Plan: plan})
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = tenant.AcceptPlan(t.Context(), request)
+					var refusal *apierr.Error
+					if !errors.As(err, &refusal) || refusal.Code != hosterr.SecretInIdentifier {
+						t.Fatalf("effective secret label persisted instead of refused: %v", err)
+					}
+					if strings.Contains(err.Error(), "hello") {
+						t.Fatal("refusal disclosed secret")
+					}
+					snapshot, err := tenant.ReadSnapshot(t.Context(), request.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if snapshot.Run.Spec != nil || len(snapshot.Run.Plan) != 0 || len(snapshot.Nodes) != 0 {
+						t.Fatal("refused effective identifiers persisted acceptance")
+					}
+				})
+			}
+		}
 	}
 }

@@ -131,6 +131,9 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if len(resolved.Jobs) != len(plan.Jobs) {
 		return runspec.Spec{}, nil, authorityError(apierr.PlanInvalid, "resolved settings do not match plan jobs")
 	}
+	if err := checkExecutionIdentifiers(resolved, secrets); err != nil {
+		return runspec.Spec{}, nil, err
+	}
 	if !localSecretDeclared(input.Resolved.SecretNames, run.Request.Request.LocalSecretNames) {
 		return runspec.Spec{}, nil, authorityError(apierr.PlanInvalid, "local secrets must be declared by the pipeline")
 	}
