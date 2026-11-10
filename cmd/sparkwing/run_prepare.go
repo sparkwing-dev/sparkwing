@@ -16,10 +16,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 type localRunPreparation struct {
 	identity     clisurface.PipelineIdentity
+	project      *projectconfig.Config
 	declarations *runspec.DeclarationGate
 	git          runspec.Git
 	source       runspec.Source
@@ -101,7 +103,7 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 	if err := enforceRiskGate(input.identity.Name, risksIn(schema), riskFlags(options)); err != nil {
 		return controllerwire.CreateRunRequest{}, riskRefusal(input.declarations, err)
 	}
-	if _, err := input.declarations.Resolve(input.identity.Entrypoint, requested, nil); err != nil {
+	if err := validateRequestedPipelineArgs(input.declarations, input.identity, input.project, requested); err != nil {
 		return controllerwire.CreateRunRequest{}, input.declarations.Error(err)
 	}
 	secretArgs := []string{}

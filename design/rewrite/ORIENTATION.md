@@ -20,7 +20,7 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
-| Intake classifies supplied secret arguments, preserves optional omission and validates required inputs before submission. Defaults are classified when resolved. Invalid intake classifications receive HTTP 400 | `cmd/sparkwing/run_prepare.go`, `trigger_prepare.go`; `internal/runspec/seal.go` | `TestOptionalSecretIntake`, `TestMissingRequiredSecretPreparation`, `TestPrepareTriggerRequestBindsAliasArgumentsAndIntake` |
+| Intake classifies supplied secret arguments, preserves optional omission and validates required inputs against configured and supplied arguments before submission. Defaults are classified when resolved. Invalid intake classifications receive HTTP 400 | `cmd/sparkwing/run_prepare.go`, `trigger_prepare.go`; `internal/runspec/seal.go` | `TestOptionalSecretIntake`, `TestMissingRequiredSecretPreparation`, `TestPrepareTriggerRequestBindsAliasArgumentsAndIntake`, `TestRequiredSecretFromConfiguredArguments` |
 
 ### SDK protocol compatibility
 

@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
@@ -96,6 +97,24 @@ func parsePipelineArgs(schema nodewire.PipelineDescription, args []string) (map[
 		out[name] = value
 	}
 	return out, nil
+}
+
+func validateRequestedPipelineArgs(gate *runspec.DeclarationGate, identity clisurface.PipelineIdentity, project *projectconfig.Config, requested map[string]string) error {
+	inputs := settings.Inputs{Context: settings.Context{Submitter: true}, Flags: settings.Values{Args: requested}}
+	if project != nil {
+		if project.Defaults != nil {
+			inputs.Defaults.Args = project.Defaults.Args
+		}
+		if pipeline := project.Registry().Find(identity.Name); pipeline != nil {
+			inputs.Pipeline.Args = pipeline.Args
+		}
+	}
+	effective, _, err := settings.Args(inputs)
+	if err != nil {
+		return err
+	}
+	_, err = gate.Resolve(identity.Entrypoint, effective, nil)
+	return err
 }
 
 func printPipelineHelp(w io.Writer, schema runspec.PipelinePresentation) {

@@ -16,6 +16,7 @@ import (
 
 type localSourceSelection struct {
 	identity  clisurface.PipelineIdentity
+	project   *projectconfig.Config
 	git       runspec.Git
 	source    runspec.Source
 	execution *source.Entry
@@ -90,7 +91,7 @@ func selectLocalRunSource(ctx context.Context, home, directory, pipeline string,
 	}
 	git.SHA = execution.SHA
 	selected.Ref, selected.WorkingTree, selected.CommittedCheckout = revision, working, flags.ref != ""
-	return localSourceSelection{identity: identity, execution: execution, git: git, source: selected}, nil
+	return localSourceSelection{identity: identity, project: cfg, execution: execution, git: git, source: selected}, nil
 }
 
 func (s localSourceSelection) checkout(ctx context.Context, home string, captured []string) (*source.Entry, error) {
