@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -99,8 +100,12 @@ func localServiceHost(home string) (crontimer.Host, error) {
 			return crontimer.Host{}, err
 		}
 	}
+	nativeHome, err := nativeServiceHome(runtime.GOOS, userHome)
+	if err != nil {
+		return crontimer.Host{}, err
+	}
 	return crontimer.Host{
-		GOOS: runtime.GOOS, Home: userHome, ConfigHome: configHome,
+		GOOS: runtime.GOOS, Home: nativeHome, ConfigHome: configHome,
 		SparkwingHome: home, Binary: binary, Version: installedVersion(),
 		PathEnv: os.Getenv("PATH"), Env: environment, UID: os.Getuid(), Exec: crontimer.DefaultExec,
 	}, nil
@@ -287,4 +292,16 @@ func localRunnerName() string {
 		return host
 	}
 	return "local"
+}
+
+func nativeServiceHome(goos, callerHome string) (string, error) {
+	if goos != "darwin" {
+		return callerHome, nil
+	}
+	// safety: launchd discovers login agents under the account home, regardless of HOME.
+	account, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	return account.HomeDir, nil
 }

@@ -3,6 +3,7 @@ package unitfile
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -21,7 +22,7 @@ func CheckSystemdSource(ctx context.Context, execute func(context.Context, strin
 	if err != nil {
 		return fmt.Errorf("native unit: inspect %s registration: %w: %s", name, err, strings.TrimSpace(out))
 	}
-	if loaded := strings.TrimSpace(out); loaded != "" && loaded != path {
+	if loaded := strings.TrimSpace(out); loaded != "" && !SameSource(loaded, path) {
 		return fmt.Errorf("native unit %s is loaded from %s, not %s", name, loaded, path)
 	}
 	return nil
@@ -38,4 +39,17 @@ func CheckAgentSource(output, path string) error {
 		}
 	}
 	return fmt.Errorf("native agent: launchctl did not report the registration's path")
+}
+
+// SameSource accepts the manager's symlink to an owned unit file.
+func SameSource(loaded, path string) bool {
+	if loaded == path {
+		return true
+	}
+	a, err := os.Stat(loaded)
+	if err != nil {
+		return false
+	}
+	b, err := os.Stat(path)
+	return err == nil && os.SameFile(a, b)
 }

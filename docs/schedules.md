@@ -159,6 +159,11 @@ the removed `crons` command with `sparkwing schedules install`.
 
 <!-- design:end -->
 
+Linux installations link their private unit files into the user manager before enabling them,
+so a caller’s `XDG_CONFIG_HOME` can differ from the manager’s config directory.
+Uninstall removes both the registration links and the private files. macOS login
+agents live under the account’s `~/Library/LaunchAgents`, even when `HOME` is overridden.
+
 On Linux, a controller started from a systemd service runs in a separate transient
 scope, so it survives its caller's exit. This applies to schedule ticks and
 updater restarts. If the scope cannot start, startup fails rather than leaving
