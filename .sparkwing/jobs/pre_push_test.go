@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestPrePushRunsTheFastStepsAndNothingElse(t *testing.T) {
+func TestPrePushFastPhaseRunsOnlyFastChecks(t *testing.T) {
 	want := []string{
 		"api-snapshot", "api-spec", "budget", "build-touched", "changelog",
 		"lint-touched", "vet-touched",
@@ -21,19 +21,19 @@ func TestPrePushRunsTheFastStepsAndNothingElse(t *testing.T) {
 	}
 }
 
-func TestPrePushRunsNothingThatJudgesTheWholeTree(t *testing.T) {
+func TestPrePushFastPhaseRunsNoWholeTreeChecks(t *testing.T) {
 	got := stepIDs(t, &PrePush{})
 	for _, broad := range []string{
 		"vet", "build", "test", "lint", "race-touched", "store-postgres",
 		"frontend-unit", "frontend-lint", "frontend-build", "frontend-browser",
 	} {
 		if slices.Contains(got, broad) {
-			t.Errorf("pre-push runs %q; the tier promises a verdict in seconds, and every one of these judges the whole tree", broad)
+			t.Errorf("pre-push's fast phase runs %q, which judges the whole tree", broad)
 		}
 	}
 }
 
-func TestPrePushStepsAllRunInParallel(t *testing.T) {
+func TestPrePushFastPhaseRunsChecksInParallel(t *testing.T) {
 	w := inspectWork(t, &PrePush{})
 	if w.FailurePolicy != sparkwing.FailFast {
 		t.Error("pre-push must fail fast: the author is holding a push open")
@@ -56,7 +56,7 @@ func TestPrePushAdmitsAheadOfTheBroadGate(t *testing.T) {
 		return (&Gate{}).Plan(t.Context(), gate, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 	if prepush.Priority <= gate.Priority {
-		t.Fatalf("pre-push priority %d, gate priority %d: a tier a human waits on, queued behind a ten-minute one, is not a fast tier",
+		t.Fatalf("pre-push priority %d, gate priority %d: push-boundary checks must admit ahead of the on-demand gate",
 			prepush.Priority, gate.Priority)
 	}
 }

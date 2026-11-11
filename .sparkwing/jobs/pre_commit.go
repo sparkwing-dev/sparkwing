@@ -30,8 +30,8 @@ func (PreCommit) Help() string {
 		"live links in released changelog entries, and no product file that resolves the sparkwing home " +
 		"itself instead of through internal/paths.DefaultPaths. Every step reads files; none compiles, " +
 		"links, or reaches the network, which is what keeps the git pre-commit hook under ten seconds. " +
-		"The push boundary adds the contract gates and a compile of the touched packages in `pre-push`; " +
-		"go vet, go build, go test, golangci-lint, the race gate and the dashboard suites run in `gate`, " +
+		"The push boundary adds contract gates and touched-package build, vet and lint in `pre-push`; main updates also run affected short and critical Go tests. " +
+		"The broader checks, race gate and dashboard suites run in `gate`, " +
 		"on demand and in hosted CI. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes " +
 		"and tracker IDs. The tier is budgeted at three seconds of each step's own run time, not time spent waiting for a core; " +
 		"a step past it warns, naming the slowest, and the tier still passes when every check did."

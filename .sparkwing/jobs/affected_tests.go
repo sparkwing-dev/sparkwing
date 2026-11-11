@@ -8,8 +8,10 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -122,17 +124,44 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string) err
 
 	sparkwing.Info(ctx, "affected tests: %s", scope)
 	if goChange(files, byDir) == "" {
-		sparkwing.Info(ctx, "affected tests: no Go source changed, so the critical set stays for hosted CI")
+		sparkwing.Info(ctx, "affected tests: no Go inputs changed; no critical tests selected")
 		for i := range plans {
 			plans[i].critical = nil
 		}
 	}
+	// safety: acceptance uses dashboard Node packages even in short mode.
+	acceptance := byDir["tests/acceptance"]
+	nativehost := byDir["sdk/typescript/test/nativehost"]
+	var frontendDeps, sdkDeps bool
+	for _, p := range plans {
+		if slices.Contains(p.packages, acceptance) || len(p.critical[acceptance]) > 0 {
+			frontendDeps, sdkDeps = true, true
+		}
+		if slices.Contains(p.packages, nativehost) || len(p.critical[nativehost]) > 0 {
+			sdkDeps = true
+		}
+	}
+	if frontendDeps {
+		if err := ensureFrontendDeps(ctx); err != nil {
+			return err
+		}
+	}
+	if sdkDeps {
+		compiler := filepath.Join(sparkwing.WorkDir(), "sdk", "typescript", "node_modules", "typescript", "bin", "tsc")
+		if _, err := os.Stat(compiler); err != nil {
+			if _, err := sparkwing.Bash(ctx, "npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund").Run(); err != nil {
+				return fmt.Errorf("TypeScript SDK dependencies: %w", err)
+			}
+		}
+	}
+	var timings goTestTimings
+	defer timings.report(ctx, time.Now())
 	return withStableProductTestHome("gate-test", func(home string) error {
 		var failures []string
 		for _, p := range plans {
 			for _, command := range p.commands(currentHost()) {
 				script := productTestScript(fmt.Sprintf("cd %q && %s", p.module, command), home)
-				if _, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run(); err != nil {
+				if err := timings.run(ctx, script); err != nil {
 					failures = append(failures, describeModuleFailure(p.module, err))
 				}
 			}

@@ -20,8 +20,8 @@ type Land struct{ sparkwing.Base }
 
 // LandArgs supplies the local review inputs.
 type LandArgs struct {
-	Queued        bool `flag:"queued" desc:"Queue a focused owned-hardware land: merge main, policy, pre-push/review, then push the unchanged commit. Use --sw-detached; a non-empty --brief is required."`
-	PrePushReview bool `flag:"pre-push-review" desc:"Run the unchanged pre-push tier alongside review in one fail-fast job; intended for the focused queue."`
+	Queued        bool `flag:"queued" desc:"Queue an owned-hardware land: merge main, policy, fast pre-push/review, affected Go tests, then push the unchanged commit. Use --sw-detached; a non-empty --brief is required."`
+	PrePushReview bool `flag:"pre-push-review" desc:"Run pre-push's fast checks alongside review in one fail-fast job; ordinary land's Gate covers the affected tests."`
 	ReviewArgs
 }
 
@@ -31,15 +31,15 @@ func (Land) ShortHelp() string {
 
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
-		"All lands share one serial run slot. With --queued, require a non-empty --brief (for example, --brief 'Short intent'), merge origin/main before checks, run policy and pre-push/review against the merged checkout, and push only the unchanged checked commit. Submit with --sw-detached; track its run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
+		"All lands share one serial run slot. With --queued, require a non-empty --brief (for example, --brief 'Short intent'), merge origin/main before checks, run policy and fast pre-push/review against the merged checkout, then the shared affected short and critical Go tests, and push only the unchanged checked commit. Submit with --sw-detached; track its run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip). " +
 		"Once policy passes, the rest of the gate (the same jobs as `sparkwing run gate`) starts while review continues. " +
 		"The review always runs, whatever the change's size or paths. When both pass and the review record's tree is HEAD's tree with result pass, " +
 		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
-		"with no force, adding --no-verify when the pushed tree is the tree the gate and review judged, since the gate covers every check the pre-push hook makes; " +
-		"a merged tree pushes through the hook. When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
+		"with no force, adding --no-verify after the gate and any merge-delta tests pass, since those checks cover the pushed tree; " +
+		"When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
 		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure and runs the affected tests over the files " +
 		"that differ between the gated tree and the merged tree, then pushes the merge; the review is not run again. It merges at most 3 times; a conflict fails " +
 		"and names the merge to run by hand. The push step carries the destructive and prod risks, " +
@@ -85,7 +85,8 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 	if in.Queued {
 		policy := sparkwing.Job(plan, policyJobID, &policyJob{}).Inline().Timeout(policyJobTimeout).Needs(pre)
 		review := reviewJobNode(plan, in.ReviewArgs, branch, true).Needs(pre)
-		needs = []sparkwing.Dep{policy, review}
+		tests := affectedPushTestsJobNode(plan).Inline().Needs(policy, review)
+		needs = []sparkwing.Dep{policy, review, tests}
 	} else {
 		gate := gateJobs(plan, &Gate{}, "gate", false)
 		gate[0].Needs(pre)
@@ -447,7 +448,7 @@ func landOnto(ctx context.Context, dir string, head landHead, recheck mergeReche
 			}
 		}
 		target.Base = base
-		refused = pushLanding(ctx, git, dir, target.Commit, head.Tree)
+		refused = pushLanding(ctx, git, dir, target.Commit, target.Tree)
 		if refused == nil {
 			return target, nil
 		}
@@ -548,8 +549,8 @@ func landPushArgs(commit string, gated bool) []string {
 	return []string{"push", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
 }
 
-// safety: the hook is skipped only when the pushed commit's tree is the one the
-// gate and review judged; anything else is judged by the hook as a human push is.
+// safety: the checked tree includes any successful merge-delta recheck; a
+// different pushed tree must still pass the hook.
 func pushLanding(ctx context.Context, git gitRunner, dir, commit, gatedTree string) error {
 	tree, err := git(ctx, "rev-parse", commit+"^{tree}")
 	gated := err == nil && tree == gatedTree

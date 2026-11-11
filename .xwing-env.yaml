@@ -9,8 +9,8 @@ tools:
     runtime: sparkwing
 commands:
   install:
-    argv: [env, GOWORK=auto, sh, -c, 'go mod download && go -C .sparkwing mod download && pnpm --dir web install --frozen-lockfile --prefer-offline --ignore-scripts']
-    description: Prepare all Go modules and dashboard dependencies
+    argv: [env, GOWORK=auto, sh, -c, 'go mod download && go -C .sparkwing mod download && pnpm --dir web install --frozen-lockfile --prefer-offline --ignore-scripts && npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund']
+    description: Prepare Go modules, dashboard dependencies and TypeScript SDK test dependencies
   build:
     argv: [env, GOWORK=auto, sh, -c, 'bash bin/build-web.sh && sparkwing run build "$@"', xwing-build]
     description: Build dashboard assets and compile every public Go binary

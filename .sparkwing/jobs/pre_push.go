@@ -5,22 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"go/build"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PrePush is the fast tier at the push boundary, and it repeats nothing the
-// commit tier already ran: the contract gates a single commit cannot answer,
-// and a compile, a vet and a fast lint of the packages the whole push touches.
-// Everything that races, lints or tests a whole module is Gate, which runs on
-// demand and in hosted CI.
+// PrePush runs fast push checks and adds affected Go tests for main updates.
 type PrePush struct{ sparkwing.Base }
 
 func (PrePush) ShortHelp() string {
-	return "Fast gate for the push boundary: contract gates, and a compile, vet and fast lint of the touched packages"
+	return "Push gate: fast checks, plus affected short and critical Go tests for main updates"
 }
 
 func (PrePush) Help() string {
@@ -31,12 +30,13 @@ func (PrePush) Help() string {
 		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. It repeats " +
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
-		"judged by `gate`. Every step reads the commits being pushed, the range origin/main..HEAD, and never " +
-		"the index, so whatever is staged cannot narrow what the push is judged against. The tier has a " +
-		"one-minute budget on each step's own run time; a step past it warns, naming the slowest, and the tier still passes when every check did. Run timings measure " +
-		"progress toward its ten-second warm-cache target; the run has no compiler-cache temperature signal. The full test suite, " +
-		"golangci-lint over every module, the race gate, the Postgres suite and the dashboard suites run in " +
-		"`gate`, which hosted CI runs on every pull request and every push to main."
+		"judged by `gate`. Every check reads the committed change from the merge base with origin/main to HEAD, and never " +
+		"the index, so whatever is staged cannot narrow what the push is judged against. The fast checks have a " +
+		"one-minute budget on each step's own run time; a step past it warns, naming the slowest, and the fast phase still passes when every check did. Run timings measure " +
+		"progress toward their ten-second warm-cache target; the run has no compiler-cache temperature signal. " +
+		"For hook updates to refs/heads/main, or an explicit run outside the hook, the affected-tests job then runs the hosted gate's reverse dependency selection with go test -short, including test imports and file readers, plus every critical test without -short when Go inputs changed. Branch pushes keep only the fast checks. " +
+		"It has a separate 45-minute execution deadline and reports package and test timings. Changelog-only changes select no tests; documentation with registered readers runs those readers. " +
+		"Broader lint, race and dashboard checks remain in `gate`; full Go and PostgreSQL verification run with `gate -- --full` and at the release boundary. Hosted CI provides additional verification."
 }
 
 func (PrePush) Examples() []sparkwing.Example {
@@ -47,8 +47,49 @@ func (PrePush) Examples() []sparkwing.Example {
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Priority(hookTierPriority)
-	sparkwing.Job(plan, rc.Pipeline, p)
+	fast := sparkwing.Job(plan, rc.Pipeline, p)
+	refs, hook := os.LookupEnv(gitenv.PushRefsVar)
+	main := !hook
+	for line := range strings.SplitSeq(refs, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 4 {
+			return fmt.Errorf("pre-push: invalid Git ref update %q", line)
+		}
+		main = main || fields[2] == "refs/heads/main"
+	}
+	if main {
+		affectedPushTestsJobNode(plan).Needs(fast)
+	}
 	return nil
+}
+
+// perf: a warm broad short replay exceeded twenty minutes, so tests have a
+// separate deadline from the fast checks' one-minute warning budget.
+const affectedPushTestsTimeout = 45 * time.Minute
+
+type affectedPushTestsJob struct{ sparkwing.Base }
+
+func affectedPushTestsJobNode(plan *sparkwing.Plan) *sparkwing.JobNode {
+	return sparkwing.Job(plan, "affected-tests", &affectedPushTestsJob{}).
+		Timeout(affectedPushTestsTimeout).
+		NoProgressTimeout(affectedPushTestsTimeout).
+		Cores(float64(goStepParallelism(currentHost())))
+}
+
+func (*affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "test", runAffectedPushTests)
+	return nil, nil
+}
+
+func runAffectedPushTests(ctx context.Context) error {
+	files, scope, err := pushRangeScope(ctx, "file(s)", func(files []string) []string { return files })
+	if err != nil {
+		return err
+	}
+	return runAffectedTestFiles(ctx, files, scope)
 }
 
 // Work declares the fast push-boundary steps.
