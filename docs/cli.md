@@ -297,6 +297,9 @@ Misspelled command words suggest the closest command in the same group. Run the
 suggested command with `--help` to see its flags. An unknown flag on `runs list`
 names the accepted flags and points to `--help`.
 
+Invalid `runs list --since` durations include the example `--since 1h`.
+Run-list HTTP limit refusals include `limit=1`; retry with a positive integer.
+
 `runs status` in plain and pretty formats includes `started_at`, `finished_at`
 and `duration` for the run, plus each job's start, finish and duration. Missing
 timestamps or a duration without both timestamps appear as `-`. JSON retains
