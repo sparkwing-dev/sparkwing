@@ -135,12 +135,13 @@ func TestAffectedStoreShardsStayWithinTheModuleCommandAllowance(t *testing.T) {
 				packages = append(packages, other)
 			}
 			p := affectedTestPlan{module: ".", packages: packages, critical: map[string][]string{store: {"TestZCritical"}}}
-			groups := p.commands(hostShape{cpus: tc.cpus})
+			groups := affectedTestGroups([]affectedTestPlan{p}, goStepParallelism(hostShape{cpus: tc.cpus}))
 			if len(groups) != 2 || len(groups[0]) != tc.shortCommands || len(groups[1]) != 1 {
 				t.Fatalf("groups = %q, want %d short commands then one critical command", groups, tc.shortCommands)
 			}
 			width, storeCommands := 0, 0
-			for _, command := range groups[0] {
+			for _, planned := range groups[0] {
+				command := planned.command
 				var gomaxprocs, parallelism int
 				if _, err := fmt.Sscanf(command, "GOMAXPROCS=%d go test -p %d", &gomaxprocs, &parallelism); err != nil {
 					t.Fatal(err)
@@ -167,17 +168,17 @@ func TestAffectedStoreShardsStayWithinTheModuleCommandAllowance(t *testing.T) {
 			if width != wantWidth || storeCommands != wantStoreCommands {
 				t.Fatalf("short width=%d, store commands=%d; want width=%d, store commands=%d", width, storeCommands, wantWidth, wantStoreCommands)
 			}
-			critical := groups[1][0]
+			critical := groups[1][0].command
 			if strings.Contains(critical, "-short") || !strings.Contains(critical, "TestZCritical") || !strings.Contains(critical, fmt.Sprintf("GOMAXPROCS=%d go test -p %d", tc.allowance, tc.allowance)) {
 				t.Fatalf("full critical command changed: %s", critical)
 			}
 		})
 	}
 	p := affectedTestPlan{module: ".sparkwing", packages: []string{store}}
-	if groups := p.commands(hostShape{cpus: 16}); len(groups) != 1 || len(groups[0]) != 1 {
+	if groups := affectedTestGroups([]affectedTestPlan{p}, 7); len(groups) != 1 || len(groups[0]) != 1 {
 		t.Fatalf("nested module gained root store shards: %q", groups)
 	}
-	if groups := (affectedTestPlan{module: "."}).commands(hostShape{cpus: 16}); len(groups) != 0 {
+	if groups := affectedTestGroups([]affectedTestPlan{{module: "."}}, 7); len(groups) != 0 {
 		t.Fatalf("empty selection runs commands: %q", groups)
 	}
 }

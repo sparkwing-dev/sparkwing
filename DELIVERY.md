@@ -187,19 +187,32 @@ checks keep their existing flag and runtime CPU policies.
 
 When the root selection includes `internal/store`, its short tests use three
 concurrent commands, each with `GOMAXPROCS=1` and `-p 1`. Other selected root
-packages run alongside them with the remaining Go command allowance. A seven-wide allowance becomes
+packages run alongside them with the remaining root-module command allowance. A seven-wide root allowance becomes
 four for the other packages and one per store shard. Store-only selections need
 an allowance of at least three; selections with other root packages need at
 least four. Smaller allowances retain the unsplit short command. Each command
 keeps the existing `GOMAXPROCS`/`-p` pairing; summed command widths stay within
-the allowance, which is not an operating-system CPU cap. Modules remain
-sequential. Each module's short commands join before its full critical tests run,
-including when a short command fails.
+the allowance, which is not an operating-system CPU cap.
+
+Selected modules run their short commands together when the job's allowance
+can give each active module one worker. Root receives the remainder. If root
+has no short work, the first active module receives the remainder. At allowance
+seven, pipeline and root short tests use one and six; when SDK short tests are
+also selected, pipeline and SDK use one each and root uses five. Root's store
+shards consume their three workers from that assigned root allowance. A lone
+module keeps the full allowance. When there are more active short modules than
+workers, the modules run sequentially, each with the full allowance.
+
+All short commands across all modules join before any full critical command
+starts. Critical modules run sequentially with the full job allowance. A short
+failure does not cancel siblings or skip critical coverage. This module overlap
+has not yet been measured against the store-only schedule.
 
 A replay of the same selection on 2026-11-11 compared `ea4b68ccd` with store
 grouping at `9d688612a`, using Go 1.26.11, warm compilation,
 `GOFLAGS=-mod=readonly` and top-level `-count=1`. Both selected the same 13-file
 cohort: two pipeline packages, 66 root packages and 37 critical declarations.
+Both replay variants ran modules sequentially, before module overlap was added.
 
 | Root short schedule | Pipeline short | Root short, joined wall | Critical | Shared runner wall |
 | --- | ---: | ---: | ---: | ---: |

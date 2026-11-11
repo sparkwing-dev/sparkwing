@@ -26,8 +26,8 @@ func TestAffectedTestsCoverTheReverseDependencyClosure(t *testing.T) {
 	if len(p.critical) != 2 || !slices.Equal(p.critical["m/billing"], []string{"TestRefund"}) || !slices.Equal(p.critical["m/leaf"], []string{"TestLeaf"}) {
 		t.Fatalf("critical = %v, want every critical test without short mode", p.critical)
 	}
-	commands := p.commands(hostShape{cpus: 8})
-	if len(commands) != 2 || !strings.Contains(commands[0][0], "-short ") || strings.Contains(commands[1][0], "-short ") || !strings.Contains(commands[1][0], "TestRefund") {
+	commands := affectedTestGroups([]affectedTestPlan{p}, 3)
+	if len(commands) != 2 || !strings.Contains(commands[0][0].command, "-short ") || strings.Contains(commands[1][0].command, "-short ") || !strings.Contains(commands[1][0].command, "TestRefund") {
 		t.Fatalf("commands = %q, want affected fast tests and unshortened critical tests", commands)
 	}
 }
@@ -45,7 +45,7 @@ func TestAffectedTestsRunTheWholeModuleWhenTheGraphCannotSeeTheChange(t *testing
 		if !p.whole {
 			t.Errorf("%s: plan = %+v, want every package", file, p)
 		}
-		if commands := p.commands(hostShape{cpus: 8}); len(commands) != 1 || !strings.Contains(commands[0][0], "m/leaf") || !strings.Contains(commands[0][0], "m/top") {
+		if commands := affectedTestGroups([]affectedTestPlan{p}, 3); len(commands) != 1 || !strings.Contains(commands[0][0].command, "m/leaf") || !strings.Contains(commands[0][0].command, "m/top") {
 			t.Errorf("%s: commands = %q, want every package in the module", file, commands)
 		}
 	}
@@ -65,8 +65,8 @@ func TestAffectedSchemaRunsStoreAndItsReadersWithoutWideningTheModule(t *testing
 
 func TestAffectedModuleChangesKeepCriticalTestsUnshortened(t *testing.T) {
 	p := planAffectedTests(".", []string{"."}, []string{"go.mod"}, affectedFixturePackages, map[string][]string{"leaf": {"TestGuard"}})
-	commands := p.commands(hostShape{cpus: 2})
-	if len(commands) != 2 || !strings.Contains(commands[0][0], "-short ") || !strings.Contains(commands[0][0], "m/top") || strings.Contains(commands[1][0], "-short ") || !strings.Contains(commands[1][0], "TestGuard") {
+	commands := affectedTestGroups([]affectedTestPlan{p}, 1)
+	if len(commands) != 2 || !strings.Contains(commands[0][0].command, "-short ") || !strings.Contains(commands[0][0].command, "m/top") || strings.Contains(commands[1][0].command, "-short ") || !strings.Contains(commands[1][0].command, "TestGuard") {
 		t.Fatalf("commands = %q, want the whole fast class and full critical tests", commands)
 	}
 }
@@ -93,8 +93,8 @@ func TestAffectedWireChangesRunTheReleaseWireCutCheck(t *testing.T) {
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
 			plan := planAffectedTests(".sparkwing", modules, []string{file}, packages, nil)
-			commands := plan.commands(hostShape{cpus: 2})
-			if len(commands) != 1 || !strings.HasSuffix(commands[0][0], " 'sparkwing-pipelines/jobs'") || strings.Contains(commands[0][0], "-run") {
+			commands := affectedTestGroups([]affectedTestPlan{plan}, 1)
+			if len(commands) != 1 || !strings.HasSuffix(commands[0][0].command, " 'sparkwing-pipelines/jobs'") || strings.Contains(commands[0][0].command, "-run") {
 				t.Fatalf("%s selected %q, want the jobs suite including TestRepositoryUnreleasedSectionDeclaresEveryWireCut", file, commands)
 			}
 		})
