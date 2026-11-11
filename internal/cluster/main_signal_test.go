@@ -36,7 +36,6 @@ func TestRunnerSignalExit(t *testing.T) {
 		cli := RunnerCLI{ReadConfig: func(string) (userconfig.Config, error) {
 			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &url, CredentialsDir: &credentials}}, nil
 		}, Factory: func(ctx context.Context, _ RunnerOptions) (runners.RuntimeConfig, error) {
-
 			if mode == "bundle" {
 				fmt.Println("ready")
 				_, err := source.Acquire(ctx, source.Spec{
@@ -269,6 +268,7 @@ type signalSourceAccess struct{}
 func (signalSourceAccess) GitCredential(context.Context, source.Spec) (source.Credential, error) {
 	return source.Credential{}, nil
 }
+
 func (signalSourceAccess) BundleURL(context.Context, string) (string, error) {
 	return "https://8.8.8.8/source.bundle", nil
 }
@@ -282,6 +282,7 @@ type signalSourceEngine struct{ resolved engine.Resolved }
 func (r signalSourceEngine) Resolve(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return r.resolved, nil
 }
+
 func (r signalSourceEngine) Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return r.resolved, nil
 }
