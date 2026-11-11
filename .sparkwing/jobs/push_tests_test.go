@@ -38,7 +38,7 @@ func TestAffectedPushTestsBlockHookAndQueuedLanding(t *testing.T) {
 			if tests == nil {
 				t.Fatal("push path omits affected-tests")
 			}
-			if tests.ContinueOnError || tests.Optional || time.Duration(tests.TimeoutMS)*time.Millisecond <= prePushBudget || tests.Cores != float64(goStepParallelism(currentHost())) {
+			if tests.ContinueOnError || tests.Optional || time.Duration(tests.TimeoutMS)*time.Millisecond <= prePushBudget || tests.Cores != float64(goStepParallelism(affectedPushHost())) {
 				t.Fatalf("affected tests must block with their own deadline and reserved Go cores: %+v", tests)
 			}
 			want := []string{"pre-push"}

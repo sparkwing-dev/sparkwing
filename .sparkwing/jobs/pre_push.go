@@ -76,7 +76,13 @@ func affectedPushTestsJobNode(plan *sparkwing.Plan) *sparkwing.JobNode {
 	return sparkwing.Job(plan, "affected-tests", &affectedPushTestsJob{}).
 		Timeout(affectedPushTestsTimeout).
 		NoProgressTimeout(affectedPushTestsTimeout).
-		Cores(float64(goStepParallelism(currentHost())))
+		Cores(float64(goStepParallelism(affectedPushHost())))
+}
+
+// perf: a submitter's Go limits describe its own work, not the runner. Local
+// landing always shares the machine, including when the SDK sets CI.
+func affectedPushHost() hostShape {
+	return hostShape{cpus: runtime.NumCPU()}
 }
 
 func (*affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -89,7 +95,7 @@ func runAffectedPushTests(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, scope)
+	return runAffectedTestFiles(ctx, files, scope, affectedPushHost())
 }
 
 // Work declares the fast push-boundary steps.

@@ -1014,7 +1014,15 @@ file. Other syntax and workflow checks remain active.
   tasks, up to 9 cores. Smaller runners divide their available cores across
   the tasks. After that phase passes, a separate `affected-tests` job runs
   the shared affected short and critical Go tests for main updates (and explicit
-  manual runs). Branch pushes keep the fast checks alone.
+  manual runs). Branch pushes keep the fast checks alone. The local test job
+  reserves and uses `max(1, (NumCPU-1)/2)` workers: seven on a 16-CPU host.
+  It ignores the submitter's `GOMAXPROCS` and the SDK's `CI` marker when
+  choosing that shared-host allowance. The shared affected-test runner clears
+  `GOFLAGS` for both package selection and test execution, including hosted
+  Gate and ordinary Land's merge recheck. Test commands set `GOMAXPROCS` and
+  `-p` explicitly, so inherited flags cannot serialize nested Go builds or
+  change the build selected for testing. Other affected build and vet checks
+  retain their existing flag and runtime CPU policies.
   The tiers shift left, so a
   push whose commits skipped the commit hook is judged by `gate` rather than a second
   time here. Rebase replay does not fire pre-commit, and automatic merges use

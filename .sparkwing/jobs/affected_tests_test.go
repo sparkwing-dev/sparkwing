@@ -218,7 +218,7 @@ func TestAffectedTestsRunTheReadersOfFilesOutsideEveryPackage(t *testing.T) {
 	packages := map[string][]modulePackage{}
 	known := map[string]bool{}
 	for _, m := range modules {
-		pkgs, err := listModulePackages(ctx, m)
+		pkgs, err := listModulePackages(ctx, m, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -369,7 +369,7 @@ func TestAffectedClosureCrossesLocalModuleReplacements(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"), "module fixture/pipelines\n\ngo 1.25\nrequire fixture v0.0.0\nreplace fixture => ..\n")
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"), "package pipelines\nimport f \"fixture/internal\"\nfunc Jobs() int { return f.Sound() }\n")
 	gitCommitAll(t, root, "modules")
-	plans, _, err := planAffectedModules(newTestContext(t), []string{"internal/sound.go"}, nil)
+	plans, _, err := planAffectedModules(newTestContext(t), []string{"internal/sound.go"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

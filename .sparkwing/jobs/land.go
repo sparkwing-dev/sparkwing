@@ -534,7 +534,7 @@ func recheckMergeDelta(ctx context.Context, files []string) error {
 	if err := ensureFrontendDeps(ctx); err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef))
+	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef), currentHost())
 }
 
 // safety: no --force and an explicit commit, so the remote accepts the push
