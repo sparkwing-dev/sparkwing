@@ -30,6 +30,9 @@ func TestRunnerSignalExit(t *testing.T) {
 			if mode != "loop" {
 				fmt.Println("ready")
 				<-ctx.Done()
+				if mode == "unrelated" {
+					return runners.RuntimeConfig{}, errors.Join(context.Cause(ctx), fmt.Errorf("real runtime failure: %w", context.Canceled))
+				}
 				if mode == "failure" {
 					return runners.RuntimeConfig{}, errors.Join(context.Cause(ctx), errors.New("real runtime failure"))
 				}
@@ -49,7 +52,7 @@ func TestRunnerSignalExit(t *testing.T) {
 		return
 	}
 	for _, command := range []string{"start", "warm"} {
-		for _, mode := range []string{"loop", "startup", "failure"} {
+		for _, mode := range []string{"loop", "startup", "failure", "unrelated"} {
 			t.Run(command+"/"+mode, func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 				defer cancel()
@@ -89,7 +92,7 @@ func TestRunnerSignalExit(t *testing.T) {
 				select {
 				case err := <-done:
 					waited = true
-					if mode == "failure" {
+					if mode == "failure" || mode == "unrelated" {
 						var exit *exec.ExitError
 						if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "real runtime failure") {
 							t.Fatalf("real failure lost: %v %s", err, &stderr)

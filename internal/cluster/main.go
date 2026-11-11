@@ -87,7 +87,7 @@ func onlyRunnerCancellation(err, cause error) bool {
 	if wrapped := errors.Unwrap(err); wrapped != nil {
 		return onlyRunnerCancellation(wrapped, cause)
 	}
-	return errors.Is(err, cause) || errors.Is(err, context.Canceled)
+	return err == cause //nolint:errorlint // An unrelated cancellation must remain a failure.
 }
 
 func writeRunnerError(writer io.Writer, command string, err error) {
