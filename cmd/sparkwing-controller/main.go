@@ -269,10 +269,6 @@ func run(args []string) error {
 		"assert that browsers reach this controller's dashboard over TLS: send "+
 			"Strict-Transport-Security and require an https origin on cookie-authenticated "+
 			"writes. Unneeded when a proxy reaching --trusted-proxy-addr forwards X-Forwarded-Proto")
-	insecureCookies := fs.Bool("insecure-cookies", false,
-		"drop Secure and the __Host- prefix from the dashboard's session cookies so a browser "+
-			"keeps a session over plain HTTP. Only for a single-team, self-hosted dashboard published without TLS: the "+
-			"cookies then travel readable to every hop on the path")
 	requireAuth := fs.Bool("require-auth", false,
 		"refuse to start until a live deployment administrator capability exists; private routes always require credentials")
 	allowDevelopmentBuild := fs.Bool("allow-development-build", false,
@@ -372,9 +368,6 @@ func run(args []string) error {
 	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
 	egressCfg.GlobalDailyAlarmBytes = guards.EgressDailyAlarmBytes
 
-	if err := checkInsecureCookies(cfg, *insecureCookies); err != nil {
-		return err
-	}
 	if *teamDownloadFree < 0 || *teamDownloadFunded < 0 {
 		return fmt.Errorf("a team daily download cap must not be negative; pass 0 to turn it off")
 	}
@@ -595,7 +588,7 @@ func run(args []string) error {
 			closeObjects = objects.Close
 			srv = srv.WithDataObjects(objects)
 		}
-		srv.WithDashboard(dashboard(p, *hsts, *insecureCookies, *supportContact))
+		srv.WithDashboard(dashboard(p, *hsts, *supportContact))
 
 		return srv.StorePolicies(), nil
 	}))
@@ -827,14 +820,6 @@ func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobS
 		"--cache-blob-store keeps its objects in, so the ceiling measures every object rather than only this process's writes")
 }
 
-func checkInsecureCookies(cfg deployment.Config, insecure bool) error {
-	if !insecure || !cfg.MultiTeam() {
-		return nil
-	}
-	return errors.New("--insecure-cookies is refused on a multi-team or hosted controller, whose sessions belong to other people; " +
-		"publish the dashboard over TLS and drop the flag")
-}
-
 // safety: a multi-team controller must refuse missing encryption before creating persistent state.
 func parseSecretsCipher(cfg deployment.Config) (*secrets.Cipher, error) {
 	cipher, err := secretsCipher(cfg.SecretsKey())
@@ -934,13 +919,12 @@ func validateBucketCeiling(cfg objectguard.CeilingConfig) error {
 
 // safety: a source build carries no dashboard bundle, so the controller still starts and serves its API and
 // sign-in pages; its dashboard pages name the build step instead.
-func dashboard(p paths.Paths, hsts, insecureCookies bool, supportContact string) controller.Dashboard {
+func dashboard(p paths.Paths, hsts bool, supportContact string) controller.Dashboard {
 	d := controller.Dashboard{
-		Version:         Version,
-		HSTS:            hsts,
-		InsecureCookies: insecureCookies,
-		SupportContact:  supportContact,
-		Paths:           p,
+		Version:        Version,
+		HSTS:           hsts,
+		SupportContact: supportContact,
+		Paths:          p,
 		Capabilities: backend.Capabilities{
 			Mode:     "cluster",
 			Storage:  backend.CapabilitiesStorage{Artifacts: "custom", Logs: "segments", Runs: "controller"},

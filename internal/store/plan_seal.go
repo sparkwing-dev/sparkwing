@@ -143,7 +143,7 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	required := slices.DeleteFunc(slices.Clone(input.Resolved.SecretNames), func(name string) bool {
 		return slices.Contains(input.Resolved.OptionalSecretNames, name)
 	})
-	if err = secretPreflightTx(ctx, tx, team, run, selection, required); err != nil {
+	if err = secretPreflightTx(ctx, tx, team, run, selection, required, string(input.Resolved.Engine.Pin.SDK)); err != nil {
 		return runspec.Spec{}, nil, err
 	}
 	if err = checkExpansionSecretPoolsTx(ctx, tx, team, runspec.Spec{Request: run.Request, Resolved: input.Resolved}, resolved.Jobs, selection); err != nil {

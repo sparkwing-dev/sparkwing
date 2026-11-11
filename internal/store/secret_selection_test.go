@@ -33,7 +33,7 @@ func TestChangedRevisionChildRequiredSecretSelection(t *testing.T) {
 			t.Fatalf("release: %v", err)
 		}
 		var refused *secretPreflightError
-		if err := secretPreflightTx(t.Context(), tx, tenant.team, run, selection, []string{"TOKEN"}); !errors.As(err, &refused) {
+		if err := secretPreflightTx(t.Context(), tx, tenant.team, run, selection, []string{"TOKEN"}, ""); !errors.As(err, &refused) {
 			t.Fatalf("preflight accepted secret release refuses: %v", err)
 		}
 		if refused.Pipeline != run.Request.Provenance.Pipeline() {
@@ -60,7 +60,7 @@ func TestChangedRevisionChildRequiredSecretSelection(t *testing.T) {
 		if _, _, err := selectedSecretTx(t.Context(), tx, tenant.team, "TOKEN", selection); err != nil {
 			t.Fatalf("shared release: %v", err)
 		}
-		return secretPreflightTx(t.Context(), tx, tenant.team, run, selection, []string{"TOKEN"})
+		return secretPreflightTx(t.Context(), tx, tenant.team, run, selection, []string{"TOKEN"}, "")
 	})
 	if err != nil {
 		t.Fatalf("shared preflight: %v", err)

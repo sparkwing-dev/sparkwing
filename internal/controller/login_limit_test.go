@@ -41,7 +41,7 @@ func failedTokenLogin(t *testing.T, srv *Server, h http.Handler, remoteAddr stri
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("token=swu_wrong&csrf_token=pair"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", "http://"+req.Host)
-	req.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, srv.cookiesSecure()), Value: "pair"})
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "pair"})
 	req.RemoteAddr = remoteAddr
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

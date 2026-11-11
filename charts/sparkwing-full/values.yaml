@@ -332,6 +332,9 @@ ingress:
   # The render check on this list is presence-only: one entry is enough,
   # and an entry without `secretName` leaves the ingress controller's
   # default certificate to terminate TLS, which is the operator's call.
+  # Required when ingress.enabled=true. Use a TLS Secret, for example one
+  # issued by cert-manager with Let's Encrypt. For local access, disable
+  # ingress and use kubectl port-forward instead.
   # Any entry also passes `--hsts` to the controller, which then sends
   # Strict-Transport-Security and requires an https Origin on
   # cookie-authenticated writes.
@@ -339,14 +342,6 @@ ingress:
   # - hosts:
   #     - sparkwing.example.com
   #   secretName: sparkwing-tls
-
-  # Publish the controller without TLS. An Ingress exposes the whole
-  # controller API and dashboard beyond the cluster, so the render fails on
-  # `tls: []` until this says the exposure is deliberate. Must be a bool: a
-  # quoted string fails the render rather than reading as an opt-out. With
-  # `tls: []` the controller also gets `--insecure-cookies`, so a browser can
-  # hold a session over plain HTTP.
-  allowInsecure: false
 
 # -----------------------------------------------------------------------
 # 3. ServiceAccount for the controller. The controller makes no

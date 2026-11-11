@@ -73,7 +73,7 @@ func TestKubernetesE2EChartRender(t *testing.T) {
 			if counts[component] == 2 {
 				deployment = "--deployment=team"
 			}
-			if !slices.Contains(args, deployment) || !slices.Contains(args, "--require-auth") || slices.Contains(args, "--insecure-cookies") {
+			if !slices.Contains(args, deployment) || !slices.Contains(args, "--require-auth") {
 				t.Fatalf("controller args: %v", args)
 			}
 			secrets := []string{}

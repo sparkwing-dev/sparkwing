@@ -9,6 +9,11 @@ to a future licensed offering.
 | Local | none | private to this OS user | this machine |
 | Sparkwing Cloud | optional self-hosted runners | shared with your team | Cloud and registered runners |
 
+Browser login requires HTTPS or loopback (`localhost` or `127.0.0.1`). For a
+remote controller, use a TLS ingress or reverse proxy, or connect through a
+port-forward or SSH tunnel. See
+[Serving the dashboard over HTTPS](self-hosting.md#serving-the-dashboard-over-https).
+
 ## Local
 
 `sparkwing run` starts the local controller on demand and hosts the run in the

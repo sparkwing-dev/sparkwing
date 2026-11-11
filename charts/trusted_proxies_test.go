@@ -53,7 +53,7 @@ func typedChartObjects(t *testing.T, manifest string) map[string][]json.RawMessa
 
 func TestTrustedProxyListenerAdmitsOnlyTheIngressNamespace(t *testing.T) {
 	manifest := helmRenderAll(t, "./sparkwing-full", "sparkwing", "sparkwing",
-		"ingress.enabled=true", "ingress.allowInsecure=true", "ingress.hosts[0].host=api.example.test", "ingress.hosts[0].paths[0].path=/",
+		"ingress.enabled=true", "ingress.tls[0].secretName=sparkwing-tls", "ingress.hosts[0].host=api.example.test", "ingress.hosts[0].paths[0].path=/",
 		"controller.trustedProxyListener.enabled=true",
 		"controller.trustedProxyListener.namespaceSelector.kubernetes\\.io/metadata\\.name=ingress-nginx")
 	objects := typedChartObjects(t, manifest)

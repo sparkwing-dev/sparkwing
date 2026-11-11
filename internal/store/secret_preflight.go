@@ -21,6 +21,7 @@ type secretPreflightError struct {
 	problems   []secretProblem
 	sharedOnly bool
 	local      bool
+	sdk        string
 }
 
 type secretProblem struct {
@@ -77,7 +78,13 @@ func (e *secretPreflightError) detail() string {
 				"\n  Fix: %s", p.Name, e.Pipeline, e.Repo, scoped)
 		}
 	}
-	b.WriteString("\nIf the run can do without a secret, declare it optional: tag its field in Secrets() `sw:\"NAME,optional\"`.")
+	b.WriteString("\nIf the run can do without a secret, declare it optional (replace NAME with its name):")
+	if e.sdk != "typescript" {
+		b.WriteString("\n" + `  Go: tag its field in Secrets() with sw:"NAME,optional".`)
+	}
+	if e.sdk != "go" {
+		b.WriteString("\n" + `  TypeScript: secrets: [{ name: "NAME", optional: true }].`)
+	}
 	return b.String()
 }
 
@@ -109,7 +116,7 @@ func (s *Store) recordSecretPreflight(ctx context.Context, team Team, request Pl
 
 // The release selector also owns preflight eligibility so an unchanged row
 // cannot pass planning and fail release.
-func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, selection secretSelection, required []string) (err error) {
+func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, selection secretSelection, required []string, sdk string) (err error) {
 	if run.Request.Request.Mode == runspec.IntakePublish {
 		return nil
 	}
@@ -169,7 +176,7 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 		repo = selection.repo
 	}
 	local := run.Request.Request.Origin == runspec.OriginLocal || run.Request.Request.Source.Location.LocalCheckout != ""
-	refused := &secretPreflightError{RunID: runID, Pipeline: pipeline, Repo: repo, sharedOnly: selection.scope == secretSharedOnly, local: local}
+	refused := &secretPreflightError{RunID: runID, Pipeline: pipeline, Repo: repo, sharedOnly: selection.scope == secretSharedOnly, local: local, sdk: sdk}
 	for _, name := range required {
 		if readable[name] {
 			continue

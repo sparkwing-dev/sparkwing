@@ -4,6 +4,11 @@ Sparkwing is unopinionated about how your pipelines deploy. It provides
 the infrastructure - controller, runners and shared data storage - and your
 pipeline code decides what to do with it.
 
+Browser login requires HTTPS or loopback (`localhost` or `127.0.0.1`). For a
+remote controller, use a TLS ingress or reverse proxy, or connect through a
+port-forward or SSH tunnel. See
+[Serving the dashboard over HTTPS](self-hosting.md#serving-the-dashboard-over-https).
+
 ## Run Targets
 
 `sparkwing run` executes locally; `sparkwing pipeline trigger` dispatches

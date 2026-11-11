@@ -497,16 +497,16 @@ api_get "/api/v1/runs?limit=1" >/dev/null
 # The dashboard signs its operator in with the admin token through the same
 # form a browser posts, which wants the CSRF cookie the sign-in page sets.
 login_headers="$(mktemp)"
-set_cookie() { sed -n "s/^[Ss]et-[Cc]ookie: \([^=]*$2\)=\([^;]*\).*/\1=\2/p" "$1" | tail -1; }
+set_cookie() { sed -n "s/^[Ss]et-[Cc]ookie: \($2\)=\([^;]*\).*/\1=\2/p" "$1" | tail -1; }
 curl --fail --silent --show-error --max-time 10 -D "$login_headers" -o /dev/null \
   "http://127.0.0.1:${controller_port}/login"
-login_csrf="$(set_cookie "$login_headers" sw_csrf)"
+login_csrf="$(set_cookie "$login_headers" __Host-sw_csrf)"
 [[ -n "$login_csrf" ]] || die "the sign-in page set no CSRF cookie"
 curl --silent --show-error --max-time 10 -D "$login_headers" -o /dev/null \
   -H "Origin: http://127.0.0.1:${controller_port}" --cookie "$login_csrf" \
   --data-urlencode "token=$admin_token" --data-urlencode "csrf_token=${login_csrf#*=}" \
   "http://127.0.0.1:${controller_port}/login"
-web_session="$(set_cookie "$login_headers" sw_session)"
+web_session="$(set_cookie "$login_headers" __Host-sw_session)"
 web_session="${web_session#*=}"
 rm -f "$login_headers"
 [[ -n "$web_session" ]] || die "signing in with the admin token opened no session"

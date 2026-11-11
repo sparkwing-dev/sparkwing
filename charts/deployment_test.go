@@ -120,7 +120,6 @@ func TestFullChartAlwaysRendersRequireAuth(t *testing.T) {
 		{"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin"},
 		{"controller.credentialsSecret.name=sparkwing-credentials"},
 		{"ingress.enabled=true", "ingress.tls[0].secretName=sparkwing-tls"},
-		{"ingress.enabled=true", "ingress.allowInsecure=true"},
 	} {
 		if args := renderController(t, sets...).Args; !slices.Contains(args, "--require-auth") {
 			t.Errorf("%v: controller args = %v, want --require-auth", sets, args)

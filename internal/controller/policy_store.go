@@ -103,7 +103,7 @@ func (s *Server) storeRouteAuthorization() routepolicy.Authorization {
 		Authenticator: policyStoreAuthenticator{s}, Bindings: policyStoreBindings{s},
 		CheckCSRF: s.checkSessionCSRF,
 		Identify: func(r *http.Request) (capability.Presentation, error) {
-			if len(r.CookiesNamed(cookieName(sessionCookieName, s.cookiesSecure()))) == 0 && s.peerIdentity != nil {
+			if len(r.CookiesNamed(sessionCookieName)) == 0 && s.peerIdentity != nil {
 				return s.identifyPeer(r)
 			}
 			raw, err := s.sessionPresentation(r)
@@ -128,7 +128,7 @@ func (s *Server) checkSessionCSRF(r *http.Request, p capability.Principal) error
 	if err := s.validateSessionFlow(session); err != nil {
 		return err
 	}
-	if !validAPIRequestCSRF(r, session.CSRFToken, s.cookiesSecure()) {
+	if !validAPIRequestCSRF(r, session.CSRFToken) {
 		return hosterr.Authorization(hosterr.ReasonBinding, "invalid CSRF token")
 	}
 	return nil

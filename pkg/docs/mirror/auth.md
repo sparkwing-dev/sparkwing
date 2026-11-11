@@ -1025,13 +1025,20 @@ also require the session's CSRF protection. A session cookie is not a deployment
 service credential. Operator-console powers require the console's session
 checks. Membership and session ancestry remain live authorization inputs.
 
-Licensed team and Cloud controllers use `__Host-sw_session` and
-`__Host-sw_csrf`, including over HTTP loopback port-forwards. Session enrollment
-clients send `__Host-sw_csrf` with the proof returned by `/api/v1/auth/session`
-for enrollment and logout. The URL scheme does not select the cookie name.
-The [Secure cookie localhost exception](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie#secure)
-allows loopback clients to keep the prefix. Licensed controllers refuse
-`--insecure-cookies`.
+All controllers use Secure `__Host-sw_session` and `__Host-sw_csrf` cookies.
+Browser login requires HTTPS or a loopback origin (`localhost` or `127.0.0.1`),
+including a port-forward or SSH tunnel. Session enrollment clients send
+`__Host-sw_csrf` with the proof returned by `/api/v1/auth/session` for enrollment
+and logout. The URL scheme does not select the cookie name. The web client
+reads only `__Host-sw_csrf`.
+See [Serving the dashboard over HTTPS](self-hosting.md#serving-the-dashboard-over-https)
+for deployment routes.
+
+Secure prevents a session cookie crossing a remote HTTP connection in clear text.
+Cookies have no port scope, including Secure `__Host-` cookies. Another service
+on a loopback port can still receive `__Host-sw_session` and read or plant
+`__Host-sw_csrf`. The Origin check and the CSRF token tied to the session protect
+writes there. Do not run untrusted services on loopback alongside the dashboard.
 
 ### Google and GitHub sign-in
 
