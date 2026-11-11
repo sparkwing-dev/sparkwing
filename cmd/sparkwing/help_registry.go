@@ -100,7 +100,27 @@ func surfaceCommand(path string) Command {
 	panic("unregistered command: " + path)
 }
 
-// #nosec G101 -- These strings are CLI flag help and contain no credential values.
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const operatorTokensCreatePrincipalDescription = "Name of the service the credential is issued to; the controller requires it."
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const operatorTokensCreateTypeDescription = "Kind of credential to issue, service by default; deployment is refused by this command."
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const operatorTokensListIncludeRevokedDescription = "Also list credentials that have been revoked."
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const operatorTokensListTypeDescription = "List only credentials of this kind."
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const secretsSetFileDescription = "Read the value from this file, which must be a regular file owned by you or root and not writable by group or others."
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const secretsSetSharedDescription = "Store a team-wide secret that every pipeline of every repository in the team reads, including uploaded, local and --runner here runs."
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const tokensCreateAllowTeamAdminDescription = "Ask for team.admin on a token minted from a signed-in account session, which then expires within 30 days; a token minted with a profile token gets team.admin whenever that token holds it, and ignores this flag."
+
 var commandFlagDescriptions = map[string]string{
 	"sparkwing dashboard open --host":                          "Exact DNS name from dashboard.allowed_hosts for an HTTPS sign-in link through Tailscale Serve.",
 	"sparkwing __complete --kind":                              "Which completion candidates to print for the given command words.",
@@ -153,11 +173,11 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing operator teams create --team":                   "Slug for the new team; a slug that exists or was retired is refused.",
 	"sparkwing operator teams show --job-namespace":            "Kubernetes namespace this deployment runs Cloud Jobs in; the team's node label value is derived from it and the team.",
 	"sparkwing operator teams show --team":                     "Slug of the team to show.",
-	"sparkwing operator tokens create --principal":             "Name of the service the credential is issued to; the controller requires it.",
+	"sparkwing operator tokens create --principal":             operatorTokensCreatePrincipalDescription,
 	"sparkwing operator tokens create --ttl":                   "Lifetime of the new credential in whole seconds or a duration; omitted or zero issues a credential that never expires.",
-	"sparkwing operator tokens create --type":                  "Kind of credential to issue, service by default; deployment is refused by this command.",
-	"sparkwing operator tokens list --include-revoked":         "Also list credentials that have been revoked.",
-	"sparkwing operator tokens list --type":                    "List only credentials of this kind.",
+	"sparkwing operator tokens create --type":                  operatorTokensCreateTypeDescription,
+	"sparkwing operator tokens list --include-revoked":         operatorTokensListIncludeRevokedDescription,
+	"sparkwing operator tokens list --type":                    operatorTokensListTypeDescription,
 	"sparkwing operator tokens rotate --grace":                 "How long the old credential keeps working after rotation, in whole seconds or a duration, 24h by default; zero revokes it at once.",
 	"sparkwing operator tokens rotate --ttl":                   "Lifetime of the replacement credential in whole seconds or a duration; omitted or zero keeps the old credential's remaining lifetime.",
 	"sparkwing overflow set --minutes":                         "Monthly Cloud overflow allowance in minutes; zero stops new Cloud overflow while local and registered-machine work stays eligible.",
@@ -298,14 +318,14 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing schedules show --fires":                         "Number of recent fires to include in the detail, 10 by default.",
 	"sparkwing schedules show --next":                          "Print the next N fire times for each selected schedule instead of its detail.",
 	"sparkwing schedules uninstall --all-repos":                "Remove every local schedule on this host from all repositories, then remove the timer when none remain.",
-	"sparkwing secrets set --file":                             "Read the value from this file, which must be a regular file owned by you or root and not writable by group or others.",
+	"sparkwing secrets set --file":                             secretsSetFileDescription,
 	"sparkwing secrets set --only-on":                          "Release the secret only to jobs placed on this reserved runner pool, never to here machines; omitted when replacing a secret, its existing pool restriction is kept.",
-	"sparkwing secrets set --shared":                           "Store a team-wide secret that every pipeline of every repository in the team reads, including uploaded, local and --runner here runs.",
+	"sparkwing secrets set --shared":                           secretsSetSharedDescription,
 	"sparkwing secrets set --value":                            "Secret value given on the command line, where it is visible in shell history and the process list; prefer --file or standard input.",
 	"sparkwing team settings set --claim-ranking":              "Comma-separated tiers, best first, that take runs selecting no runner; a tier left out takes none of them, none means first come among every tier, and default restores the standard ranking.",
 	"sparkwing team settings set --high-trust":                 "Let verified runs on trusted hosts that outlive their jobs (runners and team launchers scoped to repositories) write the shared verified cache; hosts that take asserted work never do, since an earlier job on the same host could tamper with what they archive.",
 	"sparkwing team settings set --members-can-add-machines":   "Whether members without administration may enroll their own personal machines; false also ends personal machines such members already enrolled, and true does not revive them.",
-	"sparkwing tokens create --allow-team-admin":               "Ask for team.admin on a token minted from a signed-in account session, which then expires within 30 days; a token minted with a profile token gets team.admin whenever that token holds it, and ignores this flag.",
+	"sparkwing tokens create --allow-team-admin":               tokensCreateAllowTeamAdminDescription,
 	"sparkwing tokens create --principal":                      "Not used for member tokens, which always belong to the signed-in account that mints them; the value is ignored.",
 	"sparkwing tokens create --ttl":                            "Lifetime of the new token in whole seconds or a duration such as 7d; omitted or zero gives it the remaining lifetime of the token that mints it, which it can never outlive.",
 	"sparkwing tokens create --type":                           "Kind of token to create, member by default; runners get credentials from runners add instead.",
@@ -372,7 +392,9 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-runner warm --team":                             "Team whose GitHub Actions registration --github-actions exchanges against; required with --github-actions and ignored without it.",
 }
 
-// #nosec G101 -- These strings are CLI help text and contain no credential values.
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const tokenFlagDescription = "Token identifier or prefix."
+
 var flagDescriptions = map[string]string{
 	"profile":             "Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local.",
 	"repo":                "Repository identity as owner/name. Naming a repository grants no access.",
@@ -394,7 +416,7 @@ var flagDescriptions = map[string]string{
 	"variable":            "Store an unmasked variable instead of a secret.",
 	"runner":              "Runner name or selection.",
 	"pool":                "Runner pool name.",
-	"token":               "Token identifier or prefix.",
+	"token":               tokenFlagDescription,
 	"format":              "Artifact format; markdown exports the full command reference.",
 	"split-dir":           "Directory for one generated Markdown page per command family.",
 	"path":                "Path to select.",
@@ -436,7 +458,33 @@ var flagDescriptions = map[string]string{
 	"keep-token":          "Remove only the local connection, without revoking its token at the controller.",
 }
 
-// #nosec G101 -- These strings are CLI synopsis text and contain no credential values.
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const operatorSecretsRotateSynopsis = "Reseal every stored secret and key under the current key"
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const operatorTokensRevokeSynopsis = "Revoke a deployment service credential"
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const operatorTokensRotateSynopsis = "Rotate a deployment service credential"
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const secretsRotateSynopsis = "Re-encrypt every stored secret under the current key"
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const secretsSetSynopsis = "Store (or replace) a secret value"
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const tokensCreateSynopsis = "Mint a new API token"
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const tokensListSynopsis = "List token prefixes + metadata"
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const tokensRevokeSynopsis = "Mark a token revoked"
+
+// #nosec G101 -- This is public CLI help text, not a credential value.
+const tokensSynopsis = "Manage team credentials"
+
 var commandSynopses = map[string]string{
 	"sparkwing operator teams":                      "Create teams under operator authority",
 	"sparkwing operator teams show":                 "Show a team and its protected node label",
@@ -486,12 +534,12 @@ var commandSynopses = map[string]string{
 	"sparkwing operator object-store reset-breaker": "Clear a tripped object-store budget or ceiling freeze",
 	"sparkwing operator object-store status":        "Show the controller's object-store request budget",
 	"sparkwing operator secrets":                    "Maintain the controller's sealed values",
-	"sparkwing operator secrets rotate":             "Reseal every stored secret and key under the current key",
+	"sparkwing operator secrets rotate":             operatorSecretsRotateSynopsis,
 	"sparkwing operator tokens":                     "Manage deployment service credentials",
 	"sparkwing operator tokens create":              "Issue a deployment service credential",
 	"sparkwing operator tokens list":                "List deployment service credentials",
-	"sparkwing operator tokens revoke":              "Revoke a deployment service credential",
-	"sparkwing operator tokens rotate":              "Rotate a deployment service credential",
+	"sparkwing operator tokens revoke":              operatorTokensRevokeSynopsis,
+	"sparkwing operator tokens rotate":              operatorTokensRotateSynopsis,
 	"sparkwing pipeline":                            "This repo's pipelines",
 	"sparkwing pipeline describe":                   "Print one pipeline's full metadata",
 	"sparkwing pipeline hooks":                      "Install / uninstall git pre-commit + pre-push + post-commit hooks",
@@ -578,12 +626,12 @@ var commandSynopses = map[string]string{
 	"sparkwing secrets delete":                      "Remove a secret",
 	"sparkwing secrets get":                         "Read a secret's value",
 	"sparkwing secrets list":                        "List secret names + metadata",
-	"sparkwing secrets rotate":                      "Re-encrypt every stored secret under the current key",
-	"sparkwing secrets set":                         "Store (or replace) a secret value",
-	"sparkwing tokens":                              "Manage team credentials",
-	"sparkwing tokens create":                       "Mint a new API token",
-	"sparkwing tokens list":                         "List token prefixes + metadata",
-	"sparkwing tokens revoke":                       "Mark a token revoked",
+	"sparkwing secrets rotate":                      secretsRotateSynopsis,
+	"sparkwing secrets set":                         secretsSetSynopsis,
+	"sparkwing tokens":                              tokensSynopsis,
+	"sparkwing tokens create":                       tokensCreateSynopsis,
+	"sparkwing tokens list":                         tokensListSynopsis,
+	"sparkwing tokens revoke":                       tokensRevokeSynopsis,
 	"sparkwing tokens rotate":                       "Mint a replacement token with a grace window",
 	"sparkwing update":                              "Update the CLI binary",
 	"sparkwing pipeline upgrade":                    "Upgrade repository SDK pins",

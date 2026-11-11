@@ -95,6 +95,10 @@ type deployEnv struct {
 }
 
 func defaultDeployConfig() deployConfig {
+	// #nosec G101 -- This is a parameter-store path, not its secret value.
+	const smokeSubmitTokenParameter = "/kikd-prod/sparkwing/deploy/scan-submit-token"
+	// #nosec G101 -- This is a parameter-store path, not its secret value.
+	const stagingGateTokenParameter = "/kikd-prod/sparkwing/deploy/staging-gate-token"
 	const ecr = "633280902600.dkr.ecr.us-west-2.amazonaws.com"
 	return deployConfig{
 		Region:   "us-west-2",
@@ -111,12 +115,11 @@ func defaultDeployConfig() deployConfig {
 		ReferenceName:  "hello",
 		CommitName:     "Sparkwing deploy",
 		CommitEmail:    "deploy@sparkwing.dev",
-		// #nosec G101 -- These are parameter-store paths, not the secret values stored there.
 		Params: deployParams{
 			GitopsKey:    "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
 			ReferenceKey: "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
-			StagingToken: "/kikd-prod/sparkwing/deploy/staging-gate-token",
-			SmokeToken:   "/kikd-prod/sparkwing/deploy/scan-submit-token",
+			StagingToken: stagingGateTokenParameter,
+			SmokeToken:   smokeSubmitTokenParameter,
 		},
 		Staging: deployEnv{
 			Name:                 "staging",

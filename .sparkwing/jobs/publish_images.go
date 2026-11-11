@@ -331,7 +331,7 @@ func tarFileSHA256(r io.Reader, path string) (string, bool, error) {
 			continue
 		}
 		sum := sha256.New()
-		// #nosec G110 -- tar.Reader bounds this read to the current entry header size; it does not drain the decompressor.
+		// #nosec G110 -- Release-built image bytes stream into SHA-256 without buffering or writing them to disk.
 		if _, err := io.Copy(sum, tr); err != nil {
 			return "", false, err
 		}
