@@ -728,8 +728,10 @@ Service credentials cannot submit provider outcomes or grant team credit.
 ## Deployment bootstrap
 
 Mount `bootstrap-admin-token` in the controller's `--credentials-dir`. Its value
-is `swk_` followed by the unpadded base64url encoding of 32 random bytes. Startup
-passes it to the once-only bootstrap transaction before opening the listener.
+is `swk_` followed by the unpadded base64url encoding of 32 cryptographically
+random bytes. Constant-byte placeholders, including an all-zero payload, are
+refused at startup. Startup passes a valid seed to the once-only bootstrap
+transaction before serving requests.
 The store keeps its digest and grants `operator.limits`, `operator.object_store`
 and `operator.tokens`. It grants no team membership, `runs.read`, `runs.write`,
 runner enrollment or operator-console authority.
@@ -737,7 +739,7 @@ runner enrollment or operator-console authority.
 A live seed can be reused while setup is unfinished. Issuing the first real
 deployment administrator closes the gate, revokes the seed and its descendants,
 in one transaction. Remove the mounted seed
-after that handoff. A seed left mounted after its handoff only logs a warning
+after that handoff. A valid seed left mounted after its handoff only logs a warning
 at startup, because its digest matches the one that bootstrapped the store; a
 different seed still stops startup. An empty input provisions nothing. Private
 routes require live credentials even on an empty store. `--require-auth`, which

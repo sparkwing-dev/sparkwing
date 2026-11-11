@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"slices"
@@ -55,7 +56,8 @@ func TestEnsureBootstrapAdminTokenRefusals(t *testing.T) {
 	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), issuer, ""); err != nil || created || calls != 0 {
 		t.Fatalf("empty/invalid seed reached issuer: %d %v", calls, err)
 	}
-	raw := "swk_" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	payload := sha256.Sum256([]byte("valid-bootstrap-refusal-fixture"))
+	raw := "swk_" + base64.RawURLEncoding.EncodeToString(payload[:])
 	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), issuer, raw); err == nil || created || calls != 1 {
 		t.Fatal("commit refusal suppressed")
 	}

@@ -77,7 +77,8 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 }
 
 func storeNativeBootstrapSpec() capability.ProvisionSpec {
-	return capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
+	payload := sha256.Sum256([]byte("store-native-bootstrap-fixture"))
+	return capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(payload[:]), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
 }
 
 func TestStoreProvisioningOrigins(t *testing.T) {
@@ -87,7 +88,8 @@ func TestStoreProvisioningOrigins(t *testing.T) {
 }
 
 func acceptanceBootstrap(ctx context.Context, s *store.Store) (capability.Issued, error) {
-	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	payload := sha256.Sum256([]byte("store-native-bootstrap-fixture"))
+	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(payload[:])
 	_, err := s.AsOperator().EnsureBootstrapCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: raw, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}})
 	if err != nil {
 		return capability.Issued{}, err

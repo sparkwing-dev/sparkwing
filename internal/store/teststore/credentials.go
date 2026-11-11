@@ -15,7 +15,8 @@ import (
 
 // ProvisionCredential creates a current-schema root through the real issuer.
 func ProvisionCredential(ctx context.Context, st *store.Store, spec capability.ProvisionSpec) (string, *capability.Capability, error) {
-	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	payload := sha256.Sum256([]byte("store-native-bootstrap-fixture"))
+	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(payload[:])
 	bootstrap := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
 	if _, err := st.AsOperator().EnsureBootstrapCapability(ctx, bootstrap); err != nil {
 		return "", nil, err

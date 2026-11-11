@@ -43,6 +43,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func main() {
@@ -669,6 +670,10 @@ func ensureBootstrapAdmin(ctx context.Context, st *store.Store, seed string, log
 	case errors.Is(err, store.ErrBootstrapSeedConsumed):
 		logger.Warn("the " + credBootstrapAdminToken + " credential already bootstrapped this store; remove it from the credentials directory")
 	case err != nil:
+		var refusal *apierr.Error
+		if errors.As(err, &refusal) && refusal.Hint != "" {
+			return fmt.Errorf("bootstrap admin token: %w. %s", err, refusal.Hint)
+		}
 		return fmt.Errorf("bootstrap admin token: %w", err)
 	case created:
 		logger.Info("bootstrap admin token created", "principal", controller.BootstrapAdminPrincipal)
