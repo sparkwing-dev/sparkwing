@@ -94,7 +94,7 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			award, err := control.Claim(t.Context(), "cloud", nil)
+			award, _, err := control.Claim(t.Context(), "cloud", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -421,11 +421,11 @@ func (c capacityBackoffControl) Sync(ctx context.Context, observations []CloudJo
 	return c.CloudControl.Sync(ctx, observations)
 }
 
-func (c capacityBackoffControl) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+func (c capacityBackoffControl) Claim(context.Context, string, []string) (*CloudJobAward, time.Duration, error) {
 	if !c.backoff {
-		return nil, nil
+		return nil, 0, nil
 	}
-	return nil, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(240000)}}
+	return nil, 0, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(240000)}}
 }
 
 // hack: an old controller's strict decoder refuses the ceiling field, so the real handler gets an

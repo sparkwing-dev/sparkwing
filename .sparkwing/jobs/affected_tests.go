@@ -102,22 +102,24 @@ type affectedTestPlan struct {
 	critical      map[string][]string
 }
 
+const affectedTestGoFlags = "-mod=readonly"
+
 func runAffectedTest(ctx context.Context) error {
 	files, scope, err := affectedChangeScope(ctx)
 	if err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, scope)
+	return runAffectedTestFiles(ctx, files, scope, currentHost())
 }
 
 // perf: land passes the files a merge of origin/main changed, so a clean merge
 // re-runs only the packages main touched instead of the whole gate.
-func runAffectedTestFiles(ctx context.Context, files []string, scope string) error {
+func runAffectedTestFiles(ctx context.Context, files []string, scope string, host hostShape) error {
 	critical, err := criticalTests(ctx)
 	if err != nil {
 		return err
 	}
-	plans, byDir, err := planAffectedModules(ctx, files, critical)
+	plans, byDir, err := planAffectedModules(ctx, files, critical, affectedTestGoFlags)
 	if err != nil {
 		return err
 	}
@@ -154,13 +156,15 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string) err
 			}
 		}
 	}
+	// safety: a nonempty owned flag overrides saved GOFLAGS too, while keeping
+	// the Go configuration that supplies private module and proxy settings.
 	var timings goTestTimings
 	defer timings.report(ctx, time.Now())
 	return withStableProductTestHome("gate-test", func(home string) error {
 		var failures []string
 		for _, p := range plans {
-			for _, command := range p.commands(currentHost()) {
-				script := productTestScript(fmt.Sprintf("cd %q && %s", p.module, command), home)
+			for _, command := range p.commands(host) {
+				script := productTestScript(fmt.Sprintf("cd %q && GOFLAGS=%s %s", p.module, shellQuote(affectedTestGoFlags), command), home)
 				if err := timings.run(ctx, script); err != nil {
 					failures = append(failures, describeModuleFailure(p.module, err))
 				}
@@ -174,7 +178,7 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string) err
 	})
 }
 
-func planAffectedModules(ctx context.Context, files []string, critical map[string]map[string][]string) ([]affectedTestPlan, map[string]string, error) {
+func planAffectedModules(ctx context.Context, files []string, critical map[string]map[string][]string, goFlags string) ([]affectedTestPlan, map[string]string, error) {
 	modules, err := committedModuleDirs(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -183,7 +187,7 @@ func planAffectedModules(ctx context.Context, files []string, critical map[strin
 	var plans []affectedTestPlan
 	modulePackages := make(map[string][]modulePackage)
 	for _, module := range modules {
-		packages, err := listModulePackages(ctx, module)
+		packages, err := listModulePackages(ctx, module, goFlags)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", module, err)
 		}
@@ -237,7 +241,7 @@ func runAffectedCompileCheck(ctx context.Context, verb string) error {
 }
 
 func runAffectedCompileFiles(ctx context.Context, verb string, files []string) error {
-	plans, _, err := planAffectedModules(ctx, files, nil)
+	plans, _, err := planAffectedModules(ctx, files, nil, os.Getenv("GOFLAGS"))
 	if err != nil {
 		return err
 	}
@@ -413,9 +417,9 @@ func owningPackage(rel string, byDir map[string]string) string {
 	}
 }
 
-func listModulePackages(ctx context.Context, module string) ([]modulePackage, error) {
+func listModulePackages(ctx context.Context, module, goFlags string) ([]modulePackage, error) {
 	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}{{"\t"}}{{if or .GoFiles .CgoFiles}}1{{else}}0{{end}}`
-	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).Env("GOWORK", "auto").String()
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).Env("GOWORK", "auto").Env("GOFLAGS", goFlags).String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
 	}
@@ -449,7 +453,7 @@ func affectedChangeScope(ctx context.Context) ([]string, string, error) {
 		return nil, "", fmt.Errorf("list the staged change: %w", err)
 	}
 	if len(staged) > 0 {
-		files, err := listNames(ctx, "diff --cached -z --name-only --no-renames --diff-filter=ACMRD")
+		files, err := listNames(ctx, "diff --cached -z --name-only --no-renames")
 		if err != nil {
 			return nil, "", err
 		}
@@ -459,7 +463,7 @@ func affectedChangeScope(ctx context.Context) ([]string, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	changed, err := listNames(ctx, "diff -z --name-only --no-renames --diff-filter=ACMRD "+base)
+	changed, err := listNames(ctx, "diff -z --name-only --no-renames "+base)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the change since %s: %w", base, err)
 	}
@@ -595,7 +599,7 @@ func frontendChange(ctx context.Context, browser bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	packages, err := listModulePackages(ctx, ".")
+	packages, err := listModulePackages(ctx, ".", os.Getenv("GOFLAGS"))
 	if err != nil {
 		return "", err
 	}
@@ -675,7 +679,7 @@ func repoGoChange(ctx context.Context) (string, error) {
 	}
 	byDir := map[string]string{}
 	for _, module := range modules {
-		packages, err := listModulePackages(ctx, module)
+		packages, err := listModulePackages(ctx, module, os.Getenv("GOFLAGS"))
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", module, err)
 		}

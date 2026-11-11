@@ -57,7 +57,7 @@ func TestClosedBreakerFailsWaitingAwardOnce(t *testing.T) {
 	if err != nil || len(pods.Items) != 0 || len(l.waitingAwards()) != 0 || *failures != 1 {
 		t.Fatalf("closed breaker: failures=%d pods=%v waiting=%d err=%v", *failures, pods, len(l.waitingAwards()), err)
 	}
-	if !strings.Contains(logs.String(), "budget breaker is closed") || !strings.Contains(logs.String(), "support_reference=run") {
+	if !strings.Contains(logs.String(), "budget breaker is closed") || !strings.Contains(logs.String(), "support_reference=run") || !strings.Contains(logs.String(), "level=ERROR") {
 		t.Fatalf("operator log: %s", logs.String())
 	}
 }

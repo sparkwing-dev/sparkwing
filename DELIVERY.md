@@ -149,11 +149,21 @@ a different repository must define its own landing policy before using it.
 
 The pre-push hook runs its six fast checks for every push. Updates targeting
 `refs/heads/main` then run `affected-tests`; branch pushes finish after the fast
-checks. An explicit `sparkwing run pre-push` also runs the test phase. Queued Land
+checks. Each non-deletion main update must name the checked-out HEAD's OID;
+`git push origin topic:main` from another commit is refused with a checkout
+remedy before test selection. Every ref update is inspected, including main updates
+after other refs. Deletions add no affected tests. An explicit
+`sparkwing run pre-push` also runs the test phase. Queued Land
 runs that same test job after policy and its combined fast-check/review job.
 Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.
+
+Affected tests for main use the remote OID Git advertises on hook stdin,
+independently of local `origin/main`. Main updates must fast-forward; a rewind
+or unverified remote base is refused with a fetch remedy. Creating
+main selects every committed Go module's short tests and the full critical set.
+All changes count, including type changes and both paths of renames.
 
 The job reuses the hosted Gate's package planner and command runner. It runs
 `go test -short` over the reverse dependency closure, including test imports
@@ -161,8 +171,19 @@ and registered file readers, then the critical set without `-short` when Go
 inputs changed. Changelog-only changes select no tests. Other documentation
 runs its registered readers. The `affected-tests` job has a 45-minute execution deadline,
 separate from the fast checks' one-minute warning. Each Go package retains its
-25-minute timeout. The job reserves its Go command parallelism and reports
-package counts, critical-test counts, failures, package timings and test timings.
+25-minute timeout. The local test job uses `max(1, (NumCPU-1)/2)` for both
+its scheduling reservation and Go command width: seven on a 16-CPU host,
+regardless of the submitter's `GOMAXPROCS` or the SDK's `CI` marker. This is
+not an aggregate CPU cap: seven test processes can each use seven Go execution
+threads, besides compiler and nested subprocess work. The job reports package
+counts, critical-test counts, failures, package timings and test timings.
+
+The shared affected-test runner sets nonempty `GOFLAGS=-mod=readonly` for
+selection and execution. This overrides process and saved flags while keeping
+other saved Go settings, including `GOPROXY`, `GOPRIVATE` and `GONOSUMDB`.
+Hosted affected Gate and ordinary Land's merge recheck use that same flag
+policy and retain their existing CPU policy. Other affected build and vet
+checks keep their existing flag and runtime CPU policies.
 
 The affected runner installs missing locked SDK dependencies with
 `npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund` when
@@ -182,10 +203,38 @@ Warm-build-cache observations on Go 1.26.10, with `GOMAXPROCS=2`, `-p 2`,
 The separate 37-critical-test invocation took 14.99 s and passed. These are
 individual observations on shared hardware, with SDK and dashboard dependencies
 installed. The broad short commands took 65.67 s in the pipeline module and
-1367.27 s in the root module. The 45-minute job ceiling leaves about 21 minutes
-beyond that observed short workload for setup, machine load and package-timeout
-diagnostics. It is an execution ceiling, not a latency target or a guarantee
-for every change shape.
+1367.27 s in the root module. That observation originally justified the
+45-minute job ceiling. It is an execution ceiling, not a latency target or a
+guarantee for every change shape.
+
+A matching-width replay on 2026-11-11 pinned source `15834b6d4`, Go 1.26.10,
+the same 13-file selection, warm compilation and `-count=1`. It selected two
+pipeline packages, 66 root packages and 37 critical declarations in ten
+packages. Modules and short/critical commands ran sequentially:
+
+| Command allowance (`GOMAXPROCS` / `-p`) | Pipeline short | Root short | Critical | Replay wall | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 1 / 1 | 164.48 s | 1941.21 s | 24.33 s | 2130.45 s | Passed |
+| 7 / 7 | 91.90 s | 662.59 s | 8.98 s | 763.88 s | Passed |
+
+The seven-worker observation was 64.1% shorter and left 32m16s below the
+45-minute ceiling. Retain that ceiling for wider changes, cold dependency or
+build preparation, shared-host load and timeout diagnostics. Two completed
+local queued lands also recorded 664 s and 729 s at `-p 8`; those used different
+revisions and selections and are operational context, not the matched replay.
+The earlier inherited-limit land exceeded 45 minutes before completing its
+66 root packages and critical set.
+
+Both replay widths used empty process `GOFLAGS`, private homes and no saved
+Go environment file, isolating command width. They do not time the later
+explicit readonly-flag correction, which has separate unit and native
+execution proof. Both entered the same 8,592 top-level tests; root and critical
+outcomes matched. One pipeline capacity guard skipped at width one and passed
+at seven. All 30 Linux critical bodies passed; seven other selected declarations
+are Windows-only. Root test-package lifetimes peaked at one and seven concurrent
+packages. These are single shared-host observations: mean one-minute load,
+including the replay, was 12.47 and 22.47 respectively. Replay wall includes
+less than half a second of driver bookkeeping.
 
 An installed-candidate controller test-file change selected 2 pipeline and 36
 root packages plus the full critical set. With native `GOMAXPROCS=8`, `-p 8`,
@@ -294,8 +343,9 @@ tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
 pushed commit's tree is the tree the gate judged or the merged tree whose
-delta passed its recheck. The gate and merge-delta recheck cover affected tests,
-so Land's own push skips the hook without repeating those bodies. It carries the
+delta passed its recheck. The gate and merge-delta recheck cover all six fast
+push checks and affected tests, so Land's own push skips the hook without
+repeating those bodies. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. After a refused
 push, the step fetches main and checks its ancestry. It merges main only when
 main is not an ancestor of the pushed commit. Otherwise it preserves the
@@ -308,10 +358,12 @@ merges it into the branch in the checkout (`git merge --no-ff`, the default
 git identity and signing; never a rebase). Independent changelog and migration
 fragments merge as separate files. Orientation table additions use union merge;
 changes to the same rule need review. The push step
-then runs `go build` in every module
-and the affected-test selection over the files that differ between the gated
-tree and the merged tree, then pushes the merge. The review is not run again:
-it judged the branch's own diff, and the re-check covers what the merge
+then builds the affected package closure and repeats the changelog, OpenAPI,
+API-snapshot, default and qatrust vet, and fast lint checks on the merged tree.
+Vet and lint cover both the branch range and the merge delta, including new
+packages from main. It runs affected tests once over the files that differ
+between the gated tree and the merged tree, then pushes the merge. The review
+is not run again: it judged the branch's own diff, and the re-check covers what the merge
 brought in. It
 merges at most three times per land. A conflict aborts the merge, leaves the
 branch as the gate judged it and names `git merge origin/main` to run by hand.
@@ -1092,7 +1144,9 @@ file. Other syntax and workflow checks remain active.
   tasks, up to 9 cores. Smaller runners divide their available cores across
   the tasks. After that phase passes, a separate `affected-tests` job runs
   the shared affected short and critical Go tests for main updates (and explicit
-  manual runs). Branch pushes keep the fast checks alone.
+  manual runs). Branch pushes keep the fast checks alone. The
+  [local affected-test policy](#local-affected-go-tests) defines its scheduling
+  reservation, explicit command width and owned Go flags.
   The tiers shift left, so a
   push whose commits skipped the commit hook is judged by `gate` rather than a second
   time here. Rebase replay does not fire pre-commit, and automatic merges use
