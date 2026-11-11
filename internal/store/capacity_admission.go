@@ -285,7 +285,7 @@ func checkStartPermitTx(ctx context.Context, tx *storeTx, team Team, row runstat
 	return err
 }
 
-// RelinquishStart returns a provisional burst award when compute cannot start it.
+// RelinquishStart returns an unstarted award when the host cannot start or queue it.
 // Readiness keeps its original timestamp so placement ranking does not restart.
 func (t *Tenant) RelinquishStart(ctx context.Context, b runstate.CapacityBinding, actor runstate.Actor) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
@@ -310,7 +310,7 @@ func (t *Tenant) RelinquishStart(ctx context.Context, b runstate.CapacityBinding
 	})
 }
 
-func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, runID, nodeID, scope, group string) (string, error) {
+func capacityScopeKey(runID, nodeID, scope, group, host string) (string, error) {
 	level := "job"
 	if nodeID == "" {
 		level = "plan"
@@ -324,19 +324,30 @@ func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.Author
 	case "run":
 		return runspec.ConcurrencyKey(level, scope, runID, group), nil
 	case "box":
-		chain, err := authorityChainTx(ctx, tx, authority, false)
-		if err != nil {
-			return "", err
+		if host != "" {
+			return runspec.ConcurrencyKey(level, scope, host, group), nil
 		}
-		c := chain[0].principal.Capability
-		if c.Unit != "" && c.ExecutionHost != "" {
-			return runspec.ConcurrencyKey(level, scope, c.ExecutionHost, group), nil
-		}
-		if c.Unit != "" {
-			for _, node := range chain {
-				if capability.Launcher(node.principal.Capability) {
-					return "", errLauncherHostPending
-				}
+		return "", errLauncherHostPending
+	}
+	return "", bindingRefusal()
+}
+
+func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, runID, nodeID, scope, group string) (string, error) {
+	if scope != "box" || nodeID == "" {
+		return capacityScopeKey(runID, nodeID, scope, group, "")
+	}
+	chain, err := authorityChainTx(ctx, tx, authority, false)
+	if err != nil {
+		return "", err
+	}
+	c := chain[0].principal.Capability
+	if c.Unit != "" && c.ExecutionHost != "" {
+		return capacityScopeKey(runID, nodeID, scope, group, c.ExecutionHost)
+	}
+	if c.Unit != "" {
+		for _, node := range chain {
+			if capability.Launcher(node.principal.Capability) {
+				return "", errLauncherHostPending
 			}
 		}
 	}

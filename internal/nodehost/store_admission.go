@@ -19,6 +19,7 @@ func WithAdmissionWait(ctx context.Context, suspend func() (resume func(context.
 }
 
 // AdmissionWait suspends inventory until admission succeeds or the wait ends.
+// A nil resume means the host must return its unstarted claim instead of waiting.
 func AdmissionWait(ctx context.Context) (resume func(context.Context), stop func()) {
 	if suspend, ok := ctx.Value(admissionWaitKey{}).(func() (func(context.Context), func())); ok {
 		return suspend()
@@ -45,7 +46,7 @@ type admissionFailure struct {
 func (e *admissionFailure) Error() string { return e.Err.Error() }
 func (e *admissionFailure) Unwrap() error { return e.Err }
 
-func awaitStart(ctx context.Context, state CapacityStore, binding runstate.CapacityBinding, actor runstate.Actor, queued func(runstate.AcquireSlotResponse) error) error {
+func awaitStart(ctx context.Context, state CapacityStore, binding runstate.CapacityBinding, actor runstate.Actor, queued func(runstate.AcquireSlotResponse) error) (bool, error) {
 	tick := time.NewTimer(waiterPoll)
 	defer tick.Stop()
 	delay := waiterPoll
@@ -54,43 +55,46 @@ func awaitStart(ctx context.Context, state CapacityStore, binding runstate.Capac
 	defer func() { stop() }()
 	for {
 		if err := context.Cause(ctx); err != nil {
-			return err
+			return false, err
 		}
 		response, err := state.MayStart(ctx, binding, actor)
 		if err != nil {
-			return err
+			return false, err
 		}
 		switch response.Kind {
 		case runstate.AcquireGranted, runstate.AcquireCancellingOthers:
 			if resume != nil {
 				resume(ctx)
 			}
-			return context.Cause(ctx)
+			return true, context.Cause(ctx)
 		case runstate.AcquireSkipped:
-			return &admissionFailure{Outcome: runstate.NodeSkipped, Err: errors.New("concurrency capacity is full"), committed: true}
+			return false, &admissionFailure{Outcome: runstate.NodeSkipped, Err: errors.New("concurrency capacity is full"), committed: true}
 		case runstate.AcquireFailed:
 			failure := errors.New("concurrency capacity is full")
 			if response.FailureReason == store.FailureQueueTimeout {
 				failure = errQueueTimeout
 			}
-			return &admissionFailure{Outcome: runstate.NodeFailed, Reason: response.FailureReason, Err: failure, committed: true}
+			return false, &admissionFailure{Outcome: runstate.NodeFailed, Reason: response.FailureReason, Err: failure, committed: true}
 		case runstate.AcquireQueued:
 			if resume == nil {
 				resume, stop = AdmissionWait(ctx)
+				if resume == nil {
+					return false, state.RelinquishStart(ctx, binding, actor)
+				}
 			}
 			if queued != nil {
 				if err := queued(response); err != nil {
-					return err
+					return false, err
 				}
 				queued = nil
 			}
 		default:
-			return errors.New("start decision is unknown")
+			return false, errors.New("start decision is unknown")
 		}
 		tick.Reset(delay)
 		select {
 		case <-ctx.Done():
-			return context.Cause(ctx)
+			return false, context.Cause(ctx)
 		case <-tick.C:
 		}
 		delay = min(2*delay, time.Second)

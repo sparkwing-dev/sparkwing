@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -18,8 +19,12 @@ func (f *storeHostFixture) report(ctx context.Context, input NodeInput, outcome 
 		_, err := f.State.TransitionNode(ctx, store.ReportNode{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt), Outcome: outcome, Result: &runstate.NodeResult{Outcome: outcome}})
 		return err
 	}
-	if err := awaitStart(ctx, f.Tenant, runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, actor, nil); err != nil {
+	granted, err := awaitStart(ctx, f.Tenant, runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, actor, nil)
+	if err != nil {
 		return err
+	}
+	if !granted {
+		return errors.New("test report did not receive admission")
 	}
 	started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt)})
 	if err != nil {

@@ -31,9 +31,13 @@ offer only kinds with available capacity and stop while job capacity is full.
 Jobs queued for concurrency admission and child awaits release their runner
 slots so waiting siblings cannot starve child planning. A returning wait
 reacquires its slot before source preparation or SDK execution continues.
-Admission waiters count with active work against `MaxConcurrent` when sizing job
-claims. Plan and eval claims remain available when that waiter budget is full.
-Queued admission polls back off from 100 milliseconds to one second. Refused or
+Claim selection leaves jobs unclaimed while their queue-policy groups have no
+capacity. It reuses admission's scoped keys, weighted budgets and FIFO checks;
+selection reserves no group and retries against current state on every poll.
+At most `MaxConcurrent` admission race waiters suspend inventory per runner.
+Further race losers return their unstarted claims through `RelinquishStart`.
+Plan, eval and runnable child jobs keep their own work inventory. Queued
+admission polls back off from 100 milliseconds to one second. Refused or
 cancelled waiters leave inventory released. Child awaits do not consume the
 no-progress budget. Cancellation
 unblocks slot acquisition. `TestLoopAwaitResumeWaitsForRunnerSlot` covers

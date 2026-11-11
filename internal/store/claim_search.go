@@ -129,6 +129,14 @@ func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 		conditions = append(conditions, run+` IN (SELECT id FROM bound_runs)`)
 	}
 
+	if kind == capability.UnitNode && q.afterNode != nil {
+		after := q.afterNode
+		conditions = append(conditions, `(`+alias+`.ready_at,`+alias+`.run_id,`+alias+`.node_id)>(`+q.param(after.Arrived)+`,`+q.param(string(after.Unit.RunID))+`,`+q.param(string(after.Unit.NodeID))+`)`)
+	}
+	if kind == capability.UnitNode && len(q.excludedUnits) > 0 {
+		raw, _ := json.Marshal(q.excludedUnits)
+		conditions = append(conditions, `NOT EXISTS (SELECT 1 FROM `+q.array(q.param(string(raw)), "blocked_capacity")+` WHERE `+q.at("blocked_capacity.value", "RunID")+`=`+alias+`.run_id AND `+q.at("blocked_capacity.value", "NodeID")+`=`+alias+`.node_id)`)
+	}
 	if len(conditions) == 0 {
 		return `1=1`
 	}
@@ -469,31 +477,41 @@ func claimProofFactsTx(ctx context.Context, tx *storeTx, heads []claimHead, fact
 }
 
 func firstEligibleRouteTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL, route claimHead, kinds []capability.UnitKind) (claimHead, error) {
-	outer := claimSQL{dialect: template.dialect, team: string(route.Team), search: true, requirement: route.Requirements, context: route.Context}
-	clock := outer.param(template.now)
-	source := outer.source(kinds)
-	teams := slices.DeleteFunc(slices.Clone(template.teams), func(team claimTeamFacts) bool { return team.Team != string(route.Team) })
-	facts := claimFactsForTeams(template.facts, map[string]bool{string(route.Team): true})
-	inner := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow, candidate: true, placementFree: template.placementFree, preferencesFree: template.preferencesFree}
-	queued := demand
-	queued.Target = nil
-	eligible, err := inner.query(facts, teams, template.rates, kinds, queued, template.now)
-	if err != nil {
-		return claimHead{}, err
+	var after *claimHead
+	for {
+		outer := claimSQL{dialect: template.dialect, team: string(route.Team), search: true, requirement: route.Requirements, context: route.Context, afterNode: after}
+		clock := outer.param(template.now)
+		source := outer.source(kinds)
+		teams := slices.DeleteFunc(slices.Clone(template.teams), func(team claimTeamFacts) bool { return team.Team != string(route.Team) })
+		facts := claimFactsForTeams(template.facts, map[string]bool{string(route.Team): true})
+		inner := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow, candidate: true, placementFree: template.placementFree, preferencesFree: template.preferencesFree}
+		queued := demand
+		queued.Target = nil
+		eligible, err := inner.query(facts, teams, template.rates, kinds, queued, template.now)
+		if err != nil {
+			return claimHead{}, err
+		}
+		order := `candidate.arrived,candidate.run_id`
+		if len(kinds) != 1 || kinds[0] == capability.UnitNode || kinds[0] == capability.UnitEval {
+			order += `,candidate.node_id`
+		}
+		if len(kinds) != 1 || kinds[0] == capability.UnitEval {
+			order += `,candidate.source_generation`
+		}
+		query := `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)) SELECT candidate.team,candidate.run_id,candidate.node_id,candidate.source_generation,candidate.kind,candidate.arrived FROM (` + source + `) candidate WHERE EXISTS (` + eligible + `) ORDER BY ` + order + ` LIMIT 1`
+		args := append(outer.args, inner.args...)
+		head := route
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&head.Team, &head.Unit.RunID, &head.Unit.NodeID, &head.Unit.SourceGeneration, &head.Unit.Kind, &head.Arrived)
+		if errors.Is(err, sql.ErrNoRows) {
+			return claimHead{}, notFound("eligible work", "")
+		}
+		if err != nil {
+			return claimHead{}, err
+		}
+		ready, err := claimCapacityReadyTx(ctx, tx, demand.CapabilityPrefix, head.Team, head.Unit)
+		if err != nil || ready {
+			return head, err
+		}
+		after = &head
 	}
-	order := `candidate.arrived,candidate.run_id`
-	if len(kinds) != 1 || kinds[0] == capability.UnitNode || kinds[0] == capability.UnitEval {
-		order += `,candidate.node_id`
-	}
-	if len(kinds) != 1 || kinds[0] == capability.UnitEval {
-		order += `,candidate.source_generation`
-	}
-	query := `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)) SELECT candidate.team,candidate.run_id,candidate.node_id,candidate.source_generation,candidate.kind,candidate.arrived FROM (` + source + `) candidate WHERE EXISTS (` + eligible + `) ORDER BY ` + order + ` LIMIT 1`
-	args := append(outer.args, inner.args...)
-	head := route
-	err = tx.QueryRowContext(ctx, query, args...).Scan(&head.Team, &head.Unit.RunID, &head.Unit.NodeID, &head.Unit.SourceGeneration, &head.Unit.Kind, &head.Arrived)
-	if errors.Is(err, sql.ErrNoRows) {
-		return claimHead{}, notFound("eligible work", "")
-	}
-	return head, err
 }

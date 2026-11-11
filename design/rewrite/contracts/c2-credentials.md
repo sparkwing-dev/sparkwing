@@ -3529,3 +3529,20 @@ retry, without reclassifying the source envelope.
 Secret preflight, plan validation, pool restrictions and release use the same row
 selector. Its explicit scope is pipeline, shared-only or none. Shared-only scope
 cannot select an unshared team secret or a pipeline secret.
+
+### Claim concurrency precheck
+
+Claim search and its transactional award recheck leave a job unclaimed when its
+queue-policy group cannot admit it. They reuse admission's scope key, effective
+weighted capacity and earlier-waiter checks. Selection reserves no concurrency
+holder and does not change readiness or queue order. A later poll and another
+runner see current capacity, so releasing a group makes the job eligible again.
+Skip, fail and cancel-others policies continue through the admission boundary.
+Box-scoped checks use the authenticated execution host. Launcher awards whose
+host is not selected yet defer that check to admission after activation.
+
+Capacity can change after selection. The runner keeps at most its concurrency
+limit in suspended admission waits, polls those waits with exponential backoff
+up to one second, and returns further unstarted race losses to the store.
+A suspended waiter does not consume work inventory for a runnable child job.
+Only successful admission reacquires work inventory before source preparation.

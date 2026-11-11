@@ -376,7 +376,7 @@ func TestStalledLogUploaderInitializationDoesNotDelayAnotherJobsReport(t *testin
 				t.Fatalf("award: %+v %v", award, err)
 			}
 			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}}
-			if err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: node, Generation: int64(actor.Generation)}, actor, nil); err != nil {
+			if granted, err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: node, Generation: int64(actor.Generation)}, actor, nil); err != nil || !granted {
 				t.Fatal(err)
 			}
 			if _, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &award.Node.Attempt}); err != nil {
@@ -550,7 +550,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 				input := storedExecutionInput(t, f, &ClaimedNodeHost{})
 				ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"}
 				actor := executorActor(input)
-				if err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: "job", Generation: int64(actor.Generation)}, actor, nil); err != nil {
+				if granted, err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: "job", Generation: int64(actor.Generation)}, actor, nil); err != nil || !granted {
 					t.Fatal(err)
 				}
 				started, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &input.Attempt})
@@ -705,7 +705,7 @@ func TestRetrySealsPreviousAttemptBeforeFenceAdvances(t *testing.T) {
 		input := storedExecutionInput(t, f, &ClaimedNodeHost{})
 		ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"}
 		actor := executorActor(input)
-		if err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: "job", Generation: int64(actor.Generation)}, actor, nil); err != nil {
+		if granted, err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: "job", Generation: int64(actor.Generation)}, actor, nil); err != nil || !granted {
 			t.Fatal(err)
 		}
 		started, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &input.Attempt})

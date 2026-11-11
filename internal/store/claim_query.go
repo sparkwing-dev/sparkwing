@@ -230,6 +230,8 @@ func recordClaimAwardTx(ctx context.Context, tx *storeTx, team Team) error {
 }
 
 type claimSQL struct {
+	afterNode       *claimHead
+	excludedUnits   []UnitRef
 	placementFree   bool
 	preferencesFree bool
 	heads           []claimHead
@@ -856,13 +858,30 @@ func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []c
 }
 
 func queryClaimTx(ctx context.Context, tx *storeTx, q *claimSQL, query string) (UnitRef, error) {
-	var team Team
-	var unit UnitRef
-	err := tx.QueryRowContext(ctx, query, q.args...).Scan(&team, &unit.RunID, &unit.NodeID, &unit.SourceGeneration, &unit.Kind)
-	if errors.Is(err, sql.ErrNoRows) {
-		return UnitRef{}, notFound("eligible work", "")
+	for {
+		var team Team
+		var unit UnitRef
+		err := tx.QueryRowContext(ctx, query, q.args...).Scan(&team, &unit.RunID, &unit.NodeID, &unit.SourceGeneration, &unit.Kind)
+		if errors.Is(err, sql.ErrNoRows) {
+			return UnitRef{}, notFound("eligible work", "")
+		}
+		if err != nil {
+			return UnitRef{}, err
+		}
+		ready, err := claimCapacityReadyTx(ctx, tx, q.facts[0].Prefix, team, unit)
+		if err != nil || ready {
+			return unit, err
+		}
+		if q.target != nil {
+			return UnitRef{}, errClaimCapacityUnavailable
+		}
+		q.excludedUnits = append(q.excludedUnits, unit)
+		q.args = nil
+		query, err = q.query(q.facts, q.teams, q.rates, q.kinds, UnitDemand{CapabilityPrefix: q.facts[0].Prefix}, q.now)
+		if err != nil {
+			return UnitRef{}, err
+		}
 	}
-	return unit, err
 }
 
 func (q *claimSQL) indexed(v, alias string) string {
