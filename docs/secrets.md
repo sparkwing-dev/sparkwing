@@ -8,6 +8,9 @@ secret only when its plan declares it and the secret's scope admits the run. The
 commands are in [cli-secrets](cli-secrets.md); declaration and the preflight
 that refuses a plan missing a secret are in [pipelines](pipelines.md).
 
+Team-owned API routes, including `POST /api/v1/secrets`, take the team only from
+the credential and ignore client-supplied team hints in query strings or headers.
+
 For a local run with a missing declared secret, the error names the secret and
 gives its repair command, such as `sparkwing secrets set --secret BAR --file <path>`.
 The run finishes as failed before any jobs start, and its status keeps the repair advice.
@@ -106,3 +109,10 @@ shows the warning once when the save succeeds. Warnings never include the value.
 `POST /api/v1/secrets` returns HTTP 200 with secret metadata and an optional
 `warning`; the value stays private. Secrets containing `***` are accepted.
 Masking is provided by the Sparkwing host. Pipeline code run on its own is unmasked.
+
+Masking matches whole registered values and their encoded spellings within one
+output stream. A command's stdout and stderr are masked independently. Fragments
+of a value written separately, whether to different streams or to the same stream
+with other text between them, are not masked. Masking guards against accidental
+disclosure, not against job code that deliberately transforms or splits a secret
+it can read.

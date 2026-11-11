@@ -32,5 +32,5 @@ Choose a supported browser route:
   Restrict that listener to a proxy that overwrites `X-Real-IP` and forwards
   `X-Forwarded-Proto: https`.
 
-See [Serving the dashboard over HTTPS](../self-hosting.md#serving-the-dashboard-over-https)
+See [Serving the dashboard over HTTPS](../../self-hosting.md#serving-the-dashboard-over-https)
 for commands and chart values.
