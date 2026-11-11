@@ -16,7 +16,7 @@ func TestAffectedPushTestsIgnoreSubmitterGoLimits(t *testing.T) {
 	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
 	t.Setenv("GOMAXPROCS", "2")
 	t.Setenv("GOFLAGS", "-trimpath -p=1")
-	// The local SDK also sets CI; it does not make this host single tenant.
+	// safety: the local SDK sets CI without granting exclusive use of the host.
 	t.Setenv("CI", "true")
 	want := max(1, (runtime.NumCPU()-1)/2)
 	for _, queued := range []bool{false, true} {
