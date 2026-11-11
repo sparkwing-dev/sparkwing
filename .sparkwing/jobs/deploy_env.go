@@ -231,7 +231,7 @@ func sweepStaleDeployDirs(root string, now time.Time, maxAge time.Duration) erro
 	return errors.Join(errs...)
 }
 
-// Go module cache directories need writable parents before removal. Root-scoped
+// safety: Go module cache directories need writable parents before removal. Root-scoped
 // chmod keeps concurrent symlink swaps from changing permissions outside the tree.
 func removeDeployDir(root string) (err error) {
 	info, err := os.Lstat(root)
