@@ -40,7 +40,7 @@ func (Land) Help() string {
 		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
 		"with no force, adding --no-verify after the gate and any merge-delta tests pass, since those checks cover the pushed tree; " +
 		"When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
-		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure and runs the affected tests over the files " +
+		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure, repeats the fast push checks including qatrust vet and the contract checks, and runs affected tests once over the files " +
 		"that differ between the gated tree and the merged tree, then pushes the merge; the review is not run again. It merges at most 3 times; a conflict fails " +
 		"and names the merge to run by hand. The push step carries the destructive and prod risks, " +
 		"so a real landing needs --sw-allow-risk destructive,prod. The land job's output is the landing record: branch, the commit and tree pushed, " +
@@ -525,10 +525,29 @@ func changedBetween(ctx context.Context, dir, from, to string) ([]string, error)
 	return files, nil
 }
 
-// safety: build catches compile errors before the merge delta runs its fast
-// dependency closure and the full critical set.
+// safety: the merge must retain every fast push check before skipping the
+// hook, while affected tests run once over the merge delta.
 func recheckMergeDelta(ctx context.Context, files []string) error {
 	if err := runAffectedCompileFiles(ctx, "build", files); err != nil {
+		return err
+	}
+	// safety: main's new packages can interact with this branch even though
+	// origin/main..HEAD no longer lists them after the merge.
+	branchFiles, _, err := pushRangeScope(ctx, "file(s)", func(files []string) []string { return files })
+	if err != nil {
+		return err
+	}
+	mergedFiles := append(append([]string(nil), files...), branchFiles...)
+	scope := fmt.Sprintf("%d file(s) in the branch and merge delta", len(mergedFiles))
+	for _, check := range []func(context.Context) error{checkChangelogRequired, checkAPISpec, checkAPISnapshot} {
+		if err := check(ctx); err != nil {
+			return err
+		}
+	}
+	if err := overPackageFiles(ctx, "vet-touched", "compile", existingGoFiles(mergedFiles), scope, vetTouchedCommand); err != nil {
+		return err
+	}
+	if err := overPackageFiles(ctx, "lint-touched", "lint", existingGoFiles(mergedFiles), scope, fastLintTouchedCommand); err != nil {
 		return err
 	}
 	if err := ensureFrontendDeps(ctx); err != nil {

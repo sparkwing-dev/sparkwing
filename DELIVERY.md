@@ -71,7 +71,11 @@ a different repository must define its own landing policy before using it.
 
 The pre-push hook runs its six fast checks for every push. Updates targeting
 `refs/heads/main` then run `affected-tests`; branch pushes finish after the fast
-checks. An explicit `sparkwing run pre-push` also runs the test phase. Queued Land
+checks. Each non-deletion main update must name the checked-out HEAD's OID;
+`git push origin topic:main` from another commit is refused with a checkout
+remedy before checks run. Every ref update is inspected, including main updates
+after other refs. Deletions add no affected tests. An explicit
+`sparkwing run pre-push` also runs the test phase. Queued Land
 runs that same test job after policy and its combined fast-check/review job.
 Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
@@ -255,8 +259,9 @@ tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
 pushed commit's tree is the tree the gate judged or the merged tree whose
-delta passed its recheck. The gate and merge-delta recheck cover affected tests,
-so Land's own push skips the hook without repeating those bodies. It carries the
+delta passed its recheck. The gate and merge-delta recheck cover all six fast
+push checks and affected tests, so Land's own push skips the hook without
+repeating those bodies. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. After a refused
 push, the step fetches main and checks its ancestry. It merges main only when
 main is not an ancestor of the pushed commit. Otherwise it preserves the
@@ -269,10 +274,12 @@ merges it into the branch in the checkout (`git merge --no-ff`, the default
 git identity and signing; never a rebase). Independent changelog and migration
 fragments merge as separate files. Orientation table additions use union merge;
 changes to the same rule need review. The push step
-then runs `go build` in every module
-and the affected-test selection over the files that differ between the gated
-tree and the merged tree, then pushes the merge. The review is not run again:
-it judged the branch's own diff, and the re-check covers what the merge
+then builds the affected package closure and repeats the changelog, OpenAPI,
+API-snapshot, default and qatrust vet, and fast lint checks on the merged tree.
+Vet and lint cover both the branch range and the merge delta, including new
+packages from main. It runs affected tests once over the files that differ
+between the gated tree and the merged tree, then pushes the merge. The review
+is not run again: it judged the branch's own diff, and the re-check covers what the merge
 brought in. It
 merges at most three times per land. A conflict aborts the merge, leaves the
 branch as the gate judged it and names `git merge origin/main` to run by hand.
