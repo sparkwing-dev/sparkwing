@@ -512,7 +512,7 @@ func changelogRepeatedHeadings(dir string) (string, error) {
 // safety: -z and no trimming, so a name holding a newline or leading space
 // still reaches the affected-test selection intact.
 func changedBetween(ctx context.Context, dir, from, to string) ([]string, error) {
-	out, err := runGitIn(ctx, dir, "diff", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRD", from, to)
+	out, err := runGitIn(ctx, dir, "diff", "-z", "--name-only", "--no-renames", from, to)
 	if err != nil {
 		return nil, fmt.Errorf("land: list the files the merge changed: %w", err)
 	}

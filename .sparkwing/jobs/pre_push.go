@@ -34,7 +34,7 @@ func (PrePush) Help() string {
 		"the index, so whatever is staged cannot narrow what the push is judged against. The fast checks have a " +
 		"one-minute budget on each step's own run time; a step past it warns, naming the slowest, and the fast phase still passes when every check did. Run timings measure " +
 		"progress toward their ten-second warm-cache target; the run has no compiler-cache temperature signal. " +
-		"Affected tests use Git's advertised remote OID for main, never local tracking. Non-fast-forward main updates are refused; creating main runs every committed Go module's short tests and the full critical set. Main hook updates must push the checked-out HEAD; check out a different source commit before retrying. Deletions add no tests. For hook updates to refs/heads/main, or an explicit run outside the hook, the affected-tests job then runs the hosted gate's reverse dependency selection with go test -short, including test imports and file readers, plus every critical test without -short when Go inputs changed. Branch pushes keep only the fast checks. " +
+		"Affected tests use Git's advertised remote OID for main, never local tracking, including type changes and both paths of renames. Non-fast-forward main updates are refused; creating main runs every committed Go module's short tests and the full critical set. Main hook updates must push the checked-out HEAD; check out a different source commit before retrying. Deletions add no tests. For hook updates to refs/heads/main, or an explicit run outside the hook, the affected-tests job then runs the hosted gate's reverse dependency selection with go test -short, including test imports and file readers, plus every critical test without -short when Go inputs changed. Branch pushes keep only the fast checks. " +
 		"It has a separate 45-minute execution deadline and reports package and test timings. Changelog-only changes select no tests; documentation with registered readers runs those readers. " +
 		"Broader lint, race and dashboard checks remain in `gate`; full Go and PostgreSQL verification run with `gate -- --full` and at the release boundary. Hosted CI provides additional verification."
 }
@@ -119,7 +119,7 @@ func mainPushScope(ctx context.Context) ([]string, string, error) {
 		scope = "committed file(s) for new main; every Go module and critical test"
 	} else {
 		for _, update := range updates {
-			commands = append(commands, []string{"diff", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRD", update.remote, update.local})
+			commands = append(commands, []string{"diff", "-z", "--name-only", "--no-renames", update.remote, update.local})
 		}
 	}
 	files := map[string]bool{}

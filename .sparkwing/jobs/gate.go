@@ -375,7 +375,7 @@ func pushRangeScope(ctx context.Context, noun string, keep func([]string) []stri
 	if err != nil {
 		return nil, "", err
 	}
-	changed, err := listNames(ctx, "diff -z --name-only --no-renames --diff-filter=ACMRD "+base+" HEAD")
+	changed, err := listNames(ctx, "diff -z --name-only --no-renames "+base+" HEAD")
 	if err != nil {
 		return nil, "", fmt.Errorf("list the push range %s..HEAD: %w", base, err)
 	}
@@ -588,7 +588,7 @@ func changeScope(ctx context.Context, noun string, keep func([]string) []string)
 	if err != nil {
 		return nil, "", err
 	}
-	changed, err := listNames(ctx, "diff -z --name-only --diff-filter=ACMR "+base)
+	changed, err := listNames(ctx, "diff -z --name-only --no-renames "+base)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the change since %s: %w", base, err)
 	}
@@ -664,7 +664,7 @@ func listNames(ctx context.Context, args string) ([]string, error) {
 }
 
 func stagedNames(ctx context.Context) ([]string, error) {
-	cmd := sparkwing.Bash(ctx, "git -c core.quotePath=false diff --cached -z --name-only --diff-filter=ACMR")
+	cmd := sparkwing.Bash(ctx, "git -c core.quotePath=false diff --cached -z --name-only --no-renames")
 	// safety: the CLI unbinds GIT_INDEX_FILE at startup and records it here, so
 	// the commit a hook is building lives in $SPARKWING_GATE_INDEX. Reading the
 	// repository index instead reports `git commit -a` as staging nothing, and

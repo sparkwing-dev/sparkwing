@@ -85,6 +85,7 @@ Affected tests for main use the remote OID Git advertises on hook stdin,
 independently of local `origin/main`. Main updates must fast-forward; a rewind
 or unverified remote base is refused with a fetch remedy. Creating
 main selects every committed Go module's short tests and the full critical set.
+All changes count, including type changes and both paths of renames.
 
 The job reuses the hosted Gate's package planner and command runner. It runs
 `go test -short` over the reverse dependency closure, including test imports
