@@ -147,12 +147,12 @@ func TestLandQueuePipelineChangesRunTheirOwnFocusedTests(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs", "land_test.go"), "package jobs\nimport \"testing\"\nfunc TestGate(t *testing.T) { if !Gate() { t.Fatal(\"proposed pipeline gate failed\") } }\n")
 	gitCommitAll(t, root, "pipeline fixture")
 	ctx := newTestContext(t)
-	err := runAffectedTestFiles(ctx, []string{".sparkwing/jobs/land.go"}, "pipeline change")
+	err := runAffectedTestFiles(ctx, []string{".sparkwing/jobs/land.go"}, "pipeline change", currentHost())
 	if err == nil || !strings.Contains(err.Error(), "proposed pipeline gate failed") {
 		t.Fatalf("candidate's pipeline tests did not run: %v", err)
 	}
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs", "land.go"), "package jobs\nfunc Gate() bool { return true }\n")
-	if err := runAffectedTestFiles(ctx, []string{".sparkwing/jobs/land.go"}, "pipeline change"); err != nil {
+	if err := runAffectedTestFiles(ctx, []string{".sparkwing/jobs/land.go"}, "pipeline change", currentHost()); err != nil {
 		t.Fatal(err)
 	}
 }
