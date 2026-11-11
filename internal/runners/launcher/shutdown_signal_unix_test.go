@@ -17,11 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	ktesting "k8s.io/client-go/testing"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"k8s.io/apimachinery/pkg/runtime"
-	ktesting "k8s.io/client-go/testing"
 )
 
 type shutdownPlacementBoundary struct {
