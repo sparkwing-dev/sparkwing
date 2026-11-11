@@ -173,7 +173,8 @@ func TestLoopGatewayOutageKeepsHeldHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop = &Loop{Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, PollInterval: time.Millisecond}, Controller: client,
+	loop = &Loop{
+		Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, PollInterval: time.Millisecond}, Controller: client,
 		CheckVersion: func(context.Context, string) error { return nil }, OnClaimsStopped: func() { close(stopped) },
 		Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
 			close(started)

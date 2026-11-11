@@ -147,6 +147,7 @@ func TestGatewayHeldReadOutlivesClaimRecovery(t *testing.T) {
 func TestRetryAfterHTTPDate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		resp := engineResponse(503, "no backend")
+		defer resp.Body.Close()
 		resp.Header.Set("Retry-After", time.Now().Add(3*time.Second).UTC().Format(http.TimeFormat))
 		if delay, ok := parseRetryAfter(resp); !ok || delay != 3*time.Second {
 			t.Fatalf("delay=%s ok=%v", delay, ok)
