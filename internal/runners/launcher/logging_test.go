@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -117,7 +118,11 @@ func TestLauncherLogsOnlyFirstClaimRateLimitAsInfo(t *testing.T) {
 	}{
 		{"restart interval and repeat", []error{limited, limited}, 1, 1},
 		{"successful first claim", []error{nil, limited}, 0, 1},
+		{"wrapped rate limit", []error{fmt.Errorf("controller: %w", limited)}, 1, 0},
+		{"nested rate limit", []error{fmt.Errorf("claim: %w", fmt.Errorf("controller: %w", limited))}, 1, 0},
 		{"joined fault", []error{errors.Join(limited, errors.New("cleanup failed"))}, 0, 1},
+		{"wrapped joined fault", []error{fmt.Errorf("controller: %w", errors.Join(limited, errors.New("cleanup failed")))}, 0, 1},
+		{"joined wrapped fault", []error{errors.Join(fmt.Errorf("controller: %w", limited), errors.New("cleanup failed"))}, 0, 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

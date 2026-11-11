@@ -139,6 +139,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 	defer retiring.Wait()
 	retiring.Go(func() { l.retireLoop(ctx) })
 	var cooldown time.Time
+	var pollAfter time.Duration
 	firstClaim := true
 	for ctx.Err() == nil {
 		if err := l.reportWarmPools(ctx); err != nil {
@@ -161,12 +162,15 @@ func (l *Launcher) Run(ctx context.Context) error {
 			startupRateLimit := false
 			if err == nil && !time.Now().Before(cooldown) {
 				var launched bool
-				var pollAfter time.Duration
-				launched, pollAfter, err = l.claim(ctx)
+				var suggestedPoll time.Duration
+				launched, suggestedPoll, err = l.claim(ctx)
+				// safety: an award can fail during placement; only failed claim responses retain the old advice.
+				if err == nil || launched {
+					pollAfter = suggestedPoll
+				}
 				// safety: admission precedes the response, so request latency cannot shorten the server's interval.
 				cooldown = time.Now().Add(max(poll, pollAfter))
-				failure, ok := err.(*apierr.Error) //nolint:errorlint // Joined faults must remain WARN.
-				startupRateLimit = firstClaim && !launched && ok && failure.Code == hosterr.RateLimited
+				startupRateLimit = firstClaim && !launched && claimRateLimited(err)
 				firstClaim = false
 			}
 			if err != nil {
@@ -209,6 +213,17 @@ func later(a, b time.Time) time.Time {
 		return a
 	}
 	return b
+}
+
+func claimRateLimited(err error) bool {
+	// safety: transport wrappers preserve a lone refusal; joined placement or cleanup faults must still warn.
+	for cause := err; cause != nil; cause = errors.Unwrap(cause) {
+		if _, joined := cause.(interface{ Unwrap() []error }); joined {
+			return false
+		}
+	}
+	var failure *apierr.Error
+	return errors.As(err, &failure) && failure.Code == hosterr.RateLimited
 }
 
 func retryWait(err error, poll time.Duration) time.Duration {
