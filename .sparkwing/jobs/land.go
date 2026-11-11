@@ -287,6 +287,11 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		j.landed = &landed
 		return nil
 	}).DryRun(func(ctx context.Context) error {
+		if j.Queued {
+			head := j.Head.Get(ctx)
+			sparkwing.Info(ctx, "dry run: would prove a fast-forward from planned main %s and atomically push gated commit %s with an exact base lease; already-at-target results refuse", short(head.Base), short(head.Commit))
+			return nil
+		}
 		sparkwing.Info(ctx, "dry run: would fetch %s, merge it into %s when it moved (at most %d times, re-checking the files each merge changed), then run git %s",
 			landBaseRef, j.Head.Get(ctx).Branch, landMaxMerges, strings.Join(landPushArgs("<HEAD or the merge>", false), " "))
 		return nil
