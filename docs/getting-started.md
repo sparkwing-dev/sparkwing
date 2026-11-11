@@ -253,7 +253,11 @@ Use `sparkwing daemon status` to inspect it and `sparkwing daemon stop` to stop
 it. See [Local dashboard](native-mode.md) for service requirements.
 Daemon records include `url` when known. Use `--output plain` for a single
 `running` or `stopped` value, or `--output pretty` for the terminal layout.
-A stopped `daemon status` exits 1; stopping an absent controller exits 0.
+A stopped `daemon status` exits 1. On Linux with systemd, `daemon stop` also
+waits for this home’s supervised runner units to disappear, including runners
+still starting. It exits nonzero with incomplete shutdown if they remain at
+the stop bound or their state cannot be read. Stopping an absent controller
+exits 0 only after this check passes.
 
 If you want a local Kubernetes cluster as a deploy target for user apps
 (not for sparkwing itself), bring your own - any local Kubernetes setup

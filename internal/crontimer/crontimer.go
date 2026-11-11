@@ -68,6 +68,9 @@ type Host struct {
 	// UID names the launchd domain gui/<uid>.
 	UID int
 
+	// Stat inspects runner service-manager availability. Nil uses os.Stat.
+	Stat func(string) (os.FileInfo, error)
+
 	// Exec runs systemctl or launchctl and returns stdout and stderr combined.
 	Exec func(context.Context, string, ...string) (string, error)
 }

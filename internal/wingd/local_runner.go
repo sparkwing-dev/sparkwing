@@ -19,8 +19,9 @@ import (
 
 const localRunnerPath = "/api/v1/local/runners"
 
-// safety: a runner holding jobs keeps running past this bound and finishes them against the next controller.
-const localRunnerRetireWait = 5 * time.Second
+// LocalRunnerRetireWait bounds explicit local runner shutdown. Runners holding
+// jobs keep running past this bound and finish against the next controller.
+const LocalRunnerRetireWait = 5 * time.Second
 
 type runnerWake struct {
 	mu      sync.Mutex
@@ -184,7 +185,7 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 		return err
 	}
 	d.runnerWake.notify()
-	ctx, cancel := context.WithTimeout(ctx, localRunnerRetireWait)
+	ctx, cancel := context.WithTimeout(ctx, LocalRunnerRetireWait)
 	defer cancel()
 	for {
 		alive, err := LocalRunnerProcessAlive(instance)

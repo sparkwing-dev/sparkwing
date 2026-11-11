@@ -242,13 +242,15 @@ func TestDaemonLifecycleMissingAndCancelledRuntime(t *testing.T) {
 
 func TestDaemonStopRetiresTheRunnerAndRestartKeepsIt(t *testing.T) {
 	for _, test := range []struct {
-		args  []string
-		calls []string
+		args    []string
+		calls   []string
+		stopped bool
 	}{
-		{[]string{"stop"}, []string{"status", "retire", "stop", "status"}},
-		{[]string{"restart", "--force"}, []string{"status", "stop", "status", "start"}},
+		{[]string{"stop"}, []string{"status", "retire", "stop", "status"}, false},
+		{[]string{"restart", "--force"}, []string{"status", "stop", "status", "start"}, false},
+		{[]string{"stop"}, []string{"status", "retire"}, true},
 	} {
-		fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, Version: "v2"}}
+		fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: !test.stopped, Version: "v2"}}
 		services := dashboardServices{lifecycle: fake, options: wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2"}, retireRunner: func(context.Context) error {
 			fake.calls = append(fake.calls, "retire")
 			return nil
