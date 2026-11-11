@@ -345,6 +345,9 @@ func validateFlag(f Flag, value string) error {
 			parse = ParseLookback
 		}
 		if _, err := parse(value); err != nil {
+			if f.Name == "since" {
+				return fmt.Errorf("requires a duration; use --since 1h")
+			}
 			return fmt.Errorf("requires a duration")
 		}
 	}

@@ -39,7 +39,7 @@ func parseRunQuery(inv clisurface.Invocation, now time.Time) (controllerwire.Run
 	if inv.Has("since") {
 		d, err := clisurface.ParseLookback(inv.Value("since"))
 		if err != nil || d < 0 {
-			return invalid("--since must be a nonnegative duration")
+			return invalid("--since must be a nonnegative duration; use --since 1h")
 		}
 		if d > 0 {
 			q.StartedAfter = now.Add(-d)
