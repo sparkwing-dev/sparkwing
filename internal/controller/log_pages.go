@@ -151,7 +151,9 @@ func newLogPageCursor(raw, run, team string, q controllerwire.LogQuery) (logPage
 	if raw != "" {
 		body, err := base64.RawURLEncoding.DecodeString(raw)
 		if err != nil || json.Unmarshal(body, &cursor) != nil || cursor.Scope != scope || cursor.Lines == nil || cursor.Events == nil {
-			return cursor, invalidEngineBody("log cursor does not match this selection")
+			refusal := invalidEngineBody("log cursor does not match this selection")
+			refusal.Hint = "Remove the cursor to restart this selection; only reuse a returned cursor with the same run, job and filters."
+			return cursor, refusal
 		}
 		for _, offsets := range []map[string]int64{cursor.Lines, cursor.Offsets, cursor.Skips, cursor.Counts, cursor.Events} {
 			for _, offset := range offsets {
