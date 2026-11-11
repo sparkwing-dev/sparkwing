@@ -118,16 +118,23 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 }
 
 func TestLauncherGateway503RemainsWarn(t *testing.T) {
-	for _, path := range []string{"/api/v1/launcher/claim", "/api/v1/launcher/sync"} {
-		t.Run(path, func(t *testing.T) {
+	for _, tc := range []struct{ path, advice string }{
+		{"/api/v1/launcher/claim", ""},
+		{"/api/v1/launcher/sync", ""},
+		{"/api/v1/launcher/claim", "2"},
+		{"/api/v1/launcher/sync", "2"},
+	} {
+		t.Run(tc.path+"/retry-after="+tc.advice, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				l, _, _, _ := fixture()
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				wire, err := client.NewEngineClient(client.EngineOptions{URL: "http://controller.invalid", Launcher: true, HTTP: &http.Client{Transport: cloudResourceTransport(func(r *http.Request) (*http.Response, error) {
-					if r.URL.Path == path {
+					if r.URL.Path == tc.path {
 						cancel()
-						return claimPollResponse(503, "bad gateway"), nil
+						response := claimPollResponse(503, "bad gateway")
+						response.Header.Set("Retry-After", tc.advice)
+						return response, nil
 					}
 					return claimPollResponse(200, `{"awards":[],"retired":[]}`), nil
 				})}})

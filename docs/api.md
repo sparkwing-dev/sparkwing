@@ -179,6 +179,10 @@ original seal's identity to match the new run ID.
 Retry requires `mode=failed|all` and a nonempty `idempotency_key` in the request
 body. The server rejects a missing or unknown selection before creating a run.
 
+Fresh retry responses and idempotent replays report the new invocation's
+`inputs.lineage`, including `retry_of`, `retrier` and `retry_reason`, matching a
+fresh run-detail read.
+
 Direct store consumers use `Store.ClaimUnit` for launcher and runner awards.
 `Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
 and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by

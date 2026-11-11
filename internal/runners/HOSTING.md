@@ -72,9 +72,14 @@ Both the CLI and standalone runner use the same retained executable owner.
 `TestReplacementResolutionSurvivesInstalledEngineSwap` guards byte retention
 and rejects substituting the new installation under the accepted identity.
 
-Controller transport failures, including a missing local socket, allow fresh
-claim polls for up to five seconds of consecutive failures. A successful response
-resets that window. Each poll is a new request because a lost claim reply may
+Controller connection failures, timeouts, explicit 5xx unavailability and
+5xx responses without a JSON error envelope allow fresh claim polls for up to five seconds of consecutive
+failures. Exponential jitter adds to the configured polling floor and caps the
+wait at five seconds, or the floor when longer. Retry-After seconds and HTTP
+dates can extend that wait. If advice or backoff exceeds the recovery window,
+claims stop at the deadline without an early retry. In-flight recovery claims
+carry that deadline too. A successful response resets
+that window. Each poll is a new request because a lost claim reply may
 already contain an award. Authentication, permission and protocol refusals
 remain fatal. Signed version policy keeps its existing denial behavior.
 `Loop.Drain` stops new claims and returns immediately. `Run` joins held hosts,
@@ -82,8 +87,20 @@ including uploads and terminal acknowledgements, before it returns.
 `TestLoopPollsThroughControllerRestarts`,
 `TestLoopControllerRestartKeepsHeldHostAliveThroughDrain`,
 `TestLoopBoundsControllerTransportRecovery`,
-`TestLoopTransportRecoveryKeepsRefusalsFatal` and
-`TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
+`TestLoopTransportRecoveryKeepsRefusalsFatal`,
+`TestLoopClaimsAfterGatewayOutage`, `TestLoopGatewayRetryTiming`,
+`TestLoopBoundsSlowGatewayRecovery`,
+`TestLoopGatewayOutageKeepsHeldHost`, `TestLoopGatewayProtocolFailuresStayFatal`
+and `TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
+The shared controller decoder preserves gateway status and retry advice.
+RetryableClaimError gives the runner its fresh-claim recovery classification;
+RetryableTransportError retains its transport-only meaning. One-shot operations
+return unavailable replies without extra retries unless the server advises a
+retry or the operation already owns intake recovery. Launcher gateway failures
+remain visible at WARN, including when shutdown interrupts an advised retry.
+Held reads retain their award-bound recovery. The client never replays a claim.
+A non-JSON success, an invalid error envelope in a JSON object or a protocol,
+authentication or permission refusal remains fatal. Lease keepers retain their expiry and renewal policy.
 
 Job reports and application retries carry optional `X-Sparkwing-Exited-At`,
 captured after the execution process tree joins and before final log

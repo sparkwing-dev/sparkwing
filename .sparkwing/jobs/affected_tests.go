@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -175,13 +176,23 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string, hos
 			return err
 		}
 		var failures []string
-		for _, p := range plans {
-			for _, command := range p.commands(host) {
-				script := productTestScript(fmt.Sprintf("cd %q && GOFLAGS=%s %s", p.module, shellQuote(affectedTestGoFlags), command), home)
-				if err := timings.run(ctx, script); err != nil {
-					failures = append(failures, describeModuleFailure(p.module, err))
+		for _, group := range affectedTestGroups(plans, goStepParallelism(host)) {
+			errs := make([]error, len(group))
+			var running sync.WaitGroup
+			for i, command := range group {
+				running.Go(func() {
+					script := productTestScript(fmt.Sprintf("cd %q && GOFLAGS=%s %s", command.module, shellQuote(affectedTestGoFlags), command.command), home)
+					errs[i] = timings.run(ctx, script)
+				})
+			}
+			running.Wait()
+			for i, err := range errs {
+				if err != nil {
+					failures = append(failures, describeModuleFailure(group[i].module, err))
 				}
 			}
+		}
+		for _, p := range plans {
 			sparkwing.Info(ctx, "affected tests: %s", p.describe())
 		}
 		if len(failures) == 0 {
@@ -287,17 +298,95 @@ func runAffectedCompileFiles(ctx context.Context, verb string, files []string) e
 	return nil
 }
 
-func (p affectedTestPlan) commands(h hostShape) []string {
+type affectedTestCommand struct {
+	module  string
+	command string
+}
+
+func affectedTestGroups(plans []affectedTestPlan, allowance int) [][]affectedTestCommand {
+	active, preferred := 0, -1
+	for i, p := range plans {
+		if len(p.packages) == 0 {
+			continue
+		}
+		active++
+		if preferred < 0 || p.module == "." {
+			preferred = i
+		}
+	}
+	var groups [][]affectedTestCommand
+	var together []affectedTestCommand
+	concurrent := allowance >= active
+	for i, p := range plans {
+		width := allowance
+		if concurrent {
+			width = 1
+			if i == preferred {
+				width += allowance - active
+			}
+		}
+		var group []affectedTestCommand
+		for _, command := range p.shortCommands(width) {
+			group = append(group, affectedTestCommand{module: p.module, command: command})
+		}
+		if concurrent {
+			together = append(together, group...)
+		} else if len(group) > 0 {
+			groups = append(groups, group)
+		}
+	}
+	if len(together) > 0 {
+		groups = append(groups, together)
+	}
+	// safety: a failure in one short module cannot narrow another module's
+	// coverage or let a full critical command cross the global short join.
+	for _, p := range plans {
+		if command := p.criticalCommand(allowance); command != "" {
+			groups = append(groups, []affectedTestCommand{{module: p.module, command: command}})
+		}
+	}
+	return groups
+}
+
+func (p affectedTestPlan) shortCommands(parallelism int) []string {
 	var out []string
 	timeout := "-timeout " + productGoTestTimeout + " "
 	short := "-short " + timeout
 	if len(p.packages) > 0 {
-		out = append(out, boundedGoCommand(h, "test", short+quoteAll(p.packages)))
-	}
-	if len(p.critical) > 0 {
-		out = append(out, boundedGoCommand(h, "test", criticalTestArgs(p.critical, mapKeys(p.critical))))
+		const store = "github.com/sparkwing-dev/sparkwing/internal/store"
+		patterns := storeShortTestPatterns()
+		if p.module == "." && slices.Contains(p.packages, store) && parallelism >= len(patterns) && (len(p.packages) == 1 || parallelism > len(patterns)) {
+			others := slices.DeleteFunc(slices.Clone(p.packages), func(pkg string) bool { return pkg == store })
+			var group []string
+			if len(others) > 0 {
+				group = append(group, goCommandAt(parallelism-len(patterns), "test", short+quoteAll(others)))
+			}
+			for _, pattern := range patterns {
+				group = append(group, goCommandAt(1, "test", short+"-run "+shellQuote(pattern)+" "+shellQuote(store)))
+			}
+			out = append(out, group...)
+		} else {
+			out = append(out, goCommandAt(parallelism, "test", short+quoteAll(p.packages)))
+		}
 	}
 	return out
+}
+
+func (p affectedTestPlan) criticalCommand(parallelism int) string {
+	if len(p.critical) == 0 {
+		return ""
+	}
+	return goCommandAt(parallelism, "test", criticalTestArgs(p.critical, mapKeys(p.critical)))
+}
+
+// perf: measured store costs balance these initials; the complement also covers
+// future nonASCII names without maintaining a list of test functions.
+func storeShortTestPatterns() [3]string {
+	return [3]string{
+		`^(Test|Fuzz|Example)([BCGHJKQTZ].*)?$`,
+		`^(Test|Fuzz|Example)[LMNOSUVW].*$`,
+		`^(Test|Fuzz|Example)[^BCGHJKQTZLMNOSUVW].*$`,
+	}
 }
 
 func criticalTestArgs(critical map[string][]string, packages []string) string {

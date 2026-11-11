@@ -170,9 +170,9 @@ func queuedTestCutoffSummary(ctx context.Context, packages []queuedTestPackage, 
 	summary.WriteString("**Local rerun: all selected work**\n\nThe original batched commands run every selected short and critical test, collect all failures and share one private product-test home.\n\n```sh\n")
 	var commands strings.Builder
 	commands.WriteString("rerun_status=0\n")
-	for _, p := range plans {
-		for _, command := range p.commands(host) {
-			fmt.Fprintf(&commands, "env -C %s GOWORK=auto GOFLAGS=%s %s || rerun_status=1\n", shellQuote(filepath.Join(sparkwing.WorkDir(), p.module)), shellQuote(affectedTestGoFlags), command)
+	for _, group := range affectedTestGroups(plans, goStepParallelism(host)) {
+		for _, command := range group {
+			fmt.Fprintf(&commands, "env -C %s GOWORK=auto GOFLAGS=%s %s || rerun_status=1\n", shellQuote(filepath.Join(sparkwing.WorkDir(), command.module)), shellQuote(affectedTestGoFlags), command.command)
 		}
 	}
 	commands.WriteString(`exit "$rerun_status"`)
