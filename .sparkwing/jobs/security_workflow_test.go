@@ -496,7 +496,7 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 }
 
 func TestBuildToolchainsUseFixedGoPatch(t *testing.T) {
-	const fixed = "1.26.10"
+	const fixed = "1.26.11"
 	for _, name := range workflowFileNames(t) {
 		for _, step := range workflowUsesSteps(t, name) {
 			if strings.HasPrefix(step.uses, "actions/setup-go@") && step.with["go-version"] != fixed {

@@ -917,10 +917,10 @@ as root, at the versions the deploy machines already use:
 sudo install -d -o root -g root -m 0755 /opt/sparkwing-deploy /opt/sparkwing-deploy/bin
 cd "$(mktemp -d)"
 # Go, matching go.mod's toolchain line
-curl -fsSLO https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
-curl -fsSL "https://go.dev/dl/?mode=json&include=all" | grep -A3 '"go1.26.10.linux-amd64.tar.gz"' | grep sha256  # compare
-sha256sum go1.26.10.linux-amd64.tar.gz
-sudo tar -C /opt/sparkwing-deploy -xzf go1.26.10.linux-amd64.tar.gz
+curl -fsSLO https://go.dev/dl/go1.26.11.linux-amd64.tar.gz
+curl -fsSL "https://go.dev/dl/?mode=json&include=all" | grep -A3 '"go1.26.11.linux-amd64.tar.gz"' | grep sha256  # compare
+sha256sum go1.26.11.linux-amd64.tar.gz
+sudo tar -C /opt/sparkwing-deploy -xzf go1.26.11.linux-amd64.tar.gz
 sudo ln -sf /opt/sparkwing-deploy/go/bin/go /opt/sparkwing-deploy/bin/go
 # kubectl
 curl -fsSLO https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
@@ -1764,7 +1764,7 @@ file. Other syntax and workflow checks remain active.
 - **Go directive policy:** the release cut and `pre-release`, beside its version
   checks, reject patch-level requirements in the published root module and
   template registry modules: `go 1.26` and `go 1.26.0` pass; `go 1.26.3` fails.
-  Our modules select the patched Go 1.26.10 toolchain separately.
+  Our modules select the patched Go 1.26.11 toolchain separately.
   Pipeline and fixture modules are excluded from this release check. Init and
   pipeline scaffolding share a generator that takes only the running Go
   version's major and minor; this step runs a focused scaffold test against a
