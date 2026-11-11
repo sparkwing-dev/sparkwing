@@ -170,8 +170,9 @@ The job reuses the hosted Gate's package planner and command runner. It runs
 and registered file readers, then the critical set without `-short` when Go
 inputs changed. Changelog-only changes select no tests. Other documentation
 runs its registered readers. The `affected-tests` job has a 45-minute execution deadline,
-separate from the fast checks' one-minute warning. Each Go package retains its
-25-minute timeout. The local test job uses `max(1, (NumCPU-1)/2)` for both
+separate from the fast checks' one-minute warning. Each Go package test binary
+retains its 25-minute timeout; this is not a deadline for the entire multi-package
+Go command. The local test job uses `max(1, (NumCPU-1)/2)` for both
 its scheduling reservation and combined Go command allowance: seven on a
 16-CPU host, regardless of the submitter's `GOMAXPROCS` or the SDK's `CI` marker. This is
 not an aggregate CPU cap: seven test processes can each use seven Go execution
@@ -205,34 +206,68 @@ workers, the modules run sequentially, each with the full allowance.
 
 All short commands across all modules join before any full critical command
 starts. Critical modules run sequentially with the full job allowance. A short
-failure does not cancel siblings or skip critical coverage. This module overlap
-has not yet been measured against the store-only schedule.
+failure does not cancel siblings or skip critical coverage.
 
-A replay of the same selection on 2026-11-11 compared `ea4b68ccd` with store
-grouping at `9d688612a`, using Go 1.26.11, warm compilation,
-`GOFLAGS=-mod=readonly` and top-level `-count=1`. Both selected the same 13-file
-cohort: two pipeline packages, 66 root packages and 37 critical declarations.
-Both replay variants ran modules sequentially, before module overlap was added.
+A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
+store shards S at `340ebed3f`, and module overlap with store shards M at
+`406208403`. All share root b61 and the same 13-file selection: two pipeline
+packages, 66 root packages and 37 critical declarations. All 30 runnable Linux
+critical bodies passed; seven declarations are Windows-only. The SDK module
+was unselected, so this timing does not measure three-module execution.
 
-| Root short schedule | Pipeline short | Root short, joined wall | Critical | Shared runner wall |
-| --- | ---: | ---: | ---: | ---: |
-| One width-seven command | 80.36 s | 586.42 s | 7.92 s | 675.87 s |
-| Other packages at four, three store commands at one | 89.97 s | 502.60 s | 10.96 s | 604.76 s |
+The study used Go 1.26.11, `GOFLAGS=-mod=readonly` and top-level `-count=1`.
+Compile-only warmup covered two pipeline packages and the union of 69 root
+short/critical packages, including the three critical-only packages. All nine
+samples ran in one 92.37-minute shared-desktop window, ordered U/S/M, S/M/U,
+M/U/S. Each variant had three observations with forced test bodies. The common
+command allowance was seven: U ran pipeline then root at seven; S ran pipeline
+at seven, then root at four plus three width-one store shards; M overlapped
+pipeline at one with root at three plus three width-one store shards.
 
-Both passed. Runner wall was 71.11 s (10.5%) shorter in this observation.
-The store package took 517.71 s before grouping; its shard package times were
-188.63 s, 182.36 s and 189.10 s. Package times exclude Go command setup.
-All 1,980 top-level store tests ran once, and all 7,827 root short tests and their
-outcomes matched. All 30 runnable Linux critical bodies passed; seven selected
-Windows declarations did not run. The pipeline suite added three passing guards.
-Critical commands started after every short command finished, and overlapping
-command widths peaked at seven in both variants.
+Shared runner wall times in seconds, excluding Go-slot wait:
 
-This is one shared-host pair with forced test bodies, not a cache-hit or flake-rate
-measurement. Median one-minute load, including the replay, was 13.78 before and
-11.82 after. Sampled summed descendant RSS peaked at 3.66 GiB and 4.09 GiB;
-that sum can count shared pages repeatedly and is not a private-memory limit.
-The 45-minute execution ceiling and 25-minute package timeout remain unchanged.
+| Variant / source | Round 1 | Round 2 | Round 3 | Median | Min / max | Inclusive IQR |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| U, Unsplit (`b61a1fe4e`) | 684.559 | 589.469 | 612.010 | 612.010 | 589.469 / 684.559 | 47.545 |
+| S, Store shards (`340ebed3f`) | 683.201 | 574.933 | 629.455 | 629.455 | 574.933 / 683.201 | 54.134 |
+| M, Modules together (`406208403`) | 603.686 | 555.893 | 578.596 | 578.596 | 555.893 / 603.686 | 23.897 |
+
+Statistics use the unrounded observations; IQR uses inclusive quartiles.
+Min/max and IQR describe these observations, not confidence intervals. S's
+median was 2.8506% longer than U's. Its same-round changes were -0.1983%,
+-2.4659% and +2.8506%, so store sharding did not establish a consistent whole-run
+improvement. The median of each run's slowest store package JSON elapsed time
+fell from 452.270 s to 185.226 s. That compares U's single store package result
+with S's slowest shard result, not summed command wall time.
+
+M's median runner time was 5.4597% below U and 8.0799% below S. M finished
+sooner than S in all three rounds, by 11.6385%, 3.3116% and 8.0799%.
+Pipeline command median increased from S's 96.549 s to M's 153.177 s, while
+root short span increased from 511.392 s to 569.457 s. The overlapped runs had
+lower runner wall in this cohort; overlapping component times cannot be added.
+M includes store sharding, so this study does not isolate module overlap without
+store sharding or establish that sharding is necessary inside M.
+
+All root short and critical test inventories and outcomes matched. S adds
+three passing pipeline guards, and M adds two more. One unchanged pipeline
+capacity guard passes in U/S and skips in M because its test binary starts at
+width one. Source comparisons disclose these guards and candidate documentation
+changes. Every run joined all short commands before full critical tests, stayed
+within overlapping command width seven and completed with no owned survivors.
+
+These three interleaved shared-host observations do not establish causality,
+a flake rate or a general latency guarantee. Host load varied. They supersede
+the earlier provisional single pair's 10.5% whole-run improvement claim.
+Raw sources, plans, command/test JSON, resource traces, receipts and the final
+independent recount are retained under
+`~/evidence/sparkwing/land-test-speedups-2026-11-11/repeated-speed-study/`.
+
+Keep the 45-minute job execution ceiling. The slowest runner observation here
+was 684.559 s, leaving about 33m35s below that ceiling for runner work alone.
+This study does not time cold dependency installation, all wider selections or
+other host CPU counts; job preparation and shared-host contention can consume
+more time. The 25-minute Go timeout applies to each package test binary, not
+the whole command. Neither deadline nor the existing tier allocation changes.
 
 The affected runner installs missing locked SDK dependencies with
 `npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund` when
