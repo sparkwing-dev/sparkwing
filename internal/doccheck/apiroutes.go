@@ -59,6 +59,7 @@ func checkAPIRoutes(contentDir string) bool {
 		if filepath.Ext(path) != ".md" {
 			return nil
 		}
+		// #nosec G122 -- The operator selects this local documentation tree for a read-only build check.
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err

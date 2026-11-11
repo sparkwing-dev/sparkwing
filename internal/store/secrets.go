@@ -61,6 +61,7 @@ func (s Secret) SealScope() string {
 	return s.Repo + "#" + s.Pipeline
 }
 
+// #nosec G101 -- This string lists SQL columns and contains no credential values.
 const secretCols = "name,value,principal,repo,repo_name,pipeline,only_on,masked,shared,created_at,updated_at"
 
 func boolInt(b bool) int {

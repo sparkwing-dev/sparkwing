@@ -59,6 +59,7 @@ func translateSchema(neutral string, dialect Dialect) (string, error) {
 					token += " STRICT"
 					if tableName == "AUDIT_EVENTS" {
 						// An implicit rowid would bypass the audit ID's replacement guard.
+						// #nosec G101 -- This token is SQL schema text, not an authentication token.
 						token += ", WITHOUT ROWID"
 					}
 				}

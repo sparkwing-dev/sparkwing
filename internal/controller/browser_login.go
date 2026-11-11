@@ -160,6 +160,7 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request, _ cap
 	s.endPriorSession(r, proof.raw)
 	noteAuditWrite(r.Context())
 	setSessionCookies(w, proof.raw, proof.session.CSRFToken)
+	// #nosec G710 -- safeNext rejects absolute, host-relative and backslash URLs before redirecting.
 	http.Redirect(w, r, safeNext(r.PostForm.Get("next")), http.StatusSeeOther)
 	return nil
 }

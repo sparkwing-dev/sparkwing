@@ -470,11 +470,13 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 			if filepath.IsAbs(link) {
 				link = filepath.Join(destination, rel)
 			}
+			// #nosec G122 -- The destination is a fresh private staging tree and the link target was checked inside the checkout.
 			return os.Symlink(link, target)
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("upgrade staging cannot copy non-regular file: %s", relative)
 		}
+		// #nosec G122 -- Upgrade staging reads the local operator-owned checkout, not a remote file service.
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err

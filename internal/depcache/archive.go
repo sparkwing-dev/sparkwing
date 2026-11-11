@@ -20,9 +20,7 @@ func extractArchiveRoot(r io.Reader, root *os.Root) error {
 	if err := tarsafe.ExtractIntoRoot(tar.NewReader(gz), root, tarsafe.Policy{AllowSymlinks: true}); err != nil {
 		return err
 	}
-	// safety: tar EOF precedes the gzip trailer, which must verify before publication.
-	_, err = io.Copy(io.Discard, gz)
-	return err
+	return tarsafe.VerifyGzipTrailer(gz)
 }
 
 // ExtractArchiveStagedRoot restores name inside parent, opening every path through parent.

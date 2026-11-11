@@ -139,8 +139,10 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 		return rec, err
 	}
 	profile := env.Name + "-scan"
+	// #nosec G101 -- This is an environment variable name, not its secret value.
 	secretName := "DEPLOY_SCAN_STAGING_TOKEN"
 	if env.Name == d.cfg.Production.Name {
+		// #nosec G101 -- This is an environment variable name, not its secret value.
 		secretName = "DEPLOY_SCAN_PRODUCTION_TOKEN"
 	}
 	if err = d.act(ctx, "configure fixture profile from "+secretName, func() error {

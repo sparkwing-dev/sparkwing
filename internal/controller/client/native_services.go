@@ -196,6 +196,7 @@ func (c *NativeProcessClient) Child(ctx context.Context, run string, wait time.D
 			return result, nil
 		}
 		// perf: keep one host await authorized while polling immediate controller snapshots.
+		// #nosec G404 -- Retry jitter needs dispersion, not cryptographic unpredictability.
 		pause := delay/2 + mathrand.N(delay/2)
 		if err := waitFor(ctx, min(pause, remaining)); err != nil {
 			return result, err

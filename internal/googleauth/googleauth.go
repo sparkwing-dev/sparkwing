@@ -25,7 +25,8 @@ import (
 // Google's published endpoints. Config carries them as fields so a test can
 // point a client at a local issuer.
 const (
-	googleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleAuthURL = "https://accounts.google.com/o/oauth2/v2/auth"
+	// #nosec G101 -- This is the public Google OAuth endpoint, not a token.
 	googleTokenURL = "https://oauth2.googleapis.com/token"
 	googleJWKSURL  = "https://www.googleapis.com/oauth2/v3/certs"
 )

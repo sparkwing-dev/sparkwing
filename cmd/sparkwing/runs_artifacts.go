@@ -86,6 +86,7 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 		}
 		defer func() {
 			_ = file.Close()
+			// #nosec G703 -- CreateTemp generated this file name in the operator-selected destination directory.
 			if removeErr := os.Remove(file.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 				err = errors.Join(err, removeErr)
 			}
@@ -97,6 +98,7 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 		if err := artifactDestinationAvailable(dest); err != nil {
 			return err
 		}
+		// #nosec G703 -- The local operator selects --dest and CreateTemp owns the source name.
 		if err := os.Rename(file.Name(), dest); err != nil {
 			return err
 		}
@@ -219,6 +221,7 @@ func writeArtifact(out io.Writer, record artifactRecord, format string) error {
 }
 
 func artifactDestinationAvailable(dest string) error {
+	// #nosec G703 -- The local operator selects --dest; the controller cannot select this path.
 	_, err := os.Lstat(dest)
 	if err == nil {
 		return &os.PathError{Op: "create", Path: dest, Err: os.ErrExist}

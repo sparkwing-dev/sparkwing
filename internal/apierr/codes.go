@@ -54,10 +54,12 @@ const (
 	ReasonRepositoryUnauthorized apierr.Reason = "repository_unauthorized"
 	ReasonReadOnly               apierr.Reason = "read_only"
 	ReasonPersonalMachine        apierr.Reason = "personal_machine"
-	ReasonCredentialUnconfirmed  apierr.Reason = "credential_unconfirmed"
-	ReasonReauthRequired         apierr.Reason = "reauth_required"
-	ReasonSecretsKeyRequired     apierr.Reason = "secrets_key_required"
-	ReasonExchangeUsed           apierr.Reason = "exchange_used"
+	// #nosec G101 -- This is a public error reason code, not a credential.
+	ReasonCredentialUnconfirmed apierr.Reason = "credential_unconfirmed"
+	ReasonReauthRequired        apierr.Reason = "reauth_required"
+	// #nosec G101 -- This is a public error reason code, not a secret.
+	ReasonSecretsKeyRequired apierr.Reason = "secrets_key_required"
+	ReasonExchangeUsed       apierr.Reason = "exchange_used"
 )
 
 // Definition drives error reference documentation and HTTP status selection.

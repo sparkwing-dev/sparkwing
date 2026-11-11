@@ -489,6 +489,16 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:36",
 		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:43",
 		"fb0be3344c682a67786e89fa457bfee3c8a70fd6:design/rewrite/proposals/thin-sdk-step2/checks/sdk-compat-final.log:generic-api-key:8",
+		"# PEM armor around invalid multiline canary text in the masking fixtures.",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:159",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:167",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:169",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:175",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:177",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:191",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:199",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:207",
+		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:209",
 	}, "\n")
 	if ignore != want {
 		t.Fatalf("gitleaks history exceptions are not the exact fingerprint set: %q", ignore)
@@ -496,7 +506,7 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 }
 
 func TestBuildToolchainsUseFixedGoPatch(t *testing.T) {
-	const fixed = "1.26.10"
+	const fixed = "1.26.11"
 	for _, name := range workflowFileNames(t) {
 		for _, step := range workflowUsesSteps(t, name) {
 			if strings.HasPrefix(step.uses, "actions/setup-go@") && step.with["go-version"] != fixed {

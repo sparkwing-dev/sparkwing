@@ -29,7 +29,7 @@ adds capacity from your own machines to Cloud.
 
 Building Sparkwing requires Go 1.26.0 or later. Pipeline modules that use only
 the Go SDK require Go 1.25.0 or later. Job packages can require a newer version.
-The engine's source module selects Go 1.26.10 for patched builds with automatic
+The engine's source module selects Go 1.26.11 for patched builds with automatic
 toolchain selection. SDK consumers choose their own Go patch release.
 
 ### macOS / Linux
