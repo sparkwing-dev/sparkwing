@@ -102,6 +102,8 @@ type affectedTestPlan struct {
 	critical      map[string][]string
 }
 
+const affectedTestGoFlags = "-mod=readonly"
+
 func runAffectedTest(ctx context.Context) error {
 	files, scope, err := affectedChangeScope(ctx)
 	if err != nil {
@@ -117,7 +119,7 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string, hos
 	if err != nil {
 		return err
 	}
-	plans, byDir, err := planAffectedModules(ctx, files, critical, "")
+	plans, byDir, err := planAffectedModules(ctx, files, critical, affectedTestGoFlags)
 	if err != nil {
 		return err
 	}
@@ -154,15 +156,15 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string, hos
 			}
 		}
 	}
-	// safety: the gate declares its build and test flags; submitter flags must
-	// not serialize nested Go commands or change which test class is judged.
+	// safety: a nonempty owned flag overrides saved GOFLAGS too, while keeping
+	// the Go configuration that supplies private module and proxy settings.
 	var timings goTestTimings
 	defer timings.report(ctx, time.Now())
 	return withStableProductTestHome("gate-test", func(home string) error {
 		var failures []string
 		for _, p := range plans {
 			for _, command := range p.commands(host) {
-				script := productTestScript(fmt.Sprintf("cd %q && GOFLAGS= %s", p.module, command), home)
+				script := productTestScript(fmt.Sprintf("cd %q && GOFLAGS=%s %s", p.module, shellQuote(affectedTestGoFlags), command), home)
 				if err := timings.run(ctx, script); err != nil {
 					failures = append(failures, describeModuleFailure(p.module, err))
 				}

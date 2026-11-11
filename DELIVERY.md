@@ -1017,12 +1017,16 @@ file. Other syntax and workflow checks remain active.
   manual runs). Branch pushes keep the fast checks alone. The local test job
   reserves and uses `max(1, (NumCPU-1)/2)` workers: seven on a 16-CPU host.
   It ignores the submitter's `GOMAXPROCS` and the SDK's `CI` marker when
-  choosing that shared-host allowance. The shared affected-test runner clears
-  `GOFLAGS` for both package selection and test execution, including hosted
-  Gate and ordinary Land's merge recheck. Test commands set `GOMAXPROCS` and
-  `-p` explicitly, so inherited flags cannot serialize nested Go builds or
-  change the build selected for testing. Other affected build and vet checks
-  retain their existing flag and runtime CPU policies.
+  choosing that shared-host allowance. Seven is a scheduling reservation,
+  not an aggregate CPU cap: up to seven test processes can each use seven
+  Go execution threads, besides compiler and nested subprocess work.
+  The shared affected-test runner sets `GOFLAGS=-mod=readonly` for both
+  package selection and test execution, including hosted Gate and ordinary
+  Land's merge recheck. This nonempty value overrides process and saved
+  `GOFLAGS` while preserving other saved Go settings, including `GOPROXY`,
+  `GOPRIVATE` and `GONOSUMDB`. Test commands set `GOMAXPROCS` and `-p`
+  explicitly. Other affected build and vet checks retain their existing flag
+  and runtime CPU policies.
   The tiers shift left, so a
   push whose commits skipped the commit hook is judged by `gate` rather than a second
   time here. Rebase replay does not fire pre-commit, and automatic merges use
