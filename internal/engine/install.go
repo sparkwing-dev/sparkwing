@@ -120,7 +120,7 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := runSDKInstaller(ctx, command, sdkInstallTimeout); err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			if failure := hosterr.LastDiagnostic(stderr.String()); failure != nil {
+			if failure, diagnosticErr := hosterr.LastDiagnostic(stderr.String()); diagnosticErr == nil {
 				switch failure.Code {
 				case apierr.BadRequest, apierr.InvalidArgs, apierr.Conflict, hosterr.IntegrityFailure:
 					return SDKCommand{}, fmt.Errorf("selected engine SDK installation: %w: %w", masker.Error(failure), err)
@@ -170,8 +170,8 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 func installerDiagnostic(stderr string) string {
 	text := strings.TrimSpace(stderr)
 	start := strings.LastIndexByte(text, '\n') + 1
-	failure := hosterr.LastDiagnostic(text)
-	if failure == nil {
+	failure, err := hosterr.LastDiagnostic(text)
+	if err != nil {
 		return text
 	}
 	line := failure.Message

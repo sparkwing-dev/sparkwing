@@ -23,7 +23,8 @@ func configurationRefusal(detail controllerwire.RunDetail) *apierr.Error {
 
 func runCompletionError(ctx context.Context, reader interface {
 	ReadRun(context.Context, string) (controllerwire.RunDetail, error)
-}, run, status string) error {
+}, run, status string,
+) error {
 	if status == "failed" {
 		if detail, err := reader.ReadRun(ctx, run); err == nil && detail.ID == run {
 			if refusal := configurationRefusal(detail); refusal != nil {

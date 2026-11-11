@@ -115,7 +115,7 @@ func watchHostStart(cmd *exec.Cmd, bin, home string) error {
 
 func hostExitedEarly(bin, home string, exit *exec.ExitError) error {
 	if tail := daemonLogTail(home); tail != "" {
-		if failure := hosterr.LastDiagnostic(tail); exit.ExitCode() > 0 && failure != nil && failure.Code == apierr.BadRequest {
+		if failure, err := hosterr.LastDiagnostic(tail); exit.ExitCode() > 0 && err == nil && failure.Code == apierr.BadRequest {
 			return fmt.Errorf("%w: %w", errDaemonHostFailed, failure)
 		}
 		path, _ := wingd.LogPath(home)

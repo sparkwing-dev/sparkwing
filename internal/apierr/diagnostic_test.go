@@ -20,9 +20,9 @@ func TestLastDiagnosticRequiresAFinalRegisteredEnvelope(t *testing.T) {
 		{"malformed", `{"error":`, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			failure := LastDiagnostic(test.output)
-			if (failure != nil) != test.present {
-				t.Fatalf("diagnostic = %+v, want present=%t", failure, test.present)
+			failure, err := LastDiagnostic(test.output)
+			if (failure != nil) != test.present || (err == nil) != test.present {
+				t.Fatalf("diagnostic = %+v, %v; want present=%t", failure, err, test.present)
 			}
 			if failure != nil && (failure.Code != apierr.BadRequest || failure.Message != "invalid manifest" || failure.Hint != "restore main") {
 				t.Fatalf("final diagnostic changed: %+v", failure)
