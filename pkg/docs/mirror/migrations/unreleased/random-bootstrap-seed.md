@@ -9,5 +9,6 @@ initialized store: its bootstrap gate remains consumed. Keep the existing store.
 For a fresh store, use the generator in [authentication](../../auth.md#deployment-bootstrap).
 For an existing store, follow [weak bootstrap credential recovery](../../auth.md#weak-bootstrap-credential-recovery).
 It covers zero-grace rotation before upgrade, private recovery after a refused
-restart, and removal of the mounted file. The replacement credential must not
+restart with separate proxy/metrics listeners disabled, temporary loopback CLI
+profile selection and restoration, and removal of the mounted file. The replacement credential must not
 be mounted as a new bootstrap seed.

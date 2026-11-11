@@ -817,10 +817,19 @@ bootstrap seed; do not mount it as `bootstrap-admin-token`.
 
 If the upgrade already refuses startup, stop public ingress first. Temporarily
 remove the weak bootstrap file and start the same controller/store bound to
-loopback (`--addr 127.0.0.1:PORT`) with `--require-auth` retained. Its existing
-weak credential still authenticates, so perform the rotation above through that
-private endpoint. Keep the bootstrap file removed and restore normal ingress
-only after verifying the replacement and old-credential refusal. A loopback bind
+loopback with `--addr 127.0.0.1:PORT --trusted-proxy-addr= --metrics-addr=`
+and `--require-auth` retained. Clear those separate listeners even if they were
+configured previously. Point the deployment profile at this temporary endpoint:
+
+```sh
+sparkwing profiles set --profile deployment --controller http://127.0.0.1:PORT
+```
+
+Its existing weak credential still authenticates, so perform the rotation above
+through that private endpoint. Keep the bootstrap file removed. After verifying
+the replacement and old-credential refusal, restore the normal controller
+listeners and ingress, then restore the profile's original controller URL with
+`sparkwing profiles set --profile deployment --controller ORIGINAL_URL`. A loopback bind
 is not protection from other users or processes on the host: use a trusted host
 and keep the recovery window short.
 
