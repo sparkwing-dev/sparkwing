@@ -730,7 +730,12 @@ Service credentials cannot submit provider outcomes or grant team credit.
 Mount `bootstrap-admin-token` in the controller's `--credentials-dir`. Its value
 is `swk_` followed by the unpadded base64url encoding of 32 cryptographically
 random bytes. Constant-byte placeholders, including an all-zero payload, are
-refused at startup. Startup passes a valid seed to the once-only bootstrap
+refused at startup, even on an initialized store or after revocation. This
+refusal does not revoke an already-issued weak credential. The generator only
+repairs fresh stores; an initialized store will reject a replacement seed.
+[Rotate or revoke the weak credential and remove its mounted file before
+upgrading](migrations/unreleased/random-bootstrap-seed.md#random-bootstrap-administrator-seeds).
+Startup passes a valid seed to the once-only bootstrap
 transaction before serving requests.
 The store keeps its digest and grants `operator.limits`, `operator.object_store`
 and `operator.tokens`. It grants no team membership, `runs.read`, `runs.write`,

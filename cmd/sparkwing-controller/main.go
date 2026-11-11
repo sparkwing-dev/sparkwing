@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -657,10 +658,6 @@ func (b boundListeners) close() {
 	}
 }
 
-// safety: a mounted seed that already bootstrapped this store has done its
-// job, and failing on it would leave the operator a choice between a crash
-// loop and dropping --require-auth, so it only warns. A different seed is
-// still refused.
 func ensureBootstrapAdmin(ctx context.Context, st *store.Store, seed string, logger *slog.Logger) error {
 	if seed == "" {
 		return nil
@@ -672,6 +669,17 @@ func ensureBootstrapAdmin(ctx context.Context, st *store.Store, seed string, log
 	case err != nil:
 		var refusal *apierr.Error
 		if errors.As(err, &refusal) && refusal.Hint != "" {
+			repair := *refusal
+			principal, lookupErr := st.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(seed)))
+			if lookupErr == nil && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectOperator, ID: controller.BootstrapAdminPrincipal}) {
+				repair.Message = "weak credential is live and guessable"
+				repair.Hint = "Remove bootstrap-admin-token; restart on loopback; sparkwing operator tokens rotate --profile deployment --token PREFIX --grace 0. Save replacement."
+			} else if ready, readyErr := st.AsOperator().HasDeploymentAdministrator(ctx); readyErr != nil {
+				return fmt.Errorf("check bootstrap repair: %w", readyErr)
+			} else if ready {
+				repair.Hint = "Existing store: secure its administrator and remove bootstrap-admin-token; see the random-bootstrap-seed migration guide. A new seed cannot reopen its gate."
+			}
+			err = &repair
 			return fmt.Errorf("bootstrap admin token: %w. %s", err, refusal.Hint)
 		}
 		return fmt.Errorf("bootstrap admin token: %w", err)

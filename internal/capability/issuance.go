@@ -369,7 +369,7 @@ func ValidateProvisionSeed(spec ProvisionSpec) error {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid bootstrap credential"}
 	}
 	if !slices.ContainsFunc(payload[1:], func(value byte) bool { return value != payload[0] }) {
-		return &apierr.Error{Code: apierr.BadRequest, Message: "bootstrap seed must be random; constant bytes refused", Hint: "In a private directory: (umask 077 && printf 'swk_%s' \"$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\\n')\" > bootstrap-admin-token). Mount that file."}
+		return &apierr.Error{Code: apierr.BadRequest, Message: "bootstrap seed must be random; constant bytes refused", Hint: "Fresh store only: (umask 077 && printf 'swk_%s' \"$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\\n')\" > bootstrap-admin-token). Mount that file."}
 	}
 	return nil
 }
