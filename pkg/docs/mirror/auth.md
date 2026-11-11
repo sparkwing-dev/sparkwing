@@ -734,7 +734,7 @@ refused at startup, even on an initialized store or after revocation. This
 refusal does not revoke an already-issued weak credential. The generator only
 repairs fresh stores; an initialized store will reject a replacement seed.
 [Rotate or revoke the weak credential and remove its mounted file before
-upgrading](migrations/unreleased/random-bootstrap-seed.md#random-bootstrap-administrator-seeds).
+upgrading](#weak-bootstrap-credential-recovery).
 Startup passes a valid seed to the once-only bootstrap
 transaction before serving requests.
 The store keeps its digest and grants `operator.limits`, `operator.object_store`
@@ -784,6 +784,45 @@ and cannot assert GitHub App trust.
 A `--deployment=team` controller refuses deployment-admin bearers. `local` and
 `cloud` controllers accept them. Console sessions retain their separate account
 gate.
+
+### Weak bootstrap credential recovery
+
+If a real deployment administrator already exists, verify that credential can
+list operator tokens and that the old bootstrap credential is revoked. Remove
+the mounted bootstrap file before restarting the upgraded controller.
+
+If the weak bootstrap credential is still live, treat it as guessable. Before
+upgrading, isolate the controller from untrusted traffic and rotate it with zero
+grace using the existing CLI and a deployment profile authenticated by that seed:
+
+```sh
+sparkwing operator tokens list --profile deployment -o json
+umask 077
+sparkwing operator tokens rotate --profile deployment --token PREFIX --grace 0 -o plain > replacement-token
+```
+
+`PREFIX` is the weak bootstrap credential's prefix from the list, not its full
+bearer. Rotation returns the replacement once, revokes the weak credential
+immediately and ends its descendants' authority. Store the replacement securely,
+update the profile to use it, and verify `operator tokens list` succeeds with it
+and fails with the old credential. Remove the mounted bootstrap file, then
+upgrade and restart. The replacement is an authentication credential, not a new
+bootstrap seed; do not mount it as `bootstrap-admin-token`.
+
+If the upgrade already refuses startup, stop public ingress first. Temporarily
+remove the weak bootstrap file and start the same controller/store bound to
+loopback (`--addr 127.0.0.1:PORT`) with `--require-auth` retained. Its existing
+weak credential still authenticates, so perform the rotation above through that
+private endpoint. Keep the bootstrap file removed and restore normal ingress
+only after verifying the replacement and old-credential refusal. A loopback bind
+is not protection from other users or processes on the host: use a trusted host
+and keep the recovery window short.
+
+After rotation, issue a named service administrator with `operator.tokens` and
+any other required operator grants to finish setup; that transaction also
+revokes remaining bootstrap setup credentials. If no live administrator remains,
+use your established credential recovery procedure; generating a replacement
+seed does not reopen the bootstrap gate.
 
 ## Operator console
 

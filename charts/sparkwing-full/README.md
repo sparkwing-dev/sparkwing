@@ -99,7 +99,7 @@ The bootstrap seed must contain 32 cryptographically random bytes. The controlle
 refuses constant-byte placeholders, including files left mounted on an initialized
 store. Replacing that file with a random seed cannot reopen the bootstrap gate.
 Rotate or revoke any live weak credential and remove the mounted file before
-upgrading; see [the recovery guide](../../docs/migrations/unreleased/random-bootstrap-seed.md#random-bootstrap-administrator-seeds). Generate the seed and encryption key outside
+upgrading; see [the recovery guide](../../docs/auth.md#weak-bootstrap-credential-recovery). Generate the seed and encryption key outside
 Helm, with private files:
 
 ```sh
