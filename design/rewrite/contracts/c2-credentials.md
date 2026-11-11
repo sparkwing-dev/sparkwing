@@ -1342,8 +1342,8 @@ post-exchange source grant. Native owners cannot publish prepared executables.
 The self-hosted source grant also opens the eval's own run details, receipt,
 attempts, steps, approvals and debug pauses, plus its bound pipeline's sizing.
 SDK evaluation-process delegation omits this host-only grant.
-The latter two require a pending approval predicate under the exact live
-evaluation fence. Generator expansion cannot read approval secrets or pipeline
+`secrets.release` and `refs.read` require a pending approval predicate under the
+exact live evaluation fence. Generator expansion cannot read approval secrets or pipeline
 references. Approval dependency outputs use the same accepted `Needs` rule as
 run-host evaluation. Authentication accepts a pending approval source only from
 the store-derived eligibility fact, under the exact source, evaluation and
