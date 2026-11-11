@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -47,7 +48,7 @@ func TestCritical(t *testing.T) { if testing.Short() { t.Skip("critical class") 
 			gitCommitAll(t, root, "controller change")
 			host, plan, doc := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
 				if queued {
-					return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, ReviewArgs: ReviewArgs{Brief: "Check Go limits"}}, sparkwing.RunContext{Pipeline: "land"})
+					return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Check Go limits"}}, sparkwing.RunContext{Pipeline: "land"})
 				}
 				return (&PrePush{}).Plan(ctx, plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
 			})

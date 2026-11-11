@@ -453,7 +453,7 @@ func affectedChangeScope(ctx context.Context) ([]string, string, error) {
 		return nil, "", fmt.Errorf("list the staged change: %w", err)
 	}
 	if len(staged) > 0 {
-		files, err := listNames(ctx, "diff --cached -z --name-only --no-renames --diff-filter=ACMRD")
+		files, err := listNames(ctx, "diff --cached -z --name-only --no-renames")
 		if err != nil {
 			return nil, "", err
 		}
@@ -463,7 +463,7 @@ func affectedChangeScope(ctx context.Context) ([]string, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	changed, err := listNames(ctx, "diff -z --name-only --no-renames --diff-filter=ACMRD "+base)
+	changed, err := listNames(ctx, "diff -z --name-only --no-renames "+base)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the change since %s: %w", base, err)
 	}

@@ -610,10 +610,36 @@ through the handoff and fresh-capacity fallback at 30 seconds.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts.
 
-The first claim after launcher startup logs a controller rate-limit reply at INFO,
+The claim loop waits at least its configured poll interval or the controller's
+`PollAfter`, whichever is longer, after the claim response and placement finish.
+Advice is capped at the wire protocol's eight-second maximum. Variable request
+latency therefore cannot compress the interval between controller admissions.
+An errored claim retains the last valid advice because the controller may have
+admitted the request before its response was lost. A later valid claim updates
+or clears that advice, including when its award encounters a placement failure.
+Reconciliation and held-award renewal continue during claim cooldown, and their
+failures cannot shorten it. `TestLauncherClaimPollTiming` guards the timing,
+advice bounds and reconciliation through a temporary failure with a fake clock.
+
+Poll advice is process-local. The first claim after launcher startup logs a
+controller rate-limit reply at INFO,
 because the previous process's idle poll interval may still apply. Later refusals
 log at WARN. Both honor the controller's retry delay. `TestLauncherLogsOnlyFirstClaimRateLimitAsInfo`
-guards the levels; placement failures retain WARN.
+guards the levels through single transport wrappers; joined faults and placement
+failures retain WARN. `TestLauncherRestartUsesRealClientRateLimit` and
+`TestLauncherClaimErrorRetainsLastAdvice` exercise the real client under fake time.
+
+Parent shutdown returns quietly when an in-flight operation fails only because
+that parent context stopped. This applies to claims, warm reporting,
+reconciliation, spent-node retirement and budget reads. Joined independent
+faults remain visible, and gateway failures still warn even during shutdown.
+`TestLauncherShutdownPreservesIndependentFaults` and
+`TestLauncherGateway503RemainsWarn` guard those distinctions.
+Job-local teardown failures unwrap their underlying cause, so a cancellation
+does not become an independent cleanup fault. Genuine teardown failures remain
+operator errors. `TestLauncherSIGTERMAtEveryPhase` sends SIGTERM during claim,
+placement, warm reporting, reconciliation, teardown, retirement and budget reads
+through the real controller client, including joined-fault controls.
 
 The first reservation also records `sparkwing.dev/used-run` with its team and run
 ID. Release retains it alongside the permanent protected labels. Retirement runs
