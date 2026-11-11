@@ -41,6 +41,7 @@ func setSessionCookies(w http.ResponseWriter, sessionID, csrfToken string) {
 }
 
 func setCSRFCookie(w http.ResponseWriter, token string, maxAge int) {
+	// #nosec G124 -- The page must read the CSRF cookie; the session cookie remains HttpOnly.
 	http.SetCookie(w, &http.Cookie{
 		Name:     csrfCookieName,
 		Value:    token,
@@ -54,6 +55,7 @@ func setCSRFCookie(w http.ResponseWriter, token string, maxAge int) {
 
 func clearSessionCookies(w http.ResponseWriter) {
 	for _, name := range []string{sessionCookieName, csrfCookieName} {
+		// #nosec G124 -- Deletion retains HttpOnly on the session cookie while the CSRF cookie stays page-readable.
 		http.SetCookie(w, &http.Cookie{
 			Name:     name,
 			Value:    "",

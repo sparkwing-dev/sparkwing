@@ -32,6 +32,7 @@ import (
 const AppID = 4242
 
 // webhookSecret signs the deliveries [Sign] produces.
+// #nosec G101 -- This signing string belongs only to the in-process fake GitHub server.
 const webhookSecret = "fake-app-webhook-secret"
 
 // Repo is a repository an installation covers.
@@ -183,6 +184,7 @@ func New(t testing.TB) *GitHub {
 
 // Config is an App configuration that talks to this fake.
 func (g *GitHub) Config() githubapp.Config {
+	// #nosec G101 -- These credentials authenticate only the in-process fake GitHub server.
 	return githubapp.Config{
 		AppID: AppID, Slug: "sparkwing-test", ClientID: "Iv1.fake", ClientSecret: "fake-client-secret",
 		WebhookSecret: webhookSecret, PrivateKey: g.Key, WebURL: g.URL, APIURL: g.URL,

@@ -62,6 +62,7 @@ func (StorePostgres) Help() string {
 func (StorePostgres) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Run the store suite against an embedded Postgres", Command: "sparkwing run store-postgres"},
+		// #nosec G101 -- This localhost connection string is a usage example, not a deployed credential.
 		{
 			Comment: "Run it against a server you already have",
 			Command: "SPARKWING_TEST_PG_URL=postgres://postgres:postgres@localhost:5433/postgres?sslmode=disable sparkwing run store-postgres",

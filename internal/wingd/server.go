@@ -188,6 +188,7 @@ func (d *Daemon) runElected(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// #nosec G404 -- The daemon incarnation labels journal records and is not an authentication secret.
 	incarnation := uint64(rand.Int64())
 	d.incarnation = incarnation
 	d.journal = journal.NewWriter(d.layout.dir, incarnation, d.cfg.Logf)

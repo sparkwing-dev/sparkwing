@@ -21,7 +21,8 @@ import (
 // GitHub's published endpoints. Config carries them as fields so a test can
 // point a client at a local server.
 const (
-	gitHubAuthURL   = "https://github.com/login/oauth/authorize"
+	gitHubAuthURL = "https://github.com/login/oauth/authorize"
+	// #nosec G101 -- This is the public GitHub OAuth endpoint, not a token.
 	gitHubTokenURL  = "https://github.com/login/oauth/access_token"
 	gitHubUserURL   = "https://api.github.com/user"
 	gitHubEmailsURL = "https://api.github.com/user/emails"

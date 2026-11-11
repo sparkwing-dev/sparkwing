@@ -100,6 +100,7 @@ func surfaceCommand(path string) Command {
 	panic("unregistered command: " + path)
 }
 
+// #nosec G101 -- These strings are CLI flag help and contain no credential values.
 var commandFlagDescriptions = map[string]string{
 	"sparkwing dashboard open --host":                          "Exact DNS name from dashboard.allowed_hosts for an HTTPS sign-in link through Tailscale Serve.",
 	"sparkwing __complete --kind":                              "Which completion candidates to print for the given command words.",
@@ -371,6 +372,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-runner warm --team":                             "Team whose GitHub Actions registration --github-actions exchanges against; required with --github-actions and ignored without it.",
 }
 
+// #nosec G101 -- These strings are CLI help text and contain no credential values.
 var flagDescriptions = map[string]string{
 	"profile":             "Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local.",
 	"repo":                "Repository identity as owner/name. Naming a repository grants no access.",
@@ -434,6 +436,7 @@ var flagDescriptions = map[string]string{
 	"keep-token":          "Remove only the local connection, without revoking its token at the controller.",
 }
 
+// #nosec G101 -- These strings are CLI synopsis text and contain no credential values.
 var commandSynopses = map[string]string{
 	"sparkwing operator teams":                      "Create teams under operator authority",
 	"sparkwing operator teams show":                 "Show a team and its protected node label",

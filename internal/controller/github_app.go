@@ -95,6 +95,7 @@ func (s *Server) writeGitHubAppUnavailable(w http.ResponseWriter) error {
 	return apierrhttp.Write(w, &apierr.Error{Code: hosterr.Unavailable, Message: errGitHubAppUnavailable.Error()})
 }
 
+// #nosec G101 -- This is operator-facing warning text, not a webhook secret.
 const previousWebhookSecretWarning = "GitHub App: remove the previous webhook secret after rotation"
 
 func (s *Server) hasPreviousWebhookSecret() bool {

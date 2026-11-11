@@ -35,7 +35,8 @@ type Purpose string
 
 // Bound envelope purposes.
 const (
-	PurposeSecret         Purpose = "secret"
+	PurposeSecret Purpose = "secret"
+	// #nosec G101 -- This is an AEAD purpose label, not key material.
 	PurposeGitCredential  Purpose = "git-credential"
 	PurposeRunEnvironment Purpose = "run-environment"
 	PurposeSetting        Purpose = "setting"

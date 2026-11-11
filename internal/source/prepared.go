@@ -460,6 +460,5 @@ func extractPrepared(directory string) (err error) {
 	if err := tarsafe.ExtractIntoRoot(tar.NewReader(gz), root, tarsafe.Policy{AllowSymlinks: true}); err != nil {
 		return err
 	}
-	_, err = io.Copy(io.Discard, gz)
-	return err
+	return tarsafe.VerifyGzipTrailer(gz)
 }

@@ -68,9 +68,10 @@ type gitCredentialReleaseJSON struct {
 }
 
 const (
-	maxDeployKeyBytes     = 16 << 10
-	defaultHTTPSUsername  = "x-access-token"
-	hostKeyScanTimeout    = 10 * time.Second
+	maxDeployKeyBytes    = 16 << 10
+	defaultHTTPSUsername = "x-access-token"
+	hostKeyScanTimeout   = 10 * time.Second
+	// #nosec G101 -- This is a credential scope label, not a stored credential.
 	gitCredentialScope    = "git-credential"
 	gitCredentialListSize = 200
 )

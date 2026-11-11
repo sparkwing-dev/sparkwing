@@ -260,6 +260,7 @@ func checkSDKReleaseSource(ctx context.Context, repo string) error {
 		if err != nil {
 			return err
 		}
+		// #nosec G703 -- MkdirTemp created this private directory and the copied names are fixed module file names.
 		if err := os.WriteFile(filepath.Join(scratch, name), body, 0o600); err != nil {
 			return err
 		}
