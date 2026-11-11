@@ -109,6 +109,7 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 			selector, parent := "1", "run"
 			for attempt := range 3 {
 				input := controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "retry-" + strconv.Itoa(attempt)}
+				wantInputs.Lineage = runspec.Lineage{RetryOf: parent, Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "member"}}}
 				result, err := control.Retry(t.Context(), selector, input)
 				if err != nil {
 					t.Fatal(err)
