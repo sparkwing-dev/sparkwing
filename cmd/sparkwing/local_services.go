@@ -268,11 +268,15 @@ func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, 
 		return wingdclient.MintDashboardLogin(ctx, home, host)
 	}
 	result.retireRunner = func(ctx context.Context) error {
+		deadline := time.Now().Add(wingd.LocalRunnerRetireWait)
 		err := wingdclient.Stop(ctx, wingdclient.Options{Home: home, RetireRunner: true})
-		if errors.Is(err, wingdclient.ErrNoDaemon) {
-			return nil
+		if err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
+			return err
 		}
-		return err
+		// safety: the joined controller cannot launch another runner after this inventory.
+		wait, cancel := context.WithDeadline(ctx, deadline)
+		defer cancel()
+		return wingd.WaitLocalRunnerShutdown(wait, host)
 	}
 	return result, nil
 }
