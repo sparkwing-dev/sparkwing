@@ -9,7 +9,7 @@ commands are in [cli-secrets](cli-secrets.md); declaration and the preflight
 that refuses a plan missing a secret are in [pipelines](pipelines.md).
 
 Team-owned API routes, including `POST /api/v1/secrets`, take the team only from
-the credential and ignore client-supplied team hints.
+the credential and ignore client-supplied team hints in query strings or headers.
 
 For a local run with a missing declared secret, the error names the secret and
 gives its repair command, such as `sparkwing secrets set --secret BAR --file <path>`.
