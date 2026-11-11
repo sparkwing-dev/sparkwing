@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -166,6 +168,8 @@ func TestRunClaimsAfterRefusingRestartedCapacityIdentity(t *testing.T) {
 		restarted := &Launcher{Kube: kube, Config: l.Config, Boundary: boundary, Control: claimSignalControl{CloudControl: publicationControl{CloudControl: control, sync: func([]CloudJobObservation) ([]CloudJobState, error) {
 			return nil, hosterr.Authorization(hosterr.ReasonBinding, "forged holder")
 		}}, claimed: claimed}}
+		var logs strings.Builder
+		restarted.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		done := make(chan error, 1)
@@ -182,6 +186,9 @@ func TestRunClaimsAfterRefusingRestartedCapacityIdentity(t *testing.T) {
 		cancel()
 		if err := <-done; err != nil {
 			t.Fatal(err)
+		}
+		if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "controller refused capacity Pod identity") {
+			t.Fatal(logs.String())
 		}
 	})
 }
