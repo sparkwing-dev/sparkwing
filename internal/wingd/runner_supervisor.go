@@ -136,7 +136,7 @@ func WaitLocalRunnerShutdown(ctx context.Context, host crontimer.Host) error {
 	if host.GOOS != "linux" {
 		return nil
 	}
-	if _, err := os.Stat("/run/systemd/system"); errors.Is(err, os.ErrNotExist) {
+	if _, err := runnerHostStat(host, "/run/systemd/system"); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
 		return err
@@ -176,8 +176,15 @@ func WaitLocalRunnerShutdown(ctx context.Context, host crontimer.Host) error {
 	}
 }
 
+func runnerHostStat(host crontimer.Host, path string) (os.FileInfo, error) {
+	if host.Stat != nil {
+		return host.Stat(path)
+	}
+	return os.Stat(path)
+}
+
 func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPath string) error {
-	info, err := os.Stat(bootPath)
+	info, err := runnerHostStat(host, bootPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return startUnmanagedLocalRunner(ctx, host, id)
 	}

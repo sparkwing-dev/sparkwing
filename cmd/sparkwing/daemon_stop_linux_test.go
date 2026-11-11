@@ -80,6 +80,7 @@ func TestDaemonStopRefusesASupervisedRunnerWithoutAnActiveRegistration(t *testin
 	synctest.Test(t, func(t *testing.T) {
 		home := t.TempDir()
 		config, host := localServicesFixture(t, home)
+		host.Stat = func(string) (os.FileInfo, error) { return os.Stat(host.Home) }
 		unit := wingd.LocalRunnerServiceName(home, "starting") + ".service"
 		host.Exec = func(context.Context, string, ...string) (string, error) {
 			return fmt.Sprintf(`[{"unit":%q,"active":"active","sub":"running"}]`, unit), nil
@@ -99,6 +100,7 @@ func TestDaemonStopWaitsForSupervisedUnitCollection(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		home := t.TempDir()
 		config, host := localServicesFixture(t, home)
+		host.Stat = func(string) (os.FileInfo, error) { return os.Stat(host.Home) }
 		calls := 0
 		host.Exec = func(_ context.Context, name string, args ...string) (string, error) {
 			calls++
@@ -128,6 +130,7 @@ func TestDaemonStopRefusesAnUnreadableSupervisedUnitInventory(t *testing.T) {
 		t.Run(output, func(t *testing.T) {
 			home := t.TempDir()
 			config, host := localServicesFixture(t, home)
+			host.Stat = func(string) (os.FileInfo, error) { return os.Stat(host.Home) }
 			host.Exec = func(context.Context, string, ...string) (string, error) {
 				if output == "unreadable" {
 					return "", os.ErrPermission
@@ -140,6 +143,39 @@ func TestDaemonStopRefusesAnUnreadableSupervisedUnitInventory(t *testing.T) {
 			}
 			if err := services.retireRunner(t.Context()); err == nil || !strings.Contains(err.Error(), "shutdown is incomplete") {
 				t.Fatalf("unverified shutdown succeeded: %v", err)
+			}
+		})
+	}
+}
+
+func TestDaemonStopChecksOnlySystemdHosts(t *testing.T) {
+	for _, present := range []bool{false, true} {
+		t.Run(fmt.Sprint(present), func(t *testing.T) {
+			home := t.TempDir()
+			config, host := localServicesFixture(t, home)
+			host.Stat = func(path string) (os.FileInfo, error) {
+				if path != "/run/systemd/system" {
+					t.Fatalf("unexpected capability check: %s", path)
+				}
+				if !present {
+					return nil, os.ErrNotExist
+				}
+				return os.Stat(host.Home)
+			}
+			calls := 0
+			host.Exec = func(context.Context, string, ...string) (string, error) {
+				calls++
+				return "[]", nil
+			}
+			services, err := composeLocalServices(t.Context(), config, host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := services.retireRunner(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if want := map[bool]int{false: 0, true: 1}[present]; calls != want {
+				t.Fatalf("inventory calls=%d, want %d for systemd=%v", calls, want, present)
 			}
 		})
 	}
