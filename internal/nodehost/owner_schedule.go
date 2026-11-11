@@ -479,6 +479,8 @@ func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.S
 }
 
 func (h *OwnerHost) wait(ctx context.Context, snapshot store.RunSnapshot, completed <-chan ownerExecution) (*ownerExecution, error) {
+	resume := AwaitSlot(ctx)()
+	defer resume(ctx)
 	waitCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- h.Wait(waitCtx, snapshot) }()

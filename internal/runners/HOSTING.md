@@ -28,12 +28,14 @@ runs execute in-process through the native owner, as a Cloud plan pod does.
 `MaxConcurrent` bounds plan, eval and job awards. Trigger owners have a separate
 bound of the same size, because their hosting waits for jobs to finish. Claims
 offer only kinds with available capacity and stop while job capacity is full.
-Child awaits release their slot. A returning await reacquires it before the SDK
+Owner scheduler waits and child awaits release their slots so nested run owners
+can be admitted. A returning await reacquires its slot before the SDK
 continues, waiting without consuming the no-progress budget. Cancellation
 unblocks slot acquisition. `TestLoopAwaitResumeWaitsForRunnerSlot` covers
 resumption behind unrelated work and cancellation at concurrency one.
 `TestLoopOwnerDoesNotOccupyItsJobsOnlySlot` covers a waiting owner and its job
-at concurrency one. Claims report the configured limit in the optional
+at concurrency one. `TestOwnerHostAwaitingDescendantsReleasesRunnerSlot` covers
+three nested run owners on a runner with two owner slots. Claims report the configured limit in the optional
 `X-Sparkwing-Max-Concurrent` header, independently of `free_slots`. Older
 controllers ignore this header and continue awarding work. Renewals retain
 that observation. Personal-runner `active_jobs` lists job awards and excludes

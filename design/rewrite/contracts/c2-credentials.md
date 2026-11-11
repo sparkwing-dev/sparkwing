@@ -1334,7 +1334,11 @@ without cycling through runspec. Plan claims use `log.tail` on
 `/claims/{claim}/logs`, `log-segments` and `log-manifest`. Eval uses a separate
 `CredentialEval` alternative requiring `expansion.submit`, `ownEval` and
 `LiveExpansion` on those same routes and heartbeat. Eval carries
-`expansion.submit`, `data.read`, `secrets.release` and `refs.read`.
+`expansion.submit`, `data.read`, `source.read`, `secrets.release` and `refs.read`.
+Source acquisition uses the sealed run source under the independent live eval
+lease, including after the source job finishes. Self-hosted evaluators fetch and
+build that source. Cloud evaluators can reuse the Cloud planning owner's verified
+prepared executable. Native owners cannot publish prepared executables.
 The latter two require a pending approval predicate under the exact live
 evaluation fence. Generator expansion cannot read approval secrets or pipeline
 references. Approval dependency outputs use the same accepted `Needs` rule as

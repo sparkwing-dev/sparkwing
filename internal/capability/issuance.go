@@ -130,7 +130,7 @@ var awardPolicies = []AwardPolicy{
 	{PurposePlan, UnitPlan, []Grant{TriggersClaim, ClaimsLaunch}, []Grant{
 		SourceRead, SecretsRelease, DataRead, DataWrite, NodeReport, NodeResult, LogTail,
 	}, []BindingKind{BindingRun}, parentClaimantRoot},
-	{PurposeEval, UnitEval, []Grant{NodesClaim, ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead}, []BindingKind{BindingNode}, parentClaimantRoot},
+	{PurposeEval, UnitEval, []Grant{NodesClaim, ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead, SourceRead}, []BindingKind{BindingNode}, parentClaimantRoot},
 	{PurposeHere, UnitTrigger, []Grant{RunsWrite}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
 		SecretsRelease, SourceRead, DataRead, DataWrite, OIDCMint, RefsRead, ChildrenStart, ExpansionSubmit,

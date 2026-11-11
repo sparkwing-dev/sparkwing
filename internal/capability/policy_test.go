@@ -116,7 +116,7 @@ func TestAwardVocabulary(t *testing.T) {
 		if len(policy.Bindings) == 0 || len(policy.ClaimGrants) == 0 || policy.Parent == "" {
 			t.Errorf("incomplete policy for %s", policy.Unit)
 		}
-		if policy.Purpose == PurposeEval && (!slices.Equal(policy.Grants, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead}) || policy.Unit != UnitEval) {
+		if policy.Purpose == PurposeEval && (!slices.Equal(policy.Grants, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead, SourceRead}) || policy.Unit != UnitEval) {
 			t.Fatal("eval grant vocabulary differs from evaluation reads and submission")
 		}
 		if policy.Purpose == PurposeWork && policy.Unit != UnitNode {
