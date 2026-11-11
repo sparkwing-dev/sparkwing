@@ -175,10 +175,12 @@ Run intake, plan acceptance, job status reads, job transitions, finish,
 cancellation, retry and run/job renewal use the shared capability policy. The
 controller resolves the resource's team before authorization and derives
 actors and fences from the credential. Unknown or ended credentials get
-`unauthenticated`. Their HTTP body is always `credential is unavailable`;
-it does not distinguish an unknown credential from expiry, revocation, rotation
-grace expiry, epoch changes or ended membership. Private server audit records
-keep the specific reason. Authenticated credential inventory and successful
+`unauthenticated`. Their HTTP error bodies and refusal headers are identical,
+with message `credential is unavailable`; they do not distinguish an unknown
+credential from expiry, revocation, rotation grace expiry, epoch changes or ended
+membership. Private server audit records keep the specific reason. Response timing
+is not guaranteed uniform: ended credentials require additional authority lookups.
+Authenticated credential inventory and successful
 rotation responses provide lifecycle details to authorized callers. The CLI
 uses the selected local profile to suggest signing in or saving a replacement;
 a 401 alone does not establish that a saved token was revoked. A live credential
