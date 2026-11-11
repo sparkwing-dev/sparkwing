@@ -154,3 +154,55 @@ func TestQueuedAdmissionLeavesRunnerSlotForAwaitedChild(t *testing.T) {
 		}
 	})
 }
+
+func TestQueuedAdmissionBacksOffAndRefusalDoesNotReacquire(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		resumed := false
+		ctx = WithAwaitSlot(ctx, func() func(context.Context) {
+			return func(context.Context) { resumed = true }
+		})
+		gate, probe, accepted, row := capacityFixture(t)
+		probe.admit = func(context.Context) (runstate.AcquireSlotResponse, error) {
+			return runstate.AcquireSlotResponse{Kind: runstate.AcquireQueued}, nil
+		}
+		err := gate.claimedNode(ctx, NodeInput{Accepted: accepted, NodeID: string(row.Ref.NodeID), Generation: row.Generation}, func(context.Context) error {
+			t.Error("queued job executed")
+			return nil
+		})
+		if !errors.Is(err, context.DeadlineExceeded) || resumed || len(probe.bindings) > 5 {
+			t.Fatalf("queued wait did not back off or reacquired after refusal: polls=%d resumed=%t error=%v", len(probe.bindings), resumed, err)
+		}
+	})
+}
+
+func TestQueuedAdmissionRefusalLeavesInventoryReleased(t *testing.T) {
+	for _, kind := range []runstate.AcquireKind{runstate.AcquireSkipped, runstate.AcquireFailed, "error"} {
+		t.Run(string(kind), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				resumed := false
+				ctx := WithAwaitSlot(t.Context(), func() func(context.Context) {
+					return func(context.Context) { resumed = true }
+				})
+				gate, probe, accepted, row := capacityFixture(t)
+				probe.admit = func(context.Context) (runstate.AcquireSlotResponse, error) {
+					if len(probe.bindings) == 1 {
+						return runstate.AcquireSlotResponse{Kind: runstate.AcquireQueued}, nil
+					}
+					if kind == "error" {
+						return runstate.AcquireSlotResponse{}, errors.New("admission unavailable")
+					}
+					return runstate.AcquireSlotResponse{Kind: kind}, nil
+				}
+				err := gate.claimedNode(ctx, NodeInput{Accepted: accepted, NodeID: string(row.Ref.NodeID), Generation: row.Generation}, func(context.Context) error {
+					t.Error("refused job executed")
+					return nil
+				})
+				if err == nil || resumed {
+					t.Fatalf("refusal reacquired runner inventory: resumed=%t error=%v", resumed, err)
+				}
+			})
+		})
+	}
+}

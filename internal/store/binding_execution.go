@@ -172,7 +172,7 @@ func bindingSourceTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	now := tx.now(ctx)
 	if b.Expansion != nil {
 		lease := state.Expansion
-		if state.Current.Generation != b.Generation || state.RunCancelled || lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(now) {
+		if state.Current.Generation != b.Generation || lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(now) {
 			return bindingRefusal()
 		}
 		return nil

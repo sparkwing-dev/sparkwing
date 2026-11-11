@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -155,6 +156,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	defer timer.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
 	workSlots := make(chan struct{}, l.Config.MaxConcurrent)
+	var admissionWaiters atomic.Int64
 	ownerSlots := make(chan struct{}, l.Config.MaxConcurrent)
 	active := make(map[capability.LeaseRef]struct{})
 	awaitChanged := make(chan struct{}, 1)
@@ -257,6 +259,15 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 					changed()
 				}
 			})
+			hostCtx = nodehost.WithAdmissionWait(hostCtx, func() (func(context.Context), func()) {
+				admissionWaiters.Add(1)
+				resume := nodehost.AwaitSlot(hostCtx)()
+				var once sync.Once
+				stop := func() {
+					once.Do(func() { admissionWaiters.Add(-1); changed() })
+				}
+				return func(ctx context.Context) { resume(ctx); stop() }, stop
+			})
 			err := l.Host.Host(hostCtx, unit)
 			slotMu.Lock()
 			if release != nil {
@@ -345,6 +356,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				return true
 			}
 			used := working
+			if kind == capability.UnitNode {
+				used += int(admissionWaiters.Load())
+			}
 			if kind == capability.UnitTrigger {
 				used = owners
 			}

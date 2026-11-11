@@ -31,7 +31,11 @@ offer only kinds with available capacity and stop while job capacity is full.
 Jobs queued for concurrency admission and child awaits release their runner
 slots so waiting siblings cannot starve child planning. A returning wait
 reacquires its slot before source preparation or SDK execution continues.
-Child awaits wait without consuming the no-progress budget. Cancellation
+Admission waiters count with active work against `MaxConcurrent` when sizing job
+claims. Plan and eval claims remain available when that waiter budget is full.
+Queued admission polls back off from 100 milliseconds to one second. Refused or
+cancelled waiters leave inventory released. Child awaits do not consume the
+no-progress budget. Cancellation
 unblocks slot acquisition. `TestLoopAwaitResumeWaitsForRunnerSlot` covers
 resumption behind unrelated work and cancellation at concurrency one.
 `TestLoopOwnerDoesNotOccupyItsJobsOnlySlot` covers a waiting owner and its job

@@ -150,7 +150,7 @@ func TestAuthenticationExpansionUsesOwnLease(t *testing.T) {
 			c.Unit, c.Purpose = UnitEval, PurposeEval
 			for _, policy := range AwardPolicies() {
 				if policy.Purpose == PurposeEval {
-					c.Grants = policy.Grants
+					c.Grants = policy.ExecutionGrants(&HostFacts{Kind: HostSelfHosted})
 				}
 			}
 			c.Binding.Expansion = &LeaseRef{Kind: UnitEval, ID: c.UnitID, Generation: 3, Holder: "eval-runner"}

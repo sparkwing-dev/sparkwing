@@ -130,8 +130,8 @@ func testPreparedDataHTTPPublish(t *testing.T, cloud bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(principal.Capability.Grants, capability.DataWrite) {
-		t.Fatal("eval award gained data.write")
+	if principal.Capability.Host == nil || principal.Capability.Host.Kind != capability.HostSelfHosted || !slices.Contains(principal.Capability.Grants, capability.SourceRead) || slices.Contains(principal.Capability.Grants, capability.DataWrite) {
+		t.Fatal("self-hosted eval must retain source acquisition without gaining data writes")
 	}
 	evalRaw := nativeClaimPresentation(t, e, capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run", NodeID: "gen"}})
 	w = engineClaimHTTP(t, h, evalRaw, "GET", "/api/v1/data/records?kind=prepared&pipeline=ci&name=pipeline&key=run", "", 200)

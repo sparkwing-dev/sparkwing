@@ -140,6 +140,9 @@ func TestProductionCloudPlanAndEvalReachNativeHost(t *testing.T) {
 	}
 }
 
+// An exchanged eval award has no source.read, so a Cloud evaluation that
+// fetched would be refused and fail every generator; it restores the plan's
+// prepared source like a node, and only the planning owner publishes it.
 func TestProductionCloudUnitsRestorePreparedSource(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {

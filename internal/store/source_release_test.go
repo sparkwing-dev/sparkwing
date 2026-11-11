@@ -76,7 +76,7 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 }
 
 func TestSourceReleaseEvalUsesItsLiveExpansionLease(t *testing.T) {
-	for _, change := range []string{"", "expired", "source generation", "eval generation", "cancelled"} {
+	for _, change := range []string{"", "expired", "source generation", "eval generation", "cancelled", "eval finished"} {
 		t.Run(change, func(t *testing.T) {
 			s, claim := releaseFixture(t, capability.UnitEval)
 			tenant := &Tenant{s: s, team: "a"}
@@ -109,6 +109,8 @@ func TestSourceReleaseEvalUsesItsLiveExpansionLease(t *testing.T) {
 			switch change {
 			case "expired":
 				rewriteSchemaExec(t, s.db, `UPDATE eval_units SET lease_expires_at=1`)
+			case "eval finished":
+				rewriteSchemaExec(t, s.db, `UPDATE eval_units SET status='done',claimed_by=NULL,capability_prefix='',claimed_at=NULL,finished_at=1,lease_expires_at=NULL`)
 			case "source generation":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=3`)
 			case "eval generation":

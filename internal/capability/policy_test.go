@@ -116,7 +116,7 @@ func TestAwardVocabulary(t *testing.T) {
 		if len(policy.Bindings) == 0 || len(policy.ClaimGrants) == 0 || policy.Parent == "" {
 			t.Errorf("incomplete policy for %s", policy.Unit)
 		}
-		if policy.Purpose == PurposeEval && (!slices.Equal(policy.Grants, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead, SourceRead}) || policy.Unit != UnitEval) {
+		if policy.Purpose == PurposeEval && (!slices.Equal(policy.Grants, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead}) || policy.Unit != UnitEval) {
 			t.Fatal("eval grant vocabulary differs from evaluation reads and submission")
 		}
 		if policy.Purpose == PurposeWork && policy.Unit != UnitNode {
@@ -222,6 +222,21 @@ func TestTeamAndRunOwnersRefuseATeamlessLauncherRule(t *testing.T) {
 	for _, owner := range []Owner{OwnerTeam, OwnerRun} {
 		if err := checkOwner(p, owner, launcher(), Target{Team: "victim"}); err == nil {
 			t.Fatalf("a launcher rule on a %s route skipped the team check", owner)
+		}
+	}
+}
+
+func TestEvalSourceAccessFollowsExecutorHost(t *testing.T) {
+	for _, policy := range AwardPolicies() {
+		if policy.Purpose != PurposeEval {
+			continue
+		}
+		for _, host := range []*HostFacts{nil, {Kind: HostCloud}, {Kind: HostSelfHosted}, {Kind: HostPersonal}, {Kind: HostHere}} {
+			got := policy.ExecutionGrants(host)
+			want := host != nil && host.Kind == HostSelfHosted
+			if slices.Contains(got, SourceRead) != want {
+				t.Fatalf("eval source access does not match its executor: host=%+v grants=%v", host, got)
+			}
 		}
 	}
 }

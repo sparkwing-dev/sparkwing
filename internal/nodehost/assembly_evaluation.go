@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -48,7 +49,7 @@ func (c *nodeClaims) evaluate(ctx context.Context, input EvaluationInput) (Proce
 	}
 	services.SourceBindings = evaluationBindings{readNode: c.readNode, source: row.Ref, generation: int64(row.Generation), hash: row.SpecHash}
 	return c.processes.Delegate(ctx, capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: p.Digest}, capability.DelegateSpec{
-		Parent: principal.Authority, Audience: capability.NodeHost, Grants: p.Grants, Binding: b, Repositories: p.Repositories, Data: p.Data, ExpiresAt: p.ExpiresAt,
+		Parent: principal.Authority, Audience: capability.NodeHost, Grants: slices.DeleteFunc(slices.Clone(p.Grants), func(grant capability.Grant) bool { return grant == capability.SourceRead }), Binding: b, Repositories: p.Repositories, Data: p.Data, ExpiresAt: p.ExpiresAt,
 	}, services)
 }
 

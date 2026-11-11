@@ -103,6 +103,15 @@ type AwardPolicy struct {
 // bootstrapGrants replaces the purpose's grants until Exchange consumes the bootstrap.
 var bootstrapGrants = []Grant{SourceRead, ClaimExchange}
 
+// ExecutionGrants returns the permissions needed by an award on its persisted host.
+func (p AwardPolicy) ExecutionGrants(host *HostFacts) []Grant {
+	grants := slices.Clone(p.Grants)
+	if p.Unit == UnitEval && host != nil && host.Kind == HostSelfHosted {
+		grants = append(grants, SourceRead)
+	}
+	return grants
+}
+
 // bootstrapUnits confines pod delivery to units accepted by the launcher.
 var bootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
 
@@ -116,7 +125,7 @@ const (
 	parentRequester    ParentRule = "requester"
 )
 
-// awardPolicies is exhaustive for execution grants, including the here trigger-Award case.
+// awardPolicies owns baseline grants; ExecutionGrants adds host-scoped source access.
 // Eval reads are restricted to its source or the approval predicate declarations.
 var awardPolicies = []AwardPolicy{
 	{PurposeTrigger, UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{
@@ -130,7 +139,7 @@ var awardPolicies = []AwardPolicy{
 	{PurposePlan, UnitPlan, []Grant{TriggersClaim, ClaimsLaunch}, []Grant{
 		SourceRead, SecretsRelease, DataRead, DataWrite, NodeReport, NodeResult, LogTail,
 	}, []BindingKind{BindingRun}, parentClaimantRoot},
-	{PurposeEval, UnitEval, []Grant{NodesClaim, ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead, SourceRead}, []BindingKind{BindingNode}, parentClaimantRoot},
+	{PurposeEval, UnitEval, []Grant{NodesClaim, ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead}, []BindingKind{BindingNode}, parentClaimantRoot},
 	{PurposeHere, UnitTrigger, []Grant{RunsWrite}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
 		SecretsRelease, SourceRead, DataRead, DataWrite, OIDCMint, RefsRead, ChildrenStart, ExpansionSubmit,

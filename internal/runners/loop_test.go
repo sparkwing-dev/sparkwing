@@ -1401,3 +1401,47 @@ func TestLoopAwaitResumeWaitsForRunnerSlot(t *testing.T) {
 		})
 	}
 }
+
+func TestLoopBoundsQueuedFanoutAndKeepsChildPlanningLive(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const capacity, fanout = 2, 20
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		claimed := 0
+		planned := false
+		group := make(chan struct{}, 1)
+		group <- struct{}{}
+		loop := &Loop{
+			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: capacity, MaxClaims: fanout + 1, Kinds: []capability.UnitKind{capability.UnitNode, capability.UnitPlan}},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				kind, id := capability.UnitPlan, "awaited-child"
+				if slices.Contains(request.Kinds, capability.UnitNode) && claimed < fanout {
+					claimed++
+					kind, id = capability.UnitNode, fmt.Sprintf("queued-%d", claimed)
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: kind, UnitID: id, RunID: id, JobID: "capacity-one-group", Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+				if unit.Unit == capability.UnitPlan {
+					planned = true
+					cancel()
+					return nil
+				}
+				resume, stop := nodehost.AdmissionWait(ctx)
+				defer stop()
+				select {
+				case group <- struct{}{}:
+					resume(ctx)
+					<-group
+				case <-ctx.Done():
+				}
+				return nil
+			}),
+		}
+		_ = loop.Run(ctx)
+		if claimed > capacity || !planned {
+			t.Fatalf("queued capacity-one fanout monopolized the runner: claimed=%d cap=%d child planned=%t", claimed, capacity, planned)
+		}
+	})
+}
