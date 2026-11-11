@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -163,10 +164,20 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string, hos
 	return withStableProductTestHome("gate-test", func(home string) error {
 		var failures []string
 		for _, p := range plans {
-			for _, command := range p.commands(host) {
-				script := productTestScript(fmt.Sprintf("cd %q && GOFLAGS=%s %s", p.module, shellQuote(affectedTestGoFlags), command), home)
-				if err := timings.run(ctx, script); err != nil {
-					failures = append(failures, describeModuleFailure(p.module, err))
+			for _, group := range p.commands(host) {
+				errs := make([]error, len(group))
+				var running sync.WaitGroup
+				for i, command := range group {
+					running.Go(func() {
+						script := productTestScript(fmt.Sprintf("cd %q && GOFLAGS=%s %s", p.module, shellQuote(affectedTestGoFlags), command), home)
+						errs[i] = timings.run(ctx, script)
+					})
+				}
+				running.Wait()
+				for _, err := range errs {
+					if err != nil {
+						failures = append(failures, describeModuleFailure(p.module, err))
+					}
 				}
 			}
 			sparkwing.Info(ctx, "affected tests: %s", p.describe())
@@ -274,12 +285,27 @@ func runAffectedCompileFiles(ctx context.Context, verb string, files []string) e
 	return nil
 }
 
-func (p affectedTestPlan) commands(h hostShape) []string {
-	var out []string
+func (p affectedTestPlan) commands(h hostShape) [][]string {
+	var out [][]string
 	timeout := "-timeout " + productGoTestTimeout + " "
 	short := "-short " + timeout
 	if len(p.packages) > 0 {
-		out = append(out, boundedGoCommand(h, "test", short+quoteAll(p.packages)))
+		const store = "github.com/sparkwing-dev/sparkwing/internal/store"
+		parallelism := goStepParallelism(h)
+		patterns := storeShortTestPatterns()
+		if p.module == "." && slices.Contains(p.packages, store) && parallelism >= len(patterns) && (len(p.packages) == 1 || parallelism > len(patterns)) {
+			others := slices.DeleteFunc(slices.Clone(p.packages), func(pkg string) bool { return pkg == store })
+			var group []string
+			if len(others) > 0 {
+				group = append(group, goCommandAt(parallelism-len(patterns), "test", short+quoteAll(others)))
+			}
+			for _, pattern := range patterns {
+				group = append(group, goCommandAt(1, "test", short+"-run "+shellQuote(pattern)+" "+shellQuote(store)))
+			}
+			out = append(out, group)
+		} else {
+			out = append(out, []string{boundedGoCommand(h, "test", short+quoteAll(p.packages))})
+		}
 	}
 	if len(p.critical) > 0 {
 		pkgs := mapKeys(p.critical)
@@ -290,9 +316,19 @@ func (p affectedTestPlan) commands(h hostShape) []string {
 		sort.Strings(names)
 		names = dedupe(names)
 		run := shellQuote("^(" + strings.Join(names, "|") + ")$")
-		out = append(out, boundedGoCommand(h, "test", timeout+"-run "+run+" "+quoteAll(pkgs)))
+		out = append(out, []string{boundedGoCommand(h, "test", timeout+"-run "+run+" "+quoteAll(pkgs))})
 	}
 	return out
+}
+
+// perf: measured store costs balance these initials; the complement also covers
+// future nonASCII names without maintaining a list of test functions.
+func storeShortTestPatterns() [3]string {
+	return [3]string{
+		`^(Test|Fuzz|Example)([BCGHJKQTZ].*)?$`,
+		`^(Test|Fuzz|Example)[LMNOSUVW].*$`,
+		`^(Test|Fuzz|Example)[^BCGHJKQTZLMNOSUVW].*$`,
+	}
 }
 
 func (p affectedTestPlan) describe() string {

@@ -185,6 +185,17 @@ Hosted affected Gate and ordinary Land's merge recheck use that same flag
 policy and retain their existing CPU policy. Other affected build and vet
 checks keep their existing flag and runtime CPU policies.
 
+When the root selection includes `internal/store`, its short tests use three
+concurrent one-core commands. Selected root packages outside store run alongside
+them with the remaining Go command allowance. A seven-wide allowance becomes
+four for the other packages and one per store shard. Store-only selections need
+an allowance of at least three; selections with other root packages need at
+least four. Smaller allowances retain the unsplit short command. Each command
+keeps the existing `GOMAXPROCS`/`-p` pairing; summed command widths stay within
+the allowance, which is not an operating-system CPU cap. Modules remain
+sequential. All short commands join before full critical tests run, including
+when a short command fails. Native timing for this grouping remains unmeasured.
+
 The affected runner installs missing locked SDK dependencies with
 `npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund` when
 acceptance or the native TypeScript host package is selected. It also prepares
