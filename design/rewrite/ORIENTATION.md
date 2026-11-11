@@ -80,6 +80,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Cancellation before plan acceptance finishes the started trigger without creating jobs or waiters, including when acceptance refuses the cancelled run | `internal/nodehost/owner.go`: `OwnerHost.Run`, `OwnerHost.accept` | `internal/nodehost/owner_intake_cancel_test.go`: `TestOwnerCancellationBeforeAcceptanceFinishesStartedTrigger` |
 | Cancellation locks capacity work before the target run and settles controller-owned runs in the same transaction even when no job was claimed | `internal/store/run_state.go`: `transitionRunTx` | `internal/controller/engine_cancel_unclaimed_test.go`: `TestControllerCancelUnclaimableJobFinishesRun`, `TestControllerCancelCapacityWaiterKeepsHolder`; `internal/store/capacity_order_postgres_test.go`: `TestPostgresControllerCancelLocksCapacityRunsBeforeTarget` |
 | Native controller services retain the installing caller's key and config selectors so forced restart opens the same signing key | `cmd/sparkwing/local_services.go`: `localServiceHost`; `internal/wingd/managed_units.go`: `render` | `cmd/sparkwing/daemon_key_linux_test.go`: `TestManagedControllerPreservesKeyAcrossRestart` |
 | Run display readers treat absent proof eligibility as false and reject null or non-booleans; controllers emit explicit false | `internal/controller/client/engine.go`: `requiredResponseFields`; `internal/runspec/contracts.go`: `Display` | `TestReadRunProofEligibility`, `TestDisplayDerivesProofEligibility` |
