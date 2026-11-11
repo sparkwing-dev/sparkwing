@@ -14,27 +14,105 @@ launcher when testing isolated tool state.
 
 ## Landing a change
 
-Agents and the lead land every change with `sparkwing run land`, so each
-landing goes through Sparkwing itself. From a clean work branch:
+Agents and the lead submit every landing through main's trusted
+`bin/queue-land.sh` entrypoint below. It invokes Sparkwing with main's pipeline
+definition against the candidate checkout. Ordinary interactive Land remains
+available for operator use from a clean work branch. Operators must fetch main
+and pin its pipeline source too. Set `candidate` to the absolute worktree path:
 
 ```bash
-sparkwing run land --sw-dry-run                     # preview; nothing is pushed
-sparkwing run land --sw-stop-at verify              # gate and review, stop before the push
-sparkwing run land --sw-allow-risk destructive,prod  # land on main
+candidate=/absolute/path/to/candidate
+git -C "$candidate" fetch origin main
+main_sha="$(git -C "$candidate" rev-parse --verify 'origin/main^{commit}')"
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-dry-run
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-stop-at verify --sw-allow-risk destructive,prod
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-allow-risk destructive,prod
 ```
+
+An unpinned ordinary Land compiles the candidate's definition. For a registry
+change, the operator must also review its `land` entrypoint mapping and arguments:
+the pipeline-source pin selects code, while candidate aliases still apply.
 
 Lands run on owned hardware. Policy, gate, review and push use that machine.
 The land queue invokes it with `--sw-route local`.
 
 ### Queue focused lands
 
-Submit from each clean candidate worktree:
+Extract the submission script from freshly fetched main, then invoke that copy.
+This works even when a local checkout named `main` is behind the remote. Set
+`candidate` to the absolute clean worktree path:
 
 ```bash
-sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --queued --brief 'Describe the goal to review'
+candidate=/absolute/path/to/candidate
+(
+  set -e
+  git -C "$candidate" fetch origin main
+  main_sha="$(git -C "$candidate" rev-parse --verify 'origin/main^{commit}')"
+  queue_script="$(mktemp)"
+  trap 'rm -f "$queue_script"' EXIT
+  git -C "$candidate" show "$main_sha:bin/queue-land.sh" > "$queue_script"
+  bash "$queue_script" -C "$candidate" --brief 'Describe the goal to review'
+)
+```
+
+Track the returned run:
+
+```bash
 sparkwing queue list
 sparkwing runs status --run <returned-run-id> --follow -o json
 ```
+
+The script fetches `origin/main`, resolves its exact SHA, verifies its own blob
+against that commit, and refuses a candidate `.sparkwing/sparkwing.yaml` that
+differs from main. That registry determines the `land` entrypoint even when
+pipeline code is pinned. Restore main's registry before using this queue.
+Registry changes require a separately reviewed operator landing with main's
+pipeline source pinned. The refusal prints that exact command, including the
+resolved SHA, checkout and brief.
+The submitted command is:
+
+```bash
+sparkwing run land -C <candidate> --sw-detached --sw-route local --sw-pipeline-ref <main-SHA> --sw-allow-risk destructive,prod -- --queued --queued-main <main-SHA> --brief 'Describe the goal to review'
+```
+
+`--sw-pipeline-ref` compiles main's complete pipeline source and local module
+dependencies. `WorkDir` remains the candidate checkout. The queued preconditions
+compare freshly fetched main to `--queued-main` before merging and again when
+capturing the gated HEAD, then refresh main again before the queued push. If main
+moved while the entry waited or the checks ran, the run refuses
+and names the submission script. Enqueue again to compile the new gate.
+The remote update uses `--force-with-lease=refs/heads/main:<planned-base-SHA>`
+as an atomic compare-and-swap. Before sending it, Land proves that the planned
+base is an ancestor of the gated commit, so the update can only fast-forward
+from that exact base. An already-at-target/no-op result is a refusal, because it
+does not confirm an update from the planned base.
+It never falls back to the branch's definition. Use `--foreground` on the script
+to wait in the terminal, or `--dry-run` to preview without a push.
+
+Changes to `land.go`, pre-push, or other pipeline Go files use this same path.
+Main's gate judges the merged checkout, and its `affected-tests` job runs the
+branch's own focused pipeline tests from the changed `.sparkwing/jobs` package.
+Run the focused pipeline tests before submission too. The proposed pipeline
+definition becomes the trusted gate only after it lands on main. A failing
+proposed pipeline test blocks its landing even when main's definition plans.
+
+This is a local delivery boundary. The SDK run context exposes the candidate
+commit but no pipeline ref, so `--queued-main` cannot independently prove which
+code the submitter selected. The verified script owns that selection. Bypassing
+the entrypoint or making a direct push is not stopped locally. Server-side branch
+protection with a status issued only by main's gate is separate enforcement.
+
+Runtime gate inputs remain candidate-controlled. Main's compiled jobs execute
+candidate scripts such as `bin/check-changelog.sh`, `bin/sync-docs.sh --check`,
+`bin/gen-cli-docs.sh`, and `bin/gen-config-docs.sh`, and read candidate policy
+such as `.review.yaml` and `.golangci.yml`. A branch can weaken a check by making
+its script return success or relaxing its configuration. Review must inspect
+those changes until the runtime checkers and their policy are separately pinned.
+This change protects pipeline compilation, not all gate enforcement inputs.
+Running a script from main's checkout alone does not fix that boundary: these
+scripts derive their repository root from their own path, then compile checker
+or generator code from that root. Trusted checker code needs an explicit
+candidate input root, including its transitive helpers and configuration.
 
 Each entry is a durable `land` run in the dashboard. Detached intake returns
 its run ID; keep that receipt to wait for the entry, inspect logs and failures,
@@ -71,11 +149,21 @@ a different repository must define its own landing policy before using it.
 
 The pre-push hook runs its six fast checks for every push. Updates targeting
 `refs/heads/main` then run `affected-tests`; branch pushes finish after the fast
-checks. An explicit `sparkwing run pre-push` also runs the test phase. Queued Land
+checks. Each non-deletion main update must name the checked-out HEAD's OID;
+`git push origin topic:main` from another commit is refused with a checkout
+remedy before test selection. Every ref update is inspected, including main updates
+after other refs. Deletions add no affected tests. An explicit
+`sparkwing run pre-push` also runs the test phase. Queued Land
 runs that same test job after policy and its combined fast-check/review job.
 Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.
+
+Affected tests for main use the remote OID Git advertises on hook stdin,
+independently of local `origin/main`. Main updates must fast-forward; a rewind
+or unverified remote base is refused with a fetch remedy. Creating
+main selects every committed Go module's short tests and the full critical set.
+All changes count, including type changes and both paths of renames.
 
 The job reuses the hosted Gate's package planner and command runner. It runs
 `go test -short` over the reverse dependency closure, including test imports
@@ -255,8 +343,9 @@ tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
 pushed commit's tree is the tree the gate judged or the merged tree whose
-delta passed its recheck. The gate and merge-delta recheck cover affected tests,
-so Land's own push skips the hook without repeating those bodies. It carries the
+delta passed its recheck. The gate and merge-delta recheck cover all six fast
+push checks and affected tests, so Land's own push skips the hook without
+repeating those bodies. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. After a refused
 push, the step fetches main and checks its ancestry. It merges main only when
 main is not an ancestor of the pushed commit. Otherwise it preserves the
@@ -269,10 +358,12 @@ merges it into the branch in the checkout (`git merge --no-ff`, the default
 git identity and signing; never a rebase). Independent changelog and migration
 fragments merge as separate files. Orientation table additions use union merge;
 changes to the same rule need review. The push step
-then runs `go build` in every module
-and the affected-test selection over the files that differ between the gated
-tree and the merged tree, then pushes the merge. The review is not run again:
-it judged the branch's own diff, and the re-check covers what the merge
+then builds the affected package closure and repeats the changelog, OpenAPI,
+API-snapshot, default and qatrust vet, and fast lint checks on the merged tree.
+Vet and lint cover both the branch range and the merge delta, including new
+packages from main. It runs affected tests once over the files that differ
+between the gated tree and the merged tree, then pushes the merge. The review
+is not run again: it judged the branch's own diff, and the re-check covers what the merge
 brought in. It
 merges at most three times per land. A conflict aborts the merge, leaves the
 branch as the gate judged it and names `git merge origin/main` to run by hand.

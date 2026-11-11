@@ -23,7 +23,7 @@ func TestReviewRetryPassesLauncherClaimEntryPoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if award, err := control.Claim(t.Context(), "cloud", nil); err != nil || award == nil {
+		if award, _, err := control.Claim(t.Context(), "cloud", nil); err != nil || award == nil {
 			t.Fatalf("retry=%v: claim rejected: %v", retry, err)
 		}
 	}

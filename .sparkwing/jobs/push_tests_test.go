@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	sdkserve "github.com/sparkwing-dev/sparkwing/sparkwing/runtime"
 )
 
 func TestAffectedPushTestsBlockHookAndQueuedLanding(t *testing.T) {
@@ -19,12 +20,17 @@ func TestAffectedPushTestsBlockHookAndQueuedLanding(t *testing.T) {
 			name = "queued"
 		}
 		t.Run(name, func(t *testing.T) {
-			doc := inspectPlan(t, func(plan *sparkwing.Plan) error {
-				if queued {
-					return (&Land{}).Plan(t.Context(), plan, LandArgs{Queued: true, ReviewArgs: ReviewArgs{Brief: "Check local test gating"}}, sparkwing.RunContext{Pipeline: "land"})
-				}
-				return (&PrePush{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
-			})
+			plan := sparkwing.NewPlan()
+			var err error
+			if queued {
+				err = (&Land{}).Plan(t.Context(), plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Check local test gating"}}, sparkwing.RunContext{Pipeline: "land"})
+			} else {
+				err = (&PrePush{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc := decodePipeline(t, sdkserve.DefaultOperations.Document(plan))
 			var tests, land *jobDocument
 			for i := range doc.Jobs {
 				job := &doc.Jobs[i]
@@ -55,7 +61,11 @@ func TestAffectedPushTestsBlockHookAndQueuedLanding(t *testing.T) {
 			}
 		})
 	}
-	doc := inspectPipeline(t, "Land", nil)
+	plan := sparkwing.NewPlan()
+	if err := (&Land{}).Plan(t.Context(), plan, LandArgs{}, sparkwing.RunContext{Pipeline: "land"}); err != nil {
+		t.Fatal(err)
+	}
+	doc := decodePipeline(t, sdkserve.DefaultOperations.Document(plan))
 	for _, job := range doc.Jobs {
 		if job.ID == "affected-tests" {
 			t.Fatal("ordinary Land repeats its Gate tests")

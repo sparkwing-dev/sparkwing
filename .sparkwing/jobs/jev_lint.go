@@ -305,7 +305,7 @@ func collectJevLintInvariants(ctx context.Context, root, base string) (jevLintIn
 	if err != nil {
 		return jevLintInvariantAnalysis{}, fmt.Errorf("resolve invariant merge base for %s: %w", base, err)
 	}
-	changed, err := sparkwing.Exec(ctx, "git", "-c", "core.quotePath=false", "diff", "-z", "--name-only", "--diff-filter=ACMRD", mergeBase).Dir(root).Capture()
+	changed, err := sparkwing.Exec(ctx, "git", "-c", "core.quotePath=false", "diff", "-z", "--name-only", "--no-renames", mergeBase).Dir(root).Capture()
 	if err != nil {
 		return jevLintInvariantAnalysis{}, fmt.Errorf("list invariant changes since %s: %w", shortSHA(mergeBase), err)
 	}
@@ -464,7 +464,7 @@ func collectJevLintAnalysis(ctx context.Context, root, base string, maxPairs int
 	if mergeBase == "" {
 		return jevLintAnalysis{}, "", fmt.Errorf("resolve merge base for %s: git returned no revision", base)
 	}
-	result, err := sparkwing.Exec(ctx, "git", "-c", "core.quotePath=false", "diff", "-z", "--name-only", "--diff-filter=ACMR", mergeBase).Dir(root).Capture()
+	result, err := sparkwing.Exec(ctx, "git", "-c", "core.quotePath=false", "diff", "-z", "--name-only", "--no-renames", mergeBase).Dir(root).Capture()
 	if err != nil {
 		return jevLintAnalysis{}, "", fmt.Errorf("list changed files since %s: %w", mergeBase, err)
 	}

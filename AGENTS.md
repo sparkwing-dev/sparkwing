@@ -9,6 +9,7 @@ Sparkwing is standalone. Do not assume any other local service or machine-specif
 - Treat the README, embedded docs, CLI help, and tests as product truth. Run the relevant pipeline with `sparkwing run <name>`.
 - Before selecting checks or changing hook behavior, read [DELIVERY.md](DELIVERY.md) for tier membership, budgets, coverage limits, and measured costs. `sparkwing pipeline hooks status` verifies which hooks are armed in this checkout.
 - Read `DELIVERY.md` before landing a change; it names the cheap checks and the decisions that must not be skipped.
+- Submit every agent landing with the script extracted from freshly fetched `origin/main`, using the [queued Land recipe](DELIVERY.md#queue-focused-lands). That recipe also covers pin refusals and changes to the pipeline itself.
 - The committed `go.work` joins the host, Go SDK and pipeline modules. Use this
   worktree's workspace for source builds (`GOWORK=auto` from the worktree).
   Root `go test ./...` skips the nested SDK module, so run

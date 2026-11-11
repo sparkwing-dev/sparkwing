@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -43,7 +42,7 @@ func rejectionFault(job string, err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("%w: %s: %w", errJobTeardown, job, err)
+	return &jobTeardownFault{job: job, cause: err}
 }
 
 func (l *Launcher) containJob(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation, reason string) (*batchv1.Job, error) {
