@@ -16,7 +16,7 @@ import (
 )
 
 func TestLandQueueSerializesOrdinaryAndFocusedLands(t *testing.T) {
-	for _, args := range []map[string]string{nil, {"queued": "true", "brief": "Review the queue implementation"}} {
+	for _, args := range []map[string]string{nil, {"queued": "true", "queued-main": strings.Repeat("a", 40), "brief": "Review the queue implementation"}} {
 		raw, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", args)
 		if err != nil {
 			t.Fatal(err)
@@ -65,7 +65,7 @@ func TestLandQueueSerializesOrdinaryAndFocusedLands(t *testing.T) {
 func TestLandQueueRequiresGoal(t *testing.T) {
 	for _, brief := range []string{"", " \t\n"} {
 		t.Run(brief, func(t *testing.T) {
-			_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", map[string]string{"queued": "true", "brief": brief})
+			_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", map[string]string{"queued": "true", "queued-main": strings.Repeat("a", 40), "brief": brief})
 			if err == nil || !strings.Contains(err.Error(), "requires a non-empty --brief") || !strings.Contains(err.Error(), "--brief 'BW"+"-1234: short intent'") {
 				t.Fatalf("err = %v", err)
 			}
@@ -73,9 +73,47 @@ func TestLandQueueRequiresGoal(t *testing.T) {
 	}
 }
 
+func TestLandQueueRequiresMainPin(t *testing.T) {
+	_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", map[string]string{"queued": "true", "brief": "Review the queue"})
+	if err == nil || !strings.Contains(err.Error(), "bin/queue-land.sh") {
+		t.Fatalf("unpinned queue accepted: %v", err)
+	}
+}
+
+func TestLandQueueRefusesMainThatMovedAfterSubmission(t *testing.T) {
+	r := newLandRemote(t)
+	pinned := r.remoteMain()
+	submitted := r.git(r.dev, "rev-parse", "HEAD")
+	r.moveMain(map[string]string{"b/b.txt": "new main gate\n"})
+	err := prepareQueuedLanding(newTestContext(t), gitIn(r.dev), r.dev, submitted, pinned)
+	if err == nil || !strings.Contains(err.Error(), "enqueue again through main's bin/queue-land.sh") {
+		t.Fatalf("stale main plan accepted: %v", err)
+	}
+	if got := r.git(r.dev, "rev-parse", "HEAD"); got != submitted {
+		t.Fatalf("refused submission was merged: %s", got)
+	}
+}
+
+func TestLandQueuePipelineChangesRunTheirOwnFocusedTests(t *testing.T) {
+	root := gateFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"), "module fixture/pipelines\n\ngo 1.26.0\n")
+	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs", "land.go"), "package jobs\nfunc Gate() bool { return false }\n")
+	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs", "land_test.go"), "package jobs\nimport \"testing\"\nfunc TestGate(t *testing.T) { if !Gate() { t.Fatal(\"proposed pipeline gate failed\") } }\n")
+	gitCommitAll(t, root, "pipeline fixture")
+	ctx := newTestContext(t)
+	err := runAffectedTestFiles(ctx, []string{".sparkwing/jobs/land.go"}, "pipeline change")
+	if err == nil || !strings.Contains(err.Error(), "proposed pipeline gate failed") {
+		t.Fatalf("candidate's pipeline tests did not run: %v", err)
+	}
+	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs", "land.go"), "package jobs\nfunc Gate() bool { return true }\n")
+	if err := runAffectedTestFiles(ctx, []string{".sparkwing/jobs/land.go"}, "pipeline change"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLandQueueAcceptsExplicitGoal(t *testing.T) {
 	brief := "Review only the queued landing goal requirement"
-	_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", map[string]string{"queued": "true", "brief": brief})
+	_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", map[string]string{"queued": "true", "queued-main": strings.Repeat("a", 40), "brief": brief})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +132,7 @@ func TestLandQueueMergeFailureDoesNotPreventNextEntry(t *testing.T) {
 	r := newLandRemote(t)
 	r.moveMain(map[string]string{"a/a.txt": "conflict\n"})
 	submitted := r.git(r.dev, "rev-parse", "HEAD")
-	err := prepareQueuedLanding(newTestContext(t), gitIn(r.dev), r.dev, submitted)
+	err := prepareQueuedLanding(newTestContext(t), gitIn(r.dev), r.dev, submitted, r.remoteMain())
 	if err == nil || !strings.Contains(err.Error(), "merge failed") {
 		t.Fatalf("err = %v", err)
 	}
@@ -106,7 +144,7 @@ func TestLandQueueMergeFailureDoesNotPreventNextEntry(t *testing.T) {
 	}
 	r.git(r.other, "switch", "-c", "next")
 	next := r.commit(r.other, map[string]string{"next.txt": "next entry\n"}, "next entry")
-	if err := prepareQueuedLanding(newTestContext(t), gitIn(r.other), r.other, next); err != nil {
+	if err := prepareQueuedLanding(newTestContext(t), gitIn(r.other), r.other, next, r.remoteMain()); err != nil {
 		t.Fatal(err)
 	}
 	head, err := checkLandPreconditions(newTestContext(t), gitIn(r.other), r.other)
@@ -125,7 +163,7 @@ func TestLandQueueMergesMainBeforeCapturingGatedHead(t *testing.T) {
 	r := newLandRemote(t)
 	main := r.moveMain(map[string]string{"b/b.txt": "main change\n"})
 	submitted := r.git(r.dev, "rev-parse", "HEAD")
-	if err := prepareQueuedLanding(newTestContext(t), gitIn(r.dev), r.dev, submitted); err != nil {
+	if err := prepareQueuedLanding(newTestContext(t), gitIn(r.dev), r.dev, submitted, r.remoteMain()); err != nil {
 		t.Fatal(err)
 	}
 	head, err := checkLandPreconditions(newTestContext(t), gitIn(r.dev), r.dev)
@@ -174,7 +212,7 @@ func TestLandQueueRefusesChangedCheckoutAndNeverMergesAtPush(t *testing.T) {
 
 func TestLandQueueRefusesChangedSubmissionBeforeMerging(t *testing.T) {
 	g := landableGit()
-	if err := prepareQueuedLanding(context.Background(), g.run, "/repo", "old-head"); err == nil {
+	if err := prepareQueuedLanding(context.Background(), g.run, "/repo", "old-head", "base0000"); err == nil {
 		t.Fatal("changed submission accepted")
 	}
 	for _, call := range g.calls {
@@ -184,7 +222,7 @@ func TestLandQueueRefusesChangedSubmissionBeforeMerging(t *testing.T) {
 	}
 }
 
-func TestLandQueueDocumentedSubmissionMatchesExample(t *testing.T) {
+func TestLandQueueDocumentsTrustedSubmissionContract(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join(sourceTreeRoot(), "DELIVERY.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -193,15 +231,9 @@ func TestLandQueueDocumentedSubmissionMatchesExample(t *testing.T) {
 	if !strings.Contains(string(body), deadline) {
 		t.Fatalf("DELIVERY.md omits the local test deadline: %s", deadline)
 	}
-	for _, example := range (Land{}).Examples() {
-		if !strings.Contains(example.Command, "--queued") {
-			continue
+	for _, contract := range []string{"bash <main-checkout>/bin/queue-land.sh -C <candidate> --brief 'Describe the goal to review'", "--sw-pipeline-ref", "--queued-main", "pipeline ref", "direct push", "focused pipeline tests"} {
+		if !strings.Contains(string(body), contract) {
+			t.Fatalf("DELIVERY.md omits queue contract: %s", contract)
 		}
-		command := strings.ReplaceAll(example.Command, "Describe the goal", "Describe the goal to review")
-		if !strings.Contains(string(body), command) {
-			t.Fatalf("DELIVERY.md omits queue submission: %s", command)
-		}
-		return
 	}
-	t.Fatal("land help omits queue submission")
 }

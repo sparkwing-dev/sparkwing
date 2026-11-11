@@ -20,8 +20,9 @@ type Land struct{ sparkwing.Base }
 
 // LandArgs supplies the local review inputs.
 type LandArgs struct {
-	Queued        bool `flag:"queued" desc:"Queue an owned-hardware land: merge main, policy, fast pre-push/review, affected Go tests, then push the unchanged commit. Use --sw-detached; a non-empty --brief is required."`
-	PrePushReview bool `flag:"pre-push-review" desc:"Run pre-push's fast checks alongside review in one fail-fast job; ordinary land's Gate covers the affected tests."`
+	Queued        bool   `flag:"queued" desc:"Queue through main's bin/queue-land.sh: merge main, policy, fast pre-push/review, affected Go tests, then push the unchanged commit."`
+	QueuedMain    string `flag:"queued-main" desc:"Exact main SHA supplied by the trusted queue submission script. Must match origin/main at execution."`
+	PrePushReview bool   `flag:"pre-push-review" desc:"Run pre-push's fast checks alongside review in one fail-fast job; ordinary land's Gate covers the affected tests."`
 	ReviewArgs
 }
 
@@ -31,7 +32,7 @@ func (Land) ShortHelp() string {
 
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
-		"All lands share one serial run slot. With --queued, require a non-empty --brief (for example, --brief 'Short intent'), merge origin/main before checks, run policy and fast pre-push/review against the merged checkout, then the shared affected short and critical Go tests, and push only the unchanged checked commit. Submit with --sw-detached; track its run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
+		"All lands share one serial run slot. Queue with bash <main-checkout>/bin/queue-land.sh -C <candidate> --brief 'Short intent'. The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, run policy and fast pre-push/review against the merged checkout, then the shared affected short and critical Go tests, and push only the unchanged checked commit. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip). " +
@@ -52,7 +53,6 @@ func (Land) Examples() []sparkwing.Example {
 		{Comment: "Preview the landing without pushing", Command: "sparkwing run land --sw-dry-run"},
 		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod"},
 		{Comment: "Land the branch on main", Command: "sparkwing run land --sw-allow-risk destructive,prod"},
-		{Comment: "Enqueue a focused owned-hardware landing", Command: "sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --queued --brief 'Describe the goal'"},
 	}
 }
 
@@ -73,13 +73,16 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 	if in.Queued && strings.TrimSpace(in.Brief) == "" {
 		return errors.New("land: --queued requires a non-empty --brief with the goal to review; for example: --brief 'BW" + "-1234: short intent'")
 	}
+	if in.Queued && in.QueuedMain == "" {
+		return errors.New("land queue: submit through bin/queue-land.sh from an up-to-date main checkout so the plan uses main's gate")
+	}
 	plan.Concurrency(sparkwing.NewConcurrencyGroup("sparkwing-land", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	branch, submitted := "", ""
 	if rc.Git != nil {
 		branch = rc.Git.Branch
 		submitted = rc.Git.SHA
 	}
-	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir, Queued: in.Queued, Submitted: submitted}).Inline().Cores(lightJobCores)
+	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir, Queued: in.Queued, Submitted: submitted, QueuedMain: in.QueuedMain}).Inline().Cores(lightJobCores)
 
 	var needs []sparkwing.Dep
 	if in.Queued {
@@ -130,22 +133,26 @@ type landHead struct {
 type landPreconditionsJob struct {
 	sparkwing.Base
 	sparkwing.Produces[landHead]
-	RepoDir   string
-	Queued    bool
-	Submitted string
+	RepoDir    string
+	Queued     bool
+	Submitted  string
+	QueuedMain string
 }
 
 func (j *landPreconditionsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "check", func(ctx context.Context) (landHead, error) {
 		git := gitIn(j.RepoDir)
 		if j.Queued && !sparkwing.IsDryRun(ctx) {
-			if err := prepareQueuedLanding(ctx, git, j.RepoDir, j.Submitted); err != nil {
+			if err := prepareQueuedLanding(ctx, git, j.RepoDir, j.Submitted, j.QueuedMain); err != nil {
 				return landHead{}, err
 			}
 		}
 		head, err := checkLandPreconditions(ctx, git, j.RepoDir)
 		if err != nil {
 			return landHead{}, err
+		}
+		if j.Queued && head.Base != j.QueuedMain {
+			return landHead{}, queuedMainMoved(j.QueuedMain, head.Base)
 		}
 		sparkwing.Info(ctx, "landing %s at %s (tree %s) onto %s %s", head.Branch, short(head.Commit), short(head.Tree), landBaseRef, short(head.Base))
 		return head, nil

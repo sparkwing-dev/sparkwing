@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-func prepareQueuedLanding(ctx context.Context, git gitRunner, dir, submitted string) error {
+func prepareQueuedLanding(ctx context.Context, git gitRunner, dir, submitted, main string) error {
 	branch, err := git(ctx, "symbolic-ref", "--short", "-q", "HEAD")
 	if err != nil || branch == "" || branch == landBaseBranch {
 		return fmt.Errorf("land queue: use a work branch in %s", dir)
@@ -24,11 +24,22 @@ func prepareQueuedLanding(ctx context.Context, git gitRunner, dir, submitted str
 	if err := fetchLandBase(ctx, git, dir); err != nil {
 		return err
 	}
+	base, err := git(ctx, "rev-parse", landBaseRef)
+	if err != nil {
+		return err
+	}
+	if main == "" || base != main {
+		return queuedMainMoved(main, base)
+	}
 	if _, err := git(ctx, "merge", "--no-edit", landBaseRef); err != nil {
 		_, abortErr := git(ctx, "merge", "--abort")
 		return fmt.Errorf("land queue: merge failed; resolve with git -C %s merge %s and enqueue again: %w", dir, landBaseRef, errors.Join(err, abortErr))
 	}
 	return requireClean(ctx, git, dir)
+}
+
+func queuedMainMoved(planned, current string) error {
+	return fmt.Errorf("land queue: origin/main changed from planned %s to %s; enqueue again through main's bin/queue-land.sh to compile the current gate", short(planned), short(current))
 }
 
 func pushQueuedLanding(ctx context.Context, git gitRunner, dir string, head landHead) (landTarget, error) {

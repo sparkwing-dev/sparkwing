@@ -14,8 +14,10 @@ launcher when testing isolated tool state.
 
 ## Landing a change
 
-Agents and the lead land every change with `sparkwing run land`, so each
-landing goes through Sparkwing itself. From a clean work branch:
+Agents and the lead submit every landing through main's trusted
+`bin/queue-land.sh` entrypoint below. It invokes Sparkwing with main's pipeline
+definition against the candidate checkout. Ordinary interactive Land remains
+available for operator use from a clean work branch:
 
 ```bash
 sparkwing run land --sw-dry-run                     # preview; nothing is pushed
@@ -28,13 +30,46 @@ The land queue invokes it with `--sw-route local`.
 
 ### Queue focused lands
 
-Submit from each clean candidate worktree:
+Invoke the script from an up-to-date main checkout and name the clean candidate
+worktree explicitly:
 
 ```bash
-sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --queued --brief 'Describe the goal to review'
+bash <main-checkout>/bin/queue-land.sh -C <candidate> --brief 'Describe the goal to review'
 sparkwing queue list
 sparkwing runs status --run <returned-run-id> --follow -o json
 ```
+
+The script fetches `origin/main`, resolves its exact SHA, verifies its own blob
+against that commit, and refuses a candidate `.sparkwing/sparkwing.yaml` that
+differs from main. That registry determines the `land` entrypoint even when
+pipeline code is pinned. Restore main's registry before using this queue.
+Registry changes require a separately reviewed operator landing.
+The submitted command is:
+
+```bash
+sparkwing run land -C <candidate> --sw-detached --sw-route local --sw-pipeline-ref <main-SHA> --sw-allow-risk destructive,prod -- --queued --queued-main <main-SHA> --brief 'Describe the goal to review'
+```
+
+`--sw-pipeline-ref` compiles main's complete pipeline source and local module
+dependencies. `WorkDir` remains the candidate checkout. The queued preconditions
+compare freshly fetched main to `--queued-main` before merging and again when
+capturing the gated HEAD. If main moved while the entry waited, the run refuses
+and names the submission script. Enqueue again to compile the new gate.
+It never falls back to the branch's definition. Use `--foreground` on the script
+to wait in the terminal, or `--dry-run` to preview without a push.
+
+Changes to `land.go`, pre-push, or other pipeline Go files use this same path.
+Main's gate judges the merged checkout, and its `affected-tests` job runs the
+branch's own focused pipeline tests from the changed `.sparkwing/jobs` package.
+Run the focused pipeline tests before submission too. The proposed pipeline
+definition becomes the trusted gate only after it lands on main. A failing
+proposed pipeline test blocks its landing even when main's definition plans.
+
+This is a local delivery boundary. The SDK run context exposes the candidate
+commit but no pipeline ref, so `--queued-main` cannot independently prove which
+code the submitter selected. The verified script owns that selection. Bypassing
+the entrypoint or making a direct push is not stopped locally. Server-side branch
+protection with a status issued only by main's gate is separate enforcement.
 
 Each entry is a durable `land` run in the dashboard. Detached intake returns
 its run ID; keep that receipt to wait for the entry, inspect logs and failures,
