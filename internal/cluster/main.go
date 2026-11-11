@@ -76,9 +76,6 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 }
 
 func onlyRunnerCancellation(err, cause error) bool {
-	if err == cause || err == context.Canceled {
-		return true
-	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		for _, child := range joined.Unwrap() {
 			if !onlyRunnerCancellation(child, cause) {
@@ -90,7 +87,7 @@ func onlyRunnerCancellation(err, cause error) bool {
 	if wrapped := errors.Unwrap(err); wrapped != nil {
 		return onlyRunnerCancellation(wrapped, cause)
 	}
-	return false
+	return errors.Is(err, cause) || errors.Is(err, context.Canceled)
 }
 
 func writeRunnerError(writer io.Writer, command string, err error) {
