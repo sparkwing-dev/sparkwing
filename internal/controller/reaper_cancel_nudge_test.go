@@ -30,15 +30,28 @@ func TestParentCancelNudgesChildSweepAfterCommit(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &child); err != nil {
 		t.Fatal(err)
 	}
+	childRow, err := tenant.ReadRun(t.Context(), child.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchildRequest := childRow.Request
+	grandchildRequest.RunID = "grandchild"
+	grandchildRequest.Request.Lineage.ParentRunID = child.RunID
+	grandchildRequest.Request.Lineage.ParentJobID = "body"
+	grandchildJSON, err := json.Marshal(grandchildRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,lineage_json,log_retention_class,log_retention_days,parent_run_id,parent_node_id) SELECT team,'grandchild',number+1,pipeline,'running',?,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,lineage_json,log_retention_class,log_retention_days,id,'body' FROM runs WHERE team='a' AND id=?`, grandchildJSON, child.RunID)
 	raw, record, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "cancel-nudge"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsControl}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	childCommitted := make(chan struct{}, 1)
+	childCommitted := make(chan string, 2)
 	e.Store.SetRunCancellationObserver(func(_ context.Context, team store.Team, id string) error {
-		if team == "a" && id == child.RunID {
+		if team == "a" && (id == child.RunID || id == "grandchild") {
 			select {
-			case childCommitted <- struct{}{}:
+			case childCommitted <- id:
 			default:
 			}
 		}
@@ -50,7 +63,7 @@ func TestParentCancelNudgesChildSweepAfterCommit(t *testing.T) {
 	e.cancelCommitted = func() {
 		checkCtx, stop := context.WithTimeout(t.Context(), time.Second)
 		defer stop()
-		// safety: A second write proves cancellation released the transaction before waking maintenance.
+		// hack: A second write detects a pre-commit wake without relying on query timing.
 		row, readErr := tenant.ReadRun(checkCtx, "run")
 		if readErr == nil && row.CancelRequestedAt == nil {
 			readErr = fmt.Errorf("nudge preceded committed cancel intent")
@@ -63,12 +76,15 @@ func TestParentCancelNudgesChildSweepAfterCommit(t *testing.T) {
 				readErr = fmt.Errorf("cancel write was not committed before notification")
 			}
 		}
-		checked <- readErr
+		select {
+		case checked <- readErr:
+		default:
+		}
 		nudge()
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
-	// safety: An hour-long backstop proves the committed cancel wakes maintenance without its ticker.
+	// hack: An hour-long backstop makes early descendant cancellation depend on wake delivery.
 	go func() { defer close(done); e.Server.runReaper(ctx, time.Hour) }()
 	defer func() { cancel(); <-done }()
 	bound, stop := context.WithTimeout(t.Context(), 2*time.Second)
@@ -82,10 +98,16 @@ func TestParentCancelNudgesChildSweepAfterCommit(t *testing.T) {
 	case <-bound.Done():
 		t.Fatal("committed parent cancellation did not signal reaper")
 	}
-	select {
-	case <-childCommitted:
-	case <-bound.Done():
-		t.Fatal("child cancellation waited for the ten-second sweep")
+	for observed := range 2 {
+		select {
+		case <-childCommitted:
+		case <-bound.Done():
+			t.Fatalf("descendant cancellation waited for the ten-second sweep after %d commits", observed)
+		}
+	}
+	grandchildRow, err := tenant.ReadRun(t.Context(), "grandchild")
+	if err != nil || grandchildRow.CancelRequestedAt == nil {
+		t.Fatalf("grandchild cancellation row=%+v error=%v", grandchildRow, err)
 	}
 	row, err := tenant.ReadRun(t.Context(), child.RunID)
 	if err != nil || row.CancelRequestedAt == nil {

@@ -551,15 +551,19 @@ func (s *Server) reap(ctx context.Context) {
 			"node_id", w.NodeID, "policy", w.Policy,
 			"arrived_at", w.ArrivedAt.Format(time.RFC3339))
 	}
-	if recoveries, err := s.operator.ReapUnits(ctx, 500); err != nil {
+	recoveries, err := s.operator.ReapUnits(ctx, 500)
+	if err != nil {
 		s.logger.Error("work recovery sweep failed", "err", err)
-	} else {
-		for _, recovery := range recoveries {
-			s.logger.Info("recovered expired work",
-				"run_id", recovery.RunID, "node_id", recovery.NodeID,
-				"unit", recovery.Kind, "requeued", recovery.Requeued,
-				"cancelled", recovery.Cancelled, "failed", recovery.Failed,
-				"disruptions", recovery.Disruptions)
+	}
+	for _, recovery := range recoveries {
+		s.logger.Info("recovered expired work",
+			"run_id", recovery.RunID, "node_id", recovery.NodeID,
+			"unit", recovery.Kind, "requeued", recovery.Requeued,
+			"cancelled", recovery.Cancelled, "failed", recovery.Failed,
+			"disruptions", recovery.Disruptions)
+		if recovery.Kind == "child" && recovery.Cancelled {
+			// perf: Only progress schedules another bounded pass, so deeper descendants need not wait for the ticker.
+			s.nudgeReaper()
 		}
 	}
 	s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)

@@ -26,9 +26,7 @@ type cancelledChildClaimStore struct {
 func (s *cancelledChildClaimStore) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	snapshot, err := s.acquiredClaimStore.ReadSnapshot(ctx, run)
-
-	return snapshot, err
+	return s.acquiredClaimStore.ReadSnapshot(ctx, run)
 }
 
 func (s *cancelledChildClaimStore) ReadNode(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
@@ -88,7 +86,7 @@ func TestClaimedChildHostObservesCancellationBeforeLeaseRenewal(t *testing.T) {
 		done := make(chan exit, 1)
 		go func() { err := host.Execute(ctx, input); done <- exit{err, time.Now()} }()
 		<-started
-		// safety: The persisted child cancel isolates host observation from controller cascade timing.
+		// hack: Persisted cancel intent isolates host latency from the controller sweep.
 		requestedAt := time.Now()
 		cancelled.cancelled.Store(true)
 		synctest.Wait()
