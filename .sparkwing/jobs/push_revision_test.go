@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,13 @@ import (
 )
 
 func TestPrePushRefusesUncheckedMainSource(t *testing.T) {
-	head := strings.Repeat("a", 40)
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "main")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	head, err := gitIn(root)(newTestContext(t), "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
 	topic := strings.Repeat("b", 40)
 	zero := strings.Repeat("0", 40)
 	for _, refs := range []string{
@@ -21,11 +28,10 @@ func TestPrePushRefusesUncheckedMainSource(t *testing.T) {
 	} {
 		t.Run(refs, func(t *testing.T) {
 			t.Setenv("SPARKWING_GATE_PUSH_REFS", refs)
-			var err error
-			inspectPlan(t, func(plan *sparkwing.Plan) error {
-				err = (&PrePush{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push", Git: sparkwing.NewGit("", head, "main", "main", "", "")})
-				return nil
+			host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+				return (&PrePush{}).Plan(ctx, plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
 			})
+			_, err := host.RunStep(t.Context(), plan, "affected-tests", "test")
 			if err == nil || !strings.Contains(err.Error(), "check out") || !strings.Contains(err.Error(), topic) || !strings.Contains(err.Error(), head) {
 				t.Fatalf("main update from unchecked topic: %v; want refusal naming both OIDs and checkout remedy", err)
 			}
@@ -54,5 +60,22 @@ func TestDeliveryDocumentsPushAndMergeSafety(t *testing.T) {
 		if !strings.Contains(string(body), phrase) || !strings.Contains((PrePush{}).Help()+(Land{}).Help(), phrase) {
 			t.Errorf("delivery docs and pipeline help must describe %q", phrase)
 		}
+	}
+}
+
+func TestPrePushAcceptsCheckedMainSource(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "main")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	head, err := gitIn(root)(newTestContext(t), "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_GATE_PUSH_REFS", "refs/heads/topic "+head+" refs/heads/main "+head)
+	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&PrePush{}).Plan(ctx, plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
+	})
+	if _, err := host.RunStep(t.Context(), plan, "affected-tests", "test"); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -73,7 +73,7 @@ The pre-push hook runs its six fast checks for every push. Updates targeting
 `refs/heads/main` then run `affected-tests`; branch pushes finish after the fast
 checks. Each non-deletion main update must name the checked-out HEAD's OID;
 `git push origin topic:main` from another commit is refused with a checkout
-remedy before checks run. Every ref update is inspected, including main updates
+remedy before test selection. Every ref update is inspected, including main updates
 after other refs. Deletions add no affected tests. An explicit
 `sparkwing run pre-push` also runs the test phase. Queued Land
 runs that same test job after policy and its combined fast-check/review job.

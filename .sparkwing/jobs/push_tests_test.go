@@ -76,7 +76,7 @@ func TestAffectedPushTestsRunOnlyForMainHookUpdates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SPARKWING_GATE_PUSH_REFS", tc.refs)
 			doc := inspectPlan(t, func(plan *sparkwing.Plan) error {
-				return (&PrePush{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push", Git: sparkwing.NewGit("", "abc", "work", "work", "", "")})
+				return (&PrePush{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
 			})
 			var tests, fast bool
 			for _, job := range doc.Jobs {

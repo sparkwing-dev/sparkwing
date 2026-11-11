@@ -49,28 +49,48 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	plan.Priority(hookTierPriority)
 	fast := sparkwing.Job(plan, rc.Pipeline, p)
 	refs, hook := os.LookupEnv(gitenv.PushRefsVar)
-	main := !hook
+	sources, err := mainPushSources(refs)
+	if err != nil {
+		return err
+	}
+	if !hook || len(sources) > 0 {
+		affectedPushTestsJobNode(plan).Needs(fast)
+	}
+	return nil
+}
+
+func mainPushSources(refs string) ([]string, error) {
+	var sources []string
 	for line := range strings.SplitSeq(refs, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		fields := strings.Fields(line)
 		if len(fields) != 4 {
-			return fmt.Errorf("pre-push: invalid Git ref update %q", line)
+			return nil, fmt.Errorf("pre-push: invalid Git ref update %q", line)
 		}
-		if fields[2] != "refs/heads/main" || strings.Trim(fields[1], "0") == "" {
-			continue
+		if fields[2] == "refs/heads/main" && strings.Trim(fields[1], "0") != "" {
+			sources = append(sources, fields[1])
 		}
-		if rc.Git == nil || rc.Git.SHA == "" {
-			return fmt.Errorf("pre-push: cannot identify checked-out HEAD for main update; check out the commit being pushed and retry")
-		}
-		if fields[1] != rc.Git.SHA {
-			return fmt.Errorf("pre-push: refusing main update from %s (%s): checked-out HEAD is %s; check out the commit being pushed and retry", fields[0], fields[1], rc.Git.SHA)
-		}
-		main = true
 	}
-	if main {
-		affectedPushTestsJobNode(plan).Needs(fast)
+	return sources, nil
+}
+
+// safety: a plan error hides its remedy until secret discovery completes.
+// Refuse here before selection, against the commit this job actually evaluates.
+func checkMainPushSources(ctx context.Context) error {
+	sources, err := mainPushSources(os.Getenv(gitenv.PushRefsVar))
+	if err != nil || len(sources) == 0 {
+		return err
+	}
+	head, err := gitIn(sparkwing.WorkDir())(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return fmt.Errorf("pre-push: resolve checked-out HEAD: %w", err)
+	}
+	for _, source := range sources {
+		if source != head {
+			return fmt.Errorf("pre-push: refusing main update from %s: checked-out HEAD is %s; check out the commit being pushed and retry", source, head)
+		}
 	}
 	return nil
 }
@@ -100,6 +120,9 @@ func (*affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 }
 
 func runAffectedPushTests(ctx context.Context) error {
+	if err := checkMainPushSources(ctx); err != nil {
+		return err
+	}
 	files, scope, err := pushRangeScope(ctx, "file(s)", func(files []string) []string { return files })
 	if err != nil {
 		return err
