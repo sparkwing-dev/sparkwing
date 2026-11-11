@@ -256,8 +256,8 @@ changes. Every run joined all short commands before full critical tests, stayed
 within overlapping command width seven and completed with no owned survivors.
 
 These three interleaved shared-host observations do not establish causality,
-a flake rate or a general latency guarantee. Host load varied. They supersede
-the earlier provisional single pair's 10.5% whole-run improvement claim.
+a flake rate or a general latency guarantee. Host load varied.
+These observations supersede the earlier provisional single-pair claim.
 Raw sources, plans, command/test JSON, resource traces, receipts and the final
 independent recount are retained under
 `~/evidence/sparkwing/land-test-speedups-2026-11-11/repeated-speed-study/`.
