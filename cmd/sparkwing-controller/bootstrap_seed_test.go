@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 )
 
@@ -36,6 +37,16 @@ func TestBootstrapStartupRefusesConstantSeedWithoutCreatingAdmin(t *testing.T) {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("startup refusal lacks %q: %v", want, err)
 			}
+		}
+		var output bytes.Buffer
+		slog.New(controller.CredentialSafeLogHandler(slog.NewTextHandler(&output, nil))).Error("sparkwing-controller", "err", err)
+		for _, want := range []string{"openssl rand -base64 32", "bootstrap-admin-token"} {
+			if !strings.Contains(output.String(), want) || strings.Contains(output.String(), "[truncated]") {
+				t.Errorf("logged startup refusal lost repair %q: %s", want, output.String())
+			}
+		}
+		if strings.Contains(output.String(), raw) {
+			t.Fatal("logged startup refusal exposes bootstrap token")
 		}
 		if strings.Contains(err.Error(), raw) {
 			t.Fatal("startup refusal exposes bootstrap token")
