@@ -63,6 +63,9 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		os.Exit(2)
 	}
 	if err != nil {
+		if (os.Args[1] == "start" || os.Args[1] == "warm") && ctx.Err() != nil && onlyRunnerCancellation(err, context.Cause(ctx)) {
+			return
+		}
 		writeRunnerError(os.Stderr, os.Args[1], err)
 		var usage *usageError
 		if errors.As(err, &usage) {
@@ -70,6 +73,24 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		}
 		os.Exit(1)
 	}
+}
+
+func onlyRunnerCancellation(err, cause error) bool {
+	if err == cause || err == context.Canceled {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range joined.Unwrap() {
+			if !onlyRunnerCancellation(child, cause) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		return onlyRunnerCancellation(wrapped, cause)
+	}
+	return false
 }
 
 func writeRunnerError(writer io.Writer, command string, err error) {
