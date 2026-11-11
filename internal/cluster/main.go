@@ -77,7 +77,11 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 
 func onlyRunnerCancellation(err, cause error) bool {
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		for _, child := range joined.Unwrap() {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
 			if !onlyRunnerCancellation(child, cause) {
 				return false
 			}
