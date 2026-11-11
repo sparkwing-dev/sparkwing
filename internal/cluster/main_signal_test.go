@@ -51,7 +51,9 @@ func TestRunnerSignalExit(t *testing.T) {
 	for _, command := range []string{"start", "warm"} {
 		for _, mode := range []string{"loop", "startup", "failure"} {
 			t.Run(command+"/"+mode, func(t *testing.T) {
-				cmd := exec.Command(os.Args[0], "-test.run=^TestRunnerSignalExit$", "--", command, mode)
+				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRunnerSignalExit$", "--", command, mode)
 				cmd.Env = append(os.Environ(), "SPARKWING_TEST_SIGNAL_HELPER=1")
 				var stderr bytes.Buffer
 				cmd.Stderr = &stderr
@@ -78,7 +80,7 @@ func TestRunnerSignalExit(t *testing.T) {
 					if line != "ready\n" {
 						t.Fatalf("runner did not reach runtime: %q", line)
 					}
-				case <-time.After(20 * time.Second):
+				case <-ctx.Done():
 					t.Fatal("runner never became ready")
 				}
 				if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -95,7 +97,7 @@ func TestRunnerSignalExit(t *testing.T) {
 					} else if err != nil {
 						t.Fatalf("clean SIGTERM exited unsuccessfully: %v %s", err, &stderr)
 					}
-				case <-time.After(20 * time.Second):
+				case <-ctx.Done():
 					_ = cmd.Process.Kill()
 					<-done
 					t.Fatal("runner did not finish after SIGTERM")
