@@ -68,7 +68,7 @@ func (c *ControllerControl) Claim(ctx context.Context, namespace string, exclude
 	}
 	resources := unit.CloudResources
 	if resources == nil {
-		return nil, pollAfter, errors.New("Cloud award is missing its committed allocation")
+		return nil, pollAfter, errors.New("cloud award is missing its committed allocation")
 	}
 	award := &CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores, Memory: resources.MemoryBytes, UpsizeEnabled: unit.CloudUpsizeEnabled}
 	if err := validateAward(*award); err != nil {
