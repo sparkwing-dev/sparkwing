@@ -318,6 +318,18 @@ func (g *Group) Kill() error {
 	return signalKill(g.id, g.leaderHasExited(), g.session)
 }
 
+// KillForCancellation distinguishes an owned shutdown kill from an earlier leader failure.
+func (g *Group) KillForCancellation() (bool, error) {
+	g.finishMu.Lock()
+	defer g.finishMu.Unlock()
+	if g.reaped {
+		return false, nil
+	}
+	killed, leaderErr := killLiveLeader(g.id)
+	groupErr := signalKill(g.id, g.leaderHasExited(), g.session)
+	return killed, errors.Join(leaderErr, groupErr)
+}
+
 func (g *Group) Finish(ctx context.Context, grace time.Duration) error {
 	if err := g.awaitLeader(ctx); err != nil {
 		return fmt.Errorf("%w: wait for group %d leader: %w", ErrCleanup, g.id, err)

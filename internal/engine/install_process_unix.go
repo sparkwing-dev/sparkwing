@@ -24,7 +24,7 @@ func runSDKInstallProcess(ctx context.Context, command *exec.Cmd) error {
 	if group.Reaped() {
 		return err
 	}
-	killErr := group.Kill()
+	killedLeader, killErr := group.KillForCancellation() //nolint:contextcheck // Cleanup must outlive cancellation and uses the owner's bounded process-table lookup.
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*procgroup.DefaultTerminationGrace)
 	defer cancel()
 	finishErr := group.Finish(cleanup, procgroup.DefaultTerminationGrace)
@@ -35,7 +35,7 @@ func runSDKInstallProcess(ctx context.Context, command *exec.Cmd) error {
 	if ctx.Err() != nil && errors.Is(err, ctx.Err()) && interruptedSDKWait(err) {
 		err = ctx.Err()
 	}
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && killedLeader {
 		if exit, ok := finishErr.(*exec.ExitError); ok { //nolint:errorlint // Joined failures must retain every error.
 			if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() && status.Signal() == syscall.SIGKILL {
 				finishErr = ctx.Err()

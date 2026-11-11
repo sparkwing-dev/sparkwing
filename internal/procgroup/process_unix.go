@@ -166,3 +166,16 @@ func descendantsEmptyInTable(processes []Info, leader int, session bool) bool {
 	}
 	return true
 }
+
+func killLiveLeader(pid int) (bool, error) {
+	exited, err := leaderExitedNow(pid)
+	if err != nil || exited {
+		return false, err
+	}
+	// safety: an external kill between the non-reaping check and our signal is indistinguishable during shutdown.
+	err = syscall.Kill(pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return false, nil
+	}
+	return err == nil, err
+}
