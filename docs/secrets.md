@@ -106,3 +106,10 @@ shows the warning once when the save succeeds. Warnings never include the value.
 `POST /api/v1/secrets` returns HTTP 200 with secret metadata and an optional
 `warning`; the value stays private. Secrets containing `***` are accepted.
 Masking is provided by the Sparkwing host. Pipeline code run on its own is unmasked.
+
+Masking matches whole registered values and their encoded spellings within one
+output stream. A command's stdout and stderr are masked independently. Fragments
+of a value written separately, whether to different streams or to the same stream
+with other text between them, are not masked. Masking guards against accidental
+disclosure, not against job code that deliberately transforms or splits a secret
+it can read.

@@ -54,6 +54,13 @@ exists; bytes already emitted cannot be recalled. The host therefore registers
 known values before spawning author code and lazily issued values before
 releasing them.
 
+Masking matches whole registered values and their encoded spellings within one
+output stream. A command's stdout and stderr are masked independently. Fragments
+of a value written separately, whether to different streams or to the same stream
+with other text between them, are not masked. Masking guards against accidental
+disclosure, not against job code that deliberately transforms or splits a secret
+it can read.
+
 GitHub installation tokens use the same literal registration, including
 stateless tokens longer than 40 bytes. Masking does not infer a token's length
 or alphabet from its prefix. Source authentication registers both the complete
