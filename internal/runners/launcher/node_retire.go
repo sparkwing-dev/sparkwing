@@ -68,7 +68,7 @@ func (l *Launcher) retireLoop(ctx context.Context) {
 func (l *Launcher) syncSpentNodes(ctx context.Context) {
 	l.retirementMu.Lock()
 	defer l.retirementMu.Unlock()
-	if err := l.retireSpentNodes(ctx); err != nil && (l.retirementLogged.IsZero() || time.Since(l.retirementLogged) >= time.Minute) {
+	if err := l.retireSpentNodes(ctx); err != nil && shutdownFault(ctx, err) != nil && (l.retirementLogged.IsZero() || time.Since(l.retirementLogged) >= time.Minute) {
 		l.retirementLogged = time.Now()
 		l.logger().Warn("spent node retirement failed; retrying on the next reconciliation", failureAttrs(err)...)
 	}

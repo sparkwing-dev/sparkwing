@@ -150,9 +150,9 @@ type countingClaims struct {
 	stop context.CancelFunc
 }
 
-func (c *countingClaims) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+func (c *countingClaims) Claim(context.Context, string, []string) (*CloudJobAward, time.Duration, error) {
 	if c.n++; c.n >= 2 {
 		c.stop()
 	}
-	return nil, nil
+	return nil, 0, nil
 }
