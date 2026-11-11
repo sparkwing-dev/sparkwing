@@ -56,10 +56,12 @@ Browser login uses Secure `__Host-` cookies. On `http://localhost` or
 `http://127.0.0.1`, browsers accept these cookies without certificate setup.
 For remote access, use HTTPS or bring the connection to loopback:
 
-- **Port-forward or SSH tunnel.** Keep the chart's ingress disabled and run
-  `kubectl -n sparkwing port-forward svc/sparkwing-controller 8080:80`, or run
-  `ssh -L 8080:127.0.0.1:8080 user@controller-host` for a remote controller
-  listening on port 8080. Open `http://localhost:8080`.
+- **Port-forward or SSH tunnel.** Keep the chart's ingress disabled and use
+  the `kubectl port-forward` command printed in the Helm notes. For a release
+  named `sparkwing` in namespace `sparkwing`, run
+  `kubectl -n sparkwing port-forward svc/sparkwing-sparkwing-full-controller 8080:80`.
+  For a remote controller listening on port 8080, run
+  `ssh -L 8080:127.0.0.1:8080 user@controller-host`. Open `http://localhost:8080`.
 - **Tailscale.** Run `tailscale serve --bg 8080` on the controller host and use
   the HTTPS URL it prints. Follow its prompts to enable HTTPS certificates for
   the tailnet. See [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve).
