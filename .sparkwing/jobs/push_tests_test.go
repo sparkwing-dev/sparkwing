@@ -97,8 +97,8 @@ func TestAffectedPushTestsRunCommittedControllerBodies(t *testing.T) {
 			gitCommitAll(t, root, change)
 			writeGoFile(t, filepath.Join(root, "quiet", "staged.go"), "package quiet\n")
 			runTestGit(t, root, "add", "quiet/staged.go")
-			host, plan, _ := preparePlan(t, func(_ context.Context, plan *sparkwing.Plan) error {
-				return (&PrePush{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
+			host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+				return (&PrePush{}).Plan(ctx, plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
 			})
 			_, err := host.RunStep(t.Context(), plan, "affected-tests", "test")
 			if err == nil || !strings.Contains(err.Error(), "controller test body executed") || !strings.Contains(err.Error(), "critical test body executed") || strings.Contains(err.Error(), "unrelated test body executed") {
@@ -115,8 +115,8 @@ func TestAffectedPushTestsSkipChangelogOnlyBodies(t *testing.T) {
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	writeGoFile(t, filepath.Join(root, "CHANGELOG.md"), "# Changes\n")
 	gitCommitAll(t, root, "notes")
-	host, plan, _ := preparePlan(t, func(_ context.Context, plan *sparkwing.Plan) error {
-		return (&PrePush{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
+	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&PrePush{}).Plan(ctx, plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
 	})
 	if _, err := host.RunStep(t.Context(), plan, "affected-tests", "test"); err != nil {
 		t.Fatal(err)

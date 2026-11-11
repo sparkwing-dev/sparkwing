@@ -95,16 +95,16 @@ Warm-build-cache observations on Go 1.26.10, with `GOMAXPROCS=2`, `-p 2`,
 | Change shape | Selected short packages | Selection wall time | Short command wall time | Result |
 | --- | ---: | ---: | ---: | --- |
 | Changelog only | 0 | 1.03 s | No command | Passed |
-| `internal/doccheck` | 1 root | 0.92 s | 6.17 s | Passed |
-| Broad 36-file change | 2 pipeline + 65 root | 0.98 s | 1201.91 s | Failed because SDK test dependencies were missing |
+| `internal/doccheck` | 1 root | 0.92 s | 7.37 s | Passed |
+| Broad 36-file change | 2 pipeline + 65 root | 0.98 s | 1432.94 s | Passed |
 
-The separate 37-critical-test invocation took 13.83 s and passed. These are
-individual observations on shared hardware. The failed broad measurement is
-not a passing-suite steady-state estimate. Its cost already exceeds twenty
-minutes, so the 45-minute job ceiling leaves room for the test work and a
-25-minute package timeout to report diagnostics. It is an execution ceiling,
-not a latency target. A prepared-baseline replay is required before treating
-the broad observation as a passing-suite cost.
+The separate 37-critical-test invocation took 14.99 s and passed. These are
+individual observations on shared hardware, with SDK and dashboard dependencies
+installed. The broad short commands took 65.67 s in the pipeline module and
+1367.27 s in the root module. The 45-minute job ceiling leaves about 21 minutes
+beyond that observed short workload for setup, machine load and package-timeout
+diagnostics. It is an execution ceiling, not a latency target or a guarantee
+for every change shape.
 
 Race tests remain a separate local or hosted lane, available with
 `sparkwing run gate --sw-only race-touched`. The broad shape selects five
