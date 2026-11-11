@@ -81,7 +81,7 @@ func TestZLaterFailure(t *testing.T) { signal(t,%q); t.Fatal(%q) }
 `, fmt.Sprintf("/running-%d", i), fmt.Sprintf("/C%d-later", i), fmt.Sprintf("queued fixture C%d later failure", i)))
 	}
 	writeGoFile(t, filepath.Join(root, "z_pending", "fixture_test.go"), "package fixture\n"+imports+request+`func TestPending(t *testing.T) { signal(t,"/B-started") }
-//sparkwing:critical
+`+criticalTestMarker+`
 func TestQueuedCritical(t *testing.T) { if testing.Short() { t.Skip("full critical body") }; signal(t,"/critical-started") }
 `)
 	gitCommitAll(t, root, "queued package fixture")
@@ -174,7 +174,7 @@ func TestQueuedLandRunsEveryShortModuleBeforeAnyCritical(t *testing.T) {
 		body := fmt.Sprintf(`package %s
 import ("os"; "path/filepath"; "testing")
 func TestShortBody(t *testing.T) { if !testing.Short() { t.Skip("short body") }; if err:=os.WriteFile(filepath.Join(%q,%q),[]byte("done"),0600);err!=nil { t.Fatal(err) } }
-//sparkwing:critical
+`+criticalTestMarker+`
 func TestCriticalBody(t *testing.T) {
  if testing.Short() { t.Skip("full critical body") }
  for _, name := range []string{"root-short","pipeline-short","sdk-short"} { if _,err:=os.Stat(filepath.Join(%q,name));err!=nil { t.Fatalf("critical preceded %%s: %%v",name,err) } }
@@ -213,7 +213,7 @@ func TestGateAndMainPushContinueAfterAffectedPackageFailure(t *testing.T) {
 			writeGoFile(t, filepath.Join(root, "z_later", "fixture_test.go"), fmt.Sprintf(`package fixture
 import ("os"; "path/filepath"; "testing")
 func TestLaterShort(t *testing.T) { if !testing.Short() { t.Skip("short body") }; if err:=os.WriteFile(filepath.Join(%q,"short"),[]byte("done"),0600);err!=nil { t.Fatal(err) } }
-//sparkwing:critical
+`+criticalTestMarker+`
 func TestLaterCritical(t *testing.T) { if testing.Short() { t.Skip("full critical body") }; if err:=os.WriteFile(filepath.Join(%q,"critical"),[]byte("done"),0600);err!=nil { t.Fatal(err) } }
 `, markers, markers))
 			gitCommitAll(t, root, "collect-all fixture")
@@ -496,12 +496,12 @@ func TestQueuedLandPreservesCriticalNameUnionAcrossPackages(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "unmarked-collision-body")
 	writeGoFile(t, filepath.Join(root, "a", "fixture_test.go"), `package fixture
 import "testing"
-//sparkwing:critical
+`+criticalTestMarker+`
 func TestOne(t *testing.T) {}
 `)
 	writeGoFile(t, filepath.Join(root, "b", "fixture_test.go"), fmt.Sprintf(`package fixture
 import ("os"; "testing")
-//sparkwing:critical
+`+criticalTestMarker+`
 func TestTwo(t *testing.T) {}
 func TestOne(t *testing.T) { if testing.Short() { t.Skip("full collision body") }; if err:=os.WriteFile(%q,[]byte("done"),0600);err!=nil { t.Fatal(err) } }
 `, marker))
