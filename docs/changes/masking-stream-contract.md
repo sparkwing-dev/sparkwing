@@ -5,3 +5,5 @@
   should read "stdout and stderr are masked independently". Masking matches
   whole registered values and encoded spellings within each stream. Separate
   fragments, including fragments with other text between them, are not masked.
+
+- **secrets:** Document credential-owned team scope for secret API routes
