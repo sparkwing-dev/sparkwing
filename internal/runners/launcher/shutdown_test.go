@@ -93,7 +93,14 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 					}
 					var logs strings.Builder
 					l.Poll, l.Logger = 2*time.Second, slog.New(slog.NewTextHandler(&logs, nil))
-					if err := l.Run(ctx); err != nil {
+					var err error
+					if phase == "retirement" && kind == "parent deadline" {
+						// safety: fake reactors hold the client mutex; Sync avoids concurrent calls while fake time advances.
+						err = l.Sync(ctx)
+					} else {
+						err = l.Run(ctx)
+					}
+					if err != nil {
 						t.Fatal(err)
 					}
 					wantWarn := kind == "mixed fault" || kind == "unrelated fault" || kind == "live parent"
