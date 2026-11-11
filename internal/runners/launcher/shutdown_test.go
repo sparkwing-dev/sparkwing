@@ -38,7 +38,7 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 						case "live parent":
 							time.AfterFunc(time.Second, cancel)
 						case "parent deadline":
-							time.Sleep(time.Second)
+							<-ctx.Done()
 						default:
 							cancel()
 						}
