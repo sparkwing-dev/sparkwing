@@ -14,6 +14,25 @@ number, a struct, a computed string passed as a typed output. The two
 are complementary: a node can return a typed `Ref[T]` *and* publish
 artifacts in the same run.
 
+## Names and filesystem collisions
+
+Artifact names are stored and returned byte-exactly, with no Unicode
+normalization. NFC and NFD spellings are two distinct artifacts: a name
+containing precomposed `é` (U+00E9) differs from one containing `e` followed by
+U+0301, even when both display alike. Use the exact spelling in `--path`.
+
+A destination filesystem may treat those spellings as the same path. The CLI
+refuses a download when `--dest` already exists, preserving its contents.
+Choose distinct destination names, such as `artifact-nfc.txt` and
+`artifact-nfd.txt`, to keep both files on such a filesystem. The CLI downloads
+one file at a time; it does not extract archives. Extraction by another tool
+follows that tool's collision policy.
+
+Pipeline `Consumes` staging replaces destination paths. If distinct artifact
+names resolve to one filesystem path, the later staged file can replace the
+earlier one. Use names that remain distinct on every consumer filesystem;
+separate producers can also use separate `Into` prefixes.
+
 ## Inspect and download
 
 List the files a run committed, or select one job:
