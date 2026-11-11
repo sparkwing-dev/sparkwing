@@ -118,9 +118,16 @@ func TestAffectedStoreShardsStayWithinTheModuleCommandAllowance(t *testing.T) {
 		cpus, allowance, shortCommands int
 		others                         bool
 	}{
-		{3, 1, 1, false}, {5, 2, 1, false}, {7, 3, 3, false}, {9, 4, 3, false}, {16, 7, 3, false},
-		{3, 1, 1, true}, {5, 2, 1, true}, {7, 3, 1, true},
-		{9, 4, 4, true}, {16, 7, 4, true},
+		{3, 1, 1, false},
+		{5, 2, 1, false},
+		{7, 3, 3, false},
+		{9, 4, 3, false},
+		{16, 7, 3, false},
+		{3, 1, 1, true},
+		{5, 2, 1, true},
+		{7, 3, 1, true},
+		{9, 4, 4, true},
+		{16, 7, 4, true},
 	} {
 		t.Run(fmt.Sprintf("allowance-%d/others-%v", tc.allowance, tc.others), func(t *testing.T) {
 			packages := []string{store}
