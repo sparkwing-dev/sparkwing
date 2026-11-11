@@ -33,6 +33,12 @@ func (e *admissionFailure) Unwrap() error { return e.Err }
 func awaitStart(ctx context.Context, state CapacityStore, binding runstate.CapacityBinding, actor runstate.Actor, queued func(runstate.AcquireSlotResponse) error) error {
 	tick := time.NewTicker(waiterPoll)
 	defer tick.Stop()
+	var resume func(context.Context)
+	defer func() {
+		if resume != nil {
+			resume(ctx)
+		}
+	}()
 	for {
 		if err := context.Cause(ctx); err != nil {
 			return err
@@ -53,6 +59,9 @@ func awaitStart(ctx context.Context, state CapacityStore, binding runstate.Capac
 			}
 			return &admissionFailure{Outcome: runstate.NodeFailed, Reason: response.FailureReason, Err: failure, committed: true}
 		case runstate.AcquireQueued:
+			if resume == nil {
+				resume = AwaitSlot(ctx)()
+			}
 			if queued != nil {
 				if err := queued(response); err != nil {
 					return err

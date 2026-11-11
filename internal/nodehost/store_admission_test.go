@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -103,4 +104,53 @@ func TestStartBoundaryErrorsStayErrors(t *testing.T) {
 	if !errors.Is(err, denied) {
 		t.Fatal(err)
 	}
+}
+
+func TestQueuedAdmissionLeavesRunnerSlotForAwaitedChild(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		slots := make(chan struct{}, 1)
+		slots <- struct{}{}
+		childPlanned, childStopped := make(chan struct{}), make(chan struct{})
+		ctx = WithAwaitSlot(ctx, func() func(context.Context) {
+			<-slots
+			return func(ctx context.Context) {
+				select {
+				case slots <- struct{}{}:
+				case <-ctx.Done():
+				}
+			}
+		})
+		go func() {
+			defer close(childStopped)
+			select {
+			case slots <- struct{}{}:
+				close(childPlanned)
+				<-slots
+			case <-ctx.Done():
+			}
+		}()
+		defer func() { cancel(); <-childStopped }()
+		gate, probe, accepted, row := capacityFixture(t)
+		probe.admit = func(context.Context) (runstate.AcquireSlotResponse, error) {
+			select {
+			case <-childPlanned:
+				return runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted}, nil
+			default:
+				return runstate.AcquireSlotResponse{Kind: runstate.AcquireQueued}, nil
+			}
+		}
+		ran := false
+		err := gate.claimedNode(ctx, NodeInput{Accepted: accepted, NodeID: string(row.Ref.NodeID), Generation: row.Generation}, func(context.Context) error {
+			ran = true
+			if len(slots) != 1 {
+				t.Error("job resumed without reacquiring runner inventory")
+			}
+			return nil
+		})
+		if err != nil || !ran {
+			t.Fatalf("queued sibling starved the awaited child's planning: ran=%t error=%v", ran, err)
+		}
+	})
 }
