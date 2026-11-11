@@ -69,10 +69,12 @@ a different repository must define its own landing policy before using it.
 
 ### Local affected Go tests
 
-The pre-push hook runs its six fast checks, then `affected-tests`. Queued Land
+The pre-push hook runs its six fast checks for every push. Updates targeting
+`refs/heads/main` then run `affected-tests`; branch pushes finish after the fast
+checks. An explicit `sparkwing run pre-push` also runs the test phase. Queued Land
 runs that same test job after policy and its combined fast-check/review job.
 Ordinary Land already runs the full Gate and adds no duplicate test job.
-Every path reads the complete committed push range, including deletions and
+The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.
 
 The job reuses the hosted Gate's package planner and command runner. It runs
@@ -84,10 +86,11 @@ separate from the fast checks' one-minute warning. Each Go package retains its
 25-minute timeout. The job reserves its Go command parallelism and reports
 package counts, critical-test counts, failures, package timings and test timings.
 
-Prepare SDK test dependencies with `npm --prefix sdk/typescript ci --ignore-scripts
---no-audit --no-fund` before a Go change that selects acceptance or the native
-TypeScript host package. `xwing app install` includes that setup. The affected
-runner also prepares dashboard Node dependencies when acceptance needs them.
+The affected runner installs missing locked SDK dependencies with
+`npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund` when
+acceptance or the native TypeScript host package is selected. It also prepares
+dashboard Node dependencies when acceptance needs them. `xwing app install`
+includes both dependency roots.
 
 Warm-build-cache observations on Go 1.26.10, with `GOMAXPROCS=2`, `-p 2`,
 `-short -count=1` and an explicit compile-only warm-up on 2026-11-10:
@@ -105,6 +108,13 @@ installed. The broad short commands took 65.67 s in the pipeline module and
 beyond that observed short workload for setup, machine load and package-timeout
 diagnostics. It is an execution ceiling, not a latency target or a guarantee
 for every change shape.
+
+An installed-candidate controller test-file change selected 2 pipeline and 36
+root packages plus the full critical set. With native `GOMAXPROCS=8`, `-p 8`,
+and `GOFLAGS=-trimpath`, PrePush passed in 757.03 s including preparation; the
+affected phase took 746.80 s. Uncached package durations included store 462.93 s,
+CLI 287.20 s, controller 277.58 s and acceptance 191.44 s; package durations
+overlap. Its changelog-only affected phase took 1.08 s and selected no tests.
 
 Race tests remain a separate local or hosted lane, available with
 `sparkwing run gate --sw-only race-touched`. The broad shape selects five
@@ -205,9 +215,9 @@ resolving a review output blob. Its `verify` step requires the review record's t
 tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
-pushed commit's tree is the tree the gate and review judged (the gate runs
-every check the pre-push hook makes, the qatrust vet included); a merged tree
-pushes through the hook. It carries the
+pushed commit's tree is the tree the gate judged or the merged tree whose
+delta passed its recheck. The gate and merge-delta recheck cover affected tests,
+so Land's own push skips the hook without repeating those bodies. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. After a refused
 push, the step fetches main and checks its ancestry. It merges main only when
 main is not an ancestor of the pushed commit. Otherwise it preserves the
@@ -1003,7 +1013,8 @@ file. Other syntax and workflow checks remain active.
   runner reserves the combined CPU demand of those three concurrent compiler
   tasks, up to 9 cores. Smaller runners divide their available cores across
   the tasks. After that phase passes, a separate `affected-tests` job runs
-  the shared affected short and critical Go tests before the push succeeds.
+  the shared affected short and critical Go tests for main updates (and explicit
+  manual runs). Branch pushes keep the fast checks alone.
   The tiers shift left, so a
   push whose commits skipped the commit hook is judged by `gate` rather than a second
   time here. Rebase replay does not fire pre-commit, and automatic merges use

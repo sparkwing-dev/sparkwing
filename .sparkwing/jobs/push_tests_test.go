@@ -63,6 +63,33 @@ func TestAffectedPushTestsBlockHookAndQueuedLanding(t *testing.T) {
 	}
 }
 
+func TestAffectedPushTestsRunOnlyForMainHookUpdates(t *testing.T) {
+	for _, tc := range []struct {
+		name, refs string
+		want       bool
+	}{
+		{"branch", "refs/heads/main abc refs/heads/backup def\n", false},
+		{"main", "refs/heads/work abc refs/heads/main def\n", true},
+		{"several refs", "refs/heads/work abc refs/heads/work def\nrefs/heads/other abc refs/heads/main def\n", true},
+		{"no updates", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SPARKWING_GATE_PUSH_REFS", tc.refs)
+			doc := inspectPlan(t, func(plan *sparkwing.Plan) error {
+				return (&PrePush{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
+			})
+			var tests, fast bool
+			for _, job := range doc.Jobs {
+				tests = tests || job.ID == "affected-tests"
+				fast = fast || job.ID == "pre-push"
+			}
+			if tests != tc.want || !fast {
+				t.Fatalf("hook refs %q: tests=%t fast=%t, want tests=%t and fast checks", tc.refs, tests, fast, tc.want)
+			}
+		})
+	}
+}
+
 func TestAffectedPushTestsRunCommittedControllerBodies(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real Go test subprocesses")

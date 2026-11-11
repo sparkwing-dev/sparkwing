@@ -38,8 +38,8 @@ func (Land) Help() string {
 		"Once policy passes, the rest of the gate (the same jobs as `sparkwing run gate`) starts while review continues. " +
 		"The review always runs, whatever the change's size or paths. When both pass and the review record's tree is HEAD's tree with result pass, " +
 		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
-		"with no force, adding --no-verify when the pushed tree is the tree the gate and review judged, since the gate covers every check the pre-push hook makes; " +
-		"a merged tree pushes through the hook. When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
+		"with no force, adding --no-verify after the gate and any merge-delta tests pass, since those checks cover the pushed tree; " +
+		"When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
 		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure and runs the affected tests over the files " +
 		"that differ between the gated tree and the merged tree, then pushes the merge; the review is not run again. It merges at most 3 times; a conflict fails " +
 		"and names the merge to run by hand. The push step carries the destructive and prod risks, " +
@@ -448,7 +448,7 @@ func landOnto(ctx context.Context, dir string, head landHead, recheck mergeReche
 			}
 		}
 		target.Base = base
-		refused = pushLanding(ctx, git, dir, target.Commit, head.Tree)
+		refused = pushLanding(ctx, git, dir, target.Commit, target.Tree)
 		if refused == nil {
 			return target, nil
 		}
@@ -549,8 +549,8 @@ func landPushArgs(commit string, gated bool) []string {
 	return []string{"push", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
 }
 
-// safety: the hook is skipped only when the pushed commit's tree is the one the
-// gate and review judged; anything else is judged by the hook as a human push is.
+// safety: the checked tree includes any successful merge-delta recheck; a
+// different pushed tree must still pass the hook.
 func pushLanding(ctx context.Context, git gitRunner, dir, commit, gatedTree string) error {
 	tree, err := git(ctx, "rev-parse", commit+"^{tree}")
 	gated := err == nil && tree == gatedTree

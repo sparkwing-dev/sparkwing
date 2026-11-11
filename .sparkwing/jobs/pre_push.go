@@ -5,20 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"go/build"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PrePush runs the push's fast checks, then the hosted gate's affected short
-// and critical Go tests over the committed change.
+// PrePush runs fast push checks and adds affected Go tests for main updates.
 type PrePush struct{ sparkwing.Base }
 
 func (PrePush) ShortHelp() string {
-	return "Push gate: contract checks, touched-package build, vet and lint, then affected short and critical Go tests"
+	return "Push gate: fast checks, plus affected short and critical Go tests for main updates"
 }
 
 func (PrePush) Help() string {
@@ -33,7 +34,7 @@ func (PrePush) Help() string {
 		"the index, so whatever is staged cannot narrow what the push is judged against. The fast checks have a " +
 		"one-minute budget on each step's own run time; a step past it warns, naming the slowest, and the fast phase still passes when every check did. Run timings measure " +
 		"progress toward their ten-second warm-cache target; the run has no compiler-cache temperature signal. " +
-		"After they pass, the affected-tests job runs the hosted gate's reverse dependency selection with go test -short, including test imports and file readers, plus every critical test without -short when Go inputs changed. " +
+		"For hook updates to refs/heads/main, or an explicit run outside the hook, the affected-tests job then runs the hosted gate's reverse dependency selection with go test -short, including test imports and file readers, plus every critical test without -short when Go inputs changed. Branch pushes keep only the fast checks. " +
 		"It has a separate 45-minute execution deadline and reports package and test timings. Changelog-only changes select no tests; documentation with registered readers runs those readers. " +
 		"Broader lint, race and dashboard checks remain in `gate`; full Go and PostgreSQL verification run with `gate -- --full` and at the release boundary. Hosted CI provides additional verification."
 }
@@ -47,7 +48,21 @@ func (PrePush) Examples() []sparkwing.Example {
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Priority(hookTierPriority)
 	fast := sparkwing.Job(plan, rc.Pipeline, p)
-	affectedPushTestsJobNode(plan).Needs(fast)
+	refs, hook := os.LookupEnv(gitenv.PushRefsVar)
+	main := !hook
+	for line := range strings.SplitSeq(refs, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 4 {
+			return fmt.Errorf("pre-push: invalid Git ref update %q", line)
+		}
+		main = main || fields[2] == "refs/heads/main"
+	}
+	if main {
+		affectedPushTestsJobNode(plan).Needs(fast)
+	}
 	return nil
 }
 

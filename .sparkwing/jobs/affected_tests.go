@@ -130,11 +130,27 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string) err
 		}
 	}
 	// safety: acceptance uses dashboard Node packages even in short mode.
+	acceptance := byDir["tests/acceptance"]
+	nativehost := byDir["sdk/typescript/test/nativehost"]
+	var frontendDeps, sdkDeps bool
 	for _, p := range plans {
-		acceptance := byDir["tests/acceptance"]
 		if slices.Contains(p.packages, acceptance) || len(p.critical[acceptance]) > 0 {
-			if err := ensureFrontendDeps(ctx); err != nil {
-				return err
+			frontendDeps, sdkDeps = true, true
+		}
+		if slices.Contains(p.packages, nativehost) || len(p.critical[nativehost]) > 0 {
+			sdkDeps = true
+		}
+	}
+	if frontendDeps {
+		if err := ensureFrontendDeps(ctx); err != nil {
+			return err
+		}
+	}
+	if sdkDeps {
+		compiler := filepath.Join(sparkwing.WorkDir(), "sdk", "typescript", "node_modules", "typescript", "bin", "tsc")
+		if _, err := os.Stat(compiler); err != nil {
+			if _, err := sparkwing.Bash(ctx, "npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund").Run(); err != nil {
+				return fmt.Errorf("TypeScript SDK dependencies: %w", err)
 			}
 		}
 	}

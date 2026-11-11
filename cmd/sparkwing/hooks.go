@@ -409,6 +409,10 @@ func renderHookScript(hookName string, pipes []string) string {
 	if len(pipes) > 0 {
 		b.WriteString("(\n")
 		b.WriteString(gitenv.ShellUnbind())
+		if hookName == "pre-push" {
+			b.WriteString(gitenv.PushRefsVar + "=\"$(cat)\"\n")
+			b.WriteString("export " + gitenv.PushRefsVar + "\n")
+		}
 		for _, p := range pipes {
 			// safety: pipeline names come from repo config, so quote before they reach sh.
 			fmt.Fprintf(&b, "sparkwing run %s%s\n", shellSingleQuote(p), tolerate)
