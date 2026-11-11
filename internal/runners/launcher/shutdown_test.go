@@ -64,7 +64,7 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 							path = "/api/v1/launcher/sync"
 						}
 						wire, err := client.NewEngineClient(client.EngineOptions{URL: "http://controller.invalid", Launcher: true, HTTP: &http.Client{Transport: cloudResourceTransport(func(r *http.Request) (*http.Response, error) {
-							if r.URL.Path == tc.path {
+							if r.URL.Path == path {
 								return nil, failure()
 							}
 							return claimPollResponse(200, `{"awards":[],"retired":[]}`), nil
