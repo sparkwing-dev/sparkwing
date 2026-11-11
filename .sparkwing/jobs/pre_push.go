@@ -30,11 +30,11 @@ func (PrePush) Help() string {
 		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. It repeats " +
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
-		"judged by `gate`. Every check reads the committed change from the merge base with origin/main to HEAD, and never " +
+		"judged by `gate`. Every fast check reads the committed change from the merge base with origin/main to HEAD, and never " +
 		"the index, so whatever is staged cannot narrow what the push is judged against. The fast checks have a " +
 		"one-minute budget on each step's own run time; a step past it warns, naming the slowest, and the fast phase still passes when every check did. Run timings measure " +
 		"progress toward their ten-second warm-cache target; the run has no compiler-cache temperature signal. " +
-		"Main hook updates must push the checked-out HEAD; check out a different source commit before retrying. Deletions add no tests. For hook updates to refs/heads/main, or an explicit run outside the hook, the affected-tests job then runs the hosted gate's reverse dependency selection with go test -short, including test imports and file readers, plus every critical test without -short when Go inputs changed. Branch pushes keep only the fast checks. " +
+		"Affected tests use Git's advertised remote OID for main, never local tracking. Non-fast-forward main updates are refused; creating main runs every committed Go module's short tests and the full critical set. Main hook updates must push the checked-out HEAD; check out a different source commit before retrying. Deletions add no tests. For hook updates to refs/heads/main, or an explicit run outside the hook, the affected-tests job then runs the hosted gate's reverse dependency selection with go test -short, including test imports and file readers, plus every critical test without -short when Go inputs changed. Branch pushes keep only the fast checks. " +
 		"It has a separate 45-minute execution deadline and reports package and test timings. Changelog-only changes select no tests; documentation with registered readers runs those readers. " +
 		"Broader lint, race and dashboard checks remain in `gate`; full Go and PostgreSQL verification run with `gate -- --full` and at the release boundary. Hosted CI provides additional verification."
 }
@@ -49,18 +49,22 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	plan.Priority(hookTierPriority)
 	fast := sparkwing.Job(plan, rc.Pipeline, p)
 	refs, hook := os.LookupEnv(gitenv.PushRefsVar)
-	sources, err := mainPushSources(refs)
+	updates, err := mainPushUpdates(refs)
 	if err != nil {
 		return err
 	}
-	if !hook || len(sources) > 0 {
+	if !hook || len(updates) > 0 {
 		affectedPushTestsJobNode(plan).Needs(fast)
 	}
 	return nil
 }
 
-func mainPushSources(refs string) ([]string, error) {
-	var sources []string
+type mainPushUpdate struct {
+	local, remote string
+}
+
+func mainPushUpdates(refs string) ([]mainPushUpdate, error) {
+	var updates []mainPushUpdate
 	for line := range strings.SplitSeq(refs, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -70,29 +74,67 @@ func mainPushSources(refs string) ([]string, error) {
 			return nil, fmt.Errorf("pre-push: invalid Git ref update %q", line)
 		}
 		if fields[2] == "refs/heads/main" && strings.Trim(fields[1], "0") != "" {
-			sources = append(sources, fields[1])
+			updates = append(updates, mainPushUpdate{local: fields[1], remote: fields[3]})
 		}
 	}
-	return sources, nil
+	return updates, nil
 }
 
 // safety: a plan error hides its remedy until secret discovery completes.
-// Refuse here before selection, against the commit this job actually evaluates.
-func checkMainPushSources(ctx context.Context) error {
-	sources, err := mainPushSources(os.Getenv(gitenv.PushRefsVar))
-	if err != nil || len(sources) == 0 {
-		return err
+// The job judges Git's advertised destination, which local tracking may not match.
+func mainPushScope(ctx context.Context) ([]string, string, error) {
+	refs, hook := os.LookupEnv(gitenv.PushRefsVar)
+	if !hook {
+		return pushRangeScope(ctx, "file(s)", func(files []string) []string { return files })
 	}
-	head, err := gitIn(sparkwing.WorkDir())(ctx, "rev-parse", "HEAD")
+	updates, err := mainPushUpdates(refs)
 	if err != nil {
-		return fmt.Errorf("pre-push: resolve checked-out HEAD: %w", err)
+		return nil, "", err
 	}
-	for _, source := range sources {
-		if source != head {
-			return fmt.Errorf("pre-push: refusing main update from %s: checked-out HEAD is %s; check out the commit being pushed and retry", source, head)
+	if len(updates) == 0 {
+		return nil, "no main updates", nil
+	}
+	git := gitIn(sparkwing.WorkDir())
+	head, err := git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, "", fmt.Errorf("pre-push: resolve checked-out HEAD: %w", err)
+	}
+	whole := false
+	for _, update := range updates {
+		if update.local != head {
+			return nil, "", fmt.Errorf("pre-push: refusing main update from %s: checked-out HEAD is %s; check out the commit being pushed and retry", update.local, head)
+		}
+		if strings.Trim(update.remote, "0") == "" {
+			whole = true
+			continue
+		}
+		if _, err := git(ctx, "merge-base", "--is-ancestor", update.remote, update.local); err != nil {
+			return nil, "", fmt.Errorf("pre-push: refusing non-fast-forward or unverifiable main update %s -> %s; fetch the destination and push a descendant of its main: %w", update.remote, update.local, err)
 		}
 	}
-	return nil
+	var commands [][]string
+	scope := "file(s) since Git's advertised main destination"
+	if whole {
+		commands = [][]string{{"ls-tree", "-r", "--name-only", "-z", head}}
+		scope = "committed file(s) for new main; every Go module and critical test"
+	} else {
+		for _, update := range updates {
+			commands = append(commands, []string{"diff", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRD", update.remote, update.local})
+		}
+	}
+	files := map[string]bool{}
+	for _, args := range commands {
+		out, err := runGitIn(ctx, sparkwing.WorkDir(), args...)
+		if err != nil {
+			return nil, "", fmt.Errorf("pre-push: list committed main update files: %w", err)
+		}
+		for file := range strings.SplitSeq(out, "\x00") {
+			if file != "" {
+				files[file] = true
+			}
+		}
+	}
+	return mapKeys(files), fmt.Sprintf("%d %s", len(files), scope), nil
 }
 
 // perf: a warm broad short replay exceeded twenty minutes, so tests have a
@@ -120,10 +162,7 @@ func (*affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 }
 
 func runAffectedPushTests(ctx context.Context) error {
-	if err := checkMainPushSources(ctx); err != nil {
-		return err
-	}
-	files, scope, err := pushRangeScope(ctx, "file(s)", func(files []string) []string { return files })
+	files, scope, err := mainPushScope(ctx)
 	if err != nil {
 		return err
 	}

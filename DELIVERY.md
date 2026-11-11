@@ -81,6 +81,11 @@ Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.
 
+Affected tests for main use the remote OID Git advertises on hook stdin,
+independently of local `origin/main`. Main updates must fast-forward; a rewind
+or unverified remote base is refused with a fetch remedy. Creating
+main selects every committed Go module's short tests and the full critical set.
+
 The job reuses the hosted Gate's package planner and command runner. It runs
 `go test -short` over the reverse dependency closure, including test imports
 and registered file readers, then the critical set without `-short` when Go

@@ -56,7 +56,7 @@ func TestDeliveryDocumentsPushAndMergeSafety(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phrase := range []string{"checked-out HEAD", "Deletions add no", "affected tests once", "qatrust"} {
+	for _, phrase := range []string{"checked-out HEAD", "Deletions add no", "affected tests once", "qatrust", "remote OID", "full critical set"} {
 		if !strings.Contains(string(body), phrase) || !strings.Contains((PrePush{}).Help()+(Land{}).Help(), phrase) {
 			t.Errorf("delivery docs and pipeline help must describe %q", phrase)
 		}
