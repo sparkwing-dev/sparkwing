@@ -92,7 +92,7 @@ func TestBootstrapStartupExistingWeakSeedRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	weak := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	// The old validator persisted this digest; authentication still accepts it.
+	// hack: bypass issuance to model a pre-existing weak credential.
 	digest := sha256.Sum256([]byte(weak))
 	db := teststore.SQLite(t, path)
 	if _, err := db.ExecContext(t.Context(), `UPDATE capabilities SET digest=?`, hex.EncodeToString(digest[:])); err != nil {
