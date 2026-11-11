@@ -145,6 +145,28 @@ func TestLoopGatewayProtocolFailuresStayFatal(t *testing.T) {
 	}
 }
 
+func TestLoopBoundsSlowGatewayRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		client, err := controllerclient.NewEngineClient(controllerclient.EngineOptions{URL: "http://controller", HTTP: &http.Client{Timeout: 30 * time.Second, Transport: gatewayTransport(func(r *http.Request) (*http.Response, error) {
+			calls++
+			if calls == 1 {
+				return &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("no backend"))}, nil
+			}
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		})}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		loop := &Loop{Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: time.Millisecond}, Controller: client, CheckVersion: func(context.Context, string) error { return nil }, Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { return errors.New("unexpected work") })}
+		start := time.Now()
+		if err := loop.Run(t.Context()); !errors.Is(err, context.DeadlineExceeded) || calls != 2 || time.Since(start) != 5*time.Second {
+			t.Fatalf("calls=%d elapsed=%s error=%v", calls, time.Since(start), err)
+		}
+	})
+}
+
 func TestLoopGatewayOutageKeepsHeldHost(t *testing.T) {
 	started, release, recovered, stopped := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var loop *Loop

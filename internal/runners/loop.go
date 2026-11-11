@@ -387,8 +387,18 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			done := make(chan claimOutcome, 1)
 			pending = done
 			request.FreeSlots = &freeSlots
+			var recoveryDeadline time.Time
+			if transportErr != nil {
+				recoveryDeadline = transportSince.Add(5 * time.Second)
+			}
 			go func() {
-				response, err := l.Controller.Claim(claims, request)
+				claimCtx := claims
+				if !recoveryDeadline.IsZero() {
+					var cancel context.CancelFunc
+					claimCtx, cancel = context.WithDeadline(claims, recoveryDeadline)
+					defer cancel()
+				}
+				response, err := l.Controller.Claim(claimCtx, request)
 				done <- claimOutcome{response: response, err: err, kinds: request.Kinds, workSlot: workSlot, ownerSlot: ownerSlot}
 			}()
 		}

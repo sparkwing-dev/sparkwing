@@ -77,7 +77,8 @@ Controller connection failures, timeouts, explicit 5xx unavailability and
 failures. Exponential jitter adds to the configured polling floor and caps the
 wait at five seconds, or the floor when longer. Retry-After seconds and HTTP
 dates can extend that wait. If advice or backoff exceeds the recovery window,
-claims stop at the deadline without an early retry. A successful response resets
+claims stop at the deadline without an early retry. In-flight recovery claims
+carry that deadline too. A successful response resets
 that window. Each poll is a new request because a lost claim reply may
 already contain an award. Authentication, permission and protocol refusals
 remain fatal. Signed version policy keeps its existing denial behavior.
@@ -88,6 +89,7 @@ including uploads and terminal acknowledgements, before it returns.
 `TestLoopBoundsControllerTransportRecovery`,
 `TestLoopTransportRecoveryKeepsRefusalsFatal`,
 `TestLoopClaimsAfterGatewayOutage`, `TestLoopGatewayRetryTiming`,
+`TestLoopBoundsSlowGatewayRecovery`,
 `TestLoopGatewayOutageKeepsHeldHost`, `TestLoopGatewayProtocolFailuresStayFatal`
 and `TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
 The shared controller decoder preserves gateway status and retry advice for
