@@ -270,6 +270,10 @@ fetching committed bytes. Log streams return `Cache-Control: no-store`.
 
 ## Log completeness
 
+A log cursor belongs to one run, job and filter selection. If a read refuses
+it as a mismatch, remove `--cursor` (the HTTP `cursor` parameter) to restart
+the selection, or reuse a returned cursor with the same run, job and filters.
+
 A log page contains `records`, `next_cursor`, `truncated` and `complete`.
 An incomplete page retains a cursor even when it has no records. A truncated
 page requires another read immediately. Follow polls only after reaching a
