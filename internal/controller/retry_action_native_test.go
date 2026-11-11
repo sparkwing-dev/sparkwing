@@ -185,6 +185,7 @@ func TestRetryAliasesReplayCommittedMode(t *testing.T) {
 				TrustClass:    runspec.TrustAsserted,
 				Pipeline:      "ci", RequestedArgs: map[string]string{"public": "visible", "secret": "***"}, Args: map[string]string{"public": "visible", "secret": "***"}, SecretArgs: []string{"secret"},
 				Git: source.Request.Request.Git, Actor: runspec.Actor{Kind: "account", ID: "original-author"},
+				Lineage:    runspec.Lineage{RetryOf: source.ID, Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "member"}}},
 				Reproducer: []string{"sparkwing", "run", "ci", "--", "--public=visible"},
 			}
 			control, err := client.NewEngineClient(options)
