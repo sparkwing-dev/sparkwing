@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -18,9 +19,23 @@ import (
 
 const unavailableRetries = 3
 
+type gatewayError struct{ failure *apierr.Error }
+
+func (e *gatewayError) Error() string { return e.failure.Error() }
+func (e *gatewayError) Unwrap() error { return e.failure }
+
+// RetryBackoff adds exponential jitter above the polling floor, capped at 5s
+// or the floor when it is longer. Callers retain recovery deadlines and advice.
+func RetryBackoff(attempt int, floor time.Duration) time.Duration {
+	floor = max(floor, 0)
+	ceiling := min(100*time.Millisecond<<min(max(attempt, 0), 6), max(5*time.Second, floor)-floor)
+	// #nosec G404 -- reconnect jitter carries no authority.
+	return floor + ceiling/2 + time.Duration(rand.Int64N(int64(ceiling/2)+1))
+}
+
 // safety: a controller outage cannot end held work; only read operations wait for reconnection.
 func retryHeldRead(ctx context.Context, read func() error) error {
-	for {
+	for attempt := 0; ; attempt++ {
 		err := read()
 		if err == nil {
 			return nil
@@ -36,9 +51,9 @@ func retryHeldRead(ctx context.Context, read func() error) error {
 		if !retry {
 			return err
 		}
-		delay := time.Second
+		delay := RetryBackoff(attempt, time.Second)
 		if advised, ok := hosterr.RetryDelay(err); ok {
-			delay = max(advised, 100*time.Millisecond)
+			delay = max(delay, advised)
 		}
 		if err := waitFor(ctx, delay); err != nil {
 			return context.Cause(ctx)
@@ -46,16 +61,17 @@ func retryHeldRead(ctx context.Context, read func() error) error {
 	}
 }
 
-// RetryableTransportError identifies interrupted controller transports, including
-// a local socket temporarily absent while its controller restarts.
+// RetryableTransportError identifies interrupted controller transports and
+// temporary 5xx unavailability, including controller replacement.
 func RetryableTransportError(err error) bool {
+	var gateway *gatewayError
 	var netErr net.Error
 	var operation *net.OpError
 	var path *os.PathError
-	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+	return errors.As(err, &gateway) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
 		errors.As(err, &netErr) && netErr.Timeout() ||
-		errors.As(err, &operation) && operation.Op == "dial" && strings.HasPrefix(operation.Net, "unix") && errors.Is(err, os.ErrNotExist) ||
+		errors.As(err, &operation) && operation.Op == "dial" && !errors.Is(err, os.ErrPermission) && (strings.HasPrefix(operation.Net, "tcp") || strings.HasPrefix(operation.Net, "unix") && errors.Is(err, os.ErrNotExist)) ||
 		errors.As(err, &path) && path.Op == "connect" && errors.Is(err, os.ErrNotExist)
 }
 
@@ -67,7 +83,14 @@ const maxRetryAfter = time.Hour
 // header near the int64 limit wraps a Duration negative or small, which a
 // caller would read as an invitation to come straight back.
 func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
-	return parseDelaySeconds(resp.Header.Get("Retry-After"))
+	raw := resp.Header.Get("Retry-After")
+	if delay, ok := parseDelaySeconds(raw); ok {
+		return delay, true
+	}
+	if at, err := http.ParseTime(raw); err == nil {
+		return min(max(time.Until(at), 0), maxRetryAfter), true
+	}
+	return 0, false
 }
 
 func parseDelaySeconds(raw string) (time.Duration, bool) {

@@ -160,6 +160,8 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	awaitChanged := make(chan struct{}, 1)
 	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
 	var transportSince time.Time
+	var transportErr error
+	transportAttempt := 0
 	claimed := 0
 	var failed failedWork
 	var hostErr error
@@ -327,6 +329,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if claims.Err() != nil || (l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims) || l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0) == 0 {
 			return nil, nil
 		}
+		if transportErr != nil && time.Since(transportSince) >= 5*time.Second {
+			return nil, fmt.Errorf("claim runner work: controller recovery deadline exceeded: %w", transportErr)
+		}
 		nextClaim := pollAt
 		if backoffUntil.After(nextClaim) {
 			nextClaim = backoffUntil
@@ -407,16 +412,26 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			default:
 			}
 			if controllerclient.RetryableTransportError(outcome.err) {
+				transportErr = outcome.err
 				if transportSince.IsZero() {
 					transportSince = time.Now()
 				}
-				if time.Since(transportSince) < 5*time.Second {
+				remaining := 5*time.Second - time.Since(transportSince)
+				if remaining > 0 {
+					delay := controllerclient.RetryBackoff(transportAttempt, l.Config.PollInterval)
+					transportAttempt++
+					if advised, ok := hosterr.RetryDelay(outcome.err); ok {
+						delay = max(delay, advised)
+					}
 					// safety: a fresh poll never replays a claim whose award reply was lost.
-					backoffUntil = time.Now().Add(min(l.Config.PollInterval, time.Second))
+					backoffUntil = time.Now().Add(min(delay, remaining))
 					continue
 				}
+				return nil, fmt.Errorf("claim runner work: controller recovery deadline exceeded: %w", outcome.err)
 			} else {
 				transportSince = time.Time{}
+				transportErr = nil
+				transportAttempt = 0
 			}
 			if delay, ok := hosterr.RetryDelay(outcome.err); ok {
 				backoffUntil = time.Now().Add(max(delay, l.Config.PollInterval))

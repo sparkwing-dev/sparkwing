@@ -100,12 +100,16 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		req.GetBody = nil
 	}
 	for attempt := 0; ; attempt++ {
+		wait := RetryBackoff(attempt, 0)
+		if recoverIntake {
+			wait = time.Duration(1<<attempt) * 100 * time.Millisecond
+		}
 		resp, requestErr := c.http.Do(req)
 		if requestErr != nil {
 			if !mayRetry || attempt >= retries || ctx.Err() != nil || !RetryableTransportError(requestErr) {
 				return fmt.Errorf("cannot connect to controller %s: %w; check its URL with sparkwing profiles show --profile NAME, repair it with sparkwing profiles set --profile NAME --controller URL, and check your network and whether the controller is running", c.base, requestErr)
 			}
-			if err := waitFor(ctx, time.Duration(1<<attempt)*100*time.Millisecond); err != nil {
+			if err := waitFor(ctx, wait); err != nil {
 				return err
 			}
 		} else {
@@ -116,12 +120,11 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 				}
 				return nil
 			}
-			wait, ok := parseRetryAfter(resp)
-			if recoverIntake {
-				wait = max(wait, time.Duration(1<<attempt)*100*time.Millisecond)
-			} else if !ok {
+			advised, ok := parseRetryAfter(resp)
+			if !ok && !recoverIntake && !RetryableTransportError(err) {
 				return err
 			}
+			wait = max(wait, advised)
 			if err := waitFor(ctx, wait); err != nil {
 				return err
 			}
@@ -168,7 +171,14 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 	}
 	fields, err := responseObject(data)
 	if err != nil {
-		return false, err
+		if resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode <= 599 && (errors.Is(err, ErrResponseNotObject) || !json.Valid(data)) {
+			failure := &apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("controller gateway returned HTTP %d %s without a JSON error envelope", resp.StatusCode, http.StatusText(resp.StatusCode))}
+			if delay, ok := parseRetryAfter(resp); ok {
+				failure.Details = map[string]any{"retry_after_ms": delay.Milliseconds()}
+			}
+			return true, &gatewayError{failure: failure}
+		}
+		return false, fmt.Errorf("controller HTTP %d %s: %w", resp.StatusCode, http.StatusText(resp.StatusCode), err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		inner, ok := fields["error"]
@@ -189,7 +199,18 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 			}
 			failure.Details["request_id"] = id
 		}
-		retry := resp.StatusCode == http.StatusServiceUnavailable && failure.Code == hosterr.Unavailable || resp.StatusCode == http.StatusTooManyRequests && failure.Code == hosterr.RateLimited
+		if resp.StatusCode >= http.StatusInternalServerError && failure.Code == hosterr.Unavailable {
+			if delay, ok := parseRetryAfter(resp); ok {
+				advised, _ := hosterr.RetryDelay(failure)
+				failure.Details = maps.Clone(failure.Details)
+				if failure.Details == nil {
+					failure.Details = map[string]any{}
+				}
+				failure.Details["retry_after_ms"] = max(delay, advised).Milliseconds()
+			}
+			return true, &gatewayError{failure: failure}
+		}
+		retry := resp.StatusCode == http.StatusTooManyRequests && failure.Code == hosterr.RateLimited
 		return retry, failure
 	}
 	// safety: recovery carries a persisted inner error as part of its successful result.
