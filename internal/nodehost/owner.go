@@ -139,15 +139,19 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		return preparing.Load() || h.Computing != nil && h.Computing(input.RunID)
 	}, unaccepted.Load)
 	defer stop()
-	if err := context.Cause(ctx); err != nil {
-		return completion, err
-	}
-	snapshot, err := h.Store.ReadSnapshot(ctx, input.RunID)
+	// safety: cancellation must retain the first snapshot's accepted-work fence and finish authority.
+	snapshot, err := h.Store.ReadSnapshot(lease.ExecutionContext(ctx), input.RunID)
 	if err != nil {
 		return completion, err
 	}
 	if err := ownerRequestMatches(input, snapshot.Run); err != nil {
 		return completion, err
+	}
+	if err := context.Cause(ctx); err != nil {
+		return completion, h.preparationFailure(ctx, input, snapshot.Run, err)
+	}
+	if snapshot.Run.Spec == nil && snapshot.Run.CancelRequestedAt != nil {
+		return completion, h.preparationFailure(ctx, input, snapshot.Run, &lease.CancelError{Reason: snapshot.Run.CancelReason})
 	}
 	if err := h.Masks.initialize(snapshot.Run.Request, nil, nil, nil, nil); err != nil {
 		return completion, err
@@ -344,6 +348,12 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 		if errors.As(err, &refusal) && (refusal.Code == apierr.PlanInvalid || refusal.Code == hosterr.SecretInIdentifier) {
 			return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 		}
+		if errors.As(err, &refusal) && refusal.Code == hosterr.IllegalTransition {
+			snapshot, readErr := h.Store.ReadSnapshot(lease.ExecutionContext(ctx), input.RunID)
+			if readErr == nil && snapshot.Run.CancelRequestedAt != nil {
+				return AcceptedRun{}, h.preparationFailure(ctx, input, snapshot.Run, &lease.CancelError{Reason: snapshot.Run.CancelReason})
+			}
+		}
 		return AcceptedRun{}, err
 	}
 	if !reflect.DeepEqual(accepted.Spec.Request, row.Request) || accepted.PlanHash != string(plan.PlanHash) {
@@ -362,8 +372,11 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 	// safety: the masker already holds the intake secret arguments and, once the source fetch authenticated, its git
 	// credential and Basic header; source and bundle errors also drop git output and signed URLs before they get here.
 	message := boundedNodeErrText(h.Masker.Mask(failure.Error()))
+	var cancelled *lease.CancelError
+	if errors.As(failure, &cancelled) {
+		reason, message = string(hosterr.ReasonCancelled), "cancellation requested"
+	}
 	if cause := context.Cause(ctx); cause != nil {
-		var cancelled *lease.CancelError
 		if !errors.As(cause, &cancelled) {
 			return errors.Join(failure, cause)
 		}
