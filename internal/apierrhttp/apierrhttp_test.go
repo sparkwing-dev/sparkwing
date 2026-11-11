@@ -64,7 +64,7 @@ func TestUnauthenticatedResponsesDoNotRevealCredentialHistory(t *testing.T) {
 		if !bytes.Equal(w.Body.Bytes(), firstBody) || !reflect.DeepEqual(w.Header(), firstHeaders) {
 			t.Errorf("%q revealed history: %s %v", reason, w.Body, w.Header())
 		}
-		if w.cause != failure || failure.Message != reason {
+		if w.cause == nil || w.cause.Error() != reason || failure.Message != reason {
 			t.Errorf("private cause was lost or changed for %q", reason)
 		}
 	}

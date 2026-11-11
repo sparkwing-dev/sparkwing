@@ -1,13 +1,14 @@
 package controller
 
 import (
-	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestUnauthenticatedReasonStaysInAudit(t *testing.T) {

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"bytes"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -10,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestGraceEndedAndUnknownCredentialHaveIdenticalHTTPRefusals(t *testing.T) {
