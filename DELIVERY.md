@@ -172,8 +172,8 @@ inputs changed. Changelog-only changes select no tests. Other documentation
 runs its registered readers. The `affected-tests` job has a 45-minute execution deadline,
 separate from the fast checks' one-minute warning. Each Go package retains its
 25-minute timeout. The local test job uses `max(1, (NumCPU-1)/2)` for both
-its scheduling reservation and Go command width: seven on a 16-CPU host,
-regardless of the submitter's `GOMAXPROCS` or the SDK's `CI` marker. This is
+its scheduling reservation and combined Go command allowance: seven on a
+16-CPU host, regardless of the submitter's `GOMAXPROCS` or the SDK's `CI` marker. This is
 not an aggregate CPU cap: seven test processes can each use seven Go execution
 threads, besides compiler and nested subprocess work. The job reports package
 counts, critical-test counts, failures, package timings and test timings.
@@ -186,15 +186,40 @@ policy and retain their existing CPU policy. Other affected build and vet
 checks keep their existing flag and runtime CPU policies.
 
 When the root selection includes `internal/store`, its short tests use three
-concurrent one-core commands. Selected root packages outside store run alongside
-them with the remaining Go command allowance. A seven-wide allowance becomes
+concurrent commands, each with `GOMAXPROCS=1` and `-p 1`. Other selected root
+packages run alongside them with the remaining Go command allowance. A seven-wide allowance becomes
 four for the other packages and one per store shard. Store-only selections need
 an allowance of at least three; selections with other root packages need at
 least four. Smaller allowances retain the unsplit short command. Each command
 keeps the existing `GOMAXPROCS`/`-p` pairing; summed command widths stay within
 the allowance, which is not an operating-system CPU cap. Modules remain
-sequential. All short commands join before full critical tests run, including
-when a short command fails. Native timing for this grouping remains unmeasured.
+sequential. Each module's short commands join before its full critical tests run,
+including when a short command fails.
+
+A replay of the same selection on 2026-11-11 compared `ea4b68ccd` with store
+grouping at `9d688612a`, using Go 1.26.11, warm compilation,
+`GOFLAGS=-mod=readonly` and top-level `-count=1`. Both selected the same 13-file
+cohort: two pipeline packages, 66 root packages and 37 critical declarations.
+
+| Root short schedule | Pipeline short | Root short, joined wall | Critical | Shared runner wall |
+| --- | ---: | ---: | ---: | ---: |
+| One width-seven command | 80.36 s | 586.42 s | 7.92 s | 675.87 s |
+| Other packages at four, three store commands at one | 89.97 s | 502.60 s | 10.96 s | 604.76 s |
+
+Both passed. Runner wall was 71.11 s (10.5%) shorter in this observation.
+The store package took 517.71 s before grouping; its shard package times were
+188.63 s, 182.36 s and 189.10 s. Package times exclude Go command setup.
+All 1,980 top-level store tests ran once, and all 7,827 root short tests and their
+outcomes matched. All 30 runnable Linux critical bodies passed; seven selected
+Windows declarations did not run. The pipeline suite added three passing guards.
+Critical commands started after every short command finished, and overlapping
+command widths peaked at seven in both variants.
+
+This is one shared-host pair with forced test bodies, not a cache-hit or flake-rate
+measurement. Median one-minute load, including the replay, was 13.78 before and
+11.82 after. Sampled summed descendant RSS peaked at 3.66 GiB and 4.09 GiB;
+that sum can count shared pages repeatedly and is not a private-memory limit.
+The 45-minute execution ceiling and 25-minute package timeout remain unchanged.
 
 The affected runner installs missing locked SDK dependencies with
 `npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund` when
