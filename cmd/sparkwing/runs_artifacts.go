@@ -236,7 +236,10 @@ func artifactDestinationAvailable(dest string) error {
 	// #nosec G703 -- The local operator selects --dest; the controller cannot select this path.
 	_, err := os.Lstat(dest)
 	if err == nil {
-		return &os.PathError{Op: "create", Path: dest, Err: os.ErrExist}
+		return errors.Join(
+			&clisurface.UsageError{Path: "sparkwing runs artifacts", Message: fmt.Sprintf("destination %q already exists; choose a distinct --dest", dest)},
+			&os.PathError{Op: "create", Path: dest, Err: os.ErrExist},
+		)
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
