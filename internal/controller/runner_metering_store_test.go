@@ -44,8 +44,8 @@ func TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://controller.test")
 		r.Header.Set(csrfHeaderName, csrfValue)
-		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
-		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
+		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		return w

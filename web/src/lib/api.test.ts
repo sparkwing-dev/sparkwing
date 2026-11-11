@@ -108,7 +108,7 @@ describe("authenticated mutations", () => {
     const previousFetch = runtime.fetch;
     let headers = new Headers();
     runtime.window = { __SPARKWING_REQUIRE_LOGIN__: "true" };
-    runtime.document = { cookie: "theme=dark; sw_csrf=session-token" };
+    runtime.document = { cookie: "theme=dark; __Host-sw_csrf=session-token" };
     runtime.fetch = async (_input, init) => {
       headers = new Headers(init?.headers);
       return new Response(null, { status: 204 });
@@ -138,7 +138,7 @@ describe("authenticated mutations", () => {
     const previousFetch = runtime.fetch;
     let headers = new Headers();
     runtime.window = { __SPARKWING_REQUIRE_LOGIN__: "false" };
-    runtime.document = { cookie: "sw_csrf=ignored-token" };
+    runtime.document = { cookie: "__Host-sw_csrf=ignored-token" };
     runtime.fetch = async (_input, init) => {
       headers = new Headers(init?.headers);
       return new Response(null, { status: 204 });
@@ -401,7 +401,7 @@ describe("session expiry", () => {
         assign: (url: string) => assigned.push(url),
       },
     };
-    runtime.document = { cookie: "sw_csrf=session-token" };
+    runtime.document = { cookie: "__Host-sw_csrf=session-token" };
     runtime.fetch = async () => {
       requests += 1;
       return new Response(null, { status: 401 });

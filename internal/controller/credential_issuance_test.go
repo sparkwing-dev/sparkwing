@@ -51,7 +51,7 @@ func credentialSessionServerWith(t *testing.T, configure func(*Server), opts ...
 	a := server.authorization
 	a.Authenticator = capability.NewAuthenticator(s.AsOperator())
 	a.CheckCSRF = func(r *http.Request, _ capability.Principal) error {
-		if !validAPIRequestCSRF(r, "session-csrf", true) {
+		if !validAPIRequestCSRF(r, "session-csrf") {
 			return &apierr.Error{Code: hosterr.Forbidden, Message: "invalid CSRF token"}
 		}
 		return nil

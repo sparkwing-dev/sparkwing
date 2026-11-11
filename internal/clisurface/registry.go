@@ -815,7 +815,6 @@ func Registry() []Command {
 			{Name: "heartbeats-per-runner-minute", Argument: "N", Meaning: "Per-runner request budget on the heartbeat routes, per rolling minute, charged whatever the answer."},
 			{Name: "hsts", Meaning: "Assert that browsers reach this controller's dashboard over TLS: send Strict-Transport-Security and require an https origin on cookie-authenticated writes."},
 			{Name: "idle-claim-poll", Argument: "DURATION", Meaning: "Widest poll interval this controller suggests to a claim loop while it has no work to hand out."},
-			{Name: "insecure-cookies", Meaning: "Drop Secure and the __Host- prefix from the dashboard's session cookies so a browser keeps a session over plain HTTP."},
 			{Name: "limits-profile", Argument: "VALUE", Meaning: "Named set of abuse guards this controller runs with: cloud, cloud-free."},
 			{Name: "log-format", Argument: "VALUE", Meaning: "Format of this service's own log: text or json."},
 			{Name: "log-level", Argument: "VALUE", Meaning: "Lowest level this service logs: debug, info, warn or error."},

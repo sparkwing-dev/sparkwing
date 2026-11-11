@@ -61,7 +61,9 @@ test("the page lists each provider and explains how accounts work", async ({
 }) => {
   await page
     .context()
-    .addCookies([{ name: "sw_csrf", value: "session-csrf", url: baseURL }]);
+    .addCookies([
+      { name: "__Host-sw_csrf", value: "session-csrf", url: baseURL, secure: true },
+    ]);
   await mockController(page);
   await page.goto("/account/sign-ins");
 

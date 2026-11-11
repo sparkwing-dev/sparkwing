@@ -272,6 +272,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Dashboard session, CSRF and provider-flow cookies always keep Secure and the `__Host-` prefix; browser login requires HTTPS or loopback | `internal/controller/browser_session.go`, `browser_flow.go`; `web/src/lib/csrfCookie.ts` | `internal/controller/browser_session_test.go`: `TestBrowserRejectsUnprefixedSessionCookie`; `tests/acceptance/login_http_test.go`: `TestLoginHTTPAccountCapabilitySession`; `web/src/lib/csrfCookie.test.ts`; `web/tests/browser/authenticated-dashboard.spec.ts` |
 | Email address ownership | `identity.go`: `claimEmailTx`, `releaseEmailTx`, `dropUnprovenEmailOwnershipTx` | `identity_test.go`: `TestIdentitySignInRefusesAnUnverifiedEmail`, `TestIdentityRecycledEmailNeverLinksIntoTheOldAccount` |
 | Invitations | `identity.go`: `Tenant.createInvitationTx`, `Operator.acceptAccountInvitationTx` | `identity_test.go`: `TestIdentityInvitationNeedsTheInvitedVerifiedEmail`; `team_mutations_test.go` |
 | Team creation has no lifetime count cap (decision 73) | `identity.go`: `createAccountTeamTx` | `identity_test.go`: `TestIdentityTeamCreationHasNoLifetimeCap`; `deletion_review_test.go`: `TestTeamDeletionDoesNotRestrictFutureTeamCreation` |

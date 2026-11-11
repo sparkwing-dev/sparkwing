@@ -75,8 +75,8 @@ func TestBillingModelProductionPages(t *testing.T) {
 		r.Header.Set("Origin", "https://controller.test")
 		r.Header.Set("Idempotency-Key", "native-"+path)
 		r.Header.Set(csrfHeaderName, csrf)
-		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: session})
-		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != status {
@@ -218,8 +218,8 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 		r.Header.Set("Idempotency-Key", path)
 		r.Header.Set("Origin", "https://controller.test")
 		r.Header.Set(csrfHeaderName, csrf)
-		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: session})
-		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != status {
@@ -347,8 +347,8 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 				r.Header.Set("Idempotency-Key", "retry")
 				r.Header.Set("Origin", "https://controller.test")
 				r.Header.Set(csrfHeaderName, csrf)
-				r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: session})
-				r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+				r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+				r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, r)
 				if w.Code != want {
@@ -395,8 +395,8 @@ func TestCardBilling_OwnerSetsARefill(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://controller.test")
 		r.Header.Set(csrfHeaderName, csrf)
-		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: session})
-		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != want {

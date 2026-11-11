@@ -115,9 +115,8 @@ func (s *Server) withSignInProviders(data loginPageData) loginPageData {
 // safety: the form carries the CSRF cookie's token, minting one when the browser holds none, so the login post
 // passes the same double-submit check every other form does.
 func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request, data loginPageData, status int) error {
-	secure := s.cookiesSecure()
 	token := ""
-	if cookie, err := r.Cookie(cookieName(csrfCookieName, secure)); err == nil {
+	if cookie, err := r.Cookie(csrfCookieName); err == nil {
 		token = cookie.Value
 	}
 	if token == "" {
@@ -127,7 +126,7 @@ func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request, data lo
 		}
 	}
 	data.CSRFToken = token
-	setCSRFCookie(w, token, secure, int(12*time.Hour/time.Second))
+	setCSRFCookie(w, token, int(12*time.Hour/time.Second))
 	renderPage(w, status, loginTmpl, data)
 	return nil
 }
@@ -147,8 +146,8 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request, _ capab
 		http.Redirect(w, r, data.Next, http.StatusSeeOther)
 		return nil
 	}
-	if len(r.CookiesNamed(cookieName(sessionCookieName, s.cookiesSecure()))) != 0 {
-		clearSessionCookies(w, s.cookiesSecure())
+	if len(r.CookiesNamed(sessionCookieName)) != 0 {
+		clearSessionCookies(w)
 	}
 	return s.renderLoginPage(w, r, s.withSignInProviders(data), http.StatusOK)
 }
@@ -160,13 +159,13 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request, _ cap
 	}
 	s.endPriorSession(r, proof.raw)
 	noteAuditWrite(r.Context())
-	setSessionCookies(w, proof.raw, proof.session.CSRFToken, s.cookiesSecure())
+	setSessionCookies(w, proof.raw, proof.session.CSRFToken)
 	http.Redirect(w, r, safeNext(r.PostForm.Get("next")), http.StatusSeeOther)
 	return nil
 }
 
 func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
-	prior := sessionCookie(r, s.cookiesSecure())
+	prior := sessionCookie(r)
 	if prior == "" || prior == newSessionID {
 		return
 	}

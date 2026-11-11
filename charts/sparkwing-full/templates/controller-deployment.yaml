@@ -138,9 +138,6 @@ spec:
             {{- if and .Values.ingress.enabled .Values.ingress.tls }}
             - "--hsts"
             {{- end }}
-            {{- if and .Values.ingress.enabled (not .Values.ingress.tls) .Values.ingress.allowInsecure }}
-            - "--insecure-cookies"
-            {{- end }}
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}
             {{- end }}

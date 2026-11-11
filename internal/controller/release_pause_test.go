@@ -26,7 +26,6 @@ func pauseHTTPFixture(t *testing.T) (*serverFixture, string) {
 
 func resumeHTTP(s interface {
 	Handler() http.Handler
-	cookiesSecure() bool
 }, session, path, body string,
 ) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "https://controller.test"+path, strings.NewReader(body))

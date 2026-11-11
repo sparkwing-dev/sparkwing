@@ -27,62 +27,49 @@ const (
 // store's expiry, not the browser's, ends a session.
 const sessionCookieMaxAge = int(30 * 24 * time.Hour / time.Second)
 
-// safety: a browser discards a __Host- cookie that is not Secure, so the plain-HTTP escape has to drop the prefix
-// rather than keep it or it signs nobody in. Only that escape drops Secure.
-func cookieName(name string, secure bool) string {
-	if secure {
-		return name
-	}
-	return strings.TrimPrefix(name, hostPrefix)
-}
-
-func (s *Server) cookiesSecure() bool {
-	return s.dashboard == nil || !s.dashboard.InsecureCookies
-}
-
-func setSessionCookies(w http.ResponseWriter, sessionID, csrfToken string, secure bool) {
+func setSessionCookies(w http.ResponseWriter, sessionID, csrfToken string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName(sessionCookieName, secure),
+		Name:     sessionCookieName,
 		Value:    sessionID,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   sessionCookieMaxAge,
 	})
-	setCSRFCookie(w, csrfToken, secure, sessionCookieMaxAge)
+	setCSRFCookie(w, csrfToken, sessionCookieMaxAge)
 }
 
-func setCSRFCookie(w http.ResponseWriter, token string, secure bool, maxAge int) {
+func setCSRFCookie(w http.ResponseWriter, token string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName(csrfCookieName, secure),
+		Name:     csrfCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: false, // safety: the page sends the session-bound token as a header and a form field; the session id stays HttpOnly
-		Secure:   secure,
+		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   maxAge,
 	})
 }
 
-func clearSessionCookies(w http.ResponseWriter, secure bool) {
+func clearSessionCookies(w http.ResponseWriter) {
 	for _, name := range []string{sessionCookieName, csrfCookieName} {
 		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName(name, secure),
+			Name:     name,
 			Value:    "",
 			Path:     "/",
 			MaxAge:   -1,
-			Secure:   secure,
+			Secure:   true,
 			HttpOnly: name == sessionCookieName,
 			SameSite: http.SameSiteStrictMode,
 		})
 	}
 }
 
-func sessionCookie(r *http.Request, secure bool) string {
+func sessionCookie(r *http.Request) string {
 	var value string
 	for _, c := range r.Cookies() {
-		if c.Name != cookieName(sessionCookieName, secure) {
+		if c.Name != sessionCookieName {
 			continue
 		}
 		if value != "" || c.Value == "" {
@@ -130,11 +117,11 @@ func unsafeMethod(method string) bool {
 
 // safety: the header must match both the cookie and the session's own token,
 // so a token planted in the cookie jar alone authorizes nothing.
-func validAPIRequestCSRF(r *http.Request, sessionToken string, secure bool) bool {
+func validAPIRequestCSRF(r *http.Request, sessionToken string) bool {
 	if !sameOriginRequest(r) {
 		return false
 	}
-	cookie, err := r.Cookie(cookieName(csrfCookieName, secure))
+	cookie, err := r.Cookie(csrfCookieName)
 	if err != nil {
 		return false
 	}
@@ -142,11 +129,11 @@ func validAPIRequestCSRF(r *http.Request, sessionToken string, secure bool) bool
 	return constantTimeEqual(header, cookie.Value) && constantTimeEqual(header, sessionToken)
 }
 
-func validFormCSRF(r *http.Request, secure bool) bool {
+func validFormCSRF(r *http.Request) bool {
 	if !sameOriginRequest(r) {
 		return false
 	}
-	cookie, err := r.Cookie(cookieName(csrfCookieName, secure))
+	cookie, err := r.Cookie(csrfCookieName)
 	if err != nil || cookie.Value == "" {
 		return false
 	}

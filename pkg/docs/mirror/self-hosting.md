@@ -50,6 +50,57 @@ Retention checks use the PVC mounted as the controller's `data` volume. The
 controller component label also matches the separate credential-epoch PVC.
 Image tags stay strings in the harness values, including numeric tags.
 
+### Serving the dashboard over HTTPS
+
+Browser login uses Secure `__Host-` cookies. On `http://localhost` or
+`http://127.0.0.1`, browsers accept these cookies without certificate setup.
+For remote access, use HTTPS or bring the connection to loopback:
+
+- **Port-forward or SSH tunnel.** Keep the chart's ingress disabled and run
+  `kubectl -n sparkwing port-forward svc/sparkwing-controller 8080:80`, or run
+  `ssh -L 8080:127.0.0.1:8080 user@controller-host` for a remote controller
+  listening on port 8080. Open `http://localhost:8080`.
+- **Tailscale.** Run `tailscale serve --bg 8080` on the controller host and use
+  the HTTPS URL it prints. Follow its prompts to enable HTTPS certificates for
+  the tailnet. See [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve).
+- **Kubernetes ingress.** Set `ingress.enabled=true` and configure `ingress.tls`.
+  For example, with cert-manager installed and a Let's Encrypt ClusterIssuer
+  named `letsencrypt-prod`, use the values below. Configure that issuer's ACME
+  challenge solver for your ingress controller or DNS provider first.
+  See [cert-manager ingress certificates](https://cert-manager.io/docs/usage/ingress/).
+
+```yaml
+ingress:
+  enabled: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: sparkwing.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts: [sparkwing.example.com]
+      secretName: sparkwing-tls
+```
+
+For a native controller, [Caddy](https://caddyserver.com/docs/command-line#caddy-reverse-proxy)
+can terminate HTTPS. Run the controller and proxy in separate terminals, adding
+your normal controller credential flags to the first command:
+
+```bash
+sparkwing-controller --addr=127.0.0.1:8080 --trusted-proxy-addr=127.0.0.1:8081
+caddy reverse-proxy --from https://sparkwing.example.com --to 127.0.0.1:8081 --header-up 'X-Real-IP: {http.request.remote.host}'
+```
+
+Point the hostname at the proxy and allow Caddy's certificate validation traffic.
+The trusted listener serves the same API and trusts `X-Real-IP` for client
+addresses. Only a proxy that overwrites that header may reach it. It also accepts
+`X-Forwarded-Proto: https` as TLS evidence, which enables HSTS and requires HTTPS
+Origins for cookie-authenticated writes. The ordinary `--addr` listener ignores
+those forwarded headers. Restrict the trusted listener to the proxy. See
+[Client addresses behind proxies](#client-addresses-behind-proxies).
+
 ### First shared deployment
 
 This is Cloud operator setup. Controller bootstrap credentials grant deployment

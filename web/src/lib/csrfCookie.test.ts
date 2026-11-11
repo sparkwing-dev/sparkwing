@@ -18,17 +18,17 @@ afterEach(() => {
 });
 
 describe("readCSRFCookie", () => {
-  it("prefers the prefixed cookie a sibling host cannot write", () => {
+  it("reads the prefixed cookie when a bare cookie is also present", () => {
     withCookies("sw_csrf=planted; theme=dark; __Host-sw_csrf=real");
     assert.equal(readCSRFCookie(), "real");
   });
 
-  it("falls back to the bare name the insecure escape sets", () => {
+  it("ignores the removed bare cookie name", () => {
     withCookies("theme=dark; sw_csrf=local");
-    assert.equal(readCSRFCookie(), "local");
+    assert.equal(readCSRFCookie(), "");
   });
 
-  it("reports no token when neither name is present", () => {
+  it("reports no token when the prefixed name is absent", () => {
     withCookies("theme=dark");
     assert.equal(readCSRFCookie(), "");
   });

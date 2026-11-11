@@ -1635,22 +1635,7 @@ func TestChartsDefaultToARestrictedRuntime(t *testing.T) {
 	}
 }
 
-func TestStringInsecureOptInFailsAtRender(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	for _, value := range []string{"false", "true"} {
-		t.Run(value, func(t *testing.T) {
-			out := helmRenderErrorSetString(t, "./sparkwing-full", "sparkwing",
-				"ingress.enabled=true", "ingress.allowInsecure="+value)
-			if !strings.Contains(out, "/ingress/allowInsecure") || !strings.Contains(out, "want boolean") {
-				t.Fatalf("render error does not reject the quoted opt-out:\n%s", out)
-			}
-		})
-	}
-}
-
-// safety: an authenticated, TLS-terminated Ingress install is the one the guards accept without an opt-out.
+// safety: an Ingress exposes credentials beyond the cluster, so it requires TLS.
 var publishedSets = []string{
 	"ingress.enabled=true",
 	"ingress.tls[0].secretName=sparkwing-tls",
@@ -1663,8 +1648,8 @@ func TestPublishedControllerWithoutTLSFailsAtRender(t *testing.T) {
 	}
 	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
 		"ingress.enabled=true", "controller.bootstrapAdminToken.name=sparkwing-bootstrap")
-	if !strings.Contains(out, "ingress.tls") || !strings.Contains(out, "ingress.allowInsecure=true") {
-		t.Fatalf("render error does not name the TLS knob or its opt-out:\n%s", out)
+	if !strings.Contains(out, "ingress.tls") || !strings.Contains(out, "kubectl port-forward") {
+		t.Fatalf("render error does not name the TLS setting or loopback route:\n%s", out)
 	}
 }
 
@@ -1732,20 +1717,23 @@ func TestIngressRoutesEveryHostToTheControllerService(t *testing.T) {
 	}
 }
 
-func TestInsecureOptInWithoutTLSAllowsSessionCookiesOverHTTP(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+func TestIngressWithoutTLSCannotOptOut(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "ingress.enabled=true", "ingress.allowInsecure=true")
+	for _, want := range []string{"ingress.tls", "cert-manager", "kubectl port-forward"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render error lacks supported route %q:\n%s", want, out)
+		}
 	}
-	plain := containerArgs(t, helmTemplate(t, "sparkwing", "ingress.enabled=true", "ingress.allowInsecure=true"))
-	if !slices.Contains(plain, "--insecure-cookies") {
-		t.Fatalf("controller args %v lack --insecure-cookies; a browser drops Secure cookies over plain HTTP", plain)
-	}
-	secured := containerArgs(t, helmTemplate(t, "sparkwing", publishedSets...))
-	if slices.Contains(secured, "--insecure-cookies") {
-		t.Fatalf("controller args %v carry --insecure-cookies behind TLS", secured)
-	}
-	if args := containerArgs(t, helmTemplate(t, "sparkwing", "ingress.allowInsecure=true")); slices.Contains(args, "--insecure-cookies") {
-		t.Fatalf("controller args %v carry --insecure-cookies with no Ingress", args)
+}
+
+func TestRemovedIngressInsecureValueFailsAtRender(t *testing.T) {
+	for _, value := range []string{"true", "false"} {
+		t.Run(value, func(t *testing.T) {
+			out := helmRenderError(t, "./sparkwing-full", "sparkwing", "ingress.enabled=true", "ingress.tls[0].secretName=sparkwing-tls", "ingress.allowInsecure="+value)
+			if !strings.Contains(out, "ingress.allowInsecure was removed") {
+				t.Fatalf("removed value was accepted or lacks migration guidance:\n%s", out)
+			}
+		})
 	}
 }
 
@@ -1756,8 +1744,8 @@ func TestControllerBehindATLSIngressAssertsHSTS(t *testing.T) {
 	if args := containerArgs(t, helmTemplate(t, "sparkwing", publishedSets...)); !slices.Contains(args, "--hsts") {
 		t.Errorf("controller args %v behind a TLS Ingress lack --hsts", args)
 	}
-	if args := containerArgs(t, helmTemplate(t, "sparkwing", "ingress.enabled=true", "ingress.allowInsecure=true")); slices.Contains(args, "--hsts") {
-		t.Errorf("controller args %v carry --hsts on a plain HTTP Ingress", args)
+	if args := containerArgs(t, helmTemplate(t, "sparkwing")); slices.Contains(args, "--hsts") {
+		t.Errorf("controller args %v carry --hsts with no Ingress", args)
 	}
 	if args := containerArgs(t, helmTemplate(t, "sparkwing", "ingress.tls[0].hosts[0]=sparkwing.example.com")); slices.Contains(args, "--hsts") {
 		t.Errorf("controller args %v carry --hsts with no Ingress", args)

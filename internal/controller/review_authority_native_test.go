@@ -89,7 +89,6 @@ func reviewAccount(t *testing.T, role string) (*serverFixture, string, string) {
 
 func reviewSessionRequest(t *testing.T, s interface {
 	Handler() http.Handler
-	cookiesSecure() bool
 }, raw, csrf, method, path, body string, status int,
 ) *httptest.ResponseRecorder {
 	t.Helper()
@@ -97,8 +96,8 @@ func reviewSessionRequest(t *testing.T, s interface {
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Origin", "https://controller.test")
 	r.Header.Set(csrfHeaderName, csrf)
-	r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
-	r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
+	r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != status {

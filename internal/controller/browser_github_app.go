@@ -43,15 +43,15 @@ func (f githubAppFlow) proof() oauthFlowProof {
 
 func (s *Server) readGitHubAppFlow(r *http.Request) (githubAppFlow, bool) {
 	var flow githubAppFlow
-	if !readFlowCookie(r, githubAppFlowCookieName, s.cookiesSecure(), &flow) ||
-		len(r.CookiesNamed(cookieName(githubAppFlowCookieName, s.cookiesSecure()))) != 1 || flow.State == "" || flow.Verifier == "" || !absoluteHTTPURL(flow.AuthorizeURL) {
+	if !readFlowCookie(r, githubAppFlowCookieName, &flow) ||
+		len(r.CookiesNamed(githubAppFlowCookieName)) != 1 || flow.State == "" || flow.Verifier == "" || !absoluteHTTPURL(flow.AuthorizeURL) {
 		return githubAppFlow{}, false
 	}
 	return flow, true
 }
 
 func (s *Server) setGitHubAppFlow(w http.ResponseWriter, flow githubAppFlow) bool {
-	return setFlowCookie(w, githubAppFlowCookieName, flow, s.cookiesSecure())
+	return setFlowCookie(w, githubAppFlowCookieName, flow)
 }
 
 func (s *Server) connectingBrowser(w http.ResponseWriter, r *http.Request) (githubBrowserProof, bool) {
@@ -102,7 +102,7 @@ func (s *Server) handleGitHubAppSetup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	query := r.URL.Query()
 	if query.Get("setup_action") == "request" {
-		clearFlowCookie(w, githubAppFlowCookieName, s.cookiesSecure())
+		clearFlowCookie(w, githubAppFlowCookieName)
 		renderFlowPage(w, http.StatusOK, flowPage{
 			Title: "Waiting for an organization owner",
 			Message: "An org owner must approve the installation. GitHub has asked them; once they approve it, " +
@@ -267,7 +267,7 @@ func (s *Server) handleGitHubAppSelect(w http.ResponseWriter, r *http.Request) {
 		refuseGitHubAppFlow(w, http.StatusBadRequest, "Choose an installation.")
 		return
 	}
-	clearFlowCookie(w, githubAppFlowCookieName, s.cookiesSecure())
+	clearFlowCookie(w, githubAppFlowCookieName)
 	bound, err := s.githubAppSelect(r.Context(), sess.authorized, flow.proof(), flow.Authorization, id)
 	if err != nil {
 		s.renderGitHubAppRefusal(w, err)
@@ -288,7 +288,7 @@ func (s *Server) handleGitHubAppComplete(w http.ResponseWriter, r *http.Request)
 		refuseGitHubAppFlow(w, http.StatusBadRequest, "This connection was not started in this browser. Start again.")
 		return
 	}
-	clearFlowCookie(w, githubAppFlowCookieName, s.cookiesSecure())
+	clearFlowCookie(w, githubAppFlowCookieName)
 	bound, err := s.githubAppConnectFinish(r.Context(), sess.authorized, flow.proof(), flow.InstallationID,
 		browserURL(r, githubAppCallbackPath))
 	if err != nil {

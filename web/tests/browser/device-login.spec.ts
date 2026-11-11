@@ -96,7 +96,9 @@ async function expectAccessible(page: Page) {
 async function openDevicePage(page: Page, baseURL: string | undefined) {
   await page
     .context()
-    .addCookies([{ name: "sw_csrf", value: "session-csrf", url: baseURL }]);
+    .addCookies([
+      { name: "__Host-sw_csrf", value: "session-csrf", url: baseURL, secure: true },
+    ]);
   await page.goto("/device");
   await expect(
     page.getByRole("heading", { name: "Sign in a terminal" }),
@@ -111,7 +113,9 @@ test("a typed code is approved and the terminal is told to finish", async ({
   await page.goto("/device?code=BCDFGHJK&user_code=BCDFGHJK");
   await page
     .context()
-    .addCookies([{ name: "sw_csrf", value: "session-csrf", url: baseURL }]);
+    .addCookies([
+      { name: "__Host-sw_csrf", value: "session-csrf", url: baseURL, secure: true },
+    ]);
 
   const field = page.getByLabel("Device code");
   // A code in the URL is never used; the person types it.
