@@ -2,6 +2,7 @@ package localsecrets
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -65,7 +66,7 @@ func (c *Cipher) opener() (*secrets.Cipher, error) {
 		return nil, err
 	}
 	if inner == nil {
-		return nil, errNoKey
+		return nil, fmt.Errorf("%w: restore the existing local secrets key before retrying%.0w", errNoKey, secrets.ErrKeyRefused)
 	}
 	return inner, nil
 }

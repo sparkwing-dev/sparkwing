@@ -22,7 +22,7 @@ const (
 // safety: the label separates bound envelopes from other uses of the cipher.
 const boundAADLabel = "sparkwing/secret/v3\x00"
 
-// ErrKeyRefused marks a seal that failed because the key's owner refused to
+// ErrKeyRefused marks an operation that failed because the key's owner refused to
 // load or create the key for a reason the caller can act on, such as a key
 // file outside the sparkwing home. The controller returns its message to the
 // client instead of masking it as an internal error.

@@ -9,6 +9,7 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const metaKeyLocalObjects = "local_object_signing_key"
@@ -29,7 +30,7 @@ func (o *Operator) LocalObjectSigningKey(ctx context.Context, cipher SessionKeyC
 		}
 		envelope, err = cipher.SealBound(secrets.PurposeSetting, "", metaKeyLocalObjects, "settings", false, true, hex.EncodeToString(minted))
 		if errors.Is(err, secrets.ErrKeyRefused) {
-			return nil, errors.New("local object signing key encryption failed; restore the existing local secrets key or set SPARKWING_SECRETS_KEY_FILE to a private key file inside SPARKWING_HOME before starting the controller")
+			return nil, &apierr.Error{Code: apierr.BadRequest, Message: "local object signing key encryption failed", Hint: "Restore the existing local secrets key or set SPARKWING_SECRETS_KEY_FILE to a private key file inside SPARKWING_HOME before starting the controller"}
 		}
 		if err != nil || !secrets.IsBound(envelope) {
 			return nil, errors.New("local object signing key encryption failed")
@@ -49,6 +50,9 @@ func (o *Operator) LocalObjectSigningKey(ctx context.Context, cipher SessionKeyC
 	}
 	plain, err := cipher.OpenBound(secrets.PurposeSetting, "", metaKeyLocalObjects, "settings", false, true, envelope)
 	if err != nil {
+		if errors.Is(err, secrets.ErrKeyRefused) {
+			return nil, &apierr.Error{Code: apierr.BadRequest, Message: "local object signing key cannot be opened", Hint: "Restore the original local secrets key or set SPARKWING_SECRETS_KEY_FILE to the original private key file inside SPARKWING_HOME before starting the controller"}
+		}
 		return nil, errors.New("local object signing key cannot be opened; restore the local secrets key")
 	}
 	key, err := hex.DecodeString(plain)
