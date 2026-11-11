@@ -12,7 +12,7 @@ import (
 // ResolveRevisions separates ref intent from the execution and pipeline commits.
 func ResolveRevisions(ctx context.Context, git runspec.Git, code runspec.Source, override string, lookup func(string) (string, error)) (runspec.Git, runspec.Source, error) {
 	resolve := func(ref string) (string, error) {
-		if err := context.Cause(ctx); err != nil {
+		if err := ctx.Err(); err != nil {
 			return "", err
 		}
 		if runspec.IsCommitID(ref) {
@@ -51,5 +51,5 @@ func ResolveRevisions(ctx context.Context, git runspec.Git, code runspec.Source,
 			return git, code, &apierr.Error{Code: apierr.InvalidArgs, Message: "pipeline revision disagrees with the configured source pin"}
 		}
 	}
-	return git, code, context.Cause(ctx)
+	return git, code, ctx.Err()
 }

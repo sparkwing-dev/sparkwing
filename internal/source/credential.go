@@ -128,14 +128,14 @@ func (g *gitClient) ownerHTTPSCredential(ctx context.Context, remote string) (Cr
 		return Credential{}, nil
 	}
 	if err != nil {
-		return Credential{}, errors.New("read owner source credential configuration failed")
+		return Credential{}, fmt.Errorf("read owner source credential configuration failed: %w", err)
 	}
 	cmd := procenv.ControlCommandContext(ctx, ownerEnvironment, "git", "credential", "fill")
 	cmd.Dir = g.workspace
 	cmd.Stdin = strings.NewReader("url=" + remote + "\n\n")
 	out, err := gitcmd.Output(ctx, cmd, false)
 	if err != nil {
-		return Credential{}, errors.New("owner source credential helper failed")
+		return Credential{}, fmt.Errorf("owner source credential helper failed: %w", err)
 	}
 	credential := Credential{Kind: "https"}
 	credential.Host, _ = sourceurl.Host(remote)
