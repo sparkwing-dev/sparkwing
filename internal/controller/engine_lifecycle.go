@@ -59,6 +59,10 @@ func (s *EngineController) cancel(ctx context.Context, a capability.Authorized, 
 	applied, err := tenant.TransitionRun(ctx, runstate.RunTransition{
 		RunID: runspec.RunID(a.Target.RunID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor, Reason: body.Reason,
 	})
+	// safety: TransitionRun has committed and released its locks before maintenance can wake.
+	if err == nil && !applied.Replayed && s.cancelCommitted != nil {
+		s.cancelCommitted()
+	}
 	return appliedResponse(applied), engineLookupError(err)
 }
 

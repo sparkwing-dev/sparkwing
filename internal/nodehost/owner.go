@@ -29,6 +29,7 @@ type OwnerStore interface {
 	reconciler
 	expansionStore
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
+	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 	RenewNodeClaim(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error)
 	ReleaseEvaluation(context.Context, runspec.NodeRef, runstate.Actor) (runstate.Applied, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)

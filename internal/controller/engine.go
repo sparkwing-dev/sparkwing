@@ -15,6 +15,7 @@ import (
 // EngineController applies authorized operations through store transactions.
 type EngineController struct {
 	authority         engineAuthority
+	cancelCommitted   func()
 	operator          AuthorityRevoker
 	authorization     routepolicy.Authorization
 	RunnerPolicy      RunnerAdmissionPolicy

@@ -33,6 +33,10 @@ func (s nativeHostState) RenewNodeClaim(ctx context.Context, ref runspec.NodeRef
 	return s.ClaimStore.RenewNodeClaim(ctx, ref, actor)
 }
 
+func (s nativeHostState) ReadNode(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
+	return s.ClaimStore.ReadNode(ctx, ref)
+}
+
 func (s nativeHostState) ReadSnapshot(ctx context.Context, runID string) (store.RunSnapshot, error) {
 	return s.ClaimStore.ReadSnapshot(ctx, runID)
 }

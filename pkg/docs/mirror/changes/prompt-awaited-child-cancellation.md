@@ -1,0 +1,4 @@
+### Fixed
+
+- **runner:** Cancelling a run stops any claimed job, including an awaited child, without waiting for the work lease renewal
+  New run-cancel requests wake the controller reaper after commit; each cancelled child wakes another pass for deeper descendants. Claimed jobs observe cancellation by reading only their own claim row every 3 s. The three-minute lease and cleanup authority remain unchanged.

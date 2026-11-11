@@ -91,6 +91,8 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 		t.Run(map[bool]string{true: "live", false: "removed"}[current], func(t *testing.T) {
 			server, tenant := engineRuntimeStore(t)
 			s := server.Store
+			wakes := 0
+			server.cancelCommitted = func() { wakes++ }
 			engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)
 			engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
 			engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('session','account','runs.read,runs.control',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
@@ -117,6 +119,9 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 				if err != nil || !replay.Replayed || replay.StateSeq != result.StateSeq {
 					t.Fatalf("replay: %+v, %v", replay, err)
 				}
+			}
+			if current && wakes != 1 || !current && wakes != 0 {
+				t.Fatalf("cancel/replay wake count: %d", wakes)
 			}
 			run, err := tenant.ReadRun(t.Context(), "run")
 			if err != nil || run.State != runstate.RunRunning || (run.CancelRequestedAt != nil) != current {
