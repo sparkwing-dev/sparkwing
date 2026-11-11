@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -229,7 +231,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				_, _ = fmt.Fprintln(os.Stderr, "warning: publication abandoned; run stayed local-only")
 			} else {
-				_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication failed:", masker.Mask(err.Error()))
+				_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication failed:", opsview.DisplayText(masker.Mask(err.Error())))
 			}
 		}
 	}
@@ -417,10 +419,10 @@ func emitLocalRunReceipt(out io.Writer, response controllerwire.CreateRunRespons
 	case "json":
 		return json.NewEncoder(out).Encode(receipt)
 	case "plain":
-		_, err := fmt.Fprintln(out, receipt.RunID)
+		_, err := fmt.Fprintln(out, opsview.DisplayText(receipt.RunID))
 		return err
 	default:
-		_, err := fmt.Fprintf(out, "run %s submitted\n", receipt.RunID)
+		_, err := fmt.Fprintf(out, "run %s submitted\n", opsview.DisplayText(receipt.RunID))
 		return err
 	}
 }

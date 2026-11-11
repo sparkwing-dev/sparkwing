@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -119,15 +121,15 @@ func validateRequestedPipelineArgs(gate *runspec.DeclarationGate, identity clisu
 
 func printPipelineHelp(w io.Writer, schema runspec.PipelinePresentation) {
 	if schema.Help != "" {
-		fmt.Fprintf(w, "DESCRIPTION\n  %s\n\n", schema.Help)
+		fmt.Fprintf(w, "DESCRIPTION\n  %s\n\n", opsview.DisplayText(schema.Help))
 	}
-	fmt.Fprintf(w, "USAGE\n  sparkwing run %s [sparkwing flags]", schema.Name)
+	fmt.Fprintf(w, "USAGE\n  sparkwing run %s [sparkwing flags]", opsview.DisplayText(schema.Name))
 	if len(schema.Args) > 0 {
 		fmt.Fprint(w, " --")
 	}
 	for _, a := range schema.Args {
 		if a.Required {
-			fmt.Fprintf(w, " --%s <%s>", a.Name, a.Type)
+			fmt.Fprintf(w, " --%s <%s>", opsview.DisplayText(a.Name), opsview.DisplayText(a.Type))
 		}
 	}
 	if len(schema.Args) > 0 {
@@ -139,7 +141,7 @@ func printPipelineHelp(w io.Writer, schema runspec.PipelinePresentation) {
 	} else {
 		fmt.Fprintln(w, "PIPELINE FLAGS (after --)")
 		for _, a := range schema.Args {
-			fmt.Fprintln(w, pipelineFlagLine(a))
+			fmt.Fprintln(w, opsview.DisplayText(pipelineFlagLine(a)))
 		}
 		if schema.Extra {
 			fmt.Fprintln(w, "  (additional unrecognized flags are forwarded to the pipeline)")
@@ -153,9 +155,9 @@ func printPipelineHelp(w io.Writer, schema runspec.PipelinePresentation) {
 				fmt.Fprintln(w)
 			}
 			if ex.Comment != "" {
-				fmt.Fprintf(w, "  # %s\n", ex.Comment)
+				fmt.Fprintf(w, "  # %s\n", opsview.DisplayText(ex.Comment))
 			}
-			fmt.Fprintf(w, "  %s\n", ex.Command)
+			fmt.Fprintf(w, "  %s\n", opsview.DisplayText(ex.Command))
 		}
 		fmt.Fprintln(w)
 	}

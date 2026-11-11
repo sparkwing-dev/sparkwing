@@ -70,12 +70,12 @@ func explainRunAdmission(out io.Writer, records []journal.Record, runID, format 
 			}
 			label = name + ": "
 		}
-		if _, err := fmt.Fprintf(out, "%s  %s%s\n", r.TS.Local().Format("2006-01-02 15:04:05"), label, explainEvent(r)); err != nil {
+		if _, err := fmt.Fprintf(out, "%s  %s%s\n", r.TS.Local().Format("2006-01-02 15:04:05"), opsview.DisplayText(label), opsview.DisplayText(explainEvent(r))); err != nil {
 			return err
 		}
 	}
 	if !found && format != "json" {
-		_, err := fmt.Fprintf(out, "No retained admission events for %s.\n", runID)
+		_, err := fmt.Fprintf(out, "No retained admission events for %s.\n", opsview.DisplayText(runID))
 		return err
 	}
 	return nil

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"golang.org/x/mod/semver"
@@ -123,13 +125,13 @@ func runVersionHold(inv clisurface.Invocation) error {
 	case "json":
 		return json.NewEncoder(os.Stdout).Encode(hold)
 	case "plain":
-		_, err := fmt.Fprintln(os.Stdout, hold.Value)
+		_, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(hold.Value))
 		return err
 	}
 	if hold.Value == "" {
 		_, err := fmt.Fprintln(os.Stdout, "no version hold set (CLI upgrades are unrestricted)")
 		return err
 	}
-	_, err := fmt.Fprintf(os.Stdout, "held at %s by operator (%s)\n", hold.Value, hold.Source)
+	_, err := fmt.Fprintf(os.Stdout, "held at %s by operator (%s)\n", opsview.DisplayText(hold.Value), opsview.DisplayText(hold.Source))
 	return err
 }

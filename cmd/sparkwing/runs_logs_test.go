@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -229,7 +230,7 @@ func TestRunLogsShowsTheErrorOfAJobThatFailedBeforeStarting(t *testing.T) {
 		want []string
 		not  string
 	}{
-		{[]string{"-o", "plain"}, []string{"ran\n", "build failed before it started", compiler}, "step failed"},
+		{[]string{"-o", "plain"}, []string{"ran\n", "build failed before it started", strconv.Quote(compiler)}, "step failed"},
 		{[]string{"--job", "test", "-o", "plain"}, []string{"ran\n"}, "before it started"},
 		{[]string{"-o", "json"}, []string{`"event":"job_failed_before_start"`, `"job_id":"build"`, "cannot use *** as int value"}, "step failed"},
 	} {
@@ -260,8 +261,8 @@ func TestRunLogsShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"-o", "plain"}, []string{"run error:\n" + compiler, "sparkwing pipeline plan --pipeline hello"}},
-		{[]string{"--events-only", "-o", "plain"}, []string{compiler}},
+		{[]string{"-o", "plain"}, []string{"run error:\n" + strconv.Quote(compiler), "sparkwing pipeline plan --pipeline hello"}},
+		{[]string{"--events-only", "-o", "plain"}, []string{strconv.Quote(compiler)}},
 		{[]string{"-o", "json"}, []string{`"event":"run_error"`, "undefined: qaDeliberateUndefined", `"hint":"the pipeline failed to plan`, "sparkwing pipeline plan --pipeline hello"}},
 	} {
 		var out bytes.Buffer

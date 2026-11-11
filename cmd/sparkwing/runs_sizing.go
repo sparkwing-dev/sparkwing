@@ -119,7 +119,7 @@ func writeSizingRow(out io.Writer, name, source string, p controllerwire.SizingM
 	if charge == 0 {
 		charge = p.PeakCores
 	}
-	fmt.Fprintf(out, "%s\t%s\t%s/%s\t%.1f/%.1f/%.1f\t%.1f\t%s/%s/%s\t%d\t%d\n", name, source, fmtDur(p.P50Duration), fmtDur(p.P99Duration), p.CPUP50, p.CPUP95, p.PeakCores, charge, opsview.HumanBytes(p.MemoryP50Bytes), opsview.HumanBytes(p.MemoryP95Bytes), opsview.HumanBytes(p.PeakMemoryBytes), p.SampleCount, memo)
+	fmt.Fprintf(out, "%s\t%s\t%s/%s\t%.1f/%.1f/%.1f\t%.1f\t%s/%s/%s\t%d\t%d\n", opsview.DisplayText(name), opsview.DisplayText(source), fmtDur(p.P50Duration), fmtDur(p.P99Duration), p.CPUP50, p.CPUP95, p.PeakCores, charge, opsview.HumanBytes(p.MemoryP50Bytes), opsview.HumanBytes(p.MemoryP95Bytes), opsview.HumanBytes(p.PeakMemoryBytes), p.SampleCount, memo)
 }
 
 func writeSizingReset(out io.Writer, s controllerwire.SizingResetSummary, format string) error {

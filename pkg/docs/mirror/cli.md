@@ -18,6 +18,11 @@ when stdout is redirected. `--output pretty|json|plain` (or `-o`) overrides
 the default. JSON reports occupy one line; JSON lists emit one object per
 line, with an empty stream for no results. Errors go to stderr.
 
+Human-readable fields quote C0/C1 controls, DEL and bidirectional formatting
+characters as visible escapes. Truncated summaries keep complete UTF-8 runes
+within their byte limit. JSON records retain the original field values.
+Use `runs logs -o plain` for the original log text, including terminal controls.
+
 Repository registration uses `repos add --checkout PATH` and
 `repos remove --checkout PATH`. Their JSON receipts include the action,
 absolute path and affected count. `version hold` and

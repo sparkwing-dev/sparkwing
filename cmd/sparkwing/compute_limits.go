@@ -13,6 +13,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -121,7 +123,7 @@ func renderComputeLimits(w io.Writer, view controllerwire.OperatorLimits) error 
 		fmt.Fprintf(tw, "ALARM\treached\n")
 	}
 	for _, principal := range sortedPrincipals(view.Usage.ByPrincipal) {
-		fmt.Fprintf(tw, "  %s\t%d\n", principal, view.Usage.ByPrincipal[principal])
+		fmt.Fprintf(tw, "  %s\t%d\n", opsview.DisplayText(principal), view.Usage.ByPrincipal[opsview.DisplayText(principal)])
 	}
 	return tw.Flush()
 }
@@ -143,7 +145,7 @@ func writeComputeLimitsPlain(w io.Writer, view controllerwire.OperatorLimits) er
 		}
 	}
 	for _, principal := range sortedPrincipals(view.Usage.ByPrincipal) {
-		if _, err := fmt.Fprintf(w, "runners.%s\t%d\n", principal, view.Usage.ByPrincipal[principal]); err != nil {
+		if _, err := fmt.Fprintf(w, "runners.%s\t%d\n", opsview.DisplayText(principal), view.Usage.ByPrincipal[opsview.DisplayText(principal)]); err != nil {
 			return err
 		}
 	}

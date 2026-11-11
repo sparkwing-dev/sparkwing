@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"text/tabwriter"
+
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -69,7 +70,7 @@ func writeAnnotationList(ctx context.Context, review controllerwire.RunReview, i
 	}
 	if format == "plain" {
 		for _, entry := range entries {
-			if _, err := fmt.Fprintln(out, strings.NewReplacer("\r", " ", "\n", " ").Replace(entry.Message)); err != nil {
+			if _, err := fmt.Fprintln(out, opsview.DisplayText(entry.Message)); err != nil {
 				return err
 			}
 		}
@@ -82,7 +83,7 @@ func writeAnnotationList(ctx context.Context, review controllerwire.RunReview, i
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "JOB\tSTEP\tLEVEL\tFILE\tLINE\tMESSAGE")
 	for _, entry := range entries {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", entry.JobID, orDashApproval(entry.StepID), entry.Level, orDashApproval(entry.File), entry.Line, entry.Message)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", opsview.DisplayText(entry.JobID), opsview.DisplayText(orDashApproval(entry.StepID)), opsview.DisplayText(entry.Level), opsview.DisplayText(orDashApproval(entry.File)), entry.Line, opsview.DisplayText(entry.Message))
 	}
 	return tw.Flush()
 }
@@ -105,9 +106,9 @@ func writeAnnotation(ctx context.Context, review controllerwire.RunReview, inv c
 		subject += "/" + record.StepID
 	}
 	if format == "plain" {
-		_, err := fmt.Fprintln(out, subject)
+		_, err := fmt.Fprintln(out, opsview.DisplayText(subject))
 		return err
 	}
-	_, err := fmt.Fprintf(out, "annotated %s\n", subject)
+	_, err := fmt.Fprintf(out, "annotated %s\n", opsview.DisplayText(subject))
 	return err
 }

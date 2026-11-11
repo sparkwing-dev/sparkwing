@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -113,15 +115,15 @@ func readRunTree(ctx context.Context, reader controllerwire.RunReader, detail co
 
 func writeRunTree(text *strings.Builder, tree *runTree, indent string, plain bool) {
 	if plain {
-		fmt.Fprintln(text, tree.Run.ID)
+		fmt.Fprintln(text, opsview.DisplayText(tree.Run.ID))
 	} else {
-		fmt.Fprintf(text, "%s%s\t%s\t%s\n", indent, tree.Run.ID, tree.Run.Inputs.Pipeline, tree.Run.Status)
+		fmt.Fprintf(text, "%s%s\t%s\t%s\n", indent, opsview.DisplayText(tree.Run.ID), opsview.DisplayText(tree.Run.Inputs.Pipeline), opsview.DisplayText(tree.Run.Status))
 	}
 	for _, step := range tree.Run.Steps {
 		if plain {
-			fmt.Fprintf(text, "%s/%s\n", step.JobID, step.ID)
+			fmt.Fprintf(text, "%s/%s\n", opsview.DisplayText(step.JobID), opsview.DisplayText(step.ID))
 		} else {
-			fmt.Fprintf(text, "%s  %s/%s\t%s\t%s\n", indent, step.JobID, step.ID, step.Status, step.Outcome)
+			fmt.Fprintf(text, "%s  %s/%s\t%s\t%s\n", indent, opsview.DisplayText(step.JobID), opsview.DisplayText(step.ID), opsview.DisplayText(step.Status), opsview.DisplayText(step.Outcome))
 		}
 	}
 	for _, child := range tree.Children {
@@ -134,14 +136,14 @@ func writeRunReceipt(out io.Writer, receipt controllerwire.Receipt, format strin
 		return json.NewEncoder(out).Encode(receipt)
 	}
 	if format == "plain" {
-		_, err := fmt.Fprintln(out, receipt.ReceiptSHA)
+		_, err := fmt.Fprintln(out, opsview.DisplayText(receipt.ReceiptSHA))
 		return err
 	}
 	var text strings.Builder
-	fmt.Fprintf(&text, "%s\t%s\t%s\n", receipt.RunID, receipt.Pipeline, receipt.Status)
-	fmt.Fprintf(&text, "receipt\t%s\nduration_ms\t%d\ncost\t%s\t%d\nsettled\t%t\n", receipt.ReceiptSHA, receipt.DurationMS, receipt.Cost.Currency, receipt.Cost.ComputeCents, receipt.Cost.Settled)
+	fmt.Fprintf(&text, "%s\t%s\t%s\n", opsview.DisplayText(receipt.RunID), opsview.DisplayText(receipt.Pipeline), opsview.DisplayText(receipt.Status))
+	fmt.Fprintf(&text, "receipt\t%s\nduration_ms\t%d\ncost\t%s\t%d\nsettled\t%t\n", opsview.DisplayText(receipt.ReceiptSHA), receipt.DurationMS, opsview.DisplayText(receipt.Cost.Currency), receipt.Cost.ComputeCents, receipt.Cost.Settled)
 	for _, step := range receipt.Steps {
-		fmt.Fprintf(&text, "%s\t%s\t%s\t%dms\n", step.JobID, step.ID, step.Outcome, step.DurationMS)
+		fmt.Fprintf(&text, "%s\t%s\t%s\t%dms\n", opsview.DisplayText(step.JobID), opsview.DisplayText(step.ID), opsview.DisplayText(step.Outcome), step.DurationMS)
 	}
 	_, err := io.WriteString(out, text.String())
 	return err
@@ -168,9 +170,9 @@ func writeRunErrors(out io.Writer, detail controllerwire.RunDetail, format strin
 		if format == "json" {
 			err = json.NewEncoder(out).Encode(failure)
 		} else if format == "plain" {
-			_, err = fmt.Fprintln(out, failure.RunID)
+			_, err = fmt.Fprintln(out, opsview.DisplayText(failure.RunID))
 		} else {
-			_, err = fmt.Fprintf(out, "%s\trun\t%s\n", failure.RunID, failure.Reason)
+			_, err = fmt.Fprintf(out, "%s\trun\t%s\n", opsview.DisplayText(failure.RunID), opsview.DisplayText(failure.Reason))
 		}
 		if err != nil {
 			return err
@@ -185,9 +187,9 @@ func writeRunErrors(out io.Writer, detail controllerwire.RunDetail, format strin
 		if format == "json" {
 			err = json.NewEncoder(out).Encode(failure)
 		} else if format == "plain" {
-			_, err = fmt.Fprintln(out, failure.JobID)
+			_, err = fmt.Fprintln(out, opsview.DisplayText(failure.JobID))
 		} else {
-			_, err = fmt.Fprintf(out, "%s\t%s\tattempt=%d\t%s\n", failure.RunID, failure.JobID, failure.Attempt, failure.Reason)
+			_, err = fmt.Fprintf(out, "%s\t%s\tattempt=%d\t%s\n", opsview.DisplayText(failure.RunID), opsview.DisplayText(failure.JobID), failure.Attempt, opsview.DisplayText(failure.Reason))
 		}
 		if err != nil {
 			return err
@@ -199,21 +201,21 @@ func writeRunErrors(out io.Writer, detail controllerwire.RunDetail, format strin
 func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStatusOptions) error {
 	var text strings.Builder
 	if opts.format == "plain" {
-		fmt.Fprintln(&text, detail.Status)
+		fmt.Fprintln(&text, opsview.DisplayText(detail.Status))
 	} else {
-		fmt.Fprintf(&text, "%s\t%s\t%s\n", detail.ID, detail.Inputs.Pipeline, detail.Status)
+		fmt.Fprintf(&text, "%s\t%s\t%s\n", opsview.DisplayText(detail.ID), opsview.DisplayText(detail.Inputs.Pipeline), opsview.DisplayText(detail.Status))
 	}
 	fmt.Fprintf(&text, "started_at\t%s\nfinished_at\t%s\nduration\t%s\n", displayTime(detail.StartedAt), displayTime(detail.FinishedAt), displayDuration(detail.StartedAt, detail.FinishedAt))
 	if detail.Engine != nil {
-		fmt.Fprintf(&text, "engine\t%s\n", detail.Engine.Version)
+		fmt.Fprintf(&text, "engine\t%s\n", opsview.DisplayText(detail.Engine.Version))
 	}
 	if detail.Inputs.Agent != "" {
-		fmt.Fprintf(&text, "agent\t%s\n", detail.Inputs.Agent)
+		fmt.Fprintf(&text, "agent\t%s\n", opsview.DisplayText(detail.Inputs.Agent))
 	}
 	if lineage := detail.Inputs.Lineage; lineage.RetryOf != "" {
-		fmt.Fprintf(&text, "retry_of\t%s\n", lineage.RetryOf)
+		fmt.Fprintf(&text, "retry_of\t%s\n", opsview.DisplayText(lineage.RetryOf))
 		if lineage.RetryReason != "" {
-			fmt.Fprintf(&text, "retry_reason\t%s\n", lineage.RetryReason)
+			fmt.Fprintf(&text, "retry_reason\t%s\n", opsview.DisplayText(lineage.RetryReason))
 		}
 	}
 	if err := writeEngineNotices(&text, detail.Notices); err != nil {
@@ -226,15 +228,15 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 			text.WriteString("JOB\tSTATUS\tOUTCOME\tATTEMPT\tGENERATION\tDETAIL\tSTARTED_AT\tFINISHED_AT\tDURATION\n")
 		}
 		for _, job := range detail.Jobs {
-			fmt.Fprintf(&text, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\n", job.ID, job.Status, job.Outcome, job.Attempt, job.Generation, job.StatusDetail, displayTime(job.StartedAt), displayTime(job.FinishedAt), displayDuration(job.StartedAt, job.FinishedAt))
+			fmt.Fprintf(&text, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\n", opsview.DisplayText(job.ID), opsview.DisplayText(job.Status), opsview.DisplayText(job.Outcome), job.Attempt, job.Generation, opsview.DisplayText(job.StatusDetail), displayTime(job.StartedAt), displayTime(job.FinishedAt), displayDuration(job.StartedAt, job.FinishedAt))
 		}
 	}
 	for _, step := range detail.Steps {
-		fmt.Fprintf(&text, "%s/%s\t%s\t%s\tattempt=%d\t%s\n", step.JobID, step.ID, step.Status, step.Outcome, step.Attempt, step.Reason)
+		fmt.Fprintf(&text, "%s/%s\t%s\t%s\tattempt=%d\t%s\n", opsview.DisplayText(step.JobID), opsview.DisplayText(step.ID), opsview.DisplayText(step.Status), opsview.DisplayText(step.Outcome), step.Attempt, opsview.DisplayText(step.Reason))
 	}
 	for _, job := range detail.Jobs {
 		if job.Error != "" {
-			fmt.Fprintf(&text, "%s error:\n%s\n", job.ID, strings.TrimRight(job.Error, "\n"))
+			fmt.Fprintf(&text, "%s error:\n%s\n", opsview.DisplayText(job.ID), opsview.DisplayText(strings.TrimRight(job.Error, "\n")))
 		}
 	}
 	writeRunError(&text, detail)
@@ -246,9 +248,9 @@ func writeRunError(text *strings.Builder, detail controllerwire.RunDetail) {
 	if detail.Failure == "" {
 		return
 	}
-	fmt.Fprintf(text, "run error:\n%s\n", strings.TrimRight(detail.Failure, "\n"))
+	fmt.Fprintf(text, "run error:\n%s\n", opsview.DisplayText(strings.TrimRight(detail.Failure, "\n")))
 	if hint := planFailureHint(detail); hint != "" {
-		fmt.Fprintf(text, "hint: %s\n", hint)
+		fmt.Fprintf(text, "hint: %s\n", opsview.DisplayText(hint))
 	}
 }
 
@@ -294,7 +296,7 @@ func writeRunTimeline(text *strings.Builder, detail controllerwire.RunDetail, wi
 			length := max(1, int(float64(a.FinishedAt.Sub(*a.StartedAt))/float64(end.Sub(start))*float64(width)))
 			bar = strings.Repeat(" ", offset) + strings.Repeat("=", length)
 		}
-		fmt.Fprintf(text, "%s\tattempt=%d\t%s\t%s\t%s\t%s\n", a.JobID, a.Attempt, a.Outcome, displayTime(a.StartedAt), displayTime(a.FinishedAt), bar)
+		fmt.Fprintf(text, "%s\tattempt=%d\t%s\t%s\t%s\t%s\n", opsview.DisplayText(a.JobID), a.Attempt, opsview.DisplayText(a.Outcome), displayTime(a.StartedAt), displayTime(a.FinishedAt), bar)
 	}
 }
 
@@ -324,11 +326,11 @@ func writeEngineNoticesOnce(out io.Writer, notices []engineid.Notice) error {
 
 func writeEngineNotices(out io.Writer, notices []engineid.Notice) error {
 	for _, notice := range notices {
-		if _, err := fmt.Fprintf(out, "warning: %s\n", notice.Reason); err != nil {
+		if _, err := fmt.Fprintf(out, "warning: %s\n", opsview.DisplayText(notice.Reason)); err != nil {
 			return err
 		}
 		if notice.Hint != "" {
-			if _, err := fmt.Fprintf(out, "hint: %s\n", notice.Hint); err != nil {
+			if _, err := fmt.Fprintf(out, "hint: %s\n", opsview.DisplayText(notice.Hint)); err != nil {
 				return err
 			}
 		}

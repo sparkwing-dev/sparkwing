@@ -8,6 +8,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
@@ -70,7 +72,7 @@ func listCheckouts(outputFormat string, withPipelines bool) error {
 		if pipelinesCol == "" {
 			pipelinesCol = "(describe failed)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", status, r.Path, pipelinesCol)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", status, opsview.DisplayText(r.Path), opsview.DisplayText(pipelinesCol))
 	}
 	return tw.Flush()
 }

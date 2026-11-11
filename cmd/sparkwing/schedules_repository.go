@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -291,9 +293,9 @@ func uninstallRepositorySchedules(ctx context.Context, inv clisurface.Invocation
 		return json.NewEncoder(out).Encode(result)
 	}
 	if opts.format == "plain" {
-		_, err = fmt.Fprintln(out, result.RepoURL)
+		_, err = fmt.Fprintln(out, opsview.DisplayText(result.RepoURL))
 	} else {
-		_, err = fmt.Fprintf(out, "disarmed %d schedules for %s\n", result.Removed, result.RepoURL)
+		_, err = fmt.Fprintf(out, "disarmed %d schedules for %s\n", result.Removed, opsview.DisplayText(result.RepoURL))
 	}
 	return err
 }

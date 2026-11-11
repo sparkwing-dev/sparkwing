@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -89,7 +91,7 @@ func writeStanding(out io.Writer, format string, s controllerwire.TeamStanding) 
 		if r.DecisionReason != "" {
 			line += " (" + r.DecisionReason + ")"
 		}
-		if _, err := fmt.Fprintln(out, line); err != nil {
+		if _, err := fmt.Fprintln(out, opsview.DisplayText(line)); err != nil {
 			return err
 		}
 	}
@@ -202,7 +204,7 @@ func writeRefill(out io.Writer, format string, r controllerwire.TeamRefill) erro
 	if r.FailedAt > 0 {
 		fmt.Fprintf(&b, "The last refill failed at %s", time.Unix(r.FailedAt, 0).UTC().Format(time.RFC3339))
 		if r.Failure != "" {
-			fmt.Fprintf(&b, " (%s)", r.Failure)
+			fmt.Fprintf(&b, " (%s)", opsview.DisplayText(r.Failure))
 		}
 		b.WriteString(". Update your card on the billing page, then add funds to start refills again.\n")
 	}

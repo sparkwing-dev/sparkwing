@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -738,15 +740,15 @@ func printInfoTable(info Info) {
 	row("sparkwing", v.Installed, "("+buildLabel+")")
 
 	if info.Binary != "" {
-		row("binary", info.Binary, "")
+		row("binary", opsview.DisplayText(info.Binary), "")
 	}
 
 	if info.SDKPin != nil {
-		row("sdk pin", info.SDKPin.Pin, "("+sdkPinLine(info.SDKPin)+")")
+		row("sdk pin", opsview.DisplayText(info.SDKPin.Pin), "("+opsview.DisplayText(sdkPinLine(info.SDKPin))+")")
 	}
 
 	if info.Toolchain.Go.Found {
-		row("go", info.Toolchain.Go.Version, "(your local toolchain -- used to compile .sparkwing/)")
+		row("go", opsview.DisplayText(info.Toolchain.Go.Version), "(your local toolchain -- used to compile .sparkwing/)")
 	} else {
 		row("go", color.Dim("not installed"), "(your local toolchain -- needed to compile .sparkwing/)")
 		fmt.Printf("  %-*s  %s\n", lblW, "", color.Cyan(goInstallHintForce()))
@@ -759,9 +761,9 @@ func printInfoTable(info Info) {
 			noun = "pipeline"
 		}
 		if info.Project.PipelinesError != "" {
-			row("project", ".sparkwing/ at "+info.Project.SparkwingDir, "(pipelines unavailable: "+info.Project.PipelinesError+")")
+			row("project", ".sparkwing/ at "+opsview.DisplayText(info.Project.SparkwingDir), "(pipelines unavailable: "+opsview.DisplayText(info.Project.PipelinesError)+")")
 		} else {
-			row("project", ".sparkwing/ at "+info.Project.SparkwingDir, fmt.Sprintf("(%d %s: %d triggered, %d manual)", p.Total, noun, p.Triggered, p.Manual))
+			row("project", ".sparkwing/ at "+opsview.DisplayText(info.Project.SparkwingDir), fmt.Sprintf("(%d %s: %d triggered, %d manual)", p.Total, noun, p.Triggered, p.Manual))
 		}
 		if info.Project.FoundAbove {
 			row("", color.Cyan("note: found by walking up from the current directory, not in it -- pass -C <dir> (or cd) to target a different repo"), "")
@@ -870,6 +872,6 @@ func printAlignedStepsTo(w io.Writer, steps []InfoNextStep) {
 	}
 	for _, ns := range steps {
 		pad := strings.Repeat(" ", width-len(ns.Command))
-		fmt.Fprintf(w, "  %s%s  %s\n", color.Cyan(ns.Command), pad, color.Dim(ns.Purpose))
+		fmt.Fprintf(w, "  %s%s  %s\n", color.Cyan(opsview.DisplayText(ns.Command)), pad, color.Dim(opsview.DisplayText(ns.Purpose)))
 	}
 }

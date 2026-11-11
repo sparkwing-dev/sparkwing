@@ -25,7 +25,7 @@ func docsCacheInfo(output string) error {
 		return err
 	}
 	fmt.Println(color.Bold("DOCS WEB CACHE"))
-	fmt.Printf("  dir:        %s\n", color.Cyan(stats.Dir))
+	fmt.Printf("  dir:        %s\n", color.Cyan(opsview.DisplayText(stats.Dir)))
 	if !stats.Exists {
 		fmt.Printf("  status:     %s\n", color.Dim("(not yet created -- no --web fetches have run)"))
 		return nil
@@ -60,6 +60,6 @@ func docsCacheClear(output string) error {
 		fmt.Println(color.Dim("(cache was already empty)"))
 		return nil
 	}
-	fmt.Printf("removed %d file(s) from %s\n", removed, color.Cyan(client.CacheDir))
+	fmt.Printf("removed %d file(s) from %s\n", removed, color.Cyan(opsview.DisplayText(client.CacheDir)))
 	return nil
 }

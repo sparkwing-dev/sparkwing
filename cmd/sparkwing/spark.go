@@ -11,6 +11,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"golang.org/x/mod/modfile"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -107,7 +109,7 @@ func runSparksList(inv clisurface.Invocation) error {
 			if ver == "" {
 				ver = e.Declared
 			}
-			fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", e.Name, e.Source, ver)
+			fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", e.Name, opsview.DisplayText(e.Source), ver)
 		}
 		return nil
 	default:
@@ -134,7 +136,7 @@ func runSparksList(inv clisurface.Invocation) error {
 			if name == "" {
 				name = "-"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", name, e.Source, e.Declared, resolved)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", opsview.DisplayText(name), opsview.DisplayText(e.Source), opsview.DisplayText(e.Declared), opsview.DisplayText(resolved))
 		}
 		return tw.Flush()
 	}
@@ -412,11 +414,11 @@ func runSparksUpdate(inv clisurface.Invocation) error {
 			Changed bool   `json:"changed"`
 		}{path, changed})
 	case "plain":
-		_, err := fmt.Fprintln(os.Stdout, path)
+		_, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(path))
 		return err
 	}
 	if changed {
-		_, err = fmt.Fprintln(os.Stdout, "overlay updated:", path)
+		_, err = fmt.Fprintln(os.Stdout, "overlay updated:", opsview.DisplayText(path))
 	} else {
 		_, err = fmt.Fprintln(os.Stdout, "up-to-date (no overlay changes)")
 	}
@@ -511,10 +513,10 @@ func writeSparkMutation(action string, library sparks.Library, path, output stri
 			Path    string `json:"path"`
 		}{action, library.Name, library.Source, library.Version, path})
 	case "plain":
-		_, err := fmt.Fprintln(os.Stdout, library.Name)
+		_, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(library.Name))
 		return err
 	default:
-		_, err := fmt.Fprintf(os.Stdout, "%s %s (%s@%s) in %s\n", action, library.Name, library.Source, library.Version, path)
+		_, err := fmt.Fprintf(os.Stdout, "%s %s (%s@%s) in %s\n", action, opsview.DisplayText(library.Name), opsview.DisplayText(library.Source), opsview.DisplayText(library.Version), opsview.DisplayText(path))
 		return err
 	}
 }

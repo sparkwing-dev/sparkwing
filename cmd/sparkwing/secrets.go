@@ -15,6 +15,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -97,7 +99,7 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 			result.Warning = secrets.ShortValueWarning
 		}
 		if result.Warning != "" {
-			if _, err := fmt.Fprintln(diagnostics, "warning: "+result.Warning); err != nil {
+			if _, err := fmt.Fprintln(diagnostics, "warning: "+opsview.DisplayText(result.Warning)); err != nil {
 				return err
 			}
 		}
@@ -109,7 +111,7 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 			_, err = fmt.Fprintln(out, result.Secret.Name)
 			return err
 		}
-		_, err = fmt.Fprintf(out, "secret %q set (repo: %s, pipeline: %s, masked=%t, only-on: %s)\n", result.Secret.Name, dashIfEmpty(result.Secret.Repo), secretScope(result.Secret), result.Secret.Masked, dashIfEmpty(result.Secret.OnlyOn))
+		_, err = fmt.Fprintf(out, "secret %q set (repo: %s, pipeline: %s, masked=%t, only-on: %s)\n", result.Secret.Name, opsview.DisplayText(dashIfEmpty(result.Secret.Repo)), opsview.DisplayText(secretScope(result.Secret)), result.Secret.Masked, opsview.DisplayText(dashIfEmpty(result.Secret.OnlyOn)))
 		return err
 	case "sparkwing secrets get":
 		result, err := manager.ReadSecret(ctx, selector)
@@ -257,7 +259,7 @@ func renderSecrets(out io.Writer, rows []controllerwire.SecretMetadata, filter s
 				if err := json.NewEncoder(out).Encode(row); err != nil {
 					return err
 				}
-			} else if _, err := fmt.Fprintln(out, row.Name); err != nil {
+			} else if _, err := fmt.Fprintln(out, opsview.DisplayText(row.Name)); err != nil {
 				return err
 			}
 		}
@@ -270,7 +272,7 @@ func renderSecrets(out io.Writer, rows []controllerwire.SecretMetadata, filter s
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tREPO\tPIPELINE\tMASKED\tBOUND\tONLY_ON\tPRINCIPAL\tCREATED\tUPDATED")
 	for _, row := range selected {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%t\t%t\t%s\t%s\t%s\t%s\n", row.Name, dashIfEmpty(row.Repo), secretScope(row), row.Masked, row.Bound, dashIfEmpty(row.OnlyOn), row.Principal, secretTimestamp(row.CreatedAt), secretTimestamp(row.UpdatedAt))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%t\t%t\t%s\t%s\t%s\t%s\n", opsview.DisplayText(row.Name), opsview.DisplayText(dashIfEmpty(row.Repo)), opsview.DisplayText(secretScope(row)), row.Masked, row.Bound, opsview.DisplayText(dashIfEmpty(row.OnlyOn)), opsview.DisplayText(row.Principal), secretTimestamp(row.CreatedAt), secretTimestamp(row.UpdatedAt))
 	}
 	return tw.Flush()
 }
@@ -301,7 +303,7 @@ func renderSecretRotation(out io.Writer, result controllerwire.SecretRotation, f
 			return err
 		}
 		for _, row := range result.Skipped {
-			if _, err := fmt.Fprintf(out, "skipped\t%s\t%s\t%s\n", row.Name, row.Repo, row.Pipeline); err != nil {
+			if _, err := fmt.Fprintf(out, "skipped\t%s\t%s\t%s\n", opsview.DisplayText(row.Name), row.Repo, row.Pipeline); err != nil {
 				return err
 			}
 		}
@@ -314,7 +316,7 @@ func renderSecretRotation(out io.Writer, result controllerwire.SecretRotation, f
 	} else {
 		fmt.Fprintln(tw, "The previous key is still needed for skipped rows:")
 		for _, row := range result.Skipped {
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", row.Name, dashIfEmpty(row.Repo), dashIfEmpty(row.Pipeline))
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", opsview.DisplayText(row.Name), opsview.DisplayText(dashIfEmpty(row.Repo)), opsview.DisplayText(dashIfEmpty(row.Pipeline)))
 		}
 	}
 	return tw.Flush()

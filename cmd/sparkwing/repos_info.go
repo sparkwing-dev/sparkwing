@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
@@ -240,22 +242,22 @@ func repoSuggestion(info repoInfo) string {
 }
 
 func printRepoInfo(info repoInfo) {
-	fmt.Printf("%s", info.Name)
+	fmt.Printf("%s", opsview.DisplayText(info.Name))
 	if info.Status != "" && info.Status != "ok" {
 		fmt.Printf("  (%s)", info.Status)
 	}
 	fmt.Println()
 	if info.Primary != "" {
-		fmt.Printf("  %s\n", color.Dim(info.Primary))
+		fmt.Printf("  %s\n", color.Dim(opsview.DisplayText(info.Primary)))
 	}
 
 	pin := orDashStr(info.Pin)
 	if info.Replace != "" {
 		pin = "replaced -> " + info.Replace
 	}
-	fmt.Printf("  SDK pin:   %s", pin)
+	fmt.Printf("  SDK pin:   %s", opsview.DisplayText(pin))
 	if info.Latest != "" {
-		fmt.Printf("   (latest %s)", info.Latest)
+		fmt.Printf("   (latest %s)", opsview.DisplayText(info.Latest))
 	}
 	if info.GuidesBehind > 0 {
 		fmt.Printf("   %s", color.Yellow(fmt.Sprintf("%d guide(s) behind", info.GuidesBehind)))
@@ -267,9 +269,9 @@ func printRepoInfo(info repoInfo) {
 		tree = color.Yellow("uncommitted changes")
 	}
 	if info.Branch != "" || info.Commit != "" {
-		fmt.Printf("  worktree:  %s on %s %s\n", tree, orDashStr(info.Branch), color.Dim(info.Commit))
+		fmt.Printf("  worktree:  %s on %s %s\n", opsview.DisplayText(tree), opsview.DisplayText(orDashStr(info.Branch)), color.Dim(opsview.DisplayText(info.Commit)))
 	} else if info.Primary != "" {
-		fmt.Printf("  worktree:  %s\n", tree)
+		fmt.Printf("  worktree:  %s\n", opsview.DisplayText(tree))
 	}
 
 	if len(info.Guides) > 0 {
@@ -279,9 +281,9 @@ func printRepoInfo(info repoInfo) {
 			if title == "" {
 				title = g.Summary
 			}
-			fmt.Printf("      %-10s %s\n", g.Version, color.Dim(title))
+			fmt.Printf("      %-10s %s\n", opsview.DisplayText(g.Version), color.Dim(opsview.DisplayText(title)))
 			if g.Summary != "" && g.Title != "" {
-				fmt.Printf("                 %s\n", color.Dim(g.Summary))
+				fmt.Printf("                 %s\n", color.Dim(opsview.DisplayText(g.Summary)))
 			}
 		}
 	}
@@ -293,7 +295,7 @@ func printRepoInfo(info repoInfo) {
 			if w.Diverges {
 				flagTxt = color.Yellow("  (diverges)")
 			}
-			fmt.Printf("      %-14s %s%s\n", orDashStr(w.Pin), color.Dim(w.Path), flagTxt)
+			fmt.Printf("      %-14s %s%s\n", opsview.DisplayText(orDashStr(w.Pin)), color.Dim(opsview.DisplayText(w.Path)), flagTxt)
 		}
 	}
 
@@ -304,11 +306,11 @@ func printRepoInfo(info repoInfo) {
 			if p.LastRun != "" {
 				last = p.LastRun + " " + p.LastStatus
 			}
-			fmt.Printf("      %-24s %s\n", p.Name, color.Dim(last))
+			fmt.Printf("      %-24s %s\n", opsview.DisplayText(p.Name), color.Dim(opsview.DisplayText(last)))
 		}
 	}
 
 	if info.Suggestion != "" {
-		fmt.Printf("\n%s %s\n", color.Yellow("next:"), info.Suggestion)
+		fmt.Printf("\n%s %s\n", color.Yellow("next:"), opsview.DisplayText(info.Suggestion))
 	}
 }
