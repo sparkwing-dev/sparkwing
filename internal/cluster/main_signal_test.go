@@ -38,7 +38,7 @@ func TestRunnerSignalExit(t *testing.T) {
 					t.Fatal(err)
 				}
 				bin := t.TempDir()
-				// Signal only after Git starts, so acquisition cannot stop at its entry guard.
+				// safety: signaling from Git prevents cancellation at the acquisition entry guard.
 				program := fmt.Sprintf("#!%s\nimport os, signal\nos.kill(%d, signal.SIGTERM)\nsignal.pause()\n", python, os.Getpid())
 				if err := os.WriteFile(filepath.Join(bin, "git"), []byte(program), 0o700); err != nil {
 					t.Fatal(err)
