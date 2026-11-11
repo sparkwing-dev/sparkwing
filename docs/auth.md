@@ -1034,12 +1034,11 @@ reads only `__Host-sw_csrf`.
 See [Serving the dashboard over HTTPS](self-hosting.md#serving-the-dashboard-over-https)
 for deployment routes.
 
-Without Secure, a session cookie crosses a remote HTTP connection in clear text.
-Cookies also have no port isolation on loopback. Another local HTTP service can
-receive a bare session cookie and read or plant a bare CSRF cookie, leaving the
-Origin check as the remaining CSRF boundary. Secure cookies protect transport
-but do not add port isolation. Use HTTPS for shared access, and keep local
-services trusted when using loopback.
+Secure prevents a session cookie crossing a remote HTTP connection in clear text.
+Cookies have no port scope, including Secure `__Host-` cookies. Another service
+on a loopback port can still receive `__Host-sw_session` and read or plant
+`__Host-sw_csrf`. The Origin check and the CSRF token tied to the session protect
+writes there. Do not run untrusted services on loopback alongside the dashboard.
 
 ### Google and GitHub sign-in
 

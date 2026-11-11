@@ -62,9 +62,6 @@ For remote access, use HTTPS or bring the connection to loopback:
   `kubectl -n sparkwing port-forward svc/sparkwing-sparkwing-full-controller 8080:80`.
   For a remote controller listening on port 8080, run
   `ssh -L 8080:127.0.0.1:8080 user@controller-host`. Open `http://localhost:8080`.
-- **Tailscale.** Run `tailscale serve --bg 8080` on the controller host and use
-  the HTTPS URL it prints. Follow its prompts to enable HTTPS certificates for
-  the tailnet. See [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve).
 - **Kubernetes ingress.** Set `ingress.enabled=true` and configure `ingress.tls`.
   For example, with cert-manager installed and a Let's Encrypt ClusterIssuer
   named `letsencrypt-prod`, use the values below. Configure that issuer's ACME

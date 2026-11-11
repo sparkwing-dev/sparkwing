@@ -1719,7 +1719,7 @@ func TestIngressRoutesEveryHostToTheControllerService(t *testing.T) {
 
 func TestIngressWithoutTLSCannotOptOut(t *testing.T) {
 	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "ingress.enabled=true", "ingress.allowInsecure=true")
-	for _, want := range []string{"ingress.tls", "cert-manager", "kubectl port-forward"} {
+	for _, want := range []string{"ingress.allowInsecure was removed", "ingress.tls", "cert-manager", "kubectl port-forward"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render error lacks supported route %q:\n%s", want, out)
 		}

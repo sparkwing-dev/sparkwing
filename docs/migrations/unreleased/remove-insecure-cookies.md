@@ -10,11 +10,14 @@ The chart rejects the removed value, including `false`. All controllers set Secu
 the web client reads only `__Host-sw_csrf`. Sign in again after changing the
 browser origin. Custom browser clients must use the prefixed names.
 
-**Why:** Without Secure, a session cookie crosses a remote HTTP connection in
-clear text. Cookies have no port isolation on loopback, so another local HTTP
-service can receive `sw_session` and read or plant `sw_csrf`. That leaves CSRF
-protection to the Origin check. Session CLI enrollment already sends the
-prefixed CSRF cookie and failed against the removed mode.
+**Why:** Secure prevents a session cookie crossing a remote HTTP connection in
+clear text. Session CLI enrollment already sends the prefixed CSRF cookie and
+failed against the removed mode.
+
+Cookies have no port scope, including Secure `__Host-` cookies. Another service
+on a loopback port can still receive `__Host-sw_session` and read or plant
+`__Host-sw_csrf`. The Origin check and the CSRF token tied to the session protect
+writes there. Do not run untrusted services on loopback alongside the dashboard.
 
 Choose a supported browser route:
 
@@ -23,7 +26,6 @@ Choose a supported browser route:
   services trusted.
 - Disable ingress and use `kubectl port-forward`, or use `ssh -L`, then open the
   loopback URL.
-- Use `tailscale serve` for an HTTPS URL within a tailnet.
 - Set chart `ingress.tls`, for example with cert-manager and Let's Encrypt.
   An enabled ingress with an empty TLS list fails rendering.
 - Put Caddy in front of the native controller's `--trusted-proxy-addr` listener.
