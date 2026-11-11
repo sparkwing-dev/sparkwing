@@ -298,6 +298,10 @@ func WritePolicyError(w http.ResponseWriter, err error) {
 		}
 		failure = safe
 	}
+	if failure.Code == hosterr.Unauthenticated {
+		apierrhttp.NoteResponseError(w, failure)
+		failure = &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is unavailable"}
+	}
 	if err := apierrhttp.Write(w, failure); err != nil {
 		// safety: internal errors may contain credentials; log only the safe code.
 		slog.Error("write API error response", "code", failure.Code)

@@ -38,6 +38,10 @@ func TestControllerHTTPRefusesBrowserIdentityAndCookies(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized || called {
 		t.Fatalf("browser authority: status=%d mutation=%t", recorder.Code, called)
 	}
+	var envelope struct{ Error struct{ Message string } }
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil || envelope.Error.Message != "controller lifecycle requires a verified local socket peer" {
+		t.Fatalf("local socket refusal lost its repair context: %s (%v)", recorder.Body, err)
+	}
 }
 
 func TestControllerHTTPReportsOwnerState(t *testing.T) {

@@ -11,13 +11,8 @@ import (
 )
 
 // Write writes the envelope and derives status from Code, including retry_after_ms as Retry-After.
-// Credential refusals share one public envelope; server diagnostics retain the original cause.
 // Encode failures are returned to the caller for logging; this writer never emits plain text.
 func Write(w http.ResponseWriter, failure *apierr.Error) error {
-	if failure != nil && failure.Code == hosterr.Unauthenticated {
-		NoteResponseError(w, failure)
-		failure = &apierr.Error{Code: hosterr.Unauthenticated, Message: "credential is unavailable"}
-	}
 	var encoded bytes.Buffer
 	if err := hosterr.WriteJSON(&encoded, failure); err != nil {
 		return err
@@ -38,7 +33,7 @@ func Write(w http.ResponseWriter, failure *apierr.Error) error {
 	return err
 }
 
-// NoteResponseError retains the first cause for the request's masked diagnostic.
+// NoteResponseError passes a private cause to the request's masked diagnostic recorder.
 func NoteResponseError(w http.ResponseWriter, err error) {
 	for {
 		if recorder, ok := w.(interface{ ResponseError(error) }); ok {
