@@ -303,7 +303,7 @@ func TestRunArtifactsExistingDestinationExitsAsUsage(t *testing.T) {
 		t.Run(fmt.Sprint("created-during-transfer=", during), func(t *testing.T) {
 			dest := filepath.Join(t.TempDir(), "occupied.txt")
 			writeExisting := func() {
-				if err := os.WriteFile(dest, []byte("keep"), 0600); err != nil {
+				if err := os.WriteFile(dest, []byte("keep"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
