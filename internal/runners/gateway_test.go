@@ -151,7 +151,7 @@ func TestLoopBoundsSlowGatewayRecovery(t *testing.T) {
 		client, err := controllerclient.NewEngineClient(controllerclient.EngineOptions{URL: "http://controller", HTTP: &http.Client{Timeout: 30 * time.Second, Transport: gatewayTransport(func(r *http.Request) (*http.Response, error) {
 			calls++
 			if calls == 1 {
-				return &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("no backend"))}, nil
+				return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("no backend"))}, nil
 			}
 			<-r.Context().Done()
 			return nil, r.Context().Err()
