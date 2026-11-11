@@ -629,6 +629,13 @@ guards the levels through single transport wrappers; joined faults and placement
 failures retain WARN. `TestLauncherRestartUsesRealClientRateLimit` and
 `TestLauncherClaimErrorRetainsLastAdvice` exercise the real client under fake time.
 
+Parent shutdown returns quietly when an in-flight operation fails only because
+that parent context stopped. This applies to claims, warm reporting,
+reconciliation, spent-node retirement and budget reads. Joined independent
+faults remain visible, and gateway failures still warn even during shutdown.
+`TestLauncherShutdownPreservesIndependentFaults` and
+`TestLauncherGateway503RemainsWarn` guard those distinctions.
+
 The first reservation also records `sparkwing.dev/used-run` with its team and run
 ID. Release retains it alongside the permanent protected labels. Retirement runs
 in its own loop every 30 seconds, beside reconciliation, so it finds spent nodes

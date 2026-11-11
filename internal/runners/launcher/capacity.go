@@ -180,7 +180,11 @@ func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error
 		l.logger().Error("Cloud capacity is not configured; configure the shared NodePool for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
 		return l.releaseCapacity(ctx, award.Binding)
 	}
-	if l.breakerClosed(ctx) {
+	closed := l.breakerClosed(ctx)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if closed {
 		pod, err := l.Kube.CoreV1().Pods(l.Config.Namespace).Get(ctx, capacityName(award.Binding), metav1.GetOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			return err
@@ -207,7 +211,9 @@ func (l *Launcher) breakerClosed(ctx context.Context) bool {
 	}
 	closed, err := l.Breaker(ctx)
 	if err != nil {
-		l.logger().Warn("Cloud budget state unreadable; treating the breaker as open", "error", err)
+		if shutdownFault(ctx, err) != nil {
+			l.logger().Warn("Cloud budget state unreadable; treating the breaker as open", "error", err)
+		}
 		return false
 	}
 	return closed

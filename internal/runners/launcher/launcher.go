@@ -143,24 +143,36 @@ func (l *Launcher) Run(ctx context.Context) error {
 	firstClaim := true
 	for ctx.Err() == nil {
 		if err := l.reportWarmPools(ctx); err != nil {
+			if shutdownFault(ctx, err) == nil {
+				return nil
+			}
 			if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
 				logger.Info("warm capacity observation deferred; the next complete sample replaces it", "error", err)
 			} else {
 				logger.Warn("warm capacity observation failed", "error", err)
 			}
 		}
+		if ctx.Err() != nil {
+			return nil
+		}
 		synced := l.syncActive(ctx)
+		if synced != nil && shutdownFault(ctx, synced) == nil {
+			return nil
+		}
 		if blocking(synced) != nil {
 			logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
 			cooldown = later(cooldown, time.Now().Add(retryWait(synced, 0)))
 		} else if synced != nil {
 			logger.Error("Cloud node or Job teardown faults require operator inspection if they persist; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
 		}
+		if ctx.Err() != nil {
+			return nil
+		}
 		if blocking(synced) == nil {
 			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
 			err := l.placeWaiting(ctx)
 			startupRateLimit := false
-			if err == nil && !time.Now().Before(cooldown) {
+			if err == nil && ctx.Err() == nil && !time.Now().Before(cooldown) {
 				var launched bool
 				var suggestedPoll time.Duration
 				launched, suggestedPoll, err = l.claim(ctx)
@@ -174,6 +186,10 @@ func (l *Launcher) Run(ctx context.Context) error {
 				firstClaim = false
 			}
 			if err != nil {
+				fault := shutdownFault(ctx, err)
+				if fault == nil || ctx.Err() != nil && fault == ErrNoDedicatedNode { //nolint:errorlint // Only the sole expected placement wait is quiet.
+					return nil
+				}
 				if startupRateLimit {
 					logger.Info("launcher initial claim deferred by controller rate limit", failureAttrs(err)...)
 				} else if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
@@ -224,6 +240,39 @@ func claimRateLimited(err error) bool {
 	}
 	var failure *apierr.Error
 	return errors.As(err, &failure) && failure.Code == hosterr.RateLimited
+}
+
+func shutdownFault(ctx context.Context, err error) error {
+	if ctx.Err() == nil || err == nil {
+		return err
+	}
+	// safety: a joined cancellation must not hide an independent placement or cleanup fault.
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		parts := joined.Unwrap()
+		if len(parts) == 0 {
+			return err
+		}
+		var faults []error
+		for _, part := range parts {
+			if fault := shutdownFault(ctx, part); fault != nil {
+				faults = append(faults, fault)
+			}
+		}
+		if len(faults) == 1 {
+			return faults[0]
+		}
+		return errors.Join(faults...)
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		if shutdownFault(ctx, wrapped) == nil {
+			return nil
+		}
+		return err
+	}
+	if errors.Is(err, ctx.Err()) {
+		return nil
+	}
+	return err
 }
 
 func retryWait(err error, poll time.Duration) time.Duration {
