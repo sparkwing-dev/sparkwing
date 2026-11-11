@@ -21,7 +21,7 @@ func docsCacheInfo(output string) error {
 		enc := json.NewEncoder(os.Stdout)
 		return enc.Encode(stats)
 	case "plain":
-		_, err := fmt.Println(stats.Dir)
+		_, err := fmt.Println(opsview.DisplayText(stats.Dir))
 		return err
 	}
 	fmt.Println(color.Bold("DOCS WEB CACHE"))

@@ -47,7 +47,7 @@ func listCheckouts(outputFormat string, withPipelines bool) error {
 
 	if outputFormat == "plain" {
 		for _, row := range rows {
-			if _, err := fmt.Fprintln(os.Stdout, row.Path); err != nil {
+			if _, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(row.Path)); err != nil {
 				return err
 			}
 		}
@@ -111,7 +111,7 @@ func runXrepoPrune(inv clisurface.Invocation) error {
 		}{dropped})
 	}
 	for _, path := range dropped {
-		if _, err := fmt.Fprintln(os.Stdout, path); err != nil {
+		if _, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(path)); err != nil {
 			return err
 		}
 	}
@@ -133,6 +133,6 @@ func writeRepositoryMutation(inv clisurface.Invocation, action, path string, cou
 			Count  int    `json:"count"`
 		}{action, path, count})
 	}
-	_, err := fmt.Fprintln(os.Stdout, path)
+	_, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(path))
 	return err
 }

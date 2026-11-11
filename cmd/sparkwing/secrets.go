@@ -303,7 +303,7 @@ func renderSecretRotation(out io.Writer, result controllerwire.SecretRotation, f
 			return err
 		}
 		for _, row := range result.Skipped {
-			if _, err := fmt.Fprintf(out, "skipped\t%s\t%s\t%s\n", opsview.DisplayText(row.Name), row.Repo, row.Pipeline); err != nil {
+			if _, err := fmt.Fprintf(out, "skipped\t%s\t%s\t%s\n", opsview.DisplayText(row.Name), opsview.DisplayText(row.Repo), opsview.DisplayText(row.Pipeline)); err != nil {
 				return err
 			}
 		}

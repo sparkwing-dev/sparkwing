@@ -123,7 +123,7 @@ func renderComputeLimits(w io.Writer, view controllerwire.OperatorLimits) error 
 		fmt.Fprintf(tw, "ALARM\treached\n")
 	}
 	for _, principal := range sortedPrincipals(view.Usage.ByPrincipal) {
-		fmt.Fprintf(tw, "  %s\t%d\n", opsview.DisplayText(principal), view.Usage.ByPrincipal[opsview.DisplayText(principal)])
+		fmt.Fprintf(tw, "  %s\t%d\n", opsview.DisplayText(principal), view.Usage.ByPrincipal[principal])
 	}
 	return tw.Flush()
 }
@@ -145,7 +145,7 @@ func writeComputeLimitsPlain(w io.Writer, view controllerwire.OperatorLimits) er
 		}
 	}
 	for _, principal := range sortedPrincipals(view.Usage.ByPrincipal) {
-		if _, err := fmt.Fprintf(w, "runners.%s\t%d\n", opsview.DisplayText(principal), view.Usage.ByPrincipal[opsview.DisplayText(principal)]); err != nil {
+		if _, err := fmt.Fprintf(w, "runners.%s\t%d\n", opsview.DisplayText(principal), view.Usage.ByPrincipal[principal]); err != nil {
 			return err
 		}
 	}

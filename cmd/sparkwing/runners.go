@@ -288,7 +288,7 @@ func finishRunnerEnrollment(path string, cfg userconfig.RunnerConfig, bearer str
 
 // safety: a failed revocation leaves authority live even after its local file is removed.
 func printRunnerRevokeHint(profileName, prefix string) {
-	fmt.Fprintf(os.Stderr, "the token %s is live; revoke it with:\n  sparkwing tokens revoke --profile %s --token %s\n", prefix, profileName, prefix)
+	fmt.Fprintf(os.Stderr, "the token %s is live; revoke it with:\n  sparkwing tokens revoke --profile %s --token %s\n", opsview.DisplayText(prefix), opsview.DisplayText(profileName), opsview.DisplayText(prefix))
 }
 
 type runnerRemoval struct {

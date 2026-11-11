@@ -269,9 +269,9 @@ func printRepoInfo(info repoInfo) {
 		tree = color.Yellow("uncommitted changes")
 	}
 	if info.Branch != "" || info.Commit != "" {
-		fmt.Printf("  worktree:  %s on %s %s\n", opsview.DisplayText(tree), opsview.DisplayText(orDashStr(info.Branch)), color.Dim(opsview.DisplayText(info.Commit)))
+		fmt.Printf("  worktree:  %s on %s %s\n", tree, opsview.DisplayText(orDashStr(info.Branch)), color.Dim(opsview.DisplayText(info.Commit)))
 	} else if info.Primary != "" {
-		fmt.Printf("  worktree:  %s\n", opsview.DisplayText(tree))
+		fmt.Printf("  worktree:  %s\n", tree)
 	}
 
 	if len(info.Guides) > 0 {

@@ -283,7 +283,7 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 			subject = string(unit.Kind)
 		}
 	}
-	if format == "pretty" {
+	if format == "pretty" || search {
 		line = opsview.DisplayText(line)
 		subject = opsview.DisplayText(subject)
 		record.RunID = opsview.DisplayText(record.RunID)

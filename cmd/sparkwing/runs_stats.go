@@ -178,7 +178,7 @@ func writeRunStatistics(out io.Writer, stats []pipelineStats, format string) err
 	}
 	if format == "plain" {
 		for _, stat := range stats {
-			if _, err := fmt.Fprintln(out, stat.Pipeline); err != nil {
+			if _, err := fmt.Fprintln(out, opsview.DisplayText(stat.Pipeline)); err != nil {
 				return err
 			}
 		}

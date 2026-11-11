@@ -109,12 +109,12 @@ func runSparksList(inv clisurface.Invocation) error {
 			if ver == "" {
 				ver = e.Declared
 			}
-			fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", e.Name, opsview.DisplayText(e.Source), ver)
+			fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", opsview.DisplayText(e.Name), opsview.DisplayText(e.Source), opsview.DisplayText(ver))
 		}
 		return nil
 	default:
 		if m == nil {
-			fmt.Fprintf(os.Stdout, "no sparks declared in %s/%s\n", sparkwingDir, projectconfig.Filename)
+			fmt.Fprintf(os.Stdout, "no sparks declared in %s/%s\n", opsview.DisplayText(sparkwingDir), projectconfig.Filename)
 			return nil
 		}
 		if len(entries) == 0 {
@@ -202,7 +202,7 @@ func runSparksLint(inv clisurface.Invocation) error {
 	if err := dec.Decode(&m); err != nil {
 		if strings.Contains(err.Error(), "unknown field") {
 			if err2 := json.Unmarshal(raw, &m); err2 == nil {
-				fmt.Fprintf(os.Stderr, "warn: %s: %v\n", manifestPath, err)
+				fmt.Fprintf(os.Stderr, "warn: %s: %s\n", opsview.DisplayText(manifestPath), opsview.DisplayText(err.Error()))
 			} else {
 				return fmt.Errorf("spark lint: %s: invalid JSON: %w", manifestPath, err2)
 			}
@@ -241,9 +241,9 @@ func runSparksLint(inv clisurface.Invocation) error {
 		}
 	}
 	if len(problems) > 0 {
-		fmt.Fprintf(os.Stderr, "spark lint: %s: %d problem(s)\n", manifestPath, len(problems))
+		fmt.Fprintf(os.Stderr, "spark lint: %s: %d problem(s)\n", opsview.DisplayText(manifestPath), len(problems))
 		for _, p := range problems {
-			fmt.Fprintf(os.Stderr, "  - %s\n", p)
+			fmt.Fprintf(os.Stderr, "  - %s\n", opsview.DisplayText(p))
 		}
 		return fmt.Errorf("spark lint: %d problem(s) in %s", len(problems), manifestPath)
 	}
@@ -255,10 +255,10 @@ func runSparksLint(inv clisurface.Invocation) error {
 			Kind    string `json:"kind"`
 		}{manifestPath, len(entries), field})
 	case "plain":
-		_, err := fmt.Fprintln(os.Stdout, manifestPath)
+		_, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(manifestPath))
 		return err
 	}
-	_, err = fmt.Fprintf(os.Stdout, "ok: %s (%d %s%s)\n", manifestPath, len(entries), strings.TrimSuffix(field, "s"), pluralS(len(entries)))
+	_, err = fmt.Fprintf(os.Stdout, "ok: %s (%d %s%s)\n", opsview.DisplayText(manifestPath), len(entries), strings.TrimSuffix(field, "s"), pluralS(len(entries)))
 	return err
 }
 
@@ -570,11 +570,11 @@ func runSparksInflateCommand(ctx context.Context, inv clisurface.Invocation, out
 		})
 	}
 	if format == "plain" {
-		_, err = fmt.Fprintln(out, res.Dest)
+		_, err = fmt.Fprintln(out, opsview.DisplayText(res.Dest))
 		return err
 	}
 	_, err = fmt.Fprintf(out, "vendored %s@%s\n  source copied to %s\n  added `replace %s => %s` to %s and ran go mod tidy\n\nImports now resolve to the editable local source.\nTo undo, delete %s and drop its replace directive.\n",
-		res.ModulePath, res.Version, res.Dest, res.ModulePath, res.RelReplace, filepath.Join(sparkwingDir, "go.mod"), res.Dest)
+		opsview.DisplayText(res.ModulePath), opsview.DisplayText(res.Version), opsview.DisplayText(res.Dest), opsview.DisplayText(res.ModulePath), opsview.DisplayText(res.RelReplace), opsview.DisplayText(filepath.Join(sparkwingDir, "go.mod")), opsview.DisplayText(res.Dest))
 	return err
 }
 

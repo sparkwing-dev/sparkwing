@@ -298,7 +298,11 @@ func renderScheduleRecord(out io.Writer, value any, plain, format string) error 
 	case "json":
 		return json.NewEncoder(out).Encode(value)
 	case "plain":
-		_, err := fmt.Fprintln(out, plain)
+		if row, ok := value.(controllerwire.ScheduleUpcoming); ok {
+			_, err := fmt.Fprintf(out, "%s\t%s\n", opsview.DisplayText(row.Name), opsview.DisplayText(row.At))
+			return err
+		}
+		_, err := fmt.Fprintln(out, opsview.DisplayText(plain))
 		return err
 	}
 	switch row := value.(type) {

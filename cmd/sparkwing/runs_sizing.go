@@ -40,7 +40,7 @@ func observeSizing(ctx context.Context, inv clisurface.Invocation, manager contr
 	}
 	if o.format == "plain" {
 		for _, row := range rows {
-			if _, err := fmt.Fprintln(out, sizingName(row)); err != nil {
+			if _, err := fmt.Fprintln(out, opsview.DisplayText(sizingName(row))); err != nil {
 				return err
 			}
 		}
@@ -128,7 +128,7 @@ func writeSizingReset(out io.Writer, s controllerwire.SizingResetSummary, format
 	}
 	if format == "plain" {
 		for _, pipeline := range s.Pipelines {
-			if _, err := fmt.Fprintln(out, pipeline); err != nil {
+			if _, err := fmt.Fprintln(out, opsview.DisplayText(pipeline)); err != nil {
 				return err
 			}
 		}

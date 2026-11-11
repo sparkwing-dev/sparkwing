@@ -608,5 +608,5 @@ func writeVersionPolicyLine(text *strings.Builder, policy *versionPolicyStatus) 
 	if policy.Reason != "" {
 		line += ": " + policy.Reason
 	}
-	fmt.Fprintf(text, "  policy:    %s\n", line)
+	fmt.Fprintf(text, "  policy:    %s\n", opsview.DisplayText(line))
 }
