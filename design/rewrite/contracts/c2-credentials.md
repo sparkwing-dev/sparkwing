@@ -3537,6 +3537,8 @@ queue-policy group cannot admit it. They reuse admission's scope key, effective
 weighted capacity and earlier-waiter checks. Selection reserves no concurrency
 holder and does not change readiness or queue order. A later poll and another
 runner see current capacity, so releasing a group makes the job eligible again.
+Run-host self-claims return a dispatch miss while the group is full; the owner
+retries the ready job without taking machine compute.
 Skip, fail and cancel-others policies continue through the admission boundary.
 Box-scoped checks use the authenticated execution host. Launcher awards whose
 host is not selected yet defer that check to admission after activation.

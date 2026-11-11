@@ -111,6 +111,10 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 				return err
 			}
 			claim, err := selfClaimNodeTx(ctx, tx, t.team, request.Actor, request.Ref)
+			if errors.Is(err, errClaimCapacityUnavailable) {
+				result.Kind = runstate.Dispatch
+				return nil
+			}
 			if err != nil {
 				return err
 			}

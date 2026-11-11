@@ -183,7 +183,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		return UnitClaim{}, err
 	}
 	if _, err := queryClaimTx(ctx, tx, &q, query); err != nil {
-		if errors.Is(err, ErrNotFound) && err != errClaimCapacityUnavailable && demand.Target != nil {
+		if errors.Is(err, ErrNotFound) && !errors.Is(err, errClaimCapacityUnavailable) && demand.Target != nil {
 			err = op.claimRefusalTx(ctx, tx, demand, unit)
 		}
 		return UnitClaim{}, err
