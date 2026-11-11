@@ -16,7 +16,7 @@ export async function onboardingFixture(page: Page, options: {
   const mutations: string[] = [];
   const permissionRequests: { method: string; path: string; body: unknown }[] = [];
   const requestsWithoutTeam: string[] = [];
-  await page.context().addCookies([{ name: "__Host-sw_csrf", value: "fixture-csrf", url: "http://127.0.0.1", secure: true }]);
+  await page.context().addCookies([{ name: "__Host-sw_csrf", value: "fixture-csrf", domain: "127.0.0.1", path: "/", secure: true }]);
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const method = route.request().method();

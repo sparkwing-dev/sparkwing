@@ -59,7 +59,8 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
       "/runs?run=auth-run&tab=logs",
     );
 
-    const preauthCSRF = (await context.cookies(dashboard.origin)).find(
+    // Playwright's HTTP URL filter omits Secure loopback cookies that Chromium sends.
+    const preauthCSRF = (await context.cookies()).find(
       (cookie) => cookie.name === "__Host-sw_csrf",
     );
     expect(preauthCSRF).toMatchObject({ httpOnly: false, secure: true, sameSite: "Strict" });
@@ -74,7 +75,10 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
         next: "/runs",
         csrf_token: "forged-token",
       },
-      headers: { Origin: dashboard.origin },
+      headers: {
+        Origin: dashboard.origin,
+        Cookie: `__Host-sw_csrf=${preauthCSRF?.value}`,
+      },
     });
     expect(forgedLogin.status()).toBe(403);
     expect((await fixtureState(dashboard.control_origin)).sessions).toBe(0);
@@ -94,14 +98,19 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
       page.getByRole("button", { name: "Log out", exact: true }),
     ).toBeVisible();
 
-    const cookies = await context.cookies(dashboard.origin);
+    const cookies = await context.cookies();
     const session = cookies.find((cookie) => cookie.name === "__Host-sw_session");
     const csrf = cookies.find((cookie) => cookie.name === "__Host-sw_csrf");
     expect(session).toMatchObject({ httpOnly: true, secure: true, sameSite: "Lax" });
     expect(csrf).toMatchObject({ httpOnly: false, secure: true, sameSite: "Strict" });
     expect(csrf?.value).not.toBe(preauthCSRF?.value);
+    expect(cookies.some((cookie) => cookie.name === "sw_session" || cookie.name === "sw_csrf")).toBe(false);
 
-    const indexResponse = await page.request.get(`${dashboard.origin}/`);
+    // Playwright's request client lacks Chromium's Secure-cookie loopback exception.
+    const sessionCookies = `__Host-sw_session=${session?.value}; __Host-sw_csrf=${csrf?.value}`;
+    const indexResponse = await page.request.get(`${dashboard.origin}/`, {
+      headers: { Cookie: sessionCookies },
+    });
     const html = await indexResponse.text();
     expect(html).not.toContain(dashboard.token);
     expect(html).not.toContain("__SPARKWING_TOKEN__");
@@ -183,6 +192,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
         headers: {
           "Content-Type": "application/json",
           Origin: "https://attacker.example.com",
+          Cookie: sessionCookies,
           "X-CSRF-Token": csrf?.value ?? "missing",
         },
       },
@@ -196,6 +206,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
         headers: {
           "Content-Type": "application/json",
           Origin: dashboard.origin,
+          Cookie: sessionCookies,
           "X-CSRF-Token": "attacker-token",
         },
       },
@@ -230,7 +241,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     const forgedLogout = await page.request.post(`${dashboard.origin}/logout`, {
       failOnStatusCode: false,
       form: { csrf_token: "forged-token" },
-      headers: { Origin: dashboard.origin },
+      headers: { Origin: dashboard.origin, Cookie: sessionCookies },
     });
     expect(forgedLogout.status()).toBe(403);
     expect(
@@ -247,7 +258,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     await expect(
       page.getByRole("button", { name: "Sign in", exact: true }),
     ).toBeVisible();
-    const signedOutCookies = await context.cookies(dashboard.origin);
+    const signedOutCookies = await context.cookies();
     expect(
       signedOutCookies.filter((cookie) => cookie.name === "__Host-sw_session"),
     ).toEqual([]);
@@ -289,7 +300,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     await expect(again.locator('input[name="next"]')).toHaveValue(
       "/cluster?view=services&tab=nodes",
     );
-    const loginCSRF = (await context.cookies(dashboard.origin)).find(
+    const loginCSRF = (await context.cookies()).find(
       (cookie) => cookie.name === "__Host-sw_csrf",
     );
     await expect(again.locator('input[name="csrf_token"]')).toHaveValue(
@@ -315,7 +326,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     expect(revoked.status).toBe(204);
     await page.goto(`${dashboard.origin}/cluster`);
     await expect(page).toHaveURL(/\/login\?next=/);
-    const revokedCookies = await context.cookies(dashboard.origin);
+    const revokedCookies = await context.cookies();
     expect(
       revokedCookies.filter((cookie) => cookie.name === "__Host-sw_session"),
     ).toEqual([]);

@@ -97,7 +97,7 @@ async function openDevicePage(page: Page, baseURL: string | undefined) {
   await page
     .context()
     .addCookies([
-      { name: "__Host-sw_csrf", value: "session-csrf", url: baseURL, secure: true },
+      { name: "__Host-sw_csrf", value: "session-csrf", domain: new URL(baseURL ?? "http://127.0.0.1").hostname, path: "/", secure: true },
     ]);
   await page.goto("/device");
   await expect(
@@ -114,7 +114,7 @@ test("a typed code is approved and the terminal is told to finish", async ({
   await page
     .context()
     .addCookies([
-      { name: "__Host-sw_csrf", value: "session-csrf", url: baseURL, secure: true },
+      { name: "__Host-sw_csrf", value: "session-csrf", domain: new URL(baseURL ?? "http://127.0.0.1").hostname, path: "/", secure: true },
     ]);
 
   const field = page.getByLabel("Device code");
