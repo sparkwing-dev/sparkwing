@@ -159,6 +159,22 @@ Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.
 
+Queued Land stops admitting packages after its first observed test or build
+failure. Packages already admitted finish all their selected bodies, and the
+job reports every failure it observes before returning. Pending short and
+critical packages are listed by module and phase, with exact local commands
+to rerun all selected work. A successful run still executes every selected
+short and full critical test. The pre-push hook, explicit PrePush, Gate and
+ordinary Land keep their collect-all behavior.
+
+Queued package commands compile with `-p 1` and retain the job's runtime
+`GOMAXPROCS` allowance. The package coordinator bounds their combined command
+width by that allowance. It joins admitted commands and drains their output
+before cleaning the shared test home. Explicit run cancellation and deadlines
+still interrupt running work through the existing process-owner cleanup.
+Package admission can change command startup and cache costs; no speedup is
+claimed from the correctness proof.
+
 Affected tests for main use the remote OID Git advertises on hook stdin,
 independently of local `origin/main`. Main updates must fast-forward; a rewind
 or unverified remote base is refused with a fetch remedy. Creating

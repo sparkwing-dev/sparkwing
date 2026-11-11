@@ -54,7 +54,7 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 		return err
 	}
 	if !hook || len(updates) > 0 {
-		affectedPushTestsJobNode(plan).Needs(fast)
+		affectedPushTestsJobNode(plan, false).Needs(fast)
 	}
 	return nil
 }
@@ -141,10 +141,13 @@ func mainPushScope(ctx context.Context) ([]string, string, error) {
 // separate deadline from the fast checks' one-minute warning budget.
 const affectedPushTestsTimeout = 45 * time.Minute
 
-type affectedPushTestsJob struct{ sparkwing.Base }
+type affectedPushTestsJob struct {
+	sparkwing.Base
+	queued bool
+}
 
-func affectedPushTestsJobNode(plan *sparkwing.Plan) *sparkwing.JobNode {
-	return sparkwing.Job(plan, "affected-tests", &affectedPushTestsJob{}).
+func affectedPushTestsJobNode(plan *sparkwing.Plan, queued bool) *sparkwing.JobNode {
+	return sparkwing.Job(plan, "affected-tests", &affectedPushTestsJob{queued: queued}).
 		Timeout(affectedPushTestsTimeout).
 		NoProgressTimeout(affectedPushTestsTimeout).
 		Cores(float64(goStepParallelism(affectedPushHost())))
@@ -156,17 +159,17 @@ func affectedPushHost() hostShape {
 	return hostShape{cpus: runtime.NumCPU()}
 }
 
-func (*affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "test", runAffectedPushTests)
+func (j *affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "test", func(ctx context.Context) error { return runAffectedPushTests(ctx, j.queued) })
 	return nil, nil
 }
 
-func runAffectedPushTests(ctx context.Context) error {
+func runAffectedPushTests(ctx context.Context, queued bool) error {
 	files, scope, err := mainPushScope(ctx)
 	if err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, scope, affectedPushHost())
+	return runAffectedTestFiles(ctx, files, scope, affectedPushHost(), queued)
 }
 
 // Work declares the fast push-boundary steps.

@@ -109,12 +109,12 @@ func runAffectedTest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, scope, currentHost())
+	return runAffectedTestFiles(ctx, files, scope, currentHost(), false)
 }
 
 // perf: land passes the files a merge of origin/main changed, so a clean merge
 // re-runs only the packages main touched instead of the whole gate.
-func runAffectedTestFiles(ctx context.Context, files []string, scope string, host hostShape) error {
+func runAffectedTestFiles(ctx context.Context, files []string, scope string, host hostShape, queued bool) error {
 	critical, err := criticalTests(ctx)
 	if err != nil {
 		return err
@@ -159,8 +159,21 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string, hos
 	// safety: a nonempty owned flag overrides saved GOFLAGS too, while keeping
 	// the Go configuration that supplies private module and proxy settings.
 	var timings goTestTimings
-	defer timings.report(ctx, time.Now())
+	var cutoff string
+	start := time.Now()
+	defer func() {
+		// safety: a step summary replaces its previous value in the store.
+		summary := strings.TrimSpace(cutoff + "\n\n" + timings.summary(time.Since(start)))
+		if summary != "" {
+			sparkwing.Summary(ctx, summary)
+		}
+	}()
 	return withStableProductTestHome("gate-test", func(home string) error {
+		if queued {
+			var err error
+			cutoff, err = runQueuedTestPackages(ctx, plans, host, home, &timings)
+			return err
+		}
 		var failures []string
 		for _, p := range plans {
 			for _, command := range p.commands(host) {
@@ -282,17 +295,21 @@ func (p affectedTestPlan) commands(h hostShape) []string {
 		out = append(out, boundedGoCommand(h, "test", short+quoteAll(p.packages)))
 	}
 	if len(p.critical) > 0 {
-		pkgs := mapKeys(p.critical)
-		var names []string
-		for _, pkg := range pkgs {
-			names = append(names, p.critical[pkg]...)
-		}
-		sort.Strings(names)
-		names = dedupe(names)
-		run := shellQuote("^(" + strings.Join(names, "|") + ")$")
-		out = append(out, boundedGoCommand(h, "test", timeout+"-run "+run+" "+quoteAll(pkgs)))
+		out = append(out, boundedGoCommand(h, "test", criticalTestArgs(p.critical, mapKeys(p.critical))))
 	}
 	return out
+}
+
+func criticalTestArgs(critical map[string][]string, packages []string) string {
+	pkgs := mapKeys(critical)
+	var names []string
+	for _, pkg := range pkgs {
+		names = append(names, critical[pkg]...)
+	}
+	sort.Strings(names)
+	names = dedupe(names)
+	run := shellQuote("^(" + strings.Join(names, "|") + ")$")
+	return "-timeout " + productGoTestTimeout + " -run " + run + " " + quoteAll(packages)
 }
 
 func (p affectedTestPlan) describe() string {
