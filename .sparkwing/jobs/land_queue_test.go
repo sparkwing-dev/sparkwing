@@ -229,7 +229,8 @@ func TestLandQueueMergesMainBeforeCapturingGatedHead(t *testing.T) {
 }
 
 func TestLandQueueRefusesChangedCheckoutAndNeverMergesAtPush(t *testing.T) {
-	for _, change := range []string{"head", "branch", "dirty", "main moved"} {
+	const push = "push --porcelain --no-verify --force-with-lease=refs/heads/main:ba5e0000 origin c0ffee00:refs/heads/main"
+	for _, change := range []string{"head", "branch", "dirty", "tree", "main moved"} {
 		t.Run(change, func(t *testing.T) {
 			g := landableGit()
 			g.answers["rev-parse c0ffee00^{tree}"] = "7ee00000"
@@ -240,12 +241,17 @@ func TestLandQueueRefusesChangedCheckoutAndNeverMergesAtPush(t *testing.T) {
 				g.answers["symbolic-ref --short -q HEAD"] = "another-branch"
 			case "dirty":
 				g.answers["status --porcelain --untracked-files=normal"] = " M file"
+			case "tree":
+				g.answers["rev-parse c0ffee00^{tree}"] = "another-tree"
 			case "main moved":
-				g.fail["push --no-verify origin c0ffee00:refs/heads/main"] = errors.New("main moved")
+				g.fail[push] = errors.New("main moved")
 			}
 			_, err := pushQueuedLanding(t.Context(), g.run, "/repo", acceptedHead())
 			if err == nil {
 				t.Fatal("changed checkout was pushed")
+			}
+			if change == "main moved" && !slices.Contains(g.calls, push) {
+				t.Fatalf("main movement did not reach the atomic push: %v", g.calls)
 			}
 			for _, call := range g.calls {
 				if strings.HasPrefix(call, "merge ") || change != "main moved" && strings.HasPrefix(call, "push ") {

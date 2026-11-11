@@ -33,13 +33,13 @@ func (Land) ShortHelp() string {
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
 		"For ordinary Land, fetch origin/main and pass --sw-pipeline-ref <fetched-main-SHA> so the candidate does not define its own gate. " +
-		"All lands share one serial run slot. Extract bin/queue-land.sh from freshly fetched origin/main and run that copy against the candidate with --brief 'Short intent' (see DELIVERY.md). The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, run policy and fast pre-push/review against the merged checkout, then the shared affected short and critical Go tests, and push only the unchanged checked commit. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
+		"All lands share one serial run slot. Extract bin/queue-land.sh from freshly fetched origin/main and run that copy against the candidate with --brief 'Short intent' (see DELIVERY.md). The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, run policy and fast pre-push/review against the merged checkout, then the shared affected short and critical Go tests, and push only the unchanged checked commit. The queued push proves fast-forward ancestry, atomically leases the planned main SHA, and refuses already-at-target results. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip). " +
 		"Once policy passes, the rest of the gate (the same jobs as `sparkwing run gate`) starts while review continues. " +
 		"The review always runs, whatever the change's size or paths. When both pass and the review record's tree is HEAD's tree with result pass, " +
-		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
+		"the land job re-checks that HEAD did not move. Ordinary Land fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
 		"with no force, adding --no-verify after the gate and any merge-delta tests pass, since those checks cover the pushed tree; " +
 		"When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
 		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure and runs the affected tests over the files " +

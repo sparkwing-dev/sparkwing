@@ -81,6 +81,11 @@ compare freshly fetched main to `--queued-main` before merging and again when
 capturing the gated HEAD, then refresh main again before the queued push. If main
 moved while the entry waited or the checks ran, the run refuses
 and names the submission script. Enqueue again to compile the new gate.
+The remote update uses `--force-with-lease=refs/heads/main:<planned-base-SHA>`
+as an atomic compare-and-swap. Before sending it, Land proves that the planned
+base is an ancestor of the gated commit, so the update can only fast-forward
+from that exact base. An already-at-target/no-op result is a refusal, because it
+does not confirm an update from the planned base.
 It never falls back to the branch's definition. Use `--foreground` on the script
 to wait in the terminal, or `--dry-run` to preview without a push.
 
