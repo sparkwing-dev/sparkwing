@@ -239,7 +239,7 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 		return nil, err
 	}
 	if manifest.Main == "" {
-		return nil, errors.New("TypeScript package.json requires a main entry")
+		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "TypeScript package.json requires a main entry", Hint: `Set "main": "index.ts" in ` + filepath.Join(dir, "package.json") + " (use the existing pipeline entry file), then retry"}
 	}
 	// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
 	body, err = installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")

@@ -237,7 +237,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if outputErr != nil {
 		outputErr = fmt.Errorf("run %s is %s but its completion record could not be written: %w", response.RunID, completion.Outcome, outputErr)
 	}
-	return errors.Join(statusExitCode(completion.Outcome), outputErr)
+	return errors.Join(runCompletionError(ctx, runtime.controller, response.RunID, completion.Outcome), outputErr)
 }
 
 func localRunNeedsCLIHost(flags runFlags, publish string) bool {

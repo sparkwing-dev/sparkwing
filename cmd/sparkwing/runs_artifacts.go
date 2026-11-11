@@ -16,11 +16,13 @@ import (
 	"syscall"
 	"unicode"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func validateRunArtifacts(inv clisurface.Invocation) error {
@@ -92,6 +94,16 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 			}
 		}()
 		entry, readErr := reader.DownloadArtifact(ctx, run, job, path, file)
+		var failure *apierr.Error
+		if errors.Is(readErr, blob.ErrIntegrity) {
+			failure = &apierr.Error{Code: hosterr.IntegrityFailure, Message: "object integrity mismatch"}
+		}
+		if failure != nil || errors.As(readErr, &failure) && failure.Code == apierr.Conflict {
+			diagnostic := *failure
+			diagnostic.Message = fmt.Sprintf("artifact %q from job %q in run %q: %s", path, job, run, failure.Message)
+			diagnostic.Hint = "Ask the controller operator to restore the stored artifact from a trusted copy, then repeat this download"
+			readErr = &diagnostic
+		}
 		if err := errors.Join(readErr, file.Close(), ctx.Err()); err != nil {
 			return err
 		}

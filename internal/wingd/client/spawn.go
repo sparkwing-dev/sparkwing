@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const daemonLogTailLines = 8
@@ -113,6 +115,9 @@ func watchHostStart(cmd *exec.Cmd, bin, home string) error {
 
 func hostExitedEarly(bin, home string, exit *exec.ExitError) error {
 	if tail := daemonLogTail(home); tail != "" {
+		if failure := hosterr.LastDiagnostic(tail); exit.ExitCode() > 0 && failure != nil && failure.Code == apierr.BadRequest {
+			return fmt.Errorf("%w: %w", errDaemonHostFailed, failure)
+		}
 		path, _ := wingd.LogPath(home)
 		return fmt.Errorf("%w: %s %s (exit %d); %s:\n%s",
 			errDaemonHostFailed, bin, exit.String(), exit.ExitCode(), path, tail)

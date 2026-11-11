@@ -2,12 +2,15 @@ package blob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // TransferClient sends only the signed headers to the one-object URL. Its
@@ -41,8 +44,10 @@ func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, b
 		return nil, safeTransferError(err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_, readErr := io.Copy(io.Discard, privateTransferBody{response.Body})
-		if err := errors.Join(readErr, safeTransferError(response.Body.Close())); err != nil {
+		body := privateTransferBody{response.Body}
+		payload, readErr := io.ReadAll(io.LimitReader(body, 4096))
+		_, drainErr := io.Copy(io.Discard, body)
+		if err := errors.Join(readErr, drainErr, body.Close()); err != nil {
 			return nil, err
 		}
 		switch response.StatusCode {
@@ -50,6 +55,16 @@ func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, b
 			return nil, ErrNotFound
 		case http.StatusPreconditionFailed:
 			return nil, ErrPreconditionFailed
+		case http.StatusConflict:
+			failure := &apierr.Error{Code: apierr.Conflict, Message: "signed blob transfer: HTTP 409: object conflict"}
+			var envelope struct {
+				Error *apierr.Error `json:"error"`
+			}
+			// safety: storage responses can contain credentials; retain only this fixed public reason.
+			if json.Unmarshal(payload, &envelope) == nil && envelope.Error != nil && envelope.Error.Code == apierr.Conflict && envelope.Error.Message == "object integrity mismatch" {
+				failure.Message = "object integrity mismatch"
+			}
+			return nil, failure
 		default:
 			if response.StatusCode == http.StatusForbidden && method == http.MethodGet {
 				return nil, errors.New("signed blob transfer: HTTP 403: download links may expire; re-run the command to request a fresh link")

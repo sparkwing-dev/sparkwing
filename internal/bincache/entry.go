@@ -16,6 +16,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -116,7 +119,12 @@ func (l *Lease) Install(dest string) (_ VerifiedBinary, err error) {
 		return VerifiedBinary{}, errors.Join(err, os.Remove(dest))
 	}
 	if !bytes.Equal(bytes.TrimSpace(recorded), []byte(hex.EncodeToString(hash.Sum(nil)))) {
-		return VerifiedBinary{}, errors.Join(errors.New("cached pipeline binary differs from its publication record"), os.Remove(dest))
+		refusal := &apierr.Error{
+			Code:    hosterr.IntegrityFailure,
+			Message: fmt.Sprintf("compiled pipeline cache entry %q at %s differs from its publication record", l.entry.key, l.CachedPath()),
+			Hint:    "Run `sparkwing cache prune --all-entries` to remove inactive compiled pipeline entries, then repeat the command to rebuild from source",
+		}
+		return VerifiedBinary{}, errors.Join(refusal, os.Remove(dest))
 	}
 	return VerifiedBinary{path: dest}, nil
 }

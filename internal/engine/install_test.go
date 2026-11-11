@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const installerFixtureSource = `package main
@@ -32,6 +33,7 @@ func main(){
  if err:=os.WriteFile(os.Getenv("INSTALL_MARKER"),[]byte(req.SDK),0600);err!=nil { os.Exit(23) }
  if os.Getenv("INSTALL_FAILURE")!="" { fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));fmt.Fprintln(os.Stderr,strings.Repeat("a",(1<<20)-5)+os.Getenv("REGISTRY_NOTE"));os.Exit(24) }
  if os.Getenv("INSTALL_ENVELOPE")!="" { fmt.Fprintln(os.Stderr,"jobs/broken.go:6:9: undefined: missing");fmt.Fprintln(os.Stderr,"{\"error\":{\"code\":\"internal\",\"message\":\"compile .sparkwing/: exit status 1\",\"hint\":\"fix the error above\"}}");os.Exit(1) }
+ if os.Getenv("INSTALL_REFUSAL")!="" { fmt.Fprintln(os.Stderr,"{\"error\":{\"code\":\"bad_request\",\"message\":\"TypeScript package.json requires a main entry\",\"hint\":\"set main to the pipeline entry file\"}}");os.Exit(1) }
  if reply:=os.Getenv("INSTALL_REPLY");reply!="" { fmt.Print(reply);return }
  dir:=filepath.Join(req.Directory,req.PipelineDir)
  path:=filepath.Join(dir,"pipeline")
@@ -115,6 +117,13 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 			_, err = resolved.InstallSDK(t.Context(), bad)
 			if err == nil || strings.Contains(err.Error(), `{"error"`) || !strings.HasSuffix(err.Error(), "undefined: missing\ncompile .sparkwing/: exit status 1\nhint: fix the error above") {
 				t.Fatalf("installer failure kept its JSON envelope instead of a plain line: %v", err)
+			}
+			bad = request
+			bad.Environment = append(append([]string{}, request.Environment...), "INSTALL_REFUSAL=1")
+			_, err = resolved.InstallSDK(t.Context(), bad)
+			var refusal *apierr.Error
+			if !errors.As(err, &refusal) || refusal.Code != apierr.BadRequest || refusal.Message != "TypeScript package.json requires a main entry" || refusal.Hint != "set main to the pipeline entry file" {
+				t.Fatalf("installer configuration refusal lost its class or repair: %v", err)
 			}
 			if err := os.Remove(marker); err != nil {
 				t.Fatal(err)

@@ -42,7 +42,7 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 			if setting.CeilingFrom != nil {
 				failure.Code = hosterr.LimitExceeded
 			}
-		case errors.As(err, &field), errors.Is(err, configguard.ErrOutsideSandboxHome):
+		case errors.As(err, &field), errors.Is(err, configguard.ErrOutsideSandboxHome), errors.Is(err, secrets.ErrKeyRefused):
 			failure.Code = apierr.BadRequest
 		case errors.Is(err, docs.ErrNotFound):
 			failure.Code = apierr.NotFound

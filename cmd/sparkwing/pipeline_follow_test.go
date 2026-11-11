@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestTriggeredOutcomeUsesOnePublicRunDetail(t *testing.T) {
@@ -113,7 +114,8 @@ func TestTriggeredOutcomePrintsSecretRefusalOnce(t *testing.T) {
 	reader := &statusReader{details: []controllerwire.RunDetail{{ID: "run-outcome", Status: "failed", Notices: []engineid.Notice{{Kind: engineid.NoticeSecretPreflightRefused, Reason: repair}}}}}
 	var out bytes.Buffer
 	status, err := triggeredRunOutcome(t.Context(), reader, "run-outcome", &out)
-	if err != nil || status != "failed" {
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.BadRequest || status != "failed" {
 		t.Fatalf("status=%q error=%v", status, err)
 	}
 	if strings.Count(out.String(), repair) != 1 {

@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -600,6 +601,10 @@ func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
 	wg.Wait()
 	for i, path := range files {
 		if errs[i] != nil {
+			if errors.Is(errs[i], fs.ErrPermission) {
+				refusal := &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("cannot read pipeline cache input %q", path), Hint: "Restore read access for the current user, then repeat the command"}
+				return stats, fmt.Errorf("%w: %w", refusal, errs[i])
+			}
 			return stats, errs[i]
 		}
 		rel, _ := filepath.Rel(dir, path)

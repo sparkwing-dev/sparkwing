@@ -3,6 +3,7 @@ package sdkinstall
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +13,34 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+func TestTypeScriptMissingMainNamesManifestRepair(t *testing.T) {
+	installNativeToolFixture(t)
+	dir := t.TempDir()
+	writeInput(t, dir, "package.json", []byte(`{"dependencies":{"@sparkwing/sdk":"0.20.0"}}`))
+	writeInput(t, dir, "package-lock.json", []byte(`{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"0.20.0"}},"node_modules/@sparkwing/sdk":{"version":"0.20.0"}}}`))
+	request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.TypeScriptSDK})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output, diagnostics bytes.Buffer
+	err = Run(t.Context(), bytes.NewReader(request), &output, &diagnostics)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.BadRequest || !strings.Contains(refusal.Message, "package.json") || !strings.Contains(refusal.Hint, `"main": "index.ts"`) || output.Len() != 0 {
+		t.Fatalf("missing main did not name the manifest repair: %v, output=%s", err, &output)
+	}
+	writeInput(t, dir, "package.json", []byte(`{"main":"index.ts","dependencies":{"@sparkwing/sdk":"0.20.0"}}`))
+	writeInput(t, dir, "index.ts", []byte("export {}"))
+	if err := Run(t.Context(), bytes.NewReader(request), &output, &diagnostics); err != nil {
+		t.Fatalf("applying the manifest repair failed: %v", err)
+	}
+	var installed engine.SDKCommand
+	if err := json.Unmarshal(output.Bytes(), &installed); err != nil || len(installed.Command) != 2 || installed.Command[1] != filepath.Join(dir, "index.ts") {
+		t.Fatalf("repaired entry is not executable: %+v, %v", installed, err)
+	}
+}
 
 const nativeInstallFixtureSource = `package main
 import("fmt";"os";"path/filepath";"strings")

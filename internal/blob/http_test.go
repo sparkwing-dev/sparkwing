@@ -8,7 +8,40 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+func TestSignedTransferIntegrityConflictRetainsSafeReason(t *testing.T) {
+	client := TransferClient{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"conflict","message":"object integrity mismatch","details":{"url":"https://storage.example/?signature=private"}}}`))}, nil
+	})}
+	_, err := client.Transfer(t.Context(), SignedTransfer{URL: "https://storage.example/object?signature=private"}, nil)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.Conflict || failure.Message != "object integrity mismatch" {
+		t.Fatalf("integrity conflict = %v", err)
+	}
+	if failure.Details != nil || strings.Contains(fmt.Sprintf("%+v", err), "private") {
+		t.Fatal("transfer diagnostic retained private response fields")
+	}
+}
+
+func TestSignedTransferConflictDiscardsUntrustedStorageText(t *testing.T) {
+	for _, response := range []string{
+		`{"error":{"code":"conflict","message":"private signed URL","hint":"private repair","details":{"signature":"private"}}}`,
+		`{"error":{"code":"internal","message":"object integrity mismatch"}}`,
+		`<Error><Message>private signed URL</Message></Error>`,
+	} {
+		client := TransferClient{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(response))}, nil
+		})}
+		_, err := client.Transfer(t.Context(), SignedTransfer{URL: "https://storage.example/object?signature=private"}, nil)
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.Conflict || failure.Message != "signed blob transfer: HTTP 409: object conflict" || failure.Hint != "" || failure.Details != nil {
+			t.Fatalf("storage text escaped the public conflict: %v", err)
+		}
+	}
+}
 
 type roundTrip func(*http.Request) (*http.Response, error)
 

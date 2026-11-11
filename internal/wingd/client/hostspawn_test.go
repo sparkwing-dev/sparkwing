@@ -19,7 +19,31 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+func TestDaemonStartupPreservesConfigurationRefusal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a Unix shell executable")
+	}
+	home := shortHome(t)
+	bin := filepath.Join(t.TempDir(), "sparkwing")
+	const repair = "restore the existing key or set SPARKWING_SECRETS_KEY_FILE to a private key file inside SPARKWING_HOME"
+	script := "#!/bin/sh\nprintf '%s\\n' '{\"error\":{\"code\":\"bad_request\",\"message\":\"local key is unavailable\",\"hint\":\"" + repair + "\"}}' >&2\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := EnsureDaemon(t.Context(), Options{Home: home, Spawn: func(home, version string) error {
+		return spawnDetached(bin, home, version)
+	}, NoTakeover: true, DialTimeout: 200 * time.Millisecond, Backoff: 10 * time.Millisecond})
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.BadRequest || failure.Message != "local key is unavailable" || failure.Hint != repair {
+		t.Fatalf("startup configuration refusal lost its class or repair: %v", err)
+	}
+	if !errors.Is(err, errDaemonHostFailed) || strings.Contains(err.Error(), `{"error"`) {
+		t.Fatalf("startup lost its failure cause or nested a JSON envelope: %v", err)
+	}
+}
 
 func TestSpawnUnstartableHostNamesTheExecutable(t *testing.T) {
 	home := shortHome(t)

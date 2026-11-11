@@ -103,6 +103,11 @@ func handoffHereRun(ctx context.Context, options client.EngineOptions, response 
 	if err != nil {
 		return err
 	}
+	if completion.Outcome == "failed" {
+		if reader, err := client.NewRunReader(options); err == nil {
+			return runCompletionError(ctx, reader, response.RunID, completion.Outcome)
+		}
+	}
 	return statusExitCode(completion.Outcome)
 }
 
@@ -247,5 +252,5 @@ func runHereResumeCommand(ctx context.Context, flags triggerFlags, out io.Writer
 	} else {
 		_, err = fmt.Fprintf(out, "run %s: %s\n", result.RunID, result.Outcome)
 	}
-	return errors.Join(statusExitCode(completion.Outcome), err)
+	return errors.Join(runCompletionError(ctx, controller, detail.ID, completion.Outcome), err)
 }

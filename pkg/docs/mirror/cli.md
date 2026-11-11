@@ -42,6 +42,26 @@ Cache JSON reports expose their fields directly through `.entries` and similar
 fields. Cache failures return a nonzero status with no stdout record. Plain cache output is the cache directory for `cache info`,
 the key for `cache explain`, and the reclaimed entry count for `cache prune`.
 
+### Refusals and repair
+
+JSON failures use an `error` object with `code`, `message`, and an optional
+`hint`. Plain and pretty output print the message and hint on stderr. These
+refusals exit nonzero and include the repair in the final diagnostic:
+
+| Refusal | Code | Repair |
+|---|---|---|
+| Missing required secret | `bad_request` | Follow the scoped `secrets set` command in the message, then submit a new run. `runs status` retains the same repair for members. |
+| Local-key creation would leave the selected home, or a sealed store has no key | `bad_request` | Restore the existing key, or set `SPARKWING_SECRETS_KEY_FILE` to a private key file inside the selected `SPARKWING_HOME`. A new key cannot open values sealed under an old key. |
+| TypeScript manifest has no `main` | `bad_request` | Set `"main": "index.ts"` in the named `package.json`, using the actual pipeline entry file. |
+| Pipeline cache input is unreadable | `bad_request` | Restore read access for the current user to the named input, then retry. |
+| Integer argument has the wrong type | `invalid_args` | Use a base-10 whole number with the named flag, such as `--n=42`. Supplied values may be masked. |
+| Compiled pipeline cache entry fails verification | `integrity_failure` | Run `sparkwing cache prune --all-entries`, then repeat the original command to rebuild from source. Entries in use are skipped. |
+| Downloaded artifact conflicts with its stored metadata | `conflict` | The diagnostic names the run, job and artifact. Ask the controller operator to restore that stored artifact from a trusted copy, then repeat the download. |
+
+Artifact downloads also verify size and digest after transfer. A mismatch
+returns `integrity_failure` and publishes no destination file. Signed URLs
+and unrecognized storage response text stay out of the diagnostic.
+
 ## sparkwing run
 
 `sparkwing run <pipeline> [flags...]`

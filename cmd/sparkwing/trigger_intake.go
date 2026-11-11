@@ -113,6 +113,9 @@ func followTriggeredRun(ctx context.Context, run string, follow func(context.Con
 	}
 	outcome, err := follow(ctx, run)
 	if err := errors.Join(err, ctx.Err()); err != nil {
+		if isTerminalRunStatus(outcome) {
+			return outcome, observationError(err)
+		}
 		return "", observationError(err)
 	}
 	if !isTerminalRunStatus(outcome) {
