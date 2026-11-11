@@ -74,6 +74,7 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 		}
 		return &unit, nil
 	}
+	// safety: prefer a matching runner's actionable provenance refusal over generic placement causes.
 	if slices.ContainsFunc(standings, func(e eligibility) bool {
 		return e.failed == stepTrust && e.refused != nil && e.refused.Error() == repositoryScopedRunnerReason
 	}) {

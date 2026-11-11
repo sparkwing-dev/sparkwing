@@ -48,7 +48,7 @@ func unclaimedNotice(view store.RunView) *engineid.Notice {
 		}
 	}
 	if run.Request.Provenance.ProvenRepository() == "" {
-		remedy += "; repository-scoped runners cannot run working-tree or other unproven code; commit and push, then start a new run through the GitHub App to use those runners"
+		remedy += "; repository-scoped runners cannot run working-tree code; commit and push, then rerun through the GitHub App"
 	}
 	if unit.NoEligible != "" {
 		return &engineid.Notice{Kind: engineid.NoticeNoEligibleRunner, Reason: unit.NoEligible + remedy}
