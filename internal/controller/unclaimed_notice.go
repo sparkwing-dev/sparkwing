@@ -40,8 +40,15 @@ func unclaimedNotice(view store.RunView) *engineid.Notice {
 			labels[i] = "--label '" + strings.ReplaceAll(label, "'", "'\\''") + "'"
 		}
 		if len(labels) > 0 {
-			remedy += "; ask a team administrator to add a matching runner with `sparkwing runners add --runner NAME --profile PROFILE " + strings.Join(labels, " ") + " --repos REPOSITORY --session-stdin`"
+			if run.Request.Provenance.ProvenRepository() != "" {
+				remedy += "; ask a team administrator to add a matching runner with `sparkwing runners add --runner NAME --profile PROFILE " + strings.Join(labels, " ") + " --repos REPOSITORY --session-stdin`"
+			} else {
+				remedy += "; for the submitting account's own manual runs, enroll a matching personal runner with `sparkwing runners add --runner NAME --profile PROFILE --personal " + strings.Join(labels, " ") + " --session-stdin`"
+			}
 		}
+	}
+	if run.Request.Provenance.ProvenRepository() == "" {
+		remedy += "; repository-scoped runners cannot run working-tree code; commit and push, then rerun through the GitHub App"
 	}
 	if unit.NoEligible != "" {
 		return &engineid.Notice{Kind: engineid.NoticeNoEligibleRunner, Reason: unit.NoEligible + remedy}
