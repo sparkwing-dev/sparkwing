@@ -735,6 +735,12 @@ refusal does not revoke an already-issued weak credential. The generator only
 repairs fresh stores; an initialized store will reject a replacement seed.
 [Rotate or revoke the weak credential and remove its mounted file before
 upgrading](#weak-bootstrap-credential-recovery).
+For a fresh store, generate the file in a private directory:
+
+```sh
+(umask 077 && printf 'swk_%s' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\\n')" > bootstrap-admin-token)
+```
+
 Startup passes a valid seed to the once-only bootstrap
 transaction before serving requests.
 The store keeps its digest and grants `operator.limits`, `operator.object_store`
