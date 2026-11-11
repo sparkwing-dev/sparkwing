@@ -467,3 +467,34 @@ func TestNativeOwnerEvaluationHasProductionBinder(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNativeServicesNamesRefusedSubmittedVariable(t *testing.T) {
+	for _, name := range []string{"APPDATA", "PSModulePath"} {
+		t.Run(name, func(t *testing.T) {
+			cfg, state := nativeConfigFixture(t)
+			const value = "private-submitted-value-3483"
+			cfg.Source.Base = procenv.Base{}
+			cfg.SubmittedEnv = map[string][]byte{name: []byte(value)}
+			var err error
+			state.snapshot.Run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{name: value}, strings.Repeat("5", 64))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = NewNativeServices(t.Context(), cfg)
+			if err == nil {
+				t.Fatal("runner accepted refused submitted environment")
+			}
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("refusal omits name: %v", err)
+			}
+			if strings.Contains(err.Error(), value) {
+				t.Fatal("refusal exposes value")
+			}
+			for _, want := range []string{"job environment", "runner host", "run.submit_env_allow"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal lacks repair %q: %v", want, err)
+				}
+			}
+		})
+	}
+}

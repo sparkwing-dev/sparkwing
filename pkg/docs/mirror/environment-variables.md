@@ -147,6 +147,17 @@ process starts, so logs show `***` in their place. A `GOPROXY` entry or
 access token there. Cloud and shared runners drop
 these settings unless the operator's allow list names them.
 
+When a CLI submission explicitly lists a reserved name in
+`run.submit_env_allow`, it warns on stderr with the name and repair, even if
+that variable is unset. Wildcard patterns still filter silently. Controller
+and runner refusals also name the variable; none of these diagnostics print
+its value. For tool settings such as `APPDATA` or `PSModulePath`, set the
+variable in the pipeline's job environment instead, or ask the runner operator
+to set it on the runner host and include its name in the operator's
+`run.submit_env_allow`. Adding it to the requester's allow-list cannot override
+this restriction. Engine-controlled names remain engine-controlled, and
+credential-shaped names must use declared pipeline secrets.
+
 A run can submit only its own names through `run.submit_env_allow`. Intake
 refuses, and the CLI does not capture, any name the registry above owns other
 than `AWS_REGION`, `AWS_DEFAULT_REGION`, `NO_COLOR`, `CLICOLOR_FORCE` and

@@ -42,7 +42,7 @@ func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx,
 		return authorityError(hosterr.SpecDrift, err.Error())
 	}
 	if err := procenv.CheckSubmitted(values, secrets.NewMasker()); err != nil {
-		return authorityError(apierr.BadRequest, "invalid submitted environment")
+		return authorityError(apierr.BadRequest, err.Error())
 	}
 	assignments := make([]string, 0, len(values))
 	for name, value := range values {

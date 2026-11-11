@@ -2,6 +2,7 @@ package procenv
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -34,6 +35,31 @@ func Submit(environment, allowed []string, masker *secrets.Masker) (map[string][
 		values[name] = []byte(value)
 	}
 	return values, nil
+}
+
+// SubmitWarnings exposes literal refusals that filtering would otherwise hide.
+func SubmitWarnings(allowed []string) []string {
+	var warnings []string
+	seen := map[string]bool{}
+	for _, name := range allowed {
+		if !submitEnvName.MatchString(name) || submittable(name) || seen[envKey(name)] {
+			continue
+		}
+		seen[envKey(name)] = true
+		warnings = append(warnings, refusedSubmittedName(name).Error())
+	}
+	return warnings
+}
+
+func refusedSubmittedName(name string) error {
+	row, _ := Lookup(name)
+	repair := "set it in the pipeline's job environment, or ask the runner operator to set it on the runner host and include it in the operator's run.submit_env_allow"
+	if row.Owner == "engine" {
+		repair = "remove it from run.submit_env_allow; this name is controlled by Sparkwing"
+	} else if credentialName(row, name) {
+		repair = "remove it from run.submit_env_allow and declare it as a pipeline secret instead"
+	}
+	return fmt.Errorf("cannot submit environment variable %q: reserved for the executing host; %s", name, repair)
 }
 
 // safety: a submitted value comes from the requester, so it may not reconfigure the executing
@@ -98,8 +124,17 @@ func (a SubmitAccept) accepts(name string) bool { return a.every || submitAllowe
 func CheckSubmitted(values map[string][]byte, masker *secrets.Masker) error {
 	seen := map[string]bool{}
 	for name, value := range values {
-		if !submittable(name) || strings.ContainsRune(string(value), 0) || seen[envKey(name)] {
-			return errors.New("submitted environment contains a reserved or invalid variable")
+		if !submitEnvName.MatchString(name) {
+			return errors.New("submitted environment contains an invalid variable name; use letters, digits and underscores, starting with a letter or underscore")
+		}
+		if !submittable(name) {
+			return refusedSubmittedName(name)
+		}
+		if strings.ContainsRune(string(value), 0) {
+			return fmt.Errorf("submitted environment variable %q contains NUL; remove NUL bytes from its value", name)
+		}
+		if seen[envKey(name)] {
+			return fmt.Errorf("submitted environment contains duplicate variable %q; submit each name once", name)
 		}
 		seen[envKey(name)] = true
 		if err := registerMasks(masker, name, string(value), true); err != nil {
