@@ -88,6 +88,18 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 	for _, accepted := range []bool{false, true} {
 		t.Run(strconv.FormatBool(accepted), func(t *testing.T) {
 			s, options, _, original := retryActionFixture(t, "private-retry-value", accepted)
+			type storedSeals struct {
+				request, spec, plan             []byte
+				requestHash, specHash, planHash string
+			}
+			readSeals := func(id string) storedSeals {
+				var sealed storedSeals
+				if err := teststore.SQL(t, s.store).QueryRow(`SELECT request_json,request_hash,spec_json,spec_hash,plan_json,plan_hash FROM runs WHERE team='a' AND id=?`, id).Scan(&sealed.request, &sealed.requestHash, &sealed.spec, &sealed.specHash, &sealed.plan, &sealed.planHash); err != nil {
+					t.Fatal(err)
+				}
+				return sealed
+			}
+			originalSeals := readSeals(original.ID)
 			wantInputs := runspec.Display{
 				ProofEligible: true,
 				TrustClass:    runspec.TrustAsserted,
@@ -109,6 +121,7 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 			selector, parent := "1", "run"
 			for attempt := range 3 {
 				input := controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "retry-" + strconv.Itoa(attempt)}
+				wantInputs.Lineage = runspec.Lineage{RetryOf: parent, Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "member"}}}
 				result, err := control.Retry(t.Context(), selector, input)
 				if err != nil {
 					t.Fatal(err)
@@ -126,6 +139,11 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 				if err != nil || row.State != runstate.RunPending || row.StartedAt != nil || row.FinishedAt != nil || row.Lineage.RetryOf != parent || !row.Lineage.Retrier.Set || row.Lineage.Retrier.Value.ID != "member" || !reflect.DeepEqual(row.Request, original.Request) || (row.Spec == nil) != (original.Spec == nil) || accepted && (!reflect.DeepEqual(row.Spec.Request, row.Request) || row.Spec.PlanHash != original.Spec.PlanHash) || !bytes.Equal(row.Plan, original.Plan) {
 					t.Fatalf("retry did not retain execution inputs and independent lineage: %+v %v", row, err)
 				}
+				for _, id := range []string{original.ID, result.RunID} {
+					if !reflect.DeepEqual(readSeals(id), originalSeals) {
+						t.Fatal("retry changed persisted source seal bytes or hashes")
+					}
+				}
 				if accepted {
 					if !reflect.DeepEqual(row.Spec, original.Spec) {
 						t.Fatal("retry changed accepted execution inputs")
@@ -134,6 +152,11 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 				replay, err := control.Retry(t.Context(), selector, input)
 				if err != nil || !replay.Replayed || replay.RunID != result.RunID || replay.Number != result.Number || !reflect.DeepEqual(replay.Inputs, result.Inputs) {
 					t.Fatalf("retry replay: %+v %v", replay, err)
+				}
+				for _, id := range []string{original.ID, result.RunID} {
+					if !reflect.DeepEqual(readSeals(id), originalSeals) {
+						t.Fatal("retry replay changed persisted source seal bytes or hashes")
+					}
 				}
 				var unitKind, unitState string
 				if err := teststore.SQL(t, s.store).QueryRow(`SELECT unit_kind,status FROM triggers WHERE team='a' AND id=?`, row.ID).Scan(&unitKind, &unitState); err != nil || unitKind != "trigger" || unitState != "pending" {
@@ -184,6 +207,7 @@ func TestRetryAliasesReplayCommittedMode(t *testing.T) {
 				TrustClass:    runspec.TrustAsserted,
 				Pipeline:      "ci", RequestedArgs: map[string]string{"public": "visible", "secret": "***"}, Args: map[string]string{"public": "visible", "secret": "***"}, SecretArgs: []string{"secret"},
 				Git: source.Request.Request.Git, Actor: runspec.Actor{Kind: "account", ID: "original-author"},
+				Lineage:    runspec.Lineage{RetryOf: source.ID, Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "member"}}},
 				Reproducer: []string{"sparkwing", "run", "ci", "--", "--public=visible"},
 			}
 			control, err := client.NewEngineClient(options)
@@ -226,6 +250,11 @@ func FuzzRetryActionCannotCrossAuthorityOrChangeSource(f *testing.F) {
 		}
 		secret := "private-value-" + hex.EncodeToString(value)
 		s, options, prefix, original := retryActionFixture(t, secret, false)
+		var originalJSON []byte
+		var originalHash string
+		if err := teststore.SQL(t, s.store).QueryRow(`SELECT request_json,request_hash FROM runs WHERE team='a' AND id=?`, original.ID).Scan(&originalJSON, &originalHash); err != nil {
+			t.Fatal(err)
+		}
 		engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
 		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,finished_at) SELECT 'b','foreign',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,finished_at FROM runs WHERE team='a' AND id='run'`)
 		switch state % 3 {
@@ -243,8 +272,22 @@ func FuzzRetryActionCannotCrossAuthorityOrChangeSource(f *testing.F) {
 		if (err == nil) != want {
 			t.Fatalf("selector %q state %d: %+v %v", selector, state%3, result, err)
 		}
-		if want && !reflect.DeepEqual(result.Inputs, runspec.DisplayRequest(original.Request)) {
-			t.Fatal("retry changed its source seal")
+		if want {
+			wantInputs := runspec.DisplayRequest(original.Request)
+			wantInputs.Lineage = runspec.Lineage{RetryOf: original.ID, Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "member"}}}
+			if !reflect.DeepEqual(result.Inputs, wantInputs) {
+				t.Fatal("retry changed immutable display inputs or invocation lineage")
+			}
+			for _, id := range []string{original.ID, result.RunID} {
+				var raw []byte
+				var hash string
+				if err := teststore.SQL(t, s.store).QueryRow(`SELECT request_json,request_hash FROM runs WHERE team='a' AND id=?`, id).Scan(&raw, &hash); err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(raw, originalJSON) || hash != originalHash {
+					t.Fatal("retry changed persisted source seal bytes or hash")
+				}
+			}
 		}
 		if !want && strings.Contains(err.Error(), secret) {
 			t.Fatal("retry error disclosed private execution inputs")
