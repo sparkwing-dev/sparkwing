@@ -10,13 +10,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
@@ -27,6 +32,27 @@ func TestRunnerSignalExit(t *testing.T) {
 		cli := RunnerCLI{ReadConfig: func(string) (userconfig.Config, error) {
 			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &url, CredentialsDir: &credentials}}, nil
 		}, Factory: func(ctx context.Context, _ RunnerOptions) (runners.RuntimeConfig, error) {
+			if mode == "checkout" {
+				python, err := exec.LookPath("python3")
+				if err != nil {
+					t.Fatal(err)
+				}
+				bin := t.TempDir()
+				// Signal only after Git starts, so acquisition cannot stop at its entry guard.
+				program := fmt.Sprintf("#!%s\nimport os, signal\nos.kill(%d, signal.SIGTERM)\nsignal.pause()\n", python, os.Getpid())
+				if err := os.WriteFile(filepath.Join(bin, "git"), []byte(program), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				fmt.Println("ready")
+				_, err = source.Acquire(ctx, source.Spec{RepoKey: "local:fixture", LocalCheckout: t.TempDir()}, source.Options{
+					Engines:   struct{ source.EngineResolver }{},
+					Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: "linux", GOARCH: "amd64"},
+					Base:      procenv.Base{Local: true, Captured: sourcetest.Environment(t)},
+					GitAccess: source.GitAccessOwner, BuildEnvironment: sourcetest.BuildEnvironment,
+				})
+				return runners.RuntimeConfig{}, err
+			}
 			if mode != "loop" {
 				fmt.Println("ready")
 				<-ctx.Done()
@@ -52,7 +78,7 @@ func TestRunnerSignalExit(t *testing.T) {
 		return
 	}
 	for _, command := range []string{"start", "warm"} {
-		for _, mode := range []string{"loop", "startup", "failure", "unrelated"} {
+		for _, mode := range []string{"loop", "startup", "failure", "unrelated", "checkout"} {
 			t.Run(command+"/"+mode, func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 				defer cancel()
@@ -86,8 +112,10 @@ func TestRunnerSignalExit(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal("runner never became ready")
 				}
-				if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-					t.Fatal(err)
+				if mode != "checkout" {
+					if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+						t.Fatal(err)
+					}
 				}
 				select {
 				case err := <-done:

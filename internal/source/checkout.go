@@ -21,7 +21,7 @@ import (
 // has no executable command; callers must resolve the matching engine before installation.
 // Close removes remote workspaces while preserving authorized local working trees.
 func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *Entry, err error) {
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 	if err := validateSpec(spec); err != nil {

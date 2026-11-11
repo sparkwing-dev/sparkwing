@@ -78,8 +78,8 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 	}
 	out, err := gitcmd.Output(ctx, cmd, g.combined)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		if context.Cause(ctx) != nil {
+			return nil, context.Cause(ctx)
 		}
 		// safety: remote failures can echo credentials, signed URLs and helper
 		// output, so only a combined local read returns its output on failure.

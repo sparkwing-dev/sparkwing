@@ -65,7 +65,7 @@ func OpenPublication(ctx context.Context, publication Publication) (_ *os.File, 
 		return nil, nil, errors.Join(err, input.Close())
 	}
 	_, copyErr := io.Copy(stream, input)
-	if err := errors.Join(copyErr, input.Close(), ctx.Err()); err != nil {
+	if err := errors.Join(copyErr, input.Close(), context.Cause(ctx)); err != nil {
 		return nil, nil, err
 	}
 	if err := scanPublication(ctx, root, stream, slices.Collect(environment.Values()), publication); err != nil {
@@ -159,7 +159,7 @@ func scanPublication(ctx context.Context, root string, bundle *os.File, environm
 	if waitErr != nil {
 		return errors.New("source snapshot scan failed")
 	}
-	return ctx.Err()
+	return context.Cause(ctx)
 }
 
 type publicationPolicy struct {
