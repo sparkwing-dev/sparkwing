@@ -159,6 +159,30 @@ Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.
 
+Queued Land stops admitting packages after its first observed test or build
+failure. Packages already admitted finish all their selected bodies, and the
+job reports every failure it observes before returning. Pending short and
+critical packages are listed by module and phase, with exact local commands
+to rerun all selected work. A successful run still executes every selected
+short and full critical test. The pre-push hook, explicit PrePush, Gate and
+ordinary Land keep their collect-all behavior.
+
+Queued package commands compile with `-p 1` and retain the runtime width of
+their assigned module or store lane. The coordinator shares the module and
+store allocation with collect-all execution and bounds admission within each
+lane. The three store shards form one admitted package costing three command
+slots: a failure in one shard lets all three finish, and a pending store
+package appears once in the skipped inventory. With store and other root
+packages selected alongside pipeline work at allowance seven, pipeline uses
+one slot, root's ordinary lane uses three and its store shards use one each.
+Critical modules retain the full allowance after all short work joins.
+
+The coordinator joins admitted commands and drains their output before
+cleaning the shared test home. Explicit run cancellation and deadlines still
+interrupt running work through the existing process-owner cleanup. Package
+admission can change command startup and cache costs; the correctness proof
+does not measure those costs.
+
 Affected tests for main use the remote OID Git advertises on hook stdin,
 independently of local `origin/main`. Main updates must fast-forward; a rewind
 or unverified remote base is refused with a fetch remedy. Creating
@@ -192,8 +216,9 @@ packages run alongside them with the remaining root-module command allowance. A 
 four for the other packages and one per store shard. Store-only selections need
 an allowance of at least three; selections with other root packages need at
 least four. Smaller allowances retain the unsplit short command. Each command
-keeps the existing `GOMAXPROCS`/`-p` pairing; summed command widths stay within
-the allowance, which is not an operating-system CPU cap.
+in collect-all execution keeps the existing `GOMAXPROCS`/`-p` pairing; queued
+execution uses the singleton compiler width described above. Summed command
+widths stay within the allowance, which is not an operating-system CPU cap.
 
 Selected modules run their short commands together when the job's allowance
 can give each active module one worker. Root receives the remainder. If root
@@ -205,8 +230,9 @@ module keeps the full allowance. When there are more active short modules than
 workers, the modules run sequentially, each with the full allowance.
 
 All short commands across all modules join before any full critical command
-starts. Critical modules run sequentially with the full job allowance. A short
-failure does not cancel siblings or skip critical coverage.
+starts. Critical modules run sequentially with the full job allowance.
+Collect-all callers continue critical coverage after a short failure; queued
+Land stops future admission while already admitted packages finish.
 
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at

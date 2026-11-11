@@ -56,9 +56,9 @@ func TestReader(t *testing.T) { b,e:=os.ReadFile("input.txt"); if e!=nil {t.Fata
 					t.Fatal(headErr)
 				}
 				t.Setenv("SPARKWING_GATE_PUSH_REFS", "HEAD "+head+" refs/heads/main "+base)
-				err = runAffectedPushTests(ctx)
+				err = runAffectedPushTests(ctx, false)
 			case "manual push":
-				err = runAffectedPushTests(ctx)
+				err = runAffectedPushTests(ctx, false)
 			case "merge delta":
 				files, listErr := changedBetween(ctx, root, base, "HEAD")
 				if listErr != nil {

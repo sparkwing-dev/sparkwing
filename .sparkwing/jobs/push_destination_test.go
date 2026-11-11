@@ -25,7 +25,7 @@ func TestMainPushRefusesRewindToFailingAncestor(t *testing.T) {
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", good)
 	runTestGit(t, root, "switch", "--detach", broken)
 	t.Setenv("SPARKWING_GATE_PUSH_REFS", "HEAD "+broken+" refs/heads/main "+good)
-	err = runAffectedPushTests(ctx)
+	err = runAffectedPushTests(ctx, false)
 	if err == nil || !strings.Contains(err.Error(), "non-fast-forward") || !strings.Contains(err.Error(), good) || !strings.Contains(err.Error(), broken) {
 		t.Fatalf("rewind to failing ancestor: %v; want non-fast-forward refusal naming both commits", err)
 	}
@@ -51,7 +51,7 @@ func TestNewMainRunsAllPackagesAndCriticalTests(t *testing.T) {
 				runTestGit(t, root, "update-ref", "refs/remotes/origin/main", head)
 			}
 			t.Setenv("SPARKWING_GATE_PUSH_REFS", "refs/heads/topic "+head+" refs/heads/main "+strings.Repeat("0", 40))
-			err = runAffectedPushTests(ctx)
+			err = runAffectedPushTests(ctx, false)
 			if err == nil || !strings.Contains(err.Error(), "new main ordinary test") || !strings.Contains(err.Error(), "new main critical test") {
 				t.Fatalf("new main skipped ordinary or full critical tests: %v", err)
 			}
@@ -75,7 +75,7 @@ func TestMainPushUsesAdvertisedBaseDespiteAdvancedLocalTracking(t *testing.T) {
 	}
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", head)
 	t.Setenv("SPARKWING_GATE_PUSH_REFS", "refs/heads/topic "+head+" refs/heads/main "+base)
-	if err := runAffectedPushTests(ctx); err == nil || !strings.Contains(err.Error(), "advertised main test") {
+	if err := runAffectedPushTests(ctx, false); err == nil || !strings.Contains(err.Error(), "advertised main test") {
 		t.Fatalf("advanced local tracking hid the advertised push range: %v", err)
 	}
 }
