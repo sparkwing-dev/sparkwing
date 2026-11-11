@@ -738,7 +738,7 @@ upgrading](#weak-bootstrap-credential-recovery).
 For a fresh store, generate the file in a private directory:
 
 ```sh
-(umask 077 && printf 'swk_%s' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\\n')" > bootstrap-admin-token)
+(umask 077 && printf 'swk_%s' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')" > bootstrap-admin-token)
 ```
 
 Startup passes a valid seed to the once-only bootstrap
