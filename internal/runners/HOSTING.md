@@ -92,11 +92,15 @@ including uploads and terminal acknowledgements, before it returns.
 `TestLoopBoundsSlowGatewayRecovery`,
 `TestLoopGatewayOutageKeepsHeldHost`, `TestLoopGatewayProtocolFailuresStayFatal`
 and `TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
-The shared controller decoder preserves gateway status and retry advice for
-launcher claims, replay-safe operations and held-host reads. It never replays a
-claim. A non-JSON success, an invalid error envelope in a JSON object or a protocol,
-authentication or permission refusal remains fatal. Held-host reads retry until
-their award context ends. Lease keepers retain their expiry and renewal policy.
+The shared controller decoder preserves gateway status and retry advice.
+RetryableClaimError gives the runner its fresh-claim recovery classification;
+RetryableTransportError retains its transport-only meaning. One-shot operations
+return unavailable replies without extra retries unless the server advises a
+retry or the operation already owns intake recovery. Launcher gateway failures
+remain visible at WARN, including when shutdown interrupts an advised retry.
+Held reads retain their award-bound recovery. The client never replays a claim.
+A non-JSON success, an invalid error envelope in a JSON object or a protocol,
+authentication or permission refusal remains fatal. Lease keepers retain their expiry and renewal policy.
 
 Job reports and application retries carry optional `X-Sparkwing-Exited-At`,
 captured after the execution process tree joins and before final log

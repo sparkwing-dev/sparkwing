@@ -61,17 +61,25 @@ func retryHeldRead(ctx context.Context, read func() error) error {
 	}
 }
 
-// RetryableTransportError identifies interrupted controller transports and
-// temporary 5xx unavailability, including controller replacement.
-func RetryableTransportError(err error) bool {
+// RetryableClaimError identifies failures a long-running runner can recover
+// with a fresh claim, including temporary gateway and connection failures.
+func RetryableClaimError(err error) bool {
 	var gateway *gatewayError
+	var operation *net.OpError
+	return errors.As(err, &gateway) || RetryableTransportError(err) ||
+		errors.As(err, &operation) && operation.Op == "dial" && strings.HasPrefix(operation.Net, "tcp") && !errors.Is(err, os.ErrPermission)
+}
+
+// RetryableTransportError identifies interrupted controller transports, including
+// a local socket temporarily absent while its controller restarts.
+func RetryableTransportError(err error) bool {
 	var netErr net.Error
 	var operation *net.OpError
 	var path *os.PathError
-	return errors.As(err, &gateway) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
 		errors.As(err, &netErr) && netErr.Timeout() ||
-		errors.As(err, &operation) && operation.Op == "dial" && !errors.Is(err, os.ErrPermission) && (strings.HasPrefix(operation.Net, "tcp") || strings.HasPrefix(operation.Net, "unix") && errors.Is(err, os.ErrNotExist)) ||
+		errors.As(err, &operation) && operation.Op == "dial" && strings.HasPrefix(operation.Net, "unix") && errors.Is(err, os.ErrNotExist) ||
 		errors.As(err, &path) && path.Op == "connect" && errors.Is(err, os.ErrNotExist)
 }
 

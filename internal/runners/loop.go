@@ -421,7 +421,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				return nil, nil
 			default:
 			}
-			if controllerclient.RetryableTransportError(outcome.err) {
+			if controllerclient.RetryableClaimError(outcome.err) {
 				transportErr = outcome.err
 				if transportSince.IsZero() {
 					transportSince = time.Now()

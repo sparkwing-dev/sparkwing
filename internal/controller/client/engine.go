@@ -114,19 +114,19 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 			}
 		} else {
 			retry, err := c.readResponse(resp, output)
-			if !mayRetry || attempt >= retries || !retry {
+			if !mayRetry || attempt >= retries || !retry || ctx.Err() != nil {
 				if err != nil {
 					return fmt.Errorf("controller %s %s: %w", req.Method, req.URL.Path, err)
 				}
 				return nil
 			}
 			advised, ok := parseRetryAfter(resp)
-			if !ok && !recoverIntake && !RetryableTransportError(err) {
+			if !ok && !recoverIntake {
 				return err
 			}
 			wait = max(wait, advised)
-			if err := waitFor(ctx, wait); err != nil {
-				return err
+			if waitErr := waitFor(ctx, wait); waitErr != nil {
+				return fmt.Errorf("controller %s %s: %w", req.Method, req.URL.Path, errors.Join(err, waitErr))
 			}
 		}
 		next, err := rewind(req)

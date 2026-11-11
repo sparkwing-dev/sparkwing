@@ -49,10 +49,13 @@ func TestGatewayClaimClassification(t *testing.T) {
 				return resp, nil
 			})
 			_, err := c.Claim(t.Context(), controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitNode}})
-			if err == nil || RetryableTransportError(err) != tc.retry || calls != 1 {
-				t.Fatalf("calls=%d retry=%v error=%v", calls, RetryableTransportError(err), err)
+			if err == nil || RetryableClaimError(err) != tc.retry || calls != 1 {
+				t.Fatalf("calls=%d retry=%v error=%v", calls, RetryableClaimError(err), err)
 			}
 			if tc.retry {
+				if RetryableTransportError(err) {
+					t.Fatalf("gateway reply classified as a transport fault: %v", err)
+				}
 				if delay, ok := hosterr.RetryDelay(err); !ok || delay != 2*time.Second || !strings.Contains(err.Error(), http.StatusText(tc.status)) {
 					t.Fatalf("gateway status or advice lost: delay=%s ok=%v error=%v", delay, ok, err)
 				}
@@ -62,7 +65,7 @@ func TestGatewayClaimClassification(t *testing.T) {
 }
 
 func TestGatewaySafeRequestRecovers(t *testing.T) {
-	for _, advice := range []string{"", "2", "Mon, 01 Jan 2000 00:00:00 GMT"} {
+	for _, advice := range []string{"2", "Mon, 01 Jan 2000 00:00:00 GMT"} {
 		t.Run(advice, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				calls := 0
@@ -91,13 +94,33 @@ func TestGatewaySafeRequestRecovers(t *testing.T) {
 	}
 }
 
-func TestGatewaySafeRequestBoundsRecovery(t *testing.T) {
+func TestGatewayOneShotReturnsUnavailableWithoutAdvice(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
 		c := testEngine(t, func(*http.Request) (*http.Response, error) { calls++; return engineResponse(502, "no backend"), nil })
 		_, err := c.ReadRun(t.Context(), "run")
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || calls != 4 {
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || calls != 1 || RetryableTransportError(err) {
+			t.Fatalf("calls=%d error=%v", calls, err)
+		}
+	})
+}
+
+func TestGatewayResponseSurvivesCancelledRetryWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		calls := 0
+		c := testEngine(t, func(*http.Request) (*http.Response, error) {
+			calls++
+			time.AfterFunc(50*time.Millisecond, cancel)
+			resp := engineResponse(http.StatusServiceUnavailable, "no backend")
+			resp.Header.Set("Retry-After", "2")
+			return resp, nil
+		})
+		_, err := c.ReadRun(ctx, "run")
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != hosterr.Unavailable || !errors.Is(err, context.Canceled) || calls != 1 {
 			t.Fatalf("calls=%d error=%v", calls, err)
 		}
 	})
@@ -114,7 +137,7 @@ func TestGatewayLauncherClaimDoesNotReplay(t *testing.T) {
 	})
 	c.launcher = true
 	_, err := c.Claim(t.Context(), controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitNode}})
-	if !RetryableTransportError(err) || calls != 1 {
+	if !RetryableClaimError(err) || calls != 1 {
 		t.Fatalf("calls=%d error=%v", calls, err)
 	}
 }
