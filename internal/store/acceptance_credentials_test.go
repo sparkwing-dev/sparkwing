@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
@@ -13,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func checkStoreProvisioningOrigins(t *testing.T) (err error) {
@@ -77,8 +77,7 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 }
 
 func storeNativeBootstrapSpec() capability.ProvisionSpec {
-	payload := sha256.Sum256([]byte("store-native-bootstrap-fixture"))
-	return capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(payload[:]), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
+	return capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: teststore.BootstrapSeed(), Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
 }
 
 func TestStoreProvisioningOrigins(t *testing.T) {
@@ -88,8 +87,7 @@ func TestStoreProvisioningOrigins(t *testing.T) {
 }
 
 func acceptanceBootstrap(ctx context.Context, s *store.Store) (capability.Issued, error) {
-	payload := sha256.Sum256([]byte("store-native-bootstrap-fixture"))
-	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(payload[:])
+	raw := teststore.BootstrapSeed()
 	_, err := s.AsOperator().EnsureBootstrapCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: raw, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}})
 	if err != nil {
 		return capability.Issued{}, err

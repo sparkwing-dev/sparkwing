@@ -3,7 +3,6 @@ package acceptance_test
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -89,8 +88,7 @@ func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*storedEngineW8,
 
 func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) (*storedEngineW8, capability.Issued) {
 	t.Helper()
-	payload := sha256.Sum256([]byte("store-native-bootstrap-fixture"))
-	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(payload[:])
+	raw := teststore.BootstrapSeed()
 	_, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: raw, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}})
 	if err != nil {
 		t.Fatal(err)
