@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
@@ -46,7 +48,7 @@ func TestLandQueueSerializesOrdinaryAndFocusedLands(t *testing.T) {
 			if !job.Inline {
 				t.Fatalf("queue checks must judge the merged checkout: %+v", job)
 			}
-			if job.ID == "land" && !slices.Equal(job.Needs, []string{"preconditions", "policy", "review"}) {
+			if job.ID == "land" && !slices.Equal(job.Needs, []string{"preconditions", "policy", "review", "affected-tests"}) {
 				t.Fatalf("push dependencies: %v", job.Needs)
 			}
 			if job.ID == "review" && len(job.Steps) != len(inspectWork(t, &PrePush{}).Steps)+1 {
@@ -54,7 +56,7 @@ func TestLandQueueSerializesOrdinaryAndFocusedLands(t *testing.T) {
 			}
 		}
 		slices.Sort(ids)
-		if !slices.Equal(ids, []string{"land", "policy", "preconditions", "review"}) {
+		if !slices.Equal(ids, []string{"affected-tests", "land", "policy", "preconditions", "review"}) {
 			t.Fatalf("focused jobs = %v", ids)
 		}
 	}
@@ -186,6 +188,10 @@ func TestLandQueueDocumentedSubmissionMatchesExample(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join(sourceTreeRoot(), "DELIVERY.md"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	deadline := fmt.Sprintf("`affected-tests` job has a %d-minute execution deadline", int(affectedPushTestsTimeout/time.Minute))
+	if !strings.Contains(string(body), deadline) {
+		t.Fatalf("DELIVERY.md omits the local test deadline: %s", deadline)
 	}
 	for _, example := range (Land{}).Examples() {
 		if !strings.Contains(example.Command, "--queued") {

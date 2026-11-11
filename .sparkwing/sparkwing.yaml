@@ -1,6 +1,6 @@
 pipelines:
   # pre-commit is the source-policy tier and runs from the git pre-commit hook;
-  # pre-push is the fast push-boundary tier and runs from the git pre-push hook;
+  # pre-push runs fast checks and affected Go tests from the git pre-push hook;
   # gate is the broad tier, which `sparkwing run gate` and hosted CI run and no
   # git hook fires; pre-release is the release-boundary tier, which the release
   # pipeline and the hosted release lane run.

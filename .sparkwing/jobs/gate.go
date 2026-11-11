@@ -375,7 +375,7 @@ func pushRangeScope(ctx context.Context, noun string, keep func([]string) []stri
 	if err != nil {
 		return nil, "", err
 	}
-	changed, err := listNames(ctx, "diff -z --name-only --diff-filter=ACMR "+base+" HEAD")
+	changed, err := listNames(ctx, "diff -z --name-only --no-renames --diff-filter=ACMRD "+base+" HEAD")
 	if err != nil {
 		return nil, "", fmt.Errorf("list the push range %s..HEAD: %w", base, err)
 	}

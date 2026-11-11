@@ -53,16 +53,64 @@ review uses the supplied goal rather than inferring one from the branch name.
 Ordinary interactive lands keep their objective fallback. Queued lands refuse
 a changed submission or dirty checkout,
 merge fetched `origin/main` before capturing HEAD, then run source policy and
-the full pre-push tier alongside review against that merged checkout. They
-push only when the branch, HEAD and checkout still match. If main moves again,
+the fast pre-push checks alongside review against that merged checkout. Once
+policy and review pass, the inline `affected-tests` job runs the same short
+and critical Go tests as the hosted Gate. Push waits for that job too.
+They push only when the branch, HEAD and checkout still match. If main moves again,
 the push fails rather than merging an unchecked tree; enqueue again after
 inspecting the failure. A conflict aborts the merge and records its remedy in
 the failed run.
 
-This focused mode uses the queue's owned-hardware landing policy: it omits
-the broad desktop and Cloud gates. Run focused lane tests before submitting.
+This mode uses the queue's owned-hardware landing policy: local affected Go
+tests are the primary test gate. Hosted CI supplies additional verification.
+It omits the broad desktop and Cloud gates. Run focused lane tests before submitting.
 Ordinary `land` retains its full gate. This is a repository pipeline feature;
 a different repository must define its own landing policy before using it.
+
+### Local affected Go tests
+
+The pre-push hook runs its six fast checks, then `affected-tests`. Queued Land
+runs that same test job after policy and its combined fast-check/review job.
+Ordinary Land already runs the full Gate and adds no duplicate test job.
+Every path reads the complete committed push range, including deletions and
+both paths of renames. An unrelated staged file cannot narrow the tests.
+
+The job reuses the hosted Gate's package planner and command runner. It runs
+`go test -short` over the reverse dependency closure, including test imports
+and registered file readers, then the critical set without `-short` when Go
+inputs changed. Changelog-only changes select no tests. Other documentation
+runs its registered readers. The `affected-tests` job has a 45-minute execution deadline,
+separate from the fast checks' one-minute warning. Each Go package retains its
+25-minute timeout. The job reserves its Go command parallelism and reports
+package counts, critical-test counts, failures, package timings and test timings.
+
+Prepare SDK test dependencies with `npm --prefix sdk/typescript ci --ignore-scripts
+--no-audit --no-fund` before a Go change that selects acceptance or the native
+TypeScript host package. `xwing app install` includes that setup. The affected
+runner also prepares dashboard Node dependencies when acceptance needs them.
+
+Warm-build-cache observations on Go 1.26.10, with `GOMAXPROCS=2`, `-p 2`,
+`-short -count=1` and an explicit compile-only warm-up on 2026-11-10:
+
+| Change shape | Selected short packages | Selection wall time | Short command wall time | Result |
+| --- | ---: | ---: | ---: | --- |
+| Changelog only | 0 | 1.03 s | No command | Passed |
+| `internal/doccheck` | 1 root | 0.92 s | 6.17 s | Passed |
+| Broad 36-file change | 2 pipeline + 65 root | 0.98 s | 1201.91 s | Failed because SDK test dependencies were missing |
+
+The separate 37-critical-test invocation took 13.83 s and passed. These are
+individual observations on shared hardware. The failed broad measurement is
+not a passing-suite steady-state estimate. Its cost already exceeds twenty
+minutes, so the 45-minute job ceiling leaves room for the test work and a
+25-minute package timeout to report diagnostics. It is an execution ceiling,
+not a latency target. A prepared-baseline replay is required before treating
+the broad observation as a passing-suite cost.
+
+Race tests remain a separate local or hosted lane, available with
+`sparkwing run gate --sw-only race-touched`. The broad shape selects five
+packages for `-race -short`; store races remain at the release boundary.
+Their additional wall time was not measured here. The lane retains its
+70-minute execution ceiling and 52m30s package timeout.
 
 When moving from an external queue, let its active land finish, stop that
 worker, preserve any manual holds, and submit each remaining eligible worktree
@@ -947,14 +995,15 @@ file. Other syntax and workflow checks remain active.
 
 - **The three tiers:** `pre-commit` judges the staged change against this
   repo's source policy and nothing else; the git pre-commit hook runs it.
-  `pre-push` is the fast tier the git pre-push hook runs, and it repeats
+  `pre-push` begins with the fast phase the git pre-push hook runs, and it repeats
   nothing the commit tier already ran: the changelog, OpenAPI and API-snapshot
   gates, and `go build`, `go vet` and the fast linter subset over the packages
   the push touches, with no package-count cutoff. The linter includes the
   depguard dependency rules. A
   runner reserves the combined CPU demand of those three concurrent compiler
   tasks, up to 9 cores. Smaller runners divide their available cores across
-  the tasks.
+  the tasks. After that phase passes, a separate `affected-tests` job runs
+  the shared affected short and critical Go tests before the push succeeds.
   The tiers shift left, so a
   push whose commits skipped the commit hook is judged by `gate` rather than a second
   time here. Rebase replay does not fire pre-commit, and automatic merges use
@@ -984,8 +1033,8 @@ file. Other syntax and workflow checks remain active.
   A hook script names its pipeline, so a checkout whose hooks
   were installed when the pre-push hook ran `gate` keeps running `gate` until
   `sparkwing pipeline hooks install` rewrites them.
-- **The three check classes and their budgets:** `pre-commit` is the source
-  policy at 3 seconds, `pre-push` the fast tier with a one-minute budget,
+- **Budget warnings and execution deadlines:** `pre-commit` is the source
+  policy at 3 seconds, the fast phase of `pre-push` has a one-minute budget,
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
   before it tags, 40 minutes including 30 minutes of lint-lock allowance
   and ten minutes for build, full lint, the short test suite,
@@ -993,7 +1042,7 @@ file. Other syntax and workflow checks remain active.
   Build, lint, dependency preparation, the SDK suite and short tests run in sequence.
   The job allows one hour to finish those serial checks while retaining the
   40-minute budget warning.
-  Each of those jobs times its own steps and warns when its slowest step's
+  Each of those budgeted phases times its own steps and warns when its slowest step's
   own run time overruns the class, naming the step and its cost, so a class
   cannot regrow unnoticed. A tier whose checks all passed still passes: when
   the budget failed green tiers, authors under machine load committed with
@@ -1007,7 +1056,9 @@ file. Other syntax and workflow checks remain active.
   time a step waits for a core or a step slot, or the 2.5 s the pipeline
   binary takes to recompile after a Go change. On a host at load 28, a
   pre-commit whose slowest check took 473 ms spanned 3.8 s and failed the
-  old span budget. The verdict line reports both numbers. The
+  old span budget. The verdict line reports both numbers. Pre-push's
+  affected Go tests have their own 45-minute job deadline and are outside
+  the fast phase's warning budget. The
   formatters are the per-file cost in the commit tier, and `goimports` inside
   `golangci-lint fmt` is all of it: over a hundred Go files `gofumpt` measured
   0.38 s, `goimports` 10.9 s and `gofmt` 0.09 s, so a Go file costs about
@@ -1274,8 +1325,8 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
-- **What the two hooks cost:** measured on this 16-core Linux host. `pre-push`
-  retains a ten-second target when the compiler cache is warm. Run records
+- **What the fast hook phases cost:** measured on this 16-core Linux host. The fast
+  phase of `pre-push` retains a ten-second target when the compiler cache is warm. Run records
   expose total and per-step durations, but they carry no compiler-cache
   temperature signal, so the target is measured rather than enforced. A warm
   integrated run over 13 changed Go files took 10.678 s and missed the target;
