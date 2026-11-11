@@ -1,8 +1,8 @@
 package controller
 
 import (
-	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -147,7 +147,8 @@ func checkRestoreDrill(t *testing.T, signOut bool) {
 	}
 	launcherAuthority := ref
 	if signOut {
-		seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+		payload := sha256.Sum256([]byte("restored-bootstrap-fixture"))
+		seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(payload[:])
 		if _, err := restored.AsOperator().EnsureBootstrapCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}); err != nil {
 			t.Fatal(err)
 		}

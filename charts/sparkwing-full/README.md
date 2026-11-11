@@ -95,7 +95,12 @@ the installed External Secrets CRDs.
 | `sparkwing-runner-bundle.launcher.tokenSecret` | `sparkwing-launcher-token` | `token` | `agent-token` |
 | `sparkwing-runner-bundle.launcher.budgetStateSecret` (optional) | `sparkwing-budget-state` | `state` | `budget-state` |
 
-Generate the bootstrap seed and encryption key outside Helm, with private files:
+The bootstrap seed must contain 32 cryptographically random bytes. The controller
+refuses constant-byte placeholders, including files left mounted on an initialized
+store. Replacing that file with a random seed cannot reopen the bootstrap gate.
+Rotate or revoke any live weak credential and remove the mounted file before
+upgrading; see [the recovery guide](../../docs/auth.md#weak-bootstrap-credential-recovery). Generate the seed and encryption key outside
+Helm, with private files:
 
 ```sh
 (umask 077 && printf 'swk_%s' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')" > /tmp/sparkwing-bootstrap-admin)
@@ -113,7 +118,7 @@ without a live administrator or a bootstrap seed. A fresh install needs
 from it before listening. Use the seed to provision the first real deployment
 administrator through operator credential management. That transaction revokes
 the seed and its descendants. After that handoff the seed Secret may be removed.
-A consumed seed left mounted whose digest still matches only logs a warning to
+A valid consumed seed left mounted whose digest still matches only logs a warning to
 remove the credential and does not stop the controller.
 
 Create the launcher service credential under the real administrator, with
