@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -294,5 +295,46 @@ func TestRunArtifactsDefaultPageAndCursorScope(t *testing.T) {
 		if err := observeRunArtifacts(t.Context(), inv, reader, io.Discard); err == nil {
 			t.Fatalf("accepted mismatched cursor: %v", args)
 		}
+	}
+}
+
+func TestRunArtifactsExistingDestinationExitsAsUsage(t *testing.T) {
+	for _, during := range []bool{false, true} {
+		t.Run(fmt.Sprint("created-during-transfer=", during), func(t *testing.T) {
+			dest := filepath.Join(t.TempDir(), "occupied.txt")
+			writeExisting := func() {
+				if err := os.WriteFile(dest, []byte("keep"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !during {
+				writeExisting()
+			}
+			reader := artifactTestReader{download: func(out io.Writer) (blob.ManifestEntry, error) {
+				if !during {
+					t.Fatal("pre-existing destination reached transfer")
+				}
+				writeExisting()
+				_, err := io.WriteString(out, "replacement")
+				return blob.ManifestEntry{Path: "file"}, err
+			}}
+			inv := logInvocation(t, "artifacts", "--run", "run", "--job", "build", "--path", "file", "--dest", dest, "-o", "json")
+			err := observeRunArtifacts(t.Context(), inv, reader, io.Discard)
+			if exitCodeFor(err) != 2 || !errors.Is(err, os.ErrExist) {
+				t.Fatalf("occupied destination exit=%d, err=%v", exitCodeFor(err), err)
+			}
+			var diagnostic bytes.Buffer
+			if renderErr := writeInvocationError(&diagnostic, &invocationError{inv: inv, cause: err}, hosterr.WriteJSON); renderErr != nil {
+				t.Fatal(renderErr)
+			}
+			for _, want := range []string{`"code":"bad_request"`, "occupied.txt", "distinct --dest"} {
+				if !strings.Contains(diagnostic.String(), want) {
+					t.Errorf("diagnostic missing %q: %s", want, &diagnostic)
+				}
+			}
+			if body, readErr := os.ReadFile(dest); readErr != nil || string(body) != "keep" {
+				t.Fatalf("occupied file changed: %q, %v", body, readErr)
+			}
+		})
 	}
 }

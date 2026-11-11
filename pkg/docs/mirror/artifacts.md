@@ -21,8 +21,11 @@ normalization. NFC and NFD spellings are two distinct artifacts: a name
 containing precomposed `é` (U+00E9) differs from one containing `e` followed by
 U+0301, even when both display alike. Use the exact spelling in `--path`.
 
-A destination filesystem may treat those spellings as the same path. The CLI
-refuses a download when `--dest` already exists, preserving its contents.
+A destination filesystem may treat those spellings as the same path. Before renaming a verified
+download into place, the CLI checks whether `--dest` exists. An occupied
+destination is invalid usage: the command exits 2, names the path and asks for a
+distinct `--dest`, leaving the existing file unchanged. The check and rename
+are separate; a file created concurrently after that check can be replaced.
 Choose distinct destination names, such as `artifact-nfc.txt` and
 `artifact-nfd.txt`, to keep both files on such a filesystem. The CLI downloads
 one file at a time; it does not extract archives. Extraction by another tool
