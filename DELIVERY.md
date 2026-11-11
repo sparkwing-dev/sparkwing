@@ -1552,6 +1552,16 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
+- **Native recovery simulation:** `TestStartGateSeededRecovery` runs seed 1
+  with and without compute under `-short`; the full class runs all eight seeds
+  in both modes. Each case still covers lost plan capacity, an already released
+  job, fresh work, approval, expansion and cleanup. The fixture advances external
+  events from scheduling snapshots, forces admission retry completions to cancel
+  waits while the competitor holds capacity, and fails after 64 scheduling passes.
+  A wait callback cannot drive external events because retry completions may keep
+  the owner from entering it. The full 16-case family measured 10.0 seconds without
+  race on this loaded 16-core host (load 22); keep its permutation coverage in the
+  full class while retaining both compute paths in affected landing gates.
 - **What the fast hook phases cost:** measured on this 16-core Linux host. The fast
   phase of `pre-push` retains a ten-second target when the compiler cache is warm. Run records
   expose total and per-step durations, but they carry no compiler-cache
