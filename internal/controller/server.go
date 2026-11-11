@@ -647,6 +647,9 @@ func withRequestLog(
 				logger.Log(ctx, level, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))
 			}
 			observeHTTPRequest(rec.route, r.Method, status, elapsed)
+			if status == http.StatusUnauthorized && rw.cause != nil {
+				rec.reason = masker.Mask(rw.cause.Error())
+			}
 			logRequest(ctx, logger, r, rec, status, elapsed, clientIP(r))
 		}
 		// safety: a handler that panics still made its write attempt, so it is

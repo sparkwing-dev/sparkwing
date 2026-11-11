@@ -175,8 +175,14 @@ Run intake, plan acceptance, job status reads, job transitions, finish,
 cancellation, retry and run/job renewal use the shared capability policy. The
 controller resolves the resource's team before authorization and derives
 actors and fences from the credential. Unknown or ended credentials get
-`unauthenticated`. A live
-credential without the grant or binding gets `forbidden`.
+`unauthenticated`. Their HTTP body is always `credential is unavailable`;
+it does not distinguish an unknown credential from expiry, revocation, rotation
+grace expiry, epoch changes or ended membership. Private server audit records
+keep the specific reason. Authenticated credential inventory and successful
+rotation responses provide lifecycle details to authorized callers. The CLI
+uses the selected local profile to suggest signing in or saving a replacement;
+a 401 alone does not establish that a saved token was revoked. A live credential
+without the grant or binding gets `forbidden`.
 
 Create a run with `POST /api/v1/runs`, submit its plan to
 `POST /api/v1/runs/{run}/plan`, and report job state through
