@@ -125,7 +125,7 @@ const (
 	parentRequester    ParentRule = "requester"
 )
 
-// awardPolicies owns baseline grants; ExecutionGrants adds host-scoped source access.
+// safety: Cloud evaluators restore prepared executables, so source access stays host-specific.
 // Eval reads are restricted to its source or the approval predicate declarations.
 var awardPolicies = []AwardPolicy{
 	{PurposeTrigger, UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{

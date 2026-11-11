@@ -133,9 +133,8 @@ func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 		after := q.afterNode
 		conditions = append(conditions, `(`+alias+`.ready_at,`+alias+`.run_id,`+alias+`.node_id)>(`+q.param(after.Arrived)+`,`+q.param(string(after.Unit.RunID))+`,`+q.param(string(after.Unit.NodeID))+`)`)
 	}
-	if kind == capability.UnitNode && len(q.excludedUnits) > 0 {
-		raw, _ := json.Marshal(q.excludedUnits)
-		conditions = append(conditions, `NOT EXISTS (SELECT 1 FROM `+q.array(q.param(string(raw)), "blocked_capacity")+` WHERE `+q.at("blocked_capacity.value", "RunID")+`=`+alias+`.run_id AND `+q.at("blocked_capacity.value", "NodeID")+`=`+alias+`.node_id)`)
+	if kind == capability.UnitNode && q.excludedUnitsJSON != "" {
+		conditions = append(conditions, `NOT EXISTS (SELECT 1 FROM `+q.array(q.param(q.excludedUnitsJSON), "blocked_capacity")+` WHERE `+q.at("blocked_capacity.value", "RunID")+`=`+alias+`.run_id AND `+q.at("blocked_capacity.value", "NodeID")+`=`+alias+`.node_id)`)
 	}
 	if len(conditions) == 0 {
 		return `1=1`

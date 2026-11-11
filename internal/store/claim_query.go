@@ -230,31 +230,31 @@ func recordClaimAwardTx(ctx context.Context, tx *storeTx, team Team) error {
 }
 
 type claimSQL struct {
-	afterNode       *claimHead
-	excludedUnits   []UnitRef
-	placementFree   bool
-	preferencesFree bool
-	heads           []claimHead
-	holdProof       bool
-	projected       bool
-	target          *UnitRef
-	team            string
-	ordinal         *int64
-	route           bool
-	candidate       bool
-	search          bool
-	context         string
-	requirement     string
-	runScope        string
-	facts           []claimFacts
-	teams           []claimTeamFacts
-	rates           CreditRateTable
-	kinds           []capability.UnitKind
-	now             int64
-	dialect         Dialect
-	args            []any
-	policy          ClaimPlacement
-	overflow        []claimOverflowFacts
+	afterNode         *claimHead
+	excludedUnitsJSON string
+	placementFree     bool
+	preferencesFree   bool
+	heads             []claimHead
+	holdProof         bool
+	projected         bool
+	target            *UnitRef
+	team              string
+	ordinal           *int64
+	route             bool
+	candidate         bool
+	search            bool
+	context           string
+	requirement       string
+	runScope          string
+	facts             []claimFacts
+	teams             []claimTeamFacts
+	rates             CreditRateTable
+	kinds             []capability.UnitKind
+	now               int64
+	dialect           Dialect
+	args              []any
+	policy            ClaimPlacement
+	overflow          []claimOverflowFacts
 }
 
 // hack: SQLite and PostgreSQL disagree on substr with a negative start, so match.IsCloudSizeLabel's suffix is read
@@ -858,6 +858,7 @@ func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []c
 }
 
 func queryClaimTx(ctx context.Context, tx *storeTx, q *claimSQL, query string) (UnitRef, error) {
+	var excludedUnits []UnitRef
 	for {
 		var team Team
 		var unit UnitRef
@@ -875,7 +876,12 @@ func queryClaimTx(ctx context.Context, tx *storeTx, q *claimSQL, query string) (
 		if q.target != nil {
 			return UnitRef{}, errClaimCapacityUnavailable
 		}
-		q.excludedUnits = append(q.excludedUnits, unit)
+		excludedUnits = append(excludedUnits, unit)
+		raw, err := json.Marshal(excludedUnits)
+		if err != nil {
+			return UnitRef{}, err
+		}
+		q.excludedUnitsJSON = string(raw)
 		q.args = nil
 		query, err = q.query(q.facts, q.teams, q.rates, q.kinds, UnitDemand{CapabilityPrefix: q.facts[0].Prefix}, q.now)
 		if err != nil {

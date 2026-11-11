@@ -281,11 +281,11 @@ func TestAdmissionRaceSuspendsThenReacquiresAfterCapacityFrees(t *testing.T) {
 		return func(context.Context) { resumed = true }, func() {}
 	})
 	gate := ComposeStartGate(f.Tenant, nil, false)
-	gate.Queued = func(context.Context, runspec.NodeRef, runstate.AcquireSlotResponse) error {
+	gate.Queued = func(ctx context.Context, _ runspec.NodeRef, _ runstate.AcquireSlotResponse) error {
 		if !suspended || resumed {
 			t.Fatal("queued race retained runner work inventory")
 		}
-		return f.report(t.Context(), holder, runstate.NodeSuccess)
+		return f.report(ctx, holder, runstate.NodeSuccess)
 	}
 	ran := false
 	if err := gate.claimedNode(ctx, loser, func(ctx context.Context) error {
