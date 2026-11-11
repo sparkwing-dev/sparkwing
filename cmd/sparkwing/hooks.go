@@ -181,7 +181,7 @@ func uninstallHooks(git githooks.Git, repoRoot string) error {
 		if err := os.Remove(p); err != nil {
 			return fmt.Errorf("remove %s: %w", p, err)
 		}
-		fmt.Fprintf(os.Stderr, "removed %s\n", e.Name())
+		fmt.Fprintf(os.Stderr, "removed %s\n", opsview.DisplayText(e.Name()))
 		removed++
 	}
 	if removed == 0 {

@@ -206,7 +206,9 @@ const infoBat = `      /\                        /\
 func runInfo(inv clisurface.Invocation) error {
 	output := inv.Output(color.IsInteractiveStdout())
 	if inv.Bool("for-agent") {
-		return writeRenderedText(os.Stdout, "document", output, printAgentBlock)
+		return writeRenderedText(os.Stdout, "document", output, func(w io.Writer) {
+			printAgentBlock(w, output)
+		})
 	}
 
 	if inv.Bool("first-time") {
@@ -282,7 +284,13 @@ const agentBlockBody = "- `sparkwing commands --search <task>` -- bounded comman
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n" +
 	"- `sparkwing info -o json` -- this same context as JSON, when you want to parse it\n"
 
-func printAgentBlock(w io.Writer) {
+func printAgentBlock(w io.Writer, output string) {
+	display := func(value string) string {
+		if output == "json" {
+			return value
+		}
+		return opsview.DisplayText(value)
+	}
 	fmt.Fprintln(w, agentBlockHeader)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, durableMarkerOpen)
@@ -301,24 +309,24 @@ func printAgentBlock(w io.Writer) {
 	case !info.Project.Found:
 		fmt.Fprintln(w, "- No `.sparkwing/` yet. `sparkwing pipeline new` bootstraps one; there is no separate init step.")
 	case info.Project.PipelinesError != "":
-		fmt.Fprintf(w, "- `%s` -- pipelines unavailable: %s\n", info.Project.SparkwingDir, info.Project.PipelinesError)
+		fmt.Fprintf(w, "- `%s` -- pipelines unavailable: %s\n", display(info.Project.SparkwingDir), display(info.Project.PipelinesError))
 	default:
 		p := info.Project.Pipelines
 		fmt.Fprintf(w, "- `%s` -- %d pipeline(s): %d triggered, %d manual. `sparkwing pipeline list -o json` names them.\n",
-			info.Project.SparkwingDir, p.Total, p.Triggered, p.Manual)
+			display(info.Project.SparkwingDir), p.Total, p.Triggered, p.Manual)
 	}
 	if !info.Toolchain.Go.Found {
 		fmt.Fprintln(w, "- No Go toolchain on PATH. Go pipelines need it; TypeScript pipelines need Node 22.18+ and npm.")
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		if note := goWorkNote(cwd); note != "" {
-			fmt.Fprintln(w, "- "+note)
+			fmt.Fprintln(w, "- "+display(note))
 		}
 	}
 	fmt.Fprintf(w, "- CLI %s, running from %s. Docs shipped in this binary match it exactly.\n",
-		info.Version.Installed, info.Executable.Path)
+		display(info.Version.Installed), display(info.Executable.Path))
 	if line := sdkPinLine(info.SDKPin); line != "" {
-		fmt.Fprintln(w, "- "+line)
+		fmt.Fprintln(w, "- "+display(line))
 	}
 	fmt.Fprintln(w)
 	fmt.Fprint(w, agentBlockAuthoring)
