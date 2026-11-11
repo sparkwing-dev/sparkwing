@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
@@ -138,10 +139,10 @@ type claimSignalControl struct {
 	claimed chan struct{}
 }
 
-func (c claimSignalControl) Claim(ctx context.Context, _ string, _ []string) (*CloudJobAward, error) {
+func (c claimSignalControl) Claim(ctx context.Context, _ string, _ []string) (*CloudJobAward, time.Duration, error) {
 	close(c.claimed)
 	<-ctx.Done()
-	return nil, ctx.Err()
+	return nil, 0, ctx.Err()
 }
 
 func TestRunClaimsAfterRefusingRestartedCapacityIdentity(t *testing.T) {

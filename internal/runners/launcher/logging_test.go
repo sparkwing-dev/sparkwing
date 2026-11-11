@@ -26,13 +26,13 @@ type loggingControl struct {
 	calls             int
 }
 
-func (c *loggingControl) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+func (c *loggingControl) Claim(context.Context, string, []string) (*CloudJobAward, time.Duration, error) {
 	c.calls++
 	if c.calls == 2 {
 		c.stop()
-		return nil, nil
+		return nil, 0, nil
 	}
-	return c.award, c.claimErr
+	return c.award, 0, c.claimErr
 }
 
 func (c *loggingControl) ReportWarmPools(context.Context, map[string]int64) error { return c.warmErr }
@@ -98,14 +98,14 @@ type rateLimitLoggingControl struct {
 	replies []error
 }
 
-func (c *rateLimitLoggingControl) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+func (c *rateLimitLoggingControl) Claim(context.Context, string, []string) (*CloudJobAward, time.Duration, error) {
 	if len(c.replies) == 0 {
 		c.stop()
-		return nil, nil
+		return nil, 0, nil
 	}
 	err := c.replies[0]
 	c.replies = c.replies[1:]
-	return nil, err
+	return nil, 0, err
 }
 
 func TestLauncherLogsOnlyFirstClaimRateLimitAsInfo(t *testing.T) {

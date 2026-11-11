@@ -31,10 +31,11 @@ import (
 )
 
 // CloudControl supplies awarded bindings from the controller and checks their continued authority.
+// Claim returns an award and the controller's minimum interval before the next poll.
 // Sync must return exactly one decision for each supplied binding, including dead or cancelled claims.
 type CloudControl interface {
 	Prepare(context.Context, []capability.LeaseRef) (time.Time, error)
-	Claim(context.Context, string, []string) (*CloudJobAward, error)
+	Claim(context.Context, string, []string) (*CloudJobAward, time.Duration, error)
 	Sync(context.Context, []CloudJobObservation) ([]CloudJobState, error)
 }
 
@@ -150,7 +151,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 		synced := l.syncActive(ctx)
 		if blocking(synced) != nil {
 			logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
-			cooldown = time.Now().Add(retryWait(synced, 0))
+			cooldown = later(cooldown, time.Now().Add(retryWait(synced, 0)))
 		} else if synced != nil {
 			logger.Error("Cloud node or Job teardown faults require operator inspection if they persist; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
 		}
@@ -160,8 +161,10 @@ func (l *Launcher) Run(ctx context.Context) error {
 			startupRateLimit := false
 			if err == nil && !time.Now().Before(cooldown) {
 				var launched bool
-				cooldown = time.Now().Add(poll)
-				launched, err = l.claim(ctx)
+				var pollAfter time.Duration
+				launched, pollAfter, err = l.claim(ctx)
+				// safety: admission precedes the response, so request latency cannot shorten the server's interval.
+				cooldown = time.Now().Add(max(poll, pollAfter))
 				failure, ok := err.(*apierr.Error) //nolint:errorlint // Joined faults must remain WARN.
 				startupRateLimit = firstClaim && !launched && ok && failure.Code == hosterr.RateLimited
 				firstClaim = false
@@ -238,19 +241,21 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.placeWaiting(ctx); err != nil {
 		return false, err
 	}
-	return l.claim(ctx)
+	launched, _, err = l.claim(ctx)
+	return launched, err
 }
 
-func (l *Launcher) claim(ctx context.Context) (bool, error) {
+func (l *Launcher) claim(ctx context.Context) (bool, time.Duration, error) {
 	blocked := make([]string, 0, len(l.Config.StoppedTeams))
 	for _, team := range l.Config.StoppedTeams {
 		blocked = append(blocked, TeamNodeValue(l.Config.Namespace, team))
 	}
-	award, err := l.Control.Claim(ctx, l.Config.Namespace, blocked)
+	award, pollAfter, err := l.Control.Claim(ctx, l.Config.Namespace, blocked)
 	if err != nil || award == nil {
-		return false, err
+		return false, pollAfter, err
 	}
-	return l.launch(ctx, award)
+	launched, err := l.launch(ctx, award)
+	return launched, pollAfter, err
 }
 
 func (l *Launcher) placeWaiting(ctx context.Context) error {

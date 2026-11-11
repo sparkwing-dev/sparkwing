@@ -74,10 +74,10 @@ type controlFake struct {
 	excluded []string
 }
 
-func (c *controlFake) Claim(_ context.Context, _ string, excluded []string) (*CloudJobAward, error) {
+func (c *controlFake) Claim(_ context.Context, _ string, excluded []string) (*CloudJobAward, time.Duration, error) {
 	c.claims++
 	c.excluded = append([]string(nil), excluded...)
-	return c.award, c.fail
+	return c.award, 0, c.fail
 }
 
 func (c *controlFake) Sync(_ context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
@@ -475,13 +475,13 @@ type retryAfterControl struct {
 	stop    context.CancelFunc
 }
 
-func (c *retryAfterControl) Claim(ctx context.Context, _ string, _ []string) (*CloudJobAward, error) {
+func (c *retryAfterControl) Claim(ctx context.Context, _ string, _ []string) (*CloudJobAward, time.Duration, error) {
 	c.claimed = append(c.claimed, time.Now())
 	if len(c.claimed) > 1 {
 		c.stop()
-		return nil, nil
+		return nil, 0, nil
 	}
-	return nil, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(7000)}}
+	return nil, 0, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(7000)}}
 }
 
 func TestLauncherWaitsOutAControllerRetryAfter(t *testing.T) {

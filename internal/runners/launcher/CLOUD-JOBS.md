@@ -610,7 +610,16 @@ through the handoff and fresh-capacity fallback at 30 seconds.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts.
 
-The first claim after launcher startup logs a controller rate-limit reply at INFO,
+The claim loop waits at least its configured poll interval or the controller's
+`PollAfter`, whichever is longer, after the claim response and placement finish.
+Advice is capped at the wire protocol's eight-second maximum. Variable request
+latency therefore cannot compress the interval between controller admissions.
+Reconciliation and held-award renewal continue during claim cooldown, and their
+failures cannot shorten it. `TestLauncherClaimPollTiming` guards the timing,
+advice bounds and reconciliation through a temporary failure with a fake clock.
+
+Poll advice is process-local. The first claim after launcher startup logs a
+controller rate-limit reply at INFO,
 because the previous process's idle poll interval may still apply. Later refusals
 log at WARN. Both honor the controller's retry delay. `TestLauncherLogsOnlyFirstClaimRateLimitAsInfo`
 guards the levels; placement failures retain WARN.
