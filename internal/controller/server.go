@@ -647,6 +647,9 @@ func withRequestLog(
 				logger.Log(ctx, level, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))
 			}
 			observeHTTPRequest(rec.route, r.Method, status, elapsed)
+			if status == http.StatusUnauthorized && rw.authRefusal != nil {
+				rec.reason = masker.Mask(rw.authRefusal.Message)
+			}
 			logRequest(ctx, logger, r, rec, status, elapsed, clientIP(r))
 		}
 		// safety: a handler that panics still made its write attempt, so it is
@@ -673,13 +676,19 @@ const statusClientClosedRequest = 499
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status    int
-	cause     error
-	ctx       context.Context
-	committed bool
+	status      int
+	cause       error
+	authRefusal *apierr.Error
+	ctx         context.Context
+	committed   bool
 }
 
 func (r *statusRecorder) ResponseError(err error) {
+	// safety: a 401 must audit its refusal even if another failure was noted first.
+	var refusal *apierr.Error
+	if !r.committed && errors.As(err, &refusal) && refusal.Code == hosterr.Unauthenticated {
+		r.authRefusal = refusal
+	}
 	if r.cause == nil {
 		r.cause = err
 	}
