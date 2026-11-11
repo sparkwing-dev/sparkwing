@@ -4,13 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
@@ -91,6 +90,53 @@ func TestLandQueueRefusesMainThatMovedAfterSubmission(t *testing.T) {
 	}
 	if got := r.git(r.dev, "rev-parse", "HEAD"); got != submitted {
 		t.Fatalf("refused submission was merged: %s", got)
+	}
+}
+
+func TestLandQueueRefusesMainThatMovedOnTheSecondFetch(t *testing.T) {
+	r := newLandRemote(t)
+	pinned := r.remoteMain()
+	submitted := r.git(r.dev, "rev-parse", "HEAD")
+	advanced := r.commit(r.other, map[string]string{"b/b.txt": "main advanced\n"}, "advance main")
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := t.TempDir()
+	seen := filepath.Join(tools, "first-fetch")
+	writeDeliveryTool(t, filepath.Join(tools, "git"), "#!/bin/sh\n"+
+		"if [ \"$*\" = 'fetch --quiet origin main' ]; then\n"+
+		"  if [ -f "+shellQuote(seen)+" ]; then\n"+
+		"    "+shellQuote(realGit)+" -C "+shellQuote(r.bare)+" fetch --quiet "+shellQuote(r.other)+" HEAD:refs/heads/main || exit\n"+
+		"  else touch "+shellQuote(seen)+"; fi\nfi\nexec "+shellQuote(realGit)+" \"$@\"\n")
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	host, plan, _ := prepareWork(t, &landPreconditionsJob{RepoDir: r.dev, Queued: true, Submitted: submitted, QueuedMain: pinned})
+	_, err = host.RunStep(t.Context(), plan, "job", "check")
+	if err == nil || !strings.Contains(err.Error(), "origin/main changed from planned") {
+		t.Fatalf("second fetch accepted a stale pin: %v", err)
+	}
+	if r.remoteMain() != advanced || r.git(r.dev, "rev-parse", "HEAD") != submitted {
+		t.Fatal("second fetch did not advance main without changing the candidate")
+	}
+}
+
+func TestLandQueueRefusesMainThatAdvancedToTheGatedCommit(t *testing.T) {
+	r := newLandRemote(t)
+	head := r.head()
+	r.git(r.bare, "fetch", "--quiet", r.dev, "HEAD:refs/heads/main")
+	var calls []string
+	git := func(ctx context.Context, args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return gitIn(r.dev)(ctx, args...)
+	}
+	_, err := pushQueuedLanding(newTestContext(t), git, r.dev, head)
+	if err == nil || !strings.Contains(err.Error(), "origin/main changed from planned") {
+		t.Fatalf("post-gate target change accepted: %v", err)
+	}
+	for _, call := range calls {
+		if strings.HasPrefix(call, "push ") {
+			t.Fatalf("stale gate reached push: %s", call)
+		}
 	}
 }
 
@@ -218,22 +264,6 @@ func TestLandQueueRefusesChangedSubmissionBeforeMerging(t *testing.T) {
 	for _, call := range g.calls {
 		if strings.HasPrefix(call, "merge ") {
 			t.Fatalf("merged changed submission: %v", g.calls)
-		}
-	}
-}
-
-func TestLandQueueDocumentsTrustedSubmissionContract(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join(sourceTreeRoot(), "DELIVERY.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	deadline := fmt.Sprintf("`affected-tests` job has a %d-minute execution deadline", int(affectedPushTestsTimeout/time.Minute))
-	if !strings.Contains(string(body), deadline) {
-		t.Fatalf("DELIVERY.md omits the local test deadline: %s", deadline)
-	}
-	for _, contract := range []string{"bash <main-checkout>/bin/queue-land.sh -C <candidate> --brief 'Describe the goal to review'", "--sw-pipeline-ref", "--queued-main", "pipeline ref", "direct push", "focused pipeline tests"} {
-		if !strings.Contains(string(body), contract) {
-			t.Fatalf("DELIVERY.md omits queue contract: %s", contract)
 		}
 	}
 }

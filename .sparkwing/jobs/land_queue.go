@@ -21,6 +21,17 @@ func prepareQueuedLanding(ctx context.Context, git gitRunner, dir, submitted, ma
 	if submitted == "" || head != submitted {
 		return errors.New("land queue: HEAD changed since submission; rerun focused tests and enqueue again")
 	}
+	if err := requireQueuedMain(ctx, git, dir, main); err != nil {
+		return err
+	}
+	if _, err := git(ctx, "merge", "--no-edit", landBaseRef); err != nil {
+		_, abortErr := git(ctx, "merge", "--abort")
+		return fmt.Errorf("land queue: merge failed; resolve with git -C %s merge %s and enqueue again: %w", dir, landBaseRef, errors.Join(err, abortErr))
+	}
+	return requireClean(ctx, git, dir)
+}
+
+func requireQueuedMain(ctx context.Context, git gitRunner, dir, main string) error {
 	if err := fetchLandBase(ctx, git, dir); err != nil {
 		return err
 	}
@@ -31,11 +42,7 @@ func prepareQueuedLanding(ctx context.Context, git gitRunner, dir, submitted, ma
 	if main == "" || base != main {
 		return queuedMainMoved(main, base)
 	}
-	if _, err := git(ctx, "merge", "--no-edit", landBaseRef); err != nil {
-		_, abortErr := git(ctx, "merge", "--abort")
-		return fmt.Errorf("land queue: merge failed; resolve with git -C %s merge %s and enqueue again: %w", dir, landBaseRef, errors.Join(err, abortErr))
-	}
-	return requireClean(ctx, git, dir)
+	return nil
 }
 
 func queuedMainMoved(planned, current string) error {
@@ -45,6 +52,9 @@ func queuedMainMoved(planned, current string) error {
 func pushQueuedLanding(ctx context.Context, git gitRunner, dir string, head landHead) (landTarget, error) {
 	target := landTarget{Commit: head.Commit, Tree: head.Tree, Base: head.Base}
 	if err := verifyLandingCheckout(ctx, git, dir, head); err != nil {
+		return target, err
+	}
+	if err := requireQueuedMain(ctx, git, dir, head.Base); err != nil {
 		return target, err
 	}
 	if err := pushLanding(ctx, git, dir, head.Commit, head.Tree); err != nil {
