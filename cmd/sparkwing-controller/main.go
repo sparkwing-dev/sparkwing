@@ -680,7 +680,7 @@ func ensureBootstrapAdmin(ctx context.Context, st *store.Store, seed string, log
 				repair.Hint = "Existing store: secure its administrator and remove bootstrap-admin-token; see the random-bootstrap-seed migration guide. A new seed cannot reopen its gate."
 			}
 			err = &repair
-			return fmt.Errorf("bootstrap admin token: %w. %s", err, refusal.Hint)
+			return fmt.Errorf("bootstrap admin token: %w. %s", err, repair.Hint)
 		}
 		return fmt.Errorf("bootstrap admin token: %w", err)
 	case created:
