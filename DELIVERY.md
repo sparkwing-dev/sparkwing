@@ -17,24 +17,47 @@ launcher when testing isolated tool state.
 Agents and the lead submit every landing through main's trusted
 `bin/queue-land.sh` entrypoint below. It invokes Sparkwing with main's pipeline
 definition against the candidate checkout. Ordinary interactive Land remains
-available for operator use from a clean work branch:
+available for operator use from a clean work branch. Operators must fetch main
+and pin its pipeline source too. Set `candidate` to the absolute worktree path:
 
 ```bash
-sparkwing run land --sw-dry-run                     # preview; nothing is pushed
-sparkwing run land --sw-stop-at verify              # gate and review, stop before the push
-sparkwing run land --sw-allow-risk destructive,prod  # land on main
+candidate=/absolute/path/to/candidate
+git -C "$candidate" fetch origin main
+main_sha="$(git -C "$candidate" rev-parse --verify 'origin/main^{commit}')"
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-dry-run
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-stop-at verify --sw-allow-risk destructive,prod
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-allow-risk destructive,prod
 ```
+
+An unpinned ordinary Land compiles the candidate's definition. For a registry
+change, the operator must also review its `land` entrypoint mapping and arguments:
+the pipeline-source pin selects code, while candidate aliases still apply.
 
 Lands run on owned hardware. Policy, gate, review and push use that machine.
 The land queue invokes it with `--sw-route local`.
 
 ### Queue focused lands
 
-Invoke the script from an up-to-date main checkout and name the clean candidate
-worktree explicitly:
+Extract the submission script from freshly fetched main, then invoke that copy.
+This works even when a local checkout named `main` is behind the remote. Set
+`candidate` to the absolute clean worktree path:
 
 ```bash
-bash <main-checkout>/bin/queue-land.sh -C <candidate> --brief 'Describe the goal to review'
+candidate=/absolute/path/to/candidate
+(
+  set -e
+  git -C "$candidate" fetch origin main
+  main_sha="$(git -C "$candidate" rev-parse --verify 'origin/main^{commit}')"
+  queue_script="$(mktemp)"
+  trap 'rm -f "$queue_script"' EXIT
+  git -C "$candidate" show "$main_sha:bin/queue-land.sh" > "$queue_script"
+  bash "$queue_script" -C "$candidate" --brief 'Describe the goal to review'
+)
+```
+
+Track the returned run:
+
+```bash
 sparkwing queue list
 sparkwing runs status --run <returned-run-id> --follow -o json
 ```
@@ -43,7 +66,9 @@ The script fetches `origin/main`, resolves its exact SHA, verifies its own blob
 against that commit, and refuses a candidate `.sparkwing/sparkwing.yaml` that
 differs from main. That registry determines the `land` entrypoint even when
 pipeline code is pinned. Restore main's registry before using this queue.
-Registry changes require a separately reviewed operator landing.
+Registry changes require a separately reviewed operator landing with main's
+pipeline source pinned. The refusal prints that exact command, including the
+resolved SHA, checkout and brief.
 The submitted command is:
 
 ```bash
@@ -53,7 +78,8 @@ sparkwing run land -C <candidate> --sw-detached --sw-route local --sw-pipeline-r
 `--sw-pipeline-ref` compiles main's complete pipeline source and local module
 dependencies. `WorkDir` remains the candidate checkout. The queued preconditions
 compare freshly fetched main to `--queued-main` before merging and again when
-capturing the gated HEAD. If main moved while the entry waited, the run refuses
+capturing the gated HEAD, then refresh main again before the queued push. If main
+moved while the entry waited or the checks ran, the run refuses
 and names the submission script. Enqueue again to compile the new gate.
 It never falls back to the branch's definition. Use `--foreground` on the script
 to wait in the terminal, or `--dry-run` to preview without a push.
@@ -70,6 +96,18 @@ commit but no pipeline ref, so `--queued-main` cannot independently prove which
 code the submitter selected. The verified script owns that selection. Bypassing
 the entrypoint or making a direct push is not stopped locally. Server-side branch
 protection with a status issued only by main's gate is separate enforcement.
+
+Runtime gate inputs remain candidate-controlled. Main's compiled jobs execute
+candidate scripts such as `bin/check-changelog.sh`, `bin/sync-docs.sh --check`,
+`bin/gen-cli-docs.sh`, and `bin/gen-config-docs.sh`, and read candidate policy
+such as `.review.yaml` and `.golangci.yml`. A branch can weaken a check by making
+its script return success or relaxing its configuration. Review must inspect
+those changes until the runtime checkers and their policy are separately pinned.
+This change protects pipeline compilation, not all gate enforcement inputs.
+Running a script from main's checkout alone does not fix that boundary: these
+scripts derive their repository root from their own path, then compile checker
+or generator code from that root. Trusted checker code needs an explicit
+candidate input root, including its transitive helpers and configuration.
 
 Each entry is a durable `land` run in the dashboard. Detached intake returns
 its run ID; keep that receipt to wait for the entry, inspect logs and failures,

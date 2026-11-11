@@ -32,7 +32,8 @@ func (Land) ShortHelp() string {
 
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
-		"All lands share one serial run slot. Queue with bash <main-checkout>/bin/queue-land.sh -C <candidate> --brief 'Short intent'. The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, run policy and fast pre-push/review against the merged checkout, then the shared affected short and critical Go tests, and push only the unchanged checked commit. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
+		"For ordinary Land, fetch origin/main and pass --sw-pipeline-ref <fetched-main-SHA> so the candidate does not define its own gate. " +
+		"All lands share one serial run slot. Extract bin/queue-land.sh from freshly fetched origin/main and run that copy against the candidate with --brief 'Short intent' (see DELIVERY.md). The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, run policy and fast pre-push/review against the merged checkout, then the shared affected short and critical Go tests, and push only the unchanged checked commit. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip). " +
@@ -50,9 +51,9 @@ func (Land) Help() string {
 
 func (Land) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Preview the landing without pushing", Command: "sparkwing run land --sw-dry-run"},
-		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod"},
-		{Comment: "Land the branch on main", Command: "sparkwing run land --sw-allow-risk destructive,prod"},
+		{Comment: "Preview with freshly fetched main's pipeline", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-dry-run"},
+		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-stop-at verify --sw-allow-risk destructive,prod"},
+		{Comment: "Land the branch with main's pipeline", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-allow-risk destructive,prod"},
 	}
 }
 
@@ -74,7 +75,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 		return errors.New("land: --queued requires a non-empty --brief with the goal to review; for example: --brief 'BW" + "-1234: short intent'")
 	}
 	if in.Queued && in.QueuedMain == "" {
-		return errors.New("land queue: submit through bin/queue-land.sh from an up-to-date main checkout so the plan uses main's gate")
+		return errors.New("land queue: submit through bin/queue-land.sh extracted from freshly fetched origin/main so the plan uses main's gate")
 	}
 	plan.Concurrency(sparkwing.NewConcurrencyGroup("sparkwing-land", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	branch, submitted := "", ""

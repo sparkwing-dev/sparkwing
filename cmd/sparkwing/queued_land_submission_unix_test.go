@@ -28,6 +28,23 @@ func TestQueuedLandSubmissionUsesMainDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, err := os.ReadFile(filepath.Join("..", "..", "DELIVERY.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(body), "\n### Queue focused lands\n")
+	if !ok {
+		t.Fatal("DELIVERY.md has no queued Land section")
+	}
+	_, block, ok := strings.Cut(section, "```bash\n")
+	if !ok {
+		t.Fatal("queued Land section has no Bash recipe")
+	}
+	recipe, _, ok := strings.Cut(block, "```")
+	if !ok {
+		t.Fatal("queued Land recipe has no closing fence")
+	}
+	recipe = strings.Replace(recipe, "candidate=/absolute/path/to/candidate", "candidate=\"$candidate\"", 1)
 	for _, change := range []string{"older-land", "deleted-gate", "legitimate-land-change"} {
 		t.Run(change, func(t *testing.T) {
 			home := t.TempDir()
@@ -77,8 +94,8 @@ func init(){sw.Register("Land",func()sw.Pipeline[args]{return pipeline{}})}
 			toolDir := t.TempDir()
 			capture := filepath.Join(toolDir, "arguments")
 			writeSnapshotFile(t, toolDir, "sparkwing", "#!/bin/sh\nprintf '%s\\0' \"$@\" > \""+capture+"\"\n", 0o700)
-			command := testgit.CommandContext(t.Context(), "bash", filepath.Join(repo, "bin", "queue-land.sh"), "-C", repo, "--brief", "Review candidate gate")
-			command.Env = append(command.Env, "PATH="+toolDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			command := testgit.CommandContext(t.Context(), "bash", "-c", recipe)
+			command.Env = append(command.Env, "candidate="+repo, "PATH="+toolDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			if out, err := command.CombinedOutput(); err != nil {
 				t.Fatalf("submission: %v\n%s", err, out)
 			}
@@ -175,7 +192,7 @@ func TestQueuedLandSubmissionRefusesUntrustedInputs(t *testing.T) {
 			}
 			tools := t.TempDir()
 			marker := filepath.Join(tools, "invoked")
-			writeSnapshotFile(t, tools, "sparkwing", "#!/bin/sh\ntouch \""+marker+"\"\n", 0o700)
+			writeSnapshotFile(t, tools, "sparkwing", "#!/bin/sh\nprintf '%s\\0' \"$@\" > \""+marker+"\"\n", 0o700)
 			command := testgit.CommandContext(t.Context(), "bash", filepath.Join(repo, "bin/queue-land.sh"), "-C", repo, "--brief", "Review gate")
 			command.Env = append(command.Env, "PATH="+tools+string(os.PathListSeparator)+os.Getenv("PATH"))
 			out, err := command.CombinedOutput()
@@ -184,6 +201,35 @@ func TestQueuedLandSubmissionRefusesUntrustedInputs(t *testing.T) {
 			}
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
 				t.Fatalf("untrusted input reached sparkwing: %v", err)
+			}
+			if changed == "registry" {
+				var remedy string
+				for _, line := range strings.Split(string(out), "\n") {
+					if strings.HasPrefix(strings.TrimSpace(line), "sparkwing run land ") {
+						remedy = line
+					}
+				}
+				if remedy == "" {
+					t.Fatal("registry refusal has no operator command")
+				}
+				operator := testgit.CommandContext(t.Context(), "bash", "-c", remedy)
+				operator.Env = append(operator.Env, "PATH="+tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+				if out, err := operator.CombinedOutput(); err != nil {
+					t.Fatalf("operator command: %v\n%s", err, out)
+				}
+				args, err := os.ReadFile(marker)
+				if err != nil {
+					t.Fatal(err)
+				}
+				inv, err := clisurface.Parse("sparkwing", strings.Split(strings.TrimSuffix(string(args), "\x00"), "\x00"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				flags, pass := runFlagsFromInvocation(inv)
+				main := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "origin/main"))
+				if flags.pipelineRef != main || slices.Contains(pass, "--queued") || inv.Pipeline != "land" {
+					t.Fatalf("operator remedy is not ordinary Land pinned to main: %s", remedy)
+				}
 			}
 		})
 	}
