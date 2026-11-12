@@ -267,6 +267,36 @@ little admission-order benefit. Changing order can change contention,
 cache sharing and which failure is observed first; performance needs paired
 measurements without changing coverage or fail-fast behavior.
 
+Three interleaved FIFO/hint pairs on 2026-11-11 used the identical
+`a59a9a28f` tree, the same 13-file cohort and allowance seven. FIFO removed
+only the coordinator's hint call through a Go overlay; nested tests used the
+candidate source in both arms. Each sample used one ordinary Go slot, with
+`-count=1`, shared build caches and no load-based exclusions.
+
+| Pair | FIFO runner, s | Hint runner, s | Runner change | Short-span change, s |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 727.676 | 695.567 | -4.41% | -50.971 |
+| 2 | 704.137 | 575.042 | -18.33% | -125.424 |
+| 3 | 652.664 | 652.071 | -0.09% | +2.938 |
+
+Runner medians were 704.137 / 652.071 s (FIFO / hints), a 7.39% reduction
+in the ratio of medians. Ranges were 652.664-727.676 / 575.042-695.567 s;
+inclusive IQRs were 37.506 / 60.263 s. The paired median runner saving was
+32.109 s. All six had exact top-level run/pass/skip parity: 7,908 root and
+774 pipeline short test runs, plus 31 Linux critical passes and seven
+Windows-only critical declarations absent. Selection, all 81 commands,
+lane widths, atomic store admission and the critical join were unchanged.
+
+The third pair was effectively tied: its short span increased 2.938 s,
+while its critical span fell 3.609 s. These samples do not establish a
+stable, meaningful saving. FIFO/hint load1 medians were 7.333/15.734,
+13.382/14.344 and 10.401/16.342. Other owners, load, host iowait and steal
+were recorded at 1 Hz without replacing samples. One shared host, one
+time window, fixed FIFO-before-hints order and changing cache/compile
+context limit attribution. This measures forced-body affected tests, not
+default result-cache processing or end-to-end Land. Existing deadlines
+remain unchanged.
+
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at
 `406208403`. All share root b61 and the same 13-file selection: two pipeline
