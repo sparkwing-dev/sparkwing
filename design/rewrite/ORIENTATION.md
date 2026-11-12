@@ -221,6 +221,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 | Repository placement tiers are sealed from the default-branch head of a proven run, form the whole allowed set, and replace the ranking and controller holds for listed jobs | `claim_query.go`: `repositoryTiers`, `repositoryTierMatch`, `placementCTEs`; `repository_placement.go`: `sealRepositoryPlacement`, `checkPlacementJobs`; `internal/controller/repository_placement.go`: `defaultBranchPlacement` | `repository_placement_test.go` (SQLite and PostgreSQL); `internal/controller/repository_placement_test.go`: `TestGitHubAppRunSealsDefaultBranchPlacementNotTheEventsOwn` |
 | Held repository-placed jobs project each tier's live runners and opening time from committed state using the claim liveness window | `placement_wait.go`: `readPlacementWaitsTx`, `placementTierWaits`; `internal/controller/unclaimed_notice.go`: `placementNotices` | `placement_wait_test.go`: `TestPlacementTierWaitsMirrorTheClaimHold`; `placement_wait_projection_test.go`: `TestPlacementWaitProjectsEachTierFromCommittedState`, `TestPlacementWaitUsesClaimLiveness` |
 | Team holds (operator, fraud) | `credit_reversals.go`: `teamHoldTx`, `Tenant.HoldByOperator` | `hold_stop_test.go` |
+| Ready PostgreSQL fixtures clone an immutable process-owned baseline while raw targets preserve empty-schema, reopen and schema-lock coverage; restricted roles keep fresh schemas | `internal/store/internal/storetest/postgres_template.go`: `newClonedPostgres`, `postgresTemplate`; `main.go`: `Main` | `internal/store/internal/storetest/postgres_template_test.go`: `TestConcurrentPostgresFixturesKeepTheirRowsPrivate`, `TestReadyPostgresFixtureDoesNotCopyAnotherFixturesRows`, `TestRawPostgresTargetIsEmptyAndSurvivesReopening`, `TestPostgresFixtureWorksWithoutCreateDatabasePermission`; `capacity_schema_bridge_test.go`: `AdmissionSchemaIsolation`; `postgres_test.go`: `TestPostgresOpenAndMigrate` |
 | Concurrency admission (decision 45) | `capacity_admission.go`: `Tenant.MayStart`, `admitWorkTx`; `capacity_owner.go`: `tryAdmissionLockTx` | `admission_concurrent_test.go`; `capacity_order_postgres_test.go`: `TestPostgresAdmissionLocksFollowTheirStoreSchema` |
 | Owner placement uses one shared eligibility read for a run snapshot | `state_owner_read.go`: `readOwnerSnapshot`; `owner_placement.go`: `ownerEligibleNodesTx` | `owner_snapshot_scale_test.go`: `TestOwnerSnapshotPlacementWorkDoesNotMultiplyByJobCount` |
 | Canceled snapshot and node reads report the context cause for SQLite interrupts and preserve unrelated failures | `state_contract.go`: `snapshotReadError` | `state_snapshot_cancel_test.go`: `TestSnapshotReadCancellationPreservesUnrelatedFailures`; `internal/nodehost/native_capacity_test.go`: `TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute` |
@@ -535,7 +536,10 @@ go -C $W run ./internal/commentcheck -base origin/main .
 
 - PostgreSQL: `SPARKWING_TEST_STORE=postgres` switches every test that opens
   through `internal/store/internal/storetest` to PostgreSQL;
-  `SPARKWING_TEST_PG_URL` names the server, and each test gets its own schema.
+  `SPARKWING_TEST_PG_URL` names the server. Ready-store opens clone an
+  initialized template into separate databases when CREATE DATABASE is allowed;
+  raw `New`/`NewPostgres` targets still get empty schemas. Fixture packages use
+  `storetest.Main` for template teardown and leak checks.
   Without the first variable the suite runs on SQLite.
 - Isolated HOME: tests call `testhome.Set` (`sparkwing/testsupport/testhome`). Run any `sparkwing`
   binary with a private `HOME` and `SPARKWING_HOME`, never the real ones.

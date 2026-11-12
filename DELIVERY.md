@@ -2304,7 +2304,7 @@ file. Other syntax and workflow checks remain active.
 - **Store dialect matrix:** `sparkwing run store-postgres` runs the
   `internal/store` tests that exercise PostgreSQL with
   `SPARKWING_TEST_STORE=postgres`, so every store test that opens through
-  `internal/store/storetest` exercises the Postgres dialect instead of a SQLite
+  `internal/store/internal/storetest` exercises the Postgres dialect instead of a SQLite
   file. It compiles one `internal/store` test binary, lists its top-level
   Test, Example and Fuzz names, and runs every one except two kinds. The
   internal tests in the files named by
@@ -2322,15 +2322,24 @@ file. Other syntax and workflow checks remain active.
   `TestStorePostgresSelectionCoversTheStoreInventory` in `.sparkwing/jobs`,
   when a named file is missing, declares no internal test, or reaches
   `SPARKWING_TEST_PG_URL` or the `pgx` driver directly or through a helper or
-  constant in the internal test files; remove such a file from the list. The
-  sorted selection is assigned round-robin, each
+  constant in the internal test files; remove such a file from the list.
+  Ready-store fixtures (`storetest.Open` and `OpenPostgres`) reuse one initialized
+  PostgreSQL template per test process/server and clone a database for each
+  fixture. Their TestMain closes the cache and drops its templates after every
+  fixture has closed. Servers without CREATE DATABASE permission use the
+  existing fresh-schema path. `New` and `NewPostgres` still reserve empty
+  schemas for migration, reopening and cases with multiple schemas in one database;
+  the named fresh-open and schema-lock tests use those constructors explicitly.
+  A killed process on a configured server can leave `sw_fixture_clone_*` and
+  `sw_fixture_template_*` databases; remove them only after their owner is gone.
+  The embedded server's disposable cluster is removed at run teardown.
+  The sorted selection is assigned round-robin, each
   name exactly once, to one `GOMAXPROCS=1` shard process per core a Go step
   may hold: four on the hosted four-core runner, the Go step bound
   (`(cpus-1)/2` shared, `cpus/2` under `CI`) elsewhere. Each shard gets a
   database of its own, created on the server before the shards start and
-  dropped `WITH (FORCE)` afterwards, because the store's migration advisory
-  lock is per database: shards sharing one database queue every fixture's
-  schema apply behind each other. The shard URL drops `dbname` and `database`
+  dropped `WITH (FORCE)` afterwards, because raw-target schema initialization uses a
+  database-scoped migration advisory lock. The shard URL drops `dbname` and `database`
   query options, which pgx reads over the URL path, and a `service` reference
   is refused. A run killed outright can leave `sparkwing_store_shard_*`
   databases on a configured server, and so can a `CREATE DATABASE` whose
