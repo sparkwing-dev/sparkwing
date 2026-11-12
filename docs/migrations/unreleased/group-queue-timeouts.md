@@ -1,4 +1,4 @@
-## Group queue timeouts and store schema 38
+## Upgrade the store in place to schema baseline 38
 
 A positive concurrency group `QueueTimeout` includes the job's initial wait
 before a runner award. It begins when an eligible ready job first encounters a

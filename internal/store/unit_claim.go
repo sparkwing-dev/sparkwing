@@ -162,7 +162,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		}
 	}()
 
-	prepared, err := prepareUnitClaimTx(ctx, tx, demand, candidate)
+	prepared, err := op.prepareUnitClaimTx(ctx, tx, demand, candidate)
 	if err != nil {
 		return UnitClaim{}, err
 	}
@@ -394,7 +394,7 @@ type preparedUnitClaim struct {
 	ready        bool
 }
 
-func prepareUnitClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, candidate claimHead) (preparedUnitClaim, error) {
+func (op *Operator) prepareUnitClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, candidate claimHead) (preparedUnitClaim, error) {
 	unit := candidate.Unit
 	if err := validateClaimUnit(unit); err != nil {
 		return preparedUnitClaim{}, err
@@ -411,7 +411,7 @@ func prepareUnitClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, can
 			return preparedUnitClaim{}, err
 		}
 	}
-	team, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, unit)
+	team, err := op.claimTargetTeamTx(ctx, tx, p.Capability, unit)
 	if err != nil {
 		return preparedUnitClaim{}, err
 	}

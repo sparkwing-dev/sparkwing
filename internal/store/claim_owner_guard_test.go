@@ -54,6 +54,12 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 				if ok && ident.Name == required {
 					checked = true
 				}
+				if method, ok := call.Fun.(*ast.SelectorExpr); ok && required == "prepareUnitClaimTx" && method.Sel.Name == required && fn.Recv != nil {
+					receiver, ok := method.X.(*ast.Ident)
+					if ok && len(fn.Recv.List[0].Names) == 1 && receiver.Name == fn.Recv.List[0].Names[0].Name {
+						checked = true
+					}
+				}
 				return true
 			})
 		}
@@ -104,7 +110,7 @@ var reviewedClaimSQLFragments = map[string]string{
 }
 
 func TestClaimSQLFragmentsCannotExecuteOrCarryDatabaseHandles(t *testing.T) {
-	files := []string{"claim_query.go", "claim_search.go", "claim_requirements.go", "approval_evaluation.go"}
+	files := []string{"claim_query.go", "claim_search.go", "claim_capacity_search.go", "claim_requirements.go", "approval_evaluation.go"}
 	check := func(n ast.Node) {
 		ast.Inspect(n, func(n ast.Node) bool {
 			switch v := n.(type) {

@@ -34,7 +34,7 @@ func claimCapacityReadyTx(ctx context.Context, tx *storeTx, prefix string, team 
 			continue
 		}
 		if group.Scope == "box" && host == "" {
-			chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false)
+			chain, err := teamAuthorityChainTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false, sameTeamOrCloudLauncher)
 			if err != nil {
 				return false, err
 			}

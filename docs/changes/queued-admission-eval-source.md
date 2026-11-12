@@ -7,4 +7,4 @@
 
 ### Changed
 
-- **store (Breaking):** Schema 38 persists initial group waits and upgrades schema 37 stores automatically. Older binaries refuse the upgraded store. See the [migration guide](docs/migrations/_unreleased.md#group-queue-timeouts-and-store-schema-38)
+- **store (Breaking):** The schema baseline advances to version 38 to persist initial group waits. Schema 37 stores upgrade automatically. Older binaries refuse the upgraded store. See the [migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-38)
