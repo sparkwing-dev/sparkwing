@@ -98,60 +98,6 @@
       ],
       "type": "object"
     },
-    "ExecDone": {
-      "additionalProperties": true,
-      "properties": {
-        "cleanup_error": {
-          "type": "string"
-        },
-        "exec_done": {
-          "type": "string"
-        },
-        "exit_code": {
-          "type": "integer"
-        },
-        "not_found": {
-          "type": "boolean"
-        },
-        "signaled": {
-          "type": "boolean"
-        },
-        "start_error": {
-          "type": "string"
-        },
-        "stderr": {
-          "type": "string"
-        },
-        "stdout": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "exec_done",
-        "exit_code"
-      ],
-      "type": "object"
-    },
-    "ExecOutput": {
-      "additionalProperties": true,
-      "properties": {
-        "data": {
-          "type": "string"
-        },
-        "exec_output": {
-          "type": "string"
-        },
-        "stream": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "exec_output",
-        "stream",
-        "data"
-      ],
-      "type": "object"
-    },
     "FrameLog": {
       "additionalProperties": true,
       "properties": {

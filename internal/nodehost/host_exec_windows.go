@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,10 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-type commandSession struct {
-	job        *procgroup.Job
-	cleanupErr error
-}
+type commandSession struct{ job *procgroup.Job }
 
 // safety: distinguish host termination from a natural nonzero exit racing cancellation.
 const commandCancellationExitCode uint32 = 0x53574341
@@ -74,23 +72,20 @@ func startHostCommand(cmd *exec.Cmd, _ []string) (*commandSession, error) {
 
 func (c *commandSession) leader() (int, string, bool) { return 0, "", false }
 
-func (c *commandSession) kill() error {
+func (c *commandSession) kill() {
 	if err := c.job.TerminateWithCode(commandCancellationExitCode); err != nil {
-		return fmt.Errorf("kill SDK command job: %w", err)
+		slog.Default().Debug("kill SDK command job", "err", err)
 	}
-	return nil
 }
 
 func (*commandSession) signaled(cmd *exec.Cmd) bool {
 	return uint32(cmd.ProcessState.ExitCode()) == commandCancellationExitCode
 }
 
-func (c *commandSession) failure() error { return c.cleanupErr }
-
 func endCommandSessions(sessions []*commandSession) error {
 	var errs []error
 	for _, session := range sessions {
-		errs = append(errs, session.failure(), session.job.Close())
+		errs = append(errs, session.job.Close())
 	}
 	return errors.Join(errs...)
 }

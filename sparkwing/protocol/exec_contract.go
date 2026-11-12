@@ -39,18 +39,16 @@ type ExecOutput struct {
 
 // ExecDone is the host's last line for a command. ExitCode is -1 when the
 // command was killed by a signal or never started; StartError explains the latter, and
-// NotFound marks a missing executable. CleanupError is diagnostic: the command ran,
-// but the host failed its cleanup and also fails the owning attempt. Without capture, Stdout and Stderr hold
+// NotFound marks a missing executable. Without capture, Stdout and Stderr hold
 // at most [ExecTailBytes] from the end of each stream for error messages.
 type ExecDone struct {
-	ID           string `json:"exec_done"`
-	ExitCode     int    `json:"exit_code"`
-	Signaled     bool   `json:"signaled,omitempty"`
-	StartError   string `json:"start_error,omitempty"`
-	CleanupError string `json:"cleanup_error,omitempty"`
-	NotFound     bool   `json:"not_found,omitempty"`
-	Stdout       []byte `json:"stdout,omitempty"`
-	Stderr       []byte `json:"stderr,omitempty"`
+	ID         string `json:"exec_done"`
+	ExitCode   int    `json:"exit_code"`
+	Signaled   bool   `json:"signaled,omitempty"`
+	StartError string `json:"start_error,omitempty"`
+	NotFound   bool   `json:"not_found,omitempty"`
+	Stdout     []byte `json:"stdout,omitempty"`
+	Stderr     []byte `json:"stderr,omitempty"`
 }
 
 // ExecTailBytes bounds each stream tail a logged command returns to the SDK.

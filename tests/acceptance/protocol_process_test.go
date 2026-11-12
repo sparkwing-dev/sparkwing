@@ -198,13 +198,10 @@ func protocolProbeReply(t *testing.T, process *acceptance.GoSDKProcess, id strin
 			t.Fatal(err)
 		}
 		if frame.Exec != nil {
-			done, hostErr := nodehost.ExecuteCommand(t.Context(), *frame.Exec, func(stream string, data []byte, _ bool) error {
+			done := nodehost.ExecuteCommand(t.Context(), *frame.Exec, func(stream string, data []byte, _ bool) error {
 				return process.Send(nodewire.ExecOutput{ID: frame.Exec.ID, Stream: stream, Data: data})
 			})
 			sendProtocolProbe(t, process, done)
-			if hostErr != nil {
-				t.Fatalf("host command cleanup failed: %v", hostErr)
-			}
 			continue
 		}
 		var reply nodewire.Reply

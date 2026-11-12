@@ -242,9 +242,7 @@ func TestWindowsHostCommandNaturalFailureIsNotCancellation(t *testing.T) {
 	}
 	defer windows.CloseHandle(handle)
 	waitWindowsProcess(t, handle)
-	if err := session.kill(); err != nil {
-		t.Fatal(err)
-	}
+	session.kill()
 	if err := cmd.Wait(); err == nil || cmd.ProcessState.ExitCode() != 7 || session.signaled(cmd) {
 		t.Fatalf("natural failure attributed to cancellation: %v", err)
 	}

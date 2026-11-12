@@ -185,7 +185,6 @@ type protocolSession struct {
 	execSeq                   uint64
 	commands                  sync.WaitGroup
 	measureCommand            func(context.Context, int, string) error
-	startCommand              func(*exec.Cmd, []string) (*commandSession, error)
 }
 
 var errProtocolSessionClosed = errors.New("SDK protocol session closed")
