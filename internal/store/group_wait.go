@@ -91,7 +91,7 @@ func (o *Operator) recordObservedGroupWait(ctx context.Context, demand UnitDeman
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}}); err != nil {
 			return err
 		}
-		prepared, err := tx.operator.prepareUnitClaimTx(ctx, tx, demand, claimHead{Unit: unit})
+		prepared, err := o.prepareUnitClaimTx(ctx, tx, demand, claimHead{Unit: unit})
 		if errors.Is(err, ErrNotFound) {
 			return nil
 		}

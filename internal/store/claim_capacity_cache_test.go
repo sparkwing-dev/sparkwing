@@ -46,6 +46,25 @@ func addCachedClaimJob(t *testing.T, s *Store, id string, ready int64, capacity,
 	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: runspec.NodeID(id)})
 }
 
+func TestClaimCapacitySearchReclaimsRetainedHolder(t *testing.T) {
+	for _, bound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bound=%t", bound), func(t *testing.T) {
+			s, demand := cachedClaimGroupFixture(t, 1)
+			if !bound {
+				demand.CapabilityPrefix = "runner"
+			}
+			// safety: the run owner's lease keeps the retained permit live while its node is unclaimed.
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,status='pending',ready_at=2 WHERE team='a' AND run_id='run' AND node_id='job'`)
+			addCachedClaimJob(t, s, "blocked", 1, 1, 1, nil)
+			// safety: the older sibling seeds the full-key exclusion before the holder reaches search.
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil || claim.NodeID != "job" {
+				t.Fatalf("full-key exclusion hid retained holder: claim=%s error=%v", claim.NodeID, err)
+			}
+		})
+	}
+}
+
 func TestClaimCapacityCachePreservesWeightedBackfill(t *testing.T) {
 	s, demand := cachedClaimGroupFixture(t, 2)
 	addCachedClaimJob(t, s, "heavy", 1, 2, 2, nil)

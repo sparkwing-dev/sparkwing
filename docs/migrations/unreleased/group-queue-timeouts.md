@@ -10,8 +10,9 @@ replayed after the deadline.
 Store schema 38 adds a private nullable group-wait timestamp. The controller
 upgrades a schema 37 store automatically; SQLite creates its usual backup first.
 Existing rows begin with no recorded pre-award wait. Already queued awards keep
-their recorded admission start. Sparkwing v0.72.2 and v0.72.3 refuse the upgraded store; use a
-matching binary or restore its pre-upgrade backup into a separate store.
+their recorded admission start. Binaries without schema 38 support refuse the
+upgraded store; use a matching binary or restore its pre-upgrade backup into a
+separate store. The changelog identifies the release that introduces schema 38.
 
 No pipeline configuration change is required. Deploy the controller and update
 the runner to use the claim-selection and admission fixes together.
