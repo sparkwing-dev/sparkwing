@@ -41,7 +41,7 @@ func TestPreparationFinishStopsAtAuthorityExpiry(t *testing.T) {
 			if time.Since(start) >= 250*time.Millisecond {
 				late++
 			}
-			return &http.Response{StatusCode: 503, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("no backend"))}, nil
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("no backend"))}, nil
 		})}})
 		if err != nil {
 			t.Fatal(err)
