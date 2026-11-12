@@ -43,6 +43,7 @@ type localRuntime struct {
 }
 
 type localRuntimeSession struct {
+	standalone   bool
 	daemon       *Daemon
 	cancel       context.CancelFunc
 	done         chan struct{}
@@ -97,6 +98,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 	if err != nil {
 		return err
 	}
+	session.standalone = opts.Standalone
 	defer func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -422,11 +424,18 @@ func (r *localRuntime) Drain(ctx context.Context) error {
 		return session.err
 	default:
 	}
-	if session.ready {
+	ready := session.ready
+	if ready {
 		session.daemon.markDraining()
 	}
-	session.cancel()
 	r.mu.Unlock()
+	// Standalone owns the runner too; retire it while its controller still answers.
+	if ready && session.standalone {
+		if err := session.daemon.retireLocalRunner(ctx); err != nil {
+			return err
+		}
+	}
+	session.cancel()
 	select {
 	case <-session.done:
 		return session.err
