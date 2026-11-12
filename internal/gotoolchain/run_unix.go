@@ -15,7 +15,11 @@ import (
 const toolchainTerminationTimeout = 2*procgroup.DefaultTerminationGrace + 30*time.Second
 
 func runToolchain(ctx context.Context, cmd *exec.Cmd) error {
+	drainDelay := cmd.WaitDelay
+	// safety: exec must not start a context killer outside the process owner.
+	cmd.WaitDelay = 0
 	group, err := procgroup.Start(cmd)
+	cmd.WaitDelay = drainDelay
 	if err != nil {
 		return err
 	}
