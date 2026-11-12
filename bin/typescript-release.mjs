@@ -4,9 +4,16 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const packageInputs = new Set(["package.json", "package-lock.json", "README.md", "index.d.ts", "tsconfig.json", "tsconfig.build.json"]);
+
 export function sdkDigest(root, tools = root) {
   const paths = execFileSync("git", ["-C", root, "ls-files", "-z", "--", "sdk/typescript"], { encoding: "utf8" })
-    .split("\0").filter(Boolean).filter(path => !/\/(node_modules|dist|win32-x64|win32-arm64)\//.test(path)).sort();
+    .split("\0").filter(Boolean).filter(path => {
+      const input = path.slice("sdk/typescript/".length);
+      // safety: Windows publication runs nativehost and binds its entire fixture tree into verification receipts.
+      return packageInputs.has(input) || input.startsWith("src/") || input.startsWith("test/nativehost/") ||
+        input.startsWith("native/") && !/^native\/win32-(x64|arm64)\//.test(input);
+    }).sort();
   const hash = createHash("sha256");
   for (const path of paths) {
     let bytes = readFileSync(resolve(root, path));
