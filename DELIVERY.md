@@ -2239,6 +2239,44 @@ file. Other syntax and workflow checks remain active.
   missing or failed names. Wall time fell about 17% and CPU about 16% in
   these shared-host samples.
 
+- **RSA fixture leases, measured 2026-11-12:** GitHub App and JWKS fixtures,
+  including Google and GitHub OIDC, share `internal/rsatest.New`. The process
+  generates a 2048-bit key only when no free material exists. Each live fixture
+  has an exclusive lease and its own parsed key object. Its own `t.Cleanup`
+  returns the material after issuer cleanup; parent-owned fixtures retain their
+  keys until parent cleanup. The pool retains the live-lease high-water mark,
+  rather than generating for every construction. No key material is checked in,
+  and scanner and snapshot policy are unchanged.
+
+  Three interleaved A/B pairs ran the whole `internal/controller` short class
+  on the same `f75692d80` source tree. A restored only the original two
+  generating helper files through a Go overlay; B used the pooled helpers.
+  Go 1.26.11, `GOWORK=auto`, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=3` and
+  `go test -json -p 1 -short -timeout 25m` were fixed. Every sample used private
+  homes and a private clone of the same compile-only cache seed, warmed for
+  both variants. A native process wrapper recorded user plus system CPU,
+  including waited children, and restored Go's test input log. Compilation and
+  cache cloning are outside these native timings.
+
+  | Pair | CPU before / after | CPU delta | Wall before / after | Wall delta |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 221.540 / 164.652 s | -25.68% | 249.622 / 166.779 s | -33.19% |
+  | 2 | 198.739 / 184.972 s | -6.93% | 184.614 / 175.476 s | -4.95% |
+  | 3 | 225.507 / 164.958 s | -26.85% | 230.723 / 180.211 s | -21.89% |
+
+  Native medians were 221.540 to 164.958 CPU seconds (-25.54%) and
+  230.723 to 175.476 wall seconds (-23.94%), comparing the medians.
+  CPU ranges were 198.739-225.507 before and 164.652-184.972 after;
+  wall ranges were 184.614-249.622 and 166.779-180.211 seconds.
+  All six inventories match exactly: 2,266 passes and 69 conditional skips.
+  This was one shared host and one time window, with no quiet reservation or
+  sample exclusions. Median load1 before/after was 9.68/4.09, 4.46/7.46 and
+  9.93/5.07 by pair. Raw load and Go-slot owners were recorded at 1 Hz, along
+  with CPU iowait and steal. These are package observations, not a forecast
+  for an entire queued land. Evidence, overlays, cache manifests and native
+  rusage are under
+  `/home/bombuntu/evidence/sparkwing/bw-3545-runtime-rsa-lease-pool-2026-11-12/`.
+
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured on a
   16-core Linux box, `GOWORK=off go test -count=1 <pkg>`. The CLI sample
