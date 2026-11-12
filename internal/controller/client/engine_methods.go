@@ -91,7 +91,9 @@ func (c *engineClient) Finish(ctx context.Context, run string, input controllerw
 	if !validSelector(run) {
 		return result, &apierr.Error{Code: apierr.BadRequest, Message: "invalid run selector"}
 	}
-	err := c.request(ctx, "POST", "/api/v1/runs/{run}/finish", "/api/v1/runs/"+url.PathEscape(run)+"/finish", "", input, &result)
+	err := retryHeldRequest(ctx, func() error {
+		return c.request(ctx, "POST", "/api/v1/runs/{run}/finish", "/api/v1/runs/"+url.PathEscape(run)+"/finish", "", input, &result)
+	})
 	return result, err
 }
 

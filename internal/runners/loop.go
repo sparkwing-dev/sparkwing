@@ -481,6 +481,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				}
 				return nil, fmt.Errorf("claim runner work: controller recovery deadline exceeded: %w", outcome.err)
 			} else {
+				// safety: this budget measures claim availability; successful heartbeats do not reset it.
 				transportSince = time.Time{}
 				transportErr = nil
 				transportAttempt = 0

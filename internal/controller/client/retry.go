@@ -33,23 +33,24 @@ func RetryBackoff(attempt int, floor time.Duration) time.Duration {
 	return floor + ceiling/2 + time.Duration(rand.Int64N(int64(ceiling/2)+1))
 }
 
-// safety: a controller outage cannot end held work; only read operations wait for reconnection.
-func retryHeldRead(ctx context.Context, read func() error) error {
+// safety: held reads and fenced completions retry only within their caller's award context.
+func retryHeldRequest(ctx context.Context, request func() error) error {
 	for attempt := 0; ; attempt++ {
-		err := read()
+		err := request()
 		if err == nil {
 			return nil
-		}
-		if cause := context.Cause(ctx); cause != nil {
-			return cause
 		}
 		retry := RetryableTransportError(err)
 		var failure *apierr.Error
 		if errors.As(err, &failure) {
 			retry = failure.Code == hosterr.Unavailable
 		}
+		// safety: a simultaneous shutdown must not erase a permanent authority refusal.
 		if !retry {
 			return err
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
 		}
 		delay := RetryBackoff(attempt, time.Second)
 		if advised, ok := hosterr.RetryDelay(err); ok {

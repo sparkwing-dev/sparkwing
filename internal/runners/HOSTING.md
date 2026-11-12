@@ -261,3 +261,7 @@ hosts join. The local runner uses it to persist draining independently of host
 cleanup, including when a controller outage exhausts claim recovery. Cancellation
 of that persistence worker follows host joining, so a permanently absent API
 does not hold an idle runner open.
+
+Terminal run acknowledgements retry temporary controller failures until their
+caller context ends, retaining their completion fence and Retry-After advice.
+A successful heartbeat does not reset the claim-availability budget.

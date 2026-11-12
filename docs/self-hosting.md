@@ -768,3 +768,8 @@ Held work keeps its execution context during claim recovery. Its lease expiry
 and authority checks still apply. A non-retryable claim refusal or an outage
 lasting ten minutes stops new claims and joins held work before the runner
 returns an error. The final error can therefore appear after the outage ended.
+
+Terminal run acknowledgements retry temporary controller or connection failures
+with backoff and `Retry-After` until the caller's award context ends. They keep
+the same fenced completion request. Authority loss and other permanent refusals
+return immediately. Heartbeat success does not reset the claim-outage budget.
