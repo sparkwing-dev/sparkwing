@@ -78,6 +78,7 @@ echo ready; wait`},
 	}
 }
 
+//nolint:contextcheck // Rescue and teardown outlive the test deadline; session inspection has its own bounds.
 func TestHostCommandReportsSessionCleanupFailure(t *testing.T) {
 	for _, trigger := range []string{"cancellation", "sink", "capture", "nonzero"} {
 		t.Run(trigger, func(t *testing.T) {
