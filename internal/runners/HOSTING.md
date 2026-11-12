@@ -91,10 +91,12 @@ and rejects substituting the new installation under the accepted identity.
 Controller connection failures, timeouts, explicit 5xx unavailability and
 5xx responses without a JSON error envelope allow fresh claim polls until the
 caller stops intake. Automatic exponential jitter is capped at 30 seconds;
-Retry-After seconds and HTTP dates can extend that wait. A ten-minute consecutive
+Retry-After seconds, HTTP dates and structured advice can extend that wait up
+to five minutes per claim response. The shared client ceiling is unchanged. A ten-minute consecutive
 claim outage triggers WARN, repeated at most every five minutes. `Loop.HealthError`
 reports that sustained outage, and the optional runner `/healthz` returns 503
-with its start timestamp until a claim succeeds. Heartbeats do not clear it.
+with its start timestamp until a claim succeeds. This is claim readiness, not
+process liveness; restart automation must not consume it. Heartbeats do not clear it.
 Each poll is a new request because a lost reply may already contain an award.
 Transport outages never enter drain: held hosts may depend on children this
 runner must claim after recovery. Authentication, permission and protocol
@@ -108,6 +110,7 @@ including uploads and terminal acknowledgements, before it returns.
 `TestLoopClaimsAfterGatewayOutage`, `TestLoopGatewayRetryTiming`,
 `TestLoopSurvivesDeployLengthGatewayOutage`,
 `TestLoopClaimsAfterProlongedOutageWithHeldWork`, `TestLoopClaimSuccessResetsDegradation`,
+`TestLoopDeferredClaimSuccessClearsDegradation`, `TestLoopCapsClaimRetryAdviceAtFiveMinutes`,
 `TestLoopSlowGatewayRecoveryHonorsCallerCancellation`,
 `TestLoopGatewayOutageKeepsHeldHost`, `TestLoopGatewayProtocolFailuresStayFatal`
 and `TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.

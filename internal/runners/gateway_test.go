@@ -106,8 +106,8 @@ func TestLoopGatewayRetryTiming(t *testing.T) {
 					t.Fatalf("calls=%d elapsed=%s error=%v", len(times), time.Since(start), err)
 				}
 				if tc.name == "longRetryAfter" {
-					if time.Since(start) < time.Hour {
-						t.Fatalf("ignored advice: %s", time.Since(start))
+					if time.Since(start) != 5*time.Minute {
+						t.Fatalf("claim advice not capped at five minutes: %s", time.Since(start))
 					}
 					return
 				}
@@ -427,7 +427,7 @@ func TestLoopWarnsRateLimitedDuringAdvisedOutage(t *testing.T) {
 		client, err := controllerclient.NewEngineClient(controllerclient.EngineOptions{URL: "http://controller", HTTP: &http.Client{Transport: gatewayTransport(func(*http.Request) (*http.Response, error) {
 			calls++
 			status, body := 503, "no backend"
-			if calls > 1 {
+			if time.Since(start) >= 20*time.Minute {
 				status, body = 200, "{}"
 				loop.Drain()
 			}
@@ -437,7 +437,7 @@ func TestLoopWarnsRateLimitedDuringAdvisedOutage(t *testing.T) {
 			t.Fatal(err)
 		}
 		loop = &Loop{Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1}, Controller: client, CheckVersion: func(context.Context, string) error { return nil }, Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil })}
-		if err := loop.Run(t.Context()); err != nil || calls != 2 || time.Since(start) != 20*time.Minute || loop.HealthError() != nil {
+		if err := loop.Run(t.Context()); err != nil || calls != 5 || time.Since(start) != 20*time.Minute || loop.HealthError() != nil {
 			t.Fatalf("calls=%d elapsed=%s health=%v error=%v", calls, time.Since(start), loop.HealthError(), err)
 		}
 	})

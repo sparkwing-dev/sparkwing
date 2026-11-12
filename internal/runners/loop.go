@@ -56,6 +56,9 @@ type LoopConfig struct {
 // safety: warn without withdrawing claims that held hosts may need for dependencies.
 const claimDegradedAfter = 10 * time.Minute
 
+// safety: controller availability needs rechecking sooner than the shared client advice ceiling.
+const maxClaimRetryAfter = 5 * time.Minute
+
 // Loop claims triggers and jobs until stopped and joins held work before returning.
 type Loop struct {
 	Config       LoopConfig
@@ -219,8 +222,16 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 		}
 	}
-	accept := func(outcome claimOutcome) error {
+	accept := func(outcome claimOutcome) (acceptErr error) {
 		defer func() {
+			if outcome.err == nil && acceptErr == nil {
+				// safety: claim availability alone resets degradation; heartbeats do not.
+				transportSince = time.Time{}
+				l.setUnreachableSince(transportSince)
+				nextTransportWarning = time.Time{}
+				transportAttempt = 0
+			}
+
 			if outcome.workSlot != nil {
 				outcome.workSlot()
 			}
@@ -463,13 +474,6 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			if err := accept(outcome); err != nil {
 				return nil, errors.Join(err, outcome.err)
 			}
-			if outcome.err == nil {
-				// safety: claim availability alone resets degradation; heartbeats do not.
-				transportSince = time.Time{}
-				l.setUnreachableSince(transportSince)
-				nextTransportWarning = time.Time{}
-				transportAttempt = 0
-			}
 			if claims.Err() != nil {
 				return nil, stoppedClaimError(outcome.err)
 			}
@@ -487,14 +491,14 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				delay := min(controllerclient.RetryBackoff(transportAttempt, l.Config.PollInterval), 30*time.Second)
 				transportAttempt = min(transportAttempt+1, 6)
 				if advised, ok := hosterr.RetryDelay(outcome.err); ok {
-					delay = max(delay, advised)
+					delay = max(delay, min(advised, maxClaimRetryAfter))
 				}
 				// safety: a fresh poll never replays a claim whose award reply was lost.
 				backoffUntil = time.Now().Add(delay)
 				continue
 			}
 			if delay, ok := hosterr.RetryDelay(outcome.err); ok {
-				backoffUntil = time.Now().Add(max(delay, l.Config.PollInterval))
+				backoffUntil = time.Now().Add(max(min(delay, maxClaimRetryAfter), l.Config.PollInterval))
 				continue
 			}
 			if outcome.err != nil {
