@@ -218,7 +218,7 @@ func TestBudgetSaysWhenATierJudgedNoGoFile(t *testing.T) {
 }
 
 func TestReleaseCutRunsStateChecksAndTheFastBuildClass(t *testing.T) {
-	want := []string{"budget", "build", "changelog-links", "docs-sidebar", "frontend-deps", "go-directives", "lint", "sdk-pins", "sdk-typescript", "test", "version-freshness"}
+	want := []string{"budget", "build", "changelog-links", "docs-sidebar", "frontend-deps", "go-directives", "lint", "sdk-pins", "sdk-typescript", "test", "typescript-release", "version-freshness"}
 	if got := stepIDs(t, &releaseCutChecksJob{}); !slices.Equal(got, want) {
 		t.Fatalf("release cut steps = %v, want %v", got, want)
 	}
@@ -234,7 +234,7 @@ func TestReleaseCutRunsStateChecksAndTheFastBuildClass(t *testing.T) {
 			"test":              {"sdk-typescript"},
 			"version-freshness": {"test"},
 		}[s.ID]
-		if slices.Contains([]string{"go-directives", "sdk-pins", "changelog-links", "docs-sidebar"}, s.ID) {
+		if slices.Contains([]string{"typescript-release", "go-directives", "sdk-pins", "changelog-links", "docs-sidebar"}, s.ID) {
 			wantDeps = []string{"version-freshness"}
 		}
 		if deps := s.Needs; !slices.Equal(deps, wantDeps) {

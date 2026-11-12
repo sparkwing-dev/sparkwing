@@ -297,6 +297,42 @@ context limit attribution. This measures forced-body affected tests, not
 default result-cache processing or end-to-end Land. Existing deadlines
 remain unchanged.
 
+Compiler identity discovery stats a PATH candidate before resolving its symlinks.
+A missing tool costs one stat per nonempty PATH directory. Existing tools retain
+the resolved path, size and modification-time identity. There is no process memo,
+so a newly installed higher-priority compiler is visible on the next call.
+Pipeline fixtures restrict PATH to the directories supplying their required
+tools when they do not test PATH discovery. Product and job PATH remain unchanged.
+
+A before/after pair on 2026-11-11 used base `2b52cfec5` and candidate
+`abc8e9759`, Go 1.26.11, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=7` and `-p 1`.
+Both outer commands retained the real WSL PATH, including 32 mounted Windows
+entries. Each package command started with its own empty private GOCACHE and
+private home. Default test-result caching remained enabled, with no `-count`;
+all four commands ran bodies and saved results. Compilation is outside the
+test-executable and post-`ok` intervals below.
+
+| Package | Executable before / after, s | `ok` to first cache-save observation before / after, s |
+| --- | ---: | ---: |
+| `internal/bincache` | 212.745 / 39.720 | 391.489 / 4.997 |
+| `cmd/sparkwing` | 340.905 / 239.942 | 132.079 / 17.215 |
+
+Bincache testlog operations fell from 930,770 to 312,840, with mounted Windows
+file operations falling from 144,130 to zero. CLI operations fell from 805,200
+to 643,662, with mounted Windows operations falling from 35,728 to 1,024.
+Existing test run/pass/skip inventories matched exactly, and the three added
+identity/call-count guards passed. Whole command walls, including cold build
+work and excluding slot wait, were 667.806 / 73.837 s for bincache and
+673.888 / 469.536 s for CLI.
+
+This is one pair per package on a shared host, combining the product scan
+change with fixture PATH isolation. It does not isolate their separate gains
+or establish stable end-to-end Land savings. Bincache load1 medians were
+13.438 / 10.359; CLI medians were 11.038 / 11.749. Save markers were observed
+with nominal 100 ms polling. Both CLI CPU observers missed their final exit
+sample after the save markers; raw Go timestamps and the input intervals were
+retained. These measurements change no test selection, gate tier or deadline.
+
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at
 `406208403`. All share root b61 and the same 13-file selection: two pipeline
@@ -1331,6 +1367,18 @@ file. Other syntax and workflow checks remain active.
   main runs `gate` and `race-touched` over the change since the push's previous
   commit (or the pull request base), and the full suite, `pre-release`, the
   store race lanes and Postgres conformance run nightly and on dispatch.
+  Native runner composition tests in
+  `internal/cluster/production_runtime_integration_test.go` are ordinary tests,
+  without the `rewrite_integration` build tag. Affected tests cover them when
+  cluster or its dependencies change; full, nightly and release suites always
+  include them, and touched-package race runs exercise them too. They use
+  private fixture homes, fake HTTP transports and a private in-process daemon,
+  not Docker containers or managed user services. Other packages' tagged
+  `rewrite_integration` suites remain outside this coverage claim.
+  On a shared Linux host, these cases took 4.81 seconds of an 11.56-second
+  cluster suite; a warm-cache command took 15.02 seconds wall time. Cold
+  compilation of the baseline cluster suite took 202.90 seconds including
+  10.34 seconds of test execution. These are observations, not new budgets.
   The full acceptance suite includes `TestFeatureE2E`, which exercises placement
   deadlines, failed-only retries with outputs and artifacts, and child-run
   cancellation against isolated local controller processes. Run just these with
@@ -1355,6 +1403,10 @@ file. Other syntax and workflow checks remain active.
   before it tags, 40 minutes including 30 minutes of lint-lock allowance
   and ten minutes for build, full lint, the short test suite,
   published-version, Go-directive and SDK-pin checks, and changelog-link and docs-sidebar checks.
+  The read-only `typescript-release` check verifies the published policy index's
+  signature and runs the hosted release's SDK decision against the selected source.
+  It rejects a changed SDK digest under an existing version before creating a tag,
+  including in dry runs and cuts that reuse exact-source CI.
   Build, lint, dependency preparation, the SDK suite and short tests run in sequence.
   The job allows one hour to finish those serial checks while retaining the
   40-minute budget warning.
@@ -1641,6 +1693,50 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
+- **Storage acceptance fixture creation, measured 2026-11-12:** the depcache
+  properties create their isolated current-schema SQLite databases through
+  `teststore.Open` and reopen persisted data through `OpenExisting`. The common
+  controller fixture takes that opener explicitly. Other callers retain their
+  previous opener. All archive, output, scope-forgery, corruption and revocation
+  checks remain, with 128 fixed-seed cases per backend (the existing 16-case
+  prefix under race). Cells and cases keep their serial order.
+
+  A fresh private-cache probe on `afd8a186f` took 198.48 s in `TestStorage`:
+  filesystem/S3 depcache took 84.96/89.61 s. The Go post-`ok` interval was
+  2.123 s. CPU/block profiles of those two leaves used in-process HTTP recorders
+  and map-backed S3, not an external service. Repeated schema setup accounted
+  for 13.26 s of 81.28 sampled CPU seconds. With candidate `0d8b8f961`, it fell
+  to 2.08 s of 58.33 sampled CPU seconds; nested DDL execution fell from
+  11.12 to 0.04 s. Authority-chain work remained substantial at 28.37/24.50 s.
+  Profiled runs are diagnostic observations, not performance pairs; summed idle
+  SQL-pool blocking time is not elapsed test time.
+
+  Three interleaved A/B pairs used source-bound, precompiled test binaries,
+  fresh per-sample homes/state and GOCACHE directories, runtime width seven,
+  the full `TestStorage` cohort and no profiler flags. Build/link and Go result
+  caching are outside these samples. The parent test's reported duration
+  includes its bodies and cleanup:
+
+  | Pair | Before / after body, s | Body change | Load1 median before / after |
+  | --- | ---: | ---: | ---: |
+  | 1 | 57.87 / 89.99 | +55.50% | 3.901 / 16.952 |
+  | 2 | 69.62 / 55.10 | -20.86% | 13.653 / 8.500 |
+  | 3 | 65.89 / 48.06 | -27.06% | 7.182 / 5.461 |
+
+  Body medians were 65.89/55.10 s, a -16.38% ratio of medians. Ranges were
+  57.87-69.62/48.06-89.99 s; inclusive IQRs were 5.875/20.965 s. Separate
+  admitted command walls, including tool startup and excluding slot wait,
+  were A [61.562, 74.187, 69.745] and B [93.592, 59.403, 52.088] s.
+  Their medians were 69.745/59.403 s, a -14.83% ratio of medians.
+
+  All six had exact test outcome and cell/leaf-result parity: 16 test runs
+  and passes, 15 cells and 15 assertion leaves each. Property seeds/counts
+  and cell declarations have identical source. Load, other slot owners,
+  iowait and steal were captured at 1 Hz without excluding samples.
+  The paired signs differ and load shifted sharply. Wall-time improvement
+  is inconclusive; these numbers establish no stable Land saving and change
+  no gate tier, deadline or test budget.
+
 - **Reporting fixture setup, measured 2026-11-11:** typed `teststore.SeedRun`
   inserts its known routing identity and sealed provenance with the new row.
   Provenance projections come from decoding that new row’s JSON once, so
