@@ -184,7 +184,7 @@ checks. Each non-deletion main update must name the checked-out HEAD's OID;
 remedy before test selection. Every ref update is inspected, including main updates
 after other refs. Deletions add no affected tests. An explicit
 `sparkwing run pre-push` also runs the test phase. Queued Land
-runs that same test job after policy and its combined fast-check/review job.
+runs those test bodies alongside review after policy and fast checks pass.
 Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.

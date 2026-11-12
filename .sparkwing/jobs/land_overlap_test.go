@@ -40,7 +40,7 @@ func TestQueuedLandOverlapsReviewAndTestsAfterFastChecks(t *testing.T) {
 		t.Fatalf("fast job must contain exactly the current pre-push tier: %+v", fast)
 	}
 	checks := jobs["affected-tests"]
-	if !slices.Equal(checks.Needs, []string{"policy", "fast"}) || checks.FailurePolicy != sparkwing.FailFast {
+	if !slices.Equal(checks.Needs, []string{"preconditions", "policy", "fast"}) || checks.FailurePolicy != sparkwing.FailFast {
 		t.Fatalf("review and tests must share a fail-fast job after policy and fast: %+v", checks)
 	}
 	if checks.Cores != lightJobCores+float64(goStepParallelism(affectedPushHost())) {

@@ -14,13 +14,15 @@ type queuedLandChecks struct {
 	sparkwing.Produces[reviewRecord]
 	args   ReviewArgs
 	branch string
+	Checks *queuedChecks
+	Head   sparkwing.Ref[landHead]
 }
 
 func (j *queuedLandChecks) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	// safety: shared fail-fast ownership joins and drains tests when review fails.
 	w.FailurePolicy(sparkwing.FailFast)
-	if _, err := (&affectedPushTestsJob{queued: true}).Work(w); err != nil {
+	if _, err := (&affectedPushTestsJob{queued: true, Checks: j.Checks, Head: j.Head}).Work(w); err != nil {
 		return nil, err
 	}
-	return (&reviewJob{args: j.args, branch: j.branch}).Work(w)
+	return (&reviewJob{args: j.args, branch: j.branch, Checks: j.Checks, Head: j.Head}).Work(w)
 }

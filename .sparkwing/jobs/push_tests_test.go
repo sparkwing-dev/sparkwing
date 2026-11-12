@@ -53,7 +53,7 @@ func TestAffectedPushTestsBlockHookAndQueuedLanding(t *testing.T) {
 			}
 			want := []string{"pre-push"}
 			if queued {
-				want = []string{"policy", "fast"}
+				want = []string{"preconditions", "policy", "fast"}
 			}
 			for _, prerequisite := range want {
 				if !slices.Contains(tests.Needs, prerequisite) {
