@@ -1669,7 +1669,7 @@ file. Other syntax and workflow checks remain active.
   | --- | ---: | ---: | ---: |
   | 1 | 57.87 / 89.99 | +55.50% | 3.901 / 16.952 |
   | 2 | 69.62 / 55.10 | -20.86% | 13.653 / 8.500 |
-  | 3 | 65.89 / 48.06 | -27.06% | 6.974 / 5.461 |
+  | 3 | 65.89 / 48.06 | -27.06% | 7.182 / 5.461 |
 
   Body medians were 65.89/55.10 s, a -16.38% ratio of medians. Ranges were
   57.87-69.62/48.06-89.99 s; inclusive IQRs were 5.875/20.965 s. Separate
