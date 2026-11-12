@@ -208,7 +208,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	rec.Tree, rec.Commit, rec.Base = tree, head, base
 	d.logf("review timing: phase=resolve elapsed=%s reused=%t", d.now().Sub(started), sameTree)
 
-	diff, err := reviewDiff(ctx, d, base, head, nil)
+	diff, err := reviewDiff(ctx, d, base, head)
 	if err != nil {
 		return reviewRecord{}, "", fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
 	}
@@ -220,7 +220,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 
 	if sameTree {
 		rec.Notes = append(rec.Notes, "tree and objective unchanged since the last review, so no reviewer ran; skips were reapplied")
-	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree, diff.text, changes); err != nil {
+	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree, diff, changes); err != nil {
 		return reviewRecord{}, "", err
 	}
 	diff.enforceBinaryReview(&rec, p, changes)
@@ -235,7 +235,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	return rec, file, nil
 }
 
-func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree, diff string, changes [][]string) error {
+func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string, diff reviewDiffResult, changes [][]string) error {
 	started := d.now()
 	var err error
 	var files []string
@@ -256,7 +256,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 		}
 	}
 	profiles[defaultReviewer] = files
-	d.logf("review timing: phase=diff elapsed=%s bytes=%d files=%d", d.now().Sub(started), len(diff), len(files))
+	d.logf("review timing: phase=diff elapsed=%s bytes=%d files=%d", d.now().Sub(started), len(diff.text), len(files))
 	started = d.now()
 	objective := rec.Objective
 	pass := reviewPass{Tree: tree, Commit: head, At: d.now().UTC()}
@@ -280,7 +280,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	}
 	standards := ""
 	if p.usesStandards() {
-		if standards, err = d.standards(ctx, diff); err != nil {
+		if standards, err = d.standards(ctx, diff.text); err != nil {
 			rec.Notes = append(rec.Notes, "house standards unavailable, so the standards rule was judged without them: "+err.Error())
 			standards = ""
 		}
@@ -304,11 +304,9 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	results := make([]profileResult, len(order))
 	prompts := make([]reviewPrompt, len(order))
 	for i, profile := range order {
-		scoped := diff
+		scoped := diff.text
 		if profile != defaultReviewer {
-			if scoped, err = scopedDiff(ctx, d, base, head, profiles[profile]); err != nil {
-				return err
-			}
+			scoped = diff.scoped(profiles[profile])
 		}
 		prompts[i] = reviewPrompt{
 			policy: p, profile: profile, objective: objective, standards: standards,
@@ -354,17 +352,6 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	rec.Passes = append(rec.Passes, pass)
 	d.logf("review timing: phase=settle elapsed=%s", d.now().Sub(started))
 	return nil
-}
-
-func scopedDiff(ctx context.Context, d reviewDeps, base, head string, files []string) (string, error) {
-	if len(files) == 0 {
-		return "", nil
-	}
-	out, err := reviewDiff(ctx, d, base, head, files)
-	if err != nil {
-		return "", fmt.Errorf("review: diff the strict paths: %w", err)
-	}
-	return out.text, nil
 }
 
 func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, profile, model string, prompt reviewPrompt) (bool, error) {

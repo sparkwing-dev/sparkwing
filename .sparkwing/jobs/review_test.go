@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,16 +272,19 @@ func (g *fakeGit) run(_ context.Context, args ...string) (string, error) {
 		}
 		return "M\x00" + strings.Join(g.files, "\x00M\x00") + "\x00", nil
 	case "diff --raw":
-		return "", nil
-	case "diff --no-color":
-		if i := indexOf(args, "--"); i >= 0 {
-			paths := make([]string, len(args[i+1:]))
-			for j, path := range args[i+1:] {
-				paths[j] = strings.TrimPrefix(path, ":(top,literal)")
-			}
-			return "diff of " + strings.Join(paths, ","), nil
+		var records strings.Builder
+		for _, path := range g.files {
+			fmt.Fprintf(&records, ":100644 100644 before after M\x00%s\x00", path)
 		}
-		return "diff of everything at " + g.head, nil
+		return records.String(), nil
+	case "cat-file blob":
+		return "fixture text\n", nil
+	case "diff --no-color":
+		var patch strings.Builder
+		for _, path := range g.files {
+			fmt.Fprintf(&patch, "diff --git %q %q\n@@ -0,0 +1,2 @@\n+diff of everything at %s\n+diff of %s\n", "a/"+path, "b/"+path, g.head, path)
+		}
+		return patch.String(), nil
 	}
 	return "", errors.New("unexpected git " + strings.Join(args, " "))
 }

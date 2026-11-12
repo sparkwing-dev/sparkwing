@@ -96,7 +96,8 @@ func TestReviewPromptsSummarizeBinaryBlobsWithoutChangingText(t *testing.T) {
 func TestReviewPromptTruncationPreservesUTF8TextPrefix(t *testing.T) {
 	fx := newReviewFixture(t)
 	old := fx.deps.git
-	prefix := strings.Repeat("a", maxPromptDiff-1)
+	header := "diff --git a/cmd/x.go b/cmd/x.go\n@@ -0,0 +1 @@\n+"
+	prefix := header + strings.Repeat("a", maxPromptDiff-len(header)-1)
 	fx.deps.git = func(ctx context.Context, args ...string) (string, error) {
 		if len(args) > 1 && args[0] == "diff" && args[1] == "--no-color" {
 			return prefix + "€tail", nil

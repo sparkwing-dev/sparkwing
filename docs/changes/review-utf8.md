@@ -13,6 +13,9 @@
   before numeric line/column parsing, preserving filenames with numeric colons.
   Open findings with unmatched or malformed locations block and cannot be skipped,
   including cached verdicts. Strict review includes both endpoints of renames and copies from a NUL-delimited name-status inventory,
-  preserving raw filenames and literal path selection.
+  preserving raw filenames. Strict profile selection happens in Go from one
+  complete patch: raw filename bytes never cross JSON command arguments. A
+  changed file with no rendered patch blocks independently of model output or
+  cached verdicts, including ordinary assets; `--skip` cannot clear that block.
   Repository diff attributes cannot suppress readable text changes. Ordinary UTF-8
   text hunks keep their bytes, and truncation respects character boundaries.
