@@ -173,6 +173,16 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 	}
 	d.runnerChanges.lock()
 	instance := d.retiringRunner
+	if instance != nil {
+		alive, err := LocalRunnerProcessAlive(*instance)
+		if err != nil || !alive {
+			if err == nil {
+				d.retiringRunner = nil
+			}
+			d.runnerChanges.unlock()
+			return err
+		}
+	}
 	if instance == nil {
 		var active localhostwire.LocalRunnerInstance
 		active, err = registry.ActiveLocalRunner(ctx, subject)
