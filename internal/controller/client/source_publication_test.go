@@ -1,17 +1,22 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -166,5 +171,57 @@ func TestSourcePublicationScansAThinBundleAgainstItsCheckout(t *testing.T) {
 				t.Fatalf("refused=%v requests=%d err=%v", refused, requests, err)
 			}
 		})
+	}
+}
+
+func TestSourceSnapshotUploadRewindsAfterTransportClose(t *testing.T) {
+	repo, _ := sourcetest.Repository(t)
+	path := filepath.Join(t.TempDir(), "source.bundle")
+	sourcetest.Git(t, repo, "bundle", "create", path, "HEAD")
+	var digest string
+	puts, signs, commits := 0, 0, 0
+	var first []byte
+	response := func(value any) *http.Response {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(raw))}
+	}
+	options := client.EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: publicationTransport(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/api/v1/data/source":
+			signs++
+			var request controllerwire.SourceUploadRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			digest = string(request.Digest)
+			return response(controllerwire.DataUploadTicket{UploadID: "ticket", URL: "https://objects.example/upload?signature=private", SHA256: request.Digest, Size: request.Size, ExpiresAt: time.Now().Add(time.Minute)}), nil
+		case "/upload":
+			puts++
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if puts == 1 {
+				first = body
+				return nil, io.EOF
+			}
+			if !bytes.Equal(first, body) {
+				t.Error("source replay changed bytes")
+			}
+			return response(struct{}{}), nil
+		case "/api/v1/data/source/ticket/commit":
+			commits++
+			return response(map[string]string{"digest": digest}), nil
+		default:
+			t.Fatalf("unexpected route %s", r.URL.Path)
+			return nil, nil
+		}
+	})}}
+	got, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
+	if err != nil || got != digest || puts != 2 || signs != 1 || commits != 1 {
+		t.Fatalf("digest=%s puts=%d signs=%d commits=%d error=%v", got, puts, signs, commits, err)
 	}
 }

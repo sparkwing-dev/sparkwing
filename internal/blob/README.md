@@ -4,6 +4,17 @@
 downloads and presence queries. The caller supplies authority in memory.
 `TransferClient` sends only the signed headers to the object URL and refuses
 redirects. It supports S3 and filesystem signing through the same HTTP path.
+`Upload` owns the shared PUT retry policy used by blob, source-snapshot and log
+uploads. Seekable bodies rewind to their initial position for at most three
+attempts, with 100 ms and 200 ms backoff, on connection failures before a
+response or HTTP 502, 503 and 504. Non-seekable readers get one attempt and an
+explicit not-retried diagnostic; no payload is buffered or spooled. Valid
+signing tickets are reused, and expired tickets are renewed through the
+caller's signer. Log signing still keeps its original slot deadline. Other
+HTTP refusals and errors after a successful response are not retried. Failure
+diagnostics name PUT, the object host, a fixed error class and the attempt
+count, without retaining the signed URL or arbitrary transport error text.
+
 
 All physical keys are relative to the configured storage root. For
 `--cache-blob-store=s3://bucket/controller`, CAS blobs, artifact members and
