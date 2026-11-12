@@ -85,14 +85,41 @@ func validateAnchor(leader int, exited bool) error {
 }
 
 func sendSignal(leader int, exited bool, sig syscall.Signal) error {
+	_, err := sendRecordedSignal(leader, exited, sig)
+	return err
+}
+
+func sendRecordedSignal(leader int, exited bool, sig syscall.Signal) (bool, error) {
 	if err := validateAnchor(leader, exited); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return err
+		return false, err
 	}
 	err := syscall.Kill(-leader, sig)
 	if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
+}
+
+func signalOwnedTerminate(leader int, exited, session bool) (bool, error) {
+	alreadyExited, observeErr := leaderExitedNow(leader)
+	var sent bool
+	var err error
+	if session {
+		sent, err = signalRecordedSession(leader, syscall.SIGTERM)
+	} else {
+		sent, err = sendRecordedSignal(leader, exited, syscall.SIGTERM)
+	}
+	// safety: an external death between this non-reaping check and the signal cannot be distinguished during shutdown.
+	return observeErr == nil && !alreadyExited && sent, errors.Join(observeErr, err)
+}
+
+func terminationCaused(err error, term, kill bool) bool {
+	exit, ok := err.(*exec.ExitError) //nolint:errorlint // Joined failures must retain every error.
+	if !ok {
+		return false
+	}
+	status, ok := exit.Sys().(syscall.WaitStatus)
+	return ok && status.Signaled() && (term && status.Signal() == syscall.SIGTERM || kill && status.Signal() == syscall.SIGKILL)
 }
 
 func signalTerminate(leader int, exited, session bool) error {
@@ -124,12 +151,18 @@ func descendantsEmpty(leader int, exited, session bool) (bool, error) {
 }
 
 func signalSession(leader int, sig syscall.Signal) error {
+	_, err := signalRecordedSession(leader, sig)
+	return err
+}
+
+func signalRecordedSession(leader int, sig syscall.Signal) (bool, error) {
+	sentLeader := false
 	if leader <= 1 || leader == syscall.Getpgrp() {
-		return fmt.Errorf("refusing unsafe process session %d", leader)
+		return sentLeader, fmt.Errorf("refusing unsafe process session %d", leader)
 	}
 	processes, err := processTable(true)
 	if err != nil {
-		return err
+		return sentLeader, err
 	}
 	groups := map[int]bool{}
 	for _, process := range processes {
@@ -139,11 +172,14 @@ func signalSession(leader int, sig syscall.Signal) error {
 	}
 	for group := range groups {
 		err := syscall.Kill(-group, sig)
+		if group == leader && err == nil {
+			sentLeader = true
+		}
 		if err != nil && !errors.Is(err, syscall.ESRCH) {
-			return err
+			return sentLeader, err
 		}
 	}
-	return nil
+	return sentLeader, nil
 }
 
 func sessionDescendantsEmpty(leader int) (bool, error) {

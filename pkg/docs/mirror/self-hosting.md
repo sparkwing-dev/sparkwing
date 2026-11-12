@@ -547,7 +547,7 @@ Runner service definitions run `sparkwing-runner start --config PATH` in the
 foreground. Linux uses a systemd user service. macOS uses a launchd agent.
 A clean SIGTERM or interrupt of `start` or `warm` exits 0 after shutdown. This
 includes cancellation during source acquisition and SDK setup, even when a
-dependency reports a cancellation or deadline error. Cancellation without a
+dependency reports a cancellation or deadline error. Compiler shutdown keeps external termination and real process failures visible; only an owner-attributed termination counts as cancellation. Cancellation without a
 shutdown signal, or a separate runtime or cleanup failure, still exits 1.
 The service file names an existing machine configuration and contains no
 credential. The duplicate shell enrollment installer has been removed.
