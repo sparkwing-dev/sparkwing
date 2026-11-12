@@ -88,8 +88,8 @@ func TestQueuedCritical(t *testing.T) { if testing.Short() { t.Skip("full critic
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.26.0\n")
 	gitCommitAll(t, root, "select every fixture package")
-	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
-		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Prove queued package failure admission"}}, sparkwing.RunContext{})
+	host, plan, _ := prepareQueuedFixturePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Prove queued package failure admission"}}, sparkwing.RunContext{RunID: queuedFixtureRunID})
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
@@ -189,8 +189,8 @@ func TestCriticalBody(t *testing.T) {
 		writeGoFile(t, filepath.Join(root, dir, "selected.go"), "package "+map[string]string{"internal": "internal", ".sparkwing": "pipelines", "sparkwing": "sdk"}[dir]+"\n")
 	}
 	gitCommitAll(t, root, "select all three modules")
-	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
-		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Prove all shorts precede critical bodies"}}, sparkwing.RunContext{})
+	host, plan, _ := prepareQueuedFixturePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Prove all shorts precede critical bodies"}}, sparkwing.RunContext{RunID: queuedFixtureRunID})
 	})
 	if _, err := host.RunStep(t.Context(), plan, "affected-tests", "test"); err != nil {
 		t.Fatal(err)
@@ -267,8 +267,8 @@ func TestMain(m *testing.M) { m.Run(); os.Exit(0) }
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.26.0\n")
 	gitCommitAll(t, root, "select hidden failure")
-	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
-		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Report failures despite a hidden process exit"}}, sparkwing.RunContext{})
+	host, plan, _ := prepareQueuedFixturePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Report failures despite a hidden process exit"}}, sparkwing.RunContext{RunID: queuedFixtureRunID})
 	})
 	_, err := host.RunStep(t.Context(), plan, "affected-tests", "test")
 	if err == nil || !strings.Contains(err.Error(), "TestHiddenFailure") {
@@ -324,8 +324,8 @@ func TestBody(t *testing.T) { client:=&http.Client{Timeout:30*time.Second}; resp
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.26.0\n")
 	gitCommitAll(t, root, "select build failure")
-	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
-		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Stop package admission after build failure"}}, sparkwing.RunContext{})
+	host, plan, _ := prepareQueuedFixturePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Stop package admission after build failure"}}, sparkwing.RunContext{RunID: queuedFixtureRunID})
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
@@ -455,8 +455,8 @@ func TestBlocked(t *testing.T) { response,err:=http.Get(fmt.Sprintf(%q,os.Getpid
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.26.0\n")
 	gitCommitAll(t, root, "select blocked test")
-	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
-		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Join owned processes on cancellation"}}, sparkwing.RunContext{})
+	host, plan, _ := prepareQueuedFixturePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Join owned processes on cancellation"}}, sparkwing.RunContext{RunID: queuedFixtureRunID})
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -580,8 +580,8 @@ func TestOne(t *testing.T) { if testing.Short() { t.Skip("full collision body") 
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.26.0\n")
 	gitCommitAll(t, root, "select critical collision packages")
-	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
-		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Preserve the full critical name union"}}, sparkwing.RunContext{})
+	host, plan, _ := prepareQueuedFixturePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Preserve the full critical name union"}}, sparkwing.RunContext{RunID: queuedFixtureRunID})
 	})
 	if _, err := host.RunStep(t.Context(), plan, "affected-tests", "test"); err != nil {
 		t.Fatal(err)

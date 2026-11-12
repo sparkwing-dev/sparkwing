@@ -27,7 +27,7 @@ func TestAffectedPushTestsIgnoreSubmitterGoLimits(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			root := gateFixtureRepo(t)
-			marker := filepath.Join(root, "executed")
+			marker := filepath.Join(t.TempDir(), "executed")
 			body := fmt.Sprintf(`package controller
 import ("os"; "runtime"; "testing")
 func check(t *testing.T) {
@@ -46,9 +46,13 @@ func TestCritical(t *testing.T) { if testing.Short() { t.Skip("critical class") 
 			runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 			writeGoFile(t, filepath.Join(root, "internal", "controller", "controller.go"), "package controller\nconst Changed = true\n")
 			gitCommitAll(t, root, "controller change")
-			host, plan, doc := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+			prepare := preparePlan
+			if queued {
+				prepare = prepareQueuedFixturePlan
+			}
+			host, plan, doc := prepare(t, func(ctx context.Context, plan *sparkwing.Plan) error {
 				if queued {
-					return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Check Go limits"}}, sparkwing.RunContext{Pipeline: "land"})
+					return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Check Go limits"}}, sparkwing.RunContext{Pipeline: "land", RunID: queuedFixtureRunID})
 				}
 				return (&PrePush{}).Plan(ctx, plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
 			})
