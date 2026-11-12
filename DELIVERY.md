@@ -1772,8 +1772,8 @@ file. Other syntax and workflow checks remain active.
   with no whole-Land saving claim or change to selection, lanes or deadlines.
   The earlier cold private-cache probe included an 80.296 s nested-Go prefix
   before its first compiler and is kept separate from these warm pairs.
-  Evidence: `~/evidence/sparkwing/bw-3544-native-sdk-fixture-2026-11-12/`
-  and `~/evidence/sparkwing/typescript-boundary-cost-2026-11-12/`.
+  Evidence: `~/evidence/sparkwing/typescript-boundary-cost-2026-11-12/` and
+  the native SDK fixture packet beside it.
 
 - **Storage acceptance fixture creation, measured 2026-11-12:** the depcache
   properties create their isolated current-schema SQLite databases through
