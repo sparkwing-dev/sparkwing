@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -191,7 +192,7 @@ func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []str
 
 	if err := gotoolchain.Run(ctx, cmd); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
+			return err
 		}
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return errMissingGoSum
@@ -869,6 +870,10 @@ func buildEnvironmentKey(env []string) []byte {
 }
 
 func toolIdentity(env []string, tool string) string {
+	return toolIdentityWithFS(env, tool, os.Stat, filepath.EvalSymlinks)
+}
+
+func toolIdentityWithFS(env []string, tool string, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) string {
 	candidates := []string{tool}
 	if !filepath.IsAbs(tool) {
 		candidates = nil
@@ -885,11 +890,15 @@ func toolIdentity(env []string, tool string) string {
 		}
 	}
 	for _, candidate := range candidates {
-		resolved, err := filepath.EvalSymlinks(candidate)
+		// perf: resolving missing tools walks every ancestor, including slow mounted PATH entries.
+		if _, err := stat(candidate); errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		resolved, err := evalSymlinks(candidate)
 		if err != nil {
 			continue
 		}
-		info, err := os.Stat(resolved)
+		info, err := stat(resolved)
 		if err != nil || info.IsDir() || runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 			continue
 		}

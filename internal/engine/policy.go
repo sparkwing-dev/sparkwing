@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -236,6 +237,9 @@ func restrictionNotice(version string, r Restriction, hint string) engineid.Noti
 }
 
 func integrity(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
 	return &apierr.Error{Code: hosterr.IntegrityFailure, Message: err.Error(), Hint: "Retry with the official signed release; do not execute unverified bytes."}
 }
 

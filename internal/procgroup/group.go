@@ -318,6 +318,18 @@ func (g *Group) Kill() error {
 	return signalKill(g.id, g.leaderHasExited(), g.session)
 }
 
+// KillForCancellation distinguishes an owned shutdown kill from an earlier leader failure.
+func (g *Group) KillForCancellation() (bool, error) {
+	g.finishMu.Lock()
+	defer g.finishMu.Unlock()
+	if g.reaped {
+		return false, nil
+	}
+	killed, leaderErr := killLiveLeader(g.id)
+	groupErr := signalKill(g.id, g.leaderHasExited(), g.session)
+	return killed, errors.Join(leaderErr, groupErr)
+}
+
 func (g *Group) Finish(ctx context.Context, grace time.Duration) error {
 	if err := g.awaitLeader(ctx); err != nil {
 		return fmt.Errorf("%w: wait for group %d leader: %w", ErrCleanup, g.id, err)
@@ -326,16 +338,39 @@ func (g *Group) Finish(ctx context.Context, grace time.Duration) error {
 }
 
 func (g *Group) Terminate(ctx context.Context, grace time.Duration) error {
+	_, err := g.terminate(ctx, grace, false)
+	return err
+}
+
+// TerminateForCancellation preserves failures that preceded the owner's shutdown signals.
+func (g *Group) TerminateForCancellation(ctx context.Context, grace time.Duration) (Termination, error) {
+	return g.terminate(ctx, grace, true)
+}
+
+// Termination keeps graceful and forced signals distinct so an external escalation remains a failure.
+type Termination struct{ term, kill bool }
+
+// Caused reports only an unwrapped process status; joined cleanup failures must remain visible.
+func (t Termination) Caused(err error) bool { return terminationCaused(err, t.term, t.kill) }
+
+//nolint:contextcheck,nolintlint // Unix signals use bounded owner lookups; Windows stubs make the context directive unused.
+func (g *Group) terminate(ctx context.Context, grace time.Duration, record bool) (Termination, error) {
+	var attribution Termination
 	g.finishMu.Lock()
 	if g.reaped {
 		err := g.waitErr
 		g.finishMu.Unlock()
-		return err
+		return attribution, err
 	}
-	err := signalTerminate(g.id, g.leaderHasExited(), g.session)
+	var err error
+	if record {
+		attribution.term, err = signalOwnedTerminate(g.id, g.leaderHasExited(), g.session)
+	} else {
+		err = signalTerminate(g.id, g.leaderHasExited(), g.session)
+	}
 	g.finishMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("%w: terminate group %d: %w", ErrCleanup, g.id, err)
+		return attribution, fmt.Errorf("%w: terminate group %d: %w", ErrCleanup, g.id, err)
 	}
 
 	graceCtx, cancel := boundedContext(ctx, grace)
@@ -346,18 +381,24 @@ func (g *Group) Terminate(ctx context.Context, grace time.Duration) error {
 		if g.reaped {
 			result := g.waitErr
 			g.finishMu.Unlock()
-			return result
+			return attribution, result
 		}
-		err = signalKill(g.id, g.leaderHasExited(), g.session)
+		if record {
+			var leaderErr error
+			attribution.kill, leaderErr = killLiveLeader(g.id)
+			err = errors.Join(leaderErr, signalKill(g.id, g.leaderHasExited(), g.session))
+		} else {
+			err = signalKill(g.id, g.leaderHasExited(), g.session)
+		}
 		g.finishMu.Unlock()
 		if err != nil {
-			return fmt.Errorf("%w: kill group %d: %w", ErrCleanup, g.id, err)
+			return attribution, fmt.Errorf("%w: kill group %d: %w", ErrCleanup, g.id, err)
 		}
 	}
 	if err := g.awaitLeader(ctx); err != nil {
-		return fmt.Errorf("%w: wait for killed group %d leader: %w", ErrCleanup, g.id, err)
+		return attribution, fmt.Errorf("%w: wait for killed group %d leader: %w", ErrCleanup, g.id, err)
 	}
-	return g.finish(ctx, grace)
+	return attribution, g.finish(ctx, grace)
 }
 
 func (g *Group) finish(ctx context.Context, grace time.Duration) error {

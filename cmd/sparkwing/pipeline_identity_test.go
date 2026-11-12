@@ -13,12 +13,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func aliasProject(t *testing.T) (string, nodewire.PipelineDescription) {
 	t.Helper()
+	testshell.UsePath(t, "go", "git", "sh", "sed")
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	projectAt(t, "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n  - name: deploy-stage\n    entrypoint: Deploy\n")
 	dir, err := findSparkwingDir()

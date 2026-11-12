@@ -94,5 +94,8 @@ func rememberVerifiedLocked(key cacheVerificationKey, verified *cacheVerificatio
 }
 
 func cachedIntegrity(executable string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
 	return &apierr.Error{Code: hosterr.IntegrityFailure, Message: fmt.Sprintf("Cached engine %s failed verification: %v", executable, err), Hint: fmt.Sprintf("Remove the release directory %q, then retry the original command to download and verify the engine again.", filepath.Dir(executable))}
 }

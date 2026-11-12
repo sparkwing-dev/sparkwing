@@ -24,3 +24,8 @@ func signalTerminate(int, bool, bool) error { return errUnsupported }
 func signalKill(int, bool, bool) error { return errUnsupported }
 
 func descendantsEmpty(int, bool, bool) (bool, error) { return false, errUnsupported }
+
+func killLiveLeader(int) (bool, error) { return false, errUnsupported }
+
+func signalOwnedTerminate(int, bool, bool) (bool, error) { return false, errUnsupported }
+func terminationCaused(error, bool, bool) bool           { return false }

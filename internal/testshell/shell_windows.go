@@ -24,7 +24,7 @@ func init() {
 	defer cancel()
 	cmd := procenv.HostCommandContext(ctx, os.Getenv("SPARKWING_TEST_SHELL_BASH"), append([]string{filepath.ToSlash(exe + ".sh")}, os.Args[1:]...)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := procgroup.RunCommand(cmd); err != nil {
+	if err := procgroup.RunCommand(ctx, cmd); err != nil {
 		if e, ok := err.(*exec.ExitError); ok {
 			os.Exit(e.ExitCode())
 		}

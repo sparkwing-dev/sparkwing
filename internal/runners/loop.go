@@ -165,7 +165,8 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	transportAttempt := 0
 	claimed := 0
 	var failed failedWork
-	var hostErr error
+	var firstCancellation, firstFailure error
+	var hostFailures uint64
 	finish := func(result unitResult) {
 		pollAt = time.Time{}
 		delete(active, result.key)
@@ -176,8 +177,15 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			if l.OnError != nil {
 				l.OnError(result.err)
 			}
-			if hostErr == nil {
-				hostErr = result.err
+			if OnlyCancellation(result.err, context.Cause(ctx)) {
+				if firstCancellation == nil {
+					firstCancellation = result.err
+				}
+			} else {
+				hostFailures++
+				if firstFailure == nil {
+					firstFailure = result.err
+				}
 			}
 		}
 	}
@@ -281,6 +289,16 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}()
 		return nil
 	}
+	stoppedClaimError := func(err error) error {
+		// safety: a local drain cancels only claims; mixed error trees must still fail.
+		if ctx.Err() == nil && policyInterrupted(claims, err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("claim runner work: %w", err)
+		}
+		return nil
+	}
 	var pending <-chan claimOutcome
 	var updateErr error
 	var updateStarted time.Time
@@ -313,7 +331,8 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			l.OnClaimsStopped()
 		}
 		if pending != nil {
-			runErr = errors.Join(runErr, accept(<-pending))
+			outcome := <-pending
+			runErr = errors.Join(runErr, accept(outcome), stoppedClaimError(outcome.err))
 		}
 		for len(active) > 0 {
 			finish(<-results)
@@ -325,7 +344,10 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 			slog.Info("runner update drain exited", "reason", reason, "current_version", l.Config.Version, "target_version", updateTarget, "held_units", len(active), "elapsed", time.Since(updateStarted))
 		}
-		runErr = errors.Join(runErr, hostErr, context.Cause(ctx))
+		if hostFailures > 1 {
+			firstFailure = fmt.Errorf("%d hosted units failed; first failure: %w", hostFailures, firstFailure)
+		}
+		runErr = errors.Join(runErr, firstCancellation, firstFailure, context.Cause(ctx))
 		if l.Config.FailOnFailedWork {
 			runErr = errors.Join(runErr, failed.err())
 		}
@@ -425,14 +447,14 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		case outcome := <-pending:
 			pending = nil
 			if err := accept(outcome); err != nil {
-				return nil, err
+				return nil, errors.Join(err, outcome.err)
 			}
 			if claims.Err() != nil {
-				return nil, nil
+				return nil, stoppedClaimError(outcome.err)
 			}
 			select {
 			case <-drain:
-				return nil, nil
+				return nil, stoppedClaimError(outcome.err)
 			default:
 			}
 			if controllerclient.RetryableClaimError(outcome.err) {
@@ -508,22 +530,7 @@ func (l *Loop) checkPolicy(ctx context.Context) (bool, error) {
 }
 
 func policyInterrupted(ctx context.Context, err error) bool {
-	if ctx.Err() == nil || err == nil {
-		return false
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		parts := joined.Unwrap()
-		for _, part := range parts {
-			if !policyInterrupted(ctx, part) {
-				return false
-			}
-		}
-		return len(parts) > 0
-	}
-	if wrapped := errors.Unwrap(err); wrapped != nil {
-		return policyInterrupted(ctx, wrapped)
-	}
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return ctx.Err() != nil && OnlyCancellation(err, nil)
 }
 
 func (l *Loop) request() controllerwire.ClaimRequest {

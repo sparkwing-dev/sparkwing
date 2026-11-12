@@ -55,35 +55,72 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 	if loop.OnError == nil {
 		loop.OnError = func(err error) { slog.Error("local run host failed", "err", err) }
 	}
-	watchCtx, stopWatch := context.WithCancel(ctx)
+	watchCtx, stopWatch := context.WithCancelCause(ctx)
 	watchDone := make(chan error, 1)
-	go func() { watchDone <- watchLocalRunner(watchCtx, lifecycle, instance.ID, loop) }()
+	go func() {
+		watchErr := watchLocalRunner(watchCtx, lifecycle, instance.ID, loop)
+		watchDone <- localRunnerCleanupError(watchCtx, watchErr)
+	}()
 	defer func() {
-		stopWatch()
-		if watchErr := <-watchDone; !errors.Is(watchErr, context.Canceled) {
-			err = errors.Join(err, watchErr)
-		}
+		stopWatch(&localRunnerStop{phase: "watch"})
+		err = errors.Join(err, <-watchDone)
 	}()
 	roll := time.AfterFunc(localRunnerRollAfter, loop.Drain)
 	defer roll.Stop()
-	drainCtx, stopDrain := context.WithCancel(context.WithoutCancel(ctx))
+	drainCtx, stopDrain := context.WithCancelCause(context.WithoutCancel(ctx))
 	drainResult := make(chan error, 1)
 	draining := false
 	claimsStopped := loop.OnClaimsStopped
 	loop.OnClaimsStopped = func() {
 		draining = true
-		go func() { drainResult <- lifecycle.Drain(drainCtx, instance.ID) }()
+		go func() {
+			drainErr := lifecycle.Drain(drainCtx, instance.ID)
+			drainResult <- localRunnerCleanupError(drainCtx, drainErr)
+		}()
 		if claimsStopped != nil {
 			claimsStopped()
 		}
 	}
 	defer func() {
-		stopDrain()
+		stopDrain(&localRunnerStop{phase: "drain"})
 		if draining {
-			if drainErr := <-drainResult; !errors.Is(drainErr, context.Canceled) {
-				err = errors.Join(err, drainErr)
-			}
+			err = errors.Join(err, <-drainResult)
 		}
 	}()
 	return loop.Run(ctx)
+}
+
+type localRunnerStop struct{ phase string }
+
+func (e *localRunnerStop) Error() string { return "local runner " + e.phase + " stopped" }
+func (e *localRunnerStop) Unwrap() error { return context.Canceled }
+
+// safety: a global cancellation sentinel cannot attribute an error recorded before owner shutdown.
+func localRunnerCleanupError(ctx context.Context, err error) error {
+	cause, owned := context.Cause(ctx).(*localRunnerStop) //nolint:errorlint // Only the direct private cause is an owner stop.
+	if err == nil || !owned {
+		return err
+	}
+	if err == cause { //nolint:errorlint // Only this owner's exact marker proves cancellation provenance.
+		return nil
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		parts := joined.Unwrap()
+		if len(parts) == 0 {
+			return err
+		}
+		for _, part := range parts {
+			if part == nil || localRunnerCleanupError(ctx, part) != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		if localRunnerCleanupError(ctx, wrapped) == nil {
+			return nil
+		}
+		return err
+	}
+	return err
 }
