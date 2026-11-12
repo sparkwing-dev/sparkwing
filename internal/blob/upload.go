@@ -20,7 +20,7 @@ func Upload(ctx context.Context, client HTTPClient, signed SignedTransfer, body 
 		var err error
 		start, err = seeker.Seek(0, io.SeekCurrent)
 		if err != nil {
-			return nil, err
+			replayable = false
 		}
 	}
 	for attempt := 1; ; attempt++ {

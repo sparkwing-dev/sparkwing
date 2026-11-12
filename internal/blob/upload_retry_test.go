@@ -105,20 +105,30 @@ func TestOutputUploadForbiddenIsNotRetried(t *testing.T) {
 }
 
 func TestSignedUploadStreamingBodyIsNotRetried(t *testing.T) {
-	data, _, signer := newOutputData(t)
-	puts := 0
-	signer.upload = func(_ context.Context, i UploadIntent) (UploadTicket, error) {
-		signer.intent = i
-		return UploadTicket{ID: "ticket", Transfer: SignedTransfer{URL: "https://objects.example/?signature=secret", Digest: i.Digest, Size: i.Size}}, nil
-	}
-	store := NewSignedStore(SignedStoreOptions{Signer: signer, HTTPClient: TransferClient{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
-		puts++
-		_, _ = io.Copy(io.Discard, r.Body)
-		return nil, io.EOF
-	})}})
-	_, err := store.Put(t.Context(), PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest("hello"), Size: 5, Body: struct{ io.Reader }{strings.NewReader("hello")}})
-	if err == nil || puts != 1 || !strings.Contains(err.Error(), "not replayable; not retried") || signer.commits != 0 {
-		t.Fatalf("puts=%d commits=%d error=%v", puts, signer.commits, err)
+	for _, tc := range []struct {
+		name string
+		body io.Reader
+	}{
+		{"opaque", struct{ io.Reader }{strings.NewReader("hello")}},
+		{"seek_refused", refusedUploadSeek{strings.NewReader("hello")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, _, signer := newOutputData(t)
+			puts := 0
+			signer.upload = func(_ context.Context, i UploadIntent) (UploadTicket, error) {
+				signer.intent = i
+				return UploadTicket{ID: "ticket", Transfer: SignedTransfer{URL: "https://objects.example/?signature=secret", Digest: i.Digest, Size: i.Size}}, nil
+			}
+			store := NewSignedStore(SignedStoreOptions{Signer: signer, HTTPClient: TransferClient{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+				puts++
+				_, _ = io.Copy(io.Discard, r.Body)
+				return nil, io.EOF
+			})}})
+			_, err := store.Put(t.Context(), PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest("hello"), Size: 5, Body: tc.body})
+			if err == nil || puts != 1 || !strings.Contains(err.Error(), "not replayable; not retried") || signer.commits != 0 {
+				t.Fatalf("puts=%d commits=%d error=%v", puts, signer.commits, err)
+			}
+		})
 	}
 }
 
@@ -216,3 +226,7 @@ func TestSignedUploadCancellationStopsBackoff(t *testing.T) {
 		t.Fatalf("puts=%d error=%v", puts, err)
 	}
 }
+
+type refusedUploadSeek struct{ io.Reader }
+
+func (refusedUploadSeek) Seek(int64, int) (int64, error) { return 0, errors.ErrUnsupported }
