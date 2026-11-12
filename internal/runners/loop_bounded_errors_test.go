@@ -44,10 +44,10 @@ func TestLoopBoundsFailuresWithoutHidingRealFailure(t *testing.T) {
 
 func TestHostFailureSummaryRecognizesShutdownCause(t *testing.T) {
 	cause := errors.New("runner shutdown signal")
-	if !onlyCancellationCause(errors.Join(context.Canceled, cause), cause) {
+	if !OnlyCancellation(errors.Join(context.Canceled, cause), cause) {
 		t.Fatal("shutdown cause counted as a genuine failure")
 	}
-	if onlyCancellationCause(errors.Join(cause, errors.New("real failure")), cause) {
+	if OnlyCancellation(errors.Join(cause, errors.New("real failure")), cause) {
 		t.Fatal("genuine failure discarded")
 	}
 }

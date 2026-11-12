@@ -258,7 +258,7 @@ type emptyRunnerError struct{}
 func (emptyRunnerError) Error() string   { return "empty failure" }
 func (emptyRunnerError) Unwrap() []error { return nil }
 func TestRunnerEmptyErrorTreeIsFailure(t *testing.T) {
-	if onlyRunnerCancellation(emptyRunnerError{}, errors.New("signal stop")) {
+	if runners.OnlyCancellation(emptyRunnerError{}, errors.New("signal stop")) {
 		t.Fatal("empty failure was treated as cancellation")
 	}
 }
