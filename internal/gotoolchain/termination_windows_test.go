@@ -18,7 +18,7 @@ import (
 )
 
 func TestRunWindowsAttributesTermination(t *testing.T) {
-	for _, mode := range []string{"owner", "external", "exit23"} {
+	for _, mode := range []string{"owner", "owner-context", "external", "exit23"} {
 		t.Run(mode, func(t *testing.T) {
 			for trial := 0; trial < 8; trial++ {
 				base, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -32,6 +32,9 @@ func TestRunWindowsAttributesTermination(t *testing.T) {
 					t.Fatal(err)
 				}
 				command := exec.Command(os.Args[0], "-test.run=^TestRunWindowsChild$", "--", "child")
+				if mode == "owner-context" {
+					command = exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRunWindowsChild$", "--", "child")
+				}
 				command.Stdout, command.Stdin = writer, input
 				inherited := &windowsTerminationContext{Context: ctx, command: command, ready: bufio.NewReader(reader), send: send, mode: mode, cancel: stop}
 				err = Run(inherited, command)
@@ -42,7 +45,7 @@ func TestRunWindowsAttributesTermination(t *testing.T) {
 				_ = input.Close()
 				_ = send.Close()
 				var exit *exec.ExitError
-				if mode == "owner" {
+				if strings.HasPrefix(mode, "owner") {
 					if !errors.Is(err, context.Canceled) || errors.As(err, &exit) {
 						t.Fatalf("owner termination: %v", err)
 					}
@@ -90,7 +93,7 @@ func (c *windowsTerminationContext) Done() <-chan struct{} {
 		if err != nil || strings.TrimSpace(line) != "ready" {
 			panic(fmt.Sprintf("child readiness: %q %v", line, err))
 		}
-		if c.mode != "owner" {
+		if !strings.HasPrefix(c.mode, "owner") {
 			process, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(c.command.Process.Pid))
 			if err != nil {
 				panic(err)

@@ -14,11 +14,16 @@ import (
 )
 
 func runToolchain(ctx context.Context, cmd *exec.Cmd) (result error) {
-	if cmd.WaitDelay == 0 {
-		cmd.WaitDelay = time.Second
+	drainDelay := cmd.WaitDelay
+	if drainDelay == 0 {
+		drainDelay = time.Second
 	}
-	if err := cmd.Start(); err != nil {
-		return err
+	// safety: the pipe-drain bound must not start exec's independent context killer.
+	cmd.WaitDelay = 0
+	startErr := cmd.Start()
+	cmd.WaitDelay = drainDelay
+	if startErr != nil {
+		return startErr
 	}
 	process, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
 	if err != nil {
