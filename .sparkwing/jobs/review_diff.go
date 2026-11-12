@@ -26,8 +26,8 @@ type reviewDiffResult struct {
 }
 
 type reviewBinaryChange struct {
-	path               string
-	executable, source bool
+	path                string
+	executable, shebang bool
 }
 
 // safety: model replies and cached verdicts cannot clear an omitted-content block.
@@ -43,7 +43,7 @@ func (d reviewDiffResult) enforceBinaryReview(rec *reviewRecord, p reviewPolicy,
 				strict = strict || len(p.strictFor(endpoint)) > 0
 			}
 		}
-		if !strict && !file.executable && !file.source {
+		if !strict && !file.executable && !file.shebang && reviewAssetPath(file.path) {
 			continue
 		}
 		rec.Findings = append(rec.Findings, reviewFinding{
@@ -55,9 +55,9 @@ func (d reviewDiffResult) enforceBinaryReview(rec *reviewRecord, p reviewPolicy,
 	}
 }
 
-func reviewSourcePath(file string) bool {
+func reviewAssetPath(file string) bool {
 	switch strings.ToLower(path.Ext(file)) {
-	case ".sh", ".bash", ".zsh", ".fish", ".go", ".py", ".pyw", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".rb", ".pl", ".pm", ".php", ".lua", ".r", ".ps1", ".psm1", ".bat", ".cmd", ".c", ".h", ".cc", ".cpp", ".hpp", ".rs", ".java", ".kt", ".swift", ".scala", ".cs", ".sql", ".proto", ".dart", ".vue", ".svelte", ".awk", ".sed", ".nix", ".tf":
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svgz", ".woff", ".woff2", ".ttf", ".otf", ".pdf", ".zip", ".gz", ".tgz":
 		return true
 	}
 	return false
@@ -90,7 +90,7 @@ func reviewDiff(ctx context.Context, d reviewDeps, base, head string, files []st
 		}
 		path := records[i+1]
 		binary, invalid := false, false
-		change := reviewBinaryChange{path: path, source: reviewSourcePath(path)}
+		change := reviewBinaryChange{path: path}
 		metadata := make([]string, 2)
 		for side := range 2 {
 			mode := strings.TrimPrefix(fields[side], ":")
@@ -107,7 +107,7 @@ func reviewDiff(ctx context.Context, d reviewDeps, base, head string, files []st
 			if err != nil {
 				return reviewDiffResult{}, err
 			}
-			change.source = change.source || strings.HasPrefix(body, "#!")
+			change.shebang = change.shebang || strings.HasPrefix(body, "#!")
 			binary = binary || reviewBinaryBlob(body)
 			invalid = invalid || !utf8.ValidString(body)
 			metadata[side] = fmt.Sprintf("blob=%s mode=%s size=%d sha256=%x\n    inspect: git cat-file blob %s | od -An -tx1 -v", fields[side+2], mode, len(body), sha256.Sum256([]byte(body)), fields[side+2])

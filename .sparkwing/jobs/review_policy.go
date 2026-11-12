@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -191,19 +192,26 @@ func globSegments(pat, name []string) bool {
 	return len(name) == 0
 }
 
+// safety: only model location suffixes are parsed; colons inside raw Git paths remain literal.
 func findingPath(file string) string {
-	if i := strings.Index(file, ":"); i >= 0 {
-		return file[:i]
+	for range 2 {
+		i := strings.LastIndexByte(file, ':')
+		if i < 0 {
+			break
+		}
+		if _, err := strconv.ParseUint(file[i+1:], 10, 64); err != nil {
+			break
+		}
+		file = file[:i]
 	}
 	return file
 }
 
 func (p reviewPolicy) strictFor(file string) []strictPaths {
 	var out []strictPaths
-	name := findingPath(file)
 	for _, s := range p.Strict {
 		for _, pat := range s.Paths {
-			if globMatch(pat, name) {
+			if globMatch(pat, file) {
 				out = append(out, s)
 				break
 			}
@@ -217,7 +225,11 @@ func (p reviewPolicy) blocks(f reviewFinding) bool {
 	if rank <= 1 || f.Reviewer == binaryReviewOwner {
 		return true
 	}
-	for _, s := range p.strictFor(f.File) {
+	strict := p.strictFor(f.File)
+	if path := findingPath(f.File); path != f.File {
+		strict = append(strict, p.strictFor(path)...)
+	}
+	for _, s := range strict {
 		if rank <= severityRank(s.BlockAt) {
 			return true
 		}

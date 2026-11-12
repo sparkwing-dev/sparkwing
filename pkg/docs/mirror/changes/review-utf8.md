@@ -4,10 +4,13 @@
   Text-like patches escape invalid bytes and literal backslashes with a decoding
   rule. Binary summaries identify unreviewed content, exact blobs, modes, sizes
   and SHA-256 hashes, with safe inspection commands and an inspection requirement
-  before approval. A binary summary on a strict route, an executable mode or a
-  script/source path adds a blocking finding independently of model output,
-  including cached verdicts. There is no override for that block; `--skip` refuses
-  it. Ordinary binary assets elsewhere remain summary-only. Strict review includes
+  before approval. Binary summaries block independently of model output and
+  cached verdicts. Only non-strict, non-executable files without a shebang and
+  with a known asset extension remain summary-only: png, jpg, jpeg, gif, webp,
+  ico, svgz, woff, woff2, ttf, otf, pdf, zip, gz and tgz. There is no override for
+  that block; `--skip` refuses it. Raw Git filenames, including colons, match
+  strict routes literally; only model locations parse numeric line/column suffixes.
+  Strict review includes
   both endpoints of renames and copies from a NUL-delimited name-status inventory,
   preserving raw filenames and literal path selection.
   Repository diff attributes cannot suppress readable text changes. Ordinary UTF-8

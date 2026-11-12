@@ -674,7 +674,7 @@ func (r reviewPrompt) diffSection() string {
 		diff = diff[:end]
 		note = fmt.Sprintf("The diff was cut at %d bytes; read the rest with `git diff %s %s`.\n\n", maxPromptDiff, r.base, r.head)
 	}
-	coverage := "Metadata-only binary summaries are UNREVIEWED CONTENT. You must inspect every present blob using its object id and safe inspection command before approving. If content remains unreviewed, return a blocking finding for the coverage gap. The job independently blocks binary summaries on strict routes, executable modes or script/source paths; model findings cannot clear that block.\n\n"
+	coverage := "Metadata-only binary summaries are UNREVIEWED CONTENT. You must inspect every present blob using its object id and safe inspection command before approving. If content remains unreviewed, return a blocking finding for the coverage gap. The job independently blocks binary summaries unless the file is on a non-strict route, has no executable mode or shebang, and has a known asset extension; model findings cannot clear that block.\n\n"
 	return "## Diff\n\n" + coverage + note + "```diff\n" + diff + "\n```\n\n"
 }
 

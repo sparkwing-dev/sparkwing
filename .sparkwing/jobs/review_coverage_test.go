@@ -211,11 +211,14 @@ func TestReviewSensitiveBinaryChangesBlockRegardlessOfModelVerdict(t *testing.T)
 		name, path, body  string
 		executable, block bool
 	}{
-		{"strict", "internal/store/billing_payload.bin", "\x00payload", false, true},
-		{"executable", "bin/tool", "\x00payload", true, true},
+		{"strict", "internal/store/billing_payload.png", "\x00payload", false, true},
+		{"executable", "bin/tool.png", "\x00payload", true, true},
 		{"script", "scripts/access.sh", "#!/bin/sh\nallowed() { return 0; }\n# " + strings.Repeat("\xff", 256), false, true},
 		{"source", "lib/access.go", "package access\n\x00", false, true},
-		{"shebang", "scripts/access", "#!/bin/sh\n# \x00", false, true},
+		{"shebang", "scripts/access.png", "#!/bin/sh\n# \x00", false, true},
+		{"ksh", "scripts/access.ksh", "allowed() { return 0; }\n# \x00\nallowed\n", false, true},
+		{"extensionless", "data/payload", "\x00payload", false, true},
+		{"unknown", "data/payload.mystery", "\x00payload", false, true},
 		{"asset", "images/icon.png", "\x89PNG\r\n\x1a\n\x00", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -227,6 +230,11 @@ func TestReviewSensitiveBinaryChangesBlockRegardlessOfModelVerdict(t *testing.T)
 				gitCommitAll(t, root, "make executable")
 			}
 			ctx := newTestContext(t)
+			if tc.name == "ksh" {
+				if _, err := sparkwing.Exec(ctx, "/bin/sh", filepath.Join(root, tc.path)).Capture(); err != nil {
+					t.Fatalf("extension-only script did not execute: %v", err)
+				}
+			}
 			in := reviewInputs{branch: "work", brief: "Review opaque changes"}
 			for pass := range 3 {
 				if pass == 2 {
@@ -282,5 +290,48 @@ func TestReviewBinaryCopyFromStrictPathStillBlocks(t *testing.T) {
 	}
 	if rec.Result != resultBlock || rec.BlockingOpen != 1 || len(fx.sec.calls) != 1 {
 		t.Fatalf("strict binary copied out of scope passed: %+v", rec)
+	}
+}
+
+func TestReviewStrictColonPathsRemainLiteral(t *testing.T) {
+	for _, name := range []string{"text", "binary", "pathspec-magic"} {
+		t.Run(name, func(t *testing.T) {
+			binary := name != "text"
+			path, body := "internal/store/alias:billing_payload.go", "package changed\n"
+			if binary {
+				path, body = "internal/store/alias:billing_payload.png", "\x00unreviewed"
+			}
+			policy := testPolicy(t)
+			if !binary {
+				policy.Strict[0].Paths = []string{"internal/**/*.go"}
+			}
+			if name == "pathspec-magic" {
+				path = ":(glob)billing_payload.png"
+				policy.Strict[0].Paths = []string{path}
+			}
+			fx, root := gitEncodingReviewFixture(t, nil, map[string]string{path: body})
+			if !binary {
+				reply := fmt.Sprintf(`{"findings":[{"id":"S1","severity":"P2","file":%q,"summary":"strict-path defect"}]}`, path+":4:2")
+				fx.sec.replies = []string{reply, reply}
+			}
+			ctx := newTestContext(t)
+			for pass := range 2 {
+				if pass == 1 {
+					writeGoFile(t, filepath.Join(root, "other.md"), "follow-up\n")
+					gitCommitAll(t, root, "follow-up")
+				}
+				rec, _, err := runReview(ctx, fx.deps, policy, reviewInputs{branch: "work", brief: "Review literal strict path"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if rec.Result != resultBlock || rec.BlockingOpen != 1 || len(fx.sec.calls) != pass+1 {
+					t.Fatalf("pass%d: colon-bearing strict file escaped review: %+v; security calls=%d", pass, rec, len(fx.sec.calls))
+				}
+				call := fx.sec.calls[pass]
+				if (call.session != "") != (pass == 1) || !strings.Contains(call.prompt, path) {
+					t.Fatalf("pass%d: strict prompt lost literal path/session", pass)
+				}
+			}
+		})
 	}
 }
