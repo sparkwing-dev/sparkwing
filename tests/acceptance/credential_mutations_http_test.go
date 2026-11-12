@@ -42,7 +42,7 @@ func credentialMutationServer(t *testing.T, path string, build func(*store.Store
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, server, err := openControllerFixture(t, path, func(s *store.Store) *controller.Server { return build(s, cipher) })
+	s, server, err := openControllerFixture(t, path, teststore.OpenExisting, func(s *store.Store) *controller.Server { return build(s, cipher) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +57,15 @@ func credentialMutationServer(t *testing.T, path string, build func(*store.Store
 	return s, cipher, server
 }
 
-func openControllerFixture(t teststore.T, path string, build func(*store.Store) *controller.Server, opts ...store.Option) (*store.Store, *controller.Server, error) {
+type fixtureStoreOpener func(teststore.T, string, ...store.Option) (*store.Store, error)
+
+func openControllerFixture(t teststore.T, path string, open fixtureStoreOpener, build func(*store.Store) *controller.Server, opts ...store.Option) (*store.Store, *controller.Server, error) {
 	var server *controller.Server
 	opts = append(opts, store.WithPolicies(func(s *store.Store) (store.Policies, error) {
 		server = build(s)
 		return server.StorePolicies(), nil
 	}))
-	s, err := teststore.OpenExisting(t, path, opts...)
+	s, err := open(t, path, opts...)
 	return s, server, err
 }
 
