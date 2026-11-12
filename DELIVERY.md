@@ -1744,23 +1744,27 @@ file. Other syntax and workflow checks remain active.
   the whole `TestTypeScriptBoundary` with `GOMAXPROCS=3`, `-p 1` and `-short`.
   Each sample copied the same compiled-only private seed containing both
   helper variants and the outer/nested Go flag variants. Priming, copying,
-  hashing and slot wait are excluded; native CPU is wait4 user plus system
-  time, including descendants reaped by the binary.
+  hashing and slot wait are excluded. Acceptance test-binary CPU is wait4 user
+  plus system time, including descendants reaped by `acceptance.test`.
+  These binary measurements cover both the Node SDK cell and the nested
+  nativehost Go cell.
 
-  | Pair | Native wall A / B, s | Native CPU A / B, s | Whole Go wall change | Load1 median A / B |
+  | Pair | Acceptance binary wall A / B, s | Acceptance binary CPU A / B, s | Whole Go wall change | Load1 median A / B |
   | --- | ---: | ---: | ---: | ---: |
   | 1 | 20.797 / 17.547 | 34.108 / 27.452 | -11.02% | 8.478 / 11.243 |
   | 2 | 25.868 / 24.794 | 37.937 / 37.126 | +2.58% | 9.755 / 13.206 |
   | 3 | 20.343 / 18.345 | 33.664 / 28.383 | -7.22% | 10.388 / 8.759 |
 
-  Native wall medians were 20.797/18.345 s
+  Acceptance test-binary wall medians, covering both cells, were 20.797/18.345 s
   (-11.79%), with ranges
-  20.343-25.868/17.547-24.794 s. Native CPU medians were
+  20.343-25.868/17.547-24.794 s. Acceptance test-binary CPU medians were
   34.108/28.383 s (-16.78%), with ranges
   33.664-37.937/27.452-37.126 s. Whole Go wall medians were
   24.419/22.014 s, but pair 2 regressed 2.58%; a stable
   whole-command wall saving is inconclusive. The unmodified Node cell was
   slower in B in all three pairs, so its drift is not attributed to this cache.
+  The nested Go cell's separate CPU medians were 15.959/8.972 s, including
+  that Go command's build and link work.
   Every sample retained 145 Node assertions, 15 native Go parent/leaf cases
   and both acceptance cells with exact outcome parity. Native compiler
   invocations fell from two to one. Load, owners, iowait and steal were recorded
