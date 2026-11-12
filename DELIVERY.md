@@ -1523,12 +1523,14 @@ file. Other syntax and workflow checks remain active.
   combined branch and merge delta. Publish a standalone Go SDK API change first,
   wait for its module version to resolve, then bump the root `go.mod` requirement
   before the root uses that API. Workspace conformance remains a separate check.
-  The earlier host-only check on one compiler core measured 16.05 seconds on its
-  first invocation and 9.62, 9.62 and 10.06 seconds warm at shared load 8-9.
-  Those timings cover one target. Cross-target dependency caches are separate;
-  the first six-target build can take several minutes. The fast phase's
-  one-minute warning applies to the complete matrix step. The check runs after
-  the workspace build rather than sharing its compiler allocation concurrently.
+  On one compiler core against main `b8295539a`, the host-only control measured
+  30.24 seconds initially and 10.22 seconds warm. The six-target check took
+  18m21s while filling missing cross-target dependency caches, then 54.20 and
+  57.53 seconds warm, adding 44-47 seconds over the warm host-only control.
+  Shared load1 ranged from 3.9 to 6.8. The fast phase's one-minute warning still
+  applies to the complete matrix step; a first build can exceed it substantially.
+  These timings exclude admission wait and do not measure an end-to-end land.
+  The check runs after the workspace build with the same compiler allowance.
   Without `--full`, vet and build cover the affected dependency closure. Its test step
   runs `go test -short` on changed packages
   and their reverse dependency closure, including production, internal-test

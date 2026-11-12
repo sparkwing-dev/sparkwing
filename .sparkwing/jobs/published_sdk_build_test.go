@@ -250,6 +250,11 @@ func TestPublishedSDKBuildSkipsUnownedDocsOnAffectedGate(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "docs/guide.md"), "# Ordinary documentation\n")
 	gitCommitAll(t, root, "documentation")
 	host, plan, work := prepareWork(t, &Gate{mode: gateAffected})
+	for _, step := range []string{"vet", "build"} {
+		if _, err := host.RunStep(t.Context(), plan, "job", step); err != nil {
+			t.Fatal(err)
+		}
+	}
 	closures := findStep(work, "build-published-sdk").Closures.SkipIf
 	if len(closures) == 0 {
 		t.Fatal("affected published build has no scope predicate")
