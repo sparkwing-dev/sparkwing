@@ -2512,10 +2512,12 @@ file. Other syntax and workflow checks remain active.
   excluding cold compilation; record measured runtime before changing that budget.
 
   On Linux, run the named cases sequentially with the gate set, private
-  `HOME`/`SPARKWING_HOME`, and disposable Go temporary state:
+  `HOME`/`SPARKWING_HOME`, and disposable Go temporary state. The binary input
+  must be the absolute CLI artifact, not its state-binding candidate launcher:
 
   ```sh
   export SPARKWING_TEST_USER_MANAGER=1
+  export SPARKWING_LOCAL_E2E_BINARY=/absolute/built/sparkwing
   go test -count=1 -p 1 ./internal/wingd -run '^TestManagedUnitsPrivateConfigWithSystemd$'
   go test -count=1 -p 1 ./internal/wingd/client -run '^TestServiceDaemonLeavesCallerCgroup$'
   go test -count=1 -p 1 ./cmd/sparkwing -run '^TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild$'
@@ -2523,6 +2525,7 @@ file. Other syntax and workflow checks remain active.
   go test -count=1 -p 1 ./cmd/sparkwing -run '^TestManagedControllerPreservesKeyAcrossRestart$'
   go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterSystemdLifetimeAndControllerKeys$'
   go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterRealIntakeRaceAndRollback$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterProvidedBinaryControllerInspection$'
   go test -tags=rewrite_integration -count=1 -p 1 ./cmd/sparkwing -run '^TestReviewProductionExecutionBindings$'
   ```
 

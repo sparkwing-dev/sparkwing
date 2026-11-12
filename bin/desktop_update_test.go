@@ -23,27 +23,47 @@ func TestDesktopUpdateWaitsForWorkAndRefusesUnverifiedIdle(t *testing.T) {
 		t.Skip("Linux systemd updater")
 	}
 	for _, mode := range []string{"idle", "drain", "run", "trigger", "lease", "land", "opaque-land", "status-error", "malformed", "missing-count", "missing-pid", "environment-error", "units-error", "malformed-units", "show-error", "red", "build-error", "rename-error", "rollback-error", "restart-error", "stopped"} {
-		t.Run(mode, func(t *testing.T) {
-			root, err := filepath.Abs(".")
-			if err != nil {
-				t.Fatal(err)
-			}
-			dir := t.TempDir()
-			home := filepath.Join(dir, "home")
-			bin := filepath.Join(dir, "tools")
-			dest := filepath.Join(home, ".local", "bin")
-			for _, path := range []string{home, bin, dest} {
-				if err := os.MkdirAll(path, 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			write := func(path, body string) {
-				t.Helper()
-				if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			write(filepath.Join(bin, "git"), `#!/bin/bash
+		t.Run(mode, func(t *testing.T) { testDesktopUpdater(t, mode, "") })
+	}
+}
+
+func TestDesktopUpdaterProvidedBinaryControllerInspection(t *testing.T) {
+	testmanager.Require(t)
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux systemd updater")
+	}
+	cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY")
+	if cli == "" {
+		t.Skip("set SPARKWING_LOCAL_E2E_BINARY to the absolute CLI artifact in the native qualification window")
+	}
+	if !filepath.IsAbs(cli) {
+		t.Fatal("SPARKWING_LOCAL_E2E_BINARY must be an absolute CLI artifact path")
+	}
+	testDesktopUpdater(t, "run", cli)
+}
+
+func testDesktopUpdater(t *testing.T, mode, providedCLI string) {
+	t.Helper()
+	root, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	bin := filepath.Join(dir, "tools")
+	dest := filepath.Join(home, ".local", "bin")
+	for _, path := range []string{home, bin, dest} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(bin, "git"), `#!/bin/bash
 set -eu
 case "$3" in
 remote) echo https://github.com/sparkwing-dev/sparkwing ;;
@@ -56,7 +76,7 @@ clone)
 *) exit 1 ;;
 esac
 `)
-			write(filepath.Join(dir, "install.sh"), `#!/bin/bash
+	write(filepath.Join(dir, "install.sh"), `#!/bin/bash
 set -eu
 [ "$SPARKWING_INSTALL_BIN" != "$HOME/.local/bin" ]
 echo build >> "$HOME/calls"
@@ -66,20 +86,20 @@ cp "$FIXTURE_CANDIDATE" "$SPARKWING_INSTALL_BIN/sparkwing"
 printf 'new runner\n' > "$SPARKWING_INSTALL_BIN/sparkwing-runner"
 chmod +x "$SPARKWING_INSTALL_BIN/sparkwing-runner"
 `)
-			write(filepath.Join(dir, "candidate"), `#!/bin/bash
+	write(filepath.Join(dir, "candidate"), `#!/bin/bash
 set -eu
 [ "$1 $2 $3" = 'daemon restart --force' ]
 [ "$SPARKWING_HOME" = "$HOME/state" ] || [ "$SPARKWING_HOME" = "$HOME/delivery" ]
 echo restart >> "$HOME/calls"
 [ "$MODE" != restart-error ]
 `)
-			write(filepath.Join(bin, "gh"), `#!/bin/bash
+	write(filepath.Join(bin, "gh"), `#!/bin/bash
 set -eu
 result=success
 [ "$MODE" != red ] || result=failure
 printf '[{"headSha":"selected","status":"completed","conclusion":"%s"}]\n' "$result"
 `)
-			write(filepath.Join(dest, "sparkwing"), `#!/bin/bash
+	write(filepath.Join(dest, "sparkwing"), `#!/bin/bash
 set -eu
 if [ "$1 $2" = 'runs list' ]; then
   if [ -n "${UPDATER_REAL_CLI:-}" ]; then SPARKWING_SECRETS_KEY_FILE="$SPARKWING_HOME/key" exec "$UPDATER_REAL_CLI" "$@"; fi
@@ -114,7 +134,7 @@ stopped) state=stopped ;;
 esac
 printf '{"kind":"service","tool":"sparkwing","service":"controller","state":"%s","pid":%s,"activity":{"runs":%s,"queued_triggers":%s,"held_leases":%s}}\n' "$state" "$FIXTURE_CONTROLLER_PID" "$runs" "$triggers" "$leases"
 `)
-			write(filepath.Join(bin, "systemctl"), `#!/bin/bash
+	write(filepath.Join(bin, "systemctl"), `#!/bin/bash
 set -eu
 case "$2" in
 list-units)
@@ -135,10 +155,10 @@ show)
 *) exit 1 ;;
 esac
 `)
-			write(filepath.Join(bin, "sleep"), "#!/bin/sh\ntouch \"$HOME/drained\"\n")
-			write(filepath.Join(bin, "go"), "#!/bin/sh\nexit 1\n")
-			write(filepath.Join(bin, "pnpm"), "#!/bin/sh\nexit 1\n")
-			write(filepath.Join(bin, "mv"), `#!/bin/bash
+	write(filepath.Join(bin, "sleep"), "#!/bin/sh\ntouch \"$HOME/drained\"\n")
+	write(filepath.Join(bin, "go"), "#!/bin/sh\nexit 1\n")
+	write(filepath.Join(bin, "pnpm"), "#!/bin/sh\nexit 1\n")
+	write(filepath.Join(bin, "mv"), `#!/bin/bash
 set -eu
 if [[ ( "$MODE" == rename-error || "$MODE" == rollback-error ) && "${@: -1}" == "$HOME/.local/bin/sparkwing" ]]; then
   echo 'injected CLI rename failure' >&2
@@ -147,125 +167,124 @@ fi
 if [[ "$MODE" == rollback-error && "$*" == *previous-runner* ]]; then exit 31; fi
 exec /bin/mv "$@"
 `)
-			write(filepath.Join(dest, "sparkwing-runner"), "old runner\n")
-			before, err := os.ReadFile(filepath.Join(dest, "sparkwing"))
+	write(filepath.Join(dest, "sparkwing-runner"), "old runner\n")
+	before, err := os.ReadFile(filepath.Join(dest, "sparkwing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := "0"
+	if mode == "drain" {
+		wait = "60"
+	}
+	environment := append(os.Environ(), "HOME="+home, "SPARKWING_HOME="+filepath.Join(home, "state"), "MODE="+mode,
+		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FIXTURE_INSTALLER="+filepath.Join(dir, "install.sh"), "FIXTURE_CANDIDATE="+filepath.Join(dir, "candidate"))
+	if providedCLI != "" {
+		cli := providedCLI
+		for _, state := range []string{filepath.Join(home, "state"), filepath.Join(home, "delivery")} {
+			if err := os.MkdirAll(state, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			db, err := teststore.Open(t, filepath.Join(state, "state.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			wait := "0"
-			if mode == "drain" {
-				wait = "60"
-			}
-			environment := append(os.Environ(), "HOME="+home, "SPARKWING_HOME="+filepath.Join(home, "state"), "MODE="+mode,
-				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FIXTURE_INSTALLER="+filepath.Join(dir, "install.sh"), "FIXTURE_CANDIDATE="+filepath.Join(dir, "candidate"))
-			if cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY"); cli != "" && mode == "run" && testmanager.Enabled() {
-				for _, state := range []string{filepath.Join(home, "state"), filepath.Join(home, "delivery")} {
-					if err := os.MkdirAll(state, 0o700); err != nil {
-						t.Fatal(err)
-					}
-					db, err := teststore.Open(t, filepath.Join(state, "state.db"))
-					if err != nil {
-						t.Fatal(err)
-					}
-					for n := 1; n <= 8; n++ {
-						status := "pending"
-						if n > 4 {
-							status = "running"
-						}
-						if n == 8 {
-							status = "failed"
-						}
-						if err := teststore.SeedRun(db, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-blocker-" + strconv.Itoa(n), Pipeline: "check", Status: status, DeclaredRepo: "acme/widgets"}}); err != nil {
-							t.Fatal(err)
-						}
-					}
-					if err := db.Close(); err != nil {
-						t.Fatal(err)
-					}
-					realEnv := append(environment, "SPARKWING_SECRETS_KEY_FILE="+filepath.Join(state, "key"), "SPARKWING_HOME="+state, "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"), "XDG_CONFIG_HOME="+filepath.Join(home, "config"))
-					if out, err := procenv.ControlCommandContext(t.Context(), realEnv, cli, "daemon", "restart", "--force", "-o", "json").CombinedOutput(); err != nil {
-						t.Fatalf("start real controller: %v: %s", err, out)
-					}
-					t.Cleanup(func() {
-						ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-						defer cancel()
-						if out, err := procenv.ControlCommandContext(ctx, realEnv, cli, "daemon", "stop", "-o", "json").CombinedOutput(); err != nil {
-							t.Errorf("stop real controller: %v: %s", err, out)
-						}
-					})
+			for n := 1; n <= 8; n++ {
+				status := "pending"
+				if n > 4 {
+					status = "running"
 				}
-				environment = append(environment, "UPDATER_REAL_CLI="+cli, "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"), "XDG_CONFIG_HOME="+filepath.Join(home, "config"))
+				if n == 8 {
+					status = "failed"
+				}
+				if err := teststore.SeedRun(db, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-blocker-" + strconv.Itoa(n), Pipeline: "check", Status: status, DeclaredRepo: "acme/widgets"}}); err != nil {
+					t.Fatal(err)
+				}
 			}
-			controller := procenv.ControlCommand(environment, "/bin/sleep", "300")
-			if err := controller.Start(); err != nil {
+			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = controller.Process.Kill(); _ = controller.Wait() })
-			environment = append(environment, "FIXTURE_CONTROLLER_PID="+strconv.Itoa(controller.Process.Pid))
-			cmd := procenv.ControlCommandContext(t.Context(), environment, "bash", filepath.Join(root, "desktop-update.sh"), dir, dest, wait, filepath.Join(home, "state"), filepath.Join(home, "delivery"))
-			out, err := cmd.CombinedOutput()
-			success := mode == "idle" || mode == "drain" || mode == "stopped"
-			if (err == nil) != success {
-				t.Fatalf("success=%v error=%v: %s", success, err, out)
+			realEnv := append(environment, "SPARKWING_SECRETS_KEY_FILE="+filepath.Join(state, "key"), "SPARKWING_HOME="+state, "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"), "XDG_CONFIG_HOME="+filepath.Join(home, "config"))
+			if out, err := procenv.ControlCommandContext(t.Context(), realEnv, cli, "daemon", "restart", "--force", "-o", "json").CombinedOutput(); err != nil {
+				t.Fatalf("start real controller: %v: %s", err, out)
 			}
-			cli, readErr := os.ReadFile(filepath.Join(dest, "sparkwing"))
-			if readErr != nil {
-				t.Fatal(readErr)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				if out, err := procenv.ControlCommandContext(ctx, realEnv, cli, "daemon", "stop", "-o", "json").CombinedOutput(); err != nil {
+					t.Errorf("stop real controller: %v: %s", err, out)
+				}
+			})
+		}
+		environment = append(environment, "UPDATER_REAL_CLI="+cli, "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"), "XDG_CONFIG_HOME="+filepath.Join(home, "config"))
+	}
+	controller := procenv.ControlCommand(environment, "/bin/sleep", "300")
+	if err := controller.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = controller.Process.Kill(); _ = controller.Wait() })
+	environment = append(environment, "FIXTURE_CONTROLLER_PID="+strconv.Itoa(controller.Process.Pid))
+	cmd := procenv.ControlCommandContext(t.Context(), environment, "bash", filepath.Join(root, "desktop-update.sh"), dir, dest, wait, filepath.Join(home, "state"), filepath.Join(home, "delivery"))
+	out, err := cmd.CombinedOutput()
+	success := mode == "idle" || mode == "drain" || mode == "stopped"
+	if (err == nil) != success {
+		t.Fatalf("success=%v error=%v: %s", success, err, out)
+	}
+	cli, readErr := os.ReadFile(filepath.Join(dest, "sparkwing"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	runner, err := os.ReadFile(filepath.Join(dest, "sparkwing-runner"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, _ := os.ReadFile(filepath.Join(home, "calls"))
+	if success || mode == "restart-error" {
+		if string(cli) == string(before) || string(runner) != "new runner\n" {
+			t.Fatalf("binaries did not swap: %s", out)
+		}
+		want := 2
+		if mode == "stopped" {
+			want = 0
+		} else if mode == "restart-error" {
+			want = 1
+		}
+		if strings.Count(string(calls), "restart\n") != want {
+			t.Fatalf("restart calls: %s (%s)", calls, out)
+		}
+		if mode == "drain" && !strings.Contains(string(out), "waiting for sw-land-42.service") {
+			t.Fatalf("land unit was not awaited: %s", out)
+		}
+	} else if mode == "rollback-error" {
+		if string(cli) != string(before) || string(runner) != "new runner\n" || strings.Contains(string(calls), "restart") || !strings.Contains(string(out), "mixed versions installed; restore") || !strings.Contains(string(out), "previous-runner to "+dest+"/sparkwing-runner before retrying") {
+			t.Fatalf("failed rollback lacks repair guidance: %s (%s)", calls, out)
+		}
+	} else if string(cli) != string(before) || string(runner) != "old runner\n" || strings.Contains(string(calls), "restart") {
+		t.Fatalf("refused update changed installation: %s (%s)", calls, out)
+	}
+	if !success && !strings.Contains(string(out), "desktop-update:") {
+		t.Fatalf("failure lacks updater diagnostic: %s", out)
+	}
+	if mode == "run" {
+		for _, want := range []string{"blocking run run-blocker-1 (check, pending)", "blocking run run-blocker-7 (check, running)", "7 active runs", "showing up to 5", `runs list --profile= --status "$status" --since 0 -o json`, "drain timed out"} {
+			if !strings.Contains(string(out), want) {
+				t.Fatalf("missing blocking-run diagnostic %q: %s", want, out)
 			}
-			runner, err := os.ReadFile(filepath.Join(dest, "sparkwing-runner"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			calls, _ := os.ReadFile(filepath.Join(home, "calls"))
-			if success || mode == "restart-error" {
-				if string(cli) == string(before) || string(runner) != "new runner\n" {
-					t.Fatalf("binaries did not swap: %s", out)
-				}
-				want := 2
-				if mode == "stopped" {
-					want = 0
-				} else if mode == "restart-error" {
-					want = 1
-				}
-				if strings.Count(string(calls), "restart\n") != want {
-					t.Fatalf("restart calls: %s (%s)", calls, out)
-				}
-				if mode == "drain" && !strings.Contains(string(out), "waiting for sw-land-42.service") {
-					t.Fatalf("land unit was not awaited: %s", out)
-				}
-			} else if mode == "rollback-error" {
-				if string(cli) != string(before) || string(runner) != "new runner\n" || strings.Contains(string(calls), "restart") || !strings.Contains(string(out), "mixed versions installed; restore") || !strings.Contains(string(out), "previous-runner to "+dest+"/sparkwing-runner before retrying") {
-					t.Fatalf("failed rollback lacks repair guidance: %s (%s)", calls, out)
-				}
-			} else if string(cli) != string(before) || string(runner) != "old runner\n" || strings.Contains(string(calls), "restart") {
-				t.Fatalf("refused update changed installation: %s (%s)", calls, out)
-			}
-			if !success && !strings.Contains(string(out), "desktop-update:") {
-				t.Fatalf("failure lacks updater diagnostic: %s", out)
-			}
-			if mode == "run" {
-				for _, want := range []string{"blocking run run-blocker-1 (check, pending)", "blocking run run-blocker-7 (check, running)", "7 active runs", "showing up to 5", `runs list --profile= --status "$status" --since 0 -o json`, "drain timed out"} {
-					if !strings.Contains(string(out), want) {
-						t.Fatalf("missing blocking-run diagnostic %q: %s", want, out)
+		}
+		if providedCLI != "" {
+			for _, line := range strings.Split(string(out), "\n") {
+				if command, ok := strings.CutPrefix(line, "desktop-update: inspect: "); ok {
+					details, err := procenv.ControlCommandContext(t.Context(), environment, "bash", "-c", command).CombinedOutput()
+					if err != nil || !strings.Contains(string(details), "run-blocker-6") || strings.Contains(string(details), "run-blocker-8") {
+						t.Fatalf("inspection command did not list all active runs: %v: %s", err, details)
 					}
 				}
-				if os.Getenv("SPARKWING_LOCAL_E2E_BINARY") != "" && testmanager.Enabled() {
-					for _, line := range strings.Split(string(out), "\n") {
-						if command, ok := strings.CutPrefix(line, "desktop-update: inspect: "); ok {
-							details, err := procenv.ControlCommandContext(t.Context(), environment, "bash", "-c", command).CombinedOutput()
-							if err != nil || !strings.Contains(string(details), "run-blocker-6") || strings.Contains(string(details), "run-blocker-8") {
-								t.Fatalf("inspection command did not list all active runs: %v: %s", err, details)
-							}
-						}
-					}
-				}
-				if strings.Contains(string(out), "blocking run run-blocker-6") {
-					t.Fatalf("blocking-run diagnostic exceeded cap: %s", out)
-				}
 			}
-			if mode == "rename-error" && !strings.Contains(string(out), "previous binaries restored") {
-				t.Fatalf("CLI rename failure lacks recovery diagnostic: %s", out)
-			}
-		})
+		}
+		if strings.Contains(string(out), "blocking run run-blocker-6") {
+			t.Fatalf("blocking-run diagnostic exceeded cap: %s", out)
+		}
+	}
+	if mode == "rename-error" && !strings.Contains(string(out), "previous binaries restored") {
+		t.Fatalf("CLI rename failure lacks recovery diagnostic: %s", out)
 	}
 }

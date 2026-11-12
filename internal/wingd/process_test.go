@@ -257,12 +257,12 @@ func TestProcess_CancelOthersEvictsHolderAcrossProcesses(t *testing.T) {
 }
 
 func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("process test skipped in -short")
+	}
 	if runtime.GOOS == "linux" {
 		testmanager.Scope(t)
 		t.Setenv("INVOCATION_ID", "fixture-service")
-	}
-	if testing.Short() {
-		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
 	stopProcessDaemonOnCleanup(t, home)
