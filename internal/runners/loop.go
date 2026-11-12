@@ -445,7 +445,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if pending == nil && nextClaim.After(time.Now()) {
 			wait = min(wait, time.Until(nextClaim))
 		}
-		if transportErr != nil {
+		if transportErr != nil && pending == nil {
 			wait = min(wait, max(time.Until(transportSince.Add(claimRecoveryBudget)), 0))
 		}
 		timer.Reset(l.lifecycleWait(wait, idleSince, len(active) == 0))
