@@ -56,6 +56,9 @@ func installLinux(ctx context.Context, h Host) (State, error) {
 	if _, err := refreshPreflight(ctx, h, timerPath); err != nil {
 		return State{}, err
 	}
+	if err := unitfile.PrepareWorkingDirectory(h.SparkwingHome); err != nil {
+		return State{}, err
+	}
 	if err := ensureLogDir(h.LogPath); err != nil {
 		return State{Path: timerPath}, err
 	}
@@ -158,6 +161,7 @@ func serviceUnit(h Host) string {
 	// safety: __tick ensures the local controller, then invokes its tick.
 	// Keep that controller alive after the oneshot exits.
 	b.WriteString("[Service]\nType=oneshot\nKillMode=process\n")
+	fmt.Fprintf(&b, "WorkingDirectory=%s\n", unitfile.SystemdWord(h.SparkwingHome))
 	// safety: a tick that hangs on a lock or a store would otherwise hold the
 	// unit active and swallow every following minute.
 	b.WriteString("TimeoutStartSec=5m\n")
