@@ -8,4 +8,4 @@
   Hosted failures are reported as they occur; shutdown keeps a bounded summary
   with the first genuine failure and its count. Pending claim and acquisition
   failures remain visible. Windows SDK and Git owners distinguish their own
-  termination from a prior external death. Service drain deadlines are unchanged.
+  termination from a prior external death or ordinary exit 1. Service drain deadlines are unchanged.
