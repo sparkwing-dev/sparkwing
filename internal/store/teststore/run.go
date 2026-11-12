@@ -50,7 +50,8 @@ func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) 
 		return err
 	}
 	// correctness: project the persisted JSON, including its UTF-8 repair.
-	if err := json.Unmarshal(body, &request); err != nil {
+	var persisted runspec.SealedRequest
+	if err := json.Unmarshal(body, &persisted); err != nil {
 		return err
 	}
 	var started, finished, parent any
@@ -82,7 +83,7 @@ SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,'gh:1',?,?,?,?,'host','execute',?
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, identity, request.Provenance.SHA(), request.Provenance.Ref(), created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
+	_, err = db.ExecContext(ctx, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, identity, persisted.Provenance.SHA(), persisted.Provenance.Ref(), created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
 	return err
 }
 

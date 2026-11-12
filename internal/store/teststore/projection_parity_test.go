@@ -42,3 +42,21 @@ func TestSeedRunProjectsPersistedProvenance(t *testing.T) {
 		})
 	}
 }
+
+func TestSeedRunLeavesCallerArgumentsUntouched(t *testing.T) {
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	seed := store.Run{RunSummary: runstate.RunSummary{
+		ID: "report", Pipeline: "build", Status: "success", DeclaredRepo: "acme/widgets",
+		Args: map[string]string{"value": "bad\xff", "key\xff": "original"},
+	}}
+	if err := teststore.SeedRun(s, t.Context(), store.DefaultTeam, seed); err != nil {
+		t.Fatal(err)
+	}
+	if len(seed.Args) != 2 || seed.Args["value"] != "bad\xff" || seed.Args["key\xff"] != "original" {
+		t.Fatalf("seeding mutated caller arguments: %#v", seed.Args)
+	}
+}
