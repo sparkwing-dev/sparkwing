@@ -162,7 +162,8 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	var transportSince time.Time
 	claimed := 0
 	var failed failedWork
-	var hostErrors []error
+	var firstCancellation, firstFailure error
+	var hostFailures uint64
 	finish := func(result unitResult) {
 		pollAt = time.Time{}
 		delete(active, result.key)
@@ -173,7 +174,16 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			if l.OnError != nil {
 				l.OnError(result.err)
 			}
-			hostErrors = append(hostErrors, result.err)
+			if onlyCancellationCause(result.err, context.Cause(ctx)) {
+				if firstCancellation == nil {
+					firstCancellation = result.err
+				}
+			} else {
+				hostFailures++
+				if firstFailure == nil {
+					firstFailure = result.err
+				}
+			}
 		}
 	}
 	drainResults := func() {
@@ -318,7 +328,10 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 			slog.Info("runner update drain exited", "reason", reason, "current_version", l.Config.Version, "target_version", updateTarget, "held_units", len(active), "elapsed", time.Since(updateStarted))
 		}
-		runErr = errors.Join(runErr, errors.Join(hostErrors...), context.Cause(ctx))
+		if hostFailures > 1 {
+			firstFailure = fmt.Errorf("%d hosted units failed; first failure: %w", hostFailures, firstFailure)
+		}
+		runErr = errors.Join(runErr, firstCancellation, firstFailure, context.Cause(ctx))
 		if l.Config.FailOnFailedWork {
 			runErr = errors.Join(runErr, failed.err())
 		}
@@ -478,22 +491,30 @@ func (l *Loop) checkPolicy(ctx context.Context) (bool, error) {
 }
 
 func policyInterrupted(ctx context.Context, err error) bool {
-	if ctx.Err() == nil || err == nil {
+	return ctx.Err() != nil && onlyCancellation(err)
+}
+
+func onlyCancellation(err error) bool {
+	return onlyCancellationCause(err, nil)
+}
+
+func onlyCancellationCause(err, cause error) bool {
+	if err == nil {
 		return false
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		parts := joined.Unwrap()
 		for _, part := range parts {
-			if !policyInterrupted(ctx, part) {
+			if !onlyCancellationCause(part, cause) {
 				return false
 			}
 		}
 		return len(parts) > 0
 	}
 	if wrapped := errors.Unwrap(err); wrapped != nil {
-		return policyInterrupted(ctx, wrapped)
+		return onlyCancellationCause(wrapped, cause)
 	}
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return (cause != nil && errors.Is(err, cause)) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (l *Loop) request() controllerwire.ClaimRequest {

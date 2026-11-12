@@ -9,48 +9,16 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/sparkwing-dev/sparkwing/internal/processtest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
-
-type signalAfterExternalKill struct {
-	context.Context
-	command *exec.Cmd
-	once    sync.Once
-}
-
-func (c *signalAfterExternalKill) Done() <-chan struct{} {
-	c.once.Do(func() {
-		if err := c.command.Process.Kill(); err != nil {
-			panic(err)
-		}
-		var info unix.Siginfo
-		for {
-			err := unix.Waitid(unix.P_PID, c.command.Process.Pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
-			if errors.Is(err, syscall.EINTR) {
-				continue
-			}
-			if err != nil {
-				panic(err)
-			}
-			break
-		}
-		fmt.Fprintln(os.Stderr, "EXTERNAL SIGKILL confirmed before runner SIGTERM")
-		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-			panic(err)
-		}
-		<-c.Context.Done()
-	})
-	return c.Context.Done()
-}
 
 func TestRunnerExternalKillIsFailure(t *testing.T) {
 	if os.Getenv("SPARKWING_TEST_EXTERNAL_KILL") == "1" {
@@ -60,7 +28,20 @@ func TestRunnerExternalKillIsFailure(t *testing.T) {
 			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &url, CredentialsDir: &credentials}}, nil
 		}, Factory: func(ctx context.Context, _ RunnerOptions) (runners.RuntimeConfig, error) {
 			child := exec.Command("/bin/sleep", "30")
-			_, err := gitcmd.Output(&signalAfterExternalKill{Context: ctx, command: child}, child, false) //nolint:contextcheck // The inherited context orders external death before shutdown.
+			ordered := processtest.BeforeDone(ctx, func() {
+				if err := child.Process.Kill(); err != nil {
+					panic(err)
+				}
+				if err := processtest.WaitExited(child.Process.Pid); err != nil {
+					panic(err)
+				}
+				fmt.Fprintln(os.Stderr, "EXTERNAL SIGKILL confirmed before runner SIGTERM")
+				if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+					panic(err)
+				}
+				<-ctx.Done()
+			})
+			_, err := gitcmd.Output(ordered, child, false)
 			return runners.RuntimeConfig{}, err
 		}}
 		os.Args = []string{"sparkwing-runner", command, "--config=/fixture/config.yaml"}

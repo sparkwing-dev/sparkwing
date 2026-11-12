@@ -6,48 +6,22 @@ import (
 	"context"
 	"errors"
 	"os/exec"
-	"sync"
 	"syscall"
 	"testing"
 
-	"golang.org/x/sys/unix"
+	"github.com/sparkwing-dev/sparkwing/internal/processtest"
 )
-
-type externalKillContext struct {
-	context.Context
-	command *exec.Cmd
-	cancel  context.CancelFunc
-	once    sync.Once
-	killErr error
-}
-
-func (c *externalKillContext) Done() <-chan struct{} {
-	c.once.Do(func() {
-		c.killErr = c.command.Process.Kill()
-		if c.killErr == nil {
-			var info unix.Siginfo
-			for {
-				c.killErr = unix.Waitid(unix.P_PID, c.command.Process.Pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
-				if !errors.Is(c.killErr, syscall.EINTR) {
-					break
-				}
-			}
-		}
-		c.cancel()
-	})
-	return c.Context.Done()
-}
 
 func TestExternalSIGKILLRemainsFailure(t *testing.T) {
 	erased, retained := 0, 0
 	for i := 0; i < 24; i++ {
 		base, cancel := context.WithCancel(t.Context())
 		command := exec.Command("/bin/sleep", "30")
-		ctx := &externalKillContext{Context: base, command: command, cancel: cancel}
+		ctx := processtest.KillBeforeCancel(base, command, cancel)
 		err := runSDKInstallProcess(ctx, command)
 		cancel()
-		if ctx.killErr != nil {
-			t.Fatalf("external kill/wait failed: %v", ctx.killErr)
+		if ctx.KillError() != nil {
+			t.Fatalf("external kill/wait failed: %v", ctx.KillError())
 		}
 		var exit *exec.ExitError
 		if errors.Is(err, context.Canceled) && !errors.As(err, &exit) {
