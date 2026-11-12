@@ -57,12 +57,13 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 	}
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	watchDone := make(chan error, 1)
-	go func() { watchDone <- watchLocalRunner(watchCtx, lifecycle, instance.ID, loop) }()
+	go func() {
+		watchErr := watchLocalRunner(watchCtx, lifecycle, instance.ID, loop)
+		watchDone <- localRunnerCleanupError(watchCtx, watchErr)
+	}()
 	defer func() {
 		stopWatch()
-		if watchErr := <-watchDone; !errors.Is(watchErr, context.Canceled) {
-			err = errors.Join(err, watchErr)
-		}
+		err = errors.Join(err, <-watchDone)
 	}()
 	roll := time.AfterFunc(localRunnerRollAfter, loop.Drain)
 	defer roll.Stop()
@@ -72,7 +73,10 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 	claimsStopped := loop.OnClaimsStopped
 	loop.OnClaimsStopped = func() {
 		draining = true
-		go func() { drainResult <- lifecycle.Drain(drainCtx, instance.ID) }()
+		go func() {
+			drainErr := lifecycle.Drain(drainCtx, instance.ID)
+			drainResult <- localRunnerCleanupError(drainCtx, drainErr)
+		}()
 		if claimsStopped != nil {
 			claimsStopped()
 		}
@@ -80,10 +84,37 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 	defer func() {
 		stopDrain()
 		if draining {
-			if drainErr := <-drainResult; !errors.Is(drainErr, context.Canceled) {
-				err = errors.Join(err, drainErr)
-			}
+			err = errors.Join(err, <-drainResult)
 		}
 	}()
 	return loop.Run(ctx)
+}
+
+// safety: classify at completion so a later cleanup cancellation cannot hide an earlier failure.
+func localRunnerCleanupError(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		parts := joined.Unwrap()
+		if len(parts) == 0 {
+			return err
+		}
+		for _, part := range parts {
+			if part == nil || localRunnerCleanupError(ctx, part) != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		if localRunnerCleanupError(ctx, wrapped) == nil {
+			return nil
+		}
+		return err
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	return err
 }

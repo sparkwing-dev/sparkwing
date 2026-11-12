@@ -48,12 +48,12 @@ func localRunnerInstance(id, prefix, version string) (localhostwire.LocalRunnerI
 func watchLocalRunner(ctx context.Context, lifecycle localRunnerLifecycle, id string, loop *runners.Loop) error {
 	for {
 		instance, err := lifecycle.Watch(ctx, id, "active")
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 		if err != nil {
 			loop.Drain()
 			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		if instance.State != "active" {
 			loop.Drain()
