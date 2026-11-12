@@ -139,6 +139,19 @@ the push fails rather than merging an unchecked tree; enqueue again after
 inspecting the failure. A conflict aborts the merge and records its remedy in
 the failed run.
 
+Queued authorizing checks bind their SDK process to the original local owner
+checkout, using the immutable repository path rather than an isolated checkout
+of the submitted pre-merge commit. Preconditions capture the merged commit and
+tree, the run ID and every required policy, fast, review and test check. Each
+check verifies that owner branch, HEAD and cleanliness before and after its body,
+and records the actual tree and outcome. Both verification and queued push
+require every receipt for that run to pass on the tree being pushed. Missing,
+unreadable, failed or mismatched receipts block landing. Receipts live under
+`<git common dir>/sparkwing-land-checks/<run>/<role>/<step>.json`; logs also
+record each full checked tree. Review uses the pinned `queued-main` SHA, so it
+does not depend on a worker clone carrying `origin/main`. Ordinary standalone
+review still compares against `origin/main`.
+
 This mode uses the queue's owned-hardware landing policy: local affected Go
 tests are the primary test gate. Hosted CI supplies additional verification.
 It omits the broad desktop and Cloud gates. Run focused lane tests before submitting.

@@ -140,6 +140,46 @@ func TestLandQueueRefusesMainThatAdvancedToTheGatedCommit(t *testing.T) {
 	}
 }
 
+func TestQueuedPushRequiresItsOwnNonemptyCheckSet(t *testing.T) {
+	for _, mode := range []string{"nil", "empty", "missing-run"} {
+		t.Run(mode, func(t *testing.T) {
+			r := newLandRemote(t)
+			head := r.head()
+			before := r.remoteMain()
+			switch mode {
+			case "empty":
+				head.Checks = &landCheckRequirements{RunID: "run-empty"}
+			case "missing-run":
+				head.Checks = &landCheckRequirements{Required: []string{"fast/build"}}
+			}
+			_, err := pushQueuedLanding(newTestContext(t), gitIn(r.dev), r.dev, head)
+			if err == nil || !strings.Contains(err.Error(), "authorizing check") {
+				t.Fatalf("queued push accepted %s check set: %v", mode, err)
+			}
+			if r.remoteMain() != before {
+				t.Fatal("refused check set changed the fixture remote")
+			}
+		})
+	}
+}
+
+func queuedPushFixtureChecks(t *testing.T, git gitRunner, head landHead) landHead {
+	t.Helper()
+	head.Checks = &landCheckRequirements{RunID: "run-push-fixture", Required: []string{"affected-tests/test"}}
+	common, err := git(newTestContext(t), "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := landCheckPath(common, head.Checks.RunID, head.Checks.Required[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeLandCheckReceipt(file, landCheckReceipt{RunID: head.Checks.RunID, Check: head.Checks.Required[0], Tree: head.Tree, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	return head
+}
+
 func TestLandQueuePipelineChangesRunTheirOwnFocusedTests(t *testing.T) {
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"), "module fixture/pipelines\n\ngo 1.26.0\n")
@@ -197,6 +237,7 @@ func TestLandQueueMergeFailureDoesNotPreventNextEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	head = queuedPushFixtureChecks(t, gitIn(r.other), head)
 	if _, err := pushQueuedLanding(newTestContext(t), gitIn(r.other), r.other, head); err != nil {
 		t.Fatal(err)
 	}
@@ -220,6 +261,7 @@ func TestLandQueueMergesMainBeforeCapturingGatedHead(t *testing.T) {
 		t.Fatal("main was not merged before checks")
 	}
 	r.git(r.dev, "merge-base", "--is-ancestor", main, head.Commit)
+	head = queuedPushFixtureChecks(t, gitIn(r.dev), head)
 	if _, err := pushQueuedLanding(newTestContext(t), gitIn(r.dev), r.dev, head); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +288,9 @@ func TestLandQueueRefusesChangedCheckoutAndNeverMergesAtPush(t *testing.T) {
 			case "main moved":
 				g.fail[push] = errors.New("main moved")
 			}
-			_, err := pushQueuedLanding(t.Context(), g.run, "/repo", acceptedHead())
+			g.answers["rev-parse --path-format=absolute --git-common-dir"] = t.TempDir()
+			head := queuedPushFixtureChecks(t, g.run, acceptedHead())
+			_, err := pushQueuedLanding(t.Context(), g.run, "/repo", head)
 			if err == nil {
 				t.Fatal("changed checkout was pushed")
 			}

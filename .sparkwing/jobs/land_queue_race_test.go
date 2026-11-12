@@ -12,7 +12,7 @@ func TestLandQueueRefusesMainMovementAtPush(t *testing.T) {
 				r := newLandRemote(t)
 				prefix := r.git(r.dev, "rev-parse", "HEAD")
 				r.commit(r.dev, map[string]string{"extra.txt": "candidate tail\n"}, "candidate tail")
-				head := r.head()
+				head := queuedPushFixtureChecks(t, gitIn(r.dev), r.head())
 				moved := prefix
 				if target == "gated" {
 					moved = head.Commit
@@ -60,6 +60,7 @@ func TestLandQueueRefusesNonFastForwardBeforePush(t *testing.T) {
 	r.git(r.dev, "switch", "--orphan", "rewritten")
 	commit := r.commit(r.dev, map[string]string{"unrelated.txt": "unrelated history\n"}, "unrelated candidate")
 	head := landHead{Branch: "rewritten", Commit: commit, Tree: r.git(r.dev, "rev-parse", "HEAD^{tree}"), Base: base}
+	head = queuedPushFixtureChecks(t, gitIn(r.dev), head)
 	pushed := false
 	git := func(ctx context.Context, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "push" {

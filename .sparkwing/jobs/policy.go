@@ -21,6 +21,8 @@ const policyJobTimeout = 10 * time.Minute
 type policyJob struct {
 	sparkwing.Base
 	Proven sparkwing.Ref[gatePass]
+	Head   sparkwing.Ref[landHead]
+	Checks *queuedChecks
 }
 
 // safety: CollectAll, so one run names every policy finding rather than the
@@ -28,7 +30,7 @@ type policyJob struct {
 func (j *policyJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.FailurePolicy(sparkwing.CollectAll)
 	for _, s := range policySteps {
-		sparkwing.Step(w, s.id, s.run)
+		sparkwing.Step(w, s.id, j.Checks.wrap("policy/"+s.id, j.Head, s.run))
 	}
 	return nil, nil
 }

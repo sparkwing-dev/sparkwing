@@ -26,6 +26,8 @@ type stepTiming struct {
 }
 
 type tierBudget struct {
+	checks   *queuedChecks
+	head     sparkwing.Ref[landHead]
 	tier     string
 	limit    time.Duration
 	scopeOf  scopeFunc
@@ -66,6 +68,7 @@ func (b *tierBudget) changedGoFiles(ctx context.Context) (int, string) {
 // declared with sparkwing.Step directly is one the verdict never sees. The
 // tier tests fail a step the budget does not cover.
 func (b *tierBudget) step(w *sparkwing.Work, id string, fn func(context.Context) error) *sparkwing.WorkStep {
+	fn = b.checks.wrap("fast/"+id, b.head, fn)
 	step := sparkwing.Step(w, id, func(ctx context.Context) error {
 		started := time.Now()
 		err := fn(ctx)

@@ -23,8 +23,12 @@ import (
 
 // ReviewArgs are the author's inputs to a review run.
 type ReviewArgs struct {
-	Brief string `flag:"brief" desc:"The change's objective; when set it wins over the ticket and the commit messages."`
-	Skip  string `flag:"skip" desc:"Findings to skip with a reason, as 'F3=reason; F4=reason'. Only P2 and P3 findings off strict paths may be skipped."`
+	Brief    string `flag:"brief" desc:"The change's objective; when set it wins over the ticket and the commit messages."`
+	Skip     string `flag:"skip" desc:"Findings to skip with a reason, as 'F3=reason; F4=reason'. Only P2 and P3 findings off strict paths may be skipped."`
+	base     string
+	checkout string
+	checks   *queuedChecks
+	head     sparkwing.Ref[landHead]
 }
 
 // Review runs the AI code review that .review.yaml describes against the
@@ -67,7 +71,7 @@ func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string, prePush b
 	if prePush {
 		cores += float64(prePushReservationCores(currentHost().cpus))
 	}
-	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch, prePush: prePush}).
+	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch, prePush: prePush, Checks: in.checks, Head: in.head}).
 		Inline().
 		Timeout(45 * time.Minute).
 		NoProgressTimeout(30 * time.Minute).
@@ -84,19 +88,24 @@ type reviewJob struct {
 	args    ReviewArgs
 	branch  string
 	prePush bool
+	Checks  *queuedChecks
+	Head    sparkwing.Ref[landHead]
 }
 
 func (j *reviewJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	if j.prePush {
-		if _, err := (&PrePush{}).Work(w); err != nil {
+		if _, err := (&PrePush{Checks: j.Checks, Head: j.Head}).Work(w); err != nil {
 			return nil, err
 		}
 	}
-	return sparkwing.Step(w, "review", j.run), nil
+	return sparkwing.Step(w, "review", checkedValue(j.Checks, "review/review", j.Head, j.run)), nil
 }
 
 func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 	root := sourceTreeRoot()
+	if j.args.checkout != "" {
+		root = j.args.checkout
+	}
 	if root == "" {
 		return reviewRecord{}, errors.New("review: cannot find the repository root")
 	}
@@ -131,7 +140,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 		now:        time.Now,
 		logf:       func(format string, args ...any) { sparkwing.Info(ctx, format, args...) },
 	}
-	rec, file, err := runReview(ctx, deps, policy, reviewInputs{branch: branch, brief: j.args.Brief, skip: j.args.Skip})
+	rec, file, err := runReview(ctx, deps, policy, reviewInputs{branch: branch, brief: j.args.Brief, skip: j.args.Skip, base: j.args.base})
 	if err != nil {
 		return reviewRecord{}, err
 	}
@@ -158,6 +167,7 @@ type reviewInputs struct {
 	branch string
 	brief  string
 	skip   string
+	base   string
 }
 
 const (
@@ -181,9 +191,13 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	if err != nil {
 		return reviewRecord{}, "", fmt.Errorf("review: resolve the tree: %w", err)
 	}
-	base, err := d.git(ctx, "merge-base", reviewBaseRef, "HEAD")
+	baseRef := in.base
+	if baseRef == "" {
+		baseRef = reviewBaseRef
+	}
+	base, err := d.git(ctx, "merge-base", baseRef, "HEAD")
 	if err != nil {
-		return reviewRecord{}, "", fmt.Errorf("review: no merge base with %s; fetch it first: %w", reviewBaseRef, err)
+		return reviewRecord{}, "", fmt.Errorf("review: no merge base with %s; fetch it first: %w", baseRef, err)
 	}
 	head, tree, base = strings.TrimSpace(head), strings.TrimSpace(tree), strings.TrimSpace(base)
 	branch := in.branch
@@ -202,7 +216,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	rec.Notes = nil
 	objective, notes := resolveObjective(ctx, d, p, in, base)
 	objectiveKey := fmt.Sprintf("%x", sha256.Sum256([]byte(objective.Source+"\x00"+objective.Ref+"\x00"+objective.text)))
-	sameTree := prior != nil && prior.Tree == tree && prior.ObjectiveKey == objectiveKey
+	sameTree := prior != nil && prior.Tree == tree && prior.Base == base && prior.ObjectiveKey == objectiveKey
 	rec.Objective, rec.ObjectiveKey = objective, objectiveKey
 	rec.Notes = append(rec.Notes, notes...)
 	rec.Tree, rec.Commit, rec.Base = tree, head, base

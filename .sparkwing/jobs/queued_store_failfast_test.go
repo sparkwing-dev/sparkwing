@@ -52,8 +52,8 @@ func TestZStoreCritical(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26.0\n\n// Select root module tests.\n")
 	writeGoFile(t, filepath.Join(root, ".sparkwing/go.mod"), "module fixture-pipelines\n\ngo 1.26.0\n")
 	gitCommitAll(t, root, "select both queued modules")
-	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
-		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Preserve module allocation and store shards"}}, sparkwing.RunContext{})
+	host, plan, _ := prepareQueuedFixturePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Preserve module allocation and store shards"}}, sparkwing.RunContext{RunID: queuedFixtureRunID})
 	})
 	if _, err := host.RunStep(t.Context(), plan, "affected-tests", "test"); err != nil {
 		t.Fatal(err)
@@ -205,8 +205,8 @@ func TestZStoreCritical(t *testing.T) { if testing.Short(){t.Skip("full critical
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26.1\n")
 	writeGoFile(t, filepath.Join(root, ".sparkwing/go.mod"), "module fixture-pipelines\n\ngo 1.26.0\n")
 	gitCommitAll(t, root, "select queued root and pipeline")
-	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
-		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Keep admitted store shards together on failure"}}, sparkwing.RunContext{})
+	host, plan, _ := prepareQueuedFixturePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Land{}).Plan(ctx, plan, LandArgs{Queued: true, QueuedMain: strings.Repeat("a", 40), ReviewArgs: ReviewArgs{Brief: "Keep admitted store shards together on failure"}}, sparkwing.RunContext{RunID: queuedFixtureRunID})
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
