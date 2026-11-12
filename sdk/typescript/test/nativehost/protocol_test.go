@@ -338,7 +338,7 @@ func (h *host) frame() wireFrame {
 			_, err = h.requests.Write(append(body, '\n'))
 			return err
 		}
-		done := nodehost.ExecuteCommand(h.t.Context(), req, func(stream string, data []byte, eof bool) error {
+		done, hostErr := nodehost.ExecuteCommand(h.t.Context(), req, func(stream string, data []byte, eof bool) error {
 			if !req.Capture || eof {
 				return nil
 			}
@@ -346,6 +346,9 @@ func (h *host) frame() wireFrame {
 		})
 		if err := write(done); err != nil {
 			h.t.Fatal(err)
+		}
+		if hostErr != nil {
+			h.t.Fatalf("host command cleanup failed: %v", hostErr)
 		}
 		return wireFrame{}
 	}
