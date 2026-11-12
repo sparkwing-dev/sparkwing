@@ -28,9 +28,9 @@ func (e *transferFailure) Unwrap() error { return e.cause }
 
 // safety: request errors retain signed URLs through unwrap chains; only fixed classes and safe sentinels escape.
 func newTransferFailure(method, raw string, err error) *transferFailure {
-	u, _ := url.Parse(raw)
+	u, parseErr := url.Parse(raw)
 	host := "unknown"
-	if u != nil && u.Hostname() != "" {
+	if parseErr == nil && u != nil && u.Hostname() != "" {
 		host = u.Hostname()
 	}
 	e := &transferFailure{method: method, host: host, class: "transport_error", attempts: 1}
@@ -39,9 +39,14 @@ func newTransferFailure(method, raw string, err error) *transferFailure {
 		class string
 		retry bool
 	}{
-		{context.Canceled, "cancelled", false}, {context.DeadlineExceeded, "deadline_exceeded", false},
-		{ErrIntegrity, "integrity", false}, {io.EOF, "EOF", true}, {io.ErrUnexpectedEOF, "unexpected_EOF", true},
-		{syscall.ECONNRESET, "connection_reset", true}, {syscall.EPIPE, "broken_pipe", true}, {net.ErrClosed, "connection_closed", true},
+		{context.Canceled, "cancelled", false},
+		{context.DeadlineExceeded, "deadline_exceeded", false},
+		{ErrIntegrity, "integrity", false},
+		{io.EOF, "EOF", true},
+		{io.ErrUnexpectedEOF, "unexpected_EOF", true},
+		{syscall.ECONNRESET, "connection_reset", true},
+		{syscall.EPIPE, "broken_pipe", true},
+		{net.ErrClosed, "connection_closed", true},
 	} {
 		if errors.Is(err, c.err) {
 			e.class, e.retry, e.cause = c.class, c.retry, c.err

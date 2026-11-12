@@ -47,10 +47,22 @@ func Upload(ctx context.Context, client HTTPClient, signed SignedTransfer, body 
 		}
 		var requestBody io.ReadCloser = io.NopCloser(body)
 		if replayable {
-			requestBody = &uploadBody{reader: body}
+			requestBody = &uploadBody{reader: body, done: make(chan struct{})}
 		}
 		response, err := client.Transfer(ctx, signed, requestBody)
 		_ = requestBody.Close()
+		if replayable {
+			select {
+			case <-requestBody.(*uploadBody).done:
+			case <-ctx.Done():
+				if response != nil {
+					_ = response.Close()
+				}
+				failure := newTransferFailure("PUT", signed.URL, errors.Join(err, ctx.Err()))
+				failure.attempts = attempt
+				return nil, failure
+			}
+		}
 		if err == nil {
 			return response, nil
 		}
@@ -83,15 +95,37 @@ func Upload(ctx context.Context, client HTTPClient, signed SignedTransfer, body 
 type uploadBody struct {
 	mu     sync.Mutex
 	reader io.Reader
+	done   chan struct{}
+	active int
 	closed bool
 }
 
 func (b *uploadBody) Read(p []byte) (int, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.closed {
+		b.mu.Unlock()
 		return 0, io.ErrClosedPipe
 	}
-	return b.reader.Read(p)
+	b.active++
+	b.mu.Unlock()
+	n, err := b.reader.Read(p)
+	b.mu.Lock()
+	b.active--
+	if b.closed && b.active == 0 {
+		close(b.done)
+	}
+	b.mu.Unlock()
+	return n, err
 }
-func (b *uploadBody) Close() error { b.mu.Lock(); defer b.mu.Unlock(); b.closed = true; return nil }
+
+func (b *uploadBody) Close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.closed {
+		b.closed = true
+		if b.active == 0 {
+			close(b.done)
+		}
+	}
+	return nil
+}

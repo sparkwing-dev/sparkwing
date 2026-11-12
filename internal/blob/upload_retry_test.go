@@ -96,7 +96,7 @@ func TestOutputUploadForbiddenIsNotRetried(t *testing.T) {
 	}
 	data.Bytes = NewSignedStore(SignedStoreOptions{Signer: signer, HTTPClient: TransferClient{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
 		puts++
-		return &http.Response{StatusCode: 403, Body: io.NopCloser(strings.NewReader("private body")), Header: make(http.Header)}, nil
+		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("private body")), Header: make(http.Header)}, nil
 	})}})
 	_, err := data.Put(t.Context(), []byte(`"linux/amd64"`))
 	if err == nil || puts != 1 || signer.commits != 0 || !strings.Contains(err.Error(), "403") {
@@ -151,7 +151,7 @@ func TestSignedUploadRenewsExpiredTicketBeforeCommit(t *testing.T) {
 			if puts == 1 {
 				return nil, io.EOF
 			}
-			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
 		})}})
 		if _, err := data.Put(t.Context(), []byte("hello")); err != nil {
 			t.Fatal(err)

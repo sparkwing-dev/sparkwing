@@ -35,6 +35,7 @@ func UploadSourceSnapshot(ctx context.Context, options EngineOptions, publicatio
 	digest := blob.Digest(hex.EncodeToString(hash.Sum(nil)))
 	var ticket controllerwire.DataUploadTicket
 	renew := func(ctx context.Context) (blob.SignedTransfer, error) {
+		ticket = controllerwire.DataUploadTicket{}
 		err := c.request(ctx, "POST", "/api/v1/data/source", "/api/v1/data/source", "", controllerwire.SourceUploadRequest{Git: publication.Git, Source: publication.Source, Digest: digest, Size: size}, &ticket)
 		if err != nil {
 			return blob.SignedTransfer{}, err
