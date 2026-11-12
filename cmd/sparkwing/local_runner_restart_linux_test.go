@@ -254,12 +254,20 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 			t.Fatalf("runner has no independent service cgroup: %s %v", runnerCgroup, err)
 		}
 	}
+	// bug: an outage beyond the former five-second budget must preserve this runner.
+	outage, endOutage := context.WithTimeout(ctx, 6*time.Second)
+	defer endOutage()
+	<-outage.Done()
+	if alive, err := wingd.LocalRunnerProcessAlive(first); err != nil || !alive {
+		t.Fatalf("controller outage stopped runner: alive=%t err=%v", alive, err)
+	}
 	reused := start(cli)
 	if reused != first {
 		t.Fatalf("same-build successor did not reuse identity: first=%+v successor=%+v", first, reused)
 	}
+	assertLocalRunnerResumesClaims(t, ctx, home, cli, first, systemd)
 	stopController()
-	if err := awaitLocalRunnerClaimDrain(ctx, home, first.ID); err != nil {
+	if err := awaitLocalRunnerClaimDrain(ctx, home, first); err != nil {
 		t.Fatal(err)
 	}
 	recovered := start(cli)
@@ -271,7 +279,7 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	instances = append(instances, recovered)
 	old, err := registry.Read(ctx, first.ID)
 	if err != nil || old.State != "draining" {
-		t.Fatalf("claim exit did not fence the held runner: %+v %v", old, err)
+		t.Fatalf("explicit stop did not fence the held runner: %+v %v", old, err)
 	}
 	next := filepath.Join(user, "sparkwing-next")
 	source, err := os.Open(cli)
@@ -416,7 +424,7 @@ func pollLocalRunner(ctx context.Context, condition func() bool) error {
 	return nil
 }
 
-func awaitLocalRunnerClaimDrain(ctx context.Context, home, id string) error {
+func awaitLocalRunnerClaimDrain(ctx context.Context, home string, instance localhostwire.LocalRunnerInstance) error {
 	socket, err := wingd.APISocketPath(home)
 	if err != nil {
 		return err
@@ -442,13 +450,12 @@ func awaitLocalRunnerClaimDrain(ctx context.Context, home, id string) error {
 			if err := http.NewResponseController(w).Flush(); err != nil {
 				return
 			}
-			if r.Method == http.MethodPost && r.URL.Path == "/api/v1/local/runners/"+id+"/drain" {
+			if r.Method == http.MethodPost && r.URL.Path == "/api/v1/local/runners/"+instance.ID+"/drain" {
 				once.Do(func() { close(drained) })
 			}
 			return
 		}
-		// safety: claim calls must fail as transport errors to exercise outage recovery;
-		// lifecycle calls keep retrying until the successor controller answers them.
+		// safety: an explicit stop drains claims while held work awaits the successor controller.
 		connection, _, err := w.(http.Hijacker).Hijack()
 		if err == nil {
 			_ = connection.Close()
@@ -458,6 +465,13 @@ func awaitLocalRunnerClaimDrain(ctx context.Context, home, id string) error {
 	var serveErr error
 	go func() { defer close(served); serveErr = server.Serve(listener) }()
 	defer func() { _ = server.Close(); <-served }()
+	process, err := os.FindProcess(instance.PID)
+	if err != nil {
+		return err
+	}
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		return err
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -465,6 +479,44 @@ func awaitLocalRunnerClaimDrain(ctx context.Context, home, id string) error {
 		return serveErr
 	case <-drained:
 		return server.Shutdown(ctx)
+	}
+}
+
+func assertLocalRunnerResumesClaims(t *testing.T, ctx context.Context, home, binary string, instance localhostwire.LocalRunnerInstance, systemd bool) {
+	t.Helper()
+	repo := initSnapshotRepo(t)
+	directory := filepath.Join(repo, ".sparkwing")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSDKFixture(t, directory, `package main
+import("context";"os";sw "github.com/sparkwing-dev/sparkwing/sparkwing")
+type pipeline struct{sw.Base}
+func(pipeline) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{
+ sw.Job(p,"resumed",func(context.Context)error{
+  data,err:=os.ReadFile("/proc/self/cgroup");if err!=nil{return err};return os.WriteFile(os.Getenv("RESUMED_MARKER"),data,0600)
+ }).Cores(0.25)
+ return nil
+}
+func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});sw.Main()}
+`)
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: ci\n    entrypoint: CI\n", 0o600)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-qm", "claim after controller restart")
+	marker := filepath.Join(home, "resumed-claim")
+	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "RESUMED_MARKER="+marker), binary, "run", "ci", "--sw-detached", "--sw-no-update", "-o", "json")
+	command.Dir = repo
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("submit recovery claim: %v: %s", err, output)
+	}
+	var cgroup []byte
+	awaitLocalRunnerCondition(t, ctx, func() bool {
+		var err error
+		cgroup, err = os.ReadFile(marker)
+		return err == nil
+	})
+	if systemd && !strings.Contains(string(cgroup), wingd.LocalRunnerServiceName(home, instance.ID)) {
+		t.Fatalf("recovery work did not use the original runner: %s", cgroup)
 	}
 }
 
