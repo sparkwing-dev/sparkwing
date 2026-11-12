@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -207,7 +209,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 			if err := context.Cause(ctx); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintln(os.Stderr, frame.Message)
+			_, err := fmt.Fprintln(os.Stderr, opsview.DisplayText(frame.Message))
 			return err
 		}},
 		input: nodehost.PlanningProcessInput{
@@ -451,16 +453,16 @@ func reaches(from, to string, adj map[string][]string) bool {
 
 func printPlanPreview(doc *planPreviewDoc) {
 	if doc.Pipeline != "" {
-		fmt.Printf("Plan: %s\n", doc.Pipeline)
+		fmt.Printf("Plan: %s\n", opsview.DisplayText(doc.Pipeline))
 	}
 	if doc.StartAt != "" || doc.StopAt != "" {
 		fmt.Printf("Range: --start-at=%s --stop-at=%s\n",
-			orDashStr(doc.StartAt), orDashStr(doc.StopAt))
+			opsview.DisplayText(orDashStr(doc.StartAt)), opsview.DisplayText(orDashStr(doc.StopAt)))
 	}
 	if len(doc.ResolvedArgs) > 0 {
 		fmt.Println("Args:")
 		for _, k := range slices.Sorted(maps.Keys(doc.ResolvedArgs)) {
-			fmt.Printf("  %s=%s\n", k, doc.ResolvedArgs[k])
+			fmt.Printf("  %s=%s\n", opsview.DisplayText(k), opsview.DisplayText(doc.ResolvedArgs[k]))
 		}
 	}
 	if len(doc.Jobs) == 0 {
@@ -487,7 +489,7 @@ func printPlanPreviewJob(n *planPreviewJobDoc, indent string) {
 	if n.OnFailureOf != "" {
 		decision += " [OnFailure: " + n.OnFailureOf + "]"
 	}
-	fmt.Printf("%s%s %q [%s]\n", indent, tag, n.ID, decision)
+	fmt.Printf("%s%s %q [%s]\n", indent, tag, n.ID, opsview.DisplayText(decision))
 	if n.Work != nil {
 		printPlanPreviewWork(n.Work, indent+"  ")
 	}
@@ -507,12 +509,12 @@ func printPlanPreviewItem(kind string, it *planPreviewItemDoc, indent string) {
 	if len(it.Risks) > 0 {
 		decision += " risks=" + strings.Join(it.Risks, ",")
 	}
-	fmt.Printf("%s%s %q [%s]\n", indent, kind, it.ID, decision)
+	fmt.Printf("%s%s %q [%s]\n", indent, kind, it.ID, opsview.DisplayText(decision))
 	if it.SkipDetail != "" {
-		fmt.Printf("%s  reason: %s\n", indent, it.SkipDetail)
+		fmt.Printf("%s  reason: %s\n", indent, opsview.DisplayText(it.SkipDetail))
 	}
 	if len(it.Needs) > 0 {
-		fmt.Printf("%s  needs: %s\n", indent, strings.Join(it.Needs, ", "))
+		fmt.Printf("%s  needs: %s\n", indent, opsview.DisplayText(strings.Join(it.Needs, ", ")))
 	}
 }
 

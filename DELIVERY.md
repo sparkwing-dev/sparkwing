@@ -159,6 +159,30 @@ Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.
 
+Queued Land stops admitting packages after its first observed test or build
+failure. Packages already admitted finish all their selected bodies, and the
+job reports every failure it observes before returning. Pending short and
+critical packages are listed by module and phase, with exact local commands
+to rerun all selected work. A successful run still executes every selected
+short and full critical test. The pre-push hook, explicit PrePush, Gate and
+ordinary Land keep their collect-all behavior.
+
+Queued package commands compile with `-p 1` and retain the runtime width of
+their assigned module or store lane. The coordinator shares the module and
+store allocation with collect-all execution and bounds admission within each
+lane. The three store shards form one admitted package costing three command
+slots: a failure in one shard lets all three finish, and a pending store
+package appears once in the skipped inventory. With store and other root
+packages selected alongside pipeline work at allowance seven, pipeline uses
+one slot, root's ordinary lane uses three and its store shards use one each.
+Critical modules retain the full allowance after all short work joins.
+
+The coordinator joins admitted commands and drains their output before
+cleaning the shared test home. Explicit run cancellation and deadlines still
+interrupt running work through the existing process-owner cleanup. Package
+admission can change command startup and cache costs; the correctness proof
+does not measure those costs.
+
 Affected tests for main use the remote OID Git advertises on hook stdin,
 independently of local `origin/main`. Main updates must fast-forward; a rewind
 or unverified remote base is refused with a fetch remedy. Creating
@@ -192,8 +216,9 @@ packages run alongside them with the remaining root-module command allowance. A 
 four for the other packages and one per store shard. Store-only selections need
 an allowance of at least three; selections with other root packages need at
 least four. Smaller allowances retain the unsplit short command. Each command
-keeps the existing `GOMAXPROCS`/`-p` pairing; summed command widths stay within
-the allowance, which is not an operating-system CPU cap.
+in collect-all execution keeps the existing `GOMAXPROCS`/`-p` pairing; queued
+execution uses the singleton compiler width described above. Summed command
+widths stay within the allowance, which is not an operating-system CPU cap.
 
 Selected modules run their short commands together when the job's allowance
 can give each active module one worker. Root receives the remainder. If root
@@ -205,8 +230,9 @@ module keeps the full allowance. When there are more active short modules than
 workers, the modules run sequentially, each with the full allowance.
 
 All short commands across all modules join before any full critical command
-starts. Critical modules run sequentially with the full job allowance. A short
-failure does not cancel siblings or skip critical coverage.
+starts. Critical modules run sequentially with the full job allowance.
+Collect-all callers continue critical coverage after a short failure; queued
+Land stops future admission while already admitted packages finish.
 
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at
@@ -1554,6 +1580,8 @@ file. Other syntax and workflow checks remain active.
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
 - **Reporting fixture setup, measured 2026-11-11:** typed `teststore.SeedRun`
   inserts its known routing identity and sealed provenance with the new row.
+  Provenance projections come from decoding that new row’s JSON once, so
+  JSON normalization stays consistent without changing the caller’s arguments.
   It does not rewrite earlier reporting rows. Generic fixture `Exec` retains
   its projection behavior for arbitrary SQL changes. A real SQLite update
   trigger guards the write boundary, and a separate test guards generic SQL
@@ -1595,6 +1623,24 @@ file. Other syntax and workflow checks remain active.
   not measure whole-Gate or Land latency, or a future flake rate. Raw profiles,
   scripts, six samples and complete source archives are retained with the
   `web-paging-test-cost-2026-11-11` measurement.
+
+  A later correctness follow-up (`6427439d9`) restored persisted-JSON
+  normalization and guarded caller argument ownership. Three separate,
+  unpaired confirmations of the same two instrumented bodies took 6.684,
+  5.754 and 5.666 s combined (median 5.754 s; range 5.666–6.684 s; linear IQR
+  0.509 s). They retain the same Go settings and full datasets. These are
+  confirmations on the corrected code, not replacements for the six paired
+  samples or a measurement of the follow-up’s incremental cost.
+- **Native recovery simulation:** `TestStartGateSeededRecovery` runs seed 1
+  with and without compute under `-short`; the full class runs all eight seeds
+  in both modes. Each case still covers lost plan capacity, an already released
+  job, fresh work, approval, expansion and cleanup. The fixture advances external
+  events from scheduling snapshots, forces admission retry completions to cancel
+  waits while the competitor holds capacity, and fails after 64 scheduling passes.
+  A wait callback cannot drive external events because retry completions may keep
+  the owner from entering it. The full 16-case family measured 10.0 seconds without
+  race on this loaded 16-core host (load 22); keep its permutation coverage in the
+  full class while retaining both compute paths in affected landing gates.
 - **What the fast hook phases cost:** measured on this 16-core Linux host. The fast
   phase of `pre-push` retains a ten-second target when the compiler cache is warm. Run records
   expose total and per-step durations, but they carry no compiler-cache

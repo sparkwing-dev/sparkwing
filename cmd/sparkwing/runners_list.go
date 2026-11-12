@@ -10,6 +10,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -57,7 +59,7 @@ func listRunners(ctx context.Context, inv clisurface.Invocation, reader controll
 				if err := json.NewEncoder(out).Encode(record); err != nil {
 					return err
 				}
-			} else if _, err := fmt.Fprintln(out, row.Name); err != nil {
+			} else if _, err := fmt.Fprintln(out, opsview.DisplayText(row.Name)); err != nil {
 				return err
 			}
 		}
@@ -82,7 +84,7 @@ func listRunners(ctx context.Context, inv clisurface.Invocation, reader controll
 			}
 			seen = observed.UTC().Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d/%d\t%s\t%s\t%s\t%s\t%t\n", row.Name, row.Class, row.Location, row.Status, len(row.ActiveJobs), row.MaxConcurrent, headroom, seen, joinOrDash(row.Labels), joinOrDash(row.ReservedPools), row.Metered)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d/%d\t%s\t%s\t%s\t%s\t%t\n", opsview.DisplayText(row.Name), opsview.DisplayText(row.Class), opsview.DisplayText(row.Location), opsview.DisplayText(row.Status), len(row.ActiveJobs), row.MaxConcurrent, headroom, seen, opsview.DisplayText(joinOrDash(row.Labels)), opsview.DisplayText(joinOrDash(row.ReservedPools)), row.Metered)
 	}
 	return tw.Flush()
 }

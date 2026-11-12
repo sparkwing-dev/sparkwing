@@ -72,6 +72,7 @@ var auditedReadPrefixes = []string{
 // holder and the line written after the handler returns can name the caller.
 type auditRecord struct {
 	id, route               string
+	reason                  string
 	path                    string
 	principalID, kind, team string
 	targets                 []any
@@ -179,6 +180,9 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 		attrs = append(attrs, "principal_kind", rec.kind, "principal_id", rec.principalID, "team", rec.team)
 	}
 	attrs = append(attrs, auditPathAttrs(rec.route, r.URL.EscapedPath())...)
+	if rec.reason != "" {
+		attrs = append(attrs, "reason", rec.reason)
+	}
 	attrs = append(attrs, rec.targets...)
 	attrs = append(attrs, pathAttrs...)
 	if len(rec.revokedSessions) == 0 {

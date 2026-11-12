@@ -50,7 +50,7 @@ func TestAffectedTestsPrepareTypeScriptDependencies(t *testing.T) {
 			}
 			ctx := newTestContext(t)
 			for range 2 {
-				if err := runAffectedTestFiles(ctx, files, "dependency fixture", currentHost()); err != nil {
+				if err := runAffectedTestFiles(ctx, files, "dependency fixture", currentHost(), false); err != nil {
 					t.Fatal(err)
 				}
 			}

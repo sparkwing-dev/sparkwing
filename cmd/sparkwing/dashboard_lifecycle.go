@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -106,18 +108,18 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 		return json.NewEncoder(out).Encode(result)
 	case "plain":
 		if result.Warning != "" {
-			fmt.Fprintln(os.Stderr, "warning: "+result.Warning)
+			fmt.Fprintln(os.Stderr, "warning: "+opsview.DisplayText(result.Warning))
 		}
 		_, err := fmt.Fprintln(out, result.State)
 		return err
 	default:
-		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\ninstalled: %t\n", result.State, result.PID, result.Version, result.Installed)
+		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\ninstalled: %t\n", result.State, result.PID, opsview.DisplayText(result.Version), result.Installed)
 		if err == nil {
 			switch {
 			case result.Dashboard == "serving":
-				_, err = fmt.Fprintf(out, "dashboard: serving at %s (sign in with sparkwing dashboard open)\n", result.URL)
+				_, err = fmt.Fprintf(out, "dashboard: serving at %s (sign in with sparkwing dashboard open)\n", opsview.DisplayText(result.URL))
 			case result.DashboardError != "":
-				_, err = fmt.Fprintf(out, "dashboard: not serving: %s\n", result.DashboardError)
+				_, err = fmt.Fprintf(out, "dashboard: not serving: %s\n", opsview.DisplayText(result.DashboardError))
 			default:
 				_, err = fmt.Fprintln(out, "dashboard: not serving (sparkwing dashboard open starts the controller and prints a sign-in link)")
 			}
@@ -126,7 +128,7 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 			_, err = fmt.Fprintf(out, "activity: %d runs, %d queued triggers, %d held leases, %d dashboard connections\n", result.Activity.Runs, result.Activity.QueuedTriggers, result.Activity.HeldLeases, result.Activity.DashboardConnections)
 		}
 		if err == nil && result.Warning != "" {
-			_, err = fmt.Fprintf(out, "warning: %s\n", result.Warning)
+			_, err = fmt.Fprintf(out, "warning: %s\n", opsview.DisplayText(result.Warning))
 		}
 		return err
 	}
@@ -166,10 +168,10 @@ func openDashboard(ctx context.Context, services dashboardServices, host string,
 	case "json":
 		return json.NewEncoder(out).Encode(dashboardLoginResult{Kind: "service", Tool: "sparkwing", Service: "dashboard", Action: "open", URL: login.URL, ExpiresAt: login.ExpiresAt})
 	case "plain":
-		_, err := fmt.Fprintln(out, login.URL)
+		_, err := fmt.Fprintln(out, opsview.DisplayText(login.URL))
 		return err
 	default:
-		_, err := fmt.Fprintf(out, "Open this link to sign in to the local dashboard. It works once and expires at %s.\n%s\n", login.ExpiresAt.Local().Format(time.TimeOnly), login.URL)
+		_, err := fmt.Fprintf(out, "Open this link to sign in to the local dashboard. It works once and expires at %s.\n%s\n", login.ExpiresAt.Local().Format(time.TimeOnly), opsview.DisplayText(login.URL))
 		return err
 	}
 }

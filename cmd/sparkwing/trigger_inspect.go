@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -61,7 +63,7 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintln(os.Stderr, frame.Message)
+			_, err := fmt.Fprintln(os.Stderr, opsview.DisplayText(frame.Message))
 			return err
 		},
 	}

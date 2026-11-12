@@ -48,7 +48,7 @@ func TestZCritical(t *testing.T) { if testing.Short() { t.Skip("full critical on
 `)
 	writeGoFile(t, filepath.Join(root, "other/other_test.go"), "package other\n"+imports+record+"func TestOtherPackage(t *testing.T) { record(t) }\n")
 	gitCommitAll(t, root, "store shard fixture")
-	err := runAffectedTestFiles(newTestContext(t), []string{"internal/store/store_test.go", "other/other_test.go"}, "store shard fixture", hostShape{cpus: 16})
+	err := runAffectedTestFiles(newTestContext(t), []string{"internal/store/store_test.go", "other/other_test.go"}, "store shard fixture", hostShape{cpus: 16}, false)
 	if err == nil || !strings.Contains(err.Error(), "store shard body failed") {
 		t.Fatalf("store failure was lost: %v", err)
 	}

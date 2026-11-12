@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"syscall"
-	"unicode"
+
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -221,14 +221,14 @@ func writeArtifact(out io.Writer, record artifactRecord, format string) error {
 		return json.NewEncoder(out).Encode(record)
 	}
 	if format == "plain" && record.SavedTo == "" {
-		_, err := fmt.Fprintln(out, artifactDisplayText(record.Path))
+		_, err := fmt.Fprintln(out, opsview.DisplayText(record.Path))
 		return err
 	}
 	if record.SavedTo != "" {
-		_, err := fmt.Fprintln(out, artifactDisplayText(record.SavedTo))
+		_, err := fmt.Fprintln(out, opsview.DisplayText(record.SavedTo))
 		return err
 	}
-	_, err := fmt.Fprintf(out, "%s\t%s\t%d\t%s\n", artifactDisplayText(record.JobID), artifactDisplayText(record.Path), record.Size, record.Digest)
+	_, err := fmt.Fprintf(out, "%s\t%s\t%d\t%s\n", opsview.DisplayText(record.JobID), opsview.DisplayText(record.Path), record.Size, record.Digest)
 	return err
 }
 
@@ -245,11 +245,4 @@ func artifactDestinationAvailable(dest string) error {
 		return nil
 	}
 	return err
-}
-
-func artifactDisplayText(value string) string {
-	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
-		return strconv.Quote(value)
-	}
-	return value
 }

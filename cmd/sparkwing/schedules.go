@@ -13,6 +13,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -296,7 +298,11 @@ func renderScheduleRecord(out io.Writer, value any, plain, format string) error 
 	case "json":
 		return json.NewEncoder(out).Encode(value)
 	case "plain":
-		_, err := fmt.Fprintln(out, plain)
+		if row, ok := value.(controllerwire.ScheduleUpcoming); ok {
+			_, err := fmt.Fprintf(out, "%s\t%s\n", opsview.DisplayText(row.Name), opsview.DisplayText(row.At))
+			return err
+		}
+		_, err := fmt.Fprintln(out, opsview.DisplayText(plain))
 		return err
 	}
 	switch row := value.(type) {
@@ -314,20 +320,20 @@ func renderScheduleRecord(out io.Writer, value any, plain, format string) error 
 		if row.OverrideStale {
 			override += " (declaration changed)"
 		}
-		_, err := fmt.Fprintf(out, "%s  %s  %s  %s  %s %s  %s  next %s%s  owner %s  armed by %s\n", row.ID, row.Name, row.Cron, row.TZ, row.LockState, row.LockRef, row.State, next, override, row.Owner, row.ArmedBy)
+		_, err := fmt.Fprintf(out, "%s  %s  %s  %s  %s %s  %s  next %s%s  owner %s  armed by %s\n", opsview.DisplayText(row.ID), opsview.DisplayText(row.Name), opsview.DisplayText(row.Cron), opsview.DisplayText(row.TZ), opsview.DisplayText(row.LockState), opsview.DisplayText(row.LockRef), opsview.DisplayText(row.State), opsview.DisplayText(next), override, opsview.DisplayText(row.Owner), opsview.DisplayText(row.ArmedBy))
 		return err
 	case controllerwire.ScheduleRun:
-		_, err := fmt.Fprintf(out, "run %s submitted (%s)\n  follow: sparkwing runs logs --run %s --follow\n", row.RunID, row.Schedule.Name, row.RunID)
+		_, err := fmt.Fprintf(out, "run %s submitted (%s)\n  follow: sparkwing runs logs --run %s --follow\n", opsview.DisplayText(row.RunID), opsview.DisplayText(row.Schedule.Name), opsview.DisplayText(row.RunID))
 		return err
 	case controllerwire.ScheduleDeletion:
 		state := "already absent"
 		if row.Deleted {
 			state = "disarmed"
 		}
-		_, err := fmt.Fprintf(out, "%s: %s\n", row.ScheduleID, state)
+		_, err := fmt.Fprintf(out, "%s: %s\n", opsview.DisplayText(row.ScheduleID), state)
 		return err
 	case controllerwire.ScheduleUpcoming:
-		_, err := fmt.Fprintf(out, "%s  %s\n", row.At, row.Name)
+		_, err := fmt.Fprintf(out, "%s  %s\n", opsview.DisplayText(row.At), opsview.DisplayText(row.Name))
 		return err
 	default:
 		return fmt.Errorf("unsupported schedule display")
@@ -346,27 +352,27 @@ func renderScheduleNext(out io.Writer, times []string, id, name, format string) 
 
 func renderScheduleHealth(out io.Writer, h controllerwire.HealthView) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "timer\t%s\nunit\t%s\nbinary\t%s\nlast tick\t%s\ntick error\t%s\nschedules\t%d armed, %d paused, %d undeclared\nlocks\t%d pinned, %d following, %d missing\n", h.Timer.Detail, h.Timer.Path, h.Timer.Binary, h.LastTick.At, h.LastTick.Error, h.Armed, h.Paused, h.Undeclared, h.Locked, h.Following, h.MissingBinary)
+	fmt.Fprintf(tw, "timer\t%s\nunit\t%s\nbinary\t%s\nlast tick\t%s\ntick error\t%s\nschedules\t%d armed, %d paused, %d undeclared\nlocks\t%d pinned, %d following, %d missing\n", opsview.DisplayText(h.Timer.Detail), opsview.DisplayText(h.Timer.Path), opsview.DisplayText(h.Timer.Binary), opsview.DisplayText(h.LastTick.At), opsview.DisplayText(h.LastTick.Error), h.Armed, h.Paused, h.Undeclared, h.Locked, h.Following, h.MissingBinary)
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(out, "%s\n%s\n", h.Detail, h.Remedy)
+	_, err := fmt.Fprintf(out, "%s\n%s\n", opsview.DisplayText(h.Detail), opsview.DisplayText(h.Remedy))
 	return err
 }
 
 func renderScheduleDetail(out io.Writer, detail controllerwire.DetailView) error {
 	row := detail.Schedule
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "schedule\t%s\nname\t%s\nrepo\t%s\npipeline\t%s\nwhere\t%s\nstate\t%s\nlock\t%s %s\nbinary\t%s\ndigest\t%s\nlast run\t%s\nlast outcome\t%s\n", row.ID, row.Name, row.RepoPath, row.Pipeline, row.Where, row.State, row.Lock.State, row.Lock.Ref, row.Lock.Binary, row.Lock.Digest, row.LastRunID, row.LastOutcome)
-	fmt.Fprintf(tw, "owner\t%s\narmed by\t%s\n", row.Owner, row.ArmedBy)
+	fmt.Fprintf(tw, "schedule\t%s\nname\t%s\nrepo\t%s\npipeline\t%s\nwhere\t%s\nstate\t%s\nlock\t%s %s\nbinary\t%s\ndigest\t%s\nlast run\t%s\nlast outcome\t%s\n", opsview.DisplayText(row.ID), opsview.DisplayText(row.Name), opsview.DisplayText(row.RepoPath), opsview.DisplayText(row.Pipeline), opsview.DisplayText(row.Where), opsview.DisplayText(row.State), opsview.DisplayText(row.Lock.State), opsview.DisplayText(row.Lock.Ref), opsview.DisplayText(row.Lock.Binary), opsview.DisplayText(row.Lock.Digest), opsview.DisplayText(row.LastRunID), opsview.DisplayText(row.LastOutcome))
+	fmt.Fprintf(tw, "owner\t%s\narmed by\t%s\n", opsview.DisplayText(row.Owner), opsview.DisplayText(row.ArmedBy))
 	fmt.Fprintln(tw, "FIELD\tDECLARED\tOVERRIDE\tEFFECTIVE")
-	fmt.Fprintf(tw, "cron\t%s\t%s\t%s\ntz\t%s\t%s\t%s\noverlap\t%s\t%s\t%s\ncatch up\t%s\t%s\t%s\nargs\t%s\t%s\t%s\n", row.Cron, row.Override.Cron, row.Effective.Cron, row.TZ, row.Override.TZ, row.Effective.TZ, row.Overlap, row.Override.Overlap, row.Effective.Overlap, time.Duration(row.CatchUpNS), time.Duration(row.Override.CatchUpNS), time.Duration(row.Effective.CatchUpNS), renderScheduleArgs(row.Args), renderScheduleArgs(row.Override.Args), renderScheduleArgs(row.Effective.Args))
+	fmt.Fprintf(tw, "cron\t%s\t%s\t%s\ntz\t%s\t%s\t%s\noverlap\t%s\t%s\t%s\ncatch up\t%s\t%s\t%s\nargs\t%s\t%s\t%s\n", opsview.DisplayText(row.Cron), opsview.DisplayText(row.Override.Cron), opsview.DisplayText(row.Effective.Cron), opsview.DisplayText(row.TZ), opsview.DisplayText(row.Override.TZ), opsview.DisplayText(row.Effective.TZ), opsview.DisplayText(row.Overlap), opsview.DisplayText(row.Override.Overlap), opsview.DisplayText(row.Effective.Overlap), time.Duration(row.CatchUpNS), time.Duration(row.Override.CatchUpNS), time.Duration(row.Effective.CatchUpNS), opsview.DisplayText(renderScheduleArgs(row.Args)), opsview.DisplayText(renderScheduleArgs(row.Override.Args)), opsview.DisplayText(renderScheduleArgs(row.Effective.Args)))
 	if row.Override.Stale {
 		fmt.Fprintln(tw, "override\tdeclaration changed; run sparkwing schedules install")
 	}
 	fmt.Fprintln(tw, "DUE\tDECIDED\tOUTCOME\tRUN\tSTATUS\tDETAIL")
 	for _, fire := range detail.Fires {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", fire.DueAt, fire.DecidedAt, fire.Outcome, fire.RunID, fire.RunStatus, fire.Detail)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", opsview.DisplayText(fire.DueAt), opsview.DisplayText(fire.DecidedAt), opsview.DisplayText(fire.Outcome), opsview.DisplayText(fire.RunID), opsview.DisplayText(fire.RunStatus), opsview.DisplayText(fire.Detail))
 	}
 	return tw.Flush()
 }

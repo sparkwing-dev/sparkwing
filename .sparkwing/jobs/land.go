@@ -89,7 +89,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 	if in.Queued {
 		policy := sparkwing.Job(plan, policyJobID, &policyJob{}).Inline().Timeout(policyJobTimeout).Needs(pre)
 		review := reviewJobNode(plan, in.ReviewArgs, branch, true).Needs(pre)
-		tests := affectedPushTestsJobNode(plan).Inline().Needs(policy, review)
+		tests := affectedPushTestsJobNode(plan, true).Inline().Needs(policy, review)
 		needs = []sparkwing.Dep{policy, review, tests}
 	} else {
 		gate := gateJobs(plan, &Gate{}, "gate", false)
@@ -566,7 +566,7 @@ func recheckMergeDelta(ctx context.Context, files []string) error {
 	if err := ensureFrontendDeps(ctx); err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef), currentHost())
+	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef), currentHost(), false)
 }
 
 // safety: no --force and an explicit commit, so the remote accepts the push

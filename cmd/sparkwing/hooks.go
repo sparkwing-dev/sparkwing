@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -91,7 +93,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string) (bool, error)
 			skipped++
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "installed %s -> %s\n", hookName, strings.Join(pipes, ", "))
+		fmt.Fprintf(os.Stderr, "installed %s -> %s\n", hookName, opsview.DisplayText(strings.Join(pipes, ", ")))
 		installed++
 	}
 	fmt.Fprintf(os.Stderr, "\n%d hook(s) installed, %d skipped\n", installed, skipped)
@@ -179,7 +181,7 @@ func uninstallHooks(git githooks.Git, repoRoot string) error {
 		if err := os.Remove(p); err != nil {
 			return fmt.Errorf("remove %s: %w", p, err)
 		}
-		fmt.Fprintf(os.Stderr, "removed %s\n", e.Name())
+		fmt.Fprintf(os.Stderr, "removed %s\n", opsview.DisplayText(e.Name()))
 		removed++
 	}
 	if removed == 0 {
@@ -218,7 +220,7 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 	var hooks []managedHookStatus
 	for _, h := range survey.Hooks {
 		if h.Error != "" {
-			fmt.Fprintln(os.Stderr, "warning: "+h.Error)
+			fmt.Fprintln(os.Stderr, "warning: "+opsview.DisplayText(h.Error))
 		}
 		if !h.Managed {
 			continue
@@ -247,7 +249,7 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 		}
 		switch {
 		case len(hook.Pipelines) > 0:
-			fmt.Fprintf(os.Stdout, "%s -> %s\n", hook.Name, strings.Join(hook.Pipelines, ", "))
+			fmt.Fprintf(os.Stdout, "%s -> %s\n", hook.Name, opsview.DisplayText(strings.Join(hook.Pipelines, ", ")))
 		default:
 			fmt.Fprintf(os.Stdout, "%s (managed)\n", hook.Name)
 		}
@@ -261,7 +263,7 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 	}
 	if mode == "plain" {
 		if survey.ConfigError != "" {
-			fmt.Fprintln(os.Stderr, "warning: "+survey.ConfigError)
+			fmt.Fprintln(os.Stderr, "warning: "+opsview.DisplayText(survey.ConfigError))
 		}
 		return nil
 	}
@@ -269,7 +271,7 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 		return json.NewEncoder(os.Stdout).Encode(hooksStatusSummary{Kind: "summary", Repo: repoRoot, Installed: len(hooks), Gates: survey})
 	}
 	if survey.ConfigError != "" || len(survey.NotFiring()) > 0 || len(survey.Borrowed) > 0 {
-		fmt.Fprintf(os.Stdout, "\nwarning: %s\n  %s\n", survey.Summary(), survey.Remedy())
+		fmt.Fprintf(os.Stdout, "\nwarning: %s\n  %s\n", opsview.DisplayText(survey.Summary()), opsview.DisplayText(survey.Remedy()))
 	}
 	return nil
 }

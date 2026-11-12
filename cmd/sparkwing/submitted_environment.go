@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -14,7 +16,7 @@ func captureSubmittedEnvironment(environment, allowed []string, masker *secrets.
 		return nil, err
 	}
 	for _, warning := range procenv.SubmitWarnings(allowed) {
-		if _, err := fmt.Fprintln(os.Stderr, "warning: "+warning); err != nil {
+		if _, err := fmt.Fprintln(os.Stderr, "warning: "+opsview.DisplayText(warning)); err != nil {
 			return nil, err
 		}
 	}
