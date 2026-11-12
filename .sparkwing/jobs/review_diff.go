@@ -59,16 +59,16 @@ func reviewDiff(ctx context.Context, d reviewDeps, base, head string, files []st
 			}
 			binary = binary || reviewBinaryBlob(body)
 			invalid = invalid || !utf8.ValidString(body)
-			metadata[side] = fmt.Sprintf("size=%d sha256=%x", len(body), sha256.Sum256([]byte(body)))
+			metadata[side] = fmt.Sprintf("blob=%s mode=%s size=%d sha256=%x\n    inspect: git cat-file blob %s | od -An -tx1 -v", fields[side+2], mode, len(body), sha256.Sum256([]byte(body)), fields[side+2])
 		}
 		if binary {
-			fmt.Fprintf(&summary, "Binary file %q\n  base: %s\n  head: %s\n", path, metadata[0], metadata[1])
+			fmt.Fprintf(&summary, "Binary file %q\n  UNREVIEWED CONTENT: bytes omitted; inspection required before approval.\n  base: %s\n  head: %s\n", path, metadata[0], metadata[1])
 		} else if invalid {
-			patch, err := d.git(ctx, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--text", base, head, "--", ":(top,literal)"+path)
+			patch, err := d.git(ctx, "diff", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv", "--text", base, head, "--", ":(top,literal)"+path)
 			if err != nil {
 				return "", err
 			}
-			fmt.Fprintf(&summary, "Text file %q contains invalid UTF-8; bytes escaped\n%s", path, reviewEscapeInvalidBytes(patch))
+			fmt.Fprintf(&summary, "Text file %q contains invalid UTF-8; bytes escaped\nPatch encoding: \\\\ decodes to one literal backslash; \\xNN decodes to one byte. Other UTF-8 is unchanged.\n%s", path, reviewEscapeInvalidBytes(patch))
 		}
 		if binary || invalid {
 			excluded = append(excluded, ":(top,exclude,literal)"+path)
@@ -80,7 +80,7 @@ func reviewDiff(ctx context.Context, d reviewDeps, base, head string, files []st
 		}
 		paths = append(paths, excluded...)
 	}
-	diff, err := d.git(ctx, append([]string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", base, head}, paths...)...)
+	diff, err := d.git(ctx, append([]string{"diff", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv", "--text", base, head}, paths...)...)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +107,9 @@ func reviewEscapeInvalidBytes(text string) string {
 	var escaped strings.Builder
 	for text != "" {
 		r, size := utf8.DecodeRuneInString(text)
-		if r == utf8.RuneError && size == 1 {
+		if r == '\\' {
+			escaped.WriteString(`\\`)
+		} else if r == utf8.RuneError && size == 1 {
 			fmt.Fprintf(&escaped, "\\x%02x", text[0])
 		} else {
 			escaped.WriteString(text[:size])

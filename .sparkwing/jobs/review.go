@@ -229,7 +229,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	if err != nil {
 		return fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
 	}
-	names, err := d.git(ctx, "diff", "--name-only", "-z", "--no-ext-diff", base, head)
+	names, err := d.git(ctx, "diff", "--name-only", "--no-renames", "-z", "--no-ext-diff", base, head)
 	if err != nil {
 		return fmt.Errorf("review: list changed files: %w", err)
 	}
@@ -660,7 +660,8 @@ func (r reviewPrompt) diffSection() string {
 		diff = diff[:end]
 		note = fmt.Sprintf("The diff was cut at %d bytes; read the rest with `git diff %s %s`.\n\n", maxPromptDiff, r.base, r.head)
 	}
-	return "## Diff\n\n" + note + "```diff\n" + diff + "\n```\n\n"
+	coverage := "Metadata-only binary summaries are UNREVIEWED CONTENT. You must inspect every present blob using its object id and safe inspection command before approving. If content remains unreviewed, return a blocking finding for the coverage gap.\n\n"
+	return "## Diff\n\n" + coverage + note + "```diff\n" + diff + "\n```\n\n"
 }
 
 func (r reviewPrompt) answerFormat() string {
