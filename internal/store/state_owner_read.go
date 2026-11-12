@@ -29,7 +29,8 @@ func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.Authori
 	return runstate.NodeRow{}, ErrNotFound
 }
 
-func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string, target *runspec.NodeRef) (RunSnapshot, error) {
+func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string, target *runspec.NodeRef) (snapshot RunSnapshot, err error) {
+	defer func() { err = snapshotReadError(ctx, err) }()
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return RunSnapshot{}, err
@@ -60,7 +61,6 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 	if c.Unit != capability.UnitEval && (state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(tx.now(ctx))) {
 		return RunSnapshot{}, bindingRefusal()
 	}
-	var snapshot RunSnapshot
 	if target == nil {
 		snapshot, err = readSnapshotTx(ctx, tx, t.team, runID)
 	} else {
