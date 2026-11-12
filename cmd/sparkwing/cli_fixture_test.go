@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -92,9 +94,21 @@ func seededBundleOverlay(dir string) (string, error) {
 	if err = os.WriteFile(index, []byte("<!doctype html><title>sparkwing test bundle</title>\n"), 0o600); err != nil {
 		return "", fmt.Errorf("write stub dashboard index: %w", err)
 	}
-	document, err := json.Marshal(map[string]map[string]string{
-		"Replace": {filepath.Join(root, "internal", "web", "next-out", "index.html"): index},
-	})
+	replacements := map[string]string{filepath.Join(root, "internal", "web", "next-out", "index.html"): index}
+	if !testmanager.Enabled() {
+		fixtureSource := filepath.Join(root, "cmd", "sparkwing", "fixture_user_manager_test.go")
+		source, err := os.ReadFile(fixtureSource)
+		if err != nil {
+			return "", err
+		}
+		overlaySource := filepath.Join(dir, "fixture_user_manager.go")
+		source = append(source, []byte("\nfunc init(){fixtureUseUnmanagedUserManager()}\n")...)
+		if err := os.WriteFile(overlaySource, source, 0o600); err != nil {
+			return "", err
+		}
+		replacements[filepath.Join(root, "cmd", "sparkwing", "fixture_user_manager.go")] = overlaySource
+	}
+	document, err := json.Marshal(map[string]map[string]string{"Replace": replacements})
 	if err != nil {
 		return "", fmt.Errorf("encode build overlay: %w", err)
 	}
@@ -245,7 +259,13 @@ func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
 	}
 }
 
-func TestMain(m *testing.M) {
+func TestMain(m *testing.M) { os.Exit(testmanager.Run(func() int { return runCLITestMain(m) })) }
+
+func runCLITestMain(m *testing.M) int {
+	sdkFixtureEnvironment = os.Environ()
+	if !testmanager.Enabled() {
+		fixtureUseUnmanagedUserManager()
+	}
 	if os.Getenv("SPARKWING_TEST_DAEMON_ENTRYPOINT") == "1" {
 		if err := flag.Set("test.run", "^$"); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -260,14 +280,14 @@ func TestMain(m *testing.M) {
 				os.Exit(1)
 			}
 			main()
-			return
+			return 0
 		case "wingd", "pipeline", "run", "runs", "runners", "overflow", "__tick", "__complete":
 			main()
-			return
+			return 0
 		case "__test-runner":
 			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 			cluster.MainWithVersion(installedVersion())
-			return
+			return 0
 		}
 	}
 	code := m.Run()
@@ -281,7 +301,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		code = 1
 	}
-	os.Exit(code)
+	return code
 }
 
 func TestDetachedHostEntrypointDoesNotRunPipelineFixtures(t *testing.T) {

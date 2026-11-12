@@ -889,8 +889,10 @@ func runTest(ctx context.Context) error {
 // perf: short mode defers expensive test bodies while retaining real-store
 // fixture setup, whose aggregate cost still takes minutes.
 func runShortTest(ctx context.Context) error {
+	width := goStepParallelism(currentHost())
+	command := strings.TrimSpace(shortTestCommand(width, width, nil, "")) + " ./..."
 	return withStableProductTestHome("short-test", func(home string) error {
-		return forEachGoModule(ctx, "go test", boundedGoCommand(currentHost(), "test", "-short ./..."), home)
+		return forEachGoModule(ctx, "go test", command, home)
 	})
 }
 

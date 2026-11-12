@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,7 +158,7 @@ func TestVerdictBlocksOnP0P1AndStrictP2(t *testing.T) {
 		{"skipped P2", reviewFinding{Severity: "P2", File: "a.go:1", Status: findingSkipped}, resultPass},
 	} {
 		rec := reviewRecord{Findings: []reviewFinding{c.f}}
-		rec.settle(p)
+		rec.settle(p, []string{"a.go", "internal/store/billing_policy.go"})
 		if rec.Result != c.want {
 			t.Errorf("%s: result %s, want %s", c.name, rec.Result, c.want)
 		}
@@ -177,7 +178,7 @@ func TestSkipRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	notes := applySkips(p, findings, skips)
+	notes := applySkips(p, findings, skips, []string{"a.go", "internal/store/billing_policy.go"})
 	want := map[string]string{"F1": findingOpen, "F2": findingSkipped, "F3": findingSkipped, "S1": findingOpen, "F4": findingOpen}
 	for _, f := range findings {
 		if f.Status != want[f.ID] {
@@ -265,13 +266,25 @@ func (g *fakeGit) run(_ context.Context, args ...string) (string, error) {
 	case "log --format=%s":
 		subject, _, _ := strings.Cut(g.messages, "\n")
 		return subject, nil
-	case "diff --name-only":
-		return strings.Join(g.files, "\n"), nil
-	case "diff --no-color":
-		if i := indexOf(args, "--"); i >= 0 {
-			return "diff of " + strings.Join(args[i+1:], ","), nil
+	case "diff --name-status":
+		if len(g.files) == 0 {
+			return "", nil
 		}
-		return "diff of everything at " + g.head, nil
+		return "M\x00" + strings.Join(g.files, "\x00M\x00") + "\x00", nil
+	case "diff --raw":
+		var records strings.Builder
+		for _, path := range g.files {
+			fmt.Fprintf(&records, ":100644 100644 before after M\x00%s\x00", path)
+		}
+		return records.String(), nil
+	case "cat-file blob":
+		return "fixture text\n", nil
+	case "diff --no-color":
+		var patch strings.Builder
+		for _, path := range g.files {
+			fmt.Fprintf(&patch, "diff --git %q %q\n@@ -0,0 +1,2 @@\n+diff of everything at %s\n+diff of %s\n", "a/"+path, "b/"+path, g.head, path)
+		}
+		return patch.String(), nil
 	}
 	return "", errors.New("unexpected git " + strings.Join(args, " "))
 }

@@ -221,6 +221,7 @@ func TestLocalRunEvaluatesTheSameGeneratorsAsARunnerHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := runAnywhereRepo(t)
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(os.Getenv("SPARKWING_HOME"), "secrets.key"))
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	offlineStopDaemon(t, os.Getenv("SPARKWING_HOME"))
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)

@@ -9,14 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func TestManagedUnitsPrivateConfigWithSystemd(t *testing.T) {
-	if os.Getenv("SPARKWING_TEST_SYSTEMD_UNITS") != "1" {
-		t.Skip("set SPARKWING_TEST_SYSTEMD_UNITS=1 for private real-manager units")
-	}
+	testmanager.Require(t)
 	root := t.TempDir()
 	execute := func(ctx context.Context, name string, args ...string) (string, error) {
 		out, err := procenv.ControlCommandContext(ctx, os.Environ(), "/usr/bin/"+name, args...).CombinedOutput()

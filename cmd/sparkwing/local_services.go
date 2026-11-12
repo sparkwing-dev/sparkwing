@@ -276,7 +276,7 @@ func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, 
 		// safety: the joined controller cannot launch another runner after this inventory.
 		wait, cancel := context.WithDeadline(ctx, deadline)
 		defer cancel()
-		return wingd.WaitLocalRunnerShutdown(wait, host)
+		return waitLocalRunnerShutdown(wait, host)
 	}
 	return result, nil
 }

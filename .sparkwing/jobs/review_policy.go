@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -191,19 +192,37 @@ func globSegments(pat, name []string) bool {
 	return len(name) == 0
 }
 
-func findingPath(file string) string {
-	if i := strings.Index(file, ":"); i >= 0 {
-		return file[:i]
+// safety: binding to the longest changed path preserves numeric colons that belong to filenames.
+func findingPath(location string, files []string) (string, bool) {
+	path := ""
+	for _, file := range files {
+		if len(file) > len(path) && (location == file || strings.HasPrefix(location, file+":")) {
+			path = file
+		}
 	}
-	return file
+	if path == "" {
+		return "", false
+	}
+	if location == path {
+		return path, true
+	}
+	positions := strings.Split(location[len(path)+1:], ":")
+	if len(positions) > 2 {
+		return "", false
+	}
+	for _, position := range positions {
+		if _, err := strconv.ParseUint(position, 10, 64); err != nil {
+			return "", false
+		}
+	}
+	return path, true
 }
 
 func (p reviewPolicy) strictFor(file string) []strictPaths {
 	var out []strictPaths
-	name := findingPath(file)
 	for _, s := range p.Strict {
 		for _, pat := range s.Paths {
-			if globMatch(pat, name) {
+			if globMatch(pat, file) {
 				out = append(out, s)
 				break
 			}
@@ -212,12 +231,16 @@ func (p reviewPolicy) strictFor(file string) []strictPaths {
 	return out
 }
 
-func (p reviewPolicy) blocks(f reviewFinding) bool {
+func (p reviewPolicy) blocks(f reviewFinding, files []string) bool {
 	rank := severityRank(f.Severity)
-	if rank <= 1 {
+	if rank <= 1 || f.Reviewer == binaryReviewOwner {
 		return true
 	}
-	for _, s := range p.strictFor(f.File) {
+	path, attributed := findingPath(f.File, files)
+	if !attributed {
+		return true
+	}
+	for _, s := range p.strictFor(path) {
 		if rank <= severityRank(s.BlockAt) {
 			return true
 		}
@@ -225,8 +248,8 @@ func (p reviewPolicy) blocks(f reviewFinding) bool {
 	return false
 }
 
-func (p reviewPolicy) skippable(f reviewFinding) bool {
-	return severityRank(f.Severity) >= severityRank(p.Rereview.SkipAllowedFrom) && !p.blocks(f)
+func (p reviewPolicy) skippable(f reviewFinding, files []string) bool {
+	return severityRank(f.Severity) >= severityRank(p.Rereview.SkipAllowedFrom) && !p.blocks(f, files)
 }
 
 func (p reviewPolicy) strictReviewers(files []string) map[string][]string {
