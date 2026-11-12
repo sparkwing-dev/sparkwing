@@ -1578,6 +1578,59 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
+- **Reporting fixture setup, measured 2026-11-11:** typed `teststore.SeedRun`
+  inserts its known routing identity and sealed provenance with the new row.
+  Provenance projections come from decoding that new row’s JSON once, so
+  JSON normalization stays consistent without changing the caller’s arguments.
+  It does not rewrite earlier reporting rows. Generic fixture `Exec` retains
+  its projection behavior for arbitrary SQL changes. A real SQLite update
+  trigger guards the write boundary, and a separate test guards generic SQL
+  projection.
+
+  The two web history regressions retain all 202 and 250 seeded runs, the
+  older-than-200 match, exclusion before the limit, 125 unique results over
+  four cursor pages, and every existing assertion. In a separate baseline
+  profile, seeding consumed 99.68–99.72% of their body wall time; the repeated
+  identity projector appeared on 93.01% of sampled CPU stacks. CPU share is
+  not wall-time share.
+
+  Three interleaved A/B pairs used the same clean `f23203f69` source on this
+  shared 16-logical-CPU host. A restored only the two original helper files
+  from `0c7738eda`; B used typed seeding. Both ran the same instrumented test
+  bodies with Go 1.26.11, `GOMAXPROCS=3`, `-p 1 -count=1 -short`, readonly
+  modules and `GOWORK=off` with the local SDK replacement. No CPU profiling,
+  noise exclusions, replacements or extra warmups entered these six samples.
+
+  | Pair | Combined body wall A / B, s | B minus A / A | Load1 median A / B | Load1 maximum A / B |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 369.970 / 4.222 | -98.859% | 16.99 / 14.43 | 24.57 / 14.91 |
+  | 2 | 417.706 / 3.952 | -99.054% | 16.23 / 13.21 | 31.47 / 13.40 |
+  | 3 | 407.950 / 4.687 | -98.851% | 13.35 / 16.82 | 15.85 / 16.82 |
+
+  | Body | A median, s (min–max) | B median, s (min–max) |
+  | --- | ---: | ---: |
+  | Older filtered match | 159.861 (154.094–170.716) | 1.878 (1.806–1.989) |
+  | Cursor pages | 246.989 (210.110–253.856) | 2.416 (2.075–2.698) |
+  | Combined | 407.950 (369.970–417.706) | 4.222 (3.952–4.687) |
+
+  The combined linear empirical IQR was 23.868 s for A and 0.367 s for B.
+  The ratio of combined medians fell 98.965%; median paired percentage change
+  was -98.859%. These are targeted passing-body measurements on one shared
+  host in one fixed A-before-B window. They exclude cleanup, compilation and
+  slot waiting; those intervals and the per-sample owner/iowait/steal traces
+  are retained separately. Prior validation warmed the two variants in
+  different contexts, so compile/link cache parity is unproven. This does
+  not measure whole-Gate or Land latency, or a future flake rate. Raw profiles,
+  scripts, six samples and complete source archives are retained with the
+  `web-paging-test-cost-2026-11-11` measurement.
+
+  A later correctness follow-up (`6427439d9`) restored persisted-JSON
+  normalization and guarded caller argument ownership. Three separate,
+  unpaired confirmations of the same two instrumented bodies took 6.684,
+  5.754 and 5.666 s combined (median 5.754 s; range 5.666–6.684 s; linear IQR
+  0.509 s). They retain the same Go settings and full datasets. These are
+  confirmations on the corrected code, not replacements for the six paired
+  samples or a measurement of the follow-up’s incremental cost.
 - **Native recovery simulation:** `TestStartGateSeededRecovery` runs seed 1
   with and without compute under `-short`; the full class runs all eight seeds
   in both modes. Each case still covers lost plan capacity, an already released
