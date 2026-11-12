@@ -41,16 +41,20 @@ leave gaps in those numbers. SDK protocol records using this reserved event kind
 are renamed `sdk_lease_keeper` and stay visible as application records.
 Diagnostic-only bytes do not start an upload timer. They ride the next real-output
 cut or the final seal; the existing segment-size and total-byte bounds still apply.
+Diagnostics only append to an already-bound stream. After attempt detachment,
+they count as loss and cannot create another writer.
 
 Each keeper instance records its OWNER or NODE role, unit generation, renewal
 sequence, selected expiry and watcher reset, renewal-in-flight state and inherited
 deadlines. A reset retains the originating renewal number even when a newer
-renewal is in flight. Clock samples pair process-relative monotonic durations with wall time;
+renewal is in flight. All recorders in one process share the same monotonic origin.
+Clock samples pair process-relative monotonic durations with wall time;
 process birth and boot identity indicate whether process identity is complete.
 The records contain no lease bearer or renewal payload.
 
-Delivery is best effort and cannot delay renewal, expiry or stop. Missing sequence
-numbers, a nonzero dropped count, incomplete identity, or a missing execution-end
+Delivery is best effort and cannot delay renewal, expiry or stop. Capture never
+waits for another capture: lock contention drops the record and increments loss.
+Missing sequence numbers, a nonzero dropped count, incomplete identity, or a missing execution-end
 record make a trace incomplete. A zero inherited deadline does not imply that a
 lease watcher has no expiry. Log closure or lost writer authority can discard a
 tail; diagnostics do not extend log authority or execution lifetime. These records

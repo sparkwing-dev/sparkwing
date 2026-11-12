@@ -182,7 +182,7 @@ func (l *localLogs) bind(p capability.Principal, attempt int64) {
 		l.nodes[node] = p
 		l.mu.Unlock()
 	}
-	if _, err := l.open(node); err != nil {
+	if _, err := l.open(node, true); err != nil {
 		l.alert(node, err)
 	}
 	if l.diagnosticReady != nil {
@@ -250,7 +250,7 @@ func (u *logUpload) PutManifest(ctx context.Context, manifest logseg.Manifest) e
 	return up.PutManifest(ctx, manifest)
 }
 
-func (l *localLogs) open(node string) (*localLogStream, error) {
+func (l *localLogs) open(node string, create bool) (*localLogStream, error) {
 	p, subject, err := l.subject(node)
 	if err != nil {
 		return nil, err
@@ -269,6 +269,9 @@ func (l *localLogs) open(node string) (*localLogStream, error) {
 	}
 	stream := l.streams[string(key)]
 	if stream == nil {
+		if !create {
+			return nil, logseg.ErrClosed
+		}
 		stream = &localLogStream{subject: subject, upload: &logUpload{open: func(ctx context.Context) (logseg.Uploader, error) { return l.upload(ctx, p, subject) }}}
 		l.streams[string(key)] = stream
 	}
@@ -282,7 +285,7 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	if run != l.run || l.masker == nil {
 		return errors.New("local logs require the awarded run and shared masker")
 	}
-	stream, err := l.open(node)
+	stream, err := l.open(node, frame.Event != "lease_keeper")
 	if errors.Is(err, logseg.ErrClosed) {
 		if frame.Event == "lease_keeper" {
 			return err

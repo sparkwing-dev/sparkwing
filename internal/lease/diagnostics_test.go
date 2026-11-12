@@ -24,17 +24,22 @@ func TestKeeperDiagnosticsReportActualShorterExpiryAndReset(t *testing.T) {
 		})
 		defer diagnostics.Close()
 		start := time.Now()
+		releaseRenewal := make(chan struct{})
 		calls := 0
 		keeper := Keeper{Lease: time.Minute, Interval: 10 * time.Second, Diagnostics: diagnostics, Identity: Identity{Role: "OWNER", Run: "r"}, Renew: func(ctx context.Context) (Beat, error) {
 			calls++
 			if calls == 1 {
+				synctest.Wait()
 				return Beat{ExpiresAt: start.Add(12 * time.Second)}, nil
 			}
 			<-ctx.Done()
+			<-releaseRenewal
 			return Beat{}, ctx.Err()
 		}}
 		ctx, stop := keeper.Run(t.Context())
 		<-ctx.Done()
+		synctest.Wait()
+		close(releaseRenewal)
 		stop()
 		synctest.Wait()
 		if time.Since(start) != 12*time.Second {
@@ -118,13 +123,15 @@ func TestKeeperDiagnosticsConcurrentRolesAndInheritedDeadline(t *testing.T) {
 		synctest.Wait()
 		roles := map[string]string{}
 		seq := map[string]uint64{}
+		lost := map[string]uint64{}
 		deadline, _ := parent.Deadline()
 		for _, e := range events {
 			roles[e.Identity.Role] = e.Instance
-			if e.Sequence != seq[e.Instance]+1 || e.Dropped != 0 || !e.Deadline.Equal(deadline) || e.MonoAfter < e.MonoBefore {
+			if e.Sequence != seq[e.Instance]+1 || e.Dropped < lost[e.Instance] || !e.Deadline.Equal(deadline) || e.MonoAfter < e.MonoBefore {
 				t.Fatalf("invalid ordered evidence: %+v", e)
 			}
 			seq[e.Instance] = e.Sequence
+			lost[e.Instance] = e.Dropped
 		}
 		if len(roles) != 2 || roles["OWNER"] == roles["NODE"] {
 			t.Fatalf("keepers conflated: %v", roles)
@@ -206,6 +213,7 @@ func TestKeeperDiagnosticsNominalHourVolume(t *testing.T) {
 		stop()
 		synctest.Wait()
 		size := 0
+		var dropped uint64
 		var framed bytes.Buffer
 		for _, e := range events {
 			raw, err := json.Marshal(e)
@@ -221,12 +229,10 @@ func TestKeeperDiagnosticsNominalHourVolume(t *testing.T) {
 			}{e.Wall.Format(time.RFC3339Nano), "debug", "lease_keeper", raw}); err != nil {
 				t.Fatal(err)
 			}
-			if e.Dropped != 0 {
-				t.Fatal("volume sample dropped events")
-			}
+			dropped = max(dropped, e.Dropped)
 		}
-		if len(events) != 242 {
-			t.Fatalf("one-hour events=%d, want 242", len(events))
+		if uint64(len(events))+dropped != 242 {
+			t.Fatalf("one-hour captured=%d dropped=%d, want 242 total", len(events), dropped)
 		}
 		var compressed bytes.Buffer
 		z := gzip.NewWriter(&compressed)
@@ -236,7 +242,7 @@ func TestKeeperDiagnosticsNominalHourVolume(t *testing.T) {
 		if err := z.Close(); err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("60 renewals, %d events, %d event JSONL bytes, %d framed JSONL bytes, %d gzip bytes per keeper-hour", len(events), size, framed.Len(), compressed.Len())
+		t.Logf("60 renewals, %d captured events, %d dropped, %d event JSONL bytes, %d framed JSONL bytes, %d gzip bytes per keeper-hour", len(events), dropped, size, framed.Len(), compressed.Len())
 	})
 }
 

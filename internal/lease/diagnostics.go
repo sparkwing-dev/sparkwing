@@ -50,6 +50,11 @@ type Event struct {
 	Outcome  string `json:"outcome,omitempty"`
 }
 
+var (
+	processDiagnosticOrigin    = time.Now()
+	processDiagnosticInstances atomic.Uint64
+)
+
 type diagnosticRecord struct {
 	event Event
 	trace *keeperTrace
@@ -58,19 +63,18 @@ type diagnosticRecord struct {
 // Diagnostics isolates best-effort delivery from renewal and expiry. Close cancels delivery;
 // a sink must honor its context. A blocked or failing sink cannot block a keeper.
 type Diagnostics struct {
-	queue     chan diagnosticRecord
-	ctx       context.Context
-	cancel    context.CancelFunc
-	origin    time.Time
-	instances atomic.Uint64
-	birth     string
-	boot      string
+	queue  chan diagnosticRecord
+	ctx    context.Context
+	cancel context.CancelFunc
+	origin time.Time
+	birth  string
+	boot   string
 }
 
 // NewDiagnostics starts one bounded delivery worker. The sink receives no execution authority.
 func NewDiagnostics(parent context.Context, sink func(context.Context, Event) error) *Diagnostics {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
-	d := &Diagnostics{queue: make(chan diagnosticRecord, 256), ctx: ctx, cancel: cancel, origin: time.Now()}
+	d := &Diagnostics{queue: make(chan diagnosticRecord, 256), ctx: ctx, cancel: cancel, origin: processDiagnosticOrigin}
 	birth, birthErr := procgroup.ProcessBirth(os.Getpid())
 	if birthErr == nil {
 		d.birth = birth
@@ -130,14 +134,17 @@ func (d *Diagnostics) start(ctx context.Context, identity Identity) *keeperTrace
 	}
 	deadline, _ := ctx.Deadline()
 	executionDeadline, _ := ExecutionContext(ctx).Deadline()
-	return &keeperTrace{diagnostics: d, identity: identity, instance: fmt.Sprintf("%d-%d-%d", os.Getpid(), d.origin.UnixNano(), d.instances.Add(1)), deadline: deadline, executionDeadline: executionDeadline}
+	return &keeperTrace{diagnostics: d, identity: identity, instance: fmt.Sprintf("%d-%d-%d", os.Getpid(), d.origin.UnixNano(), processDiagnosticInstances.Add(1)), deadline: deadline, executionDeadline: executionDeadline}
 }
 
 func (t *keeperTrace) emit(kind string, sent, expires time.Time, outcome string, watchRenewal uint64) uint64 {
 	if t == nil {
 		return 0
 	}
-	t.mu.Lock()
+	if !t.mu.TryLock() {
+		t.lost.Add(1)
+		return 0
+	}
 	defer t.mu.Unlock()
 	if kind == "renewal_start" {
 		t.renewal++

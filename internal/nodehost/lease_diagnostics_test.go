@@ -196,6 +196,7 @@ func TestKeeperDiagnosticStampSurvivesMasking(t *testing.T) {
 		records.view.Subject = subject
 		return records, nil
 	}}
+	logs.bind(logs.principal, 0)
 	if err := logs.write(t.Context(), "run", "", nodewire.FrameLog{Level: "debug", Event: "lease_keeper", Attrs: json.RawMessage(`{"sequence":1}`)}); err != nil {
 		t.Fatal(err)
 	}
