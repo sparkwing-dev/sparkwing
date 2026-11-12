@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,18 +66,7 @@ func TestJobIDVectorsGo(t *testing.T) {
 }
 
 func TestJobIDVectorsTypeScript(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	build := exec.CommandContext(t.Context(), node, filepath.Join(root, "node_modules/typescript/bin/tsc"), "-p", filepath.Join(root, "tsconfig.build.json"))
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build SDK: %v\n%s", err, output)
-	}
+	node, root := nativeSDKFixture(t)
 	checkJobIDVectors(t, func(t *testing.T, id string) json.RawMessage {
 		h := startSDKAt(t, node, root, "job-ids.mjs")
 		var hello json.RawMessage
