@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/sparkwing-dev/sparkwing/internal/processtest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -155,16 +155,8 @@ func (c *acquireExternalKillContext) Done() <-chan struct{} {
 		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 			panic(err)
 		}
-		for {
-			var info unix.Siginfo
-			err := unix.Waitid(unix.P_PID, pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
-			if errors.Is(err, syscall.EINTR) {
-				continue
-			}
-			if err != nil {
-				panic(err)
-			}
-			break
+		if err := processtest.WaitExited(pid); err != nil {
+			panic(err)
 		}
 		fmt.Fprintln(os.Stderr, "source Git external SIGKILL confirmed before SIGTERM")
 		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {

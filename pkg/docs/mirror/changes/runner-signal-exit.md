@@ -5,5 +5,7 @@
   errors remain, including during DNS, credentials, bundle transfers and SDK
   setup. Cancellation without a shutdown signal, and genuine runtime or cleanup
   failures, including a child killed externally before cancellation, still exit 1.
-  Failures from every hosted unit and source acquisition remain visible during
-  shutdown. Service drain deadlines are unchanged.
+  Hosted failures are reported as they occur; shutdown keeps a bounded summary
+  with the first genuine failure and its count. Pending claim and acquisition
+  failures remain visible. Windows SDK and Git owners distinguish their own
+  termination from a prior external death. Service drain deadlines are unchanged.
