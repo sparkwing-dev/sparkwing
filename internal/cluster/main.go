@@ -63,6 +63,10 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		os.Exit(2)
 	}
 	if err != nil {
+		// safety: only the signal-owned context can attribute downstream cancellation to shutdown.
+		if (os.Args[1] == "start" || os.Args[1] == "warm") && ctx.Err() != nil && onlyRunnerCancellation(err, context.Cause(ctx)) {
+			return
+		}
 		writeRunnerError(os.Stderr, os.Args[1], err)
 		var usage *usageError
 		if errors.As(err, &usage) {
@@ -70,6 +74,28 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		}
 		os.Exit(1)
 	}
+}
+
+func onlyRunnerCancellation(err, cause error) bool {
+	if err == nil || cause == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyRunnerCancellation(child, cause) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		return onlyRunnerCancellation(wrapped, cause)
+	}
+	return errors.Is(err, cause) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func writeRunnerError(writer io.Writer, command string, err error) {

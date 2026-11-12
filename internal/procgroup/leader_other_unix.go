@@ -23,3 +23,16 @@ func waitLeaderExit(pid int) error {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func leaderExitedNow(pid int) (bool, error) {
+	processes, err := processTable(false)
+	if err != nil {
+		return false, err
+	}
+	for _, process := range processes {
+		if process.PID == pid {
+			return len(process.State) > 0 && process.State[0] == 'Z', nil
+		}
+	}
+	return true, nil
+}

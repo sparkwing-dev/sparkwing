@@ -164,7 +164,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	transportAttempt := 0
 	claimed := 0
 	var failed failedWork
-	var hostErr error
+	var hostErrors []error
 	finish := func(result unitResult) {
 		pollAt = time.Time{}
 		delete(active, result.key)
@@ -175,9 +175,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			if l.OnError != nil {
 				l.OnError(result.err)
 			}
-			if hostErr == nil {
-				hostErr = result.err
-			}
+			hostErrors = append(hostErrors, result.err)
 		}
 	}
 	drainResults := func() {
@@ -311,7 +309,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 			slog.Info("runner update drain exited", "reason", reason, "current_version", l.Config.Version, "target_version", updateTarget, "held_units", len(active), "elapsed", time.Since(updateStarted))
 		}
-		runErr = errors.Join(runErr, hostErr, context.Cause(ctx))
+		runErr = errors.Join(runErr, errors.Join(hostErrors...), context.Cause(ctx))
 		if l.Config.FailOnFailedWork {
 			runErr = errors.Join(runErr, failed.err())
 		}
