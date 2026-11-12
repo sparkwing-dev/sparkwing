@@ -267,6 +267,8 @@ func (g *fakeGit) run(_ context.Context, args ...string) (string, error) {
 		return subject, nil
 	case "diff --name-only":
 		return strings.Join(g.files, "\n"), nil
+	case "diff --raw":
+		return "", nil
 	case "diff --no-color":
 		if i := indexOf(args, "--"); i >= 0 {
 			return "diff of " + strings.Join(args[i+1:], ","), nil

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -108,8 +109,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 		return reviewRecord{}, err
 	}
 	git := func(ctx context.Context, args ...string) (string, error) {
-		out, err := sparkwing.Exec(ctx, "git", args...).Dir(root).String()
-		return strings.TrimSpace(out), err
+		return reviewGit(ctx, root, args...)
 	}
 	common, err := git(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -118,7 +118,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 	branch := j.branch
 	if branch == "" {
 		if b, err := git(ctx, "symbolic-ref", "--short", "-q", "HEAD"); err == nil {
-			branch = b
+			branch = strings.TrimSpace(b)
 		}
 	}
 	deps := reviewDeps{
@@ -127,7 +127,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 		showTicket: showTicket,
 		standards:  func(ctx context.Context, diff string) (string, error) { return overwingStandards(ctx, root, diff) },
 		reviewer:   newReviewer,
-		recordDir:  filepath.Join(common, "sparkwing-review"),
+		recordDir:  filepath.Join(strings.TrimSpace(common), "sparkwing-review"),
 		now:        time.Now,
 		logf:       func(format string, args ...any) { sparkwing.Info(ctx, format, args...) },
 	}
@@ -185,6 +185,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	if err != nil {
 		return reviewRecord{}, "", fmt.Errorf("review: no merge base with %s; fetch it first: %w", reviewBaseRef, err)
 	}
+	head, tree, base = strings.TrimSpace(head), strings.TrimSpace(tree), strings.TrimSpace(base)
 	branch := in.branch
 	if branch == "" {
 		branch = "detached-" + short(head)
@@ -224,7 +225,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 
 func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string) error {
 	started := d.now()
-	diff, err := d.git(ctx, "diff", "--no-color", "--no-ext-diff", base, head)
+	diff, err := reviewDiff(ctx, d, base, head, nil)
 	if err != nil {
 		return fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
 	}
@@ -341,8 +342,7 @@ func scopedDiff(ctx context.Context, d reviewDeps, base, head string, files []st
 	if len(files) == 0 {
 		return "", nil
 	}
-	args := append([]string{"diff", "--no-color", "--no-ext-diff", base, head, "--"}, files...)
-	out, err := d.git(ctx, args...)
+	out, err := reviewDiff(ctx, d, base, head, files)
 	if err != nil {
 		return "", fmt.Errorf("review: diff the strict paths: %w", err)
 	}
@@ -627,7 +627,7 @@ func (r reviewPrompt) fresh() string {
 	}
 	b.WriteString(r.diffSection())
 	b.WriteString(r.answerFormat())
-	return b.String()
+	return strings.ToValidUTF8(b.String(), "\ufffd")
 }
 
 func (r reviewPrompt) rereview() string {
@@ -643,14 +643,18 @@ func (r reviewPrompt) rereview() string {
 	b.WriteString("## Your findings\n\n" + findingsJSON(r.prior) + "\n\n")
 	b.WriteString(r.diffSection())
 	b.WriteString(r.answerFormat())
-	return b.String()
+	return strings.ToValidUTF8(b.String(), "\ufffd")
 }
 
 func (r reviewPrompt) diffSection() string {
 	diff := r.diff
 	note := ""
 	if len(diff) > maxPromptDiff {
-		diff = diff[:maxPromptDiff]
+		end := maxPromptDiff
+		for end > 0 && !utf8.RuneStart(diff[end]) {
+			end--
+		}
+		diff = diff[:end]
 		note = fmt.Sprintf("The diff was cut at %d bytes; read the rest with `git diff %s %s`.\n\n", maxPromptDiff, r.base, r.head)
 	}
 	return "## Diff\n\n" + note + "```diff\n" + diff + "\n```\n\n"
