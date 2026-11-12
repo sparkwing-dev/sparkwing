@@ -26,6 +26,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
+	"github.com/sparkwing-dev/sparkwing/internal/rsatest"
 )
 
 // AppID is the App the fake serves.
@@ -136,10 +137,7 @@ type GitHub struct {
 // New starts the fake and stops it when t ends.
 func New(t testing.TB) *GitHub {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("githubapptest: generate key: %v", err)
-	}
+	key := rsatest.New(t)
 	g := &GitHub{
 		Key: key, t: t,
 		insts:           map[int64]*Installation{},

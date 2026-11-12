@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func newPipelineDir(t *testing.T) string {
 	t.Helper()
+	testshell.UsePath(t, "go", "git")
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.22\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
@@ -23,6 +26,7 @@ func newPipelineDir(t *testing.T) string {
 
 func mustKey(t *testing.T, dir string) string {
 	t.Helper()
+	testshell.UsePath(t, "go", "git")
 	k, err := PipelineCacheKey(dir)
 	if err != nil {
 		t.Fatalf("PipelineCacheKey: %v", err)

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
+
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 )
 
@@ -73,6 +75,16 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 						t.Fatalf("controller is not a foreground service:\n%s", body)
 					}
 				}
+				if unit.Kind == ManagedController {
+					if goos == "linux" {
+						body = []byte(strings.Replace(string(body), "WorkingDirectory="+unitfile.SystemdWord(host.SparkwingHome)+"\n", "", 1))
+					} else {
+						body = []byte(strings.Replace(string(body), "<key>WorkingDirectory</key><string>"+unitfile.XMLText(host.SparkwingHome)+"</string>\n", "", 1))
+					}
+					if err := os.WriteFile(unit.Name, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
 				if goos == "linux" {
 					body = []byte(strings.Replace(string(body), "ExecStart=", "ExecStart=\nExecStart= \t\nExecStart=", 1))
 					if err := os.WriteFile(unit.Name, body, 0o600); err != nil {
@@ -93,6 +105,17 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 				if unit.Executable != next || unit.Version != "v1.2.4" || unit.Home != host.SparkwingHome {
 					t.Fatalf("refresh lost the unit: %+v", unit)
 				}
+			}
+			body, err := os.ReadFile(manager.(*nativeUnits).path())
+			if err != nil {
+				t.Fatal(err)
+			}
+			directory := "WorkingDirectory=" + unitfile.SystemdWord(host.SparkwingHome) + "\n"
+			if goos == "darwin" {
+				directory = "<key>WorkingDirectory</key><string>" + unitfile.XMLText(host.SparkwingHome) + "</string>"
+			}
+			if !strings.Contains(string(body), directory) {
+				t.Fatalf("refresh did not upgrade existing controller directory: %s", body)
 			}
 			want := "systemctl --user restart sparkwing-controller.service"
 			if goos == "darwin" {
@@ -207,5 +230,32 @@ func TestManagedControllerInstallRefusesAnotherLoadedFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(host.ConfigHome, "systemd", "user", "sparkwing-controller.service")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("refused install wrote its unit: %v", err)
+	}
+}
+
+func TestManagedControllerWorkingDirectoryUsesStateHome(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			h := runnerSupervisorHost(t)
+			h.GOOS = goos
+			h.ConfigHome = filepath.Join(h.Home, "config")
+			h.Exec = func(context.Context, string, ...string) (string, error) {
+				t.Fatal("render contacted service manager")
+				return "", nil
+			}
+			manager, err := NewManagedUnitManager(h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := manager.(*nativeUnits).render(h.Binary, "v1.2.3")
+			want := "WorkingDirectory=" + unitfile.SystemdWord(h.SparkwingHome) + "\n"
+			if goos == "darwin" {
+				want = "<key>WorkingDirectory</key><string>" + unitfile.XMLText(h.SparkwingHome) + "</string>"
+			}
+			t.Logf("rendered %s unit:\n%s", goos, body)
+			if !strings.Contains(body, want) {
+				t.Fatalf("missing state working directory %q:\n%s", want, body)
+			}
+		})
 	}
 }

@@ -17,7 +17,17 @@ import (
 // transport is injectable for filesystem signing and S3 conformance tests.
 type TransferClient struct{ Transport http.RoundTripper }
 
-func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, body io.Reader) (io.ReadCloser, error) {
+func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, body io.Reader) (_ io.ReadCloser, resultErr error) {
+	status := 0
+	defer func() {
+		if body != nil && resultErr != nil && status != 0 {
+			failure := newTransferFailure(http.MethodPut, transfer.URL, resultErr)
+			failure.class = fmt.Sprintf("HTTP %d", status)
+			failure.retry = status == 502 || status == 503 || status == 504
+			failure.cause = resultErr
+			resultErr = failure
+		}
+	}()
 	if err := transfer.Validate(); err != nil {
 		return nil, err
 	}
@@ -41,9 +51,13 @@ func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, b
 	client := &http.Client{Transport: c.Transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(req)
 	if err != nil {
+		if method == http.MethodPut {
+			return nil, newTransferFailure(method, transfer.URL, err)
+		}
 		return nil, safeTransferError(err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		status = response.StatusCode
 		body := privateTransferBody{response.Body}
 		payload, readErr := io.ReadAll(io.LimitReader(body, 4096))
 		_, drainErr := io.Copy(io.Discard, body)

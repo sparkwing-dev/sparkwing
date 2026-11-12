@@ -224,10 +224,16 @@ func (m *nativeUnits) Refresh(ctx context.Context, executable, version string) e
 		return nil
 	}
 	body, err = unitfile.RewriteCommand(m.host.GOOS, body, append([]string{executable}, unit.Arguments...), version)
+	if err == nil {
+		body, err = unitfile.RewriteWorkingDirectory(m.host.GOOS, body, m.host.SparkwingHome)
+	}
 	if err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := unitfile.PrepareWorkingDirectory(m.host.SparkwingHome); err != nil {
 		return err
 	}
 	if err := unitfile.Write(m.path(), body); err != nil {
@@ -331,6 +337,7 @@ func (m *nativeUnits) render(executable, version string) string {
 	if m.host.GOOS == "linux" {
 		var body strings.Builder
 		fmt.Fprintf(&body, "# %s\n%s\n[Unit]\nDescription=Sparkwing local controller\n[Service]\nType=simple\nExecStart=%s\n", crontimer.Marker, unitfile.VersionRecord("linux", version), unitfile.Command(args))
+		fmt.Fprintf(&body, "WorkingDirectory=%s\n", unitfile.SystemdWord(m.host.SparkwingHome))
 		for _, key := range keys {
 			fmt.Fprintf(&body, "Environment=%s\n", unitfile.Assignment(key, environment[key]))
 		}
@@ -347,6 +354,7 @@ func (m *nativeUnits) render(executable, version string) string {
 		fmt.Fprintf(&body, "<key>%s</key><string>%s</string>\n", unitfile.XMLText(key), unitfile.XMLText(environment[key]))
 	}
 	body.WriteString("</dict>\n")
+	fmt.Fprintf(&body, "<key>WorkingDirectory</key><string>%s</string>\n", unitfile.XMLText(m.host.SparkwingHome))
 	fmt.Fprintf(&body, "<key>StandardOutPath</key><string>%s</string>\n<key>StandardErrorPath</key><string>%s</string>\n", unitfile.XMLText(m.logPath), unitfile.XMLText(m.logPath))
 	body.WriteString("<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n</dict></plist>\n")
 	return body.String()

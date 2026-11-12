@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
@@ -120,6 +121,7 @@ func main() {
 }
 
 func TestPipelineAliasDiscoveryUsesConfiguredEntrypoint(t *testing.T) {
+	testshell.UsePath(t, "go", "git", "sh", "sed")
 	if testing.Short() {
 		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
 	}

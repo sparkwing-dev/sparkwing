@@ -48,6 +48,7 @@ func linuxHost(t *testing.T, exec *fakeExec) Host {
 	return Host{
 		GOOS:       "linux",
 		Home:       root,
+		StateHome:  root,
 		ConfigHome: filepath.Join(root, ".config"),
 		Binary:     fixtureServiceBinary(root),
 		ConfigPath: filepath.Join(root, ".config", "sparkwing", "config.yaml"),
@@ -62,6 +63,7 @@ func darwinHost(t *testing.T, exec *fakeExec) Host {
 	return Host{
 		GOOS:       "darwin",
 		Home:       root,
+		StateHome:  root,
 		ConfigHome: filepath.Join(root, ".config"),
 		Binary:     fixtureServiceBinary(root),
 		ConfigPath: filepath.Join(root, ".config", "sparkwing", "config.yaml"),
@@ -333,11 +335,11 @@ func TestUninstallLeavesAServiceRunningAnotherConfig(t *testing.T) {
 }
 
 func TestUnitConfigPathReadsQuotedAndEscapedArguments(t *testing.T) {
-	h := Host{Binary: "/opt/my runner/sparkwing-runner", ConfigPath: "/home/a b/.config/sparkwing/config.yaml"}
+	h := Host{StateHome: "/home/a b/state", Binary: "/opt/my runner/sparkwing-runner", ConfigPath: "/home/a b/.config/sparkwing/config.yaml"}
 	if got := configArgument(unitfile.Arguments("linux", serviceUnit(h))); got != h.ConfigPath {
 		t.Errorf("unitConfigPath = %q, want %q", got, h.ConfigPath)
 	}
-	h = Host{Binary: "/opt/100%/sparkwing-runner", ConfigPath: "/home/a/100%/config.yaml"}
+	h = Host{StateHome: "/home/a/100%/state", Binary: "/opt/100%/sparkwing-runner", ConfigPath: "/home/a/100%/config.yaml"}
 	if got := configArgument(unitfile.Arguments("linux", serviceUnit(h))); got != h.ConfigPath {
 		t.Errorf("unitConfigPath with a specifier = %q, want %q", got, h.ConfigPath)
 	}
@@ -347,7 +349,7 @@ func TestUnitConfigPathReadsQuotedAndEscapedArguments(t *testing.T) {
 }
 
 func TestPlistConfigPathReadsProgramArguments(t *testing.T) {
-	h := Host{Binary: "/usr/local/bin/sparkwing-runner", ConfigPath: "/Users/a b/.config/sparkwing/config.yaml", Home: "/Users/a b"}
+	h := Host{Binary: "/usr/local/bin/sparkwing-runner", ConfigPath: "/Users/a b/.config/sparkwing/config.yaml", Home: "/Users/a b", StateHome: "/Users/a b/state"}
 	if got := configArgument(unitfile.PlistArguments([]byte(agentPlist(h)))); got != h.ConfigPath {
 		t.Errorf("plistConfigPath = %q, want %q", got, h.ConfigPath)
 	}
@@ -401,7 +403,7 @@ func TestXMLTextEscapesMarkupAndKeepsSpaces(t *testing.T) {
 			t.Errorf("unitfile.XMLText(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
-	h := Host{Binary: "/usr/local/bin/sparkwing-runner", Home: "/Users/r&d", ConfigPath: "/Users/r&d/config.yaml"}
+	h := Host{StateHome: "/Users/r&d/state", Binary: "/usr/local/bin/sparkwing-runner", Home: "/Users/r&d", ConfigPath: "/Users/r&d/config.yaml"}
 	body := agentPlist(h)
 	if strings.Contains(body, "r&d") {
 		t.Errorf("the plist carries a raw ampersand:\n%s", body)
@@ -435,5 +437,68 @@ func TestInstallCarriesANondefaultStateHome(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("%s registration does not carry the state home %q:\n%s", h.GOOS, want, body)
 		}
+	}
+}
+
+func TestRenderedServiceWorkingDirectoryUsesStateHome(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			h := linuxHost(t, &fakeExec{})
+			h.GOOS = goos
+			h.StateHome = filepath.Join(h.Home, "private state % & quotes\"")
+			body, want := serviceUnit(h), "WorkingDirectory="+unitfile.SystemdWord(h.StateHome)+"\n"
+			if goos == "darwin" {
+				body = agentPlist(h)
+				want = "<key>WorkingDirectory</key>\n  <string>" + unitfile.XMLText(h.StateHome) + "</string>"
+			}
+			t.Logf("rendered %s unit:\n%s", goos, body)
+			if !strings.Contains(body, want) {
+				t.Fatalf("missing state working directory %q:\n%s", want, body)
+			}
+		})
+	}
+}
+
+func TestInstallRequiresExplicitStateHome(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			executor := &fakeExec{}
+			h := linuxHost(t, executor)
+			h.GOOS = goos
+			h.StateHome = ""
+			if _, err := Install(t.Context(), h); err == nil || !strings.Contains(err.Error(), "StateHome") {
+				t.Fatalf("accepted missing state home: %v", err)
+			}
+			if len(executor.calls) != 0 {
+				t.Fatalf("contacted native manager before validating state home: %v", executor.calls)
+			}
+		})
+	}
+}
+
+func TestInstallPreparesWorkingDirectoryBeforeStarting(t *testing.T) {
+	for _, makeHost := range []func(*testing.T, *fakeExec) Host{linuxHost, darwinHost} {
+		f := &fakeExec{}
+		h := makeHost(t, f)
+		t.Run(h.GOOS, func(t *testing.T) {
+			h.StateHome = filepath.Join(t.TempDir(), "missing", "state")
+			h.LogPath = ""
+			startChecked := false
+			h.Exec = func(ctx context.Context, name string, args ...string) (string, error) {
+				if name == "systemctl" && len(args) > 1 && args[1] == "enable" || name == "launchctl" && len(args) > 0 && args[0] == "bootstrap" {
+					startChecked = true
+					if info, err := os.Stat(h.StateHome); err != nil || !info.IsDir() {
+						t.Errorf("working directory absent before start: %v", err)
+					}
+				}
+				return f.run(ctx, name, args...)
+			}
+			if _, err := Install(t.Context(), h); err != nil {
+				t.Fatal(err)
+			}
+			if !startChecked {
+				t.Fatal("fixture never started the unit")
+			}
+		})
 	}
 }

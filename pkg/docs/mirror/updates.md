@@ -67,3 +67,15 @@ are removed flags. Use `--dry-run` for previews.
 
 See [Verified self-update](security.md#verified-self-update) for release trust
 and [CLI update reference](cli-update.md) for flags.
+
+Generated runner, local-controller and schedule services use the selected
+Sparkwing state home as their working directory. The same applies to local
+runner instances and launchd agents. Updating an existing managed definition
+adds or replaces that setting while preserving captured environment, config
+arguments and timer cadence. The working directory is created before the unit
+is started or its definition is refreshed.
+
+Changing a definition does not change a running process's current directory.
+Runner self-updates preserve the running service; its new directory takes effect
+at the next service start. A loaded launchd runner also needs its registration
+reloaded, such as by reinstalling the runner service or logging in again.
