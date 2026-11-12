@@ -13,14 +13,15 @@ import (
 type transferFailure struct {
 	method, host, class string
 	attempts            int
-	retry, notRetried   bool
+	retry               bool
+	notRetriedReason    string
 	cause               error
 }
 
 func (e *transferFailure) Error() string {
 	message := fmt.Sprintf("signed blob %s %s: %s (attempts=%d)", e.method, e.host, e.class, e.attempts)
-	if e.notRetried {
-		message += "; body is not replayable; not retried"
+	if e.notRetriedReason != "" {
+		message += "; " + e.notRetriedReason + "; not retried"
 	}
 	return message
 }

@@ -40,11 +40,6 @@ func Upload(ctx context.Context, client HTTPClient, signed SignedTransfer, body 
 				return nil, errors.New("renewed signed PUT ticket is already expired")
 			}
 		}
-		if replayable {
-			if _, err := seeker.Seek(start, io.SeekStart); err != nil {
-				return nil, err
-			}
-		}
 		var requestBody io.ReadCloser = io.NopCloser(body)
 		if replayable {
 			requestBody = &uploadBody{reader: body, done: make(chan struct{})}
@@ -76,9 +71,13 @@ func Upload(ctx context.Context, client HTTPClient, signed SignedTransfer, body 
 		detail := *failure
 		detail.attempts = attempt
 		if !replayable {
-			detail.notRetried = true
+			detail.notRetriedReason = "body is not replayable"
 		}
 		if !detail.retry || !replayable || attempt == 3 || ctx.Err() != nil {
+			return nil, errors.Join(&detail, ctx.Err())
+		}
+		if _, err := seeker.Seek(start, io.SeekStart); err != nil {
+			detail.notRetriedReason = "body rewind failed"
 			return nil, errors.Join(&detail, ctx.Err())
 		}
 		timer := time.NewTimer(time.Duration(attempt) * 100 * time.Millisecond)
