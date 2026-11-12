@@ -429,7 +429,7 @@ func (r *localRuntime) Drain(ctx context.Context) error {
 		session.daemon.markDraining()
 	}
 	r.mu.Unlock()
-	// Standalone owns the runner too; retire it while its controller still answers.
+	// safety: standalone owns the runner too; retire it while its controller still answers.
 	if ready && session.standalone {
 		if err := session.daemon.retireLocalRunner(ctx); err != nil {
 			return err
