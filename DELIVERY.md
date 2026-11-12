@@ -234,6 +234,69 @@ starts. Critical modules run sequentially with the full job allowance.
 Collect-all callers continue critical coverage after a short failure; queued
 Land stops future admission while already admitted packages finish.
 
+Queued short lanes start selected packages from a static hint list first,
+in the order below. Other packages retain their relative order. Hints apply
+within existing lanes: they select no additional work, move no package between
+lanes and leave critical ordering unchanged. Store shards remain one admitted
+package with their existing command order and slots. Hook and Gate callers
+keep their collect-all ordering. The list uses no runtime-learned durations.
+
+Measured on 2026-11-11, one broad queued diagnostic on `3da0442b9` selected
+66 root and two pipeline short packages on a shared 16-logical-CPU host.
+Its allowance seven assigned one pipeline worker, three ordinary root
+workers and one per store shard. Top-level bodies were forced with
+`-count=1`; package commands used `-p 1` and their assigned runtime width.
+
+| Start-first package, in hint order | Observed command span, s |
+| --- | ---: |
+| `cmd/sparkwing` | 444.109 |
+| `internal/controller` | 426.233 |
+| `internal/store` (three overlapping shards) | 357.109 |
+| `sparkwing-pipelines/jobs` | 316.731 |
+| `internal/bincache` | 308.097 |
+| `tests/acceptance` | 202.705 |
+
+The runner took 835.553 s. Acceptance started 605.522 s after the first test
+command and was the only remaining selected short command for the final
+189.956 s. These are baseline costs, not measured savings from the hints.
+Package spans include Go driver/build and test-binary work; store's shard
+durations are not added. Shared load1 median/max was 13.763/22.586. This
+single forced-body sample does not measure default Go result-cache overhead
+or an end-to-end Land. Narrow selections that already fit their lanes have
+little admission-order benefit. Changing order can change contention,
+cache sharing and which failure is observed first; performance needs paired
+measurements without changing coverage or fail-fast behavior.
+
+Three interleaved FIFO/hint pairs on 2026-11-11 used the identical
+`a59a9a28f` tree, the same 13-file cohort and allowance seven. FIFO removed
+only the coordinator's hint call through a Go overlay; nested tests used the
+candidate source in both arms. Each sample used one ordinary Go slot, with
+`-count=1`, shared build caches and no load-based exclusions.
+
+| Pair | FIFO runner, s | Hint runner, s | Runner change | Short-span change, s |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 727.676 | 695.567 | -4.41% | -50.971 |
+| 2 | 704.137 | 575.042 | -18.33% | -125.424 |
+| 3 | 652.664 | 652.071 | -0.09% | +2.938 |
+
+Runner medians were 704.137 / 652.071 s (FIFO / hints), a 7.39% reduction
+in the ratio of medians. Ranges were 652.664-727.676 / 575.042-695.567 s;
+inclusive IQRs were 37.506 / 60.263 s. The paired median runner saving was
+32.109 s. All six had exact top-level run/pass/skip parity: 7,908 root and
+774 pipeline short test runs, plus 31 Linux critical passes and seven
+Windows-only critical declarations absent. Selection, all 81 commands,
+lane widths, atomic store admission and the critical join were unchanged.
+
+The third pair was effectively tied: its short span increased 2.938 s,
+while its critical span fell 3.609 s. These samples do not establish a
+stable, meaningful saving. FIFO/hint load1 medians were 7.333/15.734,
+13.382/14.344 and 10.401/16.342. Other owners, load, host iowait and steal
+were recorded at 1 Hz without replacing samples. One shared host, one
+time window, fixed FIFO-before-hints order and changing cache/compile
+context limit attribution. This measures forced-body affected tests, not
+default result-cache processing or end-to-end Land. Existing deadlines
+remain unchanged.
+
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at
 `406208403`. All share root b61 and the same 13-file selection: two pipeline
