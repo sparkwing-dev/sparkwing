@@ -368,7 +368,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if claims.Err() != nil || (l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims) || l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0) == 0 {
 			return nil, nil
 		}
-		if transportErr != nil && time.Since(transportSince) >= claimRecoveryBudget {
+		if transportErr != nil && pending == nil && time.Since(transportSince) >= claimRecoveryBudget {
 			return nil, fmt.Errorf("claim runner work: controller recovery deadline exceeded: %w", transportErr)
 		}
 		nextClaim := pollAt
