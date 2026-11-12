@@ -103,7 +103,12 @@ func WindowsChild(t *testing.T) {
 	if len(os.Args) < 3 || os.Args[len(os.Args)-2] != "owned-process-child" {
 		return
 	}
-	if err := os.WriteFile(os.Args[len(os.Args)-1], []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+	ready := os.Args[len(os.Args)-1]
+	if err := os.WriteFile(ready+".tmp", []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// safety: publish the complete PID atomically before the parent may use it for termination.
+	if err := os.Rename(ready+".tmp", ready); err != nil {
 		t.Fatal(err)
 	}
 	var b [1]byte
