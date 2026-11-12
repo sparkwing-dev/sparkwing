@@ -2051,6 +2051,51 @@ file. Other syntax and workflow checks remain active.
   Contention can still extend these samples; the suggested timeouts leave
   room above the measurements.
 
+- **Offline uploaded fixture builds, measured 2026-11-12:** only the nested
+  `go test` in `TestKubernetesE2EUploadedFixtureBuildsWithoutCallerCheckout`
+  uses `-trimpath -count=1`. Trimmed source paths let fresh uploaded checkouts
+  reuse build objects; count-one keeps the run-ID/log proof executing. The
+  self-contained bundle/clone, readonly modules, `GOWORK=off`, `GOPROXY=off`
+  and `GOSUMDB=off` checks remain. The native cache guard checks equal test
+  executable bytes at two source paths and four actual proof-body executions.
+
+  Three alternating before/after pairs compared main `136fdd93c` with code
+  `7e0da3f79`, Go1.26.11, `GOMAXPROCS=7`, one shared 16-CPU Linux host and one
+  time window. This is the standalone module allowance; a broad queued Land
+  can give the pipeline module one worker. Each sample copied the same private
+  cache snapshot, already primed for both modes. Test binaries were compiled
+  once per arm. Build, priming, copy and queue time are outside native timings.
+
+  | Pair | Before / after wall, s | Wall delta | Before / after CPU, s | CPU delta | Median load1, before / after |
+  | --- | --- | --- | --- | --- | --- |
+  | 1 | 10.308 / 3.656 | -64.53% | 40.391 / 5.015 | -87.58% | 6.178 / 6.352 |
+  | 2 | 10.335 / 3.764 | -63.58% | 38.410 / 5.181 | -86.51% | 7.568 / 7.187 |
+  | 3 | 10.394 / 3.742 | -64.00% | 39.105 / 5.115 | -86.92% | 6.592 / 6.178 |
+
+  Median native wall was 10.335 -> 3.742 s (-63.80%); median user+system CPU
+  was 39.105 -> 5.115 s (-86.92%). Wall ranges were 10.308-10.394 and
+  3.656-3.764 s; CPU ranges were 38.410-40.391 and 5.015-5.181 s.
+  Linux `wait4` CPU includes the test process and children it waited for;
+  direct-process and waited-child ticks are also retained separately.
+  Every sample passed the complete guard, with no selected skip or failure.
+  Load1 ranged 6.083-7.759; the BW-3538 lane in Xwing106 held another Go
+  slot throughout. All samples are included. This narrow warm-cache result
+  does not measure the whole affected-tests job or a whole Land.
+
+  First use costs more. An earlier mechanism probe at `6bc12d4f1`, starting
+  each variant from the same private cache with warm platform dependencies,
+  took 35.853 CPU s / 7.903 wall s for the normal command versus 141.231 CPU s /
+  22.106 wall s for its first trimmed command. A second fresh checkout used
+  34.972 CPU s / 7.392 wall s normally, versus 1.442 CPU s / 0.834 wall s
+  trimmed: 80 local compiler actions versus none, with the proof body run in
+  both variants. The common-cache refresh for `136fdd93c` cost another
+  24.303 CPU s / 6.082 wall s outside the paired samples. Retained cache
+  contents govern that startup cost; an empty-cache bootstrap was not measured.
+  No test selection, lane width, deadline or production engine verification
+  policy changed. Raw commands, source/bundle/cache snapshots, profiles,
+  CPU-scope self-check, outcomes and 1 Hz load/owner data are in
+  `/home/bombuntu/evidence/sparkwing/cli-fixture-staging-cost-2026-11-12/`.
+
 - **Normal broad check:** `sparkwing run gate` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,
   and browser smoke suites, formatting, vet, build, tests, documentation
