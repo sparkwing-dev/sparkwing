@@ -12,19 +12,17 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type commandOutcome struct{ waited, other error }
+// safety: ordinary process failures must not match our job-termination status.
+const ownerTerminationCode uint32 = 0x53574f43
 
-// RunProcess owns cancellation of a leader without changing its descendant policy.
-func RunProcess(ctx context.Context, cmd *exec.Cmd) error {
-	return runOwnedCommand(ctx, cmd, func() error { return cmd.Start() }, func() error { return cmd.Process.Kill() }, nil)
-}
+type commandOutcome struct{ waited, other error }
 
 // Run owns job cancellation while leaving post-wait cleanup to the caller.
 func (j *Job) Run(ctx context.Context, cmd *exec.Cmd) error {
-	return runOwnedCommand(ctx, cmd, func() error { return j.Start(cmd) }, j.Terminate, nil)
+	return runOwnedCommand(ctx, cmd, func() error { return j.Start(cmd) }, func(windows.Handle) error { return j.TerminateWithCode(ownerTerminationCode) }, nil)
 }
 
-func runOwnedCommand(ctx context.Context, cmd *exec.Cmd, start, terminate, afterExit func() error) (result error) {
+func runOwnedCommand(ctx context.Context, cmd *exec.Cmd, start func() error, terminate func(windows.Handle) error, afterExit func() error) (result error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -36,13 +34,13 @@ func runOwnedCommand(ctx context.Context, cmd *exec.Cmd, start, terminate, after
 	cmd.WaitDelay = drainDelay
 	if startErr != nil {
 		if cmd.Process != nil {
-			return errors.Join(startErr, terminate(), cmd.Wait())
+			return errors.Join(startErr, terminate(0), cmd.Wait())
 		}
 		return startErr
 	}
-	process, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(cmd.Process.Pid))
+	process, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
 	if err != nil {
-		return errors.Join(fmt.Errorf("watch command process: %w", err), terminate(), cmd.Wait())
+		return errors.Join(fmt.Errorf("watch command process: %w", err), terminate(0), cmd.Wait())
 	}
 	defer func() {
 		if closeErr := windows.CloseHandle(process); closeErr != nil {
@@ -86,7 +84,7 @@ func runOwnedCommand(ctx context.Context, cmd *exec.Cmd, start, terminate, after
 		case state == uint32(windows.WAIT_TIMEOUT):
 			// safety: the retained handle fixes identity. External death between observation and termination
 			// is indistinguishable from our kill during shutdown.
-			terminateErr = terminate()
+			terminateErr = terminate(process)
 			owned = terminateErr == nil
 		case state != windows.WAIT_OBJECT_0:
 			terminateErr = fmt.Errorf("command state returned %d", state)
@@ -95,7 +93,7 @@ func runOwnedCommand(ctx context.Context, cmd *exec.Cmd, start, terminate, after
 	reap.Unlock()
 	outcome := <-done
 	if owned {
-		if exit, ok := outcome.waited.(*exec.ExitError); ok && exit.ExitCode() == 1 { //nolint:errorlint // Joined observation and cleanup errors are kept separately.
+		if exit, ok := outcome.waited.(*exec.ExitError); ok && exit.ExitCode() == int(ownerTerminationCode) { //nolint:errorlint // Joined observation and cleanup errors are kept separately.
 			outcome.waited = ctx.Err()
 		}
 	}

@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strconv"
 	"sync/atomic"
+
+	"golang.org/x/sys/windows"
 )
 
 var commandJobSequence atomic.Uint64
@@ -43,5 +45,5 @@ func RunCommand(ctx context.Context, cmd *exec.Cmd) (result error) {
 			result = errors.Join(result, closeErr)
 		}
 	}()
-	return runOwnedCommand(ctx, cmd, func() error { return job.Start(cmd) }, job.Terminate, job.Terminate)
+	return runOwnedCommand(ctx, cmd, func() error { return job.Start(cmd) }, func(windows.Handle) error { return job.TerminateWithCode(ownerTerminationCode) }, job.Terminate)
 }
