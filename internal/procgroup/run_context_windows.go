@@ -12,7 +12,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// safety: ordinary process failures must not match our job-termination status.
+// safety: only this reserved status in the owner-termination window can alias a natural or foreign exit.
+// A child can choose any status, including zero, so this is not an authentication boundary.
 const ownerTerminationCode uint32 = 0x53574f43
 
 type commandOutcome struct{ waited, other error }
