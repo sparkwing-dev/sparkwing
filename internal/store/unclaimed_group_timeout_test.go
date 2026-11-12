@@ -14,7 +14,7 @@ import (
 )
 
 func TestUnclaimedFullGroupHonorsQueueTimeout(t *testing.T) {
-	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
+	f := admissionFixture(t, storetest.New(t), 1, 1)
 	admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireGranted)
 	plan, owner := admissionAcceptedPlan(t, f, func(doc *nodewire.PlanDoc) {
 		timeout := int64(1000)
@@ -61,7 +61,7 @@ func TestUnclaimedFullGroupHonorsQueueTimeout(t *testing.T) {
 }
 
 func TestQueuedClaimExpiresAnUnclaimedFullGroup(t *testing.T) {
-	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
+	f := admissionFixture(t, storetest.New(t), 1, 1)
 	admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireGranted)
 	plan, owner := admissionAcceptedPlan(t, f, func(doc *nodewire.PlanDoc) {
 		timeout := int64(1000)
@@ -102,7 +102,7 @@ func TestQueuedClaimExpiresAnUnclaimedFullGroup(t *testing.T) {
 }
 
 func TestPreAwardGroupWaitReachesMayStart(t *testing.T) {
-	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
+	f := admissionFixture(t, storetest.New(t), 1, 1)
 	admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireGranted)
 	plan, owner := admissionAcceptedPlan(t, f, func(doc *nodewire.PlanDoc) {
 		timeout := int64(1000)
@@ -142,7 +142,7 @@ func TestPreAwardGroupWaitReachesMayStart(t *testing.T) {
 }
 
 func TestPreAwardGroupGrantSurvivesItsOldWaitDeadline(t *testing.T) {
-	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
+	f := admissionFixture(t, storetest.New(t), 1, 1)
 	admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireGranted)
 	plan, owner := admissionAcceptedPlan(t, f, func(doc *nodewire.PlanDoc) {
 		timeout := int64(1000)
@@ -180,7 +180,7 @@ func TestPreAwardGroupGrantSurvivesItsOldWaitDeadline(t *testing.T) {
 }
 
 func TestMaterializeOnlyReconcileExpiresAGroupWait(t *testing.T) {
-	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
+	f := admissionFixture(t, storetest.New(t), 1, 1)
 	admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireGranted)
 	plan, owner := admissionAcceptedPlan(t, f, func(doc *nodewire.PlanDoc) {
 		timeout := int64(1000)
@@ -211,7 +211,7 @@ func TestMaterializeOnlyReconcileExpiresAGroupWait(t *testing.T) {
 func TestGroupQueueTimeoutSurvivesUnstartedReturnOrSkip(t *testing.T) {
 	for _, race := range []bool{false, true} {
 		t.Run(map[bool]string{false: "full at selection", true: "capacity taken after selection"}[race], func(t *testing.T) {
-			f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
+			f := admissionFixture(t, storetest.New(t), 1, 1)
 			plan, owner := admissionAcceptedPlan(t, f, func(doc *nodewire.PlanDoc) {
 				timeout := int64(1000)
 				doc.Jobs[0].Concurrency[0].QueueTimeoutMS = &timeout

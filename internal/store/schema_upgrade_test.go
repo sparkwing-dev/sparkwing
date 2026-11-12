@@ -306,8 +306,9 @@ func schemaShape(t *testing.T, st *store.Store) string {
 		`SELECT name || ' ' || sql FROM sqlite_master WHERE type = 'view' ORDER BY name`,
 	}
 	if st.Dialect() == store.DialectPostgres {
+		// safety: fixture downgrades leave dropped-column ordinal gaps in Postgres; compare visible column order.
 		queries = []string{
-			`SELECT table_name || '.' || ordinal_position || '.' || column_name || '.' || data_type || '.' || is_nullable || '.' || COALESCE(column_default, '') || '.' || COALESCE(generation_expression, '') FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, ordinal_position`,
+			`SELECT table_name || '.' || row_number() OVER (PARTITION BY table_name ORDER BY ordinal_position) || '.' || column_name || '.' || data_type || '.' || is_nullable || '.' || COALESCE(column_default, '') || '.' || COALESCE(generation_expression, '') FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, ordinal_position`,
 			`SELECT conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace = current_schema()::regnamespace ORDER BY 1`,
 			`SELECT indexname || ' ' || tablename FROM pg_indexes WHERE schemaname = current_schema() ORDER BY 1`,
 			`SELECT table_name || ' ' || view_definition FROM information_schema.views WHERE table_schema = current_schema() ORDER BY 1`,
@@ -484,7 +485,7 @@ func snapshotRows(t *testing.T, st *store.Store, queries []string) string {
 }
 
 func TestSchemaUpgradeAddsGroupWaitClockToVersion37(t *testing.T) {
-	target := storetest.NewSQLite(t)
+	target := storetest.New(t)
 	f := newStoreRecoveryFixtureAt(t, false, target)
 	before, err := f.tenant.ReadNode(t.Context(), f.ref)
 	if err != nil {
