@@ -1060,6 +1060,13 @@ share the capacity-one `sparkwing-post-deploy-work` job group. A waiting example
 that group while its weather child or serialized probe runs, so other scan jobs cannot fill
 the desktop's other slot. Probe children use a separate capacity-one job group to avoid
 waiting on their parent's group. The small staging and production smokes retain Cloud placement.
+The example's simulated `deploy` job has a two-minute execution deadline, including
+startup, render, apply and rollout. It runs no `kubectl`: after printing its tour
+output, apply waits for the controller to acknowledge its annotation; rollout
+also waits for an annotation and summary acknowledgement. The budget allows
+these reporting requests and host scheduling delays rather than treating the
+printed output as completion. A missing acknowledgement or stalled job still
+fails within the deadline; the fixture adds no sleep or retry of its own.
 Promotion does not wait for the full scan. All `deploy-scan` runs share the capacity-one
 `sparkwing-post-deploy` run group. Queued scans whose source is no longer main's tip stop
 before building or running fixtures, so the newest waiting revision wins. The target team's
