@@ -152,6 +152,7 @@ func TestKeeperDiagnosticsResetReportsInflightRenewalAndLoss(t *testing.T) {
 		synctest.Wait()
 		// The watcher stays armed while renewal is blocked; expiry still cancels the unit.
 		time.Sleep(time.Minute)
+		synctest.Wait()
 		close(release)
 		stop()
 		synctest.Wait()
@@ -247,15 +248,15 @@ func TestKeeperDiagnosticsWatchResetIncludesInflightState(t *testing.T) {
 		trace := diagnostics.start(t.Context(), Identity{Role: "NODE", Run: "r"})
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		renewal := make(chan time.Time)
+		renewal := make(chan leaseUpdate)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
 			watch(ctx, func(error) { cancel() }, renewal, time.Now().Add(time.Minute), trace)
 		}()
 		synctest.Wait()
-		trace.emit("renewal_start", time.Now(), time.Time{}, "")
-		renewal <- time.Now().Add(20 * time.Second)
+		trace.emit("renewal_start", time.Now(), time.Time{}, "", 0)
+		renewal <- leaseUpdate{expires: time.Now().Add(20 * time.Second), renewal: 1}
 		synctest.Wait()
 		cancel()
 		<-done
@@ -269,5 +270,48 @@ func TestKeeperDiagnosticsWatchResetIncludesInflightState(t *testing.T) {
 		if !reset {
 			t.Fatalf("reset lost in-flight state: %+v", events)
 		}
+	})
+}
+
+func TestKeeperWatchResetIdentifiesInstalledRenewal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var events []Event
+		diagnostics := NewDiagnostics(t.Context(), func(_ context.Context, e Event) error { events = append(events, e); return nil })
+		defer diagnostics.Close()
+		trace := diagnostics.start(t.Context(), Identity{Role: "NODE", Run: "r"})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		renewal := make(chan leaseUpdate)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			watch(ctx, func(error) { cancel() }, renewal, time.Now().Add(time.Minute), trace)
+		}()
+		synctest.Wait()
+		trace.emit("renewal_start", time.Now(), time.Time{}, "", 0)
+		trace.emit("renewal_finish", time.Time{}, time.Time{}, "success", 0)
+		trace.emit("renewal_start", time.Now(), time.Time{}, "", 0)
+		renewal <- leaseUpdate{expires: time.Now().Add(20 * time.Second), renewal: 1}
+		synctest.Wait()
+		cancel()
+		<-done
+		synctest.Wait()
+		for _, e := range events {
+			if e.Kind == "watch_reset" {
+				raw, err := json.Marshal(e)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]any
+				if err := json.Unmarshal(raw, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if fields["watch_renewal"] != float64(1) || e.Renewal != 2 || !e.InFlight {
+					t.Fatalf("reset conflated installed renewal with in-flight renewal: %s", raw)
+				}
+				return
+			}
+		}
+		t.Fatal("no reset")
 	})
 }

@@ -42,9 +42,12 @@ type Event struct {
 	ExpiresAt         time.Time `json:"expires_at,omitzero"`
 	Deadline          time.Time `json:"deadline,omitzero"`
 	ExecutionDeadline time.Time `json:"execution_deadline,omitzero"`
-	Renewal           uint64    `json:"renewal"`
-	InFlight          bool      `json:"renewal_in_flight"`
-	Outcome           string    `json:"outcome,omitempty"`
+	// WatchRenewal identifies the renewal whose expiry the watcher installed.
+	WatchRenewal uint64 `json:"watch_renewal"`
+	// Renewal identifies the latest started request, which may still be in flight.
+	Renewal  uint64 `json:"renewal"`
+	InFlight bool   `json:"renewal_in_flight"`
+	Outcome  string `json:"outcome,omitempty"`
 }
 
 type diagnosticRecord struct {
@@ -110,6 +113,7 @@ func (d *Diagnostics) Close() {
 }
 
 type keeperTrace struct {
+	watchRenewal                               uint64
 	mu                                         sync.Mutex
 	diagnostics                                *Diagnostics
 	identity                                   Identity
@@ -129,9 +133,9 @@ func (d *Diagnostics) start(ctx context.Context, identity Identity) *keeperTrace
 	return &keeperTrace{diagnostics: d, identity: identity, instance: fmt.Sprintf("%d-%d-%d", os.Getpid(), d.origin.UnixNano(), d.instances.Add(1)), deadline: deadline, executionDeadline: executionDeadline}
 }
 
-func (t *keeperTrace) emit(kind string, sent, expires time.Time, outcome string) {
+func (t *keeperTrace) emit(kind string, sent, expires time.Time, outcome string, watchRenewal uint64) uint64 {
 	if t == nil {
-		return
+		return 0
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -146,15 +150,18 @@ func (t *keeperTrace) emit(kind string, sent, expires time.Time, outcome string)
 	if !expires.IsZero() {
 		t.expires = expires
 	}
+	if kind == "watch_reset" {
+		t.watchRenewal = watchRenewal
+	}
 	t.sequence++
 	before := time.Since(t.diagnostics.origin).Nanoseconds()
 	wall := time.Now().UTC()
 	after := time.Since(t.diagnostics.origin).Nanoseconds()
-	e := Event{BootID: t.diagnostics.boot, Platform: runtime.GOOS, ProcessBirth: t.diagnostics.birth, IdentityComplete: t.diagnostics.birth != "" && (runtime.GOOS != "linux" || t.diagnostics.boot != ""), ClockOrigin: t.diagnostics.origin.UTC(), Identity: t.identity, Instance: t.instance, PID: os.Getpid(), Sequence: t.sequence, Dropped: t.lost.Load(), Kind: kind, MonoBefore: before, Wall: wall, MonoAfter: after, Sent: t.sent, ExpiresAt: t.expires, Deadline: t.deadline, ExecutionDeadline: t.executionDeadline, Renewal: t.renewal, InFlight: t.inFlight, Outcome: outcome}
+	e := Event{WatchRenewal: t.watchRenewal, BootID: t.diagnostics.boot, Platform: runtime.GOOS, ProcessBirth: t.diagnostics.birth, IdentityComplete: t.diagnostics.birth != "" && (runtime.GOOS != "linux" || t.diagnostics.boot != ""), ClockOrigin: t.diagnostics.origin.UTC(), Identity: t.identity, Instance: t.instance, PID: os.Getpid(), Sequence: t.sequence, Dropped: t.lost.Load(), Kind: kind, MonoBefore: before, Wall: wall, MonoAfter: after, Sent: t.sent, ExpiresAt: t.expires, Deadline: t.deadline, ExecutionDeadline: t.executionDeadline, Renewal: t.renewal, InFlight: t.inFlight, Outcome: outcome}
 	select {
 	case <-t.diagnostics.ctx.Done():
 		t.lost.Add(1)
-		return
+		return t.renewal
 	default:
 	}
 	select {
@@ -162,4 +169,5 @@ func (t *keeperTrace) emit(kind string, sent, expires time.Time, outcome string)
 	default:
 		t.lost.Add(1)
 	}
+	return t.renewal
 }

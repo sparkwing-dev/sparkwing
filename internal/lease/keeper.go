@@ -68,7 +68,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 	executionDone := make(chan struct{})
 	context.AfterFunc(hard, func() {
 		defer close(executionDone)
-		trace.emit("execution_end", time.Time{}, time.Time{}, "ended")
+		trace.emit("execution_end", time.Time{}, time.Time{}, "ended", 0)
 		if k.ExecutionEnded != nil {
 			k.ExecutionEnded()
 		}
@@ -84,7 +84,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		}
 	}()
 	watchDone := make(chan struct{})
-	renewed := make(chan time.Time)
+	renewed := make(chan leaseUpdate)
 	expires := time.Now().Add(k.Lease)
 	go func(expires time.Time) {
 		defer close(watchDone)
@@ -101,13 +101,13 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 				return
 			}
 			sent := time.Now()
-			trace.emit("renewal_start", sent, time.Time{}, "")
+			renewal := trace.emit("renewal_start", sent, time.Time{}, "", 0)
 			beat, err := k.Renew(unit)
 			outcome := "success"
 			if err != nil {
 				outcome = "error"
 			}
-			trace.emit("renewal_finish", time.Time{}, time.Time{}, outcome)
+			trace.emit("renewal_finish", time.Time{}, time.Time{}, outcome, 0)
 			if unit.Err() != nil {
 				return
 			}
@@ -121,7 +121,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 				if !beat.ExpiresAt.IsZero() && beat.ExpiresAt.Before(expires) {
 					expires = beat.ExpiresAt
 				}
-				trace.emit("expiry_selected", time.Time{}, expires, "")
+				trace.emit("expiry_selected", time.Time{}, expires, "", 0)
 				if !expires.After(time.Now()) {
 					hardCancel(ErrSilent)
 					cancel(ErrSilent)
@@ -132,7 +132,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			next := time.Now().Add(max(every, retryAfter(err)))
 			if err == nil {
 				select {
-				case renewed <- expires:
+				case renewed <- leaseUpdate{expires: expires, renewal: renewal}:
 				case <-hard.Done():
 					return
 				}
@@ -207,9 +207,14 @@ func retryAfter(err error) time.Duration {
 	return time.Duration(milliseconds * float64(time.Millisecond))
 }
 
-func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan time.Time, expires time.Time, trace *keeperTrace) {
+type leaseUpdate struct {
+	expires time.Time
+	renewal uint64
+}
+
+func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan leaseUpdate, expires time.Time, trace *keeperTrace) {
 	timer := time.NewTimer(time.Until(expires))
-	trace.emit("watch_arm", time.Time{}, expires, "")
+	trace.emit("watch_arm", time.Time{}, expires, "", 0)
 	defer timer.Stop()
 	for {
 		select {
@@ -218,9 +223,10 @@ func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan t
 		case <-timer.C:
 			cancel(ErrSilent)
 			return
-		case expires = <-renewed:
+		case update := <-renewed:
+			expires = update.expires
 			timer.Reset(time.Until(expires))
-			trace.emit("watch_reset", time.Time{}, expires, "")
+			trace.emit("watch_reset", time.Time{}, expires, "", update.renewal)
 		}
 	}
 }

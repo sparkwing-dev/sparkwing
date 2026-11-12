@@ -41,7 +41,8 @@ cut or the final seal; the existing segment-size and total-byte bounds still app
 
 Each keeper instance records its OWNER or NODE role, unit generation, renewal
 sequence, selected expiry and watcher reset, renewal-in-flight state and inherited
-deadlines. Clock samples pair process-relative monotonic durations with wall time;
+deadlines. A reset retains the originating renewal number even when a newer
+renewal is in flight. Clock samples pair process-relative monotonic durations with wall time;
 process birth and boot identity indicate whether process identity is complete.
 The records contain no lease bearer or renewal payload.
 
