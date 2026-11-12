@@ -2,13 +2,13 @@ package store_test
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 const buildTrustSchema35 = `CREATE TABLE team_build_trust (
@@ -18,6 +18,9 @@ const buildTrustSchema35 = `CREATE TABLE team_build_trust (
 
 func addSchema35BuildTrust(t *testing.T, st *store.Store) {
 	t.Helper()
+	if _, err := st.DB().Exec(`ALTER TABLE nodes DROP COLUMN group_wait_started_at`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().Exec(buildTrustSchema35); err != nil {
 		t.Fatal(err)
 	}
@@ -25,19 +28,10 @@ func addSchema35BuildTrust(t *testing.T, st *store.Store) {
 
 func TestSchemaUpgradeRemovesBuildTrustFromVersion36AndPreservesConfiguredInstall(t *testing.T) {
 	target := storetest.New(t)
-	dialect, location := store.DialectSQLite, target.Path()
-	if location == "" {
-		dialect, location = store.DialectPostgres, target.DSN()
-	}
 	cipher := drillCipher(t)
-	st := store.OpenSchema36ForTest(t, dialect, location, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	st := target.Open(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{Intake: storetest.IntakePolicy{}, SessionKeys: cipher}, nil
 	}))
-	if dialect == store.DialectSQLite {
-		teststore.RegisterSQLite(t, st, location)
-	} else {
-		teststore.RegisterPostgres(t, st, location)
-	}
 	populateInstall(t, st, cipher)
 	for _, statement := range []string{
 		`INSERT INTO local_runner_instances(id,capability_prefix,machine,pid,process_birth,version,build_identity,state) SELECT 'kept-runner',prefix,'kept-machine',1,'kept-birth','kept-version','kept-build','active' FROM capabilities WHERE subject_id='runner-1'`,
@@ -60,6 +54,7 @@ func TestSchemaUpgradeRemovesBuildTrustFromVersion36AndPreservesConfiguredInstal
 	}
 	rowsBefore := snapshotRows(t, st, queries)
 	before := fingerprintInstall(t, st, cipher)
+	store.PrepareSchema36ForTest(t, st)
 	if _, err := st.DB().Exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('default',1)`); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +107,7 @@ func schema30Store(t *testing.T, target *storetest.Target) {
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
 		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('kept','TOKEN','sealed-configuration','fixture',1,1)`,
 		buildTrustSchema35,
+		`ALTER TABLE nodes DROP COLUMN group_wait_started_at`,
 		`DROP INDEX idx_runs_live_children`,
 		`DROP TABLE local_runner_instances`,
 		`DROP TABLE local_run_secrets`,
@@ -469,7 +465,13 @@ func snapshotRows(t *testing.T, st *store.Store, queries []string) string {
 			if err := rows.Scan(pointers...); err != nil {
 				t.Fatal(err)
 			}
-			fmt.Fprintln(&out, values)
+			var stable []any
+			for i, col := range cols {
+				if col != "group_wait_started_at" {
+					stable = append(stable, values[i])
+				}
+			}
+			fmt.Fprintln(&out, stable)
 		}
 		if err := rows.Err(); err != nil {
 			t.Fatal(err)
@@ -479,4 +481,34 @@ func snapshotRows(t *testing.T, st *store.Store, queries []string) string {
 		}
 	}
 	return out.String()
+}
+
+func TestSchemaUpgradeAddsGroupWaitClockToVersion37(t *testing.T) {
+	target := storetest.NewSQLite(t)
+	f := newStoreRecoveryFixtureAt(t, false, target)
+	before, err := f.tenant.ReadNode(t.Context(), f.ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{`ALTER TABLE nodes DROP COLUMN group_wait_started_at`, `UPDATE sparkwing_schema_version SET version=37,baseline_digest='7da3f341c2c5b6cc6fd60afb1a881979dfc5b64e79589a551522c655b5099e64'`} {
+		if _, err := f.s.DB().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.s = target.Open(t, store.WithPolicies(sealStorePolicies))
+	f.tenant, err = f.s.ForTeam(t.Context(), f.tenant.Team())
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.tenant.ReadNode(t.Context(), f.ref)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("schema 37 job changed: before=%+v after=%+v err=%v", before, after, err)
+	}
+	var clocks int
+	if err := f.s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM nodes WHERE group_wait_started_at IS NOT NULL`).Scan(&clocks); err != nil || clocks != 0 {
+		t.Fatalf("upgrade invented wait clocks: count=%d err=%v", clocks, err)
+	}
 }

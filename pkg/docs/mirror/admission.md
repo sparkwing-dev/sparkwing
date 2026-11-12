@@ -11,6 +11,13 @@ memory. A queued set holds no partial grant. Every job needs a committed start
 permit, including jobs without concurrency groups. The store decides and commits
 admission skips, failures and queue timeouts; owners cannot assert those outcomes.
 
+Claim selection leaves jobs unclaimed while their queue-policy groups are full.
+A positive group `QueueTimeout` starts at the first eligible full-group check,
+not at the eventual award. The store persists that start separately from queue
+arrival order. Claim polling and reconciliation fail an expired wait with the
+same `queue_timeout` reason and terminal event as awarded admission. An admitted
+job retains its grant when replayed after that deadline.
+
 An executable job evaluates `SkipIf` and memo first on its executing host, under
 that permit. The coordinator acquires no job groups for evaluation. A job that
 skips still waits for its slot and briefly occupies a machine, then settles skip

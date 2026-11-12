@@ -3548,3 +3548,14 @@ limit in suspended admission waits, polls those waits with exponential backoff
 up to one second, and returns further unstarted race losses to the store.
 A suspended waiter does not consume work inventory for a runnable child job.
 Only successful admission reacquires work inventory before source preparation.
+
+A positive job group `QueueTimeout` includes pre-award waiting. The first eligible
+full-group check records a private per-node wait start after rechecking current
+claim authority, requirements, bindings and the unclaimed row under writer
+fences. A read snapshot itself writes no state. Observations carry the node's
+claim generation and queue identity, so an intervening award or retry discards
+a stale observation. This clock creates no holder or waiter and changes no FIFO
+arrival. Claim polls and reconciliation route expiry through the existing
+unclaimed `queue_timeout` transition, including materialize-only reconciliation.
+`MayStart` retains the same clock through an award; a successful grant clears it.
+State schema 38 adds the nullable clock and upgrades schema 37 automatically.

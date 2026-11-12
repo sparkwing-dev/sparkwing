@@ -23,6 +23,11 @@ func claimCapacityReadyTx(ctx context.Context, tx *storeTx, prefix string, team 
 	if err != nil {
 		return false, err
 	}
+	now := tx.now(ctx)
+	if groupWaitExpired(row, now) {
+		noteGroupWait(tx, unit, row, now)
+		return false, nil
+	}
 	var host string
 	for _, group := range row.Execution.Concurrency {
 		if group.OnLimit != "" && group.OnLimit != onLimitQueue || max(group.Cost, 1) > max(group.Capacity, 1) {
@@ -48,6 +53,9 @@ func claimCapacityReadyTx(ctx context.Context, tx *storeTx, prefix string, team 
 		}
 		ready, err := concurrencyFitsTx(ctx, tx, team, acquireSlotRequest{Key: key, HolderID: string(unit.RunID) + "/" + nodeIDOrDash(string(unit.NodeID)), RunID: string(unit.RunID), NodeID: string(unit.NodeID), Policy: onLimitQueue, Capacity: max(group.Capacity, 1), Cost: max(group.Cost, 1)}, tx.now(ctx).UnixNano(), acct, false)
 		if err != nil || !ready {
+			if err == nil {
+				noteGroupWait(tx, unit, row, now)
+			}
 			return false, err
 		}
 	}

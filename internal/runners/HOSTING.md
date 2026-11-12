@@ -34,6 +34,10 @@ reacquires its slot before source preparation or SDK execution continues.
 Claim selection leaves jobs unclaimed while their queue-policy groups have no
 capacity. It reuses admission's scoped keys, weighted budgets and FIFO checks;
 selection reserves no group and retries against current state on every poll.
+Timed groups persist the first skipped wait under the same claim authorization
+and work fences. A poll or reconciliation settles an expired unclaimed job with
+`queue_timeout`. The deadline continues into `MayStart`; a successful grant ends
+that initial wait.
 At most `MaxConcurrent` admission race waiters suspend inventory per runner.
 Further race losers return their unstarted claims through `RelinquishStart`.
 Plan, eval and runnable child jobs keep their own work inventory. Queued

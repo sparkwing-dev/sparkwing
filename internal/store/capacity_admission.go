@@ -82,12 +82,14 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		}
 		return runstate.AcquireSlotResponse{}, err
 	}
+	var jobRow runstate.NodeRow
 	// An approval has no execution award and never participates in job groups.
 	if binding.NodeID != "" {
 		row, err := readNodeTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
 		if err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
+		jobRow = row
 		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return runstate.AcquireSlotResponse{}, err
@@ -162,18 +164,22 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		return runstate.AcquireSlotResponse{}, err
 	}
 	result := runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted, HolderID: id, LeaseExpiresAt: time.Unix(0, expires)}
-	for _, key := range keys {
-		group := declarations[key]
-		if !retainedGrant && group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 && !time.Unix(0, arrival).Add(time.Duration(*group.QueueTimeoutMS)*time.Millisecond).After(tx.now(ctx)) {
-			result = runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed, FailureReason: FailureQueueTimeout}
-			break
-		}
-		result, err = t.acquireConcurrencySlotTx(ctx, tx, acquireSlotRequest{Key: key, HolderID: id, RunID: binding.RunID, NodeID: binding.NodeID}, &fence, time.Time{})
-		if err != nil {
-			return runstate.AcquireSlotResponse{}, err
-		}
-		if result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireCancellingOthers {
-			break
+	if !retainedGrant && groupWaitExpired(jobRow, tx.now(ctx)) {
+		result = runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed, FailureReason: FailureQueueTimeout}
+	} else {
+		for _, key := range keys {
+			group := declarations[key]
+			if !retainedGrant && group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 && !time.Unix(0, arrival).Add(time.Duration(*group.QueueTimeoutMS)*time.Millisecond).After(tx.now(ctx)) {
+				result = runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed, FailureReason: FailureQueueTimeout}
+				break
+			}
+			result, err = t.acquireConcurrencySlotTx(ctx, tx, acquireSlotRequest{Key: key, HolderID: id, RunID: binding.RunID, NodeID: binding.NodeID}, &fence, time.Time{})
+			if err != nil {
+				return runstate.AcquireSlotResponse{}, err
+			}
+			if result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireCancellingOthers {
+				break
+			}
 		}
 	}
 	if result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireCancellingOthers {
@@ -185,6 +191,16 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		return runstate.AcquireSlotResponse{}, err
 	}
 	if result.Kind == runstate.AcquireQueued {
+		if binding.NodeID != "" {
+			for _, group := range declarations {
+				if group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 {
+					if _, err := tx.execContext(ctx, `UPDATE nodes SET group_wait_started_at=COALESCE(group_wait_started_at,?) WHERE team=? AND run_id=? AND node_id=?`, now.UnixNano(), t.team, binding.RunID, binding.NodeID); err != nil {
+						return result, err
+					}
+					break
+				}
+			}
+		}
 		if err := clearAdmissionLevelTx(ctx, tx, t.team, binding.RunID, binding.NodeID); err != nil {
 			return result, err
 		}
@@ -198,6 +214,11 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 			}
 		}
 	} else if result.Kind == runstate.AcquireGranted || result.Kind == runstate.AcquireCancellingOthers {
+		if binding.NodeID != "" {
+			if _, err := tx.execContext(ctx, `UPDATE nodes SET group_wait_started_at=NULL WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID); err != nil {
+				return result, err
+			}
+		}
 		if _, err := tx.execContext(ctx, `UPDATE admission_work SET granted=1 WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID); err != nil {
 			return result, err
 		}

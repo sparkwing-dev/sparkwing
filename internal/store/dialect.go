@@ -138,6 +138,7 @@ type storeTx struct {
 	tx                   *sql.Tx
 	dialect              Dialect
 	store                *Store
+	groupWaits           map[UnitRef]groupWaitObservation
 	snapshotRead         bool
 	rowsOpen             bool
 	rotatingRoot         *capability.Capability
