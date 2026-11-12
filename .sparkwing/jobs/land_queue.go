@@ -67,6 +67,12 @@ func pushQueuedLanding(ctx context.Context, git gitRunner, dir string, head land
 	if tree != head.Tree {
 		return target, errors.New("land queue: pushed commit does not match the gated tree; enqueue again")
 	}
+	if head.Checks == nil || head.Checks.RunID == "" || len(head.Checks.Required) == 0 {
+		return target, fmt.Errorf("land queue: authorizing check set is missing or empty; %s", queuedCheckRemedy)
+	}
+	if err := verifyLandChecks(ctx, git, head); err != nil {
+		return target, err
+	}
 	if _, err := git(ctx, "merge-base", "--is-ancestor", head.Base, head.Commit); err != nil {
 		return target, fmt.Errorf("land queue: gated commit does not fast-forward planned main %s: %w", short(head.Base), err)
 	}

@@ -64,10 +64,19 @@ const (
 )
 
 func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc sparkwing.RunContext) error {
-	// safety: Plan reads WorkDir rather than running git, because planning does
-	// no I/O. The inline jobs run git in this checkout, not a job snapshot, so
-	// the commit they push is the one the developer is on.
+	// safety: immutable local repository metadata retains the owner path when
+	// a later SDK process starts in a snapshot of the pre-merge commit. Planning
+	// does no I/O; authorizing callbacks bind to and verify that owner at runtime.
 	repoDir := sparkwing.WorkDir()
+	var checks *queuedChecks
+	if in.Queued {
+		if rc.Git != nil && filepath.IsAbs(rc.Git.Repo) {
+			repoDir = filepath.Clean(rc.Git.Repo)
+		}
+		checks = &queuedChecks{Owner: repoDir, RunID: rc.RunID}
+		in.ReviewArgs.base, in.ReviewArgs.checkout = in.QueuedMain, repoDir
+		in.ReviewArgs.checks = checks
+	}
 	if repoDir == "" {
 		return errors.New("land: no working directory; run this pipeline from a checkout with a .sparkwing directory")
 	}
@@ -83,13 +92,17 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 		branch = rc.Git.Branch
 		submitted = rc.Git.SHA
 	}
-	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir, Queued: in.Queued, Submitted: submitted, QueuedMain: in.QueuedMain}).Inline().Cores(lightJobCores)
+	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir, Queued: in.Queued, Submitted: submitted, QueuedMain: in.QueuedMain, Checks: checks}).Inline().Cores(lightJobCores)
+	if checks != nil {
+		checks.Head = sparkwing.RefTo[landHead](pre)
+		in.ReviewArgs.head = checks.Head
+	}
 
 	var needs []sparkwing.Dep
 	if in.Queued {
-		policy := sparkwing.Job(plan, policyJobID, &policyJob{}).Inline().Timeout(policyJobTimeout).Needs(pre)
+		policy := sparkwing.Job(plan, policyJobID, &policyJob{Checks: checks, Head: checks.Head}).Inline().Timeout(policyJobTimeout).Needs(pre)
 		review := reviewJobNode(plan, in.ReviewArgs, branch, true).Needs(pre)
-		tests := affectedPushTestsJobNode(plan, true).Inline().Needs(policy, review)
+		tests := affectedPushTestsJobNode(plan, true, checks).Inline().Needs(policy, review)
 		needs = []sparkwing.Dep{policy, review, tests}
 	} else {
 		gate := gateJobs(plan, &Gate{}, "gate", false)
@@ -125,10 +138,11 @@ func gitIn(dir string) gitRunner {
 
 // safety: the commit the preconditions accepted; every later check compares against it.
 type landHead struct {
-	Branch string `json:"branch"`
-	Commit string `json:"commit"`
-	Tree   string `json:"tree"`
-	Base   string `json:"base"`
+	Branch string                 `json:"branch"`
+	Commit string                 `json:"commit"`
+	Tree   string                 `json:"tree"`
+	Base   string                 `json:"base"`
+	Checks *landCheckRequirements `json:"checks,omitempty"`
 }
 
 type landPreconditionsJob struct {
@@ -138,6 +152,7 @@ type landPreconditionsJob struct {
 	Queued     bool
 	Submitted  string
 	QueuedMain string
+	Checks     *queuedChecks
 }
 
 func (j *landPreconditionsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -154,6 +169,10 @@ func (j *landPreconditionsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, err
 		}
 		if j.Queued && head.Base != j.QueuedMain {
 			return landHead{}, queuedMainMoved(j.QueuedMain, head.Base)
+		}
+		if j.Checks != nil {
+			head.Checks = &landCheckRequirements{RunID: j.Checks.RunID, Required: j.Checks.names()}
+			sparkwing.Info(ctx, "landing check set: run=%s tree=%s required=%v", head.Checks.RunID, head.Tree, head.Checks.Required)
 		}
 		sparkwing.Info(ctx, "landing %s at %s (tree %s) onto %s %s", head.Branch, short(head.Commit), short(head.Tree), landBaseRef, short(head.Base))
 		return head, nil
@@ -263,6 +282,9 @@ type landJob struct {
 
 func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	verify := sparkwing.Step(w, "verify", func(ctx context.Context) error {
+		if j.Queued && !sparkwing.IsDryRun(ctx) && j.Head.Get(ctx).Checks == nil {
+			return errors.New("land: queued landing has no authorizing check receipts")
+		}
 		review, ok, err := j.review(ctx)
 		if err != nil {
 			return err
@@ -383,6 +405,11 @@ func verifyLanding(ctx context.Context, git gitRunner, dir string, head landHead
 	}
 	if err := verifyLandingCheckout(ctx, git, dir, head); err != nil {
 		return err
+	}
+	if !sparkwing.IsDryRun(ctx) {
+		if err := verifyLandChecks(ctx, git, head); err != nil {
+			return err
+		}
 	}
 	sparkwing.Info(ctx, "review %s on tree %s, HEAD still %s", review.Result, short(head.Tree), short(head.Commit))
 	return nil
@@ -551,6 +578,9 @@ func recheckMergeDelta(ctx context.Context, files []string) error {
 		return err
 	}
 	mergedFiles := append(append([]string(nil), files...), branchFiles...)
+	if err := runPublishedSDKBuildFiles(ctx, mergedFiles, goStepParallelism(currentHost())); err != nil {
+		return err
+	}
 	scope := fmt.Sprintf("%d file(s) in the branch and merge delta", len(mergedFiles))
 	for _, check := range []func(context.Context) error{checkChangelogRequired, checkAPISpec, checkAPISnapshot} {
 		if err := check(ctx); err != nil {

@@ -16,7 +16,11 @@ import (
 )
 
 // PrePush runs fast push checks and adds affected Go tests for main updates.
-type PrePush struct{ sparkwing.Base }
+type PrePush struct {
+	sparkwing.Base
+	Head   sparkwing.Ref[landHead]
+	Checks *queuedChecks
+}
 
 func (PrePush) ShortHelp() string {
 	return "Push gate: fast checks, plus affected short and critical Go tests for main updates"
@@ -27,7 +31,7 @@ func (PrePush) Help() string {
 		"a CHANGELOG.md entry for every covered surface the push changes (bin/check-changelog.sh), " +
 		"api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), the public API " +
 		"surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh), and `go build`, `go vet` and the " +
-		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. It repeats " +
+		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. After the workspace build, it builds root release commands with CGO disabled against the published SDK pin, without workspace, SDK replacement, vendor or alternate-modfile overrides. Publish SDK API changes and update the root pin before using them. It repeats " +
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
 		"judged by `gate`. Every fast check reads the committed change from the merge base with origin/main to HEAD, and never " +
@@ -144,10 +148,16 @@ const affectedPushTestsTimeout = 45 * time.Minute
 type affectedPushTestsJob struct {
 	sparkwing.Base
 	queued bool
+	Head   sparkwing.Ref[landHead]
+	Checks *queuedChecks
 }
 
-func affectedPushTestsJobNode(plan *sparkwing.Plan, queued bool) *sparkwing.JobNode {
-	return sparkwing.Job(plan, "affected-tests", &affectedPushTestsJob{queued: queued}).
+func affectedPushTestsJobNode(plan *sparkwing.Plan, queued bool, checks ...*queuedChecks) *sparkwing.JobNode {
+	j := &affectedPushTestsJob{queued: queued}
+	if len(checks) > 0 && checks[0] != nil {
+		j.Checks, j.Head = checks[0], checks[0].Head
+	}
+	return sparkwing.Job(plan, "affected-tests", j).
 		Timeout(affectedPushTestsTimeout).
 		NoProgressTimeout(affectedPushTestsTimeout).
 		Cores(float64(goStepParallelism(affectedPushHost())))
@@ -160,7 +170,7 @@ func affectedPushHost() hostShape {
 }
 
 func (j *affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "test", func(ctx context.Context) error { return runAffectedPushTests(ctx, j.queued) })
+	sparkwing.Step(w, "test", j.Checks.wrap("affected-tests/test", j.Head, func(ctx context.Context) error { return runAffectedPushTests(ctx, j.queued) }))
 	return nil, nil
 }
 
@@ -181,10 +191,12 @@ func runAffectedPushTests(ctx context.Context, queued bool) error {
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.FailurePolicy(sparkwing.FailFast)
 	budget := newTierBudget("pre-push", prePushBudget).over(pushRangeScope)
+	budget.checks, budget.head = p.Checks, p.Head
 	budget.step(w, "changelog", checkChangelogRequired)
 	budget.step(w, "api-spec", checkAPISpec)
 	budget.step(w, "api-snapshot", checkAPISnapshot)
-	budget.step(w, "build-touched", runBuildTouched)
+	build := budget.step(w, "build-touched", runBuildTouched)
+	budget.step(w, "build-published-sdk", runPublishedSDKBuildTouched).Needs(build)
 	budget.step(w, "vet-touched", runVetTouched)
 	budget.step(w, "lint-touched", runFastLintTouched)
 	budget.verdict(w)

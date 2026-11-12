@@ -805,19 +805,31 @@ func repoGoChange(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	modules, err := committedModuleDirs(ctx)
+	return repoGoFilesChange(ctx, files, os.Getenv("GOFLAGS"))
+}
+
+func repoGoFilesChange(ctx context.Context, files []string, goFlags string) (string, error) {
+	byDir, err := repoPackageDirs(ctx, goFlags)
 	if err != nil {
 		return "", err
 	}
+	return goChange(files, byDir), nil
+}
+
+func repoPackageDirs(ctx context.Context, goFlags string) (map[string]string, error) {
+	modules, err := committedModuleDirs(ctx)
+	if err != nil {
+		return nil, err
+	}
 	byDir := map[string]string{}
 	for _, module := range modules {
-		packages, err := listModulePackages(ctx, module, os.Getenv("GOFLAGS"))
+		packages, err := listModulePackages(ctx, module, goFlags)
 		if err != nil {
-			return "", fmt.Errorf("%s: %w", module, err)
+			return nil, fmt.Errorf("%s: %w", module, err)
 		}
 		addRepoPackages(byDir, module, packages)
 	}
-	return goChange(files, byDir), nil
+	return byDir, nil
 }
 
 // safety: an unjudgeable change runs the step, so a broken scope can only widen it.
