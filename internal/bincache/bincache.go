@@ -191,7 +191,7 @@ func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []str
 
 	if err := gotoolchain.Run(ctx, cmd); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
+			return err
 		}
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return errMissingGoSum

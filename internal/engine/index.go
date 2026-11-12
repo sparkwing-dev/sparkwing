@@ -47,7 +47,7 @@ func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, er
 	result, err = mapping.Index(ctx, now)
 	if err != nil {
 		if ctx.Err() != nil {
-			return IndexResult{}, ctx.Err()
+			return IndexResult{}, err
 		}
 		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error(), Hint: "Run `sparkwing update` once online to cache the verified version policy."}
 	}
@@ -99,7 +99,7 @@ func (r *Resolver) indexPolicy(ctx context.Context, now time.Time, persist bool)
 		return IndexResult{Index: candidate}, nil
 	}
 	if ctx.Err() != nil {
-		return IndexResult{}, ctx.Err()
+		return IndexResult{}, err
 	}
 	// safety: Another process may have persisted a revocation while this resolver was fetching.
 	persisted, cacheErr := r.loadIndex(now)
