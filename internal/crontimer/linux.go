@@ -56,6 +56,9 @@ func installLinux(ctx context.Context, h Host) (State, error) {
 	if _, err := refreshPreflight(ctx, h, timerPath); err != nil {
 		return State{}, err
 	}
+	if err := unitfile.PrepareWorkingDirectory(h.SparkwingHome); err != nil {
+		return State{}, err
+	}
 	if err := ensureLogDir(h.LogPath); err != nil {
 		return State{Path: timerPath}, err
 	}

@@ -475,3 +475,30 @@ func TestInstallRequiresExplicitStateHome(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallPreparesWorkingDirectoryBeforeStarting(t *testing.T) {
+	for _, makeHost := range []func(*testing.T, *fakeExec) Host{linuxHost, darwinHost} {
+		f := &fakeExec{}
+		h := makeHost(t, f)
+		t.Run(h.GOOS, func(t *testing.T) {
+			h.StateHome = filepath.Join(t.TempDir(), "missing", "state")
+			h.LogPath = ""
+			startChecked := false
+			h.Exec = func(ctx context.Context, name string, args ...string) (string, error) {
+				if name == "systemctl" && len(args) > 1 && args[1] == "enable" || name == "launchctl" && len(args) > 0 && args[0] == "bootstrap" {
+					startChecked = true
+					if info, err := os.Stat(h.StateHome); err != nil || !info.IsDir() {
+						t.Errorf("working directory absent before start: %v", err)
+					}
+				}
+				return f.run(ctx, name, args...)
+			}
+			if _, err := Install(t.Context(), h); err != nil {
+				t.Fatal(err)
+			}
+			if !startChecked {
+				t.Fatal("fixture never started the unit")
+			}
+		})
+	}
+}

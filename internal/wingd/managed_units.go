@@ -233,6 +233,9 @@ func (m *nativeUnits) Refresh(ctx context.Context, executable, version string) e
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := unitfile.PrepareWorkingDirectory(m.host.SparkwingHome); err != nil {
+		return err
+	}
 	if err := unitfile.Write(m.path(), body); err != nil {
 		return err
 	}

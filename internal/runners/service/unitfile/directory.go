@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 )
 
 // RewriteWorkingDirectory updates only the native working directory, retaining captured settings.
 func RewriteWorkingDirectory(goos, body, directory string) (string, error) {
-	if !filepath.IsAbs(directory) || strings.ContainsRune(directory, 0) {
-		return "", errors.New("native unit: working directory must be an absolute path without NUL bytes")
+	if err := checkWorkingDirectory(directory); err != nil {
+		return "", err
 	}
 	if goos == "linux" {
 		lines := strings.Split(body, "\n")
@@ -115,4 +116,22 @@ func RewriteWorkingDirectory(goos, body, directory string) (string, error) {
 		return "", errors.New("native unit: missing agent dictionary")
 	}
 	return body[:rootEnd] + fmt.Sprintf("<key>WorkingDirectory</key>%s\n", value) + body[rootEnd:], nil
+}
+
+// PrepareWorkingDirectory makes the selected directory available before a manager starts the unit.
+func PrepareWorkingDirectory(directory string) error {
+	if err := checkWorkingDirectory(directory); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("native unit: create working directory %s: %w", directory, err)
+	}
+	return nil
+}
+
+func checkWorkingDirectory(directory string) error {
+	if !filepath.IsAbs(directory) || strings.ContainsRune(directory, 0) {
+		return errors.New("native unit: working directory must be an absolute path without NUL bytes")
+	}
+	return nil
 }

@@ -131,6 +131,9 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 	if err := ctx.Err(); err != nil {
 		return state, err
 	}
+	if err := unitfile.PrepareWorkingDirectory(h.SparkwingHome); err != nil {
+		return state, err
+	}
 	if err := writeManaged(driver.path, body); err != nil {
 		return state, err
 	}

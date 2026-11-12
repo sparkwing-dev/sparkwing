@@ -1,7 +1,9 @@
 package unitfile
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -41,5 +43,41 @@ func TestRewriteWorkingDirectoryRefusesUnusableNativeInput(t *testing.T) {
 		if _, err := RewriteWorkingDirectory(tc.goos, tc.body, tc.home); err == nil {
 			t.Fatalf("accepted invalid %s body or home: %s %s", tc.goos, tc.body, tc.home)
 		}
+	}
+}
+
+func TestPrepareWorkingDirectoryKeepsExistingPermissions(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	if err := PrepareWorkingDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(root, 0o751); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareWorkingDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Mode() != after.Mode() {
+		t.Fatal("existing permissions changed")
+	}
+	path := filepath.Join(root, "occupied")
+	if err := os.WriteFile(path, []byte("retained"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareWorkingDirectory(path); err == nil {
+		t.Fatal("regular file accepted as working directory")
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "retained" {
+		t.Fatal("existing file changed")
 	}
 }

@@ -257,9 +257,6 @@ func TestRefreshRegistrationUpgradesWorkingDirectoryWithoutChangingConfig(t *tes
 			h := linuxHost(t, executor)
 			h.GOOS = goos
 			h.StateHome = filepath.Join(h.Home, "private state % & quotes\"")
-			if err := os.MkdirAll(h.StateHome, 0o700); err != nil {
-				t.Fatal(err)
-			}
 			if err := os.MkdirAll(filepath.Dir(h.ConfigPath), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -294,6 +291,9 @@ func TestRefreshRegistrationUpgradesWorkingDirectoryWithoutChangingConfig(t *tes
 			for range 2 {
 				if err := RefreshRegistration(t.Context(), h); err != nil {
 					t.Fatal(err)
+				}
+				if info, err := os.Stat(h.StateHome); err != nil || !info.IsDir() {
+					t.Fatalf("refresh did not prepare working directory: %v", err)
 				}
 				got, err := os.ReadFile(path)
 				if err != nil || string(got) != want {

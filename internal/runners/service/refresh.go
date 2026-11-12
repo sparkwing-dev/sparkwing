@@ -81,6 +81,9 @@ func RefreshRegistration(ctx context.Context, h Host) error {
 	if err != nil {
 		return err
 	}
+	if err := unitfile.PrepareWorkingDirectory(h.StateHome); err != nil {
+		return err
+	}
 	if updated != body {
 		if err := unitfile.Write(state.Path, updated); err != nil {
 			return err

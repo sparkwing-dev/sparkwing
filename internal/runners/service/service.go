@@ -189,6 +189,9 @@ func (h Host) registration(ctx context.Context, path string) (bool, error) {
 }
 
 func (h Host) writeRegistration(path string) error {
+	if err := unitfile.PrepareWorkingDirectory(h.StateHome); err != nil {
+		return err
+	}
 	body := serviceUnit(h)
 	if h.GOOS == "darwin" {
 		if err := ensureLogDir(h.LogPath); err != nil {

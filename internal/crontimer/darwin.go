@@ -60,6 +60,9 @@ func installDarwin(ctx context.Context, h Host) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
+	if err := unitfile.PrepareWorkingDirectory(h.SparkwingHome); err != nil {
+		return State{}, err
+	}
 	if err := ensureLogDir(h.LogPath); err != nil {
 		return State{Path: path}, err
 	}

@@ -72,7 +72,8 @@ Generated runner, local-controller and schedule services use the selected
 Sparkwing state home as their working directory. The same applies to local
 runner instances and launchd agents. Updating an existing managed definition
 adds or replaces that setting while preserving captured environment, config
-arguments and timer cadence.
+arguments and timer cadence. The working directory is created before the unit
+is started or its definition is refreshed.
 
 Changing a definition does not change a running process's current directory.
 Runner self-updates preserve the running service; its new directory takes effect
