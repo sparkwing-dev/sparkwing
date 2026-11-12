@@ -802,13 +802,13 @@ not hosted latency.
 
 `@sparkwing/sdk` has its own version in `sdk/typescript/package.json`.
 An engine release verifies the signed version index, then compares its recorded
-TypeScript SDK source digest with the selected source. The digest covers tracked
-package manifests (apart from version fields), README, declarations, compiler
-configs, `src/`, native build/packaging scripts and the native/package workflow
-slice. It also retains all of `test/nativehost/`: Windows publication executes
+TypeScript SDK source digest with the selected source. The digest includes tracked
+SDK paths by default, including new inputs and npm's automatically packed files
+such as LICENSE. Package manifest version fields are omitted. The native/package
+workflow slice is also included, as is all of `test/nativehost/`: Windows publication executes
 that package and binds its whole fixture tree into verification receipts.
-Ordinary unit tests and their helpers, examples, implementation notes, formatter
-config and generated output do not define this release digest. Changing this
+Known unit tests and their helpers, examples, implementation notes, formatter
+config and generated output are explicitly excluded. Changing this
 input set changes existing source hashes, so adopting the rule needs a new SDK
 version once. Recoveries of pre-change SDK entries also refuse the new hash;
 the signed identities are not rewritten. An unchanged digest retains the existing SDK entry
