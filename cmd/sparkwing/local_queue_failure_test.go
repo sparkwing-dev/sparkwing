@@ -41,9 +41,9 @@ func TestLocalQueueCleanupPreservesFailure(t *testing.T) {
 				result := func(ctx context.Context) error {
 					<-ctx.Done()
 					if mixed {
-						return errors.Join(fmt.Errorf("request: %w", ctx.Err()), failure)
+						return errors.Join(fmt.Errorf("request: %w", context.Cause(ctx)), failure)
 					}
-					return fmt.Errorf("request: %w", ctx.Err())
+					return fmt.Errorf("request: %w", context.Cause(ctx))
 				}
 				stopped, revoked := false, false
 				lifecycle := &queueLifecycleFixture{stop: func() { stopped = true }}

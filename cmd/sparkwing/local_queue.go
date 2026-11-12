@@ -55,19 +55,19 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 	if loop.OnError == nil {
 		loop.OnError = func(err error) { slog.Error("local run host failed", "err", err) }
 	}
-	watchCtx, stopWatch := context.WithCancel(ctx)
+	watchCtx, stopWatch := context.WithCancelCause(ctx)
 	watchDone := make(chan error, 1)
 	go func() {
 		watchErr := watchLocalRunner(watchCtx, lifecycle, instance.ID, loop)
 		watchDone <- localRunnerCleanupError(watchCtx, watchErr)
 	}()
 	defer func() {
-		stopWatch()
+		stopWatch(&localRunnerStop{phase: "watch"})
 		err = errors.Join(err, <-watchDone)
 	}()
 	roll := time.AfterFunc(localRunnerRollAfter, loop.Drain)
 	defer roll.Stop()
-	drainCtx, stopDrain := context.WithCancel(context.WithoutCancel(ctx))
+	drainCtx, stopDrain := context.WithCancelCause(context.WithoutCancel(ctx))
 	drainResult := make(chan error, 1)
 	draining := false
 	claimsStopped := loop.OnClaimsStopped
@@ -82,7 +82,7 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 		}
 	}
 	defer func() {
-		stopDrain()
+		stopDrain(&localRunnerStop{phase: "drain"})
 		if draining {
 			err = errors.Join(err, <-drainResult)
 		}
@@ -90,10 +90,19 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 	return loop.Run(ctx)
 }
 
-// safety: classify at completion so a later cleanup cancellation cannot hide an earlier failure.
+type localRunnerStop struct{ phase string }
+
+func (e *localRunnerStop) Error() string { return "local runner " + e.phase + " stopped" }
+func (e *localRunnerStop) Unwrap() error { return context.Canceled }
+
+// safety: a global cancellation sentinel cannot attribute an error recorded before owner shutdown.
 func localRunnerCleanupError(ctx context.Context, err error) error {
-	if err == nil || ctx.Err() == nil {
+	cause, owned := context.Cause(ctx).(*localRunnerStop) //nolint:errorlint // Only the direct private cause is an owner stop.
+	if err == nil || !owned {
 		return err
+	}
+	if err == cause { //nolint:errorlint // Only this owner's exact marker proves cancellation provenance.
+		return nil
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		parts := joined.Unwrap()
@@ -112,9 +121,6 @@ func localRunnerCleanupError(ctx context.Context, err error) error {
 			return nil
 		}
 		return err
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return nil
 	}
 	return err
 }

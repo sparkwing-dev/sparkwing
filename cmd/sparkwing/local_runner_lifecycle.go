@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 )
 
+// safety: retain owner stop causes so cleanup can distinguish unrelated failures.
 type localRunnerLifecycle interface {
 	Register(context.Context, localhostwire.LocalRunnerInstance) (localhostwire.LocalRunnerInstance, error)
 	Activate(context.Context, string) error
@@ -53,7 +54,7 @@ func watchLocalRunner(ctx context.Context, lifecycle localRunnerLifecycle, id st
 			return err
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return context.Cause(ctx)
 		}
 		if instance.State != "active" {
 			loop.Drain()

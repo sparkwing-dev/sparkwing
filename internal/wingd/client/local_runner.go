@@ -63,7 +63,8 @@ func (c *LocalRunnerClient) Watch(ctx context.Context, id, state string) (localh
 			return result, err
 		}
 		if err := wait.wait(ctx, err); err != nil {
-			return result, err
+			// safety: this unbounded retry stops only when its owning context is canceled.
+			return result, context.Cause(ctx)
 		}
 	}
 }
@@ -90,7 +91,7 @@ func (c *LocalRunnerClient) Drain(ctx context.Context, id string) error {
 			return err
 		}
 		if err := wait.wait(ctx, err); err != nil {
-			return err
+			return context.Cause(ctx)
 		}
 	}
 }

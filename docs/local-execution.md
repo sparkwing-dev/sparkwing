@@ -192,7 +192,8 @@ nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let
 held work finish, then retry `sparkwing daemon stop`. `sparkwing daemon restart`
 leaves the runner and its jobs running. A runner stop ignores only its own
 watch or drain cancellation; lifecycle failures remain errors, including when
-they occur alongside cancellation.
+they occur alongside cancellation. Other cancellations remain errors, even if
+they are returned after the owner stops.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful

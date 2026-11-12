@@ -95,7 +95,7 @@ func (f *queueLifecycleFixture) Watch(ctx context.Context, _, _ string) (localho
 		return f.watch(ctx)
 	}
 	<-ctx.Done()
-	return localhostwire.LocalRunnerInstance{}, ctx.Err()
+	return localhostwire.LocalRunnerInstance{}, context.Cause(ctx)
 }
 
 func (f *queueLifecycleFixture) Stop(context.Context, string) error {
@@ -153,7 +153,7 @@ func TestLocalQueueDrainWatchJoinsSaturatedHosts(t *testing.T) {
 				case <-drain:
 					return localhostwire.LocalRunnerInstance{State: "draining"}, nil
 				case <-ctx.Done():
-					return localhostwire.LocalRunnerInstance{}, ctx.Err()
+					return localhostwire.LocalRunnerInstance{}, context.Cause(ctx)
 				}
 			},
 			stop:  func() { stopped = true },
