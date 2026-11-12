@@ -20,5 +20,5 @@ func Main(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		code = 1
 	}
-	os.Exit(code) //nolint:forbidigo // TestMain owns the process exit after fixture and sandbox cleanup.
+	os.Exit(code)
 }
