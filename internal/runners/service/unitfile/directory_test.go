@@ -47,11 +47,20 @@ func TestRewriteWorkingDirectoryRefusesUnusableNativeInput(t *testing.T) {
 }
 
 func TestPrepareWorkingDirectoryKeepsExistingPermissions(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
+	root := filepath.Join(t.TempDir(), "missing", "state")
 	if err := PrepareWorkingDirectory(root); err != nil {
 		t.Fatal(err)
 	}
 	if runtime.GOOS != "windows" {
+		for _, path := range []string{filepath.Dir(root), root} {
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o700 {
+				t.Fatalf("new directory %s mode = %o, want 700", path, info.Mode().Perm())
+			}
+		}
 		if err := os.Chmod(root, 0o751); err != nil {
 			t.Fatal(err)
 		}
@@ -79,5 +88,73 @@ func TestPrepareWorkingDirectoryKeepsExistingPermissions(t *testing.T) {
 	}
 	if data, err := os.ReadFile(path); err != nil || string(data) != "retained" {
 		t.Fatal("existing file changed")
+	}
+}
+
+func TestPrepareWorkingDirectoryLinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix symlink and permission contract")
+	}
+	for _, kind := range []string{"directory", "ancestor", "file", "dangling"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "target")
+			switch kind {
+			case "directory", "ancestor":
+				if err := os.Mkdir(target, 0o751); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(target, 0o751); err != nil {
+					t.Fatal(err)
+				}
+			case "file":
+				if err := os.WriteFile(target, []byte("retained"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			link := filepath.Join(root, "link")
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			path := link
+			if kind == "ancestor" {
+				path = filepath.Join(link, "child")
+			}
+			err := PrepareWorkingDirectory(path)
+			refused := kind == "file" || kind == "dangling"
+			if (err != nil) != refused {
+				t.Fatalf("prepare %s: error = %v, want refusal %t", kind, err, refused)
+			}
+			if got, err := os.Readlink(link); err != nil || got != target {
+				t.Fatalf("link changed: %q %v", got, err)
+			}
+			switch kind {
+			case "directory", "ancestor":
+				info, err := os.Stat(target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if info.Mode().Perm() != 0o751 {
+					t.Fatalf("target mode changed: %o", info.Mode().Perm())
+				}
+				if kind == "ancestor" {
+					info, err := os.Stat(filepath.Join(target, "child"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !info.IsDir() || info.Mode().Perm() != 0o700 {
+						t.Fatalf("child mode = %s, want directory 700", info.Mode())
+					}
+				}
+			case "file":
+				if data, err := os.ReadFile(target); err != nil || string(data) != "retained" {
+					t.Fatalf("file changed: %q %v", data, err)
+				}
+			case "dangling":
+				if _, err := os.Lstat(target); !os.IsNotExist(err) {
+					t.Fatalf("dangling target created: %v", err)
+				}
+			}
+		})
 	}
 }
