@@ -263,6 +263,16 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}()
 		return nil
 	}
+	stoppedClaimError := func(err error) error {
+		// safety: a local drain cancels only claims; mixed error trees must still fail.
+		if ctx.Err() == nil && policyInterrupted(claims, err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("claim runner work: %w", err)
+		}
+		return nil
+	}
 	var pending <-chan claimOutcome
 	var updateErr error
 	var updateStarted time.Time
@@ -295,7 +305,8 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			l.OnClaimsStopped()
 		}
 		if pending != nil {
-			runErr = errors.Join(runErr, accept(<-pending))
+			outcome := <-pending
+			runErr = errors.Join(runErr, accept(outcome), stoppedClaimError(outcome.err))
 		}
 		for len(active) > 0 {
 			finish(<-results)
@@ -394,14 +405,14 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		case outcome := <-pending:
 			pending = nil
 			if err := accept(outcome); err != nil {
-				return nil, err
+				return nil, errors.Join(err, outcome.err)
 			}
 			if claims.Err() != nil {
-				return nil, nil
+				return nil, stoppedClaimError(outcome.err)
 			}
 			select {
 			case <-drain:
-				return nil, nil
+				return nil, stoppedClaimError(outcome.err)
 			default:
 			}
 			if controllerclient.RetryableTransportError(outcome.err) {
