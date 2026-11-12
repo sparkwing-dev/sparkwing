@@ -208,7 +208,7 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		sdkStep.SkipIf(skipTypeScriptSDKUnlessTouched)
 		vetStep.SkipIf(skipUnlessGoTouched("vet"))
 		buildStep.SkipIf(skipUnlessGoTouched("build"))
-		publishedBuild.SkipIf(skipUnlessGoTouched("build-published-sdk"))
+		publishedBuild.SkipIf(skipPublishedSDKBuildUnlessTouched)
 		lintStep.SkipIf(skipUnlessGoTouched("lint"))
 		frontendDeps.SkipIf(skipFrontendDepsUnlessTouched)
 	}

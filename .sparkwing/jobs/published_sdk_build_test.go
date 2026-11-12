@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"archive/zip"
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -213,5 +215,131 @@ func TestPublishedSDKBuildRejectsAnUnpublishedMergeDependency(t *testing.T) {
 	gitCommitAll(t, root, "branch uses local SDK")
 	if err := recheckMergeDelta(newTestContext(t), []string{"sparkwing/sdk.go"}); err == nil || !strings.Contains(err.Error(), "CleanupError") {
 		t.Fatalf("merge recheck accepted unpublished root API: %v", err)
+	}
+}
+
+func TestPublishedSDKBuildRejectsTargetSpecificUnpublishedAPIs(t *testing.T) {
+	for _, platform := range []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"} {
+		t.Run(platform, func(t *testing.T) {
+			root := publishedSDKFixture(t)
+			t.Setenv("GOOS", "linux")
+			t.Setenv("GOARCH", "amd64")
+			goos, goarch, _ := strings.Cut(platform, "/")
+			file := filepath.Join(root, "cmd/sparkwing", "extra_"+goos+"_"+goarch+".go")
+			writeGoFile(t, file, "package main\nimport sdk \""+sdkModulePath+"\"\nvar _ = sdk.ExecDone{}.CleanupError\n")
+			if err := buildPublishedSDK(newTestContext(t), 1); err == nil || !strings.Contains(err.Error(), "CleanupError") {
+				t.Fatalf("%s unpublished API escaped the release check: %v", platform, err)
+			}
+		})
+	}
+}
+
+func TestPublishedSDKBuildMatchesReleaseBinarySet(t *testing.T) {
+	root := publishedSDKFixture(t)
+	writeGoFile(t, filepath.Join(root, "cmd/sparkwing-controller/extra_windows.go"), "package main\nvar _ = controllerIsNotReleasedOnWindows\n")
+	if err := buildPublishedSDK(newTestContext(t), 1); err != nil {
+		t.Fatalf("release check included an unsupported binary: %v", err)
+	}
+}
+
+func TestPublishedSDKBuildSkipsUnownedDocsOnAffectedGate(t *testing.T) {
+	root := publishedSDKFixture(t)
+	writeGoFile(t, filepath.Join(root, "cmd/sparkwing/main.go"), "package main\nimport sdk \""+sdkModulePath+"\"\nfunc main() { _ = sdk.ExecDone{}.CleanupError }\n")
+	gitCommitAll(t, root, "unrelated broken command")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	writeGoFile(t, filepath.Join(root, "docs/guide.md"), "# Ordinary documentation\n")
+	gitCommitAll(t, root, "documentation")
+	host, plan, work := prepareWork(t, &Gate{mode: gateAffected})
+	closures := findStep(work, "build-published-sdk").Closures.SkipIf
+	if len(closures) == 0 {
+		t.Fatal("affected published build has no scope predicate")
+	}
+	for _, closure := range closures {
+		raw, err := host.Eval(t.Context(), plan, "job", closure, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var skip bool
+		if err := json.Unmarshal(raw, &skip); err != nil {
+			t.Fatal(err)
+		}
+		if !skip {
+			t.Fatal("ordinary documentation selected an unrelated release build")
+		}
+	}
+}
+
+func TestPublishedSDKBuildIncludesDeletedMarkdownEmbedsOnEveryLandPath(t *testing.T) {
+	for _, rel := range []string{"message.md", "assets/message.md"} {
+		for _, tc := range []struct {
+			name string
+			job  sparkwing.Workable
+		}{{"affected", &Gate{mode: gateAffected}}, {"touched", &PrePush{}}, {"merge", nil}} {
+			t.Run(rel+"/"+tc.name, func(t *testing.T) {
+				root := publishedSDKFixture(t)
+				writeGoFile(t, filepath.Join(root, "cmd/sparkwing/main.go"), fmt.Sprintf("package main\nimport _ \"embed\"\n//go:embed %s\nvar message string\nfunc main() {}\n", rel))
+				asset := filepath.Join(root, "cmd/sparkwing", rel)
+				writeGoFile(t, asset, "embedded Markdown\n")
+				gitCommitAll(t, root, "embed Markdown")
+				runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+				check := func() error { return runPublishedSDKBuildFiles(newTestContext(t), []string{"cmd/sparkwing/" + rel}, 1) }
+				if tc.job != nil {
+					host, plan, work := prepareWork(t, tc.job)
+					prerequisites := []string{"vet", "build"}
+					if _, ok := tc.job.(*PrePush); ok {
+						prerequisites = []string{"build-touched"}
+					}
+					for _, step := range prerequisites {
+						if _, err := host.RunStep(t.Context(), plan, "job", step); err != nil {
+							t.Fatal(err)
+						}
+					}
+					check = func() error {
+						for _, closure := range findStep(work, "build-published-sdk").Closures.SkipIf {
+							raw, err := host.Eval(t.Context(), plan, "job", closure, nil)
+							if err != nil {
+								return err
+							}
+							var skip bool
+							if err := json.Unmarshal(raw, &skip); err != nil {
+								return err
+							}
+							if skip {
+								return fmt.Errorf("%s skipped deleted embedded input", tc.name)
+							}
+						}
+						_, err := host.RunStep(t.Context(), plan, "job", "build-published-sdk")
+						return err
+					}
+				}
+				if err := os.Remove(asset); err != nil {
+					t.Fatal(err)
+				}
+				gitCommitAll(t, root, "remove embedded input")
+				if out, err := exec.Command("go", "build", "-o", os.DevNull, "./cmd/...").CombinedOutput(); err == nil || !strings.Contains(string(out), "no matching files found") {
+					t.Fatalf("deleted embed control: %s %v", out, err)
+				}
+				if err := check(); err == nil || !strings.Contains(err.Error(), "no matching files found") {
+					t.Fatalf("deleted Markdown embed escaped %s: %v", tc.name, err)
+				}
+			})
+		}
+	}
+}
+
+func TestPublishedSDKBuildIncludesPlatformOnlyMarkdownInputs(t *testing.T) {
+	root := publishedSDKFixture(t)
+	writeGoFile(t, filepath.Join(root, "internal/windowsdata/data_windows.go"), "package windowsdata\nimport _ \"embed\"\n//go:embed message.md\nvar Message string\n")
+	writeGoFile(t, filepath.Join(root, "cmd/sparkwing/extra_windows.go"), "package main\nimport _ \"fixture/internal/windowsdata\"\n")
+	asset := filepath.Join(root, "internal/windowsdata/message.md")
+	writeGoFile(t, asset, "Windows input\n")
+	gitCommitAll(t, root, "Windows-only package")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	if err := os.Remove(asset); err != nil {
+		t.Fatal(err)
+	}
+	gitCommitAll(t, root, "delete Windows input")
+	if err := runPublishedSDKBuildTouched(newTestContext(t)); err == nil || !strings.Contains(err.Error(), "no matching files found") {
+		t.Fatalf("platform-only embed escaped release build: %v", err)
 	}
 }

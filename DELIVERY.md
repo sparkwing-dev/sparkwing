@@ -1510,21 +1510,25 @@ file. Other syntax and workflow checks remain active.
   generated pages. `TestCommandReferenceMatchesRegistry` also compares the
   committed pages with the renderer compiled into the full CLI.
   Both gate modes and pre-push run `build-published-sdk` after their workspace
-  build, using the same compiler allowance. It compiles the root CLI, controller
-  and runner with `CGO_ENABLED=0`, `GOWORK=off`, `GOENV=off`, empty `GOFLAGS`
+  build, using the same compiler allowance. It compiles all six release targets:
+  Linux, macOS and Windows on amd64 and arm64, sequentially. The CLI and runner
+  build on every target; the controller builds on Linux and macOS.
+  Each target uses `CGO_ENABLED=0`, `GOWORK=off`, `GOENV=off`, empty `GOFLAGS`
   and `-mod=readonly -trimpath`. The selected SDK must have a published version
   and no replacement. This also bypasses vendor copies and alternate modfiles.
-  Go input changes, including SDK-only changes and package-owned embedded files,
-  select the check; full gate always runs it. Merge rechecks retain it over the
+  Go input changes, including SDK-only changes and package-owned files of any
+  extension, select the check. Package-owned Markdown is included conservatively
+  because it can be embedded, including deleted inputs. Unowned documentation
+  still skips the check; full gate always runs it. Merge rechecks retain it over the
   combined branch and merge delta. Publish a standalone Go SDK API change first,
   wait for its module version to resolve, then bump the root `go.mod` requirement
   before the root uses that API. Workspace conformance remains a separate check.
-  On the shared Linux host at load 8-9, the published build on one compiler core
-  added 16.05 seconds on its first measured invocation and 9.62, 9.62 and 10.06
-  seconds with a warm cache. This fits the fast phase's one-minute step budget;
-  it adds about ten seconds after the workspace build rather than sharing its
-  compiler allocation concurrently. These are check timings, not admission wait
-  or an end-to-end land measurement.
+  The earlier host-only check on one compiler core measured 16.05 seconds on its
+  first invocation and 9.62, 9.62 and 10.06 seconds warm at shared load 8-9.
+  Those timings cover one target. Cross-target dependency caches are separate;
+  the first six-target build can take several minutes. The fast phase's
+  one-minute warning applies to the complete matrix step. The check runs after
+  the workspace build rather than sharing its compiler allocation concurrently.
   Without `--full`, vet and build cover the affected dependency closure. Its test step
   runs `go test -short` on changed packages
   and their reverse dependency closure, including production, internal-test

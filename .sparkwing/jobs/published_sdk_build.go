@@ -33,10 +33,19 @@ func buildPublishedSDK(ctx context.Context, cores int) error {
 	if module.Path != sdkModulePath || module.Version == "" || module.Replace != nil {
 		return fmt.Errorf("published SDK: root must require %s at a published version without replace; publish the SDK before updating the root pin", sdkModulePath)
 	}
-	sparkwing.Info(ctx, "published SDK: building release commands against %s %s without workspace or replace", module.Path, module.Version)
-	command := environment + goCommandAt(cores, "build", "-mod=readonly -trimpath -o "+shellQuote(os.DevNull)+" ./cmd/sparkwing ./cmd/sparkwing-controller ./cmd/sparkwing-runner")
-	if _, err := sparkwing.Bash(ctx, command).Dir(root).Run(); err != nil {
-		return fmt.Errorf("published SDK release build: publish SDK API changes and update the root pin before using them: %w", err)
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		packages := "./cmd/sparkwing ./cmd/sparkwing-controller ./cmd/sparkwing-runner"
+		if goos == "windows" {
+			packages = "./cmd/sparkwing ./cmd/sparkwing-runner"
+		}
+		for _, goarch := range []string{"amd64", "arm64"} {
+			platform := goos + "/" + goarch
+			sparkwing.Info(ctx, "published SDK: building %s release commands against %s %s without workspace or replace", platform, module.Path, module.Version)
+			command := environment + "GOOS=" + goos + " GOARCH=" + goarch + " " + goCommandAt(cores, "build", "-mod=readonly -trimpath -o "+shellQuote(os.DevNull)+" "+packages)
+			if _, err := sparkwing.Bash(ctx, command).Dir(root).Run(); err != nil {
+				return fmt.Errorf("published SDK release build %s: publish SDK API changes and update the root pin before using them: %w", platform, err)
+			}
+		}
 	}
 	return nil
 }
@@ -50,11 +59,7 @@ func runPublishedSDKBuildTouched(ctx context.Context) error {
 }
 
 func runPublishedSDKBuildFiles(ctx context.Context, files []string, cores int) error {
-	why := goChange(files, nil)
-	var err error
-	if why == "" {
-		why, err = repoGoFilesChange(ctx, files, "")
-	}
+	why, err := publishedSDKBuildChange(ctx, files)
 	if err != nil {
 		return err
 	}
@@ -63,4 +68,36 @@ func runPublishedSDKBuildFiles(ctx context.Context, files []string, cores int) e
 		return nil
 	}
 	return buildPublishedSDK(ctx, cores)
+}
+
+func publishedSDKBuildChange(ctx context.Context, files []string) (string, error) {
+	if why := goChange(files, nil); why != "" || len(files) == 0 {
+		return why, nil
+	}
+	byDir, err := repoPackageDirs(ctx, "")
+	if err != nil {
+		return "", err
+	}
+	// safety: package-owned Markdown can be an embed input, including one deleted
+	// from the checkout, so the documentation-only exclusion cannot judge it.
+	for _, file := range files {
+		if pkg := owningPackage(file, byDir); pkg != "" {
+			return fmt.Sprintf("%s changed, which %s owns", file, pkg), nil
+		}
+	}
+	return "", nil
+}
+
+func skipPublishedSDKBuildUnlessTouched(ctx context.Context) bool {
+	files, _, err := affectedChangeScope(ctx)
+	var why string
+	if err == nil {
+		why, err = publishedSDKBuildChange(ctx, files)
+	}
+	if err != nil || why != "" {
+		sparkwing.Info(ctx, "published SDK: running (reason=%s, scope error=%v)", why, err)
+		return false
+	}
+	sparkwing.Info(ctx, "published SDK: no Go inputs changed; skipping release build")
+	return true
 }
