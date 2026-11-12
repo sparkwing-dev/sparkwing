@@ -9,9 +9,10 @@
   with a known asset extension remain summary-only: png, jpg, jpeg, gif, webp,
   ico, svgz, woff, woff2, ttf, otf, pdf, zip, gz and tgz. There is no override for
   that block; `--skip` refuses it. Raw Git filenames, including colons, match
-  strict routes literally; only model locations parse numeric line/column suffixes.
-  Strict review includes
-  both endpoints of renames and copies from a NUL-delimited name-status inventory,
+  strict routes literally. Finding locations bind to the longest changed filename
+  before numeric line/column parsing, preserving filenames with numeric colons.
+  Open findings with unmatched or malformed locations block and cannot be skipped,
+  including cached verdicts. Strict review includes both endpoints of renames and copies from a NUL-delimited name-status inventory,
   preserving raw filenames and literal path selection.
   Repository diff attributes cannot suppress readable text changes. Ordinary UTF-8
   text hunks keep their bytes, and truncation respects character boundaries.

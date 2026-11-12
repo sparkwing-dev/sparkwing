@@ -224,9 +224,10 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 		return reviewRecord{}, "", err
 	}
 	diff.enforceBinaryReview(&rec, p, changes)
+	files := slices.Concat(changes...)
 	started = d.now()
-	rec.Notes = append(rec.Notes, applySkips(p, rec.Findings, skips)...)
-	rec.settle(p)
+	rec.Notes = append(rec.Notes, applySkips(p, rec.Findings, skips, files)...)
+	rec.settle(p, files)
 	if err := saveReviewRecord(file, rec); err != nil {
 		return reviewRecord{}, "", fmt.Errorf("review: write the record: %w", err)
 	}
@@ -594,8 +595,8 @@ const severityTable = `| Severity | Meaning | Blocks |
 | --- | --- | --- |
 | P0 | Objective not met, or a security or data-loss risk that is likely or severe | yes |
 | P1 | Significant security, correctness or usability risk; or a design-rule violation | yes |
-| P2 | Real but bounded issue; fixing it is worthwhile | no, except on a strict path at or below its block_at |
-| P3 | Suggestion, clarity, minor cleanup | no |`
+| P2 | Real but bounded issue; fixing it is worthwhile | no, except on a strict path at or below its block_at, or an unattributed location |
+| P3 | Suggestion, clarity, minor cleanup | no, except an unattributed location |`
 
 func (r reviewPrompt) fresh() string {
 	var b strings.Builder
@@ -683,7 +684,7 @@ func (r reviewPrompt) answerFormat() string {
 	return "## Answer\n\nReply with one JSON object and nothing else:\n\n" +
 		"{\"findings\": [{\"id\": \"" + prefix + "1\", \"severity\": \"P0|P1|P2|P3\", \"rule\": \"<rule id, or empty>\", " +
 		"\"file\": \"path:line\", \"summary\": \"<what is wrong and why it matters>\", \"status\": \"open|fixed\"}]}\n\n" +
-		"Give new findings ids starting with " + prefix + ". Return every finding you still hold, fixed ones included. An empty findings array means the change passes.\n"
+		"Give new findings ids starting with " + prefix + ". Return every finding you still hold, fixed ones included. For file locations, use the exact changed filename, optionally followed by numeric :line or :line:column. The longest known filename wins; an unmatched or malformed location blocks an open finding and cannot be author-skipped. An empty findings array reports no model findings.\n"
 }
 
 func findingsJSON(fs []reviewFinding) string {

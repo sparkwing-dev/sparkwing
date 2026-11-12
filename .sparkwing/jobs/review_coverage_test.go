@@ -335,3 +335,65 @@ func TestReviewStrictColonPathsRemainLiteral(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewFindingLocationsUseChangedPathInventory(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, strict, location, severity string
+		block                                  bool
+	}{
+		{"numeric filename line", "internal/store/a.go:12", "internal/store/a.go:12", "internal/store/a.go:12:4", "P2", true},
+		{"two numeric filename suffixes", "internal/store/a.go:12:34", "internal/store/a.go:12:34", "internal/store/a.go:12:34:4", "P2", true},
+		{"line and column", "internal/store/a.go:12", "internal/store/a.go:12", "internal/store/a.go:12:4:2", "P2", true},
+		{"exact numeric filename", "internal/store/a.go:12", "internal/store/a.go:12", "internal/store/a.go:12", "P2", true},
+		{"unmatched", "ordinary.go", "internal/store/strict.go", "missing.go:4", "P2", true},
+		{"unmatched suggestion", "ordinary.go", "internal/store/strict.go", "missing.go:4", "P3", true},
+		{"missing", "ordinary.go", "internal/store/strict.go", "", "P2", true},
+		{"malformed suffix", "ordinary.go", "internal/store/strict.go", "ordinary.go:not-a-line", "P2", true},
+		{"path boundary", "ordinary.go", "internal/store/strict.go", "ordinary.go-extra:4", "P2", true},
+		{"known ordinary", "ordinary.go", "internal/store/strict.go", "ordinary.go:4:2", "P2", false},
+		{"longest path wins", "internal/store/a.go:12", "internal/store/a.go", "internal/store/a.go:12:4", "P2", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changes := map[string]string{tc.path: "package changed\n"}
+			if tc.name == "longest path wins" {
+				changes[tc.strict] = "package strict\n"
+			}
+			fx, root := gitEncodingReviewFixture(t, nil, changes)
+			policy := testPolicy(t)
+			policy.Strict[0].Paths = []string{tc.strict}
+			reply := fmt.Sprintf(`{"findings":[{"id":"F1","severity":%q,"file":%q,"summary":"real open defect"}]}`, tc.severity, tc.location)
+			fx.def.replies = []string{reply, reply}
+			ctx := newTestContext(t)
+			in := reviewInputs{branch: "work", brief: "Resolve model locations against actual changed paths"}
+			for pass := range 3 {
+				if pass == 2 {
+					writeGoFile(t, filepath.Join(root, "other.md"), "follow-up\n")
+					gitCommitAll(t, root, "follow-up")
+				}
+				rec, file, err := runReview(ctx, fx.deps, policy, in)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if (rec.Result == resultBlock) != tc.block || (rec.BlockingOpen == 1) != tc.block {
+					t.Fatalf("pass%d location=%q: result=%+v", pass, tc.location, rec)
+				}
+				if len(rec.Findings) != 1 || rec.Findings[0].Status != findingOpen {
+					t.Fatalf("finding cleared: %+v", rec.Findings)
+				}
+				if tc.block {
+					in.skip = "F1=author disagrees"
+					if pass == 0 {
+						rec.Findings[0].Status, rec.Findings[0].SkipReason = findingSkipped, "old skip"
+						rec.Result, rec.BlockingOpen = resultPass, 0
+						if err := saveReviewRecord(file, rec); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+			}
+			if len(fx.def.calls) != 2 || fx.def.calls[0].session != "" || fx.def.calls[1].session == "" {
+				t.Fatalf("fresh/cached/resumed modes not exercised: %+v", fx.def.calls)
+			}
+		})
+	}
+}

@@ -157,7 +157,7 @@ func TestVerdictBlocksOnP0P1AndStrictP2(t *testing.T) {
 		{"skipped P2", reviewFinding{Severity: "P2", File: "a.go:1", Status: findingSkipped}, resultPass},
 	} {
 		rec := reviewRecord{Findings: []reviewFinding{c.f}}
-		rec.settle(p)
+		rec.settle(p, []string{"a.go", "internal/store/billing_policy.go"})
 		if rec.Result != c.want {
 			t.Errorf("%s: result %s, want %s", c.name, rec.Result, c.want)
 		}
@@ -177,7 +177,7 @@ func TestSkipRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	notes := applySkips(p, findings, skips)
+	notes := applySkips(p, findings, skips, []string{"a.go", "internal/store/billing_policy.go"})
 	want := map[string]string{"F1": findingOpen, "F2": findingSkipped, "F3": findingSkipped, "S1": findingOpen, "F4": findingOpen}
 	for _, f := range findings {
 		if f.Status != want[f.ID] {
