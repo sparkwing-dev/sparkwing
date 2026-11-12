@@ -39,3 +39,12 @@ func checkClosed(t *testing.T, identities string) {
 		}
 	}
 }
+
+func inheritProbePipe(t *testing.T, command *exec.Cmd, pipe *os.File, identities string) string {
+	t.Helper()
+	command.ExtraFiles = nil
+	if pipe != nil {
+		command.ExtraFiles = []*os.File{pipe}
+	}
+	return identities
+}
