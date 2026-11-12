@@ -4,6 +4,7 @@ package nodehost
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -79,6 +81,8 @@ echo ready; wait`},
 func TestHostCommandReportsSessionCleanupFailure(t *testing.T) {
 	for _, trigger := range []string{"cancellation", "sink", "capture", "nonzero"} {
 		t.Run(trigger, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			t.Cleanup(cancel)
 			kill := make(chan struct{})
 			pid := 0
 			var restore func()
@@ -93,6 +97,8 @@ func TestHostCommandReportsSessionCleanupFailure(t *testing.T) {
 					return nil, err
 				}
 				identity := session.identity
+				rescueErr := make(chan error, 1)
+				stopRescue := context.AfterFunc(ctx, func() { rescueErr <- procgroup.KillSession(identity) })
 				// safety: the injected invalid identity makes the real session-cleanup call fail before any signal.
 				session.identity.SessionID = 0
 				if trigger == "capture" {
@@ -101,6 +107,11 @@ func TestHostCommandReportsSessionCleanupFailure(t *testing.T) {
 					session.captureErr = errors.New("injected SDK command session capture failure")
 				}
 				restore = func() {
+					if !stopRescue() {
+						if err := <-rescueErr; err != nil {
+							t.Error(err)
+						}
+					}
 					session.identity = identity
 					session.captured, session.captureErr = true, nil
 					if err := endCommandSessions([]*commandSession{session}); err != nil {
@@ -109,12 +120,28 @@ func TestHostCommandReportsSessionCleanupFailure(t *testing.T) {
 				}
 				return session, nil
 			}
-			request := nodewire.ExecRequest{ID: "cleanup-failure", Dir: t.TempDir(), Env: os.Environ(), Capture: true,
-				Argv: []string{"sh", "-c", "sleep 300 & echo $!; exit 0"}}
-			if trigger == "nonzero" {
-				request.Argv[2] = "sleep 300 & echo $!; exit 7"
+			dir := t.TempDir()
+			holdPath := filepath.Join(dir, "leader-hold")
+			if err := unix.Mkfifo(holdPath, 0o600); err != nil {
+				t.Fatal(err)
 			}
-			done, session := runHostCommandStarted(request, nil, kill, t.Context().Done(), func(stream string, chunk []byte, _ bool) error {
+			hold, err := os.OpenFile(holdPath, os.O_RDWR, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := hold.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			request := nodewire.ExecRequest{
+				ID: "cleanup-failure", Dir: dir, Env: append(os.Environ(), "HOSTEXEC_LEADER_HOLD="+holdPath), Capture: true,
+				Argv: []string{"sh", "-c", `sleep 300 & echo $!; read line < "$HOSTEXEC_LEADER_HOLD"; exit 0`},
+			}
+			if trigger == "nonzero" {
+				request.Argv[2] = strings.Replace(request.Argv[2], "exit 0", "exit 7", 1)
+			}
+			done, session := runHostCommandStarted(request, nil, kill, ctx.Done(), func(stream string, chunk []byte, _ bool) error {
 				if stream == "stdout" && len(chunk) > 0 && pid == 0 {
 					var err error
 					pid, err = strconv.Atoi(strings.TrimSpace(string(chunk)))
@@ -123,7 +150,13 @@ func TestHostCommandReportsSessionCleanupFailure(t *testing.T) {
 					}
 					if trigger != "sink" {
 						close(kill)
-					} else {
+					}
+					// safety: cancellation is observable before the leader may exit,
+					// so the callback cannot lose the cleanup request.
+					if _, err := hold.WriteString("\n"); err != nil {
+						return err
+					}
+					if trigger == "sink" {
 						return os.ErrClosed
 					}
 				}
