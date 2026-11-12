@@ -127,7 +127,7 @@ func TestKeysReuseMaterialAfterOwnerCleanup(t *testing.T) {
 	defer b.finish()
 	second := New(b)
 	if !first.Equal(second) {
-		t.Fatal("finished fixtures must reuse checked-in key material rather than generate fresh RSA keys")
+		t.Fatal("finished fixtures must reuse released key material rather than generate fresh RSA keys")
 	}
 	if first == second || first.N == second.N || first.D == second.D {
 		t.Fatal("fixtures must own independent mutable key objects")
