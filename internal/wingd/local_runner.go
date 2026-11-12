@@ -172,13 +172,22 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 		return err
 	}
 	d.runnerChanges.lock()
-	instance, err := registry.ActiveLocalRunner(ctx, subject)
+	instance := d.retiringRunner
+	if instance == nil {
+		var active localhostwire.LocalRunnerInstance
+		active, err = registry.ActiveLocalRunner(ctx, subject)
+		if err == nil {
+			// safety: the persisted drain removes this incarnation from active discovery.
+			instance = &active
+			d.retiringRunner = instance
+		}
+	}
 	var failure *apierr.Error
 	if err == nil {
 		err = registry.DrainLocalRunner(ctx, subject, instance.ID)
 	}
 	d.runnerChanges.unlock()
-	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
+	if instance == nil && errors.As(err, &failure) && failure.Code == apierr.NotFound {
 		return nil
 	}
 	if err != nil {
@@ -188,9 +197,17 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, LocalRunnerRetireWait)
 	defer cancel()
 	for {
-		alive, err := LocalRunnerProcessAlive(instance)
-		if err != nil || !alive {
+		alive, err := LocalRunnerProcessAlive(*instance)
+		if err != nil {
 			return err
+		}
+		if !alive {
+			d.runnerChanges.lock()
+			if d.retiringRunner == instance {
+				d.retiringRunner = nil
+			}
+			d.runnerChanges.unlock()
+			return nil
 		}
 		select {
 		case <-ctx.Done():

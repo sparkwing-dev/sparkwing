@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"testing/synctest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
@@ -62,7 +63,7 @@ func TestStandaloneCloseKeepsControllerForFailedRetirement(t *testing.T) {
 	f := &runtimeControllerFixture{}
 	r := newRuntimeFixture(t, f)
 	failure := errors.New("runner retirement refused")
-	registry := &runtimeRetirement{controller: f, failure: failure}
+	registry := &runtimeRetirement{controller: f, failure: failure, runnerHTTPFixture: runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{ID: "runner", PID: os.Getpid(), ProcessBirth: "retired-incarnation", State: "active"}}}
 	r.cfg.Open = func(context.Context, string) (LocalController, error) {
 		return &retiringRuntimeController{f, registry}, nil
 	}
@@ -77,8 +78,38 @@ func TestStandaloneCloseKeepsControllerForFailedRetirement(t *testing.T) {
 		t.Fatal("controller closed before runner retirement succeeded")
 	}
 	registry.failure = nil
-	registry.instance = localhostwire.LocalRunnerInstance{PID: os.Getpid(), ProcessBirth: "retired-incarnation"}
 	if err := lifecycle.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestStandaloneStopRetryKeepsPersistedDrainingRunnerAlive(t *testing.T) {
+	birth, err := admissionProcessBirth(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &runtimeControllerFixture{}
+	r := newRuntimeFixture(t, f)
+	registry := &runnerSetFixture{instances: map[string]localhostwire.LocalRunnerInstance{
+		"held": {ID: "held", PID: os.Getpid(), ProcessBirth: birth, State: "active"},
+	}}
+	r.cfg.Open = func(context.Context, string) (LocalController, error) {
+		return &retiringRuntimeController{f, registry}, nil
+	}
+	lifecycle := NewLocalLifecycle(r, nil)
+	if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "test", Standalone: true}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { r.run.cancel(); <-r.run.done }()
+	synctest.Test(t, func(t *testing.T) {
+		for attempt := 1; attempt <= 2; attempt++ {
+			err := lifecycle.Stop(t.Context())
+			if registry.state("held") != "draining" {
+				t.Fatal("drain was not persisted")
+			}
+			if err == nil || f.closed.Load() {
+				t.Fatalf("stop attempt %d closed controller while draining runner lived: %v", attempt, err)
+			}
+		}
+	})
 }
