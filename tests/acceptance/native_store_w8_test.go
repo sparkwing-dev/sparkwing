@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"sync/atomic"
@@ -269,7 +270,10 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				State:    &nativeLocalStateW8{done: done, stop: cancel},
 				HTTP:     localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
 				Runner: func(ctx context.Context) error {
-					queue, err := cloudStoreClientW8(t, server)(client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return root.Raw, nil }})
+					// safety: real HTTP preserves client cancellation instead of returning the fixture's sanitized server error.
+					httpServer := httptest.NewServer(controller.New(server.Store, nil).WithEngineController(server.EngineController).Handler())
+					defer httpServer.Close()
+					queue, err := client.NewEngineClient(client.EngineOptions{URL: httpServer.URL, HTTP: httpServer.Client(), Bearer: func(context.Context) (string, error) { return root.Raw, nil }})
 					if err != nil {
 						return err
 					}
