@@ -70,6 +70,22 @@ func RefreshRegistration(ctx context.Context, h Host) error {
 	if _, err := h.registration(ctx, state.Path); err != nil {
 		return err
 	}
+	body, exists, managed, err := unitfile.Read(state.Path, marker)
+	if err != nil {
+		return err
+	}
+	if !exists || !managed {
+		return foreignError(state.Path)
+	}
+	updated, err := unitfile.RewriteWorkingDirectory(h.GOOS, body, h.StateHome)
+	if err != nil {
+		return err
+	}
+	if updated != body {
+		if err := unitfile.Write(state.Path, updated); err != nil {
+			return err
+		}
+	}
 	if h.GOOS == "linux" {
 		return runCommand(ctx, h, "systemctl", "--user", "daemon-reload")
 	}

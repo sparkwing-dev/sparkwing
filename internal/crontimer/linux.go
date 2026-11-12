@@ -158,6 +158,7 @@ func serviceUnit(h Host) string {
 	// safety: __tick ensures the local controller, then invokes its tick.
 	// Keep that controller alive after the oneshot exits.
 	b.WriteString("[Service]\nType=oneshot\nKillMode=process\n")
+	fmt.Fprintf(&b, "WorkingDirectory=%s\n", unitfile.SystemdWord(h.SparkwingHome))
 	// safety: a tick that hangs on a lock or a store would otherwise hold the
 	// unit active and swallow every following minute.
 	b.WriteString("TimeoutStartSec=5m\n")

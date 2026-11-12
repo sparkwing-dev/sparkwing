@@ -118,6 +118,9 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 		return state, err
 	}
 	body, err := unitfile.RewriteCommand(h.GOOS, driver.body, timerCommand(h), h.Version)
+	if err == nil {
+		body, err = unitfile.RewriteWorkingDirectory(h.GOOS, body, h.SparkwingHome)
+	}
 	if err != nil {
 		return state, err
 	}

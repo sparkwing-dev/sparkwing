@@ -725,3 +725,21 @@ func TestUninstallRefusesForeignCompanionRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRenderedTimerWorkingDirectoryUsesStateHome(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			h := linuxHost(t, &fakeExec{})
+			h.GOOS = goos
+			body, want := serviceUnit(h), "WorkingDirectory="+unitfile.SystemdWord(h.SparkwingHome)+"\n"
+			if goos == "darwin" {
+				body = agentPlist(h)
+				want = "<key>WorkingDirectory</key>\n  <string>" + unitfile.XMLText(h.SparkwingHome) + "</string>"
+			}
+			t.Logf("rendered %s unit:\n%s", goos, body)
+			if !strings.Contains(body, want) {
+				t.Fatalf("missing state working directory %q:\n%s", want, body)
+			}
+		})
+	}
+}
