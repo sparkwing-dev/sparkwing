@@ -177,7 +177,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			if l.OnError != nil {
 				l.OnError(result.err)
 			}
-			if onlyCancellationCause(result.err, context.Cause(ctx)) {
+			if OnlyCancellation(result.err, context.Cause(ctx)) {
 				if firstCancellation == nil {
 					firstCancellation = result.err
 				}
@@ -530,30 +530,7 @@ func (l *Loop) checkPolicy(ctx context.Context) (bool, error) {
 }
 
 func policyInterrupted(ctx context.Context, err error) bool {
-	return ctx.Err() != nil && onlyCancellation(err)
-}
-
-func onlyCancellation(err error) bool {
-	return onlyCancellationCause(err, nil)
-}
-
-func onlyCancellationCause(err, cause error) bool {
-	if err == nil {
-		return false
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		parts := joined.Unwrap()
-		for _, part := range parts {
-			if !onlyCancellationCause(part, cause) {
-				return false
-			}
-		}
-		return len(parts) > 0
-	}
-	if wrapped := errors.Unwrap(err); wrapped != nil {
-		return onlyCancellationCause(wrapped, cause)
-	}
-	return (cause != nil && errors.Is(err, cause)) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return ctx.Err() != nil && OnlyCancellation(err, nil)
 }
 
 func (l *Loop) request() controllerwire.ClaimRequest {
