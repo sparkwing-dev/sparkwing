@@ -485,7 +485,7 @@ func TestLocalFollowReadsAtOnceWhenHostingEndsThenPollsAgain(t *testing.T) {
 }
 
 func TestRunLogsKeeperDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
-	diagnostic := jobLogRecord("r1", `{"ts":"2026-11-12T20:00:00Z","level":"debug","event":"lease_keeper","attrs":{"sequence":1}}`)
+	diagnostic := jobLogRecord("r1", `{"ts":"2026-11-12T20:00:00Z","level":"debug","event":"lease_keeper","host_lease_keeper":true,"attrs":{"sequence":1}}`)
 	ordinary := jobLogRecord("r1", `{"level":"info","event":"exec_line","msg":"42"}`)
 	for _, format := range []string{"plain", "pretty"} {
 		var baseline, observed bytes.Buffer
@@ -507,5 +507,18 @@ func TestRunLogsKeeperDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "lease_keeper") {
 		t.Fatal("JSON omitted diagnostic")
+	}
+}
+
+func TestRunLogsHidesMaskedKeeperDiagnostic(t *testing.T) {
+	record := jobLogRecord("r1", `{"level":"debug","event":"***","host_lease_keeper":true,"attrs":{"sequence":1}}`)
+	for _, format := range []string{"plain", "pretty"} {
+		var out bytes.Buffer
+		if err := writeLogRecord(&out, record, format, false); err != nil {
+			t.Fatal(err)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("masked diagnostic leaked into %s: %s", format, out.String())
+		}
 	}
 }

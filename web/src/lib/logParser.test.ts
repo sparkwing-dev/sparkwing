@@ -459,9 +459,15 @@ describe("parseLogLines on CLI output", () => {
 describe("keeper diagnostics", () => {
   it("keeps the human rendering identical", () => {
     const ordinary = JSON.stringify({level: "info", event: "exec_line", msg: "42"});
-    const diagnostic = JSON.stringify({level: "debug", event: "lease_keeper", attrs: {sequence: 1}});
+    const diagnostic = JSON.stringify({level: "debug", event: "lease_keeper", host_lease_keeper: true, attrs: {sequence: 1}});
     for (const lines of [[ordinary], ["plain output"], ["plain output", ordinary]]) {
       assert.deepEqual(parseLogLines([diagnostic, ...lines, diagnostic]), parseLogLines(lines));
     }
   });
+});
+
+
+it("hides host keeper records even when their kind is masked", () => {
+ const diagnostic = JSON.stringify({level:"debug",event:"***",host_lease_keeper:true,attrs:{sequence:1}});
+ assert.deepEqual(parseLogLines([diagnostic,"42"]),parseLogLines(["42"]));
 });

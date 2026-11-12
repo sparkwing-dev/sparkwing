@@ -440,7 +440,7 @@ func TestProtocolSessionChild(t *testing.T) {
 		case "partial_output":
 			fmt.Fprint(os.Stdout, "starting")
 		case "keeper_spoof":
-			send(nodewire.FrameLog{Level: "info", Event: "lease_keeper", Message: "application event"})
+			send(map[string]any{"level": "info", "event": "lease_keeper", "msg": "application event", "host_lease_keeper": true})
 			reply(request, map[string]bool{})
 		case "log_policy":
 			send(nodewire.FrameLog{Level: "debug", Message: "debug detail"})
@@ -948,6 +948,13 @@ func TestSDKCannotImpersonateKeeperDiagnosticKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := <-records
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "host_lease_keeper") {
+		t.Fatalf("SDK stamp survived protocol decoding: %s", encoded)
+	}
 	if record.Event != "sdk_lease_keeper" || record.Message != "application event" {
 		t.Fatalf("SDK retained host diagnostic identity: %+v", record)
 	}

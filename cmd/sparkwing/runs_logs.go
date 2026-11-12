@@ -238,11 +238,10 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 	if format == "json" {
 		return json.NewEncoder(out).Encode(record)
 	}
-	if record.Event == "lease_keeper" {
-		return nil
+	var diagnostic struct {
+		LeaseKeeper bool `json:"host_lease_keeper"`
 	}
-	var diagnostic nodewire.FrameLog
-	if json.Unmarshal([]byte(record.Line), &diagnostic) == nil && diagnostic.Event == "lease_keeper" {
+	if json.Unmarshal([]byte(record.Line), &diagnostic) == nil && diagnostic.LeaseKeeper {
 		return nil
 	}
 	line := record.Line

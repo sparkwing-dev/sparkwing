@@ -31,8 +31,11 @@ exits 4: stop polling.
 
 Native hosts also record structured `lease_keeper` diagnostics. Default CLI plain
 and pretty output and the dashboard's human log rendering hide these records.
-Use `sparkwing runs logs --run RUN --grep lease_keeper -o json` to read them
+Use `sparkwing runs logs --run RUN --grep host_lease_keeper -o json` to read them
 through the run's existing log permissions. No additional credential is granted.
+The persisted host-owned `host_lease_keeper: true` stamp identifies these records
+even when secret masking redacts the event name. The SDK protocol does not accept
+this stamp; SDK messages cannot assign it.
 Pretty prefixes keep physical log line numbers, so hidden diagnostic records can
 leave gaps in those numbers. SDK protocol records using this reserved event kind
 are renamed `sdk_lease_keeper` and stay visible as application records.

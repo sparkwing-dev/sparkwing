@@ -293,7 +293,11 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(l.masker.Log(frame))
+	// The host stamp survives masking and is never decoded from SDK protocol frames.
+	body, err := json.Marshal(struct {
+		nodewire.FrameLog
+		LeaseKeeper bool `json:"host_lease_keeper,omitempty"`
+	}{l.masker.Log(frame), frame.Event == "lease_keeper"})
 	if err != nil {
 		return err
 	}

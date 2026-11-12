@@ -15,7 +15,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestNativeKeeperDiagnosticsUseExistingAttemptLogBinding(t *testing.T) {
@@ -70,11 +72,12 @@ func TestKeeperDiagnosticLogHourlyUploadVolume(t *testing.T) {
 		}
 		diagnostics := lease.NewDiagnostics(t.Context(), func(_ context.Context, e lease.Event) error {
 			raw, err := json.Marshal(struct {
-				TS    string      `json:"ts"`
-				Level string      `json:"level"`
-				Event string      `json:"event"`
-				Attrs lease.Event `json:"attrs"`
-			}{e.Wall.Format(time.RFC3339Nano), "debug", "lease_keeper", e})
+				TS              string      `json:"ts"`
+				Level           string      `json:"level"`
+				Event           string      `json:"event"`
+				Attrs           lease.Event `json:"attrs"`
+				HostLeaseKeeper bool        `json:"host_lease_keeper"`
+			}{e.Wall.Format(time.RFC3339Nano), "debug", "lease_keeper", e, true})
 			if err != nil {
 				return err
 			}
@@ -183,4 +186,29 @@ func TestDiagnosticBytesRideRealOutputCut(t *testing.T) {
 			t.Fatalf("cut lost order: %q", body.String())
 		}
 	})
+}
+
+func TestKeeperDiagnosticStampSurvivesMasking(t *testing.T) {
+	records := &nativeLogRecords{objects: map[string][]byte{}}
+	masker := secrets.NewMasker()
+	masker.Register("lease_keeper")
+	logs := &localLogs{run: "run", masker: masker, principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitTrigger, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+		records.view.Subject = subject
+		return records, nil
+	}}
+	if err := logs.write(t.Context(), "run", "", nodewire.FrameLog{Level: "debug", Event: "lease_keeper", Attrs: json.RawMessage(`{"sequence":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+	<-logs.finish(t.Context(), "")
+	var body bytes.Buffer
+	if _, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body); err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(body.Bytes()), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["event"] != "***" || record["host_lease_keeper"] != true {
+		t.Fatalf("masking lost diagnostic identity: %s", body.String())
+	}
 }
