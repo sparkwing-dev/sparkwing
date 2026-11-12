@@ -29,6 +29,29 @@ An interrupted or incomplete observation exits 3, and polling again may
 complete it. A run that does not exist, or that the credential cannot read,
 exits 4: stop polling.
 
+Native hosts also record structured `lease_keeper` diagnostics. Default CLI plain
+and pretty output and the dashboard's human log rendering hide these records.
+Use `sparkwing runs logs --run RUN --grep lease_keeper -o json` to read them
+through the run's existing log permissions. No additional credential is granted.
+Pretty prefixes keep physical log line numbers, so hidden diagnostic records can
+leave gaps in those numbers. SDK protocol records using this reserved event kind
+are renamed `sdk_lease_keeper` and stay visible as application records.
+Diagnostic-only bytes do not start an upload timer. They ride the next real-output
+cut or the final seal; the existing segment-size and total-byte bounds still apply.
+
+Each keeper instance records its OWNER or NODE role, unit generation, renewal
+sequence, selected expiry and watcher reset, renewal-in-flight state and inherited
+deadlines. Clock samples pair process-relative monotonic durations with wall time;
+process birth and boot identity indicate whether process identity is complete.
+The records contain no lease bearer or renewal payload.
+
+Delivery is best effort and cannot delay renewal, expiry or stop. Missing sequence
+numbers, a nonzero dropped count, incomplete identity, or a missing execution-end
+record make a trace incomplete. A zero inherited deadline does not imply that a
+lease watcher has no expiry. Log closure or lost writer authority can discard a
+tail; diagnostics do not extend log authority or execution lifetime. These records
+share the run's existing log storage limits, retention and upload policy.
+
 Search several runs with `sparkwing runs grep --grep PATTERN --pipeline check`.
 Search output retains its continuation even when a page has no matching lines.
 Each log read or search request scans at most 256 MiB of log bytes for at most

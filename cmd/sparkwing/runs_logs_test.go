@@ -483,3 +483,29 @@ func TestLocalFollowReadsAtOnceWhenHostingEndsThenPollsAgain(t *testing.T) {
 		}
 	})
 }
+
+func TestRunLogsKeeperDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
+	diagnostic := jobLogRecord("r1", `{"ts":"2026-11-12T20:00:00Z","level":"debug","event":"lease_keeper","attrs":{"sequence":1}}`)
+	ordinary := jobLogRecord("r1", `{"level":"info","event":"exec_line","msg":"42"}`)
+	for _, format := range []string{"plain", "pretty"} {
+		var baseline, observed bytes.Buffer
+		if err := writeLogRecord(&baseline, ordinary, format, false); err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range []controllerwire.LogRecord{diagnostic, ordinary, diagnostic} {
+			if err := writeLogRecord(&observed, record, format, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !bytes.Equal(baseline.Bytes(), observed.Bytes()) {
+			t.Fatalf("%s diagnostics changed human output: %q != %q", format, observed.String(), baseline.String())
+		}
+	}
+	var out bytes.Buffer
+	if err := writeLogRecord(&out, diagnostic, "json", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "lease_keeper") {
+		t.Fatal("JSON omitted diagnostic")
+	}
+}

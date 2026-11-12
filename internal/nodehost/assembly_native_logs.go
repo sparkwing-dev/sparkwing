@@ -20,15 +20,17 @@ import (
 )
 
 type localLogs struct {
-	mu        sync.Mutex
-	flushes   sync.WaitGroup
-	run       string
-	masker    *secrets.Masker
-	principal capability.Principal
-	nodes     map[string]capability.Principal
-	upload    func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
-	streams   map[string]*localLogStream
-	closed    bool
+	diagnosticReady chan struct{}
+	diagnosticBound sync.Once
+	mu              sync.Mutex
+	flushes         sync.WaitGroup
+	run             string
+	masker          *secrets.Masker
+	principal       capability.Principal
+	nodes           map[string]capability.Principal
+	upload          func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
+	streams         map[string]*localLogStream
+	closed          bool
 }
 
 type logHostStore struct {
@@ -127,7 +129,7 @@ type localLogStream struct {
 	closed  bool
 }
 
-func (s *localLogStream) write(ctx context.Context, body []byte) error {
+func (s *localLogStream) write(ctx context.Context, body []byte, diagnostic bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -143,6 +145,9 @@ func (s *localLogStream) write(ctx context.Context, body []byte) error {
 		if s.failed {
 			s.sink.MarkIncomplete()
 		}
+	}
+	if diagnostic {
+		return s.sink.AppendDiagnostic(body)
 	}
 	return s.sink.Append(body)
 }
@@ -179,6 +184,9 @@ func (l *localLogs) bind(p capability.Principal, attempt int64) {
 	}
 	if _, err := l.open(node); err != nil {
 		l.alert(node, err)
+	}
+	if l.diagnosticReady != nil {
+		l.diagnosticBound.Do(func() { close(l.diagnosticReady) })
 	}
 }
 
@@ -276,6 +284,9 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	}
 	stream, err := l.open(node)
 	if errors.Is(err, logseg.ErrClosed) {
+		if frame.Event == "lease_keeper" {
+			return err
+		}
 		l.alert(node, err)
 		return nil
 	}
@@ -286,7 +297,10 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	if err != nil {
 		return err
 	}
-	if err := stream.write(ctx, body); err != nil {
+	if err := stream.write(ctx, body, frame.Event == "lease_keeper"); err != nil {
+		if frame.Event == "lease_keeper" {
+			return err
+		}
 		l.alert(node, err)
 	}
 	return nil

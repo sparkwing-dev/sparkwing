@@ -454,3 +454,14 @@ describe("parseLogLines on CLI output", () => {
     assert.ok(summary);
   });
 });
+
+
+describe("keeper diagnostics", () => {
+  it("keeps the human rendering identical", () => {
+    const ordinary = JSON.stringify({level: "info", event: "exec_line", msg: "42"});
+    const diagnostic = JSON.stringify({level: "debug", event: "lease_keeper", attrs: {sequence: 1}});
+    for (const lines of [[ordinary], ["plain output"], ["plain output", ordinary]]) {
+      assert.deepEqual(parseLogLines([diagnostic, ...lines, diagnostic]), parseLogLines(lines));
+    }
+  });
+});

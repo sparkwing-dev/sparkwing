@@ -339,6 +339,9 @@ function summaryLines(rec: LogRecord): string[] {
 }
 
 export function parseLogLines(lines: string[]): ParsedLog {
+  lines = lines.filter((line) => {
+    try { return JSON.parse(line).event !== "lease_keeper"; } catch { return true; }
+  });
   if (looksLikeJSONL(lines)) {
     return parseJSONLLogs(lines);
   }

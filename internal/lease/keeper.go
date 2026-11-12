@@ -24,9 +24,11 @@ type Beat struct {
 
 // Keeper renews every unit and its bound concurrency under the shared cadence.
 type Keeper struct {
-	Renew    func(context.Context) (Beat, error)
-	Interval time.Duration
-	Lease    time.Duration
+	Diagnostics *Diagnostics
+	Identity    Identity
+	Renew       func(context.Context) (Beat, error)
+	Interval    time.Duration
+	Lease       time.Duration
 	// Observe receives successful watch updates without changing renewal cadence.
 	Observe func(Beat)
 	// WaitCancellation observes requested cancellation without renewing authority.
@@ -60,11 +62,13 @@ var ErrSilent = errors.New("lease renewal silent")
 
 // Run returns the unit context and a stop function that cancels and joins renewal.
 func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
+	trace := k.Diagnostics.start(ctx, k.Identity)
 	hard, hardCancel := context.WithCancelCause(ExecutionContext(ctx))
 	unit, cancel := context.WithCancelCause(context.WithValue(ctx, executionKey{}, hard))
 	executionDone := make(chan struct{})
 	context.AfterFunc(hard, func() {
 		defer close(executionDone)
+		trace.emit("execution_end", time.Time{}, time.Time{}, "ended")
 		if k.ExecutionEnded != nil {
 			k.ExecutionEnded()
 		}
@@ -84,7 +88,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 	expires := time.Now().Add(k.Lease)
 	go func(expires time.Time) {
 		defer close(watchDone)
-		watch(hard, func(err error) { hardCancel(err); cancel(err) }, renewed, expires)
+		watch(hard, func(err error) { hardCancel(err); cancel(err) }, renewed, expires, trace)
 	}(expires)
 	go func() {
 		defer close(done)
@@ -97,7 +101,13 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 				return
 			}
 			sent := time.Now()
+			trace.emit("renewal_start", sent, time.Time{}, "")
 			beat, err := k.Renew(unit)
+			outcome := "success"
+			if err != nil {
+				outcome = "error"
+			}
+			trace.emit("renewal_finish", time.Time{}, time.Time{}, outcome)
 			if unit.Err() != nil {
 				return
 			}
@@ -111,6 +121,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 				if !beat.ExpiresAt.IsZero() && beat.ExpiresAt.Before(expires) {
 					expires = beat.ExpiresAt
 				}
+				trace.emit("expiry_selected", time.Time{}, expires, "")
 				if !expires.After(time.Now()) {
 					hardCancel(ErrSilent)
 					cancel(ErrSilent)
@@ -196,8 +207,9 @@ func retryAfter(err error) time.Duration {
 	return time.Duration(milliseconds * float64(time.Millisecond))
 }
 
-func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan time.Time, expires time.Time) {
+func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan time.Time, expires time.Time, trace *keeperTrace) {
 	timer := time.NewTimer(time.Until(expires))
+	trace.emit("watch_arm", time.Time{}, expires, "")
 	defer timer.Stop()
 	for {
 		select {
@@ -208,6 +220,7 @@ func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan t
 			return
 		case expires = <-renewed:
 			timer.Reset(time.Until(expires))
+			trace.emit("watch_reset", time.Time{}, expires, "")
 		}
 	}
 }
