@@ -758,18 +758,23 @@ allowance and billing interval.
 
 ## Runner recovery during controller rollout
 
-Runners retry consecutive claim transport failures and temporary gateway 5xx
-responses for up to ten minutes. Claims pause between fresh requests with
-exponential jitter and honor longer `Retry-After` advice. A successful claim
-response resets the outage budget; uncertain claims are never replayed. Advice
-beyond the budget ends recovery at the deadline without an early request.
+Runners keep retrying claim transport failures and temporary gateway 5xx
+responses until their caller stops them. Fresh requests use exponential jitter,
+with automatic backoff capped at 30 seconds; longer `Retry-After` advice is honored.
+Uncertain claims are never replayed. After ten minutes without a successful claim
+response, the runner logs a warning, repeated at most once every five minutes.
+When runner metrics are enabled, `/healthz` returns HTTP 503 with
+`degraded: controller unreachable since T` during that sustained outage, then
+returns HTTP 200 after a successful claim response. Heartbeat success alone does
+not clear claim degradation.
 
-Held work keeps its execution context during claim recovery. Its lease expiry
-and authority checks still apply. A non-retryable claim refusal or an outage
-lasting ten minutes stops new claims and joins held work before the runner
-returns an error. The final error can therefore appear after the outage ended.
+Held work keeps its execution context and existing lease and authority limits.
+A transport outage does not stop claims or start a drain: recovery can claim
+children needed by held work. A non-retryable refusal still stops new claims
+and joins held work before returning an error. Explicit stop, idle-exit and
+claim-lifetime policies retain their existing behavior.
 
 Terminal run acknowledgements retry temporary controller or connection failures
 with backoff and `Retry-After` until the caller's award context ends. They keep
 the same fenced completion request. Authority loss and other permanent refusals
-return immediately. Heartbeat success does not reset the claim-outage budget.
+return immediately. Heartbeat success does not clear claim degradation.

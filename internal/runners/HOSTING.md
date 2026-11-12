@@ -89,24 +89,26 @@ Both the CLI and standalone runner use the same retained executable owner.
 and rejects substituting the new installation under the accepted identity.
 
 Controller connection failures, timeouts, explicit 5xx unavailability and
-5xx responses without a JSON error envelope allow fresh claim polls for up to ten minutes of consecutive
-failures. Exponential jitter adds to the configured polling floor and caps the
-wait at five seconds, or the floor when longer. Retry-After seconds and HTTP
-dates can extend that wait. If advice or backoff exceeds the recovery window,
-claims stop at the deadline without an early retry. In-flight recovery claims
-carry that deadline too. A successful response resets
-that window. Each poll is a new request because a lost claim reply may
-already contain an award. Authentication, permission and protocol refusals
-remain fatal. Signed version policy keeps its existing denial behavior.
+5xx responses without a JSON error envelope allow fresh claim polls until the
+caller stops intake. Automatic exponential jitter is capped at 30 seconds;
+Retry-After seconds and HTTP dates can extend that wait. A ten-minute consecutive
+claim outage triggers WARN, repeated at most every five minutes. `Loop.HealthError`
+reports that sustained outage, and the optional runner `/healthz` returns 503
+with its start timestamp until a claim succeeds. Heartbeats do not clear it.
+Each poll is a new request because a lost reply may already contain an award.
+Transport outages never enter drain: held hosts may depend on children this
+runner must claim after recovery. Authentication, permission and protocol
+refusals remain fatal. Signed version policy retains its denial behavior.
 `Loop.Drain` stops new claims and returns immediately. `Run` joins held hosts,
 including uploads and terminal acknowledgements, before it returns.
 `TestLoopPollsThroughControllerRestarts`,
 `TestLoopControllerRestartKeepsHeldHostAliveThroughDrain`,
-`TestLoopBoundsControllerTransportRecovery`,
+`TestLoopControllerTransportRecoveryHonorsCallerCancellation`,
 `TestLoopTransportRecoveryKeepsRefusalsFatal`,
 `TestLoopClaimsAfterGatewayOutage`, `TestLoopGatewayRetryTiming`,
 `TestLoopSurvivesDeployLengthGatewayOutage`,
-`TestLoopBoundsSlowGatewayRecovery`,
+`TestLoopClaimsAfterProlongedOutageWithHeldWork`, `TestLoopClaimSuccessResetsDegradation`,
+`TestLoopSlowGatewayRecoveryHonorsCallerCancellation`,
 `TestLoopGatewayOutageKeepsHeldHost`, `TestLoopGatewayProtocolFailuresStayFatal`
 and `TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
 The shared controller decoder preserves gateway status and retry advice.
@@ -258,10 +260,10 @@ an integration obligation. A committed-source test does not close that obligatio
 
 `Loop.OnClaimsStopped` notifies the host owner before pending awards and held
 hosts join. The local runner uses it to persist draining independently of host
-cleanup, including when a controller outage exhausts claim recovery. Cancellation
+cleanup, after an explicit drain or terminal refusal. Cancellation
 of that persistence worker follows host joining, so a permanently absent API
 does not hold an idle runner open.
 
 Terminal run acknowledgements retry temporary controller failures until their
 caller context ends, retaining their completion fence and Retry-After advice.
-A successful heartbeat does not reset the claim-availability budget.
+A successful heartbeat does not clear claim degradation.

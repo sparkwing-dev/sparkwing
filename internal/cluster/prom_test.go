@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 
@@ -69,7 +70,7 @@ func TestRunnerMetricsServesAndJoins(t *testing.T) {
 				<-ctx.Done()
 				runnerJoined = true
 				return nil
-			})
+			}, nil)
 		}()
 		transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
 			client, server := net.Pipe()
@@ -114,7 +115,7 @@ func TestRunnerMetricsFailureCancelsAndJoinsRunner(t *testing.T) {
 			<-ctx.Done()
 			joined = true
 			return nil
-		})
+		}, nil)
 		if !errors.Is(err, listener.failure) || !joined {
 			t.Fatalf("joined=%t error=%v", joined, err)
 		}
@@ -125,7 +126,7 @@ func TestRunnerExitStopsMetrics(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		listener := newMetricsListener()
 		failure := errors.New("runner failed")
-		err := runWithMetrics(t.Context(), listener, func(context.Context) error { return failure })
+		err := runWithMetrics(t.Context(), listener, func(context.Context) error { return failure }, nil)
 		if !errors.Is(err, failure) {
 			t.Fatal(err)
 		}
@@ -173,4 +174,54 @@ func gatherMetrics(t *testing.T) string {
 	rec := httptest.NewRecorder()
 	promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	return rec.Body.String()
+}
+
+func TestRunnerHealthSurfacesAndClearsDegradation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		listener := newMetricsListener()
+		var degraded atomic.Bool
+		done := make(chan error, 1)
+		go func() {
+			done <- runWithMetrics(ctx, listener, func(ctx context.Context) error { <-ctx.Done(); return nil }, func() error {
+				if degraded.Load() {
+					return errors.New("degraded: controller unreachable since 2000-01-01T00:00:00Z")
+				}
+				return nil
+			})
+		}()
+		transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+			client, server := net.Pipe()
+			listener.connections <- server
+			return client, nil
+		}}
+		defer transport.CloseIdleConnections()
+		client := &http.Client{Transport: transport}
+		for _, state := range []bool{false, true, false} {
+			degraded.Store(state)
+			response, err := client.Get("http://metrics/healthz")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := response.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
+			expected := http.StatusOK
+			if state {
+				expected = http.StatusServiceUnavailable
+			}
+			if response.StatusCode != expected || state && !strings.Contains(string(body), "degraded: controller unreachable since 2000-01-01T00:00:00Z") {
+				t.Errorf("degraded=%v status=%d body=%s", state, response.StatusCode, body)
+			}
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	})
 }
