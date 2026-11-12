@@ -202,7 +202,7 @@ func TestHasManyLargeAndDuplicate(t *testing.T) {
 }
 
 func TestCommitAfterInterruptedUpload(t *testing.T) {
-	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	dir := t.TempDir()
 	backend, err := NewFilesystem(FilesystemOptions{
 		Directory: dir, Endpoint: "https://objects.invalid",
