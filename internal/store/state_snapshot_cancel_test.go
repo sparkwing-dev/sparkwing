@@ -76,7 +76,7 @@ func TestFollowerReadsNormalizeCancelledTransactions(t *testing.T) {
 					if cancelled {
 						cancel(cause)
 					}
-					// database/sql can finish cancellation rollback after the query's context check.
+					// safety: database/sql can finish cancellation rollback after the query's context check.
 					return sql.ErrTxDone
 				}
 				want := sql.ErrTxDone

@@ -85,7 +85,7 @@ func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (snapshot RunSn
 	return readSnapshotTx(ctx, tx, t.team, runID)
 }
 
-// SQL cancellation can race automatic rollback and surface a transaction or driver error.
+// safety: SQL cancellation can race automatic rollback and surface a transaction or driver error.
 func snapshotReadError(ctx context.Context, err error) error {
 	if cause := context.Cause(ctx); cause != nil && errors.Is(err, sql.ErrTxDone) {
 		return cause
