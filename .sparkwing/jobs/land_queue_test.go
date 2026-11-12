@@ -47,15 +47,15 @@ func TestLandQueueSerializesOrdinaryAndFocusedLands(t *testing.T) {
 			if !job.Inline {
 				t.Fatalf("queue checks must judge the merged checkout: %+v", job)
 			}
-			if job.ID == "land" && !slices.Equal(job.Needs, []string{"preconditions", "policy", "review", "affected-tests"}) {
+			if job.ID == "land" && !slices.Equal(job.Needs, []string{"preconditions", "policy", "fast", "affected-tests"}) {
 				t.Fatalf("push dependencies: %v", job.Needs)
 			}
-			if job.ID == "review" && len(job.Steps) != len(inspectWork(t, &PrePush{}).Steps)+1 {
+			if job.ID == "fast" && len(job.Steps) != len(inspectWork(t, &PrePush{}).Steps) {
 				t.Fatal("queue omitted pre-push checks")
 			}
 		}
 		slices.Sort(ids)
-		if !slices.Equal(ids, []string{"affected-tests", "land", "policy", "preconditions", "review"}) {
+		if !slices.Equal(ids, []string{"affected-tests", "fast", "land", "policy", "preconditions"}) {
 			t.Fatalf("focused jobs = %v", ids)
 		}
 	}

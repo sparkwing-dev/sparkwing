@@ -131,9 +131,18 @@ review uses the supplied goal rather than inferring one from the branch name.
 Ordinary interactive lands keep their objective fallback. Queued lands refuse
 a changed submission or dirty checkout,
 merge fetched `origin/main` before capturing HEAD, then run source policy and
-the fast pre-push checks alongside review against that merged checkout. Once
-policy and review pass, the inline `affected-tests` job runs the same short
-and critical Go tests as the hosted Gate. Push waits for that job too.
+the fast pre-push checks against that merged checkout. After both pass, the
+inline `affected-tests` job runs review and the hosted Gate's affected short
+and critical Go tests as independent steps under one fail-fast owner. A review
+failure cancels in-flight tests through the existing step cancellation path,
+which joins child exit and drains output. A test failure cancels review.
+Push waits for policy, fast checks and both steps to pass on the same tree.
+The fast job reserves its compiler allowance separately (nine cores on a
+16-CPU host), releasing it before the combined job reserves seven test cores
+plus 0.25 for review. These reservations are admission accounting, not CPU
+limits. The combined job keeps the affected tier's 45-minute execution and
+aggregate no-progress deadlines. Review starts after policy and fast checks;
+small-change measurements must include that start delay.
 They push only when the branch, HEAD and checkout still match. If main moves again,
 the push fails rather than merging an unchecked tree; enqueue again after
 inspecting the failure. A conflict aborts the merge and records its remedy in

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
@@ -20,7 +21,7 @@ type Land struct{ sparkwing.Base }
 
 // LandArgs supplies the local review inputs.
 type LandArgs struct {
-	Queued        bool   `flag:"queued" desc:"Queue through main's bin/queue-land.sh: merge main, policy, fast pre-push/review, affected Go tests, then push the unchanged commit."`
+	Queued        bool   `flag:"queued" desc:"Queue through main's bin/queue-land.sh: merge main, policy and fast checks, review alongside affected Go tests, then push the unchanged commit."`
 	QueuedMain    string `flag:"queued-main" desc:"Exact main SHA supplied by the trusted queue submission script. Must match origin/main at execution."`
 	PrePushReview bool   `flag:"pre-push-review" desc:"Run pre-push's fast checks alongside review in one fail-fast job; ordinary land's Gate covers the affected tests."`
 	ReviewArgs
@@ -33,7 +34,7 @@ func (Land) ShortHelp() string {
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
 		"For ordinary Land, fetch origin/main and pass --sw-pipeline-ref <fetched-main-SHA> so the candidate does not define its own gate. " +
-		"All lands share one serial run slot. Extract bin/queue-land.sh from freshly fetched origin/main and run that copy against the candidate with --brief 'Short intent' (see DELIVERY.md). The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, run policy and fast pre-push/review against the merged checkout, then the shared affected short and critical Go tests, and push only the unchanged checked commit. The queued push proves fast-forward ancestry, atomically leases the planned main SHA, and refuses already-at-target results. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
+		"All lands share one serial run slot. Extract bin/queue-land.sh from freshly fetched origin/main and run that copy against the candidate with --brief 'Short intent' (see DELIVERY.md). The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, then run policy and fast pre-push checks against the merged checkout. After both pass and release their reservations, run review alongside the shared affected short and critical Go tests in one fail-fast job. A review or test failure cancels its sibling and refuses the land. Push only the unchanged commit whose policy, fast checks, review and tests passed. The queued push proves fast-forward ancestry, atomically leases the planned main SHA, and refuses already-at-target results. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip). " +
@@ -101,9 +102,12 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 	var needs []sparkwing.Dep
 	if in.Queued {
 		policy := sparkwing.Job(plan, policyJobID, &policyJob{Checks: checks, Head: checks.Head}).Inline().Timeout(policyJobTimeout).Needs(pre)
-		review := reviewJobNode(plan, in.ReviewArgs, branch, true).Needs(pre)
-		tests := affectedPushTestsJobNode(plan, true, checks).Inline().Needs(policy, review)
-		needs = []sparkwing.Dep{policy, review, tests}
+		fast := sparkwing.Job(plan, "fast", &PrePush{}).Inline().
+			Cores(float64(prePushReservationCores(runtime.NumCPU()))).Needs(pre)
+		joined := sparkwing.Job(plan, "affected-tests", &queuedLandChecks{args: in.ReviewArgs, branch: branch}).Inline().
+			Timeout(affectedPushTestsTimeout).NoProgressTimeout(affectedPushTestsTimeout).
+			Cores(lightJobCores+float64(goStepParallelism(affectedPushHost()))).Needs(policy, fast)
+		needs = []sparkwing.Dep{policy, fast, joined}
 	} else {
 		gate := gateJobs(plan, &Gate{}, "gate", false)
 		gate[0].Needs(pre)
