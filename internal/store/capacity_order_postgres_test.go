@@ -118,7 +118,7 @@ func TestPostgresConcurrencyMaintenanceDefersBusyAdmission(t *testing.T) {
 }
 
 func TestPostgresAdmissionLocksFollowTheirStoreSchema(t *testing.T) {
-	store.AdmissionSchemaIsolation(t, func(t *testing.T) *store.Store { return storetest.OpenPostgres(t) })
+	store.AdmissionSchemaIsolation(t, func(t *testing.T) *store.Store { return storetest.NewPostgres(t).Open(t) })
 }
 
 func TestPostgresControllerCancelLocksCapacityRunsBeforeTarget(t *testing.T) {

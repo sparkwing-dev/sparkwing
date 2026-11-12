@@ -105,7 +105,7 @@ func sqliteDSN(path string) string {
 	if strings.HasPrefix(uri, "file://") {
 		uri = "file://" + strings.TrimPrefix(uri, "file:")
 	}
-	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=foreign_keys(on)", uri, store.DefaultBusyTimeoutMS)
+	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", uri, store.DefaultBusyTimeoutMS)
 }
 
 // SQL returns a connection of the fixture's own to the database behind st.

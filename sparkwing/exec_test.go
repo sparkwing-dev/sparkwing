@@ -2,7 +2,9 @@ package sparkwing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,5 +85,47 @@ func TestCommandRelaysArgumentsEnvironmentAndCapture(t *testing.T) {
 func TestCommandRequiresHost(t *testing.T) {
 	if _, err := Exec(t.Context(), "sh", "-c", "exit 0").Run(); err == nil {
 		t.Fatal("command ran without a host")
+	}
+}
+
+func TestCommandCleanupFailurePreservesObservedResult(t *testing.T) {
+	for _, code := range []int{0, 7, -1} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			var done nodeproto.ExecDone
+			raw := fmt.Sprintf(`{"exec_done":"cleanup","exit_code":%d,"signaled":%t,"cleanup_error":"owned child cleanup failed"}`, code, code == -1)
+			if err := json.Unmarshal([]byte(raw), &done); err != nil {
+				t.Fatal(err)
+			}
+			ctx := sdkserve.WithHostExec(t.Context(), func(context.Context, nodeproto.ExecRequest) (sdkserve.HostExecResult, error) {
+				return sdkserve.HostExecResult{Done: done, Stdout: []byte("observed stdout"), Stderr: []byte("observed stderr")}, nil
+			})
+			result, err := Exec(ctx, "fixture").Capture()
+			var failure *ExecError
+			if !errors.As(err, &failure) {
+				t.Fatalf("cleanup failure did not reach caller: result=%+v error=%v", result, err)
+			}
+			if result.ExitCode != code || failure.ExitCode != code || result.Stdout != "observed stdout" || failure.Stdout != "observed stdout" || result.Stderr != "observed stderr" || failure.Stderr != "observed stderr" {
+				t.Fatalf("observed result lost: result=%+v error=%+v", result, failure)
+			}
+			if !strings.Contains(err.Error(), "owned child cleanup failed") || strings.Contains(err.Error(), "failed to start") {
+				t.Fatalf("cleanup failure misclassified: %v", err)
+			}
+			if (failure.Terminated != "") != (code == -1) {
+				t.Fatalf("signal attribution lost: %+v", failure)
+			}
+		})
+	}
+}
+
+func TestCommandEmptyCleanupDiagnosticIsBenign(t *testing.T) {
+	var done nodeproto.ExecDone
+	if err := json.Unmarshal([]byte(`{"exec_done":"clean","exit_code":0,"cleanup_error":""}`), &done); err != nil {
+		t.Fatal(err)
+	}
+	ctx := sdkserve.WithHostExec(t.Context(), func(context.Context, nodeproto.ExecRequest) (sdkserve.HostExecResult, error) {
+		return sdkserve.HostExecResult{Done: done}, nil
+	})
+	if result, err := Exec(ctx, "fixture").Run(); err != nil || result.ExitCode != 0 {
+		t.Fatalf("empty diagnostic failed: result=%+v error=%v", result, err)
 	}
 }

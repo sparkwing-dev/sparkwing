@@ -1729,6 +1729,52 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
+- **TypeScript native fixture build, measured 2026-11-12:** the nativehost
+  test process compiles its unchanged SDK once, retaining the resolved Node
+  path, SDK directory and original build error. Protocol, Conformance and
+  JobIDVectors retain their cases and separate protocol processes. The Node
+  local-pack test keeps its independent production build. The native
+  `TestSDKFixtureBuildsOnce` guard counts actual compiler invocations on both
+  success and failure. Its counting executable uses a Unix shell; Windows
+  retains the real native tests.
+
+  Three interleaved A1B1A2B2A3B3 pairs used the same `0d7b18969` source,
+  with A disabling only the new cache through a Go overlay and B using it.
+  Both used identical Go JSON/tool tracing instrumentation. Go 1.26.11 ran
+  the whole `TestTypeScriptBoundary` with `GOMAXPROCS=3`, `-p 1` and `-short`.
+  Each sample copied the same compiled-only private seed containing both
+  helper variants and the outer/nested Go flag variants. Priming, copying,
+  hashing and slot wait are excluded. Acceptance test-binary CPU is wait4 user
+  plus system time, including descendants reaped by `acceptance.test`.
+  These binary measurements cover both the Node SDK cell and the nested
+  nativehost Go cell.
+
+  | Pair | Acceptance binary wall A / B, s | Acceptance binary CPU A / B, s | Whole Go wall change | Load1 median A / B |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 20.797 / 17.547 | 34.108 / 27.452 | -11.02% | 8.478 / 11.243 |
+  | 2 | 25.868 / 24.794 | 37.937 / 37.126 | +2.58% | 9.755 / 13.206 |
+  | 3 | 20.343 / 18.345 | 33.664 / 28.383 | -7.22% | 10.388 / 8.759 |
+
+  Acceptance test-binary wall medians, covering both cells, were 20.797/18.345 s
+  (-11.79%), with ranges
+  20.343-25.868/17.547-24.794 s. Acceptance test-binary CPU medians were
+  34.108/28.383 s (-16.78%), with ranges
+  33.664-37.937/27.452-37.126 s. Whole Go wall medians were
+  24.419/22.014 s, but pair 2 regressed 2.58%; a stable
+  whole-command wall saving is inconclusive. The unmodified Node cell was
+  slower in B in all three pairs, so its drift is not attributed to this cache.
+  The nested Go cell's separate CPU medians were 15.959/8.972 s, including
+  that Go command's build and link work.
+  Every sample retained 145 Node assertions, 15 native Go parent/leaf cases
+  and both acceptance cells with exact outcome parity. Native compiler
+  invocations fell from two to one. Load, owners, iowait and steal were recorded
+  at 1 Hz without filtering. This is one shared WSL host and one window,
+  with no whole-Land saving claim or change to selection, lanes or deadlines.
+  The earlier cold private-cache probe included an 80.296 s nested-Go prefix
+  before its first compiler and is kept separate from these warm pairs.
+  Evidence: `~/evidence/sparkwing/typescript-boundary-cost-2026-11-12/` and
+  the native SDK fixture packet beside it.
+
 - **Storage acceptance fixture creation, measured 2026-11-12:** the depcache
   properties create their isolated current-schema SQLite databases through
   `teststore.Open` and reopen persisted data through `OpenExisting`. The common
@@ -2076,6 +2122,43 @@ file. Other syntax and workflow checks remain active.
   removes the shared-runner capacity shortfall. A complete hosted batch under
   the split is still unmeasured.
 
+- **Fixture SQL synchronization, measured 2026-11-12:** the separate SQLite
+  connections used by `teststore.SQL` and `Exec` set `synchronous(NORMAL)`,
+  matching the production store. SQLite applies this pragma per connection;
+  the fixture previously defaulted to FULL. The native
+  `TestSQLiteFixtureConnectionUsesNormalSynchronization` guard reads the
+  connection's actual mode (2 before, 1 after). Each trust case retains its
+  own store, signing key and claims.
+
+  Three interleaved A/B pairs ran every one of the 19
+  `TestAppParentChildrenPreserveOnlyExactRevisionTrust` leaves on source
+  `76afada1a`. B applied only the fixture DSN line through a Go overlay.
+  Relevant fixture/controller sources are unchanged on implementation base
+  `18ee4831b`. Go 1.26.11 used `GOMAXPROCS=3`, `-p 1` and `-short` on the
+  shared 16-CPU WSL host. Every sample copied the same private, compiled-only
+  cache seed; result caching remained enabled. Cache copying, hashing and
+  slot wait are outside the observations. Native CPU is wait4 user plus
+  system time, including descendants reaped by the test binary.
+
+  | Pair | Native wall before / after, s | Native CPU before / after, s | Load1 median before / after |
+  | --- | ---: | ---: | ---: |
+  | 1 | 18.477 / 13.355 | 13.046 / 12.274 | 6.192 / 8.295 |
+  | 2 | 20.499 / 12.838 | 13.178 / 11.855 | 8.717 / 8.579 |
+  | 3 | 19.609 / 12.421 | 14.303 / 11.901 | 8.224 / 9.252 |
+
+  Native wall medians were 19.609/12.838 s (-34.53%), with ranges
+  18.477-20.499/12.421-13.355 s. CPU medians were 13.178/11.901 s (-9.69%),
+  with ranges 13.046-14.303/11.855-12.274 s. Whole Go command wall medians
+  were 24.413/17.853 s (-26.87%), including warm driver/build work and cache
+  bookkeeping. All six samples had identical 20 run/pass results, including
+  the parent, without skips or failures. Load, other Go-slot owners, iowait
+  and steal were recorded at 1 Hz; no samples were discarded. The earlier
+  n=1 diagnostic had no wall-time win (16.294/16.461 s) and remains in the
+  evidence. One host, one window and one test cohort establish no whole-Land
+  saving and change no gate tier, lane width, deadline or test budget.
+  Evidence: `~/evidence/sparkwing/controller-app-parent-cost-2026-11-12/`
+  and the fixture SQLite synchronization packet beside it.
+
 - **Fixture SQL connection reuse, 2026-11-01:** `teststore.Exec` retains one
   connection per registered store, closed by the opening test's cleanup. Its
   SQLite DSN keeps foreign keys, the busy timeout and immediate transactions.
@@ -2155,6 +2238,43 @@ file. Other syntax and workflow checks remain active.
   same 59 conditional skips. All eight shards exited successfully, with no
   missing or failed names. Wall time fell about 17% and CPU about 16% in
   these shared-host samples.
+
+- **RSA fixture leases, measured 2026-11-12:** GitHub App and JWKS fixtures,
+  including Google and GitHub OIDC, share `internal/rsatest.New`. The process
+  generates a 2048-bit key only when no free material exists. Each live fixture
+  has an exclusive lease and its own parsed key object. Its own `t.Cleanup`
+  returns the material after issuer cleanup; parent-owned fixtures retain their
+  keys until parent cleanup. The pool retains the live-lease high-water mark,
+  rather than generating for every construction. No key material is checked in,
+  and scanner and snapshot policy are unchanged.
+
+  Three interleaved A/B pairs ran the whole `internal/controller` short class
+  on the same `f75692d80` source tree. A restored only the original two
+  generating helper files through a Go overlay; B used the pooled helpers.
+  Go 1.26.11, `GOWORK=auto`, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=3` and
+  `go test -json -p 1 -short -timeout 25m` were fixed. Every sample used private
+  homes and a private clone of the same compile-only cache seed, warmed for
+  both variants. A native process wrapper recorded user plus system CPU,
+  including waited children, and restored Go's test input log. Compilation and
+  cache cloning are outside these native timings.
+
+  | Pair | CPU before / after | CPU delta | Wall before / after | Wall delta |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 221.540 / 164.652 s | -25.68% | 249.622 / 166.779 s | -33.19% |
+  | 2 | 198.739 / 184.972 s | -6.93% | 184.614 / 175.476 s | -4.95% |
+  | 3 | 225.507 / 164.958 s | -26.85% | 230.723 / 180.211 s | -21.89% |
+
+  Native medians were 221.540 to 164.958 CPU seconds (-25.54%) and
+  230.723 to 175.476 wall seconds (-23.94%), comparing the medians.
+  CPU ranges were 198.739-225.507 before and 164.652-184.972 after;
+  wall ranges were 184.614-249.622 and 166.779-180.211 seconds.
+  All six inventories match exactly: 2,266 passes and 69 conditional skips.
+  This was one shared host and one time window, with no quiet reservation or
+  sample exclusions. Median load1 before/after was 9.68/4.09, 4.46/7.46 and
+  9.93/5.07 by pair. Raw load and Go-slot owners were recorded at 1 Hz, along
+  with CPU iowait and steal. These are package observations, not a forecast
+  for an entire queued land. Evidence, overlays, cache manifests and native
+  rusage are in the runtime RSA lease pool packet under `~/evidence/sparkwing/`.
 
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured on a
@@ -2397,7 +2517,7 @@ file. Other syntax and workflow checks remain active.
 - **Store dialect matrix:** `sparkwing run store-postgres` runs the
   `internal/store` tests that exercise PostgreSQL with
   `SPARKWING_TEST_STORE=postgres`, so every store test that opens through
-  `internal/store/storetest` exercises the Postgres dialect instead of a SQLite
+  `internal/store/internal/storetest` exercises the Postgres dialect instead of a SQLite
   file. It compiles one `internal/store` test binary, lists its top-level
   Test, Example and Fuzz names, and runs every one except two kinds. The
   internal tests in the files named by
@@ -2415,15 +2535,24 @@ file. Other syntax and workflow checks remain active.
   `TestStorePostgresSelectionCoversTheStoreInventory` in `.sparkwing/jobs`,
   when a named file is missing, declares no internal test, or reaches
   `SPARKWING_TEST_PG_URL` or the `pgx` driver directly or through a helper or
-  constant in the internal test files; remove such a file from the list. The
-  sorted selection is assigned round-robin, each
+  constant in the internal test files; remove such a file from the list.
+  Ready-store fixtures (`storetest.Open` and `OpenPostgres`) reuse one initialized
+  PostgreSQL template per test process/server and clone a database for each
+  fixture. Their TestMain closes the cache and drops its templates after every
+  fixture has closed. Servers without CREATE DATABASE permission use the
+  existing fresh-schema path. `New` and `NewPostgres` still reserve empty
+  schemas for migration, reopening and cases with multiple schemas in one database;
+  the named fresh-open and schema-lock tests use those constructors explicitly.
+  A killed process on a configured server can leave `sw_fixture_clone_*` and
+  `sw_fixture_template_*` databases; remove them only after their owner is gone.
+  The embedded server's disposable cluster is removed at run teardown.
+  The sorted selection is assigned round-robin, each
   name exactly once, to one `GOMAXPROCS=1` shard process per core a Go step
   may hold: four on the hosted four-core runner, the Go step bound
   (`(cpus-1)/2` shared, `cpus/2` under `CI`) elsewhere. Each shard gets a
   database of its own, created on the server before the shards start and
-  dropped `WITH (FORCE)` afterwards, because the store's migration advisory
-  lock is per database: shards sharing one database queue every fixture's
-  schema apply behind each other. The shard URL drops `dbname` and `database`
+  dropped `WITH (FORCE)` afterwards, because raw-target schema initialization uses a
+  database-scoped migration advisory lock. The shard URL drops `dbname` and `database`
   query options, which pgx reads over the URL path, and a `service` reference
   is refused. A run killed outright can leave `sparkwing_store_shard_*`
   databases on a configured server, and so can a `CREATE DATABASE` whose

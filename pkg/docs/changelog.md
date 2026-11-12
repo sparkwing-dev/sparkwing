@@ -20,6 +20,119 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.72.7] - 2026-11-12
+
+### Changed
+
+- **tests:** Reuse initialized PostgreSQL templates for ready-store fixtures
+  Each fixture keeps its own database and teardown. Empty targets still exercise
+  fresh schema creation and migrations, and restricted roles retain the existing
+  schema path. Test selection, iterations and seeds stay unchanged.
+
+
+- **tests:** Identity fixtures reuse released RSA keys from a process-local pool
+  Keys are generated at runtime only when none are free. Live fixtures keep
+  distinct keys, and cleanup closes each issuer before releasing its key.
+
+
+- **sdk:** Republish the TypeScript SDK as 0.72.3 because its native verification inputs changed. New TypeScript pipelines pin 0.72.3.
+
+
+- **ci:** Compile the TypeScript native test SDK once per test process
+
+### Fixed
+
+- **runner:** Keep claim recovery live through controller rollouts and longer outages
+  Fresh claims retain capped backoff and cap Retry-After advice at five minutes
+  per response while held work
+  keeps its execution context and existing lease limits. Sustained ten-minute
+  outages warn and make the optional readiness endpoint report degraded until
+  recovery, including a successful claim accepted during shutdown.
+  Terminal run acknowledgements also wait through temporary outages within
+  their existing award context, including preparation-failure acknowledgements.
+
+### Docs
+
+- **migration:** Fix the authentication and HTTPS links in the v0.72.3 migration guide.
+
+## [v0.72.6] - 2026-11-12
+
+### Changed
+
+- **ci:** Use the store's NORMAL SQLite synchronization policy for fixture SQL connections
+
+
+- **store (Breaking):** The schema baseline advances to version 38 to persist initial group waits. Schema 37 stores upgrade automatically. Older binaries refuse the upgraded store. See the [migration guide](docs/migrations/v0.72.6.md#upgrade-the-store-in-place-to-schema-baseline-38)
+
+
+- **ci:** Keep Go SDK installation fixtures independent of unrelated host tool directories
+
+
+- **tests:** Reuse the current SQLite schema for new storage acceptance fixtures
+  Depcache cases keep their independent databases, generated inputs and close/reopen persistence checks.
+
+
+- **ci:** Reuse build objects across uploaded fixture checkouts
+  The offline Kubernetes fixture guard trims source paths and executes its proof tests on every invocation.
+
+### Fixed
+
+- **local runtime:** Keep lifecycle failures during runner shutdown
+  Local runner watch and drain cleanup preserve genuine failures alongside
+  cancellation. Only cancellation caused by the cleanup owner's stop
+  is clean; other cancellations remain errors when returned after shutdown.
+
+
+- **services:** Run generated runner, controller and schedule units from their state home
+  Existing managed definitions gain the working directory during refresh while
+  retaining captured configuration and schedule cadence. Running processes keep
+  their current directory; loaded launchd registrations also need a reload.
+
+
+- **release:** Release previews now verify the published SDK policy and reject changed TypeScript SDK source under an existing version before creating a tag. Cuts that reuse exact-source CI run the same check.
+
+
+- **runner:** Jobs in full concurrency groups stay unclaimed so awaited child pipelines can run; admission races use bounded waits and backed-off polling
+- **runner:** Self-hosted evaluators can acquire the sealed pipeline source after a generator's source job finishes
+- **controller:** Group queue timeouts include unclaimed waiting and survive controller restarts without changing queue arrival order
+- **controller:** Claim searches skip full groups together so large fan-outs do not delay runnable child jobs
+
+
+- **runner:** Report a clean operator stop as a successful exit
+  After SIGTERM or interrupt, `start` and `warm` exit 0 when only cancellation
+  errors remain, including during DNS, credentials, bundle transfers and SDK
+  setup. Cancellation without a shutdown signal, and genuine runtime or cleanup
+  failures, including a child killed externally before cancellation, still exit 1.
+  Hosted failures are reported as they occur; shutdown keeps a bounded summary
+  with the first genuine failure and its count. Pending claim and acquisition
+  failures remain visible. Windows SDK and Git owners distinguish their own
+  termination from a prior external death or ordinary exit 1. Service drain deadlines are unchanged.
+
+
+- **runner:** Retry transient signed object uploads before failing jobs
+  Seekable blob, source snapshot and log uploads make at most three attempts,
+  reuse valid signing tickets and renew expired ones. Streaming readers get
+  one attempt, and a refused rewind never blocks the first upload. Errors retain the operation, host, failure class and attempt
+  count while redacting signed URLs.
+
+
+- **toolchain:** Preserve failures that precede shutdown
+  Compiler cancellation suppresses only a termination sent by its process owner.
+  External signals and nonzero exits keep their wait status, including through
+  the pipeline compiler. A supplied pipe-drain bound does not start a second
+  cancellation killer. Grace periods and drain deadlines are unchanged.
+
+
+- **cache:** Avoid repeated ancestor scans for missing compiler tools on PATH
+  Pipeline cache identity checks stat missing candidates once before resolving symlinks. Present tools keep the same resolved path, size and modification-time identity, including symlink chains beyond the native stat traversal limit.
+
+
+- **sdk:** Windows TypeScript SDK verification now compares protocol pipe objects, so reused handle numbers do not cause false leak failures. The SDK and new TypeScript scaffolds move to 0.72.2 because the verification inputs changed.
+
+### Docs
+
+- **delivery:** Include native runner composition tests in ordinary cluster gates
+
 ## [v0.72.4] - 2026-11-12
 
 ### Fixed

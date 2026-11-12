@@ -3,9 +3,9 @@ package store_test
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
+	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
 func TestMain(m *testing.M) {
-	testleak.Main(m)
+	storetest.Main(m)
 }

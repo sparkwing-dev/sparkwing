@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
 func TestRefreshKeepsCapturedTimerSettings(t *testing.T) {
@@ -123,5 +125,51 @@ func TestTimerOperationsHonorCancellation(t *testing.T) {
 	}
 	if len(e.calls) != 0 {
 		t.Fatalf("cancelled operation contacted the service manager: %v", e.calls)
+	}
+}
+
+func TestRefreshAddsWorkingDirectoryWithoutChangingSchedule(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			executor := &fakeExec{}
+			h := linuxHost(t, executor)
+			h.GOOS = goos
+			h.Version = "v1.2.3"
+			h.Env = map[string]string{"WorkingDirectory": "captured"}
+			state, err := Install(t.Context(), h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := state.Path
+			var timerBefore string
+			if goos == "linux" {
+				timerBefore = read(t, state.Path)
+				path = filepath.Join(UnitDir(h), h.serviceName())
+			}
+			body := read(t, path)
+			if goos == "linux" {
+				body = strings.Replace(body, "WorkingDirectory="+unitfile.SystemdWord(h.SparkwingHome)+"\n", "", 1)
+			} else {
+				body = strings.Replace(body, "  <key>WorkingDirectory</key>\n  <string>"+unitfile.XMLText(h.SparkwingHome)+"</string>\n", "", 1)
+				body = strings.Replace(body, "<integer>60</integer>", "<integer>120</integer>", 1)
+			}
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			h.Version = "v1.2.4"
+			for range 2 {
+				if _, err := Refresh(t.Context(), h); err != nil {
+					t.Fatal(err)
+				}
+				after := read(t, path)
+				if goos == "linux" {
+					if !strings.Contains(after, "WorkingDirectory="+unitfile.SystemdWord(h.SparkwingHome)+"\n") || read(t, state.Path) != timerBefore {
+						t.Fatal("refresh lost working directory or timer cadence")
+					}
+				} else if !strings.Contains(after, "<key>WorkingDirectory</key><string>"+unitfile.XMLText(h.SparkwingHome)+"</string>") || !strings.Contains(after, "<integer>120</integer>") || !strings.Contains(after, "<key>WorkingDirectory</key>\n    <string>captured</string>") {
+					t.Fatalf("refresh changed agent settings: %s", after)
+				}
+			}
+		})
 	}
 }

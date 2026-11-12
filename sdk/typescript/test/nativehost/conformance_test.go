@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -43,18 +42,7 @@ type sharedCorpus struct {
 }
 
 func TestNativeConformance(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	build := exec.CommandContext(t.Context(), node, filepath.Join(root, "node_modules/typescript/bin/tsc"), "-p", filepath.Join(root, "tsconfig.build.json"))
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build SDK: %v\n%s", err, output)
-	}
+	node, root := nativeSDKFixture(t)
 	corpusDir := filepath.Join(root, "../../internal/nodeproto/conformance/testdata")
 	raw, err := os.ReadFile(filepath.Join(corpusDir, "v2-corpus.json"))
 	if err != nil {

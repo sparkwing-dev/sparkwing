@@ -11,6 +11,16 @@ func AdmissionSchemaIsolation(t *testing.T, open func(*testing.T) *Store) {
 	for _, name := range []string{"admission:planner", "capacity-admission:7:planner:plan:global:plan"} {
 		t.Run(name, func(t *testing.T) {
 			first, second := open(t), open(t)
+			var firstDB, firstSchema, secondDB, secondSchema string
+			if err := first.db.QueryRowContext(t.Context(), "SELECT current_database(), current_schema()").Scan(&firstDB, &firstSchema); err != nil {
+				t.Fatal(err)
+			}
+			if err := second.db.QueryRowContext(t.Context(), "SELECT current_database(), current_schema()").Scan(&secondDB, &secondSchema); err != nil {
+				t.Fatal(err)
+			}
+			if firstDB != secondDB || firstSchema == secondSchema {
+				t.Fatal("schema isolation requires distinct schemas within one database")
+			}
 			held, err := first.beginTx(t.Context())
 			if err != nil {
 				t.Fatal(err)
