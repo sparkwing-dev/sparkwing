@@ -14,6 +14,7 @@ import (
 
 func newCheckout(t *testing.T, root string) (pipelineDir string) {
 	t.Helper()
+	usePipelineToolPath(t)
 	writeFile(t, filepath.Join(root, "lib", "go.mod"), "module example.com/lib\n\ngo 1.22\n")
 	writeFile(t, filepath.Join(root, "lib", "lib.go"), "package lib\n\nfunc Answer() int { return 42 }\n")
 

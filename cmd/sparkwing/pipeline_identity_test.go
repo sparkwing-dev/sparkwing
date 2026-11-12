@@ -19,6 +19,7 @@ import (
 
 func aliasProject(t *testing.T) (string, nodewire.PipelineDescription) {
 	t.Helper()
+	usePipelineToolPath(t)
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	projectAt(t, "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n  - name: deploy-stage\n    entrypoint: Deploy\n")
 	dir, err := findSparkwingDir()

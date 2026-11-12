@@ -17,6 +17,7 @@ import (
 
 func scaffoldPipelineRepo(t *testing.T) string {
 	t.Helper()
+	usePipelineToolPath(t)
 	root := t.TempDir()
 	sdkDir := filepath.Join(root, "sdk")
 	pipDir := filepath.Join(root, "pipelines")
@@ -102,6 +103,7 @@ func TestPipelineCacheKey_ReplaceTargetNonGoFilesBustCache(t *testing.T) {
 
 func newSparksFixture(t *testing.T, manifest string) string {
 	t.Helper()
+	usePipelineToolPath(t)
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"),
 		"module example.com/consumer\n\ngo 1.22\n")

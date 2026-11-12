@@ -120,6 +120,7 @@ func main() {
 }
 
 func TestPipelineAliasDiscoveryUsesConfiguredEntrypoint(t *testing.T) {
+	usePipelineToolPath(t)
 	if testing.Short() {
 		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
 	}
