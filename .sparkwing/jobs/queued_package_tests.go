@@ -47,6 +47,7 @@ func queuedTestPackages(plans []affectedTestPlan, allowance int) ([]*queuedTestP
 				group = append(group, queuedTestLane{capacity: len(patterns), runtimeWidth: 1, packages: []*queuedTestPackage{item}})
 			}
 		}
+		startHintedPackagesFirst(group)
 		groups = append(groups, group)
 	}
 	for _, p := range plans {
