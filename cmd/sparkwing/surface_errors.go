@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
@@ -86,11 +88,11 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 	}
 	message := strings.TrimPrefix(failure.Message, prefix)
 	message = strings.TrimPrefix(message, strings.TrimSpace(path)+": ")
-	if _, err := fmt.Fprintln(w, prefix+message); err != nil {
+	if _, err := fmt.Fprintln(w, prefix+opsview.DisplayText(message)); err != nil {
 		return err
 	}
 	if failure.Hint != "" {
-		_, writeErr := fmt.Fprintln(w, "hint: "+failure.Hint)
+		_, writeErr := fmt.Fprintln(w, "hint: "+opsview.DisplayText(failure.Hint))
 		return writeErr
 	}
 	return nil

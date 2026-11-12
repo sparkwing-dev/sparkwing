@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -291,9 +293,9 @@ func uninstallRepositorySchedules(ctx context.Context, inv clisurface.Invocation
 		return json.NewEncoder(out).Encode(result)
 	}
 	if opts.format == "plain" {
-		_, err = fmt.Fprintln(out, result.RepoURL)
+		_, err = fmt.Fprintln(out, opsview.DisplayText(result.RepoURL))
 	} else {
-		_, err = fmt.Fprintf(out, "disarmed %d schedules for %s\n", result.Removed, result.RepoURL)
+		_, err = fmt.Fprintf(out, "disarmed %d schedules for %s\n", result.Removed, opsview.DisplayText(result.RepoURL))
 	}
 	return err
 }
@@ -303,9 +305,9 @@ func renderScheduleInstallation(out io.Writer, result scheduleInstallation, form
 		return json.NewEncoder(out).Encode(result)
 	}
 	for _, row := range result.Schedules {
-		text := row.ID
+		text := opsview.DisplayText(row.ID)
 		if format == "pretty" {
-			text = "armed " + row.Name + " (" + row.Lock.State + ")"
+			text = "armed " + opsview.DisplayText(row.Name) + " (" + opsview.DisplayText(row.Lock.State) + ")"
 		}
 		if _, err := fmt.Fprintln(out, text); err != nil {
 			return err
@@ -313,12 +315,12 @@ func renderScheduleInstallation(out io.Writer, result scheduleInstallation, form
 	}
 	if format == "pretty" {
 		for _, name := range result.Withdrawn {
-			if _, err := fmt.Fprintln(out, "withdrawn "+name); err != nil {
+			if _, err := fmt.Fprintln(out, "withdrawn "+opsview.DisplayText(name)); err != nil {
 				return err
 			}
 		}
 		for _, name := range result.Skipped {
-			if _, err := fmt.Fprintln(out, "skipped "+name+": its schedule runs elsewhere"); err != nil {
+			if _, err := fmt.Fprintln(out, "skipped "+opsview.DisplayText(name)+": its schedule runs elsewhere"); err != nil {
 				return err
 			}
 		}

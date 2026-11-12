@@ -175,8 +175,16 @@ Run intake, plan acceptance, job status reads, job transitions, finish,
 cancellation, retry and run/job renewal use the shared capability policy. The
 controller resolves the resource's team before authorization and derives
 actors and fences from the credential. Unknown or ended credentials get
-`unauthenticated`. A live
-credential without the grant or binding gets `forbidden`.
+`unauthenticated`. Their HTTP error bodies and refusal headers are identical,
+with message `credential is unavailable`; they do not distinguish an unknown
+credential from expiry, revocation, rotation grace expiry, epoch changes or ended
+membership. Private server audit records keep the specific reason. Response timing
+is not guaranteed uniform: ended credentials require additional authority lookups.
+Authenticated credential inventory and successful
+rotation responses provide lifecycle details to authorized callers. The CLI
+uses the selected local profile to suggest signing in or saving a replacement;
+a 401 alone does not establish that a saved token was revoked. A live credential
+without the grant or binding gets `forbidden`.
 
 Create a run with `POST /api/v1/runs`, submit its plan to
 `POST /api/v1/runs/{run}/plan`, and report job state through
@@ -728,8 +736,21 @@ Service credentials cannot submit provider outcomes or grant team credit.
 ## Deployment bootstrap
 
 Mount `bootstrap-admin-token` in the controller's `--credentials-dir`. Its value
-is `swk_` followed by the unpadded base64url encoding of 32 random bytes. Startup
-passes it to the once-only bootstrap transaction before opening the listener.
+is `swk_` followed by the unpadded base64url encoding of 32 cryptographically
+random bytes. Constant-byte placeholders, including an all-zero payload, are
+refused at startup, even on an initialized store or after revocation. This
+refusal does not revoke an already-issued weak credential. The generator only
+repairs fresh stores; an initialized store will reject a replacement seed.
+[Rotate or revoke the weak credential and remove its mounted file before
+upgrading](#weak-bootstrap-credential-recovery).
+For a fresh store, generate the file in a private directory:
+
+```sh
+(umask 077 && printf 'swk_%s' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')" > bootstrap-admin-token)
+```
+
+Startup passes a valid seed to the once-only bootstrap
+transaction before serving requests.
 The store keeps its digest and grants `operator.limits`, `operator.object_store`
 and `operator.tokens`. It grants no team membership, `runs.read`, `runs.write`,
 runner enrollment or operator-console authority.
@@ -737,7 +758,7 @@ runner enrollment or operator-console authority.
 A live seed can be reused while setup is unfinished. Issuing the first real
 deployment administrator closes the gate, revokes the seed and its descendants,
 in one transaction. Remove the mounted seed
-after that handoff. A seed left mounted after its handoff only logs a warning
+after that handoff. A valid seed left mounted after its handoff only logs a warning
 at startup, because its digest matches the one that bootstrapped the store; a
 different seed still stops startup. An empty input provisions nothing. Private
 routes require live credentials even on an empty store. `--require-auth`, which
@@ -777,6 +798,54 @@ and cannot assert GitHub App trust.
 A `--deployment=team` controller refuses deployment-admin bearers. `local` and
 `cloud` controllers accept them. Console sessions retain their separate account
 gate.
+
+### Weak bootstrap credential recovery
+
+If a real deployment administrator already exists, verify that credential can
+list operator tokens and that the old bootstrap credential is revoked. Remove
+the mounted bootstrap file before restarting the upgraded controller.
+
+If the weak bootstrap credential is still live, treat it as guessable. Before
+upgrading, isolate the controller from untrusted traffic and rotate it with zero
+grace using the existing CLI and a deployment profile authenticated by that seed:
+
+```sh
+sparkwing operator tokens list --profile deployment -o json
+umask 077
+sparkwing operator tokens rotate --profile deployment --token PREFIX --grace 0 -o plain > replacement-token
+```
+
+`PREFIX` is the weak bootstrap credential's prefix from the list, not its full
+bearer. Rotation returns the replacement once, revokes the weak credential
+immediately and ends its descendants' authority. Store the replacement securely,
+update the profile to use it, and verify `operator tokens list` succeeds with it
+and fails with the old credential. Remove the mounted bootstrap file, then
+upgrade and restart. The replacement is an authentication credential, not a new
+bootstrap seed; do not mount it as `bootstrap-admin-token`.
+
+If the upgrade already refuses startup, stop public ingress first. Temporarily
+remove the weak bootstrap file and start the same controller/store bound to
+loopback with `--addr 127.0.0.1:PORT --trusted-proxy-addr= --metrics-addr=`
+and `--require-auth` retained. Clear those separate listeners even if they were
+configured previously. Point the deployment profile at this temporary endpoint:
+
+```sh
+sparkwing profiles set --profile deployment --controller http://127.0.0.1:PORT
+```
+
+Its existing weak credential still authenticates, so perform the rotation above
+through that private endpoint. Keep the bootstrap file removed. After verifying
+the replacement and old-credential refusal, restore the normal controller
+listeners and ingress, then restore the profile's original controller URL with
+`sparkwing profiles set --profile deployment --controller ORIGINAL_URL`. A loopback bind
+is not protection from other users or processes on the host: use a trusted host
+and keep the recovery window short.
+
+After rotation, issue a named service administrator with `operator.tokens` and
+any other required operator grants to finish setup; that transaction also
+revokes remaining bootstrap setup credentials. If no live administrator remains,
+use your established credential recovery procedure; generating a replacement
+seed does not reopen the bootstrap gate.
 
 ## Operator console
 

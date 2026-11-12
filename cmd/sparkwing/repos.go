@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -123,7 +125,7 @@ func runReposList(inv clisurface.Invocation) error {
 		return ndjson.Write(os.Stdout, fleetJSON(fleet, latest))
 	case "plain":
 		for _, r := range fleet {
-			fmt.Printf("%s\t%s\t%s\t%s\n", r.Name, orDashStr(r.Pin), orDashStr(r.Primary), orDashStr(string(r.SDK)))
+			fmt.Printf("%s\t%s\t%s\t%s\n", opsview.DisplayText(r.Name), opsview.DisplayText(orDashStr(r.Pin)), opsview.DisplayText(orDashStr(r.Primary)), opsview.DisplayText(orDashStr(string(r.SDK))))
 		}
 		return nil
 	}
@@ -202,14 +204,14 @@ func printFleet(fleet []repos.Repo, latest string) {
 				last += " " + r.LastPipeline
 			}
 		}
-		fmt.Printf("  %-24s %-10s %-14s%s  last-run: %s\n", r.Name, orDashStr(string(r.SDK)), pin, behind, last)
+		fmt.Printf("  %-24s %-10s %-14s%s  last-run: %s\n", opsview.DisplayText(r.Name), opsview.DisplayText(orDashStr(string(r.SDK))), opsview.DisplayText(pin), behind, opsview.DisplayText(last))
 		if r.Status == "runs-only" {
 			fmt.Printf("      %s\n", color.Dim("observed in runs; no local checkout registered"))
 		} else if r.Primary != "" {
-			fmt.Printf("      %s\n", color.Dim(r.Primary))
+			fmt.Printf("      %s\n", color.Dim(opsview.DisplayText(r.Primary)))
 		}
 		for _, w := range r.DivergentWorktrees() {
-			fmt.Printf("      %s\n", color.Dim(fmt.Sprintf("worktree pins %s: %s", orDashStr(w.Pin), w.Path)))
+			fmt.Printf("      %s\n", color.Dim(fmt.Sprintf("worktree pins %s: %s", opsview.DisplayText(orDashStr(w.Pin)), opsview.DisplayText(w.Path))))
 		}
 	}
 }
@@ -267,7 +269,7 @@ func runReposUpdateWith(inv clisurface.Invocation, readFleet func(string) ([]rep
 		Verify:    inv.Bool("verify"),
 		GuidesFor: guidesFor,
 		Progress: func(repo, msg string) {
-			fmt.Fprintf(os.Stderr, "%s: %s\n", repo, msg)
+			fmt.Fprintf(os.Stderr, "%s: %s\n", opsview.DisplayText(repo), opsview.DisplayText(msg))
 		},
 		Context: ctx,
 	}
@@ -321,7 +323,7 @@ func printVerdicts(vs []repos.Verdict, fleet []repos.Repo, cfg repos.UpdateConfi
 	if cfg.Apply {
 		mode = "apply"
 	}
-	fmt.Printf("Bumping %d repo(s) to %s (%s)\n", len(vs), cfg.Target, mode)
+	fmt.Printf("Bumping %d repo(s) to %s (%s)\n", len(vs), opsview.DisplayText(cfg.Target), mode)
 	for _, v := range vs {
 		printOneVerdict(v)
 	}
@@ -365,16 +367,16 @@ func printOneVerdict(v repos.Verdict) {
 	if v.Committed {
 		committed = color.Dim(" [committed]")
 	}
-	fmt.Printf("  %-24s %s%s%s\n", v.Repo, label, pins, committed)
+	fmt.Printf("  %-24s %s%s%s\n", opsview.DisplayText(v.Repo), label, opsview.DisplayText(pins), committed)
 	if v.Detail != "" {
-		fmt.Printf("      %s\n", color.Dim(v.Detail))
+		fmt.Printf("      %s\n", color.Dim(opsview.DisplayText(v.Detail)))
 	}
 	if v.Err != "" {
-		fmt.Printf("      %s\n", color.Red(v.Err))
+		fmt.Printf("      %s\n", color.Red(opsview.DisplayText(v.Err)))
 	}
 	for _, pd := range v.Diffs {
 		for _, line := range repos.RenderDiff(pd) {
-			fmt.Printf("    %s\n", line)
+			fmt.Printf("    %s\n", opsview.DisplayText(line))
 		}
 	}
 
@@ -385,7 +387,7 @@ func printOneVerdict(v repos.Verdict) {
 			if title == "" {
 				title = g.Summary
 			}
-			fmt.Printf("        %s  %s\n", g.Version, color.Dim(title))
+			fmt.Printf("        %s  %s\n", opsview.DisplayText(g.Version), color.Dim(opsview.DisplayText(title)))
 		}
 	}
 }

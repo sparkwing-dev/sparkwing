@@ -103,7 +103,7 @@ func TestCritical(t *testing.T) {
 		writeGoFile(t, filepath.Join(root, module.dir, "overlap_test.go"), "package "+module.pkg+"_test\n"+imports+"import _ \"fixture/leaf\"\n"+helper+fmt.Sprintf("func TestShort(t *testing.T) { shortBody(t, %q) }\n", module.body))
 	}
 	gitCommitAll(t, root, "module fixture")
-	err := runAffectedTestFiles(newTestContext(t), []string{"leaf/leaf.go"}, "module overlap fixture", hostShape{cpus: 16})
+	err := runAffectedTestFiles(newTestContext(t), []string{"leaf/leaf.go"}, "module overlap fixture", hostShape{cpus: 16}, false)
 	if err == nil || !strings.Contains(err.Error(), "root short failure retained") || strings.Contains(err.Error(), "did not overlap") || strings.Contains(err.Error(), "critical started before") {
 		t.Fatalf("short failure must preserve overlap, sibling completion and full critical tests: %v", err)
 	}

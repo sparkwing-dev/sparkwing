@@ -145,21 +145,21 @@ func renderDoctor(out io.Writer, report doctorReport, format string) error {
 	if format == "plain" {
 		fmt.Fprintf(&text, "controller_checked\t%t\n", report.ControllerChecked)
 		if report.ControllerError != "" {
-			fmt.Fprintf(&text, "controller_error\t%s\n", report.ControllerError)
+			fmt.Fprintf(&text, "controller_error\t%s\n", opsview.DisplayText(report.ControllerError))
 		}
 		for _, finding := range report.Findings {
-			fmt.Fprintf(&text, "finding\t%s\t%s\t%s\t%s\n", finding.Code, finding.Unit, finding.Message, finding.Hint)
+			fmt.Fprintf(&text, "finding\t%s\t%s\t%s\t%s\n", opsview.DisplayText(finding.Code), finding.Unit, opsview.DisplayText(finding.Message), opsview.DisplayText(finding.Hint))
 		}
 	} else {
 		if report.ControllerError != "" {
-			fmt.Fprintf(&text, "Local controller checks incomplete: %s\n", report.ControllerError)
+			fmt.Fprintf(&text, "Local controller checks incomplete: %s\n", opsview.DisplayText(report.ControllerError))
 		} else if report.ControllerChecked && len(report.Findings) == 0 {
 			fmt.Fprintln(&text, "No local controller findings.")
 		}
 		for _, finding := range report.Findings {
-			fmt.Fprintf(&text, "%s [%s]: %s\n", finding.Code, emptyDash(finding.Unit), finding.Message)
+			fmt.Fprintf(&text, "%s [%s]: %s\n", opsview.DisplayText(finding.Code), opsview.DisplayText(emptyDash(finding.Unit)), opsview.DisplayText(finding.Message))
 			if finding.Hint != "" {
-				fmt.Fprintf(&text, "  hint: %s\n", finding.Hint)
+				fmt.Fprintf(&text, "  hint: %s\n", opsview.DisplayText(finding.Hint))
 			}
 		}
 	}
@@ -171,12 +171,12 @@ func renderDoctor(out io.Writer, report doctorReport, format string) error {
 func renderDoctorMachine(text *bytes.Buffer, report doctorReport) {
 	if toolchain := report.GoToolchain; toolchain != nil {
 		fmt.Fprintf(text, "go_toolchain\t%s\t%s\n", toolchain.Current, toolchain.Verdict)
-		fmt.Fprintf(text, "go_toolchain_setting\t%s\ngo_toolchain_source\t%s\ngo_toolchain_floor\t%s\ngo_toolchain_module\t%s\n", toolchain.Setting, toolchain.Source, toolchain.Floor, toolchain.Module)
+		fmt.Fprintf(text, "go_toolchain_setting\t%s\ngo_toolchain_source\t%s\ngo_toolchain_floor\t%s\ngo_toolchain_module\t%s\n", opsview.DisplayText(toolchain.Setting), opsview.DisplayText(toolchain.Source), toolchain.Floor, opsview.DisplayText(toolchain.Module))
 		if toolchain.Override != "" {
-			fmt.Fprintf(text, "go_toolchain_override\t%s\n", toolchain.Override)
+			fmt.Fprintf(text, "go_toolchain_override\t%s\n", opsview.DisplayText(toolchain.Override))
 		}
 		if toolchain.Error != "" {
-			fmt.Fprintf(text, "go_toolchain_error\t%s\n", toolchain.Error)
+			fmt.Fprintf(text, "go_toolchain_error\t%s\n", opsview.DisplayText(toolchain.Error))
 		}
 	}
 	if policy := report.VersionPolicy; policy != nil {
@@ -184,10 +184,10 @@ func renderDoctorMachine(text *bytes.Buffer, report doctorReport) {
 		if policy.PublishedAt != nil {
 			published, latest = policy.PublishedAt.Format(time.RFC3339)+" ("+policy.Age+" ago)", policy.Latest
 		}
-		fmt.Fprintf(text, "version_policy\t%s\t%s\t%s\t%s\n", policy.Status, latest, published, policy.Reason)
+		fmt.Fprintf(text, "version_policy\t%s\t%s\t%s\t%s\n", policy.Status, latest, published, opsview.DisplayText(policy.Reason))
 	}
 	if shadow := report.ShadowedHooks; shadow != nil {
-		fmt.Fprintf(text, "shadowed_hooks\t%s\n%s\n", shadow.Summary(), shadow.Remedy())
+		fmt.Fprintf(text, "shadowed_hooks\t%s\n%s\n", opsview.DisplayText(shadow.Summary()), opsview.DisplayText(shadow.Remedy()))
 	}
 }
 

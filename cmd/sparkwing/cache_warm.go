@@ -13,6 +13,8 @@ import (
 	"slices"
 	"syscall"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -101,9 +103,9 @@ func runCacheWarmCommand(ctx context.Context, inv clisurface.Invocation, out io.
 	case "json":
 		return json.NewEncoder(out).Encode(result)
 	case "plain":
-		_, err = fmt.Fprintln(out, result.Path)
+		_, err = fmt.Fprintln(out, opsview.DisplayText(result.Path))
 	default:
-		_, err = fmt.Fprintf(out, "%s pipeline %s: %s\n", result.Language, result.Status, result.Path)
+		_, err = fmt.Fprintf(out, "%s pipeline %s: %s\n", result.Language, result.Status, opsview.DisplayText(result.Path))
 	}
 	return err
 }

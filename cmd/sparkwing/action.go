@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -69,7 +71,7 @@ func runPipelineList(inv clisurface.Invocation) error {
 		return ndjson.Write(os.Stdout, index)
 	case "plain":
 		for _, a := range pipelines {
-			fmt.Println(a.Name)
+			fmt.Println(opsview.DisplayText(a.Name))
 		}
 		return nil
 	default:
@@ -106,7 +108,7 @@ func searchPipelines(query, format string) error {
 		return ndjson.Write(os.Stdout, results)
 	case "plain":
 		for _, r := range results {
-			fmt.Println(r.Name)
+			fmt.Println(opsview.DisplayText(r.Name))
 		}
 		return nil
 	}
@@ -122,9 +124,9 @@ func searchPipelines(query, format string) error {
 		}
 	}
 	nameWidth = min(nameWidth, widthCap)
-	fmt.Printf("query: %s (%d match%s)\n\n", query, len(results), plural(len(results)))
+	fmt.Printf("query: %s (%d match%s)\n\n", opsview.DisplayText(query), len(results), plural(len(results)))
 	for _, r := range results {
-		fmt.Printf("  %-*s  %s\n", nameWidth, r.Name, r.Short)
+		fmt.Printf("  %-*s  %s\n", nameWidth, opsview.DisplayText(r.Name), opsview.DisplayText(r.Short))
 	}
 	return nil
 }
@@ -225,7 +227,7 @@ func describePipelineSecrets(name, format string, secrets []nodewire.SecretDecla
 	if format == "json" {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"pipeline": name, "secrets": secrets})
 	}
-	fmt.Println(name + " secrets")
+	fmt.Println(opsview.DisplayText(name) + " secrets")
 	fmt.Println()
 	if len(secrets) == 0 {
 		fmt.Println("  (none declared)")
@@ -240,7 +242,7 @@ func describePipelineSecrets(name, format string, secrets []nodewire.SecretDecla
 		if !s.Optional {
 			req = "required"
 		}
-		fmt.Printf("  %-*s  %s\n", width, s.Name, req)
+		fmt.Printf("  %-*s  %s\n", width, opsview.DisplayText(s.Name), req)
 	}
 	return nil
 }
@@ -341,29 +343,29 @@ func printPipelineTable(pipelineList []Pipeline) {
 		if short == "" {
 			short = a.Help
 		}
-		fmt.Printf("  %-*s  %s\n", nameWidth, a.Name, short)
+		fmt.Printf("  %-*s  %s\n", nameWidth, opsview.DisplayText(a.Name), opsview.DisplayText(short))
 	}
 }
 
 func printPipelineDetail(a *Pipeline) {
-	fmt.Printf("name:  %s\n", a.Name)
+	fmt.Printf("name:  %s\n", opsview.DisplayText(a.Name))
 	if a.Entrypoint != "" {
-		fmt.Printf("entrypoint: %s\n", a.Entrypoint)
+		fmt.Printf("entrypoint: %s\n", opsview.DisplayText(a.Entrypoint))
 	}
 	if a.PinnedProfile != "" {
-		fmt.Printf("pinned: profile %s (run with: sparkwing pipeline trigger %s --profile %s)\n", a.PinnedProfile, a.Name, a.PinnedProfile)
+		fmt.Printf("pinned: profile %s (run with: sparkwing pipeline trigger %s --profile %s)\n", opsview.DisplayText(a.PinnedProfile), opsview.DisplayText(a.Name), opsview.DisplayText(a.PinnedProfile))
 	}
 	if len(a.Risks) > 0 {
-		fmt.Printf("risks: %s\n", strings.Join(a.Risks, ", "))
+		fmt.Printf("risks: %s\n", opsview.DisplayText(strings.Join(a.Risks, ", ")))
 	}
 	if len(a.Triggers) > 0 {
-		fmt.Printf("triggers: %s\n", strings.Join(a.Triggers, ", "))
+		fmt.Printf("triggers: %s\n", opsview.DisplayText(strings.Join(a.Triggers, ", ")))
 	}
 	if a.Short != "" {
-		fmt.Printf("\nshort: %s\n", a.Short)
+		fmt.Printf("\nshort: %s\n", opsview.DisplayText(a.Short))
 	}
 	if a.Help != "" && a.Help != a.Short {
-		fmt.Printf("\n%s\n", a.Help)
+		fmt.Printf("\n%s\n", opsview.DisplayText(a.Help))
 	}
 	if len(a.Args) > 0 {
 		fmt.Println("\nargs:")
@@ -377,7 +379,7 @@ func printPipelineDetail(a *Pipeline) {
 				dflt = " (default: " + *x.Default + ")"
 			}
 			fmt.Printf("  --%-20s %s %s  %s%s\n",
-				x.Name+" <"+x.Type+">", tag, x.Type, x.Description, dflt)
+				opsview.DisplayText(x.Name+" <"+x.Type+">"), tag, opsview.DisplayText(x.Type), opsview.DisplayText(x.Description), opsview.DisplayText(dflt))
 		}
 	}
 	if len(a.EnvVars) > 0 {
@@ -390,7 +392,7 @@ func printPipelineDetail(a *Pipeline) {
 			if e.Default != nil {
 				line += "  (default: " + *e.Default + ")"
 			}
-			fmt.Println(line)
+			fmt.Println(opsview.DisplayText(line))
 		}
 	}
 	if len(a.Examples) > 0 {
@@ -400,9 +402,9 @@ func printPipelineDetail(a *Pipeline) {
 				fmt.Println()
 			}
 			if e.Comment != "" {
-				fmt.Printf("  # %s\n", e.Comment)
+				fmt.Printf("  # %s\n", opsview.DisplayText(e.Comment))
 			}
-			fmt.Printf("  %s\n", e.Command)
+			fmt.Printf("  %s\n", opsview.DisplayText(e.Command))
 		}
 	}
 }

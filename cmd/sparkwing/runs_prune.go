@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -116,13 +118,13 @@ func writePruneRecord(out io.Writer, record pruneRecord, format string) error {
 		return nil
 	}
 	if format == "plain" {
-		_, err := fmt.Fprintln(out, record.RunID)
+		_, err := fmt.Fprintln(out, opsview.DisplayText(record.RunID))
 		return err
 	}
 	action := "pruned"
 	if record.DryRun {
 		action = "would prune"
 	}
-	_, err := fmt.Fprintf(out, "%s: %s\n", record.RunID, action)
+	_, err := fmt.Fprintf(out, "%s: %s\n", opsview.DisplayText(record.RunID), action)
 	return err
 }

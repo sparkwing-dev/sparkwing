@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -266,7 +268,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 			if err := context.Cause(ctx); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintln(os.Stderr, frame.Message)
+			_, err := fmt.Fprintln(os.Stderr, opsview.DisplayText(frame.Message))
 			return err
 		},
 	}

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 
 	"go.yaml.in/yaml/v3"
@@ -250,24 +252,24 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 		_, err := fmt.Fprintln(os.Stdout, result.Runner)
 		return err
 	}
-	fmt.Printf("minted runner token %s for %s on profile %s\n", token.Prefix, token.Principal, enrollment.profileName)
+	fmt.Printf("minted runner token %s for %s on profile %s\n", token.Prefix, opsview.DisplayText(token.Principal), opsview.DisplayText(enrollment.profileName))
 	if enrollment.personal {
 		fmt.Println("personal capacity: accepts only your runs")
 	}
-	fmt.Printf("wrote the runner section of %s (mode 0600)\n", enrollment.path)
+	fmt.Printf("wrote the runner section of %s (mode 0600)\n", opsview.DisplayText(enrollment.path))
 	fmt.Printf("service: %s\n", service.Status)
 	if service.Detail != "" {
-		fmt.Println(service.Detail)
+		fmt.Println(opsview.DisplayText(service.Detail))
 	}
 	if service.Path != "" {
-		fmt.Printf("service file: %s\n", service.Path)
+		fmt.Printf("service file: %s\n", opsview.DisplayText(service.Path))
 	}
 	if len(service.Command) > 0 {
 		fmt.Printf("start the runner with argv: %q\n", service.Command)
 	}
 	fmt.Println("what this machine accepts and isolates: sparkwing docs read --topic threat-model")
-	fmt.Printf("revoke this runner with:\n  sparkwing runners remove --profile %s --config %s\n", enrollment.profileName, enrollment.path)
-	fmt.Printf("or revoke its token with:\n  sparkwing tokens revoke --profile %s --token %s\n", enrollment.profileName, token.Prefix)
+	fmt.Printf("revoke this runner with:\n  sparkwing runners remove --profile %s --config %s\n", opsview.DisplayText(enrollment.profileName), opsview.DisplayText(enrollment.path))
+	fmt.Printf("or revoke its token with:\n  sparkwing tokens revoke --profile %s --token %s\n", opsview.DisplayText(enrollment.profileName), token.Prefix)
 	return nil
 }
 
@@ -286,7 +288,7 @@ func finishRunnerEnrollment(path string, cfg userconfig.RunnerConfig, bearer str
 
 // safety: a failed revocation leaves authority live even after its local file is removed.
 func printRunnerRevokeHint(profileName, prefix string) {
-	fmt.Fprintf(os.Stderr, "the token %s is live; revoke it with:\n  sparkwing tokens revoke --profile %s --token %s\n", prefix, profileName, prefix)
+	fmt.Fprintf(os.Stderr, "the token %s is live; revoke it with:\n  sparkwing tokens revoke --profile %s --token %s\n", opsview.DisplayText(prefix), opsview.DisplayText(profileName), opsview.DisplayText(prefix))
 }
 
 type runnerRemoval struct {
@@ -396,8 +398,8 @@ func removeRunner(ctx context.Context, manager controllerwire.TokenManager, remo
 		_, err := fmt.Fprintln(os.Stdout, removal.name)
 		return err
 	}
-	fmt.Printf("revoked %s on profile %s\n", removal.tokenPrefix, removal.profileName)
-	fmt.Printf("the runner section of %s retains the revoked credential file; sparkwing runners add --force replaces it\n", removal.path)
+	fmt.Printf("revoked %s on profile %s\n", removal.tokenPrefix, opsview.DisplayText(removal.profileName))
+	fmt.Printf("the runner section of %s retains the revoked credential file; sparkwing runners add --force replaces it\n", opsview.DisplayText(removal.path))
 	return nil
 }
 

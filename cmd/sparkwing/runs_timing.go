@@ -14,6 +14,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -671,14 +673,14 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, rows in
 		})
 	case "plain":
 		for _, job := range jobs {
-			if _, err := fmt.Fprintln(out, job.Job); err != nil {
+			if _, err := fmt.Fprintln(out, opsview.DisplayText(job.Job)); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 	fmt.Fprintf(out, "%s: %d finished runs (%d success, %d failed, %d cancelled; %d reruns, %d repeated commits)\n\n",
-		pipeline, summary.Runs, summary.Success, summary.Failed, summary.Cancelled, summary.Reruns, summary.RepeatedCommits)
+		opsview.DisplayText(pipeline), summary.Runs, summary.Success, summary.Failed, summary.Cancelled, summary.Reruns, summary.RepeatedCommits)
 	if summary.Runs == 0 {
 		return nil
 	}
@@ -705,7 +707,7 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, rows in
 	fmt.Fprintln(out)
 	fmt.Fprintln(tw, "JOB\tRUNS\tFAIL\tRETRY\tWAIT\tSETUP\tRUNNING\tGAP\tTOTAL")
 	for _, job := range jobs[:min(len(jobs), rows)] {
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", job.Job, job.Runs, job.Failed, job.Retries, pair(job.Wait), pair(job.Setup), pair(job.Running), pair(job.Gap), pair(job.Total))
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", opsview.DisplayText(job.Job), job.Runs, job.Failed, job.Retries, pair(job.Wait), pair(job.Setup), pair(job.Running), pair(job.Gap), pair(job.Total))
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -735,7 +737,7 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, rows in
 	fmt.Fprintln(out, "\nLongest waits:")
 	fmt.Fprintln(tw, "RUN\tJOB\tWAIT\tQUEUE\tADMIT\tAPPROVAL")
 	for _, w := range waits {
-		fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\t%s\t%s\n", w.number, w.job, fmtDur(total(w)), fmtDur(w.queue), fmtDur(w.admit), fmtDur(w.approval))
+		fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\t%s\t%s\n", w.number, opsview.DisplayText(w.job), fmtDur(total(w)), fmtDur(w.queue), fmtDur(w.admit), fmtDur(w.approval))
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -750,7 +752,7 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, rows in
 		for _, n := range f.Runs[:min(len(f.Runs), 5)] {
 			numbers = append(numbers, "#"+strconv.FormatInt(n, 10))
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", f.Count, f.Job, dashIfEmpty(f.Step), f.Outcome, dashIfEmpty(f.Reason), strings.Join(numbers, " "))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", f.Count, opsview.DisplayText(f.Job), opsview.DisplayText(dashIfEmpty(f.Step)), opsview.DisplayText(f.Outcome), opsview.DisplayText(dashIfEmpty(f.Reason)), strings.Join(numbers, " "))
 	}
 	if err := tw.Flush(); err != nil {
 		return err

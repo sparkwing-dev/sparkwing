@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -144,7 +146,7 @@ func writeUpgradeReport(out io.Writer, format string, result engine.UpgradeResul
 		return err
 	}
 	for _, path := range report.Files {
-		if _, err := fmt.Fprintln(out, "  "+path); err != nil {
+		if _, err := fmt.Fprintln(out, "  "+opsview.DisplayText(path)); err != nil {
 			return err
 		}
 	}
