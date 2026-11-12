@@ -5,4 +5,5 @@
   errors remain, including during DNS, credentials, bundle transfers and SDK
   setup. Cancellation without a shutdown signal, and genuine runtime or cleanup
   failures, including a child killed externally before cancellation, still exit 1.
-  Service drain deadlines are unchanged.
+  Failures from every hosted unit and source acquisition remain visible during
+  shutdown. Service drain deadlines are unchanged.
