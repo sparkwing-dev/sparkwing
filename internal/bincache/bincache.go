@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -890,7 +891,7 @@ func toolIdentityWithFS(env []string, tool string, stat func(string) (os.FileInf
 	}
 	for _, candidate := range candidates {
 		// perf: resolving missing tools walks every ancestor, including slow mounted PATH entries.
-		if _, err := stat(candidate); err != nil {
+		if _, err := stat(candidate); errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			continue
 		}
 		resolved, err := evalSymlinks(candidate)

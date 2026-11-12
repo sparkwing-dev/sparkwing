@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func protocolFixture(t *testing.T, path, counter, pipelines string) {
@@ -46,7 +47,7 @@ func starts(t *testing.T, counter string) int {
 // compile, which the cache test does not need.
 func materializeFixture(t *testing.T, sparkwingDir, fixture string) string {
 	t.Helper()
-	usePipelineToolPath(t)
+	testshell.UsePath(t, "go", "git", "sh", "sed")
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		t.Fatal(err)

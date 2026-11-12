@@ -1,4 +1,4 @@
-package main
+package testshell
 
 import (
 	"os"
@@ -9,10 +9,10 @@ import (
 	"testing"
 )
 
-func usePipelineToolPath(t *testing.T) {
+func UsePath(t *testing.T, tools ...string) {
 	t.Helper()
 	var dirs []string
-	for _, tool := range []string{"go", "git", "sh", "sed"} {
+	for _, tool := range tools {
 		if path, err := exec.LookPath(tool); err == nil {
 			dir := filepath.Dir(path)
 			if !slices.Contains(dirs, dir) {

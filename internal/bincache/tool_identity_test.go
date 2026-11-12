@@ -2,12 +2,14 @@ package bincache
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -119,5 +121,102 @@ func TestBuildEnvironmentKeyFollowsCurrentToolIdentity(t *testing.T) {
 	}
 	if bytes.Equal(present, buildEnvironmentKey(env(missingB))) {
 		t.Fatal("a replaced compiler reused its old key")
+	}
+}
+
+func TestReviewLongSymlinkChain(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux symlink traversal limit")
+	}
+	direct, aliases := t.TempDir(), t.TempDir()
+	target := filepath.Join(direct, "go")
+	if err := os.WriteFile(target, []byte("tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	next := target
+	for i := 0; i < 41; i++ {
+		link := filepath.Join(aliases, fmt.Sprintf("link%d", i))
+		if err := os.Symlink(next, link); err != nil {
+			t.Fatal(err)
+		}
+		next = link
+	}
+	candidate := filepath.Join(aliases, "go")
+	if err := os.Symlink(next, candidate); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(candidate); !errors.Is(err, syscall.ELOOP) {
+		t.Fatalf("expected the native traversal limit, got %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("%s|%d|%d", resolved, info.Size(), info.ModTime().UnixNano())
+	env := []string{"PATH=" + aliases}
+	for _, tool := range []string{"go", candidate} {
+		if got := toolIdentity(env, tool); got != want {
+			t.Errorf("identity of %s = %q, want %q", tool, got, want)
+		}
+	}
+	if got, want := buildEnvironmentKey(env), buildEnvironmentKey([]string{"PATH=" + direct}); !bytes.Equal(got, want) {
+		t.Errorf("cache key changed through the long symlink chain: direct=%x alias=%x", want, got)
+	}
+}
+
+func TestToolIdentityOnlySkipsDefinitiveMissingCandidates(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "tool.exe")
+	if err := os.WriteFile(target, []byte("tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		err     error
+		missing bool
+	}{
+		{"not-exist", fs.ErrNotExist, true},
+		{"not-directory", syscall.ENOTDIR, true},
+		{"symlink-limit", syscall.ELOOP, false},
+		{"permission", fs.ErrPermission, false},
+		{"other", errors.New("transient stat error"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := filepath.Join(t.TempDir(), "tool.exe")
+			var resolutions, stats int
+			stat := func(path string) (os.FileInfo, error) {
+				stats++
+				if path == candidate {
+					return nil, &os.PathError{Op: "stat", Path: path, Err: tc.err}
+				}
+				if path != target {
+					t.Fatalf("unexpected stat %q", path)
+				}
+				return info, nil
+			}
+			resolve := func(path string) (string, error) {
+				resolutions++
+				if path != candidate {
+					t.Fatalf("unexpected resolution %q", path)
+				}
+				return target, nil
+			}
+			got := toolIdentityWithFS(nil, candidate, stat, resolve)
+			want := fmt.Sprintf("%s|%d|%d", target, info.Size(), info.ModTime().UnixNano())
+			wantStats, wantResolutions := 2, 1
+			if tc.missing {
+				want, wantStats, wantResolutions = "absent", 1, 0
+			}
+			if got != want || stats != wantStats || resolutions != wantResolutions {
+				t.Fatalf("identity=%q stats=%d resolutions=%d; want %q, %d, %d", got, stats, resolutions, want, wantStats, wantResolutions)
+			}
+		})
 	}
 }

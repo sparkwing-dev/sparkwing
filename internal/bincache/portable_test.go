@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func newCheckout(t *testing.T, root string) (pipelineDir string) {
 	t.Helper()
-	usePipelineToolPath(t)
+	testshell.UsePath(t, "go", "git")
 	writeFile(t, filepath.Join(root, "lib", "go.mod"), "module example.com/lib\n\ngo 1.22\n")
 	writeFile(t, filepath.Join(root, "lib", "lib.go"), "package lib\n\nfunc Answer() int { return 42 }\n")
 
