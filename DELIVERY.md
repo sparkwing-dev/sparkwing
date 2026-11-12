@@ -2076,6 +2076,43 @@ file. Other syntax and workflow checks remain active.
   removes the shared-runner capacity shortfall. A complete hosted batch under
   the split is still unmeasured.
 
+- **Fixture SQL synchronization, measured 2026-11-12:** the separate SQLite
+  connections used by `teststore.SQL` and `Exec` set `synchronous(NORMAL)`,
+  matching the production store. SQLite applies this pragma per connection;
+  the fixture previously defaulted to FULL. The native
+  `TestSQLiteFixtureConnectionUsesNormalSynchronization` guard reads the
+  connection's actual mode (2 before, 1 after). Each trust case retains its
+  own store, signing key and claims.
+
+  Three interleaved A/B pairs ran every one of the 19
+  `TestAppParentChildrenPreserveOnlyExactRevisionTrust` leaves on source
+  `76afada1a`. B applied only the fixture DSN line through a Go overlay.
+  Relevant fixture/controller sources are unchanged on implementation base
+  `18ee4831b`. Go 1.26.11 used `GOMAXPROCS=3`, `-p 1` and `-short` on the
+  shared 16-CPU WSL host. Every sample copied the same private, compiled-only
+  cache seed; result caching remained enabled. Cache copying, hashing and
+  slot wait are outside the observations. Native CPU is wait4 user plus
+  system time, including descendants reaped by the test binary.
+
+  | Pair | Native wall before / after, s | Native CPU before / after, s | Load1 median before / after |
+  | --- | ---: | ---: | ---: |
+  | 1 | 18.477 / 13.355 | 13.046 / 12.274 | 6.192 / 8.295 |
+  | 2 | 20.499 / 12.838 | 13.178 / 11.855 | 8.717 / 8.579 |
+  | 3 | 19.609 / 12.421 | 14.303 / 11.901 | 8.224 / 9.252 |
+
+  Native wall medians were 19.609/12.838 s (-34.53%), with ranges
+  18.477-20.499/12.421-13.355 s. CPU medians were 13.178/11.901 s (-9.69%),
+  with ranges 13.046-14.303/11.855-12.274 s. Whole Go command wall medians
+  were 24.413/17.853 s (-26.87%), including warm driver/build work and cache
+  bookkeeping. All six samples had identical 20 run/pass results, including
+  the parent, without skips or failures. Load, other Go-slot owners, iowait
+  and steal were recorded at 1 Hz; no samples were discarded. The earlier
+  n=1 diagnostic had no wall-time win (16.294/16.461 s) and remains in the
+  evidence. One host, one window and one test cohort establish no whole-Land
+  saving and change no gate tier, lane width, deadline or test budget.
+  Evidence: `~/evidence/sparkwing/controller-app-parent-cost-2026-11-12/`
+  and `~/evidence/sparkwing/bw-3542-fixture-sqlite-sync-2026-11-12/`.
+
 - **Fixture SQL connection reuse, 2026-11-01:** `teststore.Exec` retains one
   connection per registered store, closed by the opening test's cleanup. Its
   SQLite DSN keeps foreign keys, the busy timeout and immediate transactions.
