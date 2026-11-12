@@ -25,6 +25,7 @@ type commandSession struct {
 	identity   procgroup.SessionIdentity
 	captured   bool
 	captureErr error
+	cleanupErr error
 	release    func()
 }
 
@@ -84,15 +85,27 @@ func (c *commandSession) kill() error {
 	return errors.Join(c.captureErr, err)
 }
 
+// safety: a later successful cleanup cannot erase the failure of the running attempt.
+func (c *commandSession) failure() error {
+	if c.captureErr == nil || errors.Is(c.cleanupErr, c.captureErr) {
+		return c.cleanupErr
+	}
+	return errors.Join(c.cleanupErr, c.captureErr)
+}
+
 // perf: one process table read finds live sessions, so thousands of commands cost a kill only where one remains.
 // safety: a record whose kill fails stays in the ledger for the crash sweep.
 func endCommandSessions(sessions []*commandSession) error {
 	if len(sessions) == 0 {
 		return nil
 	}
+	var errs []error
+	for _, session := range sessions {
+		errs = append(errs, session.failure())
+	}
 	processes, err := procgroup.ListSessions()
 	if err != nil {
-		return err
+		return errors.Join(append(errs, err)...)
 	}
 	live := map[int]bool{}
 	for _, process := range processes {
@@ -100,10 +113,8 @@ func endCommandSessions(sessions []*commandSession) error {
 			live[process.Session] = true
 		}
 	}
-	var errs []error
 	for _, c := range sessions {
 		if !c.captured && c.captureErr != nil {
-			errs = append(errs, c.captureErr)
 			continue
 		}
 		if c.captured && live[c.identity.SessionID] {

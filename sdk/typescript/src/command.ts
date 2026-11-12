@@ -24,12 +24,19 @@ export interface HostExecResult {
   exitCode: number;
   signaled: boolean;
   startError?: string;
+  cleanupError?: string;
   notFound: boolean;
   stdout: Buffer;
   stderr: Buffer;
 }
 export type HostExec = (request: HostExecRequest, signal: AbortSignal) => Promise<HostExecResult>;
 const bindings = new WeakMap<Context, CommandBinding>();
+
+class CommandCleanupError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(`command cleanup failed: ${message}`, cause === undefined ? undefined : { cause });
+  }
+}
 
 export class ExecError extends Error implements ExecResult {
   readonly command: string;
@@ -42,11 +49,14 @@ export class ExecError extends Error implements ExecResult {
     const command = boundedCommand(result.command);
     let message = terminated
       ? `command terminated by ${terminated}: ${command}`
-      : result.exitCode === exitNotStarted
+      : result.exitCode === exitNotStarted && !(cause instanceof CommandCleanupError)
         ? `command failed to start: ${command}`
         : `command failed (exit ${result.exitCode}): ${command}`;
     const output = result.stderr.trim() || result.stdout.trim();
-    if (cause instanceof Error && (terminated || result.exitCode === exitNotStarted)) message += `: ${cause.message}`;
+    if (cause instanceof CommandCleanupError) {
+      message += `: ${cause.message}`;
+      if (output) message += `\n${output}`;
+    } else if (cause instanceof Error && (terminated || result.exitCode === exitNotStarted)) message += `: ${cause.message}`;
     else if (output) message += `\n${output}`;
     super(message, cause === undefined ? undefined : { cause });
     this.name = "ExecError";
@@ -196,12 +206,14 @@ export async function runCommand(ctx: Context, argv: readonly [string, ...string
       result = { command, stdout: "", stderr: "", exitCode: exitNotStarted };
       throw new ExecError(result, "", Object.assign(new Error(reply.startError), reply.notFound ? { code: "ENOENT" } : {}));
     }
-    if (ctx.signal.aborted && (reply.signaled || reply.exitCode !== 0)) {
+    const cleanupError = reply.cleanupError || undefined;
+    const cleanup = (cause?: unknown) => cleanupError === undefined ? cause : new CommandCleanupError(cleanupError, cause);
+    if (ctx.signal.aborted && (reply.signaled || reply.exitCode !== 0 && cleanupError === undefined)) {
       result = { ...result, exitCode: exitNotStarted };
-      throw new ExecError(result, "cancellation", ctx.signal.reason);
+      throw new ExecError(result, "cancellation", cleanup(ctx.signal.reason));
     }
-    if (reply.signaled) throw new ExecError(result, "signal", new Error("process received a signal"));
-    if (result.exitCode !== 0) throw new ExecError(result);
+    if (reply.signaled) throw new ExecError(result, "signal", cleanup(new Error("process received a signal")));
+    if (result.exitCode !== 0 || cleanupError !== undefined) throw new ExecError(result, "", cleanup());
     return result;
   } catch (cause) {
     const error = cause instanceof ExecError ? cause : new ExecError(result, terminated, cause);

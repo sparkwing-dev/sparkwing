@@ -53,6 +53,10 @@ func (s *protocolSession) startExec(req nodewire.ExecRequest) {
 	s.execSeq++
 	key := fmt.Sprintf("exec:%d:", s.execSeq)
 	s.commands.Add(1)
+	start := s.startCommand
+	if start == nil {
+		start = startHostCommand
+	}
 	s.mu.Unlock()
 	go func() {
 		defer s.commands.Done()
@@ -81,7 +85,7 @@ func (s *protocolSession) startExec(req nodewire.ExecRequest) {
 				}
 			}
 		}
-		done, session := runHostCommand(req, s.cfg.output.masker, command.kill, s.done, sink, measure)
+		done, session := runHostCommandStarted(req, s.cfg.output.masker, command.kill, s.done, sink, measure, start)
 		s.mu.Lock()
 		delete(s.execs, req.ID)
 		if session != nil {
@@ -290,20 +294,22 @@ func runHostCommandStarted(req nodewire.ExecRequest, masker *secrets.Masker, kil
 	cleanupMu.Lock()
 	killErr := cleanupErr
 	cleanupMu.Unlock()
-	if killErr != nil {
-		done.StartError = fmt.Sprintf("SDK command cleanup failed: %v", errors.Join(killErr, waitErr))
-		return done, session
-	}
+	session.cleanupErr = killErr
 	var exit *exec.ExitError
 	if waitErr != nil && !errors.As(waitErr, &exit) && !errors.Is(waitErr, exec.ErrWaitDelay) {
-		done.StartError = waitErr.Error()
-		return done, session
+		session.cleanupErr = errors.Join(session.cleanupErr, fmt.Errorf("wait for SDK command: %w", waitErr))
 	}
-	done.ExitCode = cmd.ProcessState.ExitCode()
-	done.Signaled = session.signaled(cmd)
-	if done.Signaled {
-		done.ExitCode = -1
+	if cmd.ProcessState != nil {
+		done.ExitCode = cmd.ProcessState.ExitCode()
+		done.Signaled = session.signaled(cmd)
+		if done.Signaled {
+			done.ExitCode = -1
+		}
 	}
+	if err := session.failure(); err != nil {
+		done.CleanupError = err.Error()
+	}
+
 	done.Stdout, done.Stderr = tails[0].bytes(), tails[1].bytes()
 	return done, session
 }
@@ -352,6 +358,7 @@ type LocalCommands struct {
 	mu       sync.Mutex
 	masker   *secrets.Masker
 	sessions []*commandSession
+	closeErr error
 }
 
 // NewLocalCommands binds local test execution to the host command implementation.
@@ -378,20 +385,25 @@ func (c *LocalCommands) Execute(ctx context.Context, req nodewire.ExecRequest, s
 // Close joins the command sessions after their callers have returned.
 func (c *LocalCommands) Close() error {
 	c.mu.Lock()
-	sessions := c.sessions
+	defer c.mu.Unlock()
+	if len(c.sessions) == 0 {
+		return c.closeErr
+	}
+	c.closeErr = errors.Join(c.closeErr, endCommandSessions(c.sessions))
 	c.sessions = nil
-	c.mu.Unlock()
-	return endCommandSessions(sessions)
+	return c.closeErr
 }
 
 // ExecuteCommand runs a command for an in-process SDK host and joins its process tree.
+// Its error fails the host independently of the SDK-visible command exit status.
 //
 //nolint:contextcheck // Session cleanup bounds its own process-table read.
-func ExecuteCommand(ctx context.Context, req nodewire.ExecRequest, sink func(string, []byte, bool) error) nodewire.ExecDone {
+func ExecuteCommand(ctx context.Context, req nodewire.ExecRequest, sink func(string, []byte, bool) error) (nodewire.ExecDone, error) {
 	commands := NewLocalCommands(nil)
 	done := commands.Execute(ctx, req, sink)
-	if err := commands.Close(); err != nil {
-		done.StartError = err.Error()
+	err := commands.Close()
+	if err != nil && done.StartError == "" {
+		done.CleanupError = err.Error()
 	}
-	return done
+	return done, err
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -21,7 +22,7 @@ func main() {
 	}
 	var mu sync.Mutex
 	encoder := json.NewEncoder(os.Stdout)
-	done := nodehost.ExecuteCommand(ctx, req, func(stream string, data []byte, eof bool) error {
+	done, hostErr := nodehost.ExecuteCommand(ctx, req, func(stream string, data []byte, eof bool) error {
 		if eof {
 			return nil
 		}
@@ -31,5 +32,9 @@ func main() {
 	})
 	if err := encoder.Encode(done); err != nil {
 		panic(err)
+	}
+	if hostErr != nil {
+		fmt.Fprintln(os.Stderr, hostErr)
+		os.Exit(1)
 	}
 }

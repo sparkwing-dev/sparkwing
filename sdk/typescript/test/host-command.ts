@@ -14,7 +14,7 @@ export const hostCommand:HostExec=async(request,signal)=>{
  const abort=()=>child.kill("SIGTERM");signal.addEventListener("abort",abort,{once:true});
  child.on("error",reject);child.stderr.on("data",data=>process.stderr.write(data));
  child.stdout.on("data",chunk=>{buffer+=String(chunk);for(;;){const index=buffer.indexOf("\n");if(index<0)break;const data=JSON.parse(buffer.slice(0,index));buffer=buffer.slice(index+1);if(data.exec_output){const bytes=Buffer.from(data.data,"base64");(data.stream==="stdout"?stdout:stderr).push(bytes);request.onOutput?.(data.stream,bytes)}else final=data}});
- child.on("close",code=>{signal.removeEventListener("abort",abort);if(!final){reject(new Error(`command host exited ${code}`));return}resolveResult({exitCode:final.exit_code,signaled:!!final.signaled,notFound:!!final.not_found,...(final.start_error?{startError:final.start_error}:{}),stdout:request.capture?Buffer.concat(stdout):Buffer.concat(stdout).subarray(-65536),stderr:request.capture?Buffer.concat(stderr):Buffer.concat(stderr).subarray(-65536)})});
+ child.on("close",code=>{signal.removeEventListener("abort",abort);if(!final){reject(new Error(`command host exited ${code}`));return}resolveResult({exitCode:final.exit_code,signaled:!!final.signaled,notFound:!!final.not_found,...(final.start_error?{startError:final.start_error}:{}),...(final.cleanup_error?{cleanupError:final.cleanup_error}:{}),stdout:request.capture?Buffer.concat(stdout):Buffer.concat(stdout).subarray(-65536),stderr:request.capture?Buffer.concat(stderr):Buffer.concat(stderr).subarray(-65536)})});
  child.stdin.end(JSON.stringify({exec:"test",...request,...(request.stdin===undefined?{}:{stdin:Buffer.from(request.stdin).toString("base64")})})+"\n");
  if(signal.aborted)abort();
  });

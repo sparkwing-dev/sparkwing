@@ -88,13 +88,14 @@ type ExecCancel struct {
 	ID string
 }
 type ExecDone struct {
-	ID         string
-	ExitCode   int
-	Signaled   bool
-	StartError string
-	NotFound   bool
-	Stdout     []byte
-	Stderr     []byte
+	ID           string
+	ExitCode     int
+	Signaled     bool
+	StartError   string
+	CleanupError string
+	NotFound     bool
+	Stdout       []byte
+	Stderr       []byte
 }
 type ExecOutput struct {
 	ID     string
