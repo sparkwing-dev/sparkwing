@@ -10,9 +10,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func TestRunGoSDKReplacementBuildsWithInstalledEngine(t *testing.T) {
+	testshell.UsePath(t, "go", "git")
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
