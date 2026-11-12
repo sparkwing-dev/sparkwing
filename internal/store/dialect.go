@@ -139,6 +139,7 @@ type storeTx struct {
 	dialect              Dialect
 	store                *Store
 	groupWaits           map[UnitRef]groupWaitObservation
+	claimCapacity        *claimCapacitySearch
 	snapshotRead         bool
 	rowsOpen             bool
 	rotatingRoot         *capability.Capability

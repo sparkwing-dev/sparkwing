@@ -268,3 +268,44 @@ func TestGroupQueueTimeoutSurvivesUnstartedReturnOrSkip(t *testing.T) {
 		})
 	}
 }
+
+func TestCachedClaimSearchRetainsTimedSiblingDeadlines(t *testing.T) {
+	f := admissionFixture(t, storetest.New(t), 1, 1)
+	admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireGranted)
+	plan, owner := admissionAcceptedPlan(t, f, func(doc *nodewire.PlanDoc) {
+		timeout := int64(1000)
+		doc.Jobs[0].Concurrency[0].QueueTimeoutMS = &timeout
+		sibling := doc.Jobs[0]
+		sibling.ID = "second"
+		doc.Jobs = append(doc.Jobs, sibling)
+	})
+	refs := []runspec.NodeRef{{RunID: runspec.RunID(plan.RunID), NodeID: "job"}, {RunID: runspec.RunID(plan.RunID), NodeID: "second"}}
+	for _, ref := range refs {
+		if _, err := f.tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: owner}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now, err := f.s.TestOnlyDatabaseTime(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	demand := store.UnitDemand{CapabilityPrefix: owner.CapabilityPrefix, Kinds: []capability.UnitKind{capability.UnitNode}}
+	for _, elapsed := range []time.Duration{0, 999 * time.Millisecond, time.Second} {
+		f.s.SetTestClock(t, func() time.Time { return now.Add(elapsed) })
+		if _, err := f.s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("full group claim: %v", err)
+		}
+		for _, ref := range refs {
+			row, err := f.tenant.ReadNode(t.Context(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if elapsed < time.Second && row.Status != runstate.StatusPending {
+				t.Fatalf("premature sibling timeout: %+v", row)
+			}
+			if elapsed == time.Second && (row.Outcome != runstate.NodeFailed || row.FailureReason != store.FailureQueueTimeout || row.Attempt != 0) {
+				t.Fatalf("cached group lost sibling timeout: %+v", row)
+			}
+		}
+	}
+}

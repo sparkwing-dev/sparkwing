@@ -3543,6 +3543,13 @@ Skip, fail and cancel-others policies continue through the admission boundary.
 Box-scoped checks use the authenticated execution host. Launcher awards whose
 host is not selected yet defer that check to admission after activation.
 
+Each search reuses group accounting only within its read snapshot. Saturated
+groups are filtered before per-job eligibility; bound searches page blocked
+nodes by arrival and identity. Retained holders, weighted backfill and admission
+validation remain eligible. Unseen and expired timed jobs still reach the fenced
+clock writer, while live clocks can use the group filter. The next poll and the
+award transaction recompute current capacity.
+
 Capacity can change after selection. The runner keeps at most its concurrency
 limit in suspended admission waits, polls those waits with exponential backoff
 up to one second, and returns further unstarted race losses to the store.

@@ -133,8 +133,8 @@ func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 		after := q.afterNode
 		conditions = append(conditions, `(`+alias+`.ready_at,`+alias+`.run_id,`+alias+`.node_id)>(`+q.param(after.Arrived)+`,`+q.param(string(after.Unit.RunID))+`,`+q.param(string(after.Unit.NodeID))+`)`)
 	}
-	if kind == capability.UnitNode && q.excludedUnitsJSON != "" {
-		conditions = append(conditions, `NOT EXISTS (SELECT 1 FROM `+q.array(q.param(q.excludedUnitsJSON), "blocked_capacity")+` WHERE `+q.at("blocked_capacity.value", "RunID")+`=`+alias+`.run_id AND `+q.at("blocked_capacity.value", "NodeID")+`=`+alias+`.node_id)`)
+	if kind == capability.UnitNode && q.capacity != nil {
+		conditions = append(conditions, q.capacityExclusionSQL(alias))
 	}
 	if len(conditions) == 0 {
 		return `1=1`
@@ -240,6 +240,7 @@ func decodeClaimHead(head *claimHead, raw string) error {
 func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL) (claimHead, error) {
 	current := template.facts[0]
 	if current.BindRun != "" || len(current.Pushes) > 0 {
+		template.withArrival = true
 		query, err := template.query(template.facts, template.teams, template.rates, template.kinds, demand, template.now)
 		if err != nil {
 			return claimHead{}, err
@@ -478,7 +479,7 @@ func claimProofFactsTx(ctx context.Context, tx *storeTx, heads []claimHead, fact
 func firstEligibleRouteTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL, route claimHead, kinds []capability.UnitKind) (claimHead, error) {
 	var after *claimHead
 	for {
-		outer := claimSQL{dialect: template.dialect, team: string(route.Team), search: true, requirement: route.Requirements, context: route.Context, afterNode: after}
+		outer := claimSQL{dialect: template.dialect, team: string(route.Team), search: true, requirement: route.Requirements, context: route.Context, afterNode: after, capacity: template.capacity}
 		clock := outer.param(template.now)
 		source := outer.source(kinds)
 		teams := slices.DeleteFunc(slices.Clone(template.teams), func(team claimTeamFacts) bool { return team.Team != string(route.Team) })

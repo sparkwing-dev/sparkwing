@@ -47,13 +47,14 @@ func claimCapacityReadyTx(ctx context.Context, tx *storeTx, prefix string, team 
 		if err != nil {
 			return false, err
 		}
-		acct, err := txConcurrencyAccounting(ctx, tx, team, key, tx.now(ctx).UnixNano())
+		acct, err := tx.claimCapacity.read(ctx, tx, team, key, tx.now(ctx).UnixNano())
 		if err != nil {
 			return false, err
 		}
 		ready, err := concurrencyFitsTx(ctx, tx, team, acquireSlotRequest{Key: key, HolderID: string(unit.RunID) + "/" + nodeIDOrDash(string(unit.NodeID)), RunID: string(unit.RunID), NodeID: string(unit.NodeID), Policy: onLimitQueue, Capacity: max(group.Capacity, 1), Cost: max(group.Cost, 1)}, tx.now(ctx).UnixNano(), acct, false)
 		if err != nil || !ready {
 			if err == nil {
+				tx.claimCapacity.block(team, key, max(group.Capacity, 1), max(group.Cost, 1), acct)
 				noteGroupWait(tx, unit, row, now)
 			}
 			return false, err

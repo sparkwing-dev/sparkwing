@@ -12,6 +12,8 @@ permit, including jobs without concurrency groups. The store decides and commits
 admission skips, failures and queue timeouts; owners cannot assert those outcomes.
 
 Claim selection leaves jobs unclaimed while their queue-policy groups are full.
+Each search checks shared group accounting once, so a large blocked fan-out does
+not delay an unrelated runnable job with repeated group probes.
 A positive group `QueueTimeout` starts at the first eligible full-group check,
 not at the eventual award. The store persists that start separately from queue
 arrival order. Claim polling and reconciliation fail an expired wait with the

@@ -839,6 +839,8 @@ func clearNodeClaim(row *runstate.NodeRow) {
 	row.ReadyAt = nil
 }
 
+// safety: run locks serialize this full-row write with private queue-clock updates, leaving state_seq for edges.
+// Generation and queue fences reject stale observations; a retained earlier start only shortens a pending wait.
 func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow) error {
 	actor, err := json.Marshal(row.StateActor)
 	if err != nil {

@@ -230,31 +230,32 @@ func recordClaimAwardTx(ctx context.Context, tx *storeTx, team Team) error {
 }
 
 type claimSQL struct {
-	afterNode         *claimHead
-	excludedUnitsJSON string
-	placementFree     bool
-	preferencesFree   bool
-	heads             []claimHead
-	holdProof         bool
-	projected         bool
-	target            *UnitRef
-	team              string
-	ordinal           *int64
-	route             bool
-	candidate         bool
-	search            bool
-	context           string
-	requirement       string
-	runScope          string
-	facts             []claimFacts
-	teams             []claimTeamFacts
-	rates             CreditRateTable
-	kinds             []capability.UnitKind
-	now               int64
-	dialect           Dialect
-	args              []any
-	policy            ClaimPlacement
-	overflow          []claimOverflowFacts
+	afterNode       *claimHead
+	capacity        *claimCapacitySearch
+	withArrival     bool
+	placementFree   bool
+	preferencesFree bool
+	heads           []claimHead
+	holdProof       bool
+	projected       bool
+	target          *UnitRef
+	team            string
+	ordinal         *int64
+	route           bool
+	candidate       bool
+	search          bool
+	context         string
+	requirement     string
+	runScope        string
+	facts           []claimFacts
+	teams           []claimTeamFacts
+	rates           CreditRateTable
+	kinds           []capability.UnitKind
+	now             int64
+	dialect         Dialect
+	args            []any
+	policy          ClaimPlacement
+	overflow        []claimOverflowFacts
 }
 
 // hack: SQLite and PostgreSQL disagree on substr with a negative start, so match.IsCloudSizeLabel's suffix is read
@@ -780,7 +781,11 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 		currentRank := q.claimRankSQL("w", "current.facts")
 		return ctes + ` SELECT DISTINCT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM admissible w CROSS JOIN current_claimant current JOIN clock ON TRUE WHERE w.ranked=1 AND w.repo=0 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND w.claim_rank>=0 AND w.claim_rank<` + currentRank, nil
 	}
-	final := ` SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind FROM available w WHERE ` + q.at("w.facts", "prefix") + `=` + q.param(demand.CapabilityPrefix)
+	columns := `w.team,w.run_id,w.node_id,w.source_generation,w.kind`
+	if q.withArrival {
+		columns += `,w.arrived`
+	}
+	final := ` SELECT ` + columns + ` FROM available w WHERE ` + q.at("w.facts", "prefix") + `=` + q.param(demand.CapabilityPrefix)
 	if demand.Target != nil {
 		target := demand.Target
 		final += ` AND w.run_id=` + q.param(string(target.RunID)) + ` AND w.node_id=` + q.param(string(target.NodeID)) + ` AND w.kind=` + q.param(string(target.Kind)) + ` AND w.source_generation=` + q.param(target.SourceGeneration)
@@ -858,11 +863,15 @@ func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []c
 }
 
 func queryClaimTx(ctx context.Context, tx *storeTx, q *claimSQL, query string) (UnitRef, error) {
-	var excludedUnits []UnitRef
 	for {
 		var team Team
 		var unit UnitRef
-		err := tx.QueryRowContext(ctx, query, q.args...).Scan(&team, &unit.RunID, &unit.NodeID, &unit.SourceGeneration, &unit.Kind)
+		var arrived int64
+		columns := []any{&team, &unit.RunID, &unit.NodeID, &unit.SourceGeneration, &unit.Kind}
+		if q.withArrival {
+			columns = append(columns, &arrived)
+		}
+		err := tx.QueryRowContext(ctx, query, q.args...).Scan(columns...)
 		if errors.Is(err, sql.ErrNoRows) {
 			return UnitRef{}, notFound("eligible work", "")
 		}
@@ -876,12 +885,7 @@ func queryClaimTx(ctx context.Context, tx *storeTx, q *claimSQL, query string) (
 		if q.target != nil {
 			return UnitRef{}, errClaimCapacityUnavailable
 		}
-		excludedUnits = append(excludedUnits, unit)
-		raw, err := json.Marshal(excludedUnits)
-		if err != nil {
-			return UnitRef{}, err
-		}
-		q.excludedUnitsJSON = string(raw)
+		q.afterNode = &claimHead{Team: team, Unit: unit, Arrived: arrived}
 		q.args = nil
 		query, err = q.query(q.facts, q.teams, q.rates, q.kinds, UnitDemand{CapabilityPrefix: q.facts[0].Prefix}, q.now)
 		if err != nil {

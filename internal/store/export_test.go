@@ -19,6 +19,9 @@ import (
 // DB exposes the store's own pool to this package's tests.
 func (s *Store) DB() *sql.DB { return s.db }
 
+// ErrClaimCapacityUnavailableForTest distinguishes a full group from other claim refusals.
+var ErrClaimCapacityUnavailableForTest = errClaimCapacityUnavailable
+
 // SetTestClock overrides the store clock until the test ends.
 func (s *Store) SetTestClock(t testing.TB, clock func() time.Time) {
 	original, pinned := s.clock, s.pinnedClock

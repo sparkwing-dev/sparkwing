@@ -96,6 +96,8 @@ func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (clai
 		return claimHead{}, err
 	}
 	tx.groupWaits = make(map[UnitRef]groupWaitObservation)
+	tx.claimCapacity = &claimCapacitySearch{accounting: make(map[claimCapacityKey]concurrencyAccounting)}
+	q.capacity = tx.claimCapacity
 	head, searchErr := searchClaimTx(ctx, tx, demand, &q)
 	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
 		return claimHead{}, err
