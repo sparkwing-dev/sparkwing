@@ -234,6 +234,7 @@ linters:
             - "!**/*test/**"
             - "!**/sparkwing/testsupport/**"
             - "!**/internal/testshell/**"
+            - "!**/internal/testmanager/**"
             - "!**/internal/chaos/**"
           deny:
             - pkg: testing

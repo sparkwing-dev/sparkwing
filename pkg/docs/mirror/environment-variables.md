@@ -79,9 +79,11 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | Variable | Why it stays |
 |---|---|
 | `SPARKWING_TESTLEAK_HOST` | Marks the re-executed test binary in `internal/testleak`; it crosses exec, so it cannot be a flag. |
+| `SPARKWING_TEST_MANAGER_GUARD_DIR` | Shares the deny guard and its invocation record with re-executed test children. It is an internal test marker, not permission to use a manager. |
 | `SPARKWING_TEST_PG_URL` | Points the store test suite at a PostgreSQL database. |
 | `SPARKWING_TEST_SHELL_BASH` | Names the Git Bash that runs a Windows test's fake `#!/bin/sh` tool; it crosses exec into the stand-in executable, so it cannot be a flag. |
 | `SPARKWING_TEST_SHELL_EXE` | Marks the test binary `internal/testshell` re-executes as a Windows test's fake tool; it crosses exec, so it cannot be a flag. |
+| `SPARKWING_TEST_USER_MANAGER` | Set to `1` only in the dedicated quiet native user-manager qualification tier to run real systemd or launchd tests. Ordinary runs use fakes or the unmanaged fixture backend and skip native cases visibly. |
 | `SPARKWING_TEST_STORE` | Selects the store backend the store test suite runs against. |
 
 ## Other tools

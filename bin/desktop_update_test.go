@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -156,7 +158,7 @@ exec /bin/mv "$@"
 			}
 			environment := append(os.Environ(), "HOME="+home, "SPARKWING_HOME="+filepath.Join(home, "state"), "MODE="+mode,
 				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FIXTURE_INSTALLER="+filepath.Join(dir, "install.sh"), "FIXTURE_CANDIDATE="+filepath.Join(dir, "candidate"))
-			if cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY"); cli != "" && mode == "run" {
+			if cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY"); cli != "" && mode == "run" && testmanager.Enabled() {
 				for _, state := range []string{filepath.Join(home, "state"), filepath.Join(home, "delivery")} {
 					if err := os.MkdirAll(state, 0o700); err != nil {
 						t.Fatal(err)
@@ -247,7 +249,7 @@ exec /bin/mv "$@"
 						t.Fatalf("missing blocking-run diagnostic %q: %s", want, out)
 					}
 				}
-				if os.Getenv("SPARKWING_LOCAL_E2E_BINARY") != "" {
+				if os.Getenv("SPARKWING_LOCAL_E2E_BINARY") != "" && testmanager.Enabled() {
 					for _, line := range strings.Split(string(out), "\n") {
 						if command, ok := strings.CutPrefix(line, "desktop-update: inspect: "); ok {
 							details, err := procenv.ControlCommandContext(t.Context(), environment, "bash", "-c", command).CombinedOutput()

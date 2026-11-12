@@ -2496,6 +2496,43 @@ file. Other syntax and workflow checks remain active.
   the host refuses unix sockets; a sandbox that is known to refuse them sets
   `SPARKWING_TEST_NO_LOCAL_SOCKETS=1` to skip it instead.
 
+- **Native user-manager qualification:** ordinary Go tests deny unexpected
+  `systemd-run`, `systemctl`, and `launchctl` calls. Workflow fixtures use the
+  existing unmanaged runner backend through a compile-time overlay; release
+  binaries never receive that overlay. `TestLocalControllerSmoke` and local-run
+  workflows remain in the full suite, and
+  `TestReleaseBuildExcludesUserManagerFixtureInjection` checks the release boundary.
+  Managed installation, cgroup and restart tests skip visibly unless
+  `SPARKWING_TEST_USER_MANAGER=1` is set. This dedicated manual tier must run in a
+  quiet window for changes to managed runner startup, upgrades, cgroups or service
+  lifecycle. Use one test at a time, with no concurrent lands, deploys or service
+  trials; private homes do not isolate the user manager. Never enable the gate
+  globally in shared full-suite or race jobs. Schedule the tier on a dedicated
+  service host for nightly qualification. Its initial budget is 20 minutes,
+  excluding cold compilation; record measured runtime before changing that budget.
+
+  On Linux, run the named cases sequentially with the gate set, private
+  `HOME`/`SPARKWING_HOME`, and disposable Go temporary state:
+
+  ```sh
+  export SPARKWING_TEST_USER_MANAGER=1
+  go test -count=1 -p 1 ./internal/wingd -run '^TestManagedUnitsPrivateConfigWithSystemd$'
+  go test -count=1 -p 1 ./internal/wingd/client -run '^TestServiceDaemonLeavesCallerCgroup$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestDrainingLocalOwnerAwaitsChildWhileSuccessorRunsDependencies$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestManagedControllerPreservesKeyAcrossRestart$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterSystemdLifetimeAndControllerKeys$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterRealIntakeRaceAndRollback$'
+  go test -tags=rewrite_integration -count=1 -p 1 ./cmd/sparkwing -run '^TestReviewProductionExecutionBindings$'
+  ```
+
+  The provided-binary local-controller feature scenarios also need this gate;
+  follow `tests/acceptance/LOCAL_FEATURES.md`. On macOS, use the same gate for
+  native launchd coverage in the platform qualification window. List user units
+  before and after each case and verify every test-owned unit is gone. The
+  package-level guard remains enabled for all ordinary runs, even if a test
+  handles and ignores the manager's error.
+
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
   set to a database they cannot reach. Start one with `docker run --rm -d
