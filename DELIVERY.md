@@ -1530,9 +1530,14 @@ file. Other syntax and workflow checks remain active.
   generated pages. `TestCommandReferenceMatchesRegistry` also compares the
   committed pages with the renderer compiled into the full CLI.
   Both gate modes and pre-push run `build-published-sdk` after their workspace
-  build, using the same compiler allowance. It compiles all six release targets:
-  Linux, macOS and Windows on amd64 and arm64, sequentially. The CLI and runner
-  build on every target; the controller builds on Linux and macOS.
+  build, using the same compiler allowance. Affected Gate, pre-push and merge
+  rechecks compile the host target plus linux/arm64, the deploy-image target.
+  With at least two compiler cores, those builds overlap and split the existing
+  allowance; otherwise they run sequentially. A linux/arm64 host builds once.
+  Full Gate, including the nightly full tier, compiles all six release targets:
+  Linux, macOS and Windows on amd64 and arm64. The remaining targets are caught
+  at the full tier and at release, not per land. The CLI and runner build on
+  every target; the controller builds on Linux and macOS.
   Each target uses `CGO_ENABLED=0`, `GOWORK=off`, `GOENV=off`, empty `GOFLAGS`
   and `-mod=readonly -trimpath`. The selected SDK must have a published version
   and no replacement. This also bypasses vendor copies and alternate modfiles.
@@ -1543,14 +1548,15 @@ file. Other syntax and workflow checks remain active.
   combined branch and merge delta. Publish a standalone Go SDK API change first,
   wait for its module version to resolve, then bump the root `go.mod` requirement
   before the root uses that API. Workspace conformance remains a separate check.
-  On one compiler core against main `b8295539a`, the host-only control measured
-  30.24 seconds initially and 10.22 seconds warm. The six-target check took
-  18m21s while filling missing cross-target dependency caches, then 54.20 and
-  57.53 seconds warm, adding 44-47 seconds over the warm host-only control.
-  Shared load1 ranged from 3.9 to 6.8. The fast phase's one-minute warning still
-  applies to the complete matrix step; a first build can exceed it substantially.
-  These timings exclude admission wait and do not measure an end-to-end land.
-  The check runs after the workspace build with the same compiler allowance.
+  The full-tier matrix measured 18m21s while filling missing cross-target caches
+  and 54-58 seconds with the same source and warm caches on one compiler core.
+  The host/deploy check, measured three times on the same `aee29e9e1` source,
+  took a median 17.37s wall and 17.28s CPU with one compiler core. Splitting
+  three cores across the two targets took 10.51s wall and 20.21s CPU at the
+  median. Shared load1 ranged from 4.0 to 5.3. These are warm-cache compiler
+  timings, excluding admission, not end-to-end land measurements. The fast
+  phase retains its one-minute warning. The build follows the workspace build
+  rather than increasing its compiler reservation.
   Without `--full`, vet and build cover the affected dependency closure. Its test step
   runs `go test -short` on changed packages
   and their reverse dependency closure, including production, internal-test

@@ -2,14 +2,21 @@ package jobs
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -227,7 +234,7 @@ func TestPublishedSDKBuildRejectsTargetSpecificUnpublishedAPIs(t *testing.T) {
 			goos, goarch, _ := strings.Cut(platform, "/")
 			file := filepath.Join(root, "cmd/sparkwing", "extra_"+goos+"_"+goarch+".go")
 			writeGoFile(t, file, "package main\nimport sdk \""+sdkModulePath+"\"\nvar _ = sdk.ExecDone{}.CleanupError\n")
-			if err := buildPublishedSDK(newTestContext(t), 1); err == nil || !strings.Contains(err.Error(), "CleanupError") {
+			if err := buildPublishedSDK(newTestContext(t), 1, gateFull); err == nil || !strings.Contains(err.Error(), "CleanupError") {
 				t.Fatalf("%s unpublished API escaped the release check: %v", platform, err)
 			}
 		})
@@ -237,7 +244,7 @@ func TestPublishedSDKBuildRejectsTargetSpecificUnpublishedAPIs(t *testing.T) {
 func TestPublishedSDKBuildMatchesReleaseBinarySet(t *testing.T) {
 	root := publishedSDKFixture(t)
 	writeGoFile(t, filepath.Join(root, "cmd/sparkwing-controller/extra_windows.go"), "package main\nvar _ = controllerIsNotReleasedOnWindows\n")
-	if err := buildPublishedSDK(newTestContext(t), 1); err != nil {
+	if err := buildPublishedSDK(newTestContext(t), 1, gateFull); err != nil {
 		t.Fatalf("release check included an unsupported binary: %v", err)
 	}
 }
@@ -344,7 +351,136 @@ func TestPublishedSDKBuildIncludesPlatformOnlyMarkdownInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitCommitAll(t, root, "delete Windows input")
-	if err := runPublishedSDKBuildTouched(newTestContext(t)); err == nil || !strings.Contains(err.Error(), "no matching files found") {
+	if why, err := publishedSDKBuildChange(newTestContext(t), []string{"internal/windowsdata/message.md"}); err != nil || why == "" {
+		t.Fatalf("platform-only Markdown not selected: %s %v", why, err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := runPublishedSDKBuildTouched(newTestContext(t)); err != nil {
+			t.Fatalf("affected tier built deferred Windows input: %v", err)
+		}
+	}
+	if err := buildPublishedSDK(newTestContext(t), 1, gateFull); err == nil || !strings.Contains(err.Error(), "no matching files found") {
 		t.Fatalf("platform-only embed escaped release build: %v", err)
+	}
+}
+
+func TestPublishedSDKBuildDefersOtherTargetsToFullGate(t *testing.T) {
+	deferred := "darwin/arm64"
+	if runtime.GOOS+"/"+runtime.GOARCH == deferred {
+		deferred = "windows/amd64"
+	}
+	goos, goarch, _ := strings.Cut(deferred, "/")
+	for _, tc := range []struct {
+		name string
+		job  sparkwing.Workable
+		full bool
+	}{
+		{"full", &Gate{mode: gateFull}, true}, {"affected", &Gate{mode: gateAffected}, false}, {"touched", &PrePush{}, false}, {"merge", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := publishedSDKFixture(t)
+			writeGoFile(t, filepath.Join(root, "cmd/sparkwing", "extra_"+goos+"_"+goarch+".go"), "package main\nimport sdk \""+sdkModulePath+"\"\nvar _ = sdk.ExecDone{}.CleanupError\n")
+			gitCommitAll(t, root, "target-specific API")
+			var err error
+			if tc.job == nil {
+				err = runPublishedSDKBuildFiles(newTestContext(t), []string{"cmd/sparkwing/extra_" + goos + "_" + goarch + ".go"}, 1)
+			} else {
+				err = runPublishedSDKJobStep(t, tc.job)
+			}
+			if tc.full {
+				if err == nil || !strings.Contains(err.Error(), "CleanupError") {
+					t.Fatalf("full tier missed %s: %v", deferred, err)
+				}
+			} else if err != nil {
+				t.Fatalf("affected tier built deferred %s: %v", deferred, err)
+			}
+		})
+	}
+}
+
+func TestPublishedSDKBuildKeepsDeployARM64OnAffectedPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		job  sparkwing.Workable
+	}{{"affected", &Gate{mode: gateAffected}}, {"touched", &PrePush{}}, {"merge", nil}} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := publishedSDKFixture(t)
+			writeGoFile(t, filepath.Join(root, "cmd/sparkwing/extra_linux_arm64.go"), "package main\nimport sdk \""+sdkModulePath+"\"\nvar _ = sdk.ExecDone{}.CleanupError\n")
+			gitCommitAll(t, root, "deploy API")
+			var err error
+			if tc.job == nil {
+				err = runPublishedSDKBuildFiles(newTestContext(t), []string{"cmd/sparkwing/extra_linux_arm64.go"}, 3)
+			} else {
+				err = runPublishedSDKJobStep(t, tc.job)
+			}
+			if err == nil || !strings.Contains(err.Error(), "CleanupError") {
+				t.Fatalf("deploy arm64 API escaped: %v", err)
+			}
+		})
+	}
+}
+
+func TestPublishedSDKBuildAvoidsDuplicateDeployTarget(t *testing.T) {
+	targets := publishedSDKPlatforms(gateAffected, "linux/arm64")
+	if len(targets) != 1 || targets[0] != "linux/arm64" {
+		t.Fatalf("duplicate host/deploy target: %v", targets)
+	}
+}
+
+func TestPublishedSDKBuildSharesConcurrentTargetAllowance(t *testing.T) {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+		t.Skip("host and deploy are one target")
+	}
+	for _, cores := range []int{1, 3} {
+		t.Run(strconv.Itoa(cores), func(t *testing.T) {
+			publishedSDKFixture(t)
+			realGo, err := exec.LookPath("go")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var mu sync.Mutex
+			var active, peak, starts int
+			var invalid string
+			release := make(chan struct{})
+			var once sync.Once
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				allowance, _ := strconv.Atoi(r.URL.Query().Get("cores"))
+				packages, _ := strconv.Atoi(r.URL.Query().Get("packages"))
+				mu.Lock()
+				starts++
+				active += allowance
+				peak = max(peak, active)
+				if allowance != packages || allowance < 1 {
+					invalid = r.URL.RawQuery
+				}
+				if cores == 1 || starts == 2 {
+					once.Do(func() { close(release) })
+				}
+				mu.Unlock()
+				select {
+				case <-release:
+				case <-r.Context().Done():
+				}
+				mu.Lock()
+				active -= allowance
+				mu.Unlock()
+			}))
+			defer server.Close()
+			tools := t.TempDir()
+			writeDeliveryTool(t, filepath.Join(tools, "go"), "#!/bin/sh\nif [ \"$1\" = build ]; then exec curl --fail --silent \""+server.URL+"/$GOOS/$GOARCH?cores=$GOMAXPROCS&packages=$3\"; fi\nexec "+shellQuote(realGo)+" \"$@\"\n")
+			t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+			ctx, cancel := context.WithTimeout(newTestContext(t), 10*time.Second)
+			defer cancel()
+			err = runPublishedSDKBuildFiles(ctx, []string{"go.mod"}, cores)
+			once.Do(func() { close(release) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if starts != 2 || peak != cores || invalid != "" {
+				t.Fatalf("starts=%d peak=%d allowance=%d invalid=%q", starts, peak, cores, invalid)
+			}
+		})
 	}
 }

@@ -176,7 +176,11 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}
 	vetStep := sparkwing.Step(w, "vet", vet)
 	buildStep := sparkwing.Step(w, "build", build).Needs(vetStep)
-	publishedBuild := sparkwing.Step(w, "build-published-sdk", runPublishedSDKBuild).Needs(buildStep)
+	published := runPublishedSDKBuild
+	if p.mode == gateAffected {
+		published = runAffectedPublishedSDKBuild
+	}
+	publishedBuild := sparkwing.Step(w, "build-published-sdk", published).Needs(buildStep)
 	sparkwing.Step(w, "vet-qatrust", runQATrustVetTouched).Needs(vetStep)
 	// safety: a Gate that Plan never configured runs every test, so a missing
 	// mode can only widen the gate.
