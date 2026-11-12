@@ -301,8 +301,9 @@ Compiler identity discovery stats a PATH candidate before resolving its symlinks
 A missing tool costs one stat per nonempty PATH directory. Existing tools retain
 the resolved path, size and modification-time identity. There is no process memo,
 so a newly installed higher-priority compiler is visible on the next call.
-Pipeline fixtures restrict PATH to the directories supplying their required
-tools when they do not test PATH discovery. Product and job PATH remain unchanged.
+Pipeline and real-Go SDK installation fixtures restrict PATH to the directories
+supplying their required tools when they do not test PATH discovery. Product
+and job PATH remain unchanged.
 
 A before/after pair on 2026-11-11 used base `2b52cfec5` and candidate
 `abc8e9759`, Go 1.26.11, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=7` and `-p 1`.
@@ -332,6 +333,41 @@ or establish stable end-to-end Land savings. Bincache load1 medians were
 with nominal 100 ms polling. Both CLI CPU observers missed their final exit
 sample after the save markers; raw Go timestamps and the input intervals were
 retained. These measurements change no test selection, gate tier or deadline.
+
+Three interleaved SDK installation package pairs on 2026-11-12 used base
+`76afada1a` and code `11610638c`, Go 1.26.11, `GOMAXPROCS=3`, `-p 1`,
+`-short` and default result caching. All fifteen original top-level cases were
+selected; the two short-mode skips stayed unchanged. The new ambient-compiler
+fixture guard was checked separately. Each command copied the same private
+compiled-only cache seed and used fresh product/user state. The outer PATH
+kept its 32 mounted entries; only the candidate's real-Go fixtures narrowed
+their tool directories. No result-cache replay replaced test bodies.
+
+| Measure, seconds | Before median (range) | After median (range) |
+| --- | ---: | ---: |
+| Whole Go command wall | 102.746 (100.929–103.684) | 45.569 (45.468–45.753) |
+| Whole Go command CPU | 71.797 (70.833–72.121) | 62.622 (62.343–62.810) |
+| Native test wall | 65.867 (64.577–66.060) | 43.335 (43.149–43.430) |
+| Native test CPU | 64.877 (63.468–65.503) | 60.042 (59.663–60.141) |
+| Native `ok` to terminal package event | 36.251 (34.236–38.543) | 1.694 (1.666–1.767) |
+
+CPU is wait4 user+sys including waited descendants in each stated scope;
+the native and whole-command columns overlap. Whole-command wall fell
+54.85%, 55.75% and 55.87% per pair; CPU fell 13.17%, 13.17% and 11.33%.
+Mounted testlog stats fell from 5,376 / 5,632 / 5,888 to zero. Outcome
+inventories matched after normalizing two local-SDK cases' temporary path
+names. Native quick-check payloads retain their per-invocation random inputs.
+The full candidate package also passed all 30 parent/leaf cases with race
+detection, including both real-compiler cases skipped by short mode.
+
+Cache copying, compile-only priming, npm preparation and manifest hashing are
+outside the observations. Native CPU supervision restores Go's usual local
+testlog argument, which `-exec` otherwise omits; retained logs and cache-save
+events prove input replay stayed active. Load1 medians were 4.55 / 3.31,
+2.82 / 2.88 and 2.92 / 2.98. Two other Go-slot holders were present, and all
+samples were retained. This is one shared WSL host and one time window,
+with exact native timestamps and 1 Hz host/process samples. It measures the
+SDK package, not end-to-end Land, and changes no tier, selection or deadline.
 
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at

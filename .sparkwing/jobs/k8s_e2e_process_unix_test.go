@@ -5,6 +5,7 @@ package jobs
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,17 +15,19 @@ import (
 	"time"
 )
 
+const kubernetesCancellationProbeScript = `
+trap 'printf cleanup >"$CLEANUP_MARKER"; exit 143' TERM INT
+printf 'ready\n'
+read -r hold
+`
+
 func TestKubernetesE2ECommandCancellationRunsCleanup(t *testing.T) {
 	bound, stop := context.WithTimeout(t.Context(), 10*time.Second)
 	defer stop()
 	ctx, cancel := context.WithCancel(bound)
 	defer cancel()
 	cleanupMarker := filepath.Join(t.TempDir(), "cleanup")
-	cmd := exec.CommandContext(ctx, kubernetesTestBash(t), "-c", `
-trap 'printf cleanup >"$CLEANUP_MARKER"; exit 143' TERM INT
-printf 'ready\n'
-read -r hold
-`)
+	cmd := exec.CommandContext(ctx, kubernetesTestBash(t), "-c", kubernetesCancellationProbeScript)
 	cmd.Env = append(os.Environ(), "CLEANUP_MARKER="+cleanupMarker)
 	configureKubernetesE2ECommand(cmd)
 	if cmd.Cancel == nil || cmd.WaitDelay != 90*time.Second {
@@ -69,15 +72,23 @@ read -r hold
 		close(done)
 	}()
 	cancel()
+	var signalErr error
+	select {
+	case signalErr = <-signaled:
+		if signalErr != nil && !errors.Is(signalErr, os.ErrProcessDone) {
+			t.Fatalf("cancellation signal: %v", signalErr)
+		}
+	case <-bound.Done():
+		t.Fatal("cancellation callback did not complete")
+	}
+	// safety: only this fixture holds stdin; EOF releases Bash's deferred TERM trap.
+	if err := stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+		t.Fatal(err)
+	}
 	select {
 	case <-done:
 	case <-bound.Done():
-		select {
-		case err := <-signaled:
-			t.Logf("cancellation signal for PID %d: %v", cmd.Process.Pid, err)
-		default:
-			t.Logf("cancellation callback has not returned for PID %d", cmd.Process.Pid)
-		}
+		t.Logf("cancellation signal for PID %d: %v", cmd.Process.Pid, signalErr)
 		if runtime.GOOS == "linux" {
 			status, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(cmd.Process.Pid), "status"))
 			t.Logf("cancellation signal masks and process status (%v):\n%s", err, status)
@@ -92,5 +103,25 @@ read -r hold
 	}
 	if got, err := os.ReadFile(cleanupMarker); err != nil || string(got) != "cleanup" {
 		t.Fatalf("Kubernetes cancellation cleanup marker = %q, %v (wait: %v)", got, err, waitErr)
+	}
+}
+
+func TestKubernetesE2EScriptEOFDoesNotRunSignalCleanup(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "cleanup")
+	script := filepath.Join(root, "probe.sh")
+	if err := os.WriteFile(script, []byte(kubernetesCancellationProbeScript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLEANUP_MARKER", marker)
+	ctx, stop := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stop()
+	err := runKubernetesE2EScript(ctx, root, script)
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || ctx.Err() != nil {
+		t.Fatalf("product script did not receive EOF: %v", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("EOF ran signal cleanup: %v", err)
 	}
 }
