@@ -49,7 +49,7 @@ func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) 
 	if err != nil {
 		return err
 	}
-	// correctness: project the persisted JSON, including its UTF-8 repair.
+	// bug: project the persisted JSON, including its UTF-8 repair.
 	var persisted runspec.SealedRequest
 	if err := json.Unmarshal(body, &persisted); err != nil {
 		return err
