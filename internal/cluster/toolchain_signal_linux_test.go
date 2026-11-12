@@ -16,9 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/processtest"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
@@ -107,17 +106,8 @@ func (c *runnerToolchainContext) Done() <-chan struct{} {
 			if err := syscall.Kill(c.command.Process.Pid, sig); err != nil {
 				panic(err)
 			}
-			// safety: WNOWAIT leaves status to the owner; ECHILD means the owner already reaped the child.
-			for {
-				var info unix.Siginfo
-				err := unix.Waitid(unix.P_PID, c.command.Process.Pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
-				if errors.Is(err, syscall.EINTR) {
-					continue
-				}
-				if err != nil && !errors.Is(err, syscall.ECHILD) {
-					panic(err)
-				}
-				break
+			if err := processtest.WaitExited(c.command.Process.Pid); err != nil {
+				panic(err)
 			}
 		}
 		fmt.Fprintln(os.Stderr, "toolchain shutdown ordering reached")

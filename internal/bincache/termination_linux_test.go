@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/sparkwing-dev/sparkwing/internal/processtest"
 )
 
 func TestCompilePipelineRetainsExternalTermination(t *testing.T) {
@@ -68,16 +68,8 @@ func (c *compileTerminationContext) Done() <-chan struct{} {
 		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 			panic(err)
 		}
-		for {
-			var info unix.Siginfo
-			err := unix.Waitid(unix.P_PID, pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
-			if errors.Is(err, syscall.EINTR) {
-				continue
-			}
-			if err != nil && !errors.Is(err, syscall.ECHILD) {
-				panic(err)
-			}
-			break
+		if err := processtest.WaitExited(pid); err != nil {
+			panic(err)
 		}
 		c.cancel()
 	})

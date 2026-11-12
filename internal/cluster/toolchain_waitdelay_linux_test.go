@@ -7,16 +7,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
-	"syscall"
 	"testing"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
@@ -51,7 +46,7 @@ func TestReviewRunnerWaitDelay(t *testing.T) {
 					_ = child.Process.Kill()
 				}
 			}()
-			inherited := &reviewRunnerWaitDelayContext{Context: ctx, command: child, ready: bufio.NewReader(ready), mode: mode}
+			inherited := &runnerToolchainContext{Context: ctx, command: child, ready: bufio.NewReader(ready), mode: mode}
 			err = gotoolchain.Run(inherited, child) //nolint:contextcheck // This inherited context orders external termination before the runner signal.
 			return runners.RuntimeConfig{}, err
 		}}
@@ -84,48 +79,4 @@ func TestReviewRunnerWaitDelay(t *testing.T) {
 			})
 		}
 	}
-}
-
-type reviewRunnerWaitDelayContext struct {
-	context.Context
-	command *exec.Cmd
-	ready   *bufio.Reader
-	mode    string
-	once    sync.Once
-}
-
-func (c *reviewRunnerWaitDelayContext) Done() <-chan struct{} {
-	c.once.Do(func() {
-		line, err := c.ready.ReadString('\n')
-		if err != nil || line != "ready\n" {
-			panic(fmt.Sprintf("child readiness: %q %v", line, err))
-		}
-		if strings.HasPrefix(c.mode, "external-") {
-			sig := syscall.SIGTERM
-			if c.mode == "external-kill" {
-				sig = syscall.SIGKILL
-			}
-			if err := syscall.Kill(c.command.Process.Pid, sig); err != nil {
-				panic(err)
-			}
-			// safety: WNOWAIT leaves status to the owner; ECHILD means the owner already reaped the child.
-			for {
-				var info unix.Siginfo
-				err := unix.Waitid(unix.P_PID, c.command.Process.Pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
-				if errors.Is(err, syscall.EINTR) {
-					continue
-				}
-				if err != nil && !errors.Is(err, syscall.ECHILD) {
-					panic(err)
-				}
-				break
-			}
-		}
-		fmt.Fprintln(os.Stderr, "toolchain shutdown ordering reached")
-		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-			panic(err)
-		}
-		<-c.Context.Done()
-	})
-	return c.Context.Done()
 }
