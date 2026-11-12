@@ -72,13 +72,8 @@ func TestRunnerMetricsServesAndJoins(t *testing.T) {
 				return nil
 			}, nil)
 		}()
-		transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
-			client, server := net.Pipe()
-			listener.connections <- server
-			return client, nil
-		}}
-		defer transport.CloseIdleConnections()
-		client := &http.Client{Transport: transport}
+		client, closeClient := newMetricsHTTPClient(listener)
+		defer closeClient()
 		observeClaimOutcome("claimed")
 		for _, path := range []string{"/healthz", "/metrics"} {
 			response, err := client.Get("http://metrics" + path)
@@ -191,13 +186,8 @@ func TestRunnerHealthSurfacesAndClearsDegradation(t *testing.T) {
 				return nil
 			})
 		}()
-		transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
-			client, server := net.Pipe()
-			listener.connections <- server
-			return client, nil
-		}}
-		defer transport.CloseIdleConnections()
-		client := &http.Client{Transport: transport}
+		client, closeClient := newMetricsHTTPClient(listener)
+		defer closeClient()
 		for _, state := range []bool{false, true, false} {
 			degraded.Store(state)
 			response, err := client.Get("http://metrics/healthz")
@@ -224,4 +214,13 @@ func TestRunnerHealthSurfacesAndClearsDegradation(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func newMetricsHTTPClient(listener *metricsListener) (*http.Client, func()) {
+	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		client, server := net.Pipe()
+		listener.connections <- server
+		return client, nil
+	}}
+	return &http.Client{Transport: transport}, transport.CloseIdleConnections
 }
