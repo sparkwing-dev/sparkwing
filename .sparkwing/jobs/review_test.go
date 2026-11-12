@@ -265,11 +265,11 @@ func (g *fakeGit) run(_ context.Context, args ...string) (string, error) {
 	case "log --format=%s":
 		subject, _, _ := strings.Cut(g.messages, "\n")
 		return subject, nil
-	case "diff --name-only":
+	case "diff --name-status":
 		if len(g.files) == 0 {
 			return "", nil
 		}
-		return strings.Join(g.files, "\x00") + "\x00", nil
+		return "M\x00" + strings.Join(g.files, "\x00M\x00") + "\x00", nil
 	case "diff --raw":
 		return "", nil
 	case "diff --no-color":

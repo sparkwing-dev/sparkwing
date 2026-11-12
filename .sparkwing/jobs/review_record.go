@@ -218,6 +218,8 @@ func applySkips(p reviewPolicy, findings []reviewFinding, skips map[string]strin
 			f.Status, f.SkipReason = findingOpen, ""
 			notes = append(notes, fmt.Sprintf("%s reopened: it is %s and blocks, so only the reviewer clears it", f.ID, f.Severity))
 		case !asked || f.Status == findingFixed:
+		case f.Reviewer == binaryReviewOwner:
+			notes = append(notes, fmt.Sprintf("skip of %s refused: binary or unreadable content requires human review; no override exists", f.ID))
 		case !p.skippable(*f):
 			notes = append(notes, fmt.Sprintf("skip of %s refused: it is %s and blocks, so only the reviewer clears it", f.ID, f.Severity))
 		default:

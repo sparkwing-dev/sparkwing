@@ -208,11 +208,22 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	rec.Tree, rec.Commit, rec.Base = tree, head, base
 	d.logf("review timing: phase=resolve elapsed=%s reused=%t", d.now().Sub(started), sameTree)
 
-	if sameTree {
-		rec.Notes = append(rec.Notes, "tree and objective unchanged since the last review, so no reviewer ran; skips were reapplied")
-	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree); err != nil {
+	diff, err := reviewDiff(ctx, d, base, head, nil)
+	if err != nil {
+		return reviewRecord{}, "", fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
+	}
+
+	changes, err := reviewChangedPaths(ctx, d, base, head)
+	if err != nil {
 		return reviewRecord{}, "", err
 	}
+
+	if sameTree {
+		rec.Notes = append(rec.Notes, "tree and objective unchanged since the last review, so no reviewer ran; skips were reapplied")
+	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree, diff.text, changes); err != nil {
+		return reviewRecord{}, "", err
+	}
+	diff.enforceBinaryReview(&rec, p, changes)
 	started = d.now()
 	rec.Notes = append(rec.Notes, applySkips(p, rec.Findings, skips)...)
 	rec.settle(p)
@@ -223,29 +234,32 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	return rec, file, nil
 }
 
-func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string) error {
+func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree, diff string, changes [][]string) error {
 	started := d.now()
-	diff, err := reviewDiff(ctx, d, base, head, nil)
-	if err != nil {
-		return fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
-	}
-	names, err := d.git(ctx, "diff", "--name-only", "--no-renames", "-z", "--no-ext-diff", base, head)
-	if err != nil {
-		return fmt.Errorf("review: list changed files: %w", err)
-	}
+	var err error
 	var files []string
-	if names != "" {
-		files = strings.Split(strings.TrimSuffix(names, "\x00"), "\x00")
+	profiles := map[string][]string{}
+	for _, change := range changes {
+		for _, file := range change {
+			if !slices.Contains(files, file) {
+				files = append(files, file)
+			}
+		}
+		// safety: copying or renaming out of strict scope still needs its destination reviewed.
+		for profile := range p.strictReviewers(change) {
+			for _, file := range change {
+				if !slices.Contains(profiles[profile], file) {
+					profiles[profile] = append(profiles[profile], file)
+				}
+			}
+		}
 	}
+	profiles[defaultReviewer] = files
 	d.logf("review timing: phase=diff elapsed=%s bytes=%d files=%d", d.now().Sub(started), len(diff), len(files))
 	started = d.now()
 	objective := rec.Objective
 	pass := reviewPass{Tree: tree, Commit: head, At: d.now().UTC()}
 
-	profiles := map[string][]string{defaultReviewer: files}
-	for profile, strictFiles := range p.strictReviewers(files) {
-		profiles[profile] = strictFiles
-	}
 	for _, ref := range rec.Reviewers {
 		if _, ok := profiles[ref.Profile]; !ok && rec.openBy(ref.Profile) {
 			profiles[ref.Profile] = nil
@@ -349,7 +363,7 @@ func scopedDiff(ctx context.Context, d reviewDeps, base, head string, files []st
 	if err != nil {
 		return "", fmt.Errorf("review: diff the strict paths: %w", err)
 	}
-	return out, nil
+	return out.text, nil
 }
 
 func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, profile, model string, prompt reviewPrompt) (bool, error) {
@@ -660,7 +674,7 @@ func (r reviewPrompt) diffSection() string {
 		diff = diff[:end]
 		note = fmt.Sprintf("The diff was cut at %d bytes; read the rest with `git diff %s %s`.\n\n", maxPromptDiff, r.base, r.head)
 	}
-	coverage := "Metadata-only binary summaries are UNREVIEWED CONTENT. You must inspect every present blob using its object id and safe inspection command before approving. If content remains unreviewed, return a blocking finding for the coverage gap.\n\n"
+	coverage := "Metadata-only binary summaries are UNREVIEWED CONTENT. You must inspect every present blob using its object id and safe inspection command before approving. If content remains unreviewed, return a blocking finding for the coverage gap. The job independently blocks binary summaries on strict routes, executable modes or script/source paths; model findings cannot clear that block.\n\n"
 	return "## Diff\n\n" + coverage + note + "```diff\n" + diff + "\n```\n\n"
 }
 

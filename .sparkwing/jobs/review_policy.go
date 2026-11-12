@@ -214,7 +214,7 @@ func (p reviewPolicy) strictFor(file string) []strictPaths {
 
 func (p reviewPolicy) blocks(f reviewFinding) bool {
 	rank := severityRank(f.Severity)
-	if rank <= 1 {
+	if rank <= 1 || f.Reviewer == binaryReviewOwner {
 		return true
 	}
 	for _, s := range p.strictFor(f.File) {

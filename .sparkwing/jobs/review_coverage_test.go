@@ -94,17 +94,17 @@ func TestReviewEscapedPatchesDistinguishLiteralBackslashesFromInvalidBytes(t *te
 }
 
 func TestReviewStrictRoutingIncludesRenameSourcesAndDestinations(t *testing.T) {
-	for _, kind := range []string{"delete", "mode", "rename-in", "rename-out", "rename-between-strict"} {
+	for _, kind := range []string{"delete", "mode", "rename-in", "rename-out", "rename-between-strict", "copy-in", "copy-out"} {
 		t.Run(kind, func(t *testing.T) {
 			fx := newReviewFixture(t)
 			root := t.TempDir()
 			gitInit(t, root)
 			source := "internal/store/billing_source \xff.sh"
 			destination := "internal/store/billing_destination \xfe.sh"
-			if kind == "rename-in" {
+			if kind == "rename-in" || kind == "copy-in" {
 				source = "ordinary.sh"
 			}
-			if kind == "rename-out" {
+			if kind == "rename-out" || kind == "copy-out" {
 				destination = "ordinary.sh"
 			}
 			writeGoFile(t, filepath.Join(root, source), "#!/bin/sh\nallowed() { return 0; }\n")
@@ -124,7 +124,9 @@ func TestReviewStrictRoutingIncludesRenameSourcesAndDestinations(t *testing.T) {
 				if err := os.MkdirAll(filepath.Dir(filepath.Join(root, destination)), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Rename(filepath.Join(root, source), filepath.Join(root, destination)); err != nil {
+				if strings.HasPrefix(kind, "copy-") {
+					writeGoFile(t, filepath.Join(root, destination), "#!/bin/sh\nallowed() { return 0; }\n")
+				} else if err := os.Rename(filepath.Join(root, source), filepath.Join(root, destination)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -164,16 +166,14 @@ func TestReviewStrictRoutingIncludesRenameSourcesAndDestinations(t *testing.T) {
 						t.Errorf("pass%d omitted mode change", pass)
 					}
 				}
-				if kind == "rename-in" || kind == "rename-between-strict" {
+				if strings.HasPrefix(kind, "rename-") || strings.HasPrefix(kind, "copy-") {
 					for _, want := range []string{"new file mode", "+allowed() { return 0; }"} {
 						if !strings.Contains(call.prompt, want) {
 							t.Errorf("%s pass%d omitted strict destination %q", kind, pass, want)
 						}
 					}
 				}
-				if kind == "rename-out" && strings.Contains(call.prompt, "+++ b/ordinary.sh") {
-					t.Errorf("pass%d strict scope included ordinary destination", pass)
-				}
+
 			}
 		})
 	}
@@ -203,5 +203,84 @@ func TestReviewAttributesCannotHideExecutableTextChanges(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestReviewSensitiveBinaryChangesBlockRegardlessOfModelVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body  string
+		executable, block bool
+	}{
+		{"strict", "internal/store/billing_payload.bin", "\x00payload", false, true},
+		{"executable", "bin/tool", "\x00payload", true, true},
+		{"script", "scripts/access.sh", "#!/bin/sh\nallowed() { return 0; }\n# " + strings.Repeat("\xff", 256), false, true},
+		{"source", "lib/access.go", "package access\n\x00", false, true},
+		{"shebang", "scripts/access", "#!/bin/sh\n# \x00", false, true},
+		{"asset", "images/icon.png", "\x89PNG\r\n\x1a\n\x00", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx, root := gitEncodingReviewFixture(t, nil, map[string]string{tc.path: tc.body})
+			if tc.executable {
+				if err := os.Chmod(filepath.Join(root, tc.path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				gitCommitAll(t, root, "make executable")
+			}
+			ctx := newTestContext(t)
+			in := reviewInputs{branch: "work", brief: "Review opaque changes"}
+			for pass := range 3 {
+				if pass == 2 {
+					writeGoFile(t, filepath.Join(root, "other.md"), "follow-up\n")
+					gitCommitAll(t, root, "follow-up")
+				}
+				rec, file, err := runReview(ctx, fx.deps, testPolicy(t), in)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !tc.block {
+					if rec.Result != resultPass {
+						t.Fatalf("ordinary asset blocked: %+v", rec)
+					}
+					continue
+				}
+				if rec.Result != resultBlock || rec.BlockingOpen != 1 {
+					t.Fatalf("pass %d: opaque change accepted after empty model verdict: %+v", pass, rec)
+				}
+				var finding reviewFinding
+				for _, f := range rec.Findings {
+					if strings.Contains(f.Summary, "binary or unreadable change requires human review: "+tc.path) {
+						finding = f
+					}
+				}
+				if finding.ID == "" || finding.Status != findingOpen {
+					t.Fatalf("missing human-review finding: %+v", rec.Findings)
+				}
+				if pass > 0 && !strings.Contains(strings.Join(rec.Notes, "\n"), "no override") {
+					t.Fatalf("skip refusal suggests the model can clear a mechanical block: %v", rec.Notes)
+				}
+				in.skip = finding.ID + "=inspected by author"
+				// safety: even a cached record from an older review must not bypass the current content check.
+				rec.Findings = nil
+				rec.Result, rec.BlockingOpen = resultPass, 0
+				if err := saveReviewRecord(file, rec); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(fx.def.calls) != 2 {
+				t.Fatalf("cached tree reran model: %d calls", len(fx.def.calls))
+			}
+		})
+	}
+}
+
+func TestReviewBinaryCopyFromStrictPathStillBlocks(t *testing.T) {
+	source, destination := "internal/store/billing_payload.bin", "images/payload.png"
+	fx, _ := gitEncodingReviewFixture(t, map[string]string{source: "\x00payload"}, map[string]string{destination: "\x00payload"})
+	rec, _, err := runReview(newTestContext(t), fx.deps, testPolicy(t), reviewInputs{branch: "work", brief: "Review strict binary copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Result != resultBlock || rec.BlockingOpen != 1 || len(fx.sec.calls) != 1 {
+		t.Fatalf("strict binary copied out of scope passed: %+v", rec)
 	}
 }
