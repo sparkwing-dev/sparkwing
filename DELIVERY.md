@@ -297,6 +297,42 @@ context limit attribution. This measures forced-body affected tests, not
 default result-cache processing or end-to-end Land. Existing deadlines
 remain unchanged.
 
+Compiler identity discovery stats a PATH candidate before resolving its symlinks.
+A missing tool costs one stat per nonempty PATH directory. Existing tools retain
+the resolved path, size and modification-time identity. There is no process memo,
+so a newly installed higher-priority compiler is visible on the next call.
+Pipeline fixtures restrict PATH to the directories supplying their required
+tools when they do not test PATH discovery. Product and job PATH remain unchanged.
+
+A before/after pair on 2026-11-11 used base `2b52cfec5` and candidate
+`abc8e9759`, Go 1.26.11, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=7` and `-p 1`.
+Both outer commands retained the real WSL PATH, including 32 mounted Windows
+entries. Each package command started with its own empty private GOCACHE and
+private home. Default test-result caching remained enabled, with no `-count`;
+all four commands ran bodies and saved results. Compilation is outside the
+test-executable and post-`ok` intervals below.
+
+| Package | Executable before / after, s | `ok` to first cache-save observation before / after, s |
+| --- | ---: | ---: |
+| `internal/bincache` | 212.745 / 39.720 | 391.489 / 4.997 |
+| `cmd/sparkwing` | 340.905 / 239.942 | 132.079 / 17.215 |
+
+Bincache testlog operations fell from 930,770 to 312,840, with mounted Windows
+file operations falling from 144,130 to zero. CLI operations fell from 805,200
+to 643,662, with mounted Windows operations falling from 35,728 to 1,024.
+Existing test run/pass/skip inventories matched exactly, and the three added
+identity/call-count guards passed. Whole command walls, including cold build
+work and excluding slot wait, were 667.806 / 73.837 s for bincache and
+673.888 / 469.536 s for CLI.
+
+This is one pair per package on a shared host, combining the product scan
+change with fixture PATH isolation. It does not isolate their separate gains
+or establish stable end-to-end Land savings. Bincache load1 medians were
+13.438 / 10.359; CLI medians were 11.038 / 11.749. Save markers were observed
+with nominal 100 ms polling. Both CLI CPU observers missed their final exit
+sample after the save markers; raw Go timestamps and the input intervals were
+retained. These measurements change no test selection, gate tier or deadline.
+
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at
 `406208403`. All share root b61 and the same 13-file selection: two pipeline
