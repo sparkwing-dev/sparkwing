@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,10 +71,11 @@ func startHostCommand(cmd *exec.Cmd, _ []string) (*commandSession, error) {
 
 func (c *commandSession) leader() (int, string, bool) { return 0, "", false }
 
-func (c *commandSession) kill() {
+func (c *commandSession) kill() error {
 	if err := c.job.TerminateWithCode(commandCancellationExitCode); err != nil {
-		slog.Default().Debug("kill SDK command job", "err", err)
+		return fmt.Errorf("kill SDK command job: %w", err)
 	}
+	return nil
 }
 
 func (*commandSession) signaled(cmd *exec.Cmd) bool {

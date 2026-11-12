@@ -4,6 +4,7 @@ package nodehost
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -20,10 +21,11 @@ import (
 // safety: cancellation kills the whole session, including children in other process groups; a normal
 // exit leaves background children running, as SDK-run commands did, until the SDK session ends.
 type commandSession struct {
-	pid      int
-	identity procgroup.SessionIdentity
-	captured bool
-	release  func()
+	pid        int
+	identity   procgroup.SessionIdentity
+	captured   bool
+	captureErr error
+	release    func()
 }
 
 func execFormatError(err error) bool { return errors.Is(err, syscall.ENOEXEC) }
@@ -52,7 +54,8 @@ func trackHostCommand(cmd *exec.Cmd, env []string) *commandSession {
 	c := &commandSession{pid: cmd.Process.Pid, release: func() {}}
 	identity, err := procgroup.CaptureSession(c.pid)
 	if err != nil {
-		slog.Default().Debug("SDK command session not captured", "err", err)
+		c.captureErr = fmt.Errorf("capture SDK command session %d: %w", c.pid, err)
+		slog.Default().Debug("SDK command session not captured", "err", c.captureErr)
 		return c
 	}
 	c.identity, c.captured = identity, true
@@ -64,16 +67,21 @@ func (c *commandSession) leader() (int, string, bool) {
 	return c.identity.LeaderPID, c.identity.BirthToken, c.captured
 }
 
-func (c *commandSession) kill() {
+func (c *commandSession) kill() error {
 	if c.captured {
 		if err := procgroup.KillSession(c.identity); err != nil {
-			slog.Default().Debug("kill SDK command session", "err", err)
+			return fmt.Errorf("kill SDK command session %d: %w", c.pid, err)
 		}
-		return
+		return nil
 	}
-	if err := syscall.Kill(-c.pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		slog.Default().Debug("kill SDK command group", "err", err)
+	err := syscall.Kill(-c.pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		err = nil
 	}
+	if err != nil {
+		err = fmt.Errorf("kill SDK command group %d: %w", c.pid, err)
+	}
+	return errors.Join(c.captureErr, err)
 }
 
 // perf: one process table read finds live sessions, so thousands of commands cost a kill only where one remains.
@@ -94,6 +102,10 @@ func endCommandSessions(sessions []*commandSession) error {
 	}
 	var errs []error
 	for _, c := range sessions {
+		if !c.captured && c.captureErr != nil {
+			errs = append(errs, c.captureErr)
+			continue
+		}
 		if c.captured && live[c.identity.SessionID] {
 			if err := procgroup.KillSession(c.identity); err != nil {
 				errs = append(errs, err)

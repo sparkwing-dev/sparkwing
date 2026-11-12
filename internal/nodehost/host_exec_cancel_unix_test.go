@@ -4,7 +4,9 @@ package nodehost
 
 import (
 	"bytes"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -71,5 +73,88 @@ echo ready; wait`},
 				t.Errorf("cancellation returned with escaped child still alive: %+v", process)
 			}
 		}
+	}
+}
+
+func TestHostCommandReportsSessionCleanupFailure(t *testing.T) {
+	for _, trigger := range []string{"cancellation", "sink", "capture", "nonzero"} {
+		t.Run(trigger, func(t *testing.T) {
+			kill := make(chan struct{})
+			pid := 0
+			var restore func()
+			t.Cleanup(func() {
+				if restore != nil {
+					restore()
+				}
+			})
+			start := func(cmd *exec.Cmd, env []string) (*commandSession, error) {
+				session, err := startHostCommand(cmd, env)
+				if err != nil {
+					return nil, err
+				}
+				identity := session.identity
+				// safety: the injected invalid identity makes the real session-cleanup call fail before any signal.
+				session.identity.SessionID = 0
+				if trigger == "capture" {
+					session.identity = identity
+					session.captured = false
+					session.captureErr = errors.New("injected SDK command session capture failure")
+				}
+				restore = func() {
+					session.identity = identity
+					session.captured, session.captureErr = true, nil
+					if err := endCommandSessions([]*commandSession{session}); err != nil {
+						t.Error(err)
+					}
+				}
+				return session, nil
+			}
+			request := nodewire.ExecRequest{ID: "cleanup-failure", Dir: t.TempDir(), Env: os.Environ(), Capture: true,
+				Argv: []string{"sh", "-c", "sleep 300 & echo $!; exit 0"}}
+			if trigger == "nonzero" {
+				request.Argv[2] = "sleep 300 & echo $!; exit 7"
+			}
+			done, session := runHostCommandStarted(request, nil, kill, t.Context().Done(), func(stream string, chunk []byte, _ bool) error {
+				if stream == "stdout" && len(chunk) > 0 && pid == 0 {
+					var err error
+					pid, err = strconv.Atoi(strings.TrimSpace(string(chunk)))
+					if err != nil {
+						return err
+					}
+					if trigger != "sink" {
+						close(kill)
+					} else {
+						return os.ErrClosed
+					}
+				}
+				return nil
+			}, nil, start)
+			processes, err := procgroup.ListSessions()
+			if err != nil {
+				t.Fatal(err)
+			}
+			alive := false
+			for _, process := range processes {
+				if process.PID == pid {
+					alive = !process.Terminated()
+					t.Logf("after return: child=%+v result=%+v", process, done)
+				}
+			}
+			want := "invalid guarded session identity"
+			if trigger == "capture" {
+				want = "injected SDK command session capture failure"
+				if err := endCommandSessions([]*commandSession{session}); err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("session close lost capture error: %v", err)
+				}
+			} else if !alive {
+				t.Fatal("probe did not keep the failed-cleanup child alive across return")
+			}
+			if trigger == "nonzero" && !strings.Contains(done.StartError, "exit status 7") {
+				t.Errorf("cleanup error replaced command failure: %+v", done)
+			}
+			if !strings.Contains(done.StartError, want) {
+				t.Errorf("session cleanup error lost: %+v", done)
+			}
+		})
 	}
 }

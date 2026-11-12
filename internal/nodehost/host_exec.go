@@ -126,6 +126,11 @@ var commandBuffers = sync.Pool{New: func() any { return new([64 << 10]byte) }}
 // safety: a normal exit returns the session alive; the end of the SDK session kills what it left running.
 // measure, when set, adds a command still running after commandMeasureDelay to the job's machine measurement.
 func runHostCommand(req nodewire.ExecRequest, masker *secrets.Masker, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error, measure func(pid int, birth string)) (nodewire.ExecDone, *commandSession) {
+	return runHostCommandStarted(req, masker, kill, closed, sink, measure, startHostCommand)
+}
+
+// safety: a per-call starter keeps injected ownership failures isolated from concurrent commands.
+func runHostCommandStarted(req nodewire.ExecRequest, masker *secrets.Masker, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error, measure func(pid int, birth string), start func(*exec.Cmd, []string) (*commandSession, error)) (nodewire.ExecDone, *commandSession) {
 	done := nodewire.ExecDone{ID: req.ID, ExitCode: -1}
 	if info, err := os.Stat(req.Dir); err != nil {
 		done.StartError = fmt.Sprintf("dir %q: %v", req.Dir, err)
@@ -168,11 +173,11 @@ func runHostCommand(req nodewire.ExecRequest, masker *secrets.Masker, kill, clos
 		return done, nil
 	default:
 	}
-	session, err := startHostCommand(cmd, req.Env)
+	session, err := start(cmd, req.Env)
 	if err != nil && execFormatError(err) {
 		// hack: execvp runs executable text without #! through /bin/sh for both SDKs.
 		cmd = command("/bin/sh", append([]string{cmd.Path}, req.Argv[1:]...))
-		session, err = startHostCommand(cmd, req.Env)
+		session, err = start(cmd, req.Env)
 	}
 	if err != nil {
 		closeFiles(outR, outW, errR, errW)
@@ -185,21 +190,30 @@ func runHostCommand(req nodewire.ExecRequest, masker *secrets.Masker, kill, clos
 	if pid, birth, ok := session.leader(); ok && measure != nil {
 		stopMeasure = time.AfterFunc(commandMeasureDelay, func() { measure(pid, birth) }).Stop
 	}
+	var cleanupMu sync.Mutex
+	var cleanupErr error
+	killSession := func() {
+		if err := session.kill(); err != nil {
+			cleanupMu.Lock()
+			cleanupErr = errors.Join(cleanupErr, err)
+			cleanupMu.Unlock()
+		}
+	}
 	exited := make(chan struct{})
 	cleanupDone := make(chan struct{})
 	go func() {
 		defer close(cleanupDone)
 		select {
 		case <-kill:
-			session.kill()
+			killSession()
 		case <-closed:
-			session.kill()
+			killSession()
 		case <-exited:
 			select {
 			case <-kill:
-				session.kill()
+				killSession()
 			case <-closed:
-				session.kill()
+				killSession()
 			default:
 			}
 		}
@@ -236,7 +250,7 @@ func runHostCommand(req nodewire.ExecRequest, masker *secrets.Masker, kill, clos
 					sinkMu.Unlock()
 					if failed {
 						// safety: a dead sink must not leave the command blocked on a full pipe.
-						session.kill()
+						killSession()
 					}
 				}
 				if owed == 0 {
@@ -273,6 +287,13 @@ func runHostCommand(req nodewire.ExecRequest, masker *secrets.Masker, kill, clos
 	}
 	drains.Wait()
 	closeFiles(outR, errR)
+	cleanupMu.Lock()
+	killErr := cleanupErr
+	cleanupMu.Unlock()
+	if killErr != nil {
+		done.StartError = fmt.Sprintf("SDK command cleanup failed: %v", errors.Join(killErr, waitErr))
+		return done, session
+	}
 	var exit *exec.ExitError
 	if waitErr != nil && !errors.As(waitErr, &exit) && !errors.Is(waitErr, exec.ErrWaitDelay) {
 		done.StartError = waitErr.Error()
