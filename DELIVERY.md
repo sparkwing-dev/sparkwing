@@ -1729,6 +1729,48 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
+- **TypeScript native fixture build, measured 2026-11-12:** the nativehost
+  test process compiles its unchanged SDK once, retaining the resolved Node
+  path, SDK directory and original build error. Protocol, Conformance and
+  JobIDVectors retain their cases and separate protocol processes. The Node
+  local-pack test keeps its independent production build. The native
+  `TestSDKFixtureBuildsOnce` guard counts actual compiler invocations on both
+  success and failure. Its counting executable uses a Unix shell; Windows
+  retains the real native tests.
+
+  Three interleaved A1B1A2B2A3B3 pairs used the same `0d7b18969` source,
+  with A disabling only the new cache through a Go overlay and B using it.
+  Both used identical Go JSON/tool tracing instrumentation. Go 1.26.11 ran
+  the whole `TestTypeScriptBoundary` with `GOMAXPROCS=3`, `-p 1` and `-short`.
+  Each sample copied the same compiled-only private seed containing both
+  helper variants and the outer/nested Go flag variants. Priming, copying,
+  hashing and slot wait are excluded; native CPU is wait4 user plus system
+  time, including descendants reaped by the binary.
+
+  | Pair | Native wall A / B, s | Native CPU A / B, s | Whole Go wall change | Load1 median A / B |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 20.797 / 17.547 | 34.108 / 27.452 | -11.02% | 8.478 / 11.243 |
+  | 2 | 25.868 / 24.794 | 37.937 / 37.126 | +2.58% | 9.755 / 13.206 |
+  | 3 | 20.343 / 18.345 | 33.664 / 28.383 | -7.22% | 10.388 / 8.759 |
+
+  Native wall medians were 20.797/18.345 s
+  (-11.79%), with ranges
+  20.343-25.868/17.547-24.794 s. Native CPU medians were
+  34.108/28.383 s (-16.78%), with ranges
+  33.664-37.937/27.452-37.126 s. Whole Go wall medians were
+  24.419/22.014 s, but pair 2 regressed 2.58%; a stable
+  whole-command wall saving is inconclusive. The unmodified Node cell was
+  slower in B in all three pairs, so its drift is not attributed to this cache.
+  Every sample retained 145 Node assertions, 15 native Go parent/leaf cases
+  and both acceptance cells with exact outcome parity. Native compiler
+  invocations fell from two to one. Load, owners, iowait and steal were recorded
+  at 1 Hz without filtering. This is one shared WSL host and one window,
+  with no whole-Land saving claim or change to selection, lanes or deadlines.
+  The earlier cold private-cache probe included an 80.296 s nested-Go prefix
+  before its first compiler and is kept separate from these warm pairs.
+  Evidence: `~/evidence/sparkwing/bw-3544-native-sdk-fixture-2026-11-12/`
+  and `~/evidence/sparkwing/typescript-boundary-cost-2026-11-12/`.
+
 - **Storage acceptance fixture creation, measured 2026-11-12:** the depcache
   properties create their isolated current-schema SQLite databases through
   `teststore.Open` and reopen persisted data through `OpenExisting`. The common
