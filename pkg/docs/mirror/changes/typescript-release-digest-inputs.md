@@ -6,4 +6,5 @@
   no longer force SDK version bumps. The entire nativehost fixture tree remains
   included because Windows publication runs it and records it in receipts.
   Adopting the narrower input set changes existing digests and needs a new SDK
-  version once; published policy entries are unchanged.
+  version once. Recoveries of pre-change entries also refuse the new hash;
+  published policy entries are unchanged.

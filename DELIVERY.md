@@ -810,7 +810,8 @@ that package and binds its whole fixture tree into verification receipts.
 Ordinary unit tests and their helpers, examples, implementation notes, formatter
 config and generated output do not define this release digest. Changing this
 input set changes existing source hashes, so adopting the rule needs a new SDK
-version once. An unchanged digest retains the existing SDK entry
+version once. Recoveries of pre-change SDK entries also refuse the new hash;
+the signed identities are not rewritten. An unchanged digest retains the existing SDK entry
 and skips native assembly and npm publication. Changed source requires a new
 SDK version. Bump both package manifests before cutting the engine release.
 The first independent SDK version is `0.72.0`.
