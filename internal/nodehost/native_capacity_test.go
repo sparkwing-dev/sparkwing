@@ -99,7 +99,7 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 			config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
 			var awards atomic.Int32
 			awarded := make(chan struct{})
-			// A full group can refuse the second claim before it reaches admission.
+			// safety: a full group can refuse the second claim before it reaches admission.
 			config.Owner.AdoptClaim = func(ctx context.Context, _ runstate.ReconciledNode) error {
 				if awards.Add(1) == int32(len(plan.Jobs)) {
 					close(awarded)
