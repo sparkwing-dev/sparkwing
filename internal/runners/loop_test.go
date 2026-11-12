@@ -587,7 +587,7 @@ func TestLoopPollsThroughControllerRestarts(t *testing.T) {
 	})
 }
 
-func TestLoopBoundsControllerTransportRecovery(t *testing.T) {
+func TestLoopControllerTransportRecoveryHonorsCallerCancellation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
 		start := time.Now()
@@ -600,7 +600,9 @@ func TestLoopBoundsControllerTransportRecovery(t *testing.T) {
 			}),
 			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil }),
 		}
-		if err := loop.Run(t.Context()); !errors.Is(err, io.ErrUnexpectedEOF) || (calls < 4 || calls > 5) || time.Since(start) != 5*time.Second {
+		ctx, cancel := context.WithTimeout(t.Context(), 12*time.Minute)
+		defer cancel()
+		if err := loop.Run(ctx); !errors.Is(err, context.DeadlineExceeded) || (calls < 100 || calls > 400) || time.Since(start) != 12*time.Minute {
 			t.Fatalf("claims = %d, elapsed = %s, error = %v", calls, time.Since(start), err)
 		}
 	})
@@ -1285,6 +1287,7 @@ func TestLoopReportsStoppedClaimsBeforeHeldHostJoins(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		started, stopped, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		calls := 0
+		failure := errors.New("non-retryable claim refusal")
 		loop := &Loop{
 			Config:          LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, PollInterval: time.Second},
 			CheckVersion:    func(context.Context, string) error { return nil },
@@ -1294,13 +1297,13 @@ func TestLoopReportsStoppedClaimsBeforeHeldHostJoins(t *testing.T) {
 				if calls == 1 {
 					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
 				}
-				return controllerwire.ClaimResponse{}, io.ErrUnexpectedEOF
+				return controllerwire.ClaimResponse{}, failure
 			}),
 			Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
 				close(started)
 				<-release
 				if ctx.Err() != nil {
-					t.Errorf("claim transport exit cancelled held work: %v", ctx.Err())
+					t.Errorf("claim refusal cancelled held work: %v", ctx.Err())
 				}
 				return nil
 			}),
@@ -1315,8 +1318,8 @@ func TestLoopReportsStoppedClaimsBeforeHeldHostJoins(t *testing.T) {
 		default:
 		}
 		close(release)
-		if err := <-joined; !errors.Is(err, io.ErrUnexpectedEOF) {
-			t.Fatalf("claim transport outcome: %v", err)
+		if err := <-joined; !errors.Is(err, failure) {
+			t.Fatalf("claim refusal outcome: %v", err)
 		}
 	})
 }

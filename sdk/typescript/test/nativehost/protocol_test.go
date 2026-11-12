@@ -22,18 +22,7 @@ import (
 
 func TestNativeProtocol(t *testing.T) {
 	t.Run("pipe_object_identity", TestProtocolToolChecksPipeObjectIdentity)
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	build := exec.CommandContext(t.Context(), node, filepath.Join(root, "node_modules/typescript/bin/tsc"), "-p", filepath.Join(root, "tsconfig.build.json"))
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build SDK: %v\n%s", err, output)
-	}
+	node, root := nativeSDKFixture(t)
 	t.Run("refuses_regular_files", func(t *testing.T) {
 		files := make([]*os.File, 2)
 		for i := range files {
