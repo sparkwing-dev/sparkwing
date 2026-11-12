@@ -24,7 +24,11 @@ import (
 )
 
 func TestStartGateSeededRecovery(t *testing.T) {
-	for seed := uint64(1); seed <= 8; seed++ {
+	seeds := uint64(8)
+	if testing.Short() {
+		seeds = 1
+	}
+	for seed := uint64(1); seed <= seeds; seed++ {
 		for _, compute := range []bool{false, true} {
 			t.Run(fmt.Sprintf("seed=%d/compute=%t", seed, compute), func(t *testing.T) {
 				simulateNativeRecovery(t, rand.New(rand.NewPCG(seed, 17)), compute)
@@ -70,11 +74,6 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subscription, err := f.State.subscribe(t.Context(), f.Input.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = subscription.Close() }()
 	var otherHeld, releasedDone, queued, expanded, approved atomic.Bool
 	otherHeld.Store(true)
 	if random.IntN(2) == 0 {
@@ -83,7 +82,12 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 		}
 		releasedDone.Store(true)
 	}
+	passes := 0
 	owner.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
+		passes++
+		if passes > 64 {
+			return store.ScheduleSnapshot{}, errors.New("recovery simulation exceeded 64 scheduling passes")
+		}
 		if otherHeld.Load() {
 			for _, row := range snapshot.Nodes {
 				if row.Ref.NodeID == "ready" || row.Ref.NodeID == "approval" {
@@ -105,46 +109,36 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 				}
 			}
 		}
-		return snapshot.Scheduling()
-	}
-	owner.Wait = func(ctx context.Context, snapshot store.RunSnapshot) error {
-		if otherHeld.Load() {
-			state, err := f.Tenant.GetConcurrencyState(ctx, "plan:global:deploys")
-			if err != nil {
-				return err
+		// safety: retry completions can keep the scheduler out of Wait indefinitely.
+		if queued.Load() && !releasedDone.Swap(true) {
+			if err := f.report(t.Context(), running, runstate.NodeSuccess); err != nil {
+				return store.ScheduleSnapshot{}, err
 			}
-			for _, waiter := range state.Waiters {
-				if waiter.RunID == f.Input.RunID {
-					queued.Store(true)
-				}
-			}
-		}
-		if !releasedDone.Swap(true) {
-			return f.report(t.Context(), running, runstate.NodeSuccess)
-		}
-		if otherHeld.Load() && queued.Load() {
+		} else if otherHeld.Load() && queued.Load() {
 			if _, err := other.Tenant.TransitionNode(t.Context(), store.CancelNode{Ref: runspec.NodeRef{RunID: runspec.RunID(other.Input.RunID), NodeID: "hold"}, Actor: other.Actor}); err != nil {
-				return fmt.Errorf("cancel competitor: %w", err)
-			}
-			if _, err := other.Tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: other.Actor.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(other.Input.RunID), Actor: other.Actor, Cause: runstate.RunFinish}}); err != nil {
-				return fmt.Errorf("finish competitor: %w", err)
+				return store.ScheduleSnapshot{}, fmt.Errorf("cancel competitor: %w", err)
 			}
 			otherHeld.Store(false)
-			return nil
+			if _, err := other.Tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: other.Actor.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(other.Input.RunID), Actor: other.Actor, Cause: runstate.RunFinish}}); err != nil {
+				return store.ScheduleSnapshot{}, fmt.Errorf("finish competitor: %w", err)
+			}
 		}
 		if row, ok := ownerNode(snapshot, "approval"); ok && row.Status == runstate.StatusApprovalPending {
 			if _, err := f.State.TransitionNode(t.Context(), store.ResolveApprovalNode{Ref: row.Ref, Actor: f.Control, Outcome: runstate.NodeSuccess, Approval: &runstate.ApprovalResolution{Decision: store.ApprovalResolutionApproved}}); err != nil {
-				return err
+				return store.ScheduleSnapshot{}, err
 			}
 			approved.Store(true)
-			return nil
 		}
-		select {
-		case <-subscription.Changed:
-			return nil
-		case <-ctx.Done():
+		return snapshot.Scheduling()
+	}
+	// safety: external recovery events must progress even when every wait loses to a retry.
+	wait := owner.Wait
+	owner.Wait = func(ctx context.Context, snapshot store.RunSnapshot) error {
+		if otherHeld.Load() {
+			<-ctx.Done()
 			return context.Cause(ctx)
 		}
+		return wait(ctx, snapshot)
 	}
 	owner.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		if otherHeld.Load() {
