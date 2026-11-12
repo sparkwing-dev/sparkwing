@@ -1355,6 +1355,10 @@ file. Other syntax and workflow checks remain active.
   before it tags, 40 minutes including 30 minutes of lint-lock allowance
   and ten minutes for build, full lint, the short test suite,
   published-version, Go-directive and SDK-pin checks, and changelog-link and docs-sidebar checks.
+  The read-only `typescript-release` check verifies the published policy index's
+  signature and runs the hosted release's SDK decision against the selected source.
+  It rejects a changed SDK digest under an existing version before creating a tag,
+  including in dry runs and cuts that reuse exact-source CI.
   Build, lint, dependency preparation, the SDK suite and short tests run in sequence.
   The job allows one hour to finish those serial checks while retaining the
   40-minute budget warning.
