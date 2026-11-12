@@ -213,9 +213,16 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 		return reviewRecord{}, "", fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
 	}
 
-	changes, err := reviewChangedPaths(ctx, d, base, head)
+	changes, modified, err := reviewChangedPaths(ctx, d, base, head)
 	if err != nil {
 		return reviewRecord{}, "", err
+	}
+
+	diff.requireChangedPaths(modified)
+	// safety: a verdict over an omitted patch cannot approve bytes the reviewer has never seen.
+	if sameTree && len(diff.missing) == 0 && slices.ContainsFunc(rec.Findings, func(f reviewFinding) bool { return f.Reviewer == binaryReviewOwner && f.Rule == "missing-diff-review" }) {
+		sameTree = false
+		rec.Notes = append(rec.Notes, "diff coverage recovered, so reviewers must inspect the rendered changes")
 	}
 
 	if sameTree {

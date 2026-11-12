@@ -140,8 +140,20 @@ func reviewDiff(ctx context.Context, d reviewDeps, base, head string) (reviewDif
 		}
 		result.parts[path] = part.String()
 	}
-	result.text = result.scoped(result.order)
 	return result, nil
+}
+
+// safety: the routing inventory must remain covered even if raw metadata is missing.
+func (d *reviewDiffResult) requireChangedPaths(files []string) {
+	for _, file := range files {
+		if _, exists := d.parts[file]; exists {
+			continue
+		}
+		d.missing = append(d.missing, file)
+		d.order = append(d.order, file)
+		d.parts[file] = fmt.Sprintf("Changed file %q has no rendered diff; requires human review.\n", file)
+	}
+	d.text = d.scoped(d.order)
 }
 
 // safety: filenames stay in byte-preserving Git output; JSON argv never carries raw filename bytes.
@@ -230,16 +242,17 @@ func reviewEscapeInvalidBytes(text string) string {
 }
 
 // safety: NUL-delimited status records preserve raw names and both endpoints of renames and copies.
-func reviewChangedPaths(ctx context.Context, d reviewDeps, base, head string) ([][]string, error) {
+func reviewChangedPaths(ctx context.Context, d reviewDeps, base, head string) ([][]string, []string, error) {
 	names, err := d.git(ctx, "diff", "--name-status", "-z", "--find-renames", "--find-copies", "--find-copies-harder", "--no-ext-diff", base, head)
 	if err != nil {
-		return nil, fmt.Errorf("review: list changed files: %w", err)
+		return nil, nil, fmt.Errorf("review: list changed files: %w", err)
 	}
 	var changes [][]string
+	var modified []string
 	for names != "" {
 		status, rest, ok := strings.Cut(names, "\x00")
 		if !ok || status == "" {
-			return nil, fmt.Errorf("review: malformed name-status diff")
+			return nil, nil, fmt.Errorf("review: malformed name-status diff")
 		}
 		names = rest
 		count := 1
@@ -250,12 +263,18 @@ func reviewChangedPaths(ctx context.Context, d reviewDeps, base, head string) ([
 		for range count {
 			file, rest, ok := strings.Cut(names, "\x00")
 			if !ok || file == "" {
-				return nil, fmt.Errorf("review: malformed name-status path")
+				return nil, nil, fmt.Errorf("review: malformed name-status path")
 			}
 			names = rest
 			change = append(change, file)
 		}
 		changes = append(changes, change)
+		// safety: an unchanged copy source affects strict routing but has no patch of its own.
+		if status[0] == 'C' {
+			modified = append(modified, change[1])
+		} else {
+			modified = append(modified, change...)
+		}
 	}
-	return changes, nil
+	return changes, modified, nil
 }

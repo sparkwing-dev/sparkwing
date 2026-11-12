@@ -180,7 +180,11 @@ func TestReviewRawFilenamesCrossRealCommandProtocol(t *testing.T) {
 func TestReviewMissingChangedDiffBlocksModelPass(t *testing.T) {
 	for _, path := range []string{"internal/store/billing_\xff.go", "assets/opaque.png"} {
 		t.Run(fmt.Sprintf("%q", path), func(t *testing.T) {
-			fx, _ := gitEncodingReviewFixture(t, map[string]string{path: "old\n"}, map[string]string{path: "new\n"})
+			before, after := "old\n", "new\n"
+			if strings.HasSuffix(path, ".png") {
+				before, after = "\x89PNG\x00old", "\x89PNG\x00new"
+			}
+			fx, _ := gitEncodingReviewFixture(t, map[string]string{path: before}, map[string]string{path: after})
 			git := fx.deps.git
 			fx.deps.git = func(ctx context.Context, args ...string) (string, error) {
 				if args[0] == "diff" && slices.Contains(args, "--text") {
@@ -234,5 +238,69 @@ func TestReviewProtocolRetainsBothTypeChangePatches(t *testing.T) {
 				t.Errorf("%s dropped type change %q", name, want)
 			}
 		}
+	}
+}
+
+func TestReviewMissingRawMetadataStillBlocksChangedPaths(t *testing.T) {
+	for _, path := range []string{"internal/store/billing_\xff.go", "assets/opaque.png"} {
+		t.Run(fmt.Sprintf("%q", path), func(t *testing.T) {
+			before, after := "old\n", "new\n"
+			if strings.HasSuffix(path, ".png") {
+				before, after = "\x89PNG\x00old", "\x89PNG\x00new"
+			}
+			fx, _ := gitEncodingReviewFixture(t, map[string]string{path: before}, map[string]string{path: after})
+			git := fx.deps.git
+			fx.deps.git = func(ctx context.Context, args ...string) (string, error) {
+				if args[0] == "diff" && (slices.Contains(args, "--text") || slices.Contains(args, "--raw")) {
+					return "", nil
+				}
+				return git(ctx, args...)
+			}
+			var rec reviewRecord
+			reviewThroughProtocol(t, func(ctx context.Context) (err error) {
+				rec, _, err = runReview(ctx, fx.deps, testPolicy(t), reviewInputs{branch: "work", brief: "Review complete coverage"})
+				return err
+			})
+			if rec.Result != resultBlock || !slices.ContainsFunc(rec.Findings, func(f reviewFinding) bool {
+				return f.File == path && strings.Contains(f.Summary, "changed file has no rendered diff")
+			}) {
+				t.Fatalf("name-status changed file escaped coverage: %+v", rec)
+			}
+		})
+	}
+}
+
+func TestReviewRecoveredDiffMustReachTheReviewerBeforeCachedPass(t *testing.T) {
+	path := "internal/store/billing_\xff.go"
+	fx, _ := gitEncodingReviewFixture(t, map[string]string{path: "package store\n// deny\n"}, map[string]string{path: "package store\n// allow\n"})
+	git := fx.deps.git
+	missing := true
+	fx.deps.git = func(ctx context.Context, args ...string) (string, error) {
+		if missing && args[0] == "diff" && slices.Contains(args, "--text") {
+			return "", nil
+		}
+		return git(ctx, args...)
+	}
+	var rec reviewRecord
+	in := reviewInputs{branch: "work", brief: "Review recovered coverage"}
+	reviewThroughProtocol(t, func(ctx context.Context) (err error) {
+		rec, _, err = runReview(ctx, fx.deps, testPolicy(t), in)
+		return err
+	})
+	if rec.Result != resultBlock {
+		t.Fatalf("missing diff did not block: %+v", rec)
+	}
+	missing = false
+	reviewThroughProtocol(t, func(ctx context.Context) (err error) {
+		rec, _, err = runReview(ctx, fx.deps, testPolicy(t), in)
+		return err
+	})
+	for name, rv := range map[string]*fakeReviewer{"default": fx.def, "security": fx.sec} {
+		if len(rv.calls) != 2 || !strings.Contains(rv.calls[1].prompt, "+// allow") {
+			t.Errorf("%s used a cached pass without seeing recovered bytes", name)
+		}
+	}
+	if rec.Result != resultPass {
+		t.Fatalf("reviewed recovered diff did not pass: %+v", rec)
 	}
 }

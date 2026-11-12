@@ -17,5 +17,6 @@
   complete patch: raw filename bytes never cross JSON command arguments. A
   changed file with no rendered patch blocks independently of model output or
   cached verdicts, including ordinary assets; `--skip` cannot clear that block.
+  Restored coverage must reach the reviewers before an earlier pass can be reused.
   Repository diff attributes cannot suppress readable text changes. Ordinary UTF-8
   text hunks keep their bytes, and truncation respects character boundaries.
