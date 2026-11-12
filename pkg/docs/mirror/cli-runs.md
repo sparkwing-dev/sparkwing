@@ -357,6 +357,8 @@ Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one s
 
 --reason records why the retry should pass on the new run, shown by runs list and runs status. It is required when an agent retries: the CLI detects Claude Code, Codex and Gemini CLI, or reads --agent or SPARKWING_AGENT, and the controller refuses an agent's retry without a reason. --agent none opts out.
 
+An agent retry without --reason exits 2 with bad_request. The repair hint asks for --reason saying why the retry should pass, such as --reason "flake: DNS timeout in TestX" or --reason "fixed X in commit Y".
+
 ### Flags
 
 | Flag | Description |

@@ -602,6 +602,7 @@ func Registry() []Command {
 			"Reuse requires readable source results in the retry's data scope. Missing, expired or host-confined results can make a successful job run again. Run status lists a job in `retry.reused` only after its source result has been materialized without an execution attempt.",
 			"Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.",
 			"--reason records why the retry should pass on the new run, shown by runs list and runs status. It is required when an agent retries: the CLI detects Claude Code, Codex and Gemini CLI, or reads --agent or SPARKWING_AGENT, and the controller refuses an agent's retry without a reason. --agent none opts out.",
+			"An agent retry without --reason exits 2 with bad_request. The repair hint asks for --reason saying why the retry should pass, such as --reason \"flake: DNS timeout in TestX\" or --reason \"fixed X in commit Y\".",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true, Repeatable: true, CommaList: true},
 			{Name: "failed", Conflicts: []string{"all-jobs"}},
