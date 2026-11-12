@@ -1331,6 +1331,18 @@ file. Other syntax and workflow checks remain active.
   main runs `gate` and `race-touched` over the change since the push's previous
   commit (or the pull request base), and the full suite, `pre-release`, the
   store race lanes and Postgres conformance run nightly and on dispatch.
+  Native runner composition tests in
+  `internal/cluster/production_runtime_integration_test.go` are ordinary tests,
+  without the `rewrite_integration` build tag. Affected tests cover them when
+  cluster or its dependencies change; full, nightly and release suites always
+  include them, and touched-package race runs exercise them too. They use
+  private fixture homes, fake HTTP transports and a private in-process daemon,
+  not Docker containers or managed user services. Other packages' tagged
+  `rewrite_integration` suites remain outside this coverage claim.
+  On a shared Linux host, these cases took 4.81 seconds of an 11.56-second
+  cluster suite; a warm-cache command took 15.02 seconds wall time. Cold
+  compilation of the baseline cluster suite took 202.90 seconds including
+  10.34 seconds of test execution. These are observations, not new budgets.
   The full acceptance suite includes `TestFeatureE2E`, which exercises placement
   deadlines, failed-only retries with outputs and artifacts, and child-run
   cancellation against isolated local controller processes. Run just these with
