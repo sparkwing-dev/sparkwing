@@ -13,7 +13,7 @@ import (
 
 func TestPrePushFastPhaseRunsOnlyFastChecks(t *testing.T) {
 	want := []string{
-		"api-snapshot", "api-spec", "budget", "build-touched", "changelog",
+		"api-snapshot", "api-spec", "budget", "build-published-sdk", "build-touched", "changelog",
 		"lint-touched", "vet-touched",
 	}
 	if got := stepIDs(t, &PrePush{}); !slices.Equal(got, want) {
@@ -40,6 +40,12 @@ func TestPrePushFastPhaseRunsChecksInParallel(t *testing.T) {
 	}
 	for _, s := range w.Steps {
 		if s.ID == budgetStepID {
+			continue
+		}
+		if s.ID == "build-published-sdk" {
+			if !slices.Equal(s.Needs, []string{"build-touched"}) {
+				t.Errorf("published build dependencies = %v, want [build-touched]", s.Needs)
+			}
 			continue
 		}
 		if deps := s.Needs; len(deps) != 0 {

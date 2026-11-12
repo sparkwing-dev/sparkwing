@@ -805,13 +805,17 @@ func repoGoChange(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return repoGoFilesChange(ctx, files, os.Getenv("GOFLAGS"))
+}
+
+func repoGoFilesChange(ctx context.Context, files []string, goFlags string) (string, error) {
 	modules, err := committedModuleDirs(ctx)
 	if err != nil {
 		return "", err
 	}
 	byDir := map[string]string{}
 	for _, module := range modules {
-		packages, err := listModulePackages(ctx, module, os.Getenv("GOFLAGS"))
+		packages, err := listModulePackages(ctx, module, goFlags)
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", module, err)
 		}

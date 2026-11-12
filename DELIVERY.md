@@ -1502,6 +1502,22 @@ file. Other syntax and workflow checks remain active.
   still regenerates every reference page and rejects changed, missing or stale
   generated pages. `TestCommandReferenceMatchesRegistry` also compares the
   committed pages with the renderer compiled into the full CLI.
+  Both gate modes and pre-push run `build-published-sdk` after their workspace
+  build, using the same compiler allowance. It compiles the root CLI, controller
+  and runner with `CGO_ENABLED=0`, `GOWORK=off`, `GOENV=off`, empty `GOFLAGS`
+  and `-mod=readonly -trimpath`. The selected SDK must have a published version
+  and no replacement. This also bypasses vendor copies and alternate modfiles.
+  Go input changes, including SDK-only changes and package-owned embedded files,
+  select the check; full gate always runs it. Merge rechecks retain it over the
+  combined branch and merge delta. Publish a standalone Go SDK API change first,
+  wait for its module version to resolve, then bump the root `go.mod` requirement
+  before the root uses that API. Workspace conformance remains a separate check.
+  On the shared Linux host at load 8-9, the published build on one compiler core
+  added 16.05 seconds on its first measured invocation and 9.62, 9.62 and 10.06
+  seconds with a warm cache. This fits the fast phase's one-minute step budget;
+  it adds about ten seconds after the workspace build rather than sharing its
+  compiler allocation concurrently. These are check timings, not admission wait
+  or an end-to-end land measurement.
   Without `--full`, vet and build cover the affected dependency closure. Its test step
   runs `go test -short` on changed packages
   and their reverse dependency closure, including production, internal-test

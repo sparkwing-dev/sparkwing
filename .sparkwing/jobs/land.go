@@ -551,6 +551,9 @@ func recheckMergeDelta(ctx context.Context, files []string) error {
 		return err
 	}
 	mergedFiles := append(append([]string(nil), files...), branchFiles...)
+	if err := runPublishedSDKBuildFiles(ctx, mergedFiles, goStepParallelism(currentHost())); err != nil {
+		return err
+	}
 	scope := fmt.Sprintf("%d file(s) in the branch and merge delta", len(mergedFiles))
 	for _, check := range []func(context.Context) error{checkChangelogRequired, checkAPISpec, checkAPISnapshot} {
 		if err := check(ctx); err != nil {
