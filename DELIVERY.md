@@ -234,6 +234,69 @@ starts. Critical modules run sequentially with the full job allowance.
 Collect-all callers continue critical coverage after a short failure; queued
 Land stops future admission while already admitted packages finish.
 
+Queued short lanes start selected packages from a static hint list first,
+in the order below. Other packages retain their relative order. Hints apply
+within existing lanes: they select no additional work, move no package between
+lanes and leave critical ordering unchanged. Store shards remain one admitted
+package with their existing command order and slots. Hook and Gate callers
+keep their collect-all ordering. The list uses no runtime-learned durations.
+
+Measured on 2026-11-11, one broad queued diagnostic on `3da0442b9` selected
+66 root and two pipeline short packages on a shared 16-logical-CPU host.
+Its allowance seven assigned one pipeline worker, three ordinary root
+workers and one per store shard. Top-level bodies were forced with
+`-count=1`; package commands used `-p 1` and their assigned runtime width.
+
+| Start-first package, in hint order | Observed command span, s |
+| --- | ---: |
+| `cmd/sparkwing` | 444.109 |
+| `internal/controller` | 426.233 |
+| `internal/store` (three overlapping shards) | 357.109 |
+| `sparkwing-pipelines/jobs` | 316.731 |
+| `internal/bincache` | 308.097 |
+| `tests/acceptance` | 202.705 |
+
+The runner took 835.553 s. Acceptance started 605.522 s after the first test
+command and was the only remaining selected short command for the final
+189.956 s. These are baseline costs, not measured savings from the hints.
+Package spans include Go driver/build and test-binary work; store's shard
+durations are not added. Shared load1 median/max was 13.763/22.586. This
+single forced-body sample does not measure default Go result-cache overhead
+or an end-to-end Land. Narrow selections that already fit their lanes have
+little admission-order benefit. Changing order can change contention,
+cache sharing and which failure is observed first; performance needs paired
+measurements without changing coverage or fail-fast behavior.
+
+Three interleaved FIFO/hint pairs on 2026-11-11 used the identical
+`a59a9a28f` tree, the same 13-file cohort and allowance seven. FIFO removed
+only the coordinator's hint call through a Go overlay; nested tests used the
+candidate source in both arms. Each sample used one ordinary Go slot, with
+`-count=1`, shared build caches and no load-based exclusions.
+
+| Pair | FIFO runner, s | Hint runner, s | Runner change | Short-span change, s |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 727.676 | 695.567 | -4.41% | -50.971 |
+| 2 | 704.137 | 575.042 | -18.33% | -125.424 |
+| 3 | 652.664 | 652.071 | -0.09% | +2.938 |
+
+Runner medians were 704.137 / 652.071 s (FIFO / hints), a 7.39% reduction
+in the ratio of medians. Ranges were 652.664-727.676 / 575.042-695.567 s;
+inclusive IQRs were 37.506 / 60.263 s. The paired median runner saving was
+32.109 s. All six had exact top-level run/pass/skip parity: 7,908 root and
+774 pipeline short test runs, plus 31 Linux critical passes and seven
+Windows-only critical declarations absent. Selection, all 81 commands,
+lane widths, atomic store admission and the critical join were unchanged.
+
+The third pair was effectively tied: its short span increased 2.938 s,
+while its critical span fell 3.609 s. These samples do not establish a
+stable, meaningful saving. FIFO/hint load1 medians were 7.333/15.734,
+13.382/14.344 and 10.401/16.342. Other owners, load, host iowait and steal
+were recorded at 1 Hz without replacing samples. One shared host, one
+time window, fixed FIFO-before-hints order and changing cache/compile
+context limit attribution. This measures forced-body affected tests, not
+default result-cache processing or end-to-end Land. Existing deadlines
+remain unchanged.
+
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at
 `406208403`. All share root b61 and the same 13-file selection: two pipeline
@@ -1578,6 +1641,59 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
+- **Reporting fixture setup, measured 2026-11-11:** typed `teststore.SeedRun`
+  inserts its known routing identity and sealed provenance with the new row.
+  Provenance projections come from decoding that new row’s JSON once, so
+  JSON normalization stays consistent without changing the caller’s arguments.
+  It does not rewrite earlier reporting rows. Generic fixture `Exec` retains
+  its projection behavior for arbitrary SQL changes. A real SQLite update
+  trigger guards the write boundary, and a separate test guards generic SQL
+  projection.
+
+  The two web history regressions retain all 202 and 250 seeded runs, the
+  older-than-200 match, exclusion before the limit, 125 unique results over
+  four cursor pages, and every existing assertion. In a separate baseline
+  profile, seeding consumed 99.68–99.72% of their body wall time; the repeated
+  identity projector appeared on 93.01% of sampled CPU stacks. CPU share is
+  not wall-time share.
+
+  Three interleaved A/B pairs used the same clean `f23203f69` source on this
+  shared 16-logical-CPU host. A restored only the two original helper files
+  from `0c7738eda`; B used typed seeding. Both ran the same instrumented test
+  bodies with Go 1.26.11, `GOMAXPROCS=3`, `-p 1 -count=1 -short`, readonly
+  modules and `GOWORK=off` with the local SDK replacement. No CPU profiling,
+  noise exclusions, replacements or extra warmups entered these six samples.
+
+  | Pair | Combined body wall A / B, s | B minus A / A | Load1 median A / B | Load1 maximum A / B |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 369.970 / 4.222 | -98.859% | 16.99 / 14.43 | 24.57 / 14.91 |
+  | 2 | 417.706 / 3.952 | -99.054% | 16.23 / 13.21 | 31.47 / 13.40 |
+  | 3 | 407.950 / 4.687 | -98.851% | 13.35 / 16.82 | 15.85 / 16.82 |
+
+  | Body | A median, s (min–max) | B median, s (min–max) |
+  | --- | ---: | ---: |
+  | Older filtered match | 159.861 (154.094–170.716) | 1.878 (1.806–1.989) |
+  | Cursor pages | 246.989 (210.110–253.856) | 2.416 (2.075–2.698) |
+  | Combined | 407.950 (369.970–417.706) | 4.222 (3.952–4.687) |
+
+  The combined linear empirical IQR was 23.868 s for A and 0.367 s for B.
+  The ratio of combined medians fell 98.965%; median paired percentage change
+  was -98.859%. These are targeted passing-body measurements on one shared
+  host in one fixed A-before-B window. They exclude cleanup, compilation and
+  slot waiting; those intervals and the per-sample owner/iowait/steal traces
+  are retained separately. Prior validation warmed the two variants in
+  different contexts, so compile/link cache parity is unproven. This does
+  not measure whole-Gate or Land latency, or a future flake rate. Raw profiles,
+  scripts, six samples and complete source archives are retained with the
+  `web-paging-test-cost-2026-11-11` measurement.
+
+  A later correctness follow-up (`6427439d9`) restored persisted-JSON
+  normalization and guarded caller argument ownership. Three separate,
+  unpaired confirmations of the same two instrumented bodies took 6.684,
+  5.754 and 5.666 s combined (median 5.754 s; range 5.666–6.684 s; linear IQR
+  0.509 s). They retain the same Go settings and full datasets. These are
+  confirmations on the corrected code, not replacements for the six paired
+  samples or a measurement of the follow-up’s incremental cost.
 - **Native recovery simulation:** `TestStartGateSeededRecovery` runs seed 1
   with and without compute under `-short`; the full class runs all eight seeds
   in both modes. Each case still covers lost plan capacity, an already released

@@ -73,7 +73,7 @@ func runClaimWait(run RunRow) runspec.Setting[time.Duration] {
 }
 
 // safety: one attempt per generation is not an application retry; the rest are.
-const nodeReadColumns = `node_id,status,outcome,status_detail,failure_reason,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,output_record,manifest_record,
+const nodeReadColumns = `node_id,status,outcome,status_detail,failure_reason,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,group_wait_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,output_record,manifest_record,
  (SELECT COUNT(*)-COUNT(DISTINCT generation) FROM node_attempts a
  WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id)`
 
@@ -87,9 +87,9 @@ func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef
 
 func scanNode(row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
 	v := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runID}}
-	var ready, queued, lease, start, finish, cancel sql.NullInt64
+	var ready, queued, groupWait, lease, start, finish, cancel sql.NullInt64
 	var actor, execution, output, manifest []byte
-	err := row.Scan(&v.Ref.NodeID, &v.Status, &v.Outcome, &v.StatusDetail, &v.FailureReason, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest, &v.ApplicationRetries)
+	err := row.Scan(&v.Ref.NodeID, &v.Status, &v.Outcome, &v.StatusDetail, &v.FailureReason, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &groupWait, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest, &v.ApplicationRetries)
 	if err != nil {
 		return v, err
 	}
@@ -111,6 +111,7 @@ func scanNode(row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
 	if err = json.Unmarshal(execution, &v.Execution); err != nil {
 		return v, authorityError(hosterr.IntegrityFailure, "invalid persisted execution: "+err.Error())
 	}
+	v.GroupWaitStartedAt = stateTime(groupWait)
 	v.ReadyAt, v.QueueStartedAt, v.LeaseExpiresAt, v.StartedAt, v.FinishedAt, v.CancelRequestedAt = stateTime(ready), stateTime(queued), stateTime(lease), stateTime(start), stateTime(finish), stateTime(cancel)
 	if _, err = nodeState(v); err != nil {
 		return v, err
