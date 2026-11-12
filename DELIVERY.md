@@ -140,8 +140,9 @@ Push waits for policy, fast checks and both steps to pass on the same tree.
 The fast job reserves its compiler allowance separately (nine cores on a
 16-CPU host), releasing it before the combined job reserves seven test cores
 plus 0.25 for review. These reservations are admission accounting, not CPU
-limits. The combined job keeps the affected tier's 45-minute execution and
-aggregate no-progress deadlines. Review starts after policy and fast checks;
+limits. Fast checks retain the former combined review job's 45-minute execution
+and 30-minute no-progress deadlines. The combined job keeps the affected tier's
+45-minute execution and aggregate no-progress deadlines. Review starts after policy and fast checks;
 small-change measurements must include that start delay.
 They push only when the branch, HEAD and checkout still match. If main moves again,
 the push fails rather than merging an unchecked tree; enqueue again after

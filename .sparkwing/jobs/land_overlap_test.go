@@ -30,6 +30,9 @@ func TestQueuedLandOverlapsReviewAndTestsAfterFastChecks(t *testing.T) {
 	if fast.Cores != float64(prePushReservationCores(runtime.NumCPU())) {
 		t.Fatalf("fast reservation = %v", fast.Cores)
 	}
+	if fast.TimeoutMS != affectedPushTestsTimeout.Milliseconds() || fast.NoProgressMS != 30*60*1000 {
+		t.Fatalf("split fast checks lost the former combined job's deadlines: %+v", fast)
+	}
 	tier := inspectWork(t, &PrePush{})
 	if !slices.EqualFunc(fast.Steps, tier.Steps, func(a, b stepDocument) bool {
 		return a.ID == b.ID && slices.Equal(a.Needs, b.Needs) && a.Finally == b.Finally && a.ContinueOnError == b.ContinueOnError
@@ -42,6 +45,9 @@ func TestQueuedLandOverlapsReviewAndTestsAfterFastChecks(t *testing.T) {
 	}
 	if checks.Cores != lightJobCores+float64(goStepParallelism(affectedPushHost())) {
 		t.Fatalf("combined reservation = %v", checks.Cores)
+	}
+	if checks.TimeoutMS != affectedPushTestsTimeout.Milliseconds() || checks.NoProgressMS != affectedPushTestsTimeout.Milliseconds() {
+		t.Fatalf("combined checks lost the affected tier's deadlines: %+v", checks)
 	}
 	if len(checks.Steps) != 2 || !slices.ContainsFunc(checks.Steps, func(step stepDocument) bool { return step.ID == "review" }) || !slices.ContainsFunc(checks.Steps, func(step stepDocument) bool { return step.ID == "test" }) {
 		t.Fatalf("review and affected test bodies must both run: %+v", checks.Steps)

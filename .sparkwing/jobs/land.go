@@ -103,6 +103,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 	if in.Queued {
 		policy := sparkwing.Job(plan, policyJobID, &policyJob{Checks: checks, Head: checks.Head}).Inline().Timeout(policyJobTimeout).Needs(pre)
 		fast := sparkwing.Job(plan, "fast", &PrePush{}).Inline().
+			Timeout(affectedPushTestsTimeout).NoProgressTimeout(queuedFastNoProgressTimeout).
 			Cores(float64(prePushReservationCores(runtime.NumCPU()))).Needs(pre)
 		joined := sparkwing.Job(plan, "affected-tests", &queuedLandChecks{args: in.ReviewArgs, branch: branch}).Inline().
 			Timeout(affectedPushTestsTimeout).NoProgressTimeout(affectedPushTestsTimeout).

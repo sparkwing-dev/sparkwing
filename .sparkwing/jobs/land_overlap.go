@@ -1,6 +1,13 @@
 package jobs
 
-import "github.com/sparkwing-dev/sparkwing/sparkwing"
+import (
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+// safety: splitting fast checks must retain their former review-job deadline.
+const queuedFastNoProgressTimeout = 30 * time.Minute
 
 type queuedLandChecks struct {
 	sparkwing.Base
