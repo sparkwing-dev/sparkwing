@@ -39,7 +39,7 @@ func TestKeeperDiagnosticContentionCannotDelayWatcher(t *testing.T) {
 				<-armed
 				trace.mu.Lock()
 			}
-			// Holding the capture mutex models a renewal goroutine descheduled in emit.
+			// safety: Holding the capture mutex models a renewal goroutine descheduled in emit.
 			updates <- leaseUpdate{expires: time.Now().Add(10 * time.Millisecond), renewal: 1}
 			timely := false
 			select {

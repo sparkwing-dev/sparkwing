@@ -11,7 +11,7 @@ import (
 	"unsafe"
 )
 
-// Model the state before the delivery worker first evaluates ctx.Done().
+// safety: Model the state before the delivery worker first evaluates ctx.Done().
 func newUnstartedDiagnosticTrace(t *testing.T) *keeperTrace {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -37,7 +37,7 @@ func TestKeeperFirstCaptureDoesNotWaitForDeliveryContextMutex(t *testing.T) {
 	d := NewDiagnostics(t.Context(), func(context.Context, Event) error { return nil })
 	defer d.Close()
 	trace := d.start(t.Context(), Identity{})
-	// Go 1.26 cancelCtx.Done initializes its channel under cancelCtx.mu.
+	// safety: Go 1.26 cancelCtx.Done initializes its channel under cancelCtx.mu.
 	// Model the delivery worker descheduled while owning that initialization lock.
 	value := reflect.ValueOf(d.ctx).Elem()
 	mu := (*sync.Mutex)(unsafe.Pointer(value.FieldByName("mu").UnsafeAddr()))

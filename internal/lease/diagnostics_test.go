@@ -157,7 +157,7 @@ func TestKeeperDiagnosticsResetReportsInflightRenewalAndLoss(t *testing.T) {
 		_, stop := keeper.Run(t.Context())
 		<-started
 		synctest.Wait()
-		// The watcher stays armed while renewal is blocked; expiry still cancels the unit.
+		// safety: The watcher stays armed while renewal is blocked; expiry still cancels the unit.
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		close(release)

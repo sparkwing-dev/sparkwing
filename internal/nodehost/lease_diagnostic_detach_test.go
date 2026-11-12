@@ -63,7 +63,7 @@ func TestLateDiagnosticCannotStealDetachedSegment(t *testing.T) {
 				}
 				oldDone := logs.finish(t.Context(), "job")
 				<-uploadStarted
-				// A queued execution_end record can arrive after node-specific detachment.
+				// safety: A queued execution_end record can arrive after node-specific detachment.
 				if diagnostic {
 					if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodewire.FrameLog{Event: "lease_keeper", Attrs: []byte(`{"kind":"execution_end"}`)}); err != nil {
 						t.Logf("late record refused safely: %v", err)
