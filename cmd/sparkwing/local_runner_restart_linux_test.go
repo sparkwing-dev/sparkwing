@@ -494,7 +494,11 @@ import("context";"os";sw "github.com/sparkwing-dev/sparkwing/sparkwing")
 type pipeline struct{sw.Base}
 func(pipeline) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{
  sw.Job(p,"resumed",func(context.Context)error{
-  data,err:=os.ReadFile("/proc/self/cgroup");if err!=nil{return err};return os.WriteFile(os.Getenv("RESUMED_MARKER"),data,0600)
+  data,err:=os.ReadFile("/proc/self/cgroup");if err!=nil{return err}
+  marker:=os.Getenv("RESUMED_MARKER");temporary:=marker+".tmp"
+  defer os.Remove(temporary)
+  if err:=os.WriteFile(temporary,data,0600);err!=nil{return err}
+  return os.Rename(temporary,marker)
  }).Cores(0.25)
  return nil
 }
@@ -513,7 +517,19 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 	awaitLocalRunnerCondition(t, ctx, func() bool {
 		var err error
 		cgroup, err = os.ReadFile(marker)
-		return err == nil
+		if err != nil || len(cgroup) == 0 || cgroup[len(cgroup)-1] != '\n' {
+			return false
+		}
+		for _, line := range strings.Split(strings.TrimSuffix(string(cgroup), "\n"), "\n") {
+			fields := strings.SplitN(line, ":", 3)
+			if len(fields) != 3 || !filepath.IsAbs(fields[2]) {
+				return false
+			}
+			if hierarchy, err := strconv.Atoi(fields[0]); err != nil || hierarchy < 0 {
+				return false
+			}
+		}
+		return true
 	})
 	if systemd && !strings.Contains(string(cgroup), wingd.LocalRunnerServiceName(home, instance.ID)) {
 		t.Fatalf("recovery work did not use the original runner: %s", cgroup)
