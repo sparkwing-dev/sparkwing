@@ -1,6 +1,7 @@
 package storetest
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -143,5 +145,107 @@ func TestPostgresFixtureURLBindsDatabaseAndSchema(t *testing.T) {
 	}
 	if strings.Contains(raw, "foreign") || strings.Contains(raw, "also_other") {
 		t.Fatal("original location escaped the fixture binding")
+	}
+}
+
+func TestPostgresCloneDatabasesIsolateSettingsAndExtensions(t *testing.T) {
+	base := PostgresURL(t)
+	template, err := postgresTemplate(t, t.Context(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if template == "" {
+		t.Skip("configured role cannot create fixture databases")
+	}
+	first := newClonedPostgres(t, base)
+	a, err := sql.Open("pgx", first.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var aName string
+	if err := a.QueryRowContext(t.Context(), "SELECT current_database()").Scan(&aName); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ExecContext(t.Context(), "ALTER DATABASE "+pgx.Identifier{aName}.Sanitize()+" SET application_name='fixture-mutated'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ExecContext(t.Context(), "CREATE EXTENSION hstore"); err != nil {
+		t.Fatal(err)
+	}
+	second := newClonedPostgres(t, base)
+	b, err := sql.Open("pgx", second.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	var bName string
+	if err := b.QueryRowContext(t.Context(), "SELECT current_database()").Scan(&bName); err != nil {
+		t.Fatal(err)
+	}
+	if aName == bName || aName == template || bName == template {
+		t.Fatalf("fixtures share a database: first=%s second=%s template=%s", aName, bName, template)
+	}
+	for _, tc := range []struct {
+		name string
+		db   *sql.DB
+		want int
+	}{{"mutated", a, 1}, {"isolated", b, 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var extensions, settings int
+			err := tc.db.QueryRowContext(t.Context(), `SELECT
+    (SELECT count(*) FROM pg_extension WHERE extname='hstore'),
+    (SELECT count(*) FROM pg_db_role_setting WHERE setdatabase=(SELECT oid FROM pg_database WHERE datname=current_database())
+     AND setrole=0 AND setconfig @> ARRAY['application_name=fixture-mutated'])`).Scan(&extensions, &settings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if extensions != tc.want || settings != tc.want {
+				t.Fatalf("extensions=%d settings=%d, want %d", extensions, settings, tc.want)
+			}
+		})
+	}
+}
+
+func TestPostgresTemplateHasNoSessionsAndRejectsConnections(t *testing.T) {
+	base := PostgresURL(t)
+	template, err := postgresTemplate(t, t.Context(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if template == "" {
+		t.Skip("configured role cannot create fixture databases")
+	}
+	admin, err := sql.Open("pgx", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	var allow, isTemplate bool
+	var sessions int
+	err = admin.QueryRowContext(t.Context(), `SELECT datallowconn, datistemplate,
+  (SELECT count(*) FROM pg_stat_activity WHERE datname=$1)
+  FROM pg_database WHERE datname=$1`, template).Scan(&allow, &isTemplate, &sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allow || isTemplate || sessions != 0 {
+		t.Fatalf("template allow_connections=%t is_template=%t sessions=%d", allow, isTemplate, sessions)
+	}
+	dsn, err := postgresFixtureURL(base, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocked.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	err = blocked.PingContext(ctx)
+	var refused *pgconn.PgError
+	if !errors.As(err, &refused) || refused.Code != "55000" {
+		t.Fatalf("template connection error=%v, want SQLSTATE 55000", err)
 	}
 }
