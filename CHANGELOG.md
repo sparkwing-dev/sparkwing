@@ -20,6 +20,41 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.72.7] - 2026-11-12
+
+### Changed
+
+- **tests:** Reuse initialized PostgreSQL templates for ready-store fixtures
+  Each fixture keeps its own database and teardown. Empty targets still exercise
+  fresh schema creation and migrations, and restricted roles retain the existing
+  schema path. Test selection, iterations and seeds stay unchanged.
+
+
+- **tests:** Identity fixtures reuse released RSA keys from a process-local pool
+  Keys are generated at runtime only when none are free. Live fixtures keep
+  distinct keys, and cleanup closes each issuer before releasing its key.
+
+
+- **sdk:** Republish the TypeScript SDK as 0.72.3 because its native verification inputs changed. New TypeScript pipelines pin 0.72.3.
+
+
+- **ci:** Compile the TypeScript native test SDK once per test process
+
+### Fixed
+
+- **runner:** Keep claim recovery live through controller rollouts and longer outages
+  Fresh claims retain capped backoff and cap Retry-After advice at five minutes
+  per response while held work
+  keeps its execution context and existing lease limits. Sustained ten-minute
+  outages warn and make the optional readiness endpoint report degraded until
+  recovery, including a successful claim accepted during shutdown.
+  Terminal run acknowledgements also wait through temporary outages within
+  their existing award context, including preparation-failure acknowledgements.
+
+### Docs
+
+- **migration:** Fix the authentication and HTTPS links in the v0.72.3 migration guide.
+
 ## [v0.72.6] - 2026-11-12
 
 ### Changed
