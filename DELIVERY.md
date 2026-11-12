@@ -145,6 +145,13 @@ It omits the broad desktop and Cloud gates. Run focused lane tests before submit
 Ordinary `land` retains its full gate. This is a repository pipeline feature;
 a different repository must define its own landing policy before using it.
 
+Review prompts retain UTF-8 text patches unchanged. Text-like files with
+invalid UTF-8 keep their patch with only invalid bytes escaped as `\xNN`,
+marked "contains invalid UTF-8; bytes escaped". Files containing NUL or more
+than 30% invalid/control bytes use binary path, byte size and SHA-256 metadata
+for each side. Changed names use NUL delimiters and literal pathspecs for
+strict-review routing. The prompt budget truncates at a UTF-8 rune boundary.
+
 ### Local affected Go tests
 
 The pre-push hook runs its six fast checks for every push. Updates targeting
