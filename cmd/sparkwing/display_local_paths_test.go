@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestDeltaSweepAgentInfoPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames cannot contain ESC")
+	}
 	root := filepath.Join(t.TempDir(), "repo\x1b[2J")
 	if err := os.MkdirAll(filepath.Join(root, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
@@ -67,6 +71,9 @@ func TestDeltaSweepAgentInfoPath(t *testing.T) {
 }
 
 func TestDeltaSweepReferenceReceipt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames cannot contain ESC")
+	}
 	dir := filepath.Join(t.TempDir(), "out\x1b[2J")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -118,6 +125,9 @@ func TestDeltaSweepReferenceReceipt(t *testing.T) {
 }
 
 func TestDeltaSweepHookUninstallReceipt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames cannot contain ESC")
+	}
 	root := t.TempDir()
 	hooks := filepath.Join(root, ".git", "hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
