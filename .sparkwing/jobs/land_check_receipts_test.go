@@ -48,7 +48,7 @@ func TestQueuedChecksBindTheOwnerAndRequireEveryReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"missing", "wrong-tree", "wrong-run", "failed", "unreadable"} {
+	for _, mode := range []string{"missing", "wrong-tree", "wrong-run", "wrong-check", "failed", "unreadable"} {
 		t.Run(mode, func(t *testing.T) {
 			receipt := landCheckReceipt{RunID: head.Checks.RunID, Check: "fast/probe", Tree: head.Tree, Success: true}
 			switch mode {
@@ -56,6 +56,8 @@ func TestQueuedChecksBindTheOwnerAndRequireEveryReceipt(t *testing.T) {
 				receipt.Tree = "another-tree"
 			case "wrong-run":
 				receipt.RunID = "another-run"
+			case "wrong-check":
+				receipt.Check = "another/check"
 			case "failed":
 				receipt.Success = false
 			}
@@ -70,10 +72,45 @@ func TestQueuedChecksBindTheOwnerAndRequireEveryReceipt(t *testing.T) {
 			if mode == "unreadable" {
 				writeGoFile(t, file, "not JSON")
 			}
-			if err := verifyLanding(ctx, gitIn(owner), owner, head, review); err == nil {
+			err := verifyLanding(ctx, gitIn(owner), owner, head, review)
+			if err == nil {
 				t.Fatal("invalid authorizing receipt accepted")
 			}
+			if mode == "missing" || mode == "wrong-tree" {
+				if !strings.Contains(err.Error(), queuedCheckRemedy) {
+					t.Fatalf("missing queue remedy: %v", err)
+				}
+			}
+			if mode == "wrong-run" || mode == "wrong-check" {
+				for _, value := range []string{head.Checks.RunID, "fast/probe", receipt.RunID, receipt.Check} {
+					if !strings.Contains(err.Error(), value) {
+						t.Fatalf("missing identity %q: %v", value, err)
+					}
+				}
+			}
 		})
+	}
+}
+
+func TestQueuedCheckNamesItsInvalidPreconditions(t *testing.T) {
+	q := &queuedChecks{RunID: "executing-run"}
+	for _, tc := range []struct {
+		checks  *landCheckRequirements
+		details []string
+	}{
+		{nil, []string{"missing", "executing-run"}},
+		{&landCheckRequirements{RunID: "preconditions-run"}, []string{"preconditions-run", "executing-run"}},
+		{&landCheckRequirements{RunID: q.RunID}, []string{"empty", q.RunID}},
+	} {
+		err := q.run(t.Context(), "fast/build", landHead{Checks: tc.checks}, func(context.Context) error { t.Fatal("invalid set ran a check"); return nil })
+		if err == nil {
+			t.Fatal("invalid preconditions accepted")
+		}
+		for _, detail := range append(tc.details, "fast/build", queuedCheckRemedy) {
+			if !strings.Contains(err.Error(), detail) {
+				t.Fatalf("missing %q: %v", detail, err)
+			}
+		}
 	}
 }
 

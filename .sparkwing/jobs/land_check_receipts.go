@@ -21,6 +21,8 @@ type landCheckRequirements struct {
 	Required []string `json:"required"`
 }
 
+const queuedCheckRemedy = "enqueue again through main's bin/queue-land.sh"
+
 type landCheckReceipt struct {
 	RunID   string `json:"run_id"`
 	Check   string `json:"check"`
@@ -110,8 +112,14 @@ func (q *queuedChecks) inspect(ctx context.Context, head landHead) (string, erro
 }
 
 func (q *queuedChecks) run(ctx context.Context, key string, head landHead, fn func(context.Context) error) error {
-	if head.Checks == nil || head.Checks.RunID != q.RunID || len(head.Checks.Required) == 0 {
-		return errors.New("queued check does not match its preconditions receipt set")
+	if head.Checks == nil {
+		return fmt.Errorf("queued check %q: preconditions receipt set is missing for run %q; %s", key, q.RunID, queuedCheckRemedy)
+	}
+	if head.Checks.RunID != q.RunID {
+		return fmt.Errorf("queued check %q: preconditions run %q differs from executing run %q; %s", key, head.Checks.RunID, q.RunID, queuedCheckRemedy)
+	}
+	if len(head.Checks.Required) == 0 {
+		return fmt.Errorf("queued check %q: preconditions receipt set is empty for run %q; %s", key, q.RunID, queuedCheckRemedy)
 	}
 	if err := q.enter(); err != nil {
 		return fmt.Errorf("bind queued check to owner: %w", err)
@@ -198,20 +206,20 @@ func verifyLandChecks(ctx context.Context, git gitRunner, head landHead) error {
 		}
 		data, err := os.ReadFile(file)
 		if err != nil {
-			return fmt.Errorf("land: missing authorizing check %s: %w", key, err)
+			return fmt.Errorf("land: missing authorizing check %s; %s: %w", key, queuedCheckRemedy, err)
 		}
 		var receipt landCheckReceipt
 		if err := json.Unmarshal(data, &receipt); err != nil {
 			return fmt.Errorf("land: unreadable authorizing check %s: %w", key, err)
 		}
 		if receipt.RunID != head.Checks.RunID || receipt.Check != key {
-			return fmt.Errorf("land: check %s has a different run or check identity", key)
+			return fmt.Errorf("land: check %q identity mismatch: expected run %q check %q, got run %q check %q; %s", key, head.Checks.RunID, key, receipt.RunID, receipt.Check, queuedCheckRemedy)
 		}
 		if !receipt.Success {
 			return fmt.Errorf("land: authorizing check %s did not pass", key)
 		}
 		if receipt.Tree != head.Tree {
-			return fmt.Errorf("land: check %s recorded checked tree %s, pushing %s (success=%t); rerun the landing checks", key, receipt.Tree, head.Tree, receipt.Success)
+			return fmt.Errorf("land: check %s recorded checked tree %s, pushing %s (success=%t); %s", key, receipt.Tree, head.Tree, receipt.Success, queuedCheckRemedy)
 		}
 	}
 	return nil

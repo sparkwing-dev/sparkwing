@@ -6,3 +6,4 @@
   failed or mismatched check receipts, so a passing pre-merge snapshot cannot
   authorize a different tree. Queued review uses its pinned main SHA and owner
   checkout instead of relying on a worker clone's remote-tracking refs.
+  Standalone review also requires a matching base before reusing a cached verdict.
