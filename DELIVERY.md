@@ -2274,8 +2274,7 @@ file. Other syntax and workflow checks remain active.
   9.93/5.07 by pair. Raw load and Go-slot owners were recorded at 1 Hz, along
   with CPU iowait and steal. These are package observations, not a forecast
   for an entire queued land. Evidence, overlays, cache manifests and native
-  rusage are under
-  `/home/bombuntu/evidence/sparkwing/bw-3545-runtime-rsa-lease-pool-2026-11-12/`.
+  rusage are in the runtime RSA lease pool packet under `~/evidence/sparkwing/`.
 
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured on a
