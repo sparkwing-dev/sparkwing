@@ -234,6 +234,39 @@ starts. Critical modules run sequentially with the full job allowance.
 Collect-all callers continue critical coverage after a short failure; queued
 Land stops future admission while already admitted packages finish.
 
+Queued short lanes start selected packages from a static hint list first,
+in the order below. Other packages retain their relative order. Hints apply
+within existing lanes: they select no additional work, move no package between
+lanes and leave critical ordering unchanged. Store shards remain one admitted
+package with their existing command order and slots. Hook and Gate callers
+keep their collect-all ordering. The list uses no runtime-learned durations.
+
+Measured on 2026-11-11, one broad queued diagnostic on `3da0442b9` selected
+66 root and two pipeline short packages on a shared 16-logical-CPU host.
+Its allowance seven assigned one pipeline worker, three ordinary root
+workers and one per store shard. Top-level bodies were forced with
+`-count=1`; package commands used `-p 1` and their assigned runtime width.
+
+| Start-first package, in hint order | Observed command span, s |
+| --- | ---: |
+| `cmd/sparkwing` | 444.109 |
+| `internal/controller` | 426.233 |
+| `internal/store` (three overlapping shards) | 357.109 |
+| `sparkwing-pipelines/jobs` | 316.731 |
+| `internal/bincache` | 308.097 |
+| `tests/acceptance` | 202.705 |
+
+The runner took 835.553 s. Acceptance started 605.522 s after the first test
+command and was the only remaining selected short command for the final
+189.956 s. These are baseline costs, not measured savings from the hints.
+Package spans include Go driver/build and test-binary work; store's shard
+durations are not added. Shared load1 median/max was 13.763/22.586. This
+single forced-body sample does not measure default Go result-cache overhead
+or an end-to-end Land. Narrow selections that already fit their lanes have
+little admission-order benefit. Changing order can change contention,
+cache sharing and which failure is observed first; performance needs paired
+measurements without changing coverage or fail-fast behavior.
+
 A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
 store shards S at `340ebed3f`, and module overlap with store shards M at
 `406208403`. All share root b61 and the same 13-file selection: two pipeline
