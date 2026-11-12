@@ -2079,8 +2079,7 @@ file. Other syntax and workflow checks remain active.
   Linux `wait4` CPU includes the test process and children it waited for;
   direct-process and waited-child ticks are also retained separately.
   Every sample passed the complete guard, with no selected skip or failure.
-  Load1 ranged 6.083-7.759; the BW-3538 lane in Xwing106 held another Go
-  slot throughout. All samples are included. This narrow warm cache result
+  Load1 ranged 6.083-7.759; another job held a second Go slot throughout. All samples are included. This narrow warm cache result
   does not measure the whole affected-tests job or a whole Land.
 
   The initial seed made the first trimmed build more expensive. A probe at `6bc12d4f1`, starting
