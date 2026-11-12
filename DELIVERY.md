@@ -2051,10 +2051,10 @@ file. Other syntax and workflow checks remain active.
   Contention can still extend these samples; the suggested timeouts leave
   room above the measurements.
 
-- **Offline uploaded fixture builds, measured 2026-11-12:** only the nested
+- **Offline uploaded fixture builds, measured 2026-11-12:** the nested
   `go test` in `TestKubernetesE2EUploadedFixtureBuildsWithoutCallerCheckout`
   uses `-trimpath -count=1`. Trimmed source paths let fresh uploaded checkouts
-  reuse build objects; count-one keeps the run-ID/log proof executing. The
+  reuse build objects; `-count=1` keeps the run-ID/log proof executing. The
   self-contained bundle/clone, readonly modules, `GOWORK=off`, `GOPROXY=off`
   and `GOSUMDB=off` checks remain. The native cache guard checks equal test
   executable bytes at two source paths and four actual proof-body executions.
@@ -2064,7 +2064,8 @@ file. Other syntax and workflow checks remain active.
   time window. This is the standalone module allowance; a broad queued Land
   can give the pipeline module one worker. Each sample copied the same private
   cache snapshot, already primed for both modes. Test binaries were compiled
-  once per arm. Build, priming, copy and queue time are outside native timings.
+  once per arm. Their compilation, cache copies, priming and queue wait are
+  outside native timings. Nested fixture compilation is included.
 
   | Pair | Before / after wall, s | Wall delta | Before / after CPU, s | CPU delta | Median load1, before / after |
   | --- | --- | --- | --- | --- | --- |
@@ -2079,10 +2080,10 @@ file. Other syntax and workflow checks remain active.
   direct-process and waited-child ticks are also retained separately.
   Every sample passed the complete guard, with no selected skip or failure.
   Load1 ranged 6.083-7.759; the BW-3538 lane in Xwing106 held another Go
-  slot throughout. All samples are included. This narrow warm-cache result
+  slot throughout. All samples are included. This narrow warm cache result
   does not measure the whole affected-tests job or a whole Land.
 
-  First use costs more. An earlier mechanism probe at `6bc12d4f1`, starting
+  The initial seed made the first trimmed build more expensive. A probe at `6bc12d4f1`, starting
   each variant from the same private cache with warm platform dependencies,
   took 35.853 CPU s / 7.903 wall s for the normal command versus 141.231 CPU s /
   22.106 wall s for its first trimmed command. A second fresh checkout used
