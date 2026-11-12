@@ -139,6 +139,19 @@ the push fails rather than merging an unchecked tree; enqueue again after
 inspecting the failure. A conflict aborts the merge and records its remedy in
 the failed run.
 
+Queued authorizing checks bind their SDK process to the original local owner
+checkout, using the immutable repository path rather than an isolated checkout
+of the submitted pre-merge commit. Preconditions capture the merged commit and
+tree, the run ID and every required policy, fast, review and test check. Each
+check verifies that owner branch, HEAD and cleanliness before and after its body,
+and records the actual tree and outcome. Both verification and queued push
+require every receipt for that run to pass on the tree being pushed. Missing,
+unreadable, failed or mismatched receipts block landing. Receipts live under
+`<git common dir>/sparkwing-land-checks/<run>/<role>/<step>.json`; logs also
+record each full checked tree. Review uses the pinned `queued-main` SHA, so it
+does not depend on a worker clone carrying `origin/main`. Ordinary standalone
+review still compares against `origin/main`.
+
 This mode uses the queue's owned-hardware landing policy: local affected Go
 tests are the primary test gate. Hosted CI supplies additional verification.
 It omits the broad desktop and Cloud gates. Run focused lane tests before submitting.
@@ -809,9 +822,16 @@ not hosted latency.
 
 `@sparkwing/sdk` has its own version in `sdk/typescript/package.json`.
 An engine release verifies the signed version index, then compares its recorded
-TypeScript SDK source digest with the selected source. The digest covers tracked
-SDK files and native bridge workflow inputs, excluding generated output and
-package version metadata. An unchanged digest retains the existing SDK entry
+TypeScript SDK source digest with the selected source. The digest includes tracked
+SDK paths by default, including new inputs and npm's automatically packed files
+such as LICENSE. Package manifest version fields are omitted. The native/package
+workflow slice is also included, as is all of `test/nativehost/`: Windows publication executes
+that package and binds its whole fixture tree into verification receipts.
+Known unit tests and their helpers, examples, implementation notes, formatter
+config and generated output are explicitly excluded. Changing this
+input set changes existing source hashes, so adopting the rule needs a new SDK
+version once. Recoveries of pre-change SDK entries also refuse the new hash;
+the signed identities are not rewritten. An unchanged digest retains the existing SDK entry
 and skips native assembly and npm publication. Changed source requires a new
 SDK version. Bump both package manifests before cutting the engine release.
 The first independent SDK version is `0.72.0`.

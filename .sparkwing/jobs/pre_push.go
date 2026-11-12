@@ -16,7 +16,11 @@ import (
 )
 
 // PrePush runs fast push checks and adds affected Go tests for main updates.
-type PrePush struct{ sparkwing.Base }
+type PrePush struct {
+	sparkwing.Base
+	Head   sparkwing.Ref[landHead]
+	Checks *queuedChecks
+}
 
 func (PrePush) ShortHelp() string {
 	return "Push gate: fast checks, plus affected short and critical Go tests for main updates"
@@ -144,10 +148,16 @@ const affectedPushTestsTimeout = 45 * time.Minute
 type affectedPushTestsJob struct {
 	sparkwing.Base
 	queued bool
+	Head   sparkwing.Ref[landHead]
+	Checks *queuedChecks
 }
 
-func affectedPushTestsJobNode(plan *sparkwing.Plan, queued bool) *sparkwing.JobNode {
-	return sparkwing.Job(plan, "affected-tests", &affectedPushTestsJob{queued: queued}).
+func affectedPushTestsJobNode(plan *sparkwing.Plan, queued bool, checks ...*queuedChecks) *sparkwing.JobNode {
+	j := &affectedPushTestsJob{queued: queued}
+	if len(checks) > 0 && checks[0] != nil {
+		j.Checks, j.Head = checks[0], checks[0].Head
+	}
+	return sparkwing.Job(plan, "affected-tests", j).
 		Timeout(affectedPushTestsTimeout).
 		NoProgressTimeout(affectedPushTestsTimeout).
 		Cores(float64(goStepParallelism(affectedPushHost())))
@@ -160,7 +170,7 @@ func affectedPushHost() hostShape {
 }
 
 func (j *affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "test", func(ctx context.Context) error { return runAffectedPushTests(ctx, j.queued) })
+	sparkwing.Step(w, "test", j.Checks.wrap("affected-tests/test", j.Head, func(ctx context.Context) error { return runAffectedPushTests(ctx, j.queued) }))
 	return nil, nil
 }
 
@@ -181,6 +191,7 @@ func runAffectedPushTests(ctx context.Context, queued bool) error {
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.FailurePolicy(sparkwing.FailFast)
 	budget := newTierBudget("pre-push", prePushBudget).over(pushRangeScope)
+	budget.checks, budget.head = p.Checks, p.Head
 	budget.step(w, "changelog", checkChangelogRequired)
 	budget.step(w, "api-spec", checkAPISpec)
 	budget.step(w, "api-snapshot", checkAPISnapshot)

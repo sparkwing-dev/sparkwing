@@ -24,6 +24,7 @@ func gateFixtureRepo(t *testing.T) string {
 	isolateTestHome(t)
 	root := t.TempDir()
 	gitInit(t, root)
+	writeGoFile(t, filepath.Join(root, "AGENTS.md"), "# Fixture\n")
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.25\n")
 	writeGoFile(t, filepath.Join(root, "internal", "sound.go"),
 		"package internal\n\nfunc Sound() int { return 1 }\n")
