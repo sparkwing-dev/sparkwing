@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -63,6 +64,10 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		os.Exit(2)
 	}
 	if err != nil {
+		// safety: only the signal-owned context can attribute downstream cancellation to shutdown.
+		if (os.Args[1] == "start" || os.Args[1] == "warm") && ctx.Err() != nil && runners.OnlyCancellation(err, context.Cause(ctx)) {
+			return
+		}
 		writeRunnerError(os.Stderr, os.Args[1], err)
 		var usage *usageError
 		if errors.As(err, &usage) {

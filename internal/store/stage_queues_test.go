@@ -16,7 +16,7 @@ func TestJobStageQueuesAllowCrossRunPipelining(t *testing.T) {
 			doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: name, Capacity: new(1)}}
 		}
 	}
-	f := newStoreRecoveryFixtureAt(t, true, storetest.NewSQLite(t), group("production"))
+	f := newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), group("production"))
 	admit := func(binding runstate.CapacityBinding, actor runstate.Actor, want runstate.AcquireKind) {
 		t.Helper()
 		if result, err := f.tenant.MayStart(t.Context(), binding, actor); err != nil || result.Kind != want {
@@ -39,13 +39,15 @@ func TestJobStageQueuesAllowCrossRunPipelining(t *testing.T) {
 		}
 	}
 	production, prodActor := admissionPolicyBlocker(t, f)
+	// safety: award before capacity is taken so the queued permit exercises the admission race fallback.
+	start(runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
 	admit(production, prodActor, runstate.AcquireQueued)
 	build, buildActor := admissionPolicyBlocker(t, f, group("build"))
 	start(build, buildActor)
 	finish(build, buildActor)
 	staging, stageActor := admissionPolicyBlocker(t, f, group("staging"))
-	start(staging, stageActor)
 	waiting, waiter := admissionPolicyBlocker(t, f, group("staging"))
+	start(staging, stageActor)
 	admit(waiting, waiter, runstate.AcquireQueued)
 	admit(production, prodActor, runstate.AcquireQueued)
 	finish(staging, stageActor)

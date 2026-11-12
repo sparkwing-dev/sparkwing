@@ -20,6 +20,13 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.72.4] - 2026-11-12
+
+### Fixed
+
+- **sdk:** Republish the TypeScript SDK as `0.72.1` because its native bridges now build with Go 1.26.11
+  New TypeScript pipelines pin that SDK release.
+
 ## [v0.72.3] - 2026-11-12
 
 ### Changed

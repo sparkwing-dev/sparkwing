@@ -28,12 +28,28 @@ runs execute in-process through the native owner, as a Cloud plan pod does.
 `MaxConcurrent` bounds plan, eval and job awards. Trigger owners have a separate
 bound of the same size, because their hosting waits for jobs to finish. Claims
 offer only kinds with available capacity and stop while job capacity is full.
-Child awaits release their slot. A returning await reacquires it before the SDK
-continues, waiting without consuming the no-progress budget. Cancellation
+Jobs queued for concurrency admission and child awaits release their runner
+slots so waiting siblings cannot starve child planning. A returning wait
+reacquires its slot before source preparation or SDK execution continues.
+Claim selection leaves jobs unclaimed while their queue-policy groups have no
+capacity. It reuses admission's scoped keys, weighted budgets and FIFO checks;
+selection reserves no group and retries against current state on every poll.
+Timed groups persist the first skipped wait under the same claim authorization
+and work fences. A poll or reconciliation settles an expired unclaimed job with
+`queue_timeout`. The deadline continues into `MayStart`; a successful grant ends
+that initial wait.
+At most `MaxConcurrent` admission race waiters suspend inventory per runner.
+Further race losers return their unstarted claims through `RelinquishStart`.
+Plan, eval and runnable child jobs keep their own work inventory. Queued
+admission polls back off from 100 milliseconds to one second. Refused or
+cancelled waiters leave inventory released. Child awaits do not consume the
+no-progress budget. Cancellation
 unblocks slot acquisition. `TestLoopAwaitResumeWaitsForRunnerSlot` covers
 resumption behind unrelated work and cancellation at concurrency one.
 `TestLoopOwnerDoesNotOccupyItsJobsOnlySlot` covers a waiting owner and its job
-at concurrency one. Claims report the configured limit in the optional
+at concurrency one. `TestQueuedAdmissionLeavesRunnerSlotForAwaitedChild` covers
+child planning while a sibling waits for its parent's concurrency group.
+Claims report the configured limit in the optional
 `X-Sparkwing-Max-Concurrent` header, independently of `free_slots`. Older
 controllers ignore this header and continue awarding work. Renewals retain
 that observation. Personal-runner `active_jobs` lists job awards and excludes

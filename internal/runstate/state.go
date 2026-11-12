@@ -135,6 +135,7 @@ type NodeRow struct {
 	Disruptions           int
 	ReadyAt               *time.Time
 	QueueStartedAt        *time.Time
+	GroupWaitStartedAt    *time.Time `json:"-"`
 	LeaseExpiresAt        *time.Time
 	StartedAt             *time.Time
 	FinishedAt            *time.Time

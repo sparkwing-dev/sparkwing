@@ -29,12 +29,13 @@ func (g StartGate) claimedNode(ctx context.Context, input NodeInput, body func(c
 		return errors.New("local execution requires machine admission")
 	}
 	binding := runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}
-	if err := awaitStart(ctx, g.state, binding, executorActor(input), func(response runstate.AcquireSlotResponse) error {
+	granted, err := awaitStart(ctx, g.state, binding, executorActor(input), func(response runstate.AcquireSlotResponse) error {
 		if g.Queued == nil {
 			return nil
 		}
 		return g.Queued(ctx, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}, response)
-	}); err != nil {
+	})
+	if err != nil || !granted {
 		return err
 	}
 	if g.compute == nil {
@@ -48,7 +49,7 @@ func (g StartGate) claimedNode(ctx context.Context, input NodeInput, body func(c
 	if spec.Request.Request.Burst == nil {
 		return g.compute.node(ctx, input.Accepted, row, body)
 	}
-	err := g.compute.tryNode(ctx, input.Accepted, row, body)
+	err = g.compute.tryNode(ctx, input.Accepted, row, body)
 	if !errors.Is(err, errComputeBusy) {
 		return err
 	}

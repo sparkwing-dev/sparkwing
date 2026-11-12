@@ -69,6 +69,7 @@ var schemaUpgrades = []schemaUpgrade{
 		from: 36, release: "schema 36", digest: "afbe14b512e2e182e9f8322685477a29ce5fe337a01faf0003856ca317d23f24",
 		statements: []string{`DROP TABLE team_build_trust`},
 	},
+	{from: 37, release: "schema 37", digest: "7da3f341c2c5b6cc6fd60afb1a881979dfc5b64e79589a551522c655b5099e64", statements: []string{`ALTER TABLE nodes ADD COLUMN group_wait_started_at BIGINT CHECK(group_wait_started_at IS NULL OR group_wait_started_at>0)`}},
 }
 
 var schema35ActionsStatements = []string{`CREATE TABLE github_actions_approvals (

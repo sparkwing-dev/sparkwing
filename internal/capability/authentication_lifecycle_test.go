@@ -148,6 +148,11 @@ func TestAuthenticationExpansionUsesOwnLease(t *testing.T) {
 			r, p, _ := authenticationFixture()
 			c := &r.snapshot.Authorities[0].Principal.Capability
 			c.Unit, c.Purpose = UnitEval, PurposeEval
+			for _, policy := range AwardPolicies() {
+				if policy.Purpose == PurposeEval {
+					c.Grants = policy.ExecutionGrants(&HostFacts{Kind: HostSelfHosted})
+				}
+			}
 			c.Binding.Expansion = &LeaseRef{Kind: UnitEval, ID: c.UnitID, Generation: 3, Holder: "eval-runner"}
 			finish := r.snapshot.Now.Add(-time.Hour)
 			r.snapshot.Binding.FinishedAt = &finish
@@ -158,6 +163,20 @@ func TestAuthenticationExpansionUsesOwnLease(t *testing.T) {
 			if _, err := a.Authenticate(t.Context(), p, route); err != nil {
 				t.Fatalf("live eval refused: %v", err)
 			}
+			source, _ := LookupRoute("POST", "/api/v1/runs/{run}/source-credential")
+			auth, err := a.Authenticate(t.Context(), p, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Authorize(t.Context(), allowAuthenticationBinding{}, source, auth, p.Evidence.Target); err != nil {
+				t.Fatalf("live eval could not authorize sealed source acquisition: %v", err)
+			}
+			binding, expansion := r.snapshot.Binding, *r.snapshot.Binding.Expansion
+			mutate(r)
+			_, err = a.Authenticate(t.Context(), p, source)
+			requireAuthenticationCode(t, err, hosterr.Unauthenticated)
+			r.snapshot.Binding = binding
+			r.snapshot.Binding.Expansion = &expansion
 			c.Delivery, c.Grants = DeliveryBootstrap, []Grant{SourceRead, ClaimExchange}
 			for _, path := range []string{"/api/v1/claims/exchange", "/api/v1/runs/{run}/source-credential"} {
 				bootstrapRoute, _ := LookupRoute("POST", path)
@@ -166,7 +185,7 @@ func TestAuthenticationExpansionUsesOwnLease(t *testing.T) {
 				}
 			}
 			mutate(r)
-			_, err := a.Authenticate(t.Context(), p, route)
+			_, err = a.Authenticate(t.Context(), p, route)
 			requireAuthenticationCode(t, err, hosterr.Unauthenticated)
 		})
 	}

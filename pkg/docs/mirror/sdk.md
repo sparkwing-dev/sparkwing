@@ -455,8 +455,13 @@ Reused group definitions at the same level must agree on scope, capacity and
 policy. Plan and job groups have separate namespaces. The same name at both
 levels identifies two budgets. The store derives keys from accepted declarations
 and the actual execution award. Each complete group set grants atomically. A
-queued job holds none of its groups. `QueueTimeout` bounds initial waiting.
-Replaying an already granted admission after that timeout retains its groups.
+queued job holds none of its groups. `QueueTimeout` bounds the initial wait from
+when an eligible ready job first encounters a full group, even before a runner
+claims it. That start survives an unstarted return or controller restart.
+An expired unclaimed wait fails with `queue_timeout` on the next claim poll or
+reconciliation, without consuming an execution attempt. Awarded admission uses
+the same start; replaying an already granted admission after that timeout retains
+its groups.
 
 After released work loses plan capacity, it keeps running. New releases queue
 without a timeout until the plan reacquires capacity. `CancelOthers` replaces

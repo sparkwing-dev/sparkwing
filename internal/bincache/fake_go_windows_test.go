@@ -127,7 +127,7 @@ func TestNativeFakeGoDispatchUsesExecutableAndFailsClosed(t *testing.T) {
 		cmd.Env = append(os.Environ(), "SPARKWING_TEST_FAKE_GO="+marker)
 		return cmd
 	}
-	if _, err := procgroup.CommandOutput(command("1"), true); err != nil {
+	if _, err := procgroup.CommandOutput(t.Context(), command("1"), true); err != nil {
 		t.Fatal("native fake Go did not dispatch with Go's argv name")
 	}
 	if _, err := os.Stat(dest); err != nil {
@@ -136,7 +136,7 @@ func TestNativeFakeGoDispatchUsesExecutableAndFailsClosed(t *testing.T) {
 	if err := os.Remove(dest); err != nil {
 		t.Fatal(err)
 	}
-	_, err := procgroup.CommandOutput(command(""), true)
+	_, err := procgroup.CommandOutput(t.Context(), command(""), true)
 	exit, ok := err.(*exec.ExitError)
 	if !ok || exit.ExitCode() != 2 || ctx.Err() != nil {
 		t.Fatal("native fake Go did not reject a missing marker before TestMain")

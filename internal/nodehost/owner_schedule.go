@@ -395,6 +395,9 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 		}
 		return errors.Join(err, readErr)
 	}
+	if result.Kind == runstate.Dispatch {
+		return deferRelease(ctx)
+	}
 	if result.Kind != runstate.Execute {
 		return nil
 	}

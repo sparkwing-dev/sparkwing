@@ -1391,6 +1391,10 @@ file. Other syntax and workflow checks remain active.
   before it tags, 40 minutes including 30 minutes of lint-lock allowance
   and ten minutes for build, full lint, the short test suite,
   published-version, Go-directive and SDK-pin checks, and changelog-link and docs-sidebar checks.
+  The read-only `typescript-release` check verifies the published policy index's
+  signature and runs the hosted release's SDK decision against the selected source.
+  It rejects a changed SDK digest under an existing version before creating a tag,
+  including in dry runs and cuts that reuse exact-source CI.
   Build, lint, dependency preparation, the SDK suite and short tests run in sequence.
   The job allows one hour to finish those serial checks while retaining the
   40-minute budget warning.
@@ -1677,6 +1681,50 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
+- **Storage acceptance fixture creation, measured 2026-11-12:** the depcache
+  properties create their isolated current-schema SQLite databases through
+  `teststore.Open` and reopen persisted data through `OpenExisting`. The common
+  controller fixture takes that opener explicitly. Other callers retain their
+  previous opener. All archive, output, scope-forgery, corruption and revocation
+  checks remain, with 128 fixed-seed cases per backend (the existing 16-case
+  prefix under race). Cells and cases keep their serial order.
+
+  A fresh private-cache probe on `afd8a186f` took 198.48 s in `TestStorage`:
+  filesystem/S3 depcache took 84.96/89.61 s. The Go post-`ok` interval was
+  2.123 s. CPU/block profiles of those two leaves used in-process HTTP recorders
+  and map-backed S3, not an external service. Repeated schema setup accounted
+  for 13.26 s of 81.28 sampled CPU seconds. With candidate `0d8b8f961`, it fell
+  to 2.08 s of 58.33 sampled CPU seconds; nested DDL execution fell from
+  11.12 to 0.04 s. Authority-chain work remained substantial at 28.37/24.50 s.
+  Profiled runs are diagnostic observations, not performance pairs; summed idle
+  SQL-pool blocking time is not elapsed test time.
+
+  Three interleaved A/B pairs used source-bound, precompiled test binaries,
+  fresh per-sample homes/state and GOCACHE directories, runtime width seven,
+  the full `TestStorage` cohort and no profiler flags. Build/link and Go result
+  caching are outside these samples. The parent test's reported duration
+  includes its bodies and cleanup:
+
+  | Pair | Before / after body, s | Body change | Load1 median before / after |
+  | --- | ---: | ---: | ---: |
+  | 1 | 57.87 / 89.99 | +55.50% | 3.901 / 16.952 |
+  | 2 | 69.62 / 55.10 | -20.86% | 13.653 / 8.500 |
+  | 3 | 65.89 / 48.06 | -27.06% | 7.182 / 5.461 |
+
+  Body medians were 65.89/55.10 s, a -16.38% ratio of medians. Ranges were
+  57.87-69.62/48.06-89.99 s; inclusive IQRs were 5.875/20.965 s. Separate
+  admitted command walls, including tool startup and excluding slot wait,
+  were A [61.562, 74.187, 69.745] and B [93.592, 59.403, 52.088] s.
+  Their medians were 69.745/59.403 s, a -14.83% ratio of medians.
+
+  All six had exact test outcome and cell/leaf-result parity: 16 test runs
+  and passes, 15 cells and 15 assertion leaves each. Property seeds/counts
+  and cell declarations have identical source. Load, other slot owners,
+  iowait and steal were captured at 1 Hz without excluding samples.
+  The paired signs differ and load shifted sharply. Wall-time improvement
+  is inconclusive; these numbers establish no stable Land saving and change
+  no gate tier, deadline or test budget.
+
 - **Reporting fixture setup, measured 2026-11-11:** typed `teststore.SeedRun`
   inserts its known routing identity and sealed provenance with the new row.
   Provenance projections come from decoding that new row’s JSON once, so

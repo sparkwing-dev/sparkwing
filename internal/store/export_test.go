@@ -19,6 +19,9 @@ import (
 // DB exposes the store's own pool to this package's tests.
 func (s *Store) DB() *sql.DB { return s.db }
 
+// ErrClaimCapacityUnavailableForTest distinguishes a full group from other claim refusals.
+var ErrClaimCapacityUnavailableForTest = errClaimCapacityUnavailable
+
 // SetTestClock overrides the store clock until the test ends.
 func (s *Store) SetTestClock(t testing.TB, clock func() time.Time) {
 	original, pinned := s.clock, s.pinnedClock
@@ -119,8 +122,8 @@ func InstallSchema35ActionsForTest(t testing.TB, s *Store) {
 	}
 }
 
-// OpenSchema36ForTest creates the shipped schema before any current migration runs.
-func OpenSchema36ForTest(t testing.TB, dialect Dialect, target string, opts ...Option) *Store {
+// PrepareSchema36ForTest preserves configured rows in the shipped pre-migration schema.
+func PrepareSchema36ForTest(t testing.TB, st *Store) {
 	t.Helper()
 	const trust = `CREATE TABLE team_build_trust (
     team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
@@ -128,53 +131,17 @@ func OpenSchema36ForTest(t testing.TB, dialect Dialect, target string, opts ...O
 );
 
 `
-	neutral := strings.Replace(schemaNeutral, "CREATE TABLE audit_events (", trust+"CREATE TABLE audit_events (", 1)
+	neutral := strings.Replace(strings.Replace(schemaNeutral, "    group_wait_started_at BIGINT CHECK(group_wait_started_at IS NULL OR group_wait_started_at>0),\n", "", 1), "CREATE TABLE audit_events (", trust+"CREATE TABLE audit_events (", 1)
 	// safety: the digest proves the fixture is the shipped DDL, including both direct team foreign keys.
 	neutral = strings.Replace(neutral, "-- safety: account audit events precede team creation, so this operator table permits no team.\n"+trust, trust+"-- safety: account audit events precede team creation, so this operator table permits no team.\n", 1)
 	const digest = "afbe14b512e2e182e9f8322685477a29ce5fe337a01faf0003856ca317d23f24"
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(neutral))); got != digest {
 		t.Fatalf("schema 36 fixture digest %s, want %s", got, digest)
 	}
-	db, err := rawDBForTest(dialect, target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	st := &Store{db: db, dialect: dialect}
-	t.Cleanup(func() {
-		if err := st.Close(); err != nil {
-			t.Error(err)
+
+	for _, statement := range []string{`ALTER TABLE nodes DROP COLUMN group_wait_started_at`, trust, `UPDATE sparkwing_schema_version SET version=36,baseline_digest='afbe14b512e2e182e9f8322685477a29ce5fe337a01faf0003856ca317d23f24'`} {
+		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
 		}
-	})
-	tx, err := st.beginTx(t.Context())
-	if err != nil {
-		t.Fatal(err)
 	}
-	defer rollbackOrLog(tx)
-	translated, err := translateSchema(neutral, dialect)
-	if err == nil {
-		err = execStatements(t.Context(), tx, translated)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.operator.installAuditProtection(t.Context(), tx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.execContext(t.Context(), `INSERT INTO sparkwing_schema_version(version,applied_at,baseline_digest) VALUES(36,1,?)`, digest); err != nil {
-		t.Fatal(err)
-	}
-	if err := recordDefaultTeamTx(t.Context(), tx); err != nil {
-		t.Fatal(err)
-	}
-	if err := seedSignUpGateTx(t.Context(), tx); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.configurePolicyOptions(opts); err != nil {
-		t.Fatal(err)
-	}
-	return st
 }
