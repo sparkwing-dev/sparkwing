@@ -1446,6 +1446,10 @@ file. Other syntax and workflow checks remain active.
   Build, lint, dependency preparation, the SDK suite and short tests run in sequence.
   The job allows one hour to finish those serial checks while retaining the
   40-minute budget warning.
+  The broad short-test phase reuses the affected-test command owner and its
+  25-minute timeout for each package binary, including an unsharded store.
+  It does not fall back to Go's ten-minute default under load. Module ordering,
+  command width and the one-hour job deadline are unchanged.
   Each of those budgeted phases times its own steps and warns when its slowest step's
   own run time overruns the class, naming the step and its cost, so a class
   cannot regrow unnoticed. A tier whose checks all passed still passes: when
