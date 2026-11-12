@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
@@ -84,8 +85,11 @@ func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (snapshot RunSn
 	return readSnapshotTx(ctx, tx, t.team, runID)
 }
 
-// hack: SQLite can surface its interrupt code instead of the context cancellation that caused it.
+// safety: SQL cancellation can race automatic rollback and surface a transaction or driver error.
 func snapshotReadError(ctx context.Context, err error) error {
+	if cause := context.Cause(ctx); cause != nil && errors.Is(err, sql.ErrTxDone) {
+		return cause
+	}
 	var coded interface{ Code() int }
 	if cause := context.Cause(ctx); cause != nil && errors.As(err, &coded) && coded.Code() == 9 {
 		return cause

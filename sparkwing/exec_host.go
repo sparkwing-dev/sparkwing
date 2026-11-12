@@ -33,7 +33,7 @@ func hostExecCmd(ctx context.Context, run sdkserve.HostExecFunc, display, name s
 	}
 	res := ExecResult{Command: display, Stdout: string(reply.Stdout), Stderr: string(reply.Stderr), ExitCode: done.ExitCode}
 	Debug(ctx, "exec done: exit=%d bytes_stdout=%d bytes_stderr=%d", res.ExitCode, len(res.Stdout), len(res.Stderr))
-	if done.ExitCode == 0 && !done.Signaled {
+	if done.ExitCode == 0 && !done.Signaled && done.CleanupError == "" {
 		return res, nil
 	}
 	failure := &ExecError{Command: display, Stdout: res.Stdout, Stderr: res.Stderr, ExitCode: res.ExitCode, Cause: fmt.Errorf("exit status %d", done.ExitCode)}
@@ -50,6 +50,9 @@ func hostExecCmd(ctx context.Context, run sdkserve.HostExecFunc, display, name s
 				}
 			}
 		}
+	}
+	if done.CleanupError != "" {
+		failure.Cause = errors.Join(failure.Cause, &commandCleanupError{error: errors.New("command cleanup failed: " + done.CleanupError)})
 	}
 	return res, failure
 }

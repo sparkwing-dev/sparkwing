@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,6 +53,8 @@ type ExecError struct {
 	Terminated string
 }
 
+type commandCleanupError struct{ error }
+
 const execErrorCommandBytes = 512
 
 // Error repeats at most 512 bytes of the command and counts the rest, so a
@@ -80,7 +83,9 @@ func (e *ExecError) Error() string {
 		}
 		return b.String()
 	}
-	if e.ExitCode == ExitNotStarted {
+	var cleanup *commandCleanupError
+	cleanupFailed := errors.As(e.Cause, &cleanup)
+	if e.ExitCode == ExitNotStarted && !cleanupFailed {
 		fmt.Fprintf(&b, "command failed to start: %s", command)
 		if e.Cause != nil {
 			fmt.Fprintf(&b, ": %v", e.Cause)
@@ -94,6 +99,9 @@ func (e *ExecError) Error() string {
 	}
 	if out != "" {
 		fmt.Fprintf(&b, "\n%s", out)
+	}
+	if cleanupFailed {
+		fmt.Fprintf(&b, "\n%s", cleanup)
 	}
 	return b.String()
 }

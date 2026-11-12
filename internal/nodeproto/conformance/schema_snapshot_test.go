@@ -23,7 +23,7 @@ func TestV2SchemaSnapshots(t *testing.T) {
 		name  string
 		types []any
 	}{
-		{"v2-wire.schema.json", []any{nodewire.Request{}, nodewire.Reply{}, nodewire.FrameLog{}, nodewire.HelloResult{}, nodewire.RunResult{}, nodewire.EvalResult{}}},
+		{"v2-wire.schema.json", []any{nodewire.Request{}, nodewire.Reply{}, nodewire.FrameLog{}, nodewire.HelloResult{}, nodewire.RunResult{}, nodewire.EvalResult{}, nodewire.ExecDone{}, nodewire.ExecOutput{}}},
 		{"v2-documents.schema.json", []any{nodewire.DescribeDoc{}, nodewire.PlanDoc{}}},
 	} {
 		defs := map[string]any{}
@@ -58,6 +58,9 @@ func shape(t reflect.Type, defs map[string]any, strict bool) map[string]any {
 	}
 	if t == reflect.TypeOf(json.RawMessage{}) {
 		return map[string]any{}
+	}
+	if t == reflect.TypeFor[[]byte]() {
+		return map[string]any{"type": "string"}
 	}
 	if t == reflect.TypeOf(time.Time{}) {
 		return map[string]any{"type": "string", "format": "date-time"}
@@ -117,5 +120,36 @@ func shape(t reflect.Type, defs map[string]any, strict bool) map[string]any {
 		return map[string]any{"$ref": "#/$defs/" + name}
 	default:
 		panic(fmt.Sprintf("unsupported wire schema kind: %s", t))
+	}
+}
+
+func TestCommandCompletionCleanupDiagnosticsConform(t *testing.T) {
+	schema, err := LoadSchema(filepath.Join("testdata", "v2-wire.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []int{0, 7, -1} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			done := nodewire.ExecDone{ID: "command", ExitCode: code, Signaled: code == -1, CleanupError: "owned child cleanup failed", Stdout: []byte("stdout"), Stderr: []byte("stderr")}
+			raw, err := json.Marshal(done)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value any
+			if err := json.Unmarshal(raw, &value); err != nil {
+				t.Fatal(err)
+			}
+			def, ok := schema.Def("ExecDone")
+			if !ok {
+				t.Fatal("command completion schema missing")
+			}
+			if failures := schema.Validate(def, value, "exec_done"); len(failures) > 0 {
+				t.Fatalf("command result schema: %v", failures)
+			}
+			parsed, host, err := nodewire.ParseHostLine(raw)
+			if err != nil || !host || parsed.Done == nil || !reflect.DeepEqual(*parsed.Done, done) {
+				t.Fatalf("command result changed: raw=%s decoded=%+v error=%v", raw, parsed.Done, err)
+			}
+		})
 	}
 }

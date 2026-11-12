@@ -223,13 +223,14 @@ ExecDone is the host's last line for a command.
 
 ```
 type ExecDone struct {
-    ID         string `json:"exec_done"`
-    ExitCode   int    `json:"exit_code"`
-    Signaled   bool   `json:"signaled,omitempty"`
-    StartError string `json:"start_error,omitempty"`
-    NotFound   bool   `json:"not_found,omitempty"`
-    Stdout     []byte `json:"stdout,omitempty"`
-    Stderr     []byte `json:"stderr,omitempty"`
+    ID           string `json:"exec_done"`
+    ExitCode     int    `json:"exit_code"`
+    Signaled     bool   `json:"signaled,omitempty"`
+    StartError   string `json:"start_error,omitempty"`
+    CleanupError string `json:"cleanup_error,omitempty"`
+    NotFound     bool   `json:"not_found,omitempty"`
+    Stdout       []byte `json:"stdout,omitempty"`
+    Stderr       []byte `json:"stderr,omitempty"`
 }
 ```
 

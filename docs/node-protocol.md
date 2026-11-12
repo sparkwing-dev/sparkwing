@@ -365,7 +365,14 @@ lines before the result. An optional base64 `stdin` is written to the command.
 `{"exec_cancel":"<id>"}` kills a running command; its `exec_done` still follows,
 with `signaled: true`. A command that never started has `exit_code: -1`, a
 `start_error` and `not_found: true` when the executable is missing. Host lines
-share the request pipe and are identified by their first key. TypeScript output
+share the request pipe and are identified by their first key. A command that ran
+may include `cleanup_error` when the host could not complete its cleanup. The
+result keeps its observed exit code, signal flag and available output; cleanup
+failure does not turn it into a launch failure. The host retains this failure and
+fails the owning attempt at process Close, even if the SDK ignores the diagnostic
+or catches the command error. Updated SDKs also report the diagnostic with the
+original command result. An already-gone session is not a cleanup failure.
+TypeScript output
 callbacks consume the streamed `exec_output` chunks.
 
 ## Host service routes
