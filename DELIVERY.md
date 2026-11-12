@@ -2111,7 +2111,7 @@ file. Other syntax and workflow checks remain active.
   evidence. One host, one window and one test cohort establish no whole-Land
   saving and change no gate tier, lane width, deadline or test budget.
   Evidence: `~/evidence/sparkwing/controller-app-parent-cost-2026-11-12/`
-  and `~/evidence/sparkwing/bw-3542-fixture-sqlite-sync-2026-11-12/`.
+  and the fixture SQLite synchronization packet beside it.
 
 - **Fixture SQL connection reuse, 2026-11-01:** `teststore.Exec` retains one
   connection per registered store, closed by the opening test's cleanup. Its
