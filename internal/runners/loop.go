@@ -53,6 +53,9 @@ type LoopConfig struct {
 	Kubernetes bool
 }
 
+// safety: allow a full controller rollout and restart before abandoning fresh claims.
+const claimRecoveryBudget = 10 * time.Minute
+
 // Loop claims triggers and jobs until stopped and joins held work before returning.
 type Loop struct {
 	Config       LoopConfig
@@ -365,7 +368,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if claims.Err() != nil || (l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims) || l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0) == 0 {
 			return nil, nil
 		}
-		if transportErr != nil && time.Since(transportSince) >= 5*time.Second {
+		if transportErr != nil && time.Since(transportSince) >= claimRecoveryBudget {
 			return nil, fmt.Errorf("claim runner work: controller recovery deadline exceeded: %w", transportErr)
 		}
 		nextClaim := pollAt
@@ -425,7 +428,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			request.FreeSlots = &freeSlots
 			var recoveryDeadline time.Time
 			if transportErr != nil {
-				recoveryDeadline = transportSince.Add(5 * time.Second)
+				recoveryDeadline = transportSince.Add(claimRecoveryBudget)
 			}
 			go func() {
 				claimCtx := claims
@@ -441,6 +444,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		wait := limits.VersionIndexRefresh
 		if pending == nil && nextClaim.After(time.Now()) {
 			wait = min(wait, time.Until(nextClaim))
+		}
+		if transportErr != nil {
+			wait = min(wait, max(time.Until(transportSince.Add(claimRecoveryBudget)), 0))
 		}
 		timer.Reset(l.lifecycleWait(wait, idleSince, len(active) == 0))
 		select {
@@ -462,7 +468,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				if transportSince.IsZero() {
 					transportSince = time.Now()
 				}
-				remaining := 5*time.Second - time.Since(transportSince)
+				remaining := claimRecoveryBudget - time.Since(transportSince)
 				if remaining > 0 {
 					delay := controllerclient.RetryBackoff(transportAttempt, l.Config.PollInterval)
 					transportAttempt++

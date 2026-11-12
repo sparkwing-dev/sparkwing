@@ -755,3 +755,16 @@ Quota and allowance writes preserve each other's fields. Creating an allowance
 for a team without a quota preserves its effective default-tier limits.
 [Retained storage billing](auth.md#retained-storage) describes the rate, free
 allowance and billing interval.
+
+## Runner recovery during controller rollout
+
+Runners retry consecutive claim transport failures and temporary gateway 5xx
+responses for up to ten minutes. Claims pause between fresh requests with
+exponential jitter and honor longer `Retry-After` advice. A successful claim
+response resets the outage budget; uncertain claims are never replayed. Advice
+beyond the budget ends recovery at the deadline without an early request.
+
+Held work keeps its execution context during claim recovery. Its lease expiry
+and authority checks still apply. A non-retryable claim refusal or an outage
+lasting ten minutes stops new claims and joins held work before the runner
+returns an error. The final error can therefore appear after the outage ended.

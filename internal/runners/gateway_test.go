@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -74,15 +75,15 @@ func TestLoopGatewayRetryTiming(t *testing.T) {
 	}{
 		{"exponential", "", 3, false},
 		{"retryAfter", "2", 2, false},
-		{"retryAfterExceedsBudget", "60", 1, true},
-		{"boundedOutage", "", 100, true},
+		{"retryAfterExceedsBudget", "3600", 1, true},
+		{"boundedOutage", "", 1000, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				var times []time.Time
 				var loop *Loop
 				client, err := controllerclient.NewEngineClient(controllerclient.EngineOptions{URL: "http://controller", HTTP: &http.Client{Transport: gatewayTransport(func(*http.Request) (*http.Response, error) {
-					if len(times) >= 20 {
+					if len(times) >= 300 {
 						t.Fatal("gateway retry is spinning hot")
 					}
 					times = append(times, time.Now())
@@ -99,12 +100,12 @@ func TestLoopGatewayRetryTiming(t *testing.T) {
 				loop = &Loop{Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: time.Millisecond}, Controller: client, CheckVersion: func(context.Context, string) error { return nil }, Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil })}
 				start := time.Now()
 				err = loop.Run(t.Context())
-				if (err != nil) != tc.fatal || time.Since(start) > 5*time.Second {
+				if (err != nil) != tc.fatal || time.Since(start) > 10*time.Minute {
 					t.Fatalf("calls=%d elapsed=%s error=%v", len(times), time.Since(start), err)
 				}
 				if tc.fatal {
-					if time.Since(start) != 5*time.Second {
-						t.Fatalf("recovery ended after %s, want 5s", time.Since(start))
+					if time.Since(start) != 10*time.Minute {
+						t.Fatalf("recovery ended after %s, want 10m", time.Since(start))
 					}
 					return
 				}
@@ -148,7 +149,7 @@ func TestLoopGatewayProtocolFailuresStayFatal(t *testing.T) {
 func TestLoopBoundsSlowGatewayRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
-		client, err := controllerclient.NewEngineClient(controllerclient.EngineOptions{URL: "http://controller", HTTP: &http.Client{Timeout: 30 * time.Second, Transport: gatewayTransport(func(r *http.Request) (*http.Response, error) {
+		client, err := controllerclient.NewEngineClient(controllerclient.EngineOptions{URL: "http://controller", HTTP: &http.Client{Timeout: 20 * time.Minute, Transport: gatewayTransport(func(r *http.Request) (*http.Response, error) {
 			calls++
 			if calls == 1 {
 				return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("no backend"))}, nil
@@ -161,7 +162,7 @@ func TestLoopBoundsSlowGatewayRecovery(t *testing.T) {
 		}
 		loop := &Loop{Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: time.Millisecond}, Controller: client, CheckVersion: func(context.Context, string) error { return nil }, Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { return errors.New("unexpected work") })}
 		start := time.Now()
-		if err := loop.Run(t.Context()); !errors.Is(err, context.DeadlineExceeded) || calls != 2 || time.Since(start) != 5*time.Second {
+		if err := loop.Run(t.Context()); !errors.Is(err, context.DeadlineExceeded) || calls != 2 || time.Since(start) != 10*time.Minute {
 			t.Fatalf("calls=%d elapsed=%s error=%v", calls, time.Since(start), err)
 		}
 	})
@@ -224,5 +225,63 @@ func TestLoopGatewayOutageKeepsHeldHost(t *testing.T) {
 	close(release)
 	if err := <-joined; err != nil || calls != 4 {
 		t.Fatalf("claims=%d error=%v", calls, err)
+	}
+}
+
+func TestLoopSurvivesDeployLengthGatewayOutage(t *testing.T) {
+	for _, held := range []bool{false, true} {
+		t.Run(fmt.Sprint("held=", held), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				started, release := make(chan struct{}), make(chan struct{})
+				var loop *Loop
+				calls, hosted := 0, 0
+				client, err := controllerclient.NewEngineClient(controllerclient.EngineOptions{URL: "http://controller", HTTP: &http.Client{Transport: gatewayTransport(func(*http.Request) (*http.Response, error) {
+					calls++
+					status, body := 503, "no backend"
+					if held && calls == 1 {
+						data, marshalErr := json.Marshal(controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "held", RunID: "run", Capability: "secret"}})
+						if marshalErr != nil {
+							t.Fatal(marshalErr)
+						}
+						status, body = 200, string(data)
+					} else {
+						if held {
+							<-started
+						}
+						if time.Since(start) >= 90*time.Second {
+							status, body = 200, "{}"
+							loop.Drain()
+							close(release)
+						}
+					}
+					return &http.Response{StatusCode: status, Header: http.Header{"Retry-After": []string{"10"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+				})}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				loop = &Loop{Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, PollInterval: time.Millisecond}, Controller: client, CheckVersion: func(context.Context, string) error { return nil }, Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
+					hosted++
+					close(started)
+					select {
+					case <-release:
+						return ctx.Err()
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				})}
+				// safety: release the held fixture even when a premature claim shutdown is the regression.
+				loop.OnClaimsStopped = func() {
+					select {
+					case <-release:
+					default:
+						close(release)
+					}
+				}
+				if err := loop.Run(t.Context()); err != nil || time.Since(start) < 90*time.Second || calls > 11 || hosted != map[bool]int{false: 0, true: 1}[held] {
+					t.Fatalf("held=%v calls=%d hosted=%d elapsed=%s error=%v", held, calls, hosted, time.Since(start), err)
+				}
+			})
+		})
 	}
 }

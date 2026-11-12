@@ -600,7 +600,7 @@ func TestLoopBoundsControllerTransportRecovery(t *testing.T) {
 			}),
 			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil }),
 		}
-		if err := loop.Run(t.Context()); !errors.Is(err, io.ErrUnexpectedEOF) || (calls < 4 || calls > 5) || time.Since(start) != 5*time.Second {
+		if err := loop.Run(t.Context()); !errors.Is(err, io.ErrUnexpectedEOF) || (calls < 100 || calls > 205) || time.Since(start) != 10*time.Minute {
 			t.Fatalf("claims = %d, elapsed = %s, error = %v", calls, time.Since(start), err)
 		}
 	})

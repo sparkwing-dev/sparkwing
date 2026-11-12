@@ -89,7 +89,7 @@ Both the CLI and standalone runner use the same retained executable owner.
 and rejects substituting the new installation under the accepted identity.
 
 Controller connection failures, timeouts, explicit 5xx unavailability and
-5xx responses without a JSON error envelope allow fresh claim polls for up to five seconds of consecutive
+5xx responses without a JSON error envelope allow fresh claim polls for up to ten minutes of consecutive
 failures. Exponential jitter adds to the configured polling floor and caps the
 wait at five seconds, or the floor when longer. Retry-After seconds and HTTP
 dates can extend that wait. If advice or backoff exceeds the recovery window,
@@ -105,6 +105,7 @@ including uploads and terminal acknowledgements, before it returns.
 `TestLoopBoundsControllerTransportRecovery`,
 `TestLoopTransportRecoveryKeepsRefusalsFatal`,
 `TestLoopClaimsAfterGatewayOutage`, `TestLoopGatewayRetryTiming`,
+`TestLoopSurvivesDeployLengthGatewayOutage`,
 `TestLoopBoundsSlowGatewayRecovery`,
 `TestLoopGatewayOutageKeepsHeldHost`, `TestLoopGatewayProtocolFailuresStayFatal`
 and `TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
