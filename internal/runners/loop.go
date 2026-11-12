@@ -155,6 +155,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	defer timer.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
 	workSlots := make(chan struct{}, l.Config.MaxConcurrent)
+	admissionWaiters := make(chan struct{}, l.Config.MaxConcurrent)
 	ownerSlots := make(chan struct{}, l.Config.MaxConcurrent)
 	active := make(map[capability.LeaseRef]struct{})
 	awaitChanged := make(chan struct{}, 1)
@@ -256,6 +257,19 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 					}
 					changed()
 				}
+			})
+			hostCtx = nodehost.WithAdmissionWait(hostCtx, func() (func(context.Context), func()) {
+				select {
+				case admissionWaiters <- struct{}{}:
+				default:
+					return nil, func() {}
+				}
+				resume := nodehost.AwaitSlot(hostCtx)()
+				var once sync.Once
+				stop := func() {
+					once.Do(func() { <-admissionWaiters; changed() })
+				}
+				return func(ctx context.Context) { resume(ctx); stop() }, stop
 			})
 			err := l.Host.Host(hostCtx, unit)
 			slotMu.Lock()

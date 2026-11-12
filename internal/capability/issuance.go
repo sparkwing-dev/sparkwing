@@ -105,6 +105,15 @@ type AwardPolicy struct {
 // bootstrapGrants replaces the purpose's grants until Exchange consumes the bootstrap.
 var bootstrapGrants = []Grant{SourceRead, ClaimExchange}
 
+// ExecutionGrants returns the permissions needed by an award on its persisted host.
+func (p AwardPolicy) ExecutionGrants(host *HostFacts) []Grant {
+	grants := slices.Clone(p.Grants)
+	if p.Unit == UnitEval && host != nil && host.Kind == HostSelfHosted {
+		grants = append(grants, SourceRead)
+	}
+	return grants
+}
+
 // bootstrapUnits confines pod delivery to units accepted by the launcher.
 var bootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
 
@@ -118,7 +127,7 @@ const (
 	parentRequester    ParentRule = "requester"
 )
 
-// awardPolicies is exhaustive for execution grants, including the here trigger-Award case.
+// safety: Cloud evaluators restore prepared executables, so source access stays host-specific.
 // Eval reads are restricted to its source or the approval predicate declarations.
 var awardPolicies = []AwardPolicy{
 	{PurposeTrigger, UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{

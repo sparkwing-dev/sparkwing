@@ -381,7 +381,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 			break
 		}
 	}
-	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}}
+	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}}
 	c.ExecutionHost = awardExecutionHost(chain, sealed, here)
 	c.Host = claimant.Capability.Host
 	if c.Host == nil {
@@ -391,6 +391,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		}
 		c.Host = &capability.HostFacts{Kind: facts.HostKind, Fresh: facts.FreshHost, RunnerKind: facts.OIDCKind, CacheScope: cacheScope, OwnerAccountID: facts.OwnerAccount, MachineID: chain[len(chain)-1].principal.Capability.Subject.ID}
 	}
+	c.Grants = policy.ExecutionGrants(c.Host)
 	c.Binding = capability.Binding{Kind: policy.Bindings[0], RunID: row.run, NodeID: row.node, Generation: row.generation, Holder: row.holder, Attempt: 0}
 	if row.expiry.Valid {
 		deadline := time.Unix(0, row.expiry.Int64).UTC()
@@ -649,7 +650,7 @@ func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Exch
 	}
 	c.Issuance = capability.Exchange
 	c.Delivery = capability.DeliveryDirect
-	c.Grants = slices.Clone(policy.Grants)
+	c.Grants = policy.ExecutionGrants(c.Host)
 	c.RevokedAt = nil
 	return c, nil
 }

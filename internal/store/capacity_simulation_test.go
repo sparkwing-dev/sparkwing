@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -244,6 +245,9 @@ func (s *admissionSimulation) start(i int) {
 			machine = s.machines[1]
 		}
 		claim, err := s.f.s.AsOperator().ClaimUnit(s.t.Context(), store.UnitDemand{CapabilityPrefix: machine, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run.id), NodeID: "job"}})
+		if errors.Is(err, store.ErrClaimCapacityUnavailableForTest) {
+			return
+		}
 		if err != nil {
 			s.t.Fatalf("claim run=%d: %v", i, err)
 		}

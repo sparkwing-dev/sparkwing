@@ -75,11 +75,11 @@ func TestAdmissionClaimOrOwnerLossRetainsLiveFIFO(t *testing.T) {
 				t.Run(loss, func(t *testing.T) {
 					f := admissionFixture(t, target(t), 1, 1)
 					leader, leaderAward := admissionPolicyBlocker(t, f)
+					later, laterAward := admissionPolicyBlocker(t, f)
 					admissionWant(t, f, leader, leaderAward, runstate.AcquireGranted)
 					oldest, oldAward := admissionBinding(f), f.holder
 					admissionWant(t, f, oldest, oldAward, runstate.AcquireQueued)
 					before := admissionState(t, f).Waiters[0]
-					later, laterAward := admissionPolicyBlocker(t, f)
 					admissionWant(t, f, later, laterAward, runstate.AcquireQueued)
 					now, err := f.s.TestOnlyDatabaseTime(t.Context())
 					if err != nil {
@@ -192,11 +192,11 @@ func TestAdmissionWeightedCapacityAndBackfill(t *testing.T) {
 func TestAdmissionExpiredWaiterReturnsBehindLiveArrival(t *testing.T) {
 	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
 	leader, leaderAward := admissionPolicyBlocker(t, f)
+	earlier, earlierAward := admissionPolicyBlocker(t, f)
 	admissionWant(t, f, leader, leaderAward, runstate.AcquireGranted)
 	returning := admissionBinding(f)
 	admissionWant(t, f, returning, f.holder, runstate.AcquireQueued)
 	old := admissionState(t, f).Waiters[0].ArrivedAt
-	earlier, earlierAward := admissionPolicyBlocker(t, f)
 	admissionWant(t, f, earlier, earlierAward, runstate.AcquireQueued)
 	now, err := f.s.TestOnlyDatabaseTime(t.Context())
 	if err != nil {
@@ -435,9 +435,9 @@ func TestAdmissionAcrossSQLiteConnectionsSerializes(t *testing.T) {
 func TestAdmissionCancelledWaiterCannotBlockLiveWork(t *testing.T) {
 	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
 	leader, leaderAward := admissionPolicyBlocker(t, f)
+	later, award := admissionPolicyBlocker(t, f)
 	admissionWant(t, f, leader, leaderAward, runstate.AcquireGranted)
 	admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireQueued)
-	later, award := admissionPolicyBlocker(t, f)
 	admissionWant(t, f, later, award, runstate.AcquireQueued)
 	if _, err := f.tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: f.ref.RunID, To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}, Reason: "user_cancelled"}); err != nil {
 		t.Fatal(err)
@@ -466,11 +466,11 @@ func TestAdmissionCancelledWaiterCannotBlockLiveWork(t *testing.T) {
 func TestAdmissionCancelledHolderKeepsSlotUntilCleanupReports(t *testing.T) {
 	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
 	binding := admissionBinding(f)
+	competitor, award := admissionPolicyBlocker(t, f)
 	admissionWant(t, f, binding, f.holder, runstate.AcquireGranted)
 	if _, err := f.tenant.TransitionNode(t.Context(), store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
-	competitor, award := admissionPolicyBlocker(t, f)
 	admissionWant(t, f, competitor, award, runstate.AcquireQueued)
 	state := admissionState(t, f)
 	expires := state.Holders[0].LeaseExpiresAt

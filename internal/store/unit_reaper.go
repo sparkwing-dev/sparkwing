@@ -245,7 +245,7 @@ func reapUnclaimedNodeTx(ctx context.Context, tx *storeTx, target expiredUnit, a
 		to = approvalTimeoutOutcome(policy)
 	} else {
 		wait := runClaimWait(run)
-		if row.Status != runstate.StatusPending || row.QueueStartedAt == nil || !wait.Set || wait.Value <= 0 || row.QueueStartedAt.Add(wait.Value).After(now) {
+		if row.Status != runstate.StatusPending || !groupWaitExpired(row, now) && (row.QueueStartedAt == nil || !wait.Set || wait.Value <= 0 || row.QueueStartedAt.Add(wait.Value).After(now)) {
 			return nil, nil
 		}
 	}

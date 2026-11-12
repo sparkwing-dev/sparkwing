@@ -115,8 +115,11 @@ proof. The heartbeat also keeps its claim `node.report`/`ownClaim`/reporting
 alternative. Each log route keeps its claim `log.tail`/`ownClaim`/logTail
 alternative.
 
-Eval authority carries exactly `expansion.submit` and `data.read`, so reporting
-uses the expansion grant under its own live eval lease. `ownEval` binds the path
+Eval authority carries `expansion.submit`, `data.read`, `secrets.release` and
+`refs.read`. Self-hosted eval hosts also receive `source.read`, including the
+bound run read routes. Cloud evals and SDK evaluation processes do not. Reporting uses the expansion grant under its
+own live eval lease. Source acquisition is sealed to the run and independent
+evaluation fence. Secrets and references require an approval predicate. `ownEval` binds the path
 claim and unit log subject to the eval's run, holder and generation, and checks
 the immutable source job and source generation. A sibling eval, bootstrap or
 owner-delegated expansion capability cannot satisfy this alternative. Logs

@@ -175,12 +175,16 @@ func cancelSupersededCapacityTx(ctx context.Context, tx *storeTx, team Team, key
 	return appendStateEventTx(ctx, tx, team, runspec.NodeRef{RunID: runspec.RunID(b.RunID)}, "run_cancel_requested", run.StateSeq+1, nil, now)
 }
 
-func capacityWaiterCurrentTx(ctx context.Context, tx *storeTx, team Team, waiter ConcurrencyWaiter) (bool, error) {
+func capacityWaiterLiveTx(ctx context.Context, tx *storeTx, team Team, waiter ConcurrencyWaiter) (bool, error) {
 	var expires int64
 	if err := tx.QueryRowContext(ctx, `SELECT lease_expires_at FROM concurrency_waiters WHERE team=? AND key=? AND run_id=? AND node_id=?`, team, waiter.Key, waiter.RunID, waiter.NodeID).Scan(&expires); err != nil {
 		return false, err
 	}
-	live, err := capacityWorkLiveTx(ctx, tx, team, runstate.CapacityBinding{RunID: waiter.RunID, NodeID: waiter.NodeID}, expires)
+	return capacityWorkLiveTx(ctx, tx, team, runstate.CapacityBinding{RunID: waiter.RunID, NodeID: waiter.NodeID}, expires)
+}
+
+func capacityWaiterCurrentTx(ctx context.Context, tx *storeTx, team Team, waiter ConcurrencyWaiter) (bool, error) {
+	live, err := capacityWaiterLiveTx(ctx, tx, team, waiter)
 	if err != nil || live {
 		return live, err
 	}
