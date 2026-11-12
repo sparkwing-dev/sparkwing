@@ -25,7 +25,7 @@ func (p *keyPool) take() ([]byte, error) {
 		p.free = p.free[:n-1]
 		return der, nil
 	}
-	// Hold admission through generation so only the live-lease peak creates keys.
+	// perf: hold admission through generation so only the live-lease peak creates keys.
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
