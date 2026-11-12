@@ -5,10 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func TestServiceDaemonLeavesCallerCgroup(t *testing.T) {
+	testmanager.Require(t)
 	if err := procenv.ControlCommandContext(t.Context(), os.Environ(), "systemctl", "--user", "show-environment").Run(); err != nil {
 		t.Skip("systemd user manager unavailable")
 	}
@@ -49,6 +52,7 @@ func TestServiceDaemonRefusesUnsafeFallback(t *testing.T) {
 			case "missing-manager":
 				t.Setenv("PATH", home)
 			case "unavailable-bus":
+				testmanager.Fail(t, "systemd-run")
 				t.Setenv("XDG_RUNTIME_DIR", home)
 				t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "missing-bus"))
 			}

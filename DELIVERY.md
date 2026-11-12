@@ -1067,6 +1067,13 @@ share the capacity-one `sparkwing-post-deploy-work` job group. A waiting example
 that group while its weather child or serialized probe runs, so other scan jobs cannot fill
 the desktop's other slot. Probe children use a separate capacity-one job group to avoid
 waiting on their parent's group. The small staging and production smokes retain Cloud placement.
+The example's simulated `deploy` job has a two-minute execution deadline, including
+startup, render, apply and rollout. It runs no `kubectl`: after printing its tour
+output, apply waits for the controller to acknowledge its annotation; rollout
+also waits for an annotation and summary acknowledgement. The budget allows
+these reporting requests and host scheduling delays rather than treating the
+printed output as completion. A missing acknowledgement or stalled job still
+fails within the deadline; the fixture adds no sleep or retry of its own.
 Promotion does not wait for the full scan. All `deploy-scan` runs share the capacity-one
 `sparkwing-post-deploy` run group. Queued scans whose source is no longer main's tip stop
 before building or running fixtures, so the newest waiting revision wins. The target team's
@@ -1453,6 +1460,10 @@ file. Other syntax and workflow checks remain active.
   Build, lint, dependency preparation, the SDK suite and short tests run in sequence.
   The job allows one hour to finish those serial checks while retaining the
   40-minute budget warning.
+  The broad short-test phase reuses the affected-test command owner and its
+  25-minute timeout for each package binary, including an unsharded store.
+  It does not fall back to Go's ten-minute default under load. Module ordering,
+  command width and the one-hour job deadline are unchanged.
   Each of those budgeted phases times its own steps and warns when its slowest step's
   own run time overruns the class, naming the step and its cost, so a class
   cannot regrow unnoticed. A tier whose checks all passed still passes: when
@@ -2631,6 +2642,46 @@ file. Other syntax and workflow checks remain active.
   command against a fresh local controller in a private home. It fails when
   the host refuses unix sockets; a sandbox that is known to refuse them sets
   `SPARKWING_TEST_NO_LOCAL_SOCKETS=1` to skip it instead.
+
+- **Native user-manager qualification:** ordinary Go tests deny unexpected
+  `systemd-run`, `systemctl`, and `launchctl` calls. Workflow fixtures use the
+  existing unmanaged runner backend through a compile-time overlay; release
+  binaries never receive that overlay. `TestLocalControllerSmoke` and local-run
+  workflows remain in the full suite, and
+  `TestReleaseBuildExcludesUserManagerFixtureInjection` checks the release boundary.
+  Managed installation, cgroup and restart tests skip visibly unless
+  `SPARKWING_TEST_USER_MANAGER=1` is set. This dedicated manual tier must run in a
+  quiet window for changes to managed runner startup, upgrades, cgroups or service
+  lifecycle. Use one test at a time, with no concurrent lands, deploys or service
+  trials; private homes do not isolate the user manager. Never enable the gate
+  globally in shared full-suite or race jobs. Schedule the tier on a dedicated
+  service host for nightly qualification. Its initial budget is 20 minutes,
+  excluding cold compilation; record measured runtime before changing that budget.
+
+  On Linux, run the named cases sequentially with the gate set, private
+  `HOME`/`SPARKWING_HOME`, and disposable Go temporary state. The binary input
+  must be the absolute CLI artifact, not its state-binding candidate launcher:
+
+  ```sh
+  export SPARKWING_TEST_USER_MANAGER=1
+  export SPARKWING_LOCAL_E2E_BINARY=/absolute/built/sparkwing
+  go test -count=1 -p 1 ./internal/wingd -run '^TestManagedUnitsPrivateConfigWithSystemd$'
+  go test -count=1 -p 1 ./internal/wingd/client -run '^TestServiceDaemonLeavesCallerCgroup$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestDrainingLocalOwnerAwaitsChildWhileSuccessorRunsDependencies$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestManagedControllerPreservesKeyAcrossRestart$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterSystemdLifetimeAndControllerKeys$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterRealIntakeRaceAndRollback$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterProvidedBinaryControllerInspection$'
+  go test -tags=rewrite_integration -count=1 -p 1 ./cmd/sparkwing -run '^TestReviewProductionExecutionBindings$'
+  ```
+
+  The provided-binary local-controller feature scenarios also need this gate;
+  follow `tests/acceptance/LOCAL_FEATURES.md`. On macOS, use the same gate for
+  native launchd coverage in the platform qualification window. List user units
+  before and after each case and verify every test-owned unit is gone. The
+  package-level guard remains enabled for all ordinary runs, even if a test
+  handles and ignores the manager's error.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is

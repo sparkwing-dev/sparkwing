@@ -95,7 +95,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs
 
 	deploy := exampleJob(plan, in, "deploy", &ExampleDeploy{Build: buildRef}).
 		Needs(approveDeploy).
-		Timeout(30 * time.Second)
+		Timeout(2 * time.Minute)
 	exampleScanJobs(in, deploy.OnFailure("deploy-rollback", rollbackFn))
 
 	smokeTest := exampleJob(plan, in, "smoke-test", smokeTestFn).Needs(deploy)

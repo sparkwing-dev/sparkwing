@@ -59,6 +59,9 @@ const claimDegradedAfter = 10 * time.Minute
 // safety: controller availability needs rechecking sooner than the shared client advice ceiling.
 const maxClaimRetryAfter = 5 * time.Minute
 
+// safety: permanent claim failures must remain visible without flooding a long valid drain.
+const claimDrainWarningInterval = 5 * time.Minute
+
 // Loop claims triggers and jobs until stopped and joins held work before returning.
 type Loop struct {
 	Config       LoopConfig
@@ -73,12 +76,21 @@ type Loop struct {
 	running          bool
 	draining         bool
 	unreachableSince time.Time
+	claimFailure     error
+	drainingUnits    int
 }
 
-// HealthError reports a sustained claim outage without stopping held work or recovery.
+// HealthError reports unavailable claims while preserving held work and transport recovery.
 func (l *Loop) HealthError() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.claimFailure != nil {
+		units := "units"
+		if l.drainingUnits == 1 {
+			units = "unit"
+		}
+		return fmt.Errorf("claiming stopped: %w; draining %d held %s", l.claimFailure, l.drainingUnits, units)
+	}
 	if !l.unreachableSince.IsZero() && time.Since(l.unreachableSince) >= claimDegradedAfter {
 		return fmt.Errorf("degraded: controller unreachable since %s", l.unreachableSince.UTC().Format(time.RFC3339))
 	}
@@ -89,6 +101,20 @@ func (l *Loop) setUnreachableSince(since time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.unreachableSince = since
+}
+
+func (l *Loop) setClaimFailure(err error, held int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.claimFailure, l.drainingUnits = err, held
+}
+
+func (l *Loop) updateDrainingUnits(held int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.claimFailure != nil {
+		l.drainingUnits = held
+	}
 }
 
 // Drain stops new claims and makes Run join held hosts without cancelling their
@@ -190,9 +216,11 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	var failed failedWork
 	var firstCancellation, firstFailure error
 	var hostFailures uint64
+	var fatalClaim error
 	finish := func(result unitResult) {
 		pollAt = time.Time{}
 		delete(active, result.key)
+		l.updateDrainingUnits(len(active))
 		if len(active) == 0 {
 			idleSince = time.Now()
 		}
@@ -222,8 +250,22 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 		}
 	}
+	noteFatalClaim := func(err error) {
+		if err == nil || fatalClaim != nil || controllerclient.RetryableClaimError(err) {
+			return
+		}
+		if _, advised := hosterr.RetryDelay(err); advised || claims.Err() != nil && OnlyCancellation(err, context.Cause(claims)) {
+			return
+		}
+		fatalClaim = err
+		l.setClaimFailure(err, len(active))
+		slog.Error("runner claiming stopped; draining held work", "err", err, "held_units", len(active))
+	}
 	accept := func(outcome claimOutcome) (acceptErr error) {
 		defer func() {
+			if acceptErr != nil {
+				noteFatalClaim(acceptErr)
+			}
 			if outcome.err == nil && acceptErr == nil {
 				// safety: claim availability alone resets degradation; heartbeats do not.
 				transportSince = time.Time{}
@@ -326,6 +368,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			return nil
 		}
 		if err != nil {
+			noteFatalClaim(err)
 			return fmt.Errorf("claim runner work: %w", err)
 		}
 		return nil
@@ -365,8 +408,19 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			outcome := <-pending
 			runErr = errors.Join(runErr, accept(outcome), stoppedClaimError(outcome.err))
 		}
+		var warnings <-chan time.Time
+		if fatalClaim != nil && len(active) > 0 {
+			ticker := time.NewTicker(claimDrainWarningInterval)
+			defer ticker.Stop()
+			warnings = ticker.C
+		}
 		for len(active) > 0 {
-			finish(<-results)
+			select {
+			case result := <-results:
+				finish(result)
+			case <-warnings:
+				slog.Warn("runner claiming remains stopped; draining held work", "err", fatalClaim, "held_units", len(active))
+			}
 		}
 		if !updateStarted.IsZero() {
 			reason := "held work finished"
@@ -502,6 +556,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				continue
 			}
 			if outcome.err != nil {
+				noteFatalClaim(outcome.err)
 				return nil, fmt.Errorf("claim runner work: %w", outcome.err)
 			}
 			if outcome.response.Claim == nil {

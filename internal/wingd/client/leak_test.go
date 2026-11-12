@@ -3,9 +3,9 @@ package client_test
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
 )
 
 func TestMain(m *testing.M) {
-	testleak.Main(m)
+	testmanager.Main(m)
 }

@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
@@ -33,10 +35,12 @@ import (
 )
 
 func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T) {
+	testmanager.Require(t)
 	testDetachedLocalRunnerRestart(t, false)
 }
 
 func TestDrainingLocalOwnerAwaitsChildWhileSuccessorRunsDependencies(t *testing.T) {
+	testmanager.Require(t)
 	testDetachedLocalRunnerRestart(t, true)
 }
 
