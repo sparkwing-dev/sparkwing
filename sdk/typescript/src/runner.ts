@@ -136,7 +136,6 @@ class Session {
       exitCode: Number(line.exit_code),
       signaled: line.signaled === true,
       ...(typeof line.start_error === "string" ? { startError: line.start_error } : {}),
-      ...(typeof line.cleanup_error === "string" ? { cleanupError: line.cleanup_error } : {}),
       notFound: line.not_found === true,
       stdout: pending.capture ? Buffer.concat(pending.stdout) : bytes(line.stdout),
       stderr: pending.capture ? Buffer.concat(pending.stderr) : bytes(line.stderr),

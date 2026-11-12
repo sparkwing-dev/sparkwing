@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -34,6 +36,7 @@ type localFeatureController struct {
 }
 
 func newLocalFeatureController(t *testing.T) *localFeatureController {
+	testmanager.Require(t)
 	t.Helper()
 	cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY")
 	if cli == "" {

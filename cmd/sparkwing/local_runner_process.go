@@ -24,6 +24,11 @@ const (
 	localRunnerMaxRetry      = time.Minute
 )
 
+var (
+	startLocalRunnerProcess = wingd.StartLocalRunnerProcess
+	waitLocalRunnerShutdown = wingd.WaitLocalRunnerShutdown
+)
+
 type localRunnerDiscovery interface {
 	Active(context.Context) (localhostwire.LocalRunnerInstance, error)
 	Read(context.Context, string) (localhostwire.LocalRunnerInstance, error)
@@ -59,7 +64,7 @@ func superviseLocalRunnerProcess(ctx context.Context, host crontimer.Host) error
 	}
 	supervisor := localRunnerProcessSupervisor{
 		registry: registry, version: host.Version, build: build, alive: wingd.LocalRunnerProcessAlive,
-		start: func(ctx context.Context, id string) error { return wingd.StartLocalRunnerProcess(ctx, host, id) },
+		start: func(ctx context.Context, id string) error { return startLocalRunnerProcess(ctx, host, id) },
 	}
 	return supervisor.run(ctx)
 }

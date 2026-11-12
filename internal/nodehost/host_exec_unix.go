@@ -4,7 +4,6 @@ package nodehost
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -21,12 +20,10 @@ import (
 // safety: cancellation kills the whole session, including children in other process groups; a normal
 // exit leaves background children running, as SDK-run commands did, until the SDK session ends.
 type commandSession struct {
-	pid        int
-	identity   procgroup.SessionIdentity
-	captured   bool
-	captureErr error
-	cleanupErr error
-	release    func()
+	pid      int
+	identity procgroup.SessionIdentity
+	captured bool
+	release  func()
 }
 
 func execFormatError(err error) bool { return errors.Is(err, syscall.ENOEXEC) }
@@ -55,8 +52,7 @@ func trackHostCommand(cmd *exec.Cmd, env []string) *commandSession {
 	c := &commandSession{pid: cmd.Process.Pid, release: func() {}}
 	identity, err := procgroup.CaptureSession(c.pid)
 	if err != nil {
-		c.captureErr = fmt.Errorf("capture SDK command session %d: %w", c.pid, err)
-		slog.Default().Debug("SDK command session not captured", "err", c.captureErr)
+		slog.Default().Debug("SDK command session not captured", "err", err)
 		return c
 	}
 	c.identity, c.captured = identity, true
@@ -68,29 +64,16 @@ func (c *commandSession) leader() (int, string, bool) {
 	return c.identity.LeaderPID, c.identity.BirthToken, c.captured
 }
 
-func (c *commandSession) kill() error {
+func (c *commandSession) kill() {
 	if c.captured {
 		if err := procgroup.KillSession(c.identity); err != nil {
-			return fmt.Errorf("kill SDK command session %d: %w", c.pid, err)
+			slog.Default().Debug("kill SDK command session", "err", err)
 		}
-		return nil
+		return
 	}
-	err := syscall.Kill(-c.pid, syscall.SIGKILL)
-	if errors.Is(err, syscall.ESRCH) {
-		err = nil
+	if err := syscall.Kill(-c.pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		slog.Default().Debug("kill SDK command group", "err", err)
 	}
-	if err != nil {
-		err = fmt.Errorf("kill SDK command group %d: %w", c.pid, err)
-	}
-	return errors.Join(c.captureErr, err)
-}
-
-// safety: a later successful cleanup cannot erase the failure of the running attempt.
-func (c *commandSession) failure() error {
-	if c.captureErr == nil || errors.Is(c.cleanupErr, c.captureErr) {
-		return c.cleanupErr
-	}
-	return errors.Join(c.cleanupErr, c.captureErr)
 }
 
 // perf: one process table read finds live sessions, so thousands of commands cost a kill only where one remains.
@@ -99,13 +82,9 @@ func endCommandSessions(sessions []*commandSession) error {
 	if len(sessions) == 0 {
 		return nil
 	}
-	var errs []error
-	for _, session := range sessions {
-		errs = append(errs, session.failure())
-	}
 	processes, err := procgroup.ListSessions()
 	if err != nil {
-		return errors.Join(append(errs, err)...)
+		return err
 	}
 	live := map[int]bool{}
 	for _, process := range processes {
@@ -113,10 +92,8 @@ func endCommandSessions(sessions []*commandSession) error {
 			live[process.Session] = true
 		}
 	}
+	var errs []error
 	for _, c := range sessions {
-		if !c.captured && c.captureErr != nil {
-			continue
-		}
 		if c.captured && live[c.identity.SessionID] {
 			if err := procgroup.KillSession(c.identity); err != nil {
 				errs = append(errs, err)
