@@ -21,18 +21,8 @@ import (
 )
 
 func TestNativeProtocol(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	build := exec.CommandContext(t.Context(), node, filepath.Join(root, "node_modules/typescript/bin/tsc"), "-p", filepath.Join(root, "tsconfig.build.json"))
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build SDK: %v\n%s", err, output)
-	}
+	t.Run("pipe_object_identity", TestProtocolToolChecksPipeObjectIdentity)
+	node, root := nativeSDKFixture(t)
 	t.Run("refuses_regular_files", func(t *testing.T) {
 		files := make([]*os.File, 2)
 		for i := range files {
@@ -66,6 +56,49 @@ func TestNativeProtocol(t *testing.T) {
 		if strings.Contains(text, "hello-only-bearer") || strings.Contains(text, "legacy-env-bearer") {
 			t.Fatal("protocol credential escaped into output")
 		}
+	}
+}
+
+func TestProtocolToolChecksPipeObjectIdentity(t *testing.T) {
+	for _, mode := range []string{"closed", "inherited", "unrelated"} {
+		t.Run(mode, func(t *testing.T) {
+			pipe := func() (*os.File, *os.File) {
+				t.Helper()
+				read, write, err := os.Pipe()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = read.Close(); _ = write.Close() })
+				return read, write
+			}
+			request, _ := pipe()
+			_, frame := pipe()
+			other, _ := pipe()
+			executable, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := exec.CommandContext(t.Context(), executable, "-test.run=^TestProtocolTool$")
+			identities := attach(t, command, request, frame)
+			var inherited *os.File
+			if mode == "inherited" {
+				inherited = request
+			} else if mode == "unrelated" {
+				inherited = other
+			}
+			identities = inheritProbePipe(t, command, inherited, identities)
+			command.Args = []string{executable, "-test.run=^TestProtocolTool$", "--", identities}
+			output, err := command.CombinedOutput()
+			if mode == "inherited" {
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(string(output), "inherited") {
+					t.Fatalf("inherited protocol pipe was not detected: %v\n%s", err, output)
+				}
+				t.Logf("inherited protocol pipe rejected:\n%s", output)
+			} else if err != nil {
+				t.Fatalf("%s protocol pipe: %v\n%s", mode, err, output)
+			}
+		})
 	}
 }
 

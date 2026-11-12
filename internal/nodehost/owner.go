@@ -383,7 +383,7 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 		reason = string(hosterr.ReasonCancelled)
 		message = "cancellation requested"
 	}
-	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
+	finishCtx, cancel := context.WithTimeout(lease.ExecutionContext(ctx), limits.HeartbeatTimeout)
 	defer cancel()
 	_, err := h.Store.FinishRunAndUnit(finishCtx, runstate.FinishRunRequest{
 		Unit: input.Owner.Owner,

@@ -65,15 +65,23 @@ func runRunner(ctx context.Context, runner *runners.ManagedRunner, address strin
 	if err != nil {
 		return fmt.Errorf("runner metrics: %w", err)
 	}
-	return runWithMetrics(ctx, listener, runner.Run)
+	return runWithMetrics(ctx, listener, runner.Run, runner.Loop.HealthError)
 }
 
-func runWithMetrics(ctx context.Context, listener net.Listener, run func(context.Context) error) error {
+func runWithMetrics(ctx context.Context, listener net.Listener, run func(context.Context) error, health func() error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{}))
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		if health != nil {
+			if err := health(); err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
 	serving, shutdown := make(chan error, 1), make(chan error, 1)
 	go func() {

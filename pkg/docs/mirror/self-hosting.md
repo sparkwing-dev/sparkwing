@@ -755,3 +755,30 @@ Quota and allowance writes preserve each other's fields. Creating an allowance
 for a team without a quota preserves its effective default-tier limits.
 [Retained storage billing](auth.md#retained-storage) describes the rate, free
 allowance and billing interval.
+
+## Runner recovery during controller rollout
+
+Runners keep retrying claim transport failures and temporary gateway 5xx
+responses until their caller stops them. Fresh requests use exponential jitter,
+with automatic backoff capped at 30 seconds. Claim polls honor longer
+`Retry-After` advice up to five minutes per response.
+Uncertain claims are never replayed. After ten minutes without a successful claim
+response, the runner logs a warning, repeated at most once every five minutes.
+When runner metrics are enabled, `/healthz` is a readiness or monitoring endpoint
+for claim availability. It returns HTTP 503 with
+`degraded: controller unreachable since T` during that sustained outage, then
+returns HTTP 200 after a successful claim response. Heartbeat success alone does
+not clear claim degradation. Do not wire this endpoint to process liveness or
+restart automation: a controller outage must not restart an otherwise healthy
+runner.
+
+Held work keeps its execution context and existing lease and authority limits.
+A transport outage does not stop claims or start a drain: recovery can claim
+children needed by held work. A non-retryable refusal still stops new claims
+and joins held work before returning an error. Explicit stop, idle-exit and
+claim-lifetime policies retain their existing behavior.
+
+Terminal run acknowledgements retry temporary controller or connection failures
+with backoff and `Retry-After` until the caller's award context ends. They keep
+the same fenced completion request. Authority loss and other permanent refusals
+return immediately. Heartbeat success does not clear claim degradation.

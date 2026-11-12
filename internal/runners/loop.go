@@ -53,6 +53,12 @@ type LoopConfig struct {
 	Kubernetes bool
 }
 
+// safety: warn without withdrawing claims that held hosts may need for dependencies.
+const claimDegradedAfter = 10 * time.Minute
+
+// safety: controller availability needs rechecking sooner than the shared client advice ceiling.
+const maxClaimRetryAfter = 5 * time.Minute
+
 // Loop claims triggers and jobs until stopped and joins held work before returning.
 type Loop struct {
 	Config       LoopConfig
@@ -61,11 +67,28 @@ type Loop struct {
 	CheckVersion func(context.Context, string) error
 	OnError      func(error)
 	// OnClaimsStopped runs once before joining hosts when the claim loop exits.
-	OnClaimsStopped func()
-	mu              sync.Mutex
-	drain           chan struct{}
-	running         bool
-	draining        bool
+	OnClaimsStopped  func()
+	mu               sync.Mutex
+	drain            chan struct{}
+	running          bool
+	draining         bool
+	unreachableSince time.Time
+}
+
+// HealthError reports a sustained claim outage without stopping held work or recovery.
+func (l *Loop) HealthError() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.unreachableSince.IsZero() && time.Since(l.unreachableSince) >= claimDegradedAfter {
+		return fmt.Errorf("degraded: controller unreachable since %s", l.unreachableSince.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+func (l *Loop) setUnreachableSince(since time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.unreachableSince = since
 }
 
 // Drain stops new claims and makes Run join held hosts without cancelling their
@@ -161,7 +184,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	awaitChanged := make(chan struct{}, 1)
 	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
 	var transportSince time.Time
-	var transportErr error
+	var nextTransportWarning time.Time
 	transportAttempt := 0
 	claimed := 0
 	var failed failedWork
@@ -199,8 +222,16 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 		}
 	}
-	accept := func(outcome claimOutcome) error {
+	accept := func(outcome claimOutcome) (acceptErr error) {
 		defer func() {
+			if outcome.err == nil && acceptErr == nil {
+				// safety: claim availability alone resets degradation; heartbeats do not.
+				transportSince = time.Time{}
+				l.setUnreachableSince(transportSince)
+				nextTransportWarning = time.Time{}
+				transportAttempt = 0
+			}
+
 			if outcome.workSlot != nil {
 				outcome.workSlot()
 			}
@@ -365,8 +396,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if claims.Err() != nil || (l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims) || l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0) == 0 {
 			return nil, nil
 		}
-		if transportErr != nil && time.Since(transportSince) >= 5*time.Second {
-			return nil, fmt.Errorf("claim runner work: controller recovery deadline exceeded: %w", transportErr)
+		if !nextTransportWarning.IsZero() && !time.Now().Before(nextTransportWarning) {
+			slog.Warn("runner degraded: controller unreachable", "since", transportSince, "elapsed", time.Since(transportSince), "held_units", len(active))
+			nextTransportWarning = time.Now().Add(5 * time.Minute)
 		}
 		nextClaim := pollAt
 		if backoffUntil.After(nextClaim) {
@@ -423,24 +455,17 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			done := make(chan claimOutcome, 1)
 			pending = done
 			request.FreeSlots = &freeSlots
-			var recoveryDeadline time.Time
-			if transportErr != nil {
-				recoveryDeadline = transportSince.Add(5 * time.Second)
-			}
 			go func() {
-				claimCtx := claims
-				if !recoveryDeadline.IsZero() {
-					var cancel context.CancelFunc
-					claimCtx, cancel = context.WithDeadline(claims, recoveryDeadline)
-					defer cancel()
-				}
-				response, err := l.Controller.Claim(claimCtx, request)
+				response, err := l.Controller.Claim(claims, request)
 				done <- claimOutcome{response: response, err: err, kinds: request.Kinds, workSlot: workSlot, ownerSlot: ownerSlot}
 			}()
 		}
 		wait := limits.VersionIndexRefresh
 		if pending == nil && nextClaim.After(time.Now()) {
 			wait = min(wait, time.Until(nextClaim))
+		}
+		if !nextTransportWarning.IsZero() {
+			wait = min(wait, max(time.Until(nextTransportWarning), 0))
 		}
 		timer.Reset(l.lifecycleWait(wait, idleSince, len(active) == 0))
 		select {
@@ -458,29 +483,22 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			default:
 			}
 			if controllerclient.RetryableClaimError(outcome.err) {
-				transportErr = outcome.err
 				if transportSince.IsZero() {
 					transportSince = time.Now()
+					l.setUnreachableSince(transportSince)
+					nextTransportWarning = transportSince.Add(claimDegradedAfter)
 				}
-				remaining := 5*time.Second - time.Since(transportSince)
-				if remaining > 0 {
-					delay := controllerclient.RetryBackoff(transportAttempt, l.Config.PollInterval)
-					transportAttempt++
-					if advised, ok := hosterr.RetryDelay(outcome.err); ok {
-						delay = max(delay, advised)
-					}
-					// safety: a fresh poll never replays a claim whose award reply was lost.
-					backoffUntil = time.Now().Add(min(delay, remaining))
-					continue
+				delay := min(controllerclient.RetryBackoff(transportAttempt, l.Config.PollInterval), 30*time.Second)
+				transportAttempt = min(transportAttempt+1, 6)
+				if advised, ok := hosterr.RetryDelay(outcome.err); ok {
+					delay = max(delay, min(advised, maxClaimRetryAfter))
 				}
-				return nil, fmt.Errorf("claim runner work: controller recovery deadline exceeded: %w", outcome.err)
-			} else {
-				transportSince = time.Time{}
-				transportErr = nil
-				transportAttempt = 0
+				// safety: a fresh poll never replays a claim whose award reply was lost.
+				backoffUntil = time.Now().Add(delay)
+				continue
 			}
 			if delay, ok := hosterr.RetryDelay(outcome.err); ok {
-				backoffUntil = time.Now().Add(max(delay, l.Config.PollInterval))
+				backoffUntil = time.Now().Add(max(min(delay, maxClaimRetryAfter), l.Config.PollInterval))
 				continue
 			}
 			if outcome.err != nil {

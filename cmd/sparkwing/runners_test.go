@@ -49,7 +49,7 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	}
 	t.Cleanup(swapRunnerServiceHost(func(configPath string) (runnerservice.Host, error) {
 		return runnerservice.Host{
-			GOOS: "linux", Home: home, ConfigHome: filepath.Join(home, ".config"), Binary: f.binary, ConfigPath: configPath,
+			GOOS: "linux", Home: home, StateHome: home, ConfigHome: filepath.Join(home, ".config"), Binary: f.binary, ConfigPath: configPath,
 			Exec: func(_ context.Context, name string, args ...string) (string, error) {
 				call := strings.TrimSpace(name + " " + strings.Join(args, " "))
 				calls = append(calls, call)

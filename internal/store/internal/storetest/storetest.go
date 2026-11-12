@@ -23,7 +23,7 @@ const (
 	// dialectEnv selects the dialect the suite runs against; "postgres"
 	// is the only value that changes anything.
 	dialectEnv = "SPARKWING_TEST_STORE"
-	// URLEnv names the Postgres server that schema-scoped test stores
+	// URLEnv names the Postgres server that test stores
 	// are created on.
 	URLEnv = "SPARKWING_TEST_PG_URL"
 )
@@ -93,7 +93,7 @@ func PostgresURL(t *testing.T) string {
 func Open(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
 	if suiteRunsOnPostgres() {
-		return New(t).Open(t, opts...)
+		return newClonedPostgres(t, PostgresURL(t)).Open(t, opts...)
 	}
 	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), append(defaultOptions(), opts...)...)
 	if err == nil {
@@ -110,11 +110,11 @@ func Open(t *testing.T, opts ...store.Option) *store.Store {
 	return st
 }
 
-// OpenPostgres opens a schema-scoped Postgres store whatever the suite's
+// OpenPostgres opens a fresh Postgres fixture whatever the suite's
 // dialect is, skipping when no server is configured.
 func OpenPostgres(t *testing.T) *store.Store {
 	t.Helper()
-	return NewPostgres(t).Open(t)
+	return newClonedPostgres(t, PostgresURL(t)).Open(t)
 }
 
 // DSN is the schema-scoped connection string the target opens, empty

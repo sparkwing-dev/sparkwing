@@ -218,6 +218,7 @@ func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPat
 	}
 	args := []string{
 		"--user", "--unit=" + LocalRunnerServiceName(host.SparkwingHome, id),
+		"--working-directory=" + host.SparkwingHome,
 		"--collect", "--service-type=exec", "--property=Restart=no", "--property=TimeoutStopSec=infinity",
 		"--property=KillMode=mixed",
 		"--property=EnvironmentFile=" + environmentPath,
@@ -271,6 +272,7 @@ func localRunnerAgent(host crontimer.Host, id, log string) (string, error) {
 		body = fmt.Appendf(body, "<key>%s</key><string>%s</string>\n", unitfile.XMLText(key), unitfile.XMLText(value))
 	}
 	body = append(body, "</dict>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><false/>\n"...)
+	body = fmt.Appendf(body, "<key>WorkingDirectory</key><string>%s</string>\n", unitfile.XMLText(host.SparkwingHome))
 	// safety: launchd's default exit timeout would kill work while the runner drains.
 	body = append(body, "<key>ExitTimeOut</key><integer>0</integer>\n"...)
 	body = fmt.Appendf(body, "<key>StandardOutPath</key><string>%s</string>\n<key>StandardErrorPath</key><string>%s</string>\n</dict></plist>\n", unitfile.XMLText(log), unitfile.XMLText(log))

@@ -28,7 +28,7 @@ func (StorePostgres) ShortHelp() string {
 
 func (StorePostgres) Help() string {
 	return "Runs the internal/store tests that exercise Postgres with SPARKWING_TEST_STORE=postgres, " +
-		"so every store test that opens through internal/store/storetest exercises the Postgres dialect " +
+		"so every store test that opens through internal/store/internal/storetest exercises the Postgres dialect " +
 		"instead of a SQLite file. It compiles one internal/store test binary, lists its top-level " +
 		"tests and runs every one except the internal tests in the files named by " +
 		".sparkwing/jobs/store_postgres_sqlite_only.txt, which only open SQLite and which the full Go " +
@@ -45,7 +45,10 @@ func (StorePostgres) Help() string {
 		"dbname and database query options and refuses a service reference. A failing shard stops the " +
 		"others. Shards time out at 25 minutes, so a hung test prints its stack only when preparation " +
 		"finished inside the step's other five minutes. " +
-		"The storetest and teststore packages run whole. " +
+		"The storetest and teststore packages run whole. Ready-store fixtures clone a process-owned " +
+		"initialized template when the server permits CREATE DATABASE; empty targets keep fresh schemas. " +
+		"Fixture cleanup drops clones; TestMain drops templates. A killed process on a configured server can leave " +
+		"sw_fixture_clone_* or sw_fixture_template_* databases; remove those only after its owner is gone. " +
 		"When SPARKWING_TEST_PG_URL is already set the run uses " +
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
 		"directory under a temporary root and its binaries under the persistent tool cache, " +
