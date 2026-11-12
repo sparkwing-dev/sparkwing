@@ -139,6 +139,19 @@ the push fails rather than merging an unchecked tree; enqueue again after
 inspecting the failure. A conflict aborts the merge and records its remedy in
 the failed run.
 
+Queued authorizing checks bind their SDK process to the original local owner
+checkout, using the immutable repository path rather than an isolated checkout
+of the submitted pre-merge commit. Preconditions capture the merged commit and
+tree, the run ID and every required policy, fast, review and test check. Each
+check verifies that owner branch, HEAD and cleanliness before and after its body,
+and records the actual tree and outcome. Both verification and queued push
+require every receipt for that run to pass on the tree being pushed. Missing,
+unreadable, failed or mismatched receipts block landing. Receipts live under
+`<git common dir>/sparkwing-land-checks/<run>/<role>/<step>.json`; logs also
+record each full checked tree. Review uses the pinned `queued-main` SHA, so it
+does not depend on a worker clone carrying `origin/main`. Ordinary standalone
+review still compares against `origin/main`.
+
 This mode uses the queue's owned-hardware landing policy: local affected Go
 tests are the primary test gate. Hosted CI supplies additional verification.
 It omits the broad desktop and Cloud gates. Run focused lane tests before submitting.
@@ -154,7 +167,7 @@ strict-review routing. The prompt budget truncates at a UTF-8 rune boundary.
 
 ### Local affected Go tests
 
-The pre-push hook runs its six fast checks for every push. Updates targeting
+The pre-push hook runs its fast checks for every push. Updates targeting
 `refs/heads/main` then run `affected-tests`; branch pushes finish after the fast
 checks. Each non-deletion main update must name the checked-out HEAD's OID;
 `git push origin topic:main` from another commit is refused with a checkout
@@ -595,7 +608,7 @@ tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
 pushed commit's tree is the tree the gate judged or the merged tree whose
-delta passed its recheck. The gate and merge-delta recheck cover all six fast
+delta passed its recheck. The gate and merge-delta recheck cover all fast
 push checks and affected tests, so Land's own push skips the hook without
 repeating those bodies. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. After a refused
@@ -1516,6 +1529,34 @@ file. Other syntax and workflow checks remain active.
   still regenerates every reference page and rejects changed, missing or stale
   generated pages. `TestCommandReferenceMatchesRegistry` also compares the
   committed pages with the renderer compiled into the full CLI.
+  Both gate modes and pre-push run `build-published-sdk` after their workspace
+  build, using the same compiler allowance. Affected Gate, pre-push and merge
+  rechecks compile the host target plus linux/arm64, the deploy-image target.
+  With at least two compiler cores, those builds overlap and split the existing
+  allowance; otherwise they run sequentially. A linux/arm64 host builds once.
+  Full Gate, including the nightly full tier, compiles all six release targets:
+  Linux, macOS and Windows on amd64 and arm64. The remaining targets are caught
+  at the full tier and at release, not per land. The CLI and runner build on
+  every target; the controller builds on Linux and macOS.
+  Each target uses `CGO_ENABLED=0`, `GOWORK=off`, `GOENV=off`, empty `GOFLAGS`
+  and `-mod=readonly -trimpath`. The selected SDK must have a published version
+  and no replacement. This also bypasses vendor copies and alternate modfiles.
+  Go input changes, including SDK-only changes and package-owned files of any
+  extension, select the check. Package-owned Markdown is included conservatively
+  because it can be embedded, including deleted inputs. Unowned documentation
+  still skips the check; full gate always runs it. Merge rechecks retain it over the
+  combined branch and merge delta. Publish a standalone Go SDK API change first,
+  wait for its module version to resolve, then bump the root `go.mod` requirement
+  before the root uses that API. Workspace conformance remains a separate check.
+  The full-tier matrix measured 18m21s while filling missing cross-target caches
+  and 54-58 seconds with the same source and warm caches on one compiler core.
+  The host/deploy check, measured three times on the same `aee29e9e1` source,
+  took a median 17.37s wall and 17.28s CPU with one compiler core. Splitting
+  three cores across the two targets took 10.51s wall and 20.21s CPU at the
+  median. Shared load1 ranged from 4.0 to 5.3. These are warm-cache compiler
+  timings, excluding admission, not end-to-end land measurements. The fast
+  phase retains its one-minute warning. The build follows the workspace build
+  rather than increasing its compiler reservation.
   Without `--full`, vet and build cover the affected dependency closure. Its test step
   runs `go test -short` on changed packages
   and their reverse dependency closure, including production, internal-test

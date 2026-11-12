@@ -24,6 +24,7 @@ func gateFixtureRepo(t *testing.T) string {
 	isolateTestHome(t)
 	root := t.TempDir()
 	gitInit(t, root)
+	writeGoFile(t, filepath.Join(root, "AGENTS.md"), "# Fixture\n")
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.25\n")
 	writeGoFile(t, filepath.Join(root, "internal", "sound.go"),
 		"package internal\n\nfunc Sound() int { return 1 }\n")
@@ -351,7 +352,7 @@ func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 
 func TestBuildAndTestKeepTheirCompilerDependencies(t *testing.T) {
 	w := inspectWork(t, &Gate{})
-	chain := []string{"vet", "build", "test"}
+	chain := []string{"vet", "build", "build-published-sdk", "test"}
 	for i := 1; i < len(chain); i++ {
 		if findStep(w, chain[i]) == nil {
 			t.Errorf("the gate must run step %q", chain[i])
