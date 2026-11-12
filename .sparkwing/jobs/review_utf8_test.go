@@ -11,18 +11,20 @@ import (
 	"unicode/utf8"
 )
 
-func TestReviewPromptsSummarizeNonUTF8BlobsWithoutChangingText(t *testing.T) {
+func TestReviewPromptsSummarizeBinaryBlobsWithoutChangingText(t *testing.T) {
 	fx := newReviewFixture(t)
 	root := t.TempDir()
 	gitInit(t, root)
 	path := "internal/store/billing_policy.sig"
-	before := []byte{0xff, 'o', 'l', 'd', '\n'}
-	after := []byte{0xfe, 'n', 'e', 'w', '\n'}
+	before := []byte{0xff, 'o', 'l', 'd', '\n', 0}
+	after := []byte{0xfe, 'n', 'e', 'w', '\n', 0}
 	writeGoFile(t, filepath.Join(root, path), string(before))
 	writeGoFile(t, filepath.Join(root, "text.md"), "old café\n")
 	hidden := strings.Repeat("unchanged\n", 80) + string(before)
 	writeGoFile(t, filepath.Join(root, "internal/store/billing_hidden.bin"), hidden)
 	writeGoFile(t, filepath.Join(root, "deleted.bin"), string(before))
+	writeGoFile(t, filepath.Join(root, "internal/store/billing_nul.bin"), "\x00old")
+	writeGoFile(t, filepath.Join(root, "internal/store/billing_opaque.bin"), strings.Repeat("\xff", 30))
 	gitCommitAll(t, root, "base")
 	base := strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD"))
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", base)
@@ -35,6 +37,8 @@ func TestReviewPromptsSummarizeNonUTF8BlobsWithoutChangingText(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "deleted.bin")); err != nil {
 		t.Fatal(err)
 	}
+	writeGoFile(t, filepath.Join(root, "internal/store/billing_nul.bin"), "\x00new")
+	writeGoFile(t, filepath.Join(root, "internal/store/billing_opaque.bin"), strings.Repeat("\xfe", 30))
 	gitCommitAll(t, root, "head")
 	head := strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD"))
 	textDiff := gitOutput(t, root, "diff", "--no-color", "--no-ext-diff", base, head, "--", "text.md")
@@ -59,7 +63,7 @@ func TestReviewPromptsSummarizeNonUTF8BlobsWithoutChangingText(t *testing.T) {
 			if !utf8.ValidString(prompt) {
 				t.Errorf("%s pass%d received non-UTF-8 stdin", name, pass)
 			}
-			for _, value := range []string{path, "binary", fmt.Sprintf("sha256=%x", sha256.Sum256(before)), fmt.Sprintf("sha256=%x", sha256.Sum256(after)), "size=5"} {
+			for _, value := range []string{path, "binary", fmt.Sprintf("sha256=%x", sha256.Sum256(before)), fmt.Sprintf("sha256=%x", sha256.Sum256(after)), "size=6"} {
 				if !strings.Contains(strings.ToLower(prompt), value) {
 					t.Errorf("%s missing binary metadata %q", name, value)
 				}
@@ -69,6 +73,11 @@ func TestReviewPromptsSummarizeNonUTF8BlobsWithoutChangingText(t *testing.T) {
 			}
 			if !strings.Contains(prompt, `Binary file "internal/store/billing_hidden.bin"`) {
 				t.Error("non-UTF-8 bytes outside a hunk were not classified as binary")
+			}
+			for _, path := range []string{"internal/store/billing_nul.bin", "internal/store/billing_opaque.bin"} {
+				if !strings.Contains(prompt, fmt.Sprintf("Binary file %q", path)) {
+					t.Errorf("missing binary metadata for %q", path)
+				}
 			}
 			if name == "default" {
 				for _, path := range []string{"added.bin", "deleted.bin"} {

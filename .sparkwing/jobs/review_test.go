@@ -266,12 +266,19 @@ func (g *fakeGit) run(_ context.Context, args ...string) (string, error) {
 		subject, _, _ := strings.Cut(g.messages, "\n")
 		return subject, nil
 	case "diff --name-only":
-		return strings.Join(g.files, "\n"), nil
+		if len(g.files) == 0 {
+			return "", nil
+		}
+		return strings.Join(g.files, "\x00") + "\x00", nil
 	case "diff --raw":
 		return "", nil
 	case "diff --no-color":
 		if i := indexOf(args, "--"); i >= 0 {
-			return "diff of " + strings.Join(args[i+1:], ","), nil
+			paths := make([]string, len(args[i+1:]))
+			for j, path := range args[i+1:] {
+				paths[j] = strings.TrimPrefix(path, ":(top,literal)")
+			}
+			return "diff of " + strings.Join(paths, ","), nil
 		}
 		return "diff of everything at " + g.head, nil
 	}

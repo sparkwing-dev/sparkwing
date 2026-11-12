@@ -229,11 +229,14 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	if err != nil {
 		return fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
 	}
-	names, err := d.git(ctx, "diff", "--name-only", "--no-ext-diff", base, head)
+	names, err := d.git(ctx, "diff", "--name-only", "-z", "--no-ext-diff", base, head)
 	if err != nil {
 		return fmt.Errorf("review: list changed files: %w", err)
 	}
-	files := strings.Fields(names)
+	var files []string
+	if names != "" {
+		files = strings.Split(strings.TrimSuffix(names, "\x00"), "\x00")
+	}
 	d.logf("review timing: phase=diff elapsed=%s bytes=%d files=%d", d.now().Sub(started), len(diff), len(files))
 	started = d.now()
 	objective := rec.Objective
@@ -610,7 +613,7 @@ func (r reviewPrompt) fresh() string {
 		b.WriteString("\n")
 	}
 	if r.profile != defaultReviewer {
-		fmt.Fprintf(&b, "You review only these strict-path files; another reviewer covers the rest: %s\n\n", strings.Join(r.files, ", "))
+		fmt.Fprintf(&b, "You review only these strict-path files; another reviewer covers the rest: %q\n\n", r.files)
 	}
 	if strings.TrimSpace(r.standards) != "" {
 		b.WriteString("## House standards\n\n" + r.standards + "\n\n")
