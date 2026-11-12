@@ -65,6 +65,7 @@ type diagnosticRecord struct {
 type Diagnostics struct {
 	queue  chan diagnosticRecord
 	ctx    context.Context
+	done   <-chan struct{}
 	cancel context.CancelFunc
 	origin time.Time
 	birth  string
@@ -74,7 +75,7 @@ type Diagnostics struct {
 // NewDiagnostics starts one bounded delivery worker. The sink receives no execution authority.
 func NewDiagnostics(parent context.Context, sink func(context.Context, Event) error) *Diagnostics {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
-	d := &Diagnostics{queue: make(chan diagnosticRecord, 256), ctx: ctx, cancel: cancel, origin: processDiagnosticOrigin}
+	d := &Diagnostics{queue: make(chan diagnosticRecord, 256), ctx: ctx, done: ctx.Done(), cancel: cancel, origin: processDiagnosticOrigin}
 	birth, birthErr := procgroup.ProcessBirth(os.Getpid())
 	if birthErr == nil {
 		d.birth = birth
@@ -88,10 +89,10 @@ func NewDiagnostics(parent context.Context, sink func(context.Context, Event) er
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-d.done:
 				return
 			case r := <-d.queue:
-				if !deliverDiagnostic(ctx, sink, r.event) {
+				if !deliverDiagnostic(d.ctx, sink, r.event) {
 					r.trace.lost.Add(1)
 				}
 			}
@@ -166,7 +167,7 @@ func (t *keeperTrace) emit(kind string, sent, expires time.Time, outcome string,
 	after := time.Since(t.diagnostics.origin).Nanoseconds()
 	e := Event{WatchRenewal: t.watchRenewal, BootID: t.diagnostics.boot, Platform: runtime.GOOS, ProcessBirth: t.diagnostics.birth, IdentityComplete: t.diagnostics.birth != "" && (runtime.GOOS != "linux" || t.diagnostics.boot != ""), ClockOrigin: t.diagnostics.origin.UTC(), Identity: t.identity, Instance: t.instance, PID: os.Getpid(), Sequence: t.sequence, Dropped: t.lost.Load(), Kind: kind, MonoBefore: before, Wall: wall, MonoAfter: after, Sent: t.sent, ExpiresAt: t.expires, Deadline: t.deadline, ExecutionDeadline: t.executionDeadline, Renewal: t.renewal, InFlight: t.inFlight, Outcome: outcome}
 	select {
-	case <-t.diagnostics.ctx.Done():
+	case <-t.diagnostics.done:
 		t.lost.Add(1)
 		return t.renewal
 	default:
