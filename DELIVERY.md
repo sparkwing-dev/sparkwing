@@ -167,7 +167,7 @@ strict-review routing. The prompt budget truncates at a UTF-8 rune boundary.
 
 ### Local affected Go tests
 
-The pre-push hook runs its six fast checks for every push. Updates targeting
+The pre-push hook runs its fast checks for every push. Updates targeting
 `refs/heads/main` then run `affected-tests`; branch pushes finish after the fast
 checks. Each non-deletion main update must name the checked-out HEAD's OID;
 `git push origin topic:main` from another commit is refused with a checkout
@@ -608,7 +608,7 @@ tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
 pushed commit's tree is the tree the gate judged or the merged tree whose
-delta passed its recheck. The gate and merge-delta recheck cover all six fast
+delta passed its recheck. The gate and merge-delta recheck cover all fast
 push checks and affected tests, so Land's own push skips the hook without
 repeating those bodies. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. After a refused
