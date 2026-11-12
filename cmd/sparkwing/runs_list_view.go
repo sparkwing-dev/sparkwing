@@ -10,6 +10,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
@@ -38,7 +40,7 @@ func writeListedRun(out io.Writer, run controllerwire.RunDetail, format string, 
 				ID string `json:"id"`
 			}{run.ID})
 		}
-		_, err := fmt.Fprintln(out, run.ID)
+		_, err := fmt.Fprintln(out, opsview.DisplayText(run.ID))
 		return err
 	}
 	if format == "json" {
@@ -63,7 +65,7 @@ func writeListedRun(out io.Writer, run controllerwire.RunDetail, format string, 
 	if reason := run.Inputs.Lineage.RetryReason; reason != "" {
 		agent += fmt.Sprintf("  retry of %s: %s", run.Inputs.Lineage.RetryOf, reason)
 	}
-	_, err := fmt.Fprintf(out, "%s (#%d)  %s  %s  %s  %s%s\n", run.ID, run.Number, run.Inputs.Pipeline, run.Status, run.Inputs.Git.Ref, shortSHAOrDash(run.Inputs.Git.SHA), agent)
+	_, err := fmt.Fprintf(out, "%s (#%d)  %s  %s  %s  %s%s\n", opsview.DisplayText(run.ID), run.Number, opsview.DisplayText(run.Inputs.Pipeline), opsview.DisplayText(run.Status), opsview.DisplayText(run.Inputs.Git.Ref), opsview.DisplayText(shortSHAOrDash(run.Inputs.Git.SHA)), opsview.DisplayText(agent))
 	return err
 }
 
@@ -134,7 +136,7 @@ func renderRunFailures(ctx context.Context, reader controllerwire.RunReader, out
 				} else if o.format == "plain" || o.quiet {
 					err = writeListedRun(out, run, o.format, true)
 				} else {
-					_, err = fmt.Fprintf(out, "%s  %s  %s  %s\n", row.RunID, row.Pipeline, row.JobID, truncateOneLine(row.Message, 160))
+					_, err = fmt.Fprintf(out, "%s  %s  %s  %s\n", opsview.DisplayText(row.RunID), opsview.DisplayText(row.Pipeline), opsview.DisplayText(row.JobID), opsview.DisplayText(row.Message, 160))
 				}
 				if err != nil {
 					return err
@@ -179,9 +181,9 @@ func renderRunFailures(ctx context.Context, reader controllerwire.RunReader, out
 				Key string `json:"key"`
 			}{key})
 		case o.format == "plain" || o.quiet:
-			_, err = fmt.Fprintln(out, key)
+			_, err = fmt.Fprintln(out, opsview.DisplayText(key))
 		default:
-			_, err = fmt.Fprintf(out, "%s  %d  %s\n", key, row.Count, truncateOneLine(row.SampleError, 160))
+			_, err = fmt.Fprintf(out, "%s  %d  %s\n", opsview.DisplayText(key), row.Count, opsview.DisplayText(row.SampleError, 160))
 		}
 		if err != nil {
 			return err
@@ -262,9 +264,9 @@ func renderPipelineList(ctx context.Context, reader controllerwire.RunReader, ou
 				Pipeline string `json:"pipeline"`
 			}{row.Pipeline})
 		case o.format == "plain" || o.quiet:
-			_, err = fmt.Fprintln(out, row.Pipeline)
+			_, err = fmt.Fprintln(out, opsview.DisplayText(row.Pipeline))
 		default:
-			_, err = fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\n", row.Pipeline, pipelineSparkline(row.RecentStatuses, o.style), row.Total, row.Failures, row.LastRunID, row.LastStatus)
+			_, err = fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\n", opsview.DisplayText(row.Pipeline), pipelineSparkline(row.RecentStatuses, o.style), row.Total, row.Failures, opsview.DisplayText(row.LastRunID), opsview.DisplayText(row.LastStatus))
 		}
 		if err != nil {
 			return err

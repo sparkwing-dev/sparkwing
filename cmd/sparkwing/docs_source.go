@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -109,7 +111,7 @@ func displayEmbedded(v string) string {
 
 func printDiscoveryWarning(r webResolution) {
 	if r.discoveryW != "" {
-		fmt.Fprintf(os.Stderr, "%s %s\n", color.Yellow("warning:"), r.discoveryW)
+		fmt.Fprintf(os.Stderr, "%s %s\n", color.Yellow("warning:"), opsview.DisplayText(r.discoveryW))
 	}
 }
 

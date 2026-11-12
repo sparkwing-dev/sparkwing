@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestRunStatusShowsAnUnstartedJobsError(t *testing.T) {
 		if err := observeRunStatus(t.Context(), statusInvocation(t, args...), reader, &out, nil); exitCodeFor(err) != 1 {
 			t.Fatalf("%v status exit: %v", args, err)
 		}
-		want := compiler
+		want := strconv.Quote(compiler)
 		if args[1] == "json" {
 			want = "cannot use *** as int value"
 		}
@@ -87,7 +88,7 @@ func TestRunStatusShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
 		if err := observeRunStatus(t.Context(), statusInvocation(t, args...), reader, &out, nil); exitCodeFor(err) != 1 {
 			t.Fatalf("%v status exit: %v", args, err)
 		}
-		want := []string{compiler}
+		want := []string{strconv.Quote(compiler)}
 		if args[len(args)-1] == "json" {
 			want = []string{"undefined: qaDeliberateUndefined", `"hint":"the pipeline failed to plan`, "sparkwing pipeline plan --pipeline hello"}
 		} else if args[0] != "--view" {

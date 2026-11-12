@@ -11,6 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -84,10 +86,10 @@ func renderObjectStoreCeiling(out io.Writer, c controllerwire.ObjectStoreCeiling
 		fmt.Fprintf(out, "ceiling: unlimited bytes=%d objects=%d\n", c.Bytes, c.Objects)
 	}
 	if c.Incomplete {
-		fmt.Fprintf(out, "ceiling measurement incomplete: %s\n", c.MeasureError)
+		fmt.Fprintf(out, "ceiling measurement incomplete: %s\n", opsview.DisplayText(c.MeasureError))
 	}
 	if c.Frozen {
-		fmt.Fprintf(out, "ceiling frozen on %s since %s\n", c.FrozenReason, c.FrozenAt.Format(time.RFC3339))
+		fmt.Fprintf(out, "ceiling frozen on %s since %s\n", opsview.DisplayText(c.FrozenReason), c.FrozenAt.Format(time.RFC3339))
 	}
 	if !c.ReconciledAt.IsZero() {
 		fmt.Fprintf(out, "ceiling measured at %s every %s\n", c.ReconciledAt.Format(time.RFC3339), c.Reconcile)

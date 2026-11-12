@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -223,7 +225,7 @@ func writeUnloggedFailures(ctx context.Context, inv clisurface.Invocation, runs 
 		if runLogOutput(inv) == "json" {
 			err = json.NewEncoder(out).Encode(controllerwire.LogRecord{RunID: detail.ID, Event: "job_failed_before_start", JobID: failed.ID, Line: failed.Error})
 		} else {
-			_, err = fmt.Fprintf(out, "%s failed before it started, so it has no logs; its error:\n%s\n", failed.ID, strings.TrimRight(failed.Error, "\n"))
+			_, err = fmt.Fprintf(out, "%s failed before it started, so it has no logs; its error:\n%s\n", opsview.DisplayText(failed.ID), opsview.DisplayText(strings.TrimRight(failed.Error, "\n")))
 		}
 		if err != nil {
 			return err
@@ -280,6 +282,11 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 		} else if unit := record.Subject.Unit; unit != nil {
 			subject = string(unit.Kind)
 		}
+	}
+	if format == "pretty" || search {
+		line = opsview.DisplayText(line)
+		subject = opsview.DisplayText(subject)
+		record.RunID = opsview.DisplayText(record.RunID)
 	}
 	if record.Event != "" && line == "" {
 		_, err := fmt.Fprintf(out, "%s/%s:%d\n", record.RunID, subject, record.LineNo)

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -76,9 +78,9 @@ func runDebugResume(ctx context.Context, inv clisurface.Invocation, out io.Write
 		return json.NewEncoder(out).Encode(result)
 	}
 	if format == "plain" {
-		_, err = fmt.Fprintf(out, "%s/%s\n", result.RunID, result.JobID)
+		_, err = fmt.Fprintf(out, "%s/%s\n", opsview.DisplayText(result.RunID), opsview.DisplayText(result.JobID))
 	} else {
-		_, err = fmt.Fprintf(out, "resumed %s/%s\n", result.RunID, result.JobID)
+		_, err = fmt.Fprintf(out, "resumed %s/%s\n", opsview.DisplayText(result.RunID), opsview.DisplayText(result.JobID))
 	}
 	return err
 }

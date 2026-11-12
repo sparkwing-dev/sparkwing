@@ -11,6 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -148,7 +150,7 @@ func writeTokenMetadata(out io.Writer, tokens []controllerwire.TokenMetadata, fo
 	}
 	if format == "plain" {
 		for _, token := range tokens {
-			if _, err := fmt.Fprintln(out, token.Prefix); err != nil {
+			if _, err := fmt.Fprintln(out, opsview.DisplayText(token.Prefix)); err != nil {
 				return err
 			}
 		}
@@ -168,7 +170,7 @@ func writeTokenMetadata(out io.Writer, tokens []controllerwire.TokenMetadata, fo
 		if token.RevokedAt != nil {
 			revoked = time.Unix(*token.RevokedAt, 0).UTC().Format(time.RFC3339)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%t\t%s\t%s\n", token.Prefix, token.Kind, token.Principal, joinOrDash(scopes), token.Metered, last, revoked)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%t\t%s\t%s\n", opsview.DisplayText(token.Prefix), opsview.DisplayText(token.Kind), opsview.DisplayText(token.Principal), opsview.DisplayText(joinOrDash(scopes)), token.Metered, last, revoked)
 	}
 	return tw.Flush()
 }

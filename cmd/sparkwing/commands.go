@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -475,7 +476,7 @@ func writeSplitMarkdownOutput(dir string, cmds []CommandJSON, output string) err
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			return fmt.Errorf("commands: %w", err)
 		}
-		fmt.Fprintf(os.Stderr, "removed stale generated page %s\n", filepath.Join(dir, name))
+		fmt.Fprintf(os.Stderr, "removed stale generated page %s\n", opsview.DisplayText(filepath.Join(dir, name)))
 		removed++
 	}
 	if output == "json" {
@@ -491,7 +492,7 @@ func writeSplitMarkdownOutput(dir string, cmds []CommandJSON, output string) err
 		fmt.Println(dir)
 		return nil
 	}
-	fmt.Printf("cli reference: wrote %d, unchanged %d, removed %d page(s) in %s\n", wrote, unchanged, removed, dir)
+	fmt.Printf("cli reference: wrote %d, unchanged %d, removed %d page(s) in %s\n", wrote, unchanged, removed, opsview.DisplayText(dir))
 	return nil
 }
 

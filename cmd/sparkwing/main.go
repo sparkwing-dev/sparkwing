@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -230,7 +232,7 @@ func pinnedProfileHere(pipelineName string) (string, error) {
 
 func printPin(pipelineName string) {
 	if pin, err := pinnedProfileHere(pipelineName); err == nil && pin != "" {
-		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger %s --profile %s`\n", pin, pipelineName, pin)
+		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger %s --profile %s`\n", opsview.DisplayText(pin), opsview.DisplayText(pipelineName), opsview.DisplayText(pin))
 	}
 }
 

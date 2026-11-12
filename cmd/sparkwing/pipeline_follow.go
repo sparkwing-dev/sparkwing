@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -53,7 +55,7 @@ func triggeredRunOutcome(ctx context.Context, reader controllerwire.RunReader, r
 		return "", err
 	}
 	if detail.Status != "success" {
-		if _, err := fmt.Fprintf(out, "\nrun %s\nstatus:    %s\n", detail.ID, detail.Status); err != nil {
+		if _, err := fmt.Fprintf(out, "\nrun %s\nstatus:    %s\n", opsview.DisplayText(detail.ID), opsview.DisplayText(detail.Status)); err != nil {
 			return "", err
 		}
 		if err := writeRunErrors(out, detail, "pretty"); err != nil {
