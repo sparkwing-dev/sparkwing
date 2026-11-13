@@ -17,12 +17,17 @@ func clockMonotonic(t *testing.T) int64 {
 }
 
 func TestKeeperDiagnosticsBracketTheOriginOnClockMonotonic(t *testing.T) {
-	diagnostics, events := collectDiagnostics(t)
+	diagnostics, recorded := collectDiagnostics(t)
 	trace := diagnostics.start(t.Context(), Identity{Role: "OWNER", Run: "r"})
 	before := clockMonotonic(t)
 	trace.emit("watch_arm", time.Time{}, time.Now().Add(time.Minute), "", 0)
 	after := clockMonotonic(t)
-	event := nextKind(t, events, "watch_arm")
+	all, _ := sealed(t, diagnostics, recorded)
+	arms := ofKind(all, "watch_arm")
+	if len(arms) != 1 {
+		t.Fatalf("records=%+v", all)
+	}
+	event := arms[0]
 	if event.OriginMonoBefore <= 0 || event.OriginMonoBefore > event.OriginMonoAfter {
 		t.Fatalf("origin bracket [%d, %d]", event.OriginMonoBefore, event.OriginMonoAfter)
 	}

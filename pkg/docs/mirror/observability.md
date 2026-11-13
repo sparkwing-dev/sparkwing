@@ -61,9 +61,11 @@ origin on `CLOCK_MONOTONIC`, the clock behind every `mono_*_ns` duration. A
 sample's position on that clock is the bracket plus its duration.
 `expires_mono_ns`, `deadline_mono_ns` and `execution_deadline_mono_ns` restate
 the expiry and the inherited deadlines as offsets from the same origin. Each is
-absent when its target has only a wall time. The keeper moves a server-supplied
-expiry onto the monotonic clock when it arrives, so a later wall-clock step
-cannot move that expiry.
+absent when its target has only a wall time, as an inherited deadline decoded
+from a Cloud award does. The keeper holds a server-supplied expiry on the
+monotonic clock and still enforces the server's wall expiry, stopping at
+whichever comes first, so `expires_mono_ns` bounds when it stops. A forward
+wall-clock step, such as one after a host suspend, can end the lease earlier.
 A failed renewal's `renewal_finish` carries `error_code`: the wire error code,
 or `unclassified` when the error has none. It never carries the message. A
 `cancel_requested` record, with `cancel_source` set to `renewal` or `wait`, is

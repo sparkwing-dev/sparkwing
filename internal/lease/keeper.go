@@ -36,6 +36,7 @@ type Keeper struct {
 	WaitCancellation func(context.Context) *CancelError
 	// ExecutionEnded stops execution surfaces outside the SDK tree. It runs once and must return promptly.
 	ExecutionEnded func()
+	wall           func() time.Time
 }
 
 // CancelError distinguishes a requested cancellation from lost authority.
@@ -91,12 +92,22 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		defer close(watchDone)
 		watch(hard, func(err error) { hardCancel(err); cancel(err) }, renewed, expires, trace)
 	}(expires)
+	wall := k.wall
+	if wall == nil {
+		wall = time.Now
+	}
 	go func() {
 		defer close(done)
 		defer cancel(context.Canceled)
 		every := k.Interval
+		var serverWall time.Time
+		expired := func() bool {
+			// safety: the server's decoded wall expiry still binds, because after a host suspend the
+			// wall clock passes it while the monotonic expiry has not advanced.
+			return !time.Now().Before(expires) || !serverWall.IsZero() && !wall().Before(serverWall)
+		}
 		for unit.Err() == nil {
-			if !time.Now().Before(expires) {
+			if expired() {
 				hardCancel(ErrSilent)
 				cancel(ErrSilent)
 				return
@@ -112,19 +123,19 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			if unit.Err() != nil {
 				return
 			}
-			if !time.Now().Before(expires) {
+			if expired() {
 				hardCancel(ErrSilent)
 				cancel(ErrSilent)
 				return
 			}
 			if err == nil {
-				expires = sent.Add(k.Lease)
+				expires, serverWall = sent.Add(k.Lease), time.Time{}
 				if !beat.ExpiresAt.IsZero() {
-					// safety: restating the decoded wall expiry on the monotonic clock keeps a later
-					// wall-clock step from moving it.
+					// safety: the watcher and diagnostics hold the server expiry on the monotonic clock,
+					// and serverWall keeps its wall bound, so the loop stops at whichever comes first.
 					now := time.Now()
 					if server := now.Add(beat.ExpiresAt.Sub(now)); server.Before(expires) {
-						expires = server
+						expires, serverWall = server, beat.ExpiresAt.Round(0)
 					}
 				}
 				trace.emit("expiry_selected", time.Time{}, expires, "", 0)
@@ -133,7 +144,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 					// with this record, and the record still precedes the cancellation it reports.
 					trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, "", "renewal")
 				}
-				if !expires.After(time.Now()) {
+				if expired() {
 					hardCancel(ErrSilent)
 					cancel(ErrSilent)
 					return
