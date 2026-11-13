@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 	root := repoRoot(t)
 	syms := exportedSymbols(t, filepath.Join(root, "sparkwing"))

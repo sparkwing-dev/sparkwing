@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestRepositorySourceHintsUseCurrentGrammar(t *testing.T) {
 	if !checkSourceHints(filepath.Join("..", "..")) {
 		t.Fatal("Go source prints commands outside the current grammar")

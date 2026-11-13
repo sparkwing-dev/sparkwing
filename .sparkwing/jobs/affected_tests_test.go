@@ -135,6 +135,85 @@ func TestAffectedTestStepRunsTheChangeAndTheCriticalSetOnly(t *testing.T) {
 	}
 }
 
+func TestAffectedTestsRejectUnsafeGitInUnrelatedTestPackages(t *testing.T) {
+	guard, err := os.ReadFile(filepath.Join(sourceTreeRoot(), "pkg", "gitenv", "testgit", "guard_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{".sparkwing/jobs_test.go", "internal/sound_test.go", "sparkwing/example_test.go", "README.md"} {
+		t.Run(file, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			writeGoFile(t, filepath.Join(root, "pkg/gitenv/testgit/guard_test.go"), string(guard))
+			writeGoFile(t, filepath.Join(root, "sparkwing/go.mod"), "module fixture-sdk\n\ngo 1.25\n")
+			writeGoFile(t, filepath.Join(root, "sparkwing/example.go"), "package sdk\n")
+			if file == "README.md" {
+				writeGoFile(t, filepath.Join(root, "internal/unsafe_test.go"), "package internal\nimport \"os/exec\"\nfunc unsafeFixture() { exec.Command(\"git\", \"status\") }\n")
+			}
+			gitCommitAll(t, root, "base")
+			runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+			pkg := map[string]string{".sparkwing/jobs_test.go": "pipelines", "internal/sound_test.go": "internal", "sparkwing/example_test.go": "sdk"}[file]
+			body := "# Docs only\n"
+			if pkg != "" {
+				body = "package " + pkg + "\nimport \"os/exec\"\nfunc unsafeFixture() { exec.Command(\"git\", \"status\") }\n"
+			}
+			writeGoFile(t, filepath.Join(root, file), body)
+			gitAddAll(t, root)
+			err := runAffectedTestFiles(newTestContext(t), []string{file}, "fixture", hostShape{cpus: 2}, false)
+			if pkg == "" {
+				if err != nil {
+					t.Fatalf("docs-only change selected the Go guard: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "TestRepositoryGitFixturesUseTheScrubbedEnvironment") || !strings.Contains(err.Error(), "use testgit.Command") {
+				t.Fatalf("unsafe Git in %s escaped the repository guard: %v", file, err)
+			}
+		})
+	}
+}
+
+func TestAffectedTestsAlwaysSelectRepositoryScanningGuards(t *testing.T) {
+	t.Chdir(sourceTreeRoot())
+	critical, err := criticalTests(newTestContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guards := map[string]map[string][]string{
+		".": {
+			"pkg/gitenv/testgit": {"TestRepositoryGitFixturesUseTheScrubbedEnvironment"},
+			"pkg/color":          {"TestNoRawANSIOutsideAllowed"},
+			"internal/source":    {"TestGitAcquisitionHasOneOwner"},
+			"internal/doccheck":  {"TestProductionCommentsUseCurrentConfigFilename", "TestRepositorySourceHintsUseCurrentGrammar"},
+			"cmd/sparkwing":      {"TestDocsNameEveryEnvironmentVariableTheCodeReads"},
+			"pkg/docs":           {"TestDocsNameOnlySymbolsThatExist"},
+			"internal/store":     {"TestLifecycleGuard_StatusLiteralsStayCanonical", "TestConcurrencyGuard_TablesTouchedOnlyByStore", "TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField"},
+			"internal/fssecure":  {"TestConfigDirectoryWritersDoNotMkdirGroupReadable"},
+		},
+		"sparkwing": {
+			".":                    {"TestSDKHasNoMaskerOrAutomaticRegistration"},
+			"testsupport/testleak": {"TestEveryTestPackageRunsInsideTheSandbox"},
+		},
+	}
+	for module, dirs := range guards {
+		var packages []modulePackage
+		for dir := range dirs {
+			packages = append(packages, modulePackage{importPath: path.Join("fixture", dir), dir: dir})
+		}
+		p := planAffectedTests(module, []string{".", "sparkwing", ".sparkwing"}, []string{".sparkwing/jobs/unrelated_test.go"}, packages, critical[module])
+		if len(p.packages) != 0 {
+			t.Fatalf("%s: unrelated module change selected short packages %v", module, p.packages)
+		}
+		command := p.criticalCommand(1)
+		for dir, names := range dirs {
+			for _, name := range names {
+				if !slices.Contains(p.critical[path.Join("fixture", dir)], name) || !strings.Contains(command, name) || strings.Contains(command, "-short") {
+					t.Errorf("%s/%s: guard %s missing from unshortened command %s", module, dir, name, command)
+				}
+			}
+		}
+	}
+}
+
 func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 	root := sourceTreeRoot()
 	if root == "" {
@@ -155,8 +234,8 @@ func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 		}
 	}
 	// perf: the critical set runs on every gate, so it stays a few dozen tests.
-	if count == 0 || count > 40 {
-		t.Errorf("critical set holds %d tests, want between 1 and 40", count)
+	if count == 0 || count > 50 {
+		t.Errorf("critical set holds %d tests, want between 1 and 50", count)
 	}
 }
 

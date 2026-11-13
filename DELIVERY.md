@@ -223,6 +223,17 @@ not an aggregate CPU cap: seven test processes can each use seven Go execution
 threads, besides compiler and nested subprocess work. The job reports package
 counts, critical-test counts, failures, package timings and test timings.
 
+Repository-scanning source guards carry the existing `//sparkwing:critical`
+tag because their filesystem reads are absent from the import graph. Every Go
+input change, including a test in another committed module, runs the named Git
+fixture, source ownership, ANSI, SQL ownership, configuration-directory,
+environment documentation, source-hint, SDK boundary and SDK sandbox guards
+without `-short`. The guard inventory and its cross-module selection are pinned
+by `TestAffectedTestsAlwaysSelectRepositoryScanningGuards`; an unsafe unrelated
+Git fixture is exercised by
+`TestAffectedTestsRejectUnsafeGitInUnrelatedTestPackages`. These tags share the
+existing critical phase and deadline. Documentation-only selection is unchanged.
+
 The shared affected-test runner sets nonempty `GOFLAGS=-mod=readonly` for
 selection and execution. This overrides process and saved flags while keeping
 other saved Go settings, including `GOPROXY`, `GOPRIVATE` and `GONOSUMDB`.
