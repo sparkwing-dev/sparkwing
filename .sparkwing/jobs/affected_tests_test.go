@@ -183,6 +183,7 @@ func TestAffectedTestsAlwaysSelectRepositoryScanningGuards(t *testing.T) {
 			"pkg/gitenv/testgit": {"TestRepositoryGitFixturesUseTheScrubbedEnvironment"},
 			"pkg/color":          {"TestNoRawANSIOutsideAllowed"},
 			"internal/source":    {"TestGitAcquisitionHasOneOwner"},
+			"internal/sdkchecks": {"TestPrefersDocumentationStatesEligibility", "TestRequiresDocumentationStatesDispatchBehavior"},
 			"internal/doccheck":  {"TestProductionCommentsUseCurrentConfigFilename", "TestRepositorySourceHintsUseCurrentGrammar"},
 			"cmd/sparkwing":      {"TestDocsNameEveryEnvironmentVariableTheCodeReads"},
 			"pkg/docs":           {"TestDocsNameOnlySymbolsThatExist"},

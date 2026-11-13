@@ -227,15 +227,15 @@ Repository-scanning source guards carry the existing `//sparkwing:critical`
 tag because their filesystem reads are absent from the import graph. Every Go
 input change, including a test in another committed module, runs the named Git
 fixture, source ownership, ANSI, SQL ownership, configuration-directory,
-environment documentation, source-hint, SDK boundary and SDK sandbox guards
+environment documentation, source-hint, SDK documentation, SDK boundary and SDK sandbox guards
 without `-short`. The guard inventory and its cross-module selection are pinned
 by `TestAffectedTestsAlwaysSelectRepositoryScanningGuards`; an unsafe unrelated
 Git fixture is exercised by
 `TestAffectedTestsRejectUnsafeGitInUnrelatedTestPackages`. These tags share the
 existing critical phase and deadline. Documentation-only selection is unchanged.
 
-Measured on 2026-11-12, the 13 newly tagged guard bodies summed to 5.54 seconds
-in one shared-host run. The eight-package command for the 11 root guards took
+Measured on 2026-11-12, 13 guard bodies excluding the SDK documentation guards
+summed to 5.54 seconds in one shared-host run. The eight-package command for the 11 root guards took
 81.09 seconds wall and 137.45 seconds CPU, including compilation and waited
 children, at load1 13.2-17.5. The two SDK guards ran with `-race` in 5.75 seconds
 wall and 4.40 seconds CPU. These mixed-cache command timings do not measure
