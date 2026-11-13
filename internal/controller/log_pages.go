@@ -40,8 +40,10 @@ type logPageCursor struct {
 	Matches map[string]int64 `json:"matches,omitempty"`
 }
 
-var errLogPageFull = errors.New("log page is full")
-var errLogSelectionDone = errors.New("bounded log selection is complete")
+var (
+	errLogPageFull      = errors.New("log page is full")
+	errLogSelectionDone = errors.New("bounded log selection is complete")
+)
 
 type logBudget struct {
 	ctx   context.Context
