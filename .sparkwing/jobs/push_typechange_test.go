@@ -15,6 +15,9 @@ func TestTypeChangeRunsAffectedReader(t *testing.T) {
 	for _, mode := range []string{"main hook", "manual push", "gate committed", "gate staged", "gate unstaged", "merge delta"} {
 		t.Run(mode, func(t *testing.T) {
 			root := gateFixtureRepo(t)
+			if mode == "merge delta" {
+				configurePublishedSDKFixture(t, root)
+			}
 			input := filepath.Join(root, "internal", "input.txt")
 			writeGoFile(t, input, "ok")
 			writeGoFile(t, filepath.Join(root, "internal", "bad.txt"), "bad")

@@ -56,6 +56,9 @@ type stepDocument struct {
 	Finally           bool
 	ContinueOnError   bool `json:"continue_on_error"`
 	SafeWithoutDryRun bool `json:"safe_without_dry_run"`
+	Closures          struct {
+		SkipIf []string `json:"skip_if"`
+	}
 }
 
 type testPipeline struct {
