@@ -22,6 +22,7 @@ var declaredRepoReaders = map[string]string{
 
 var declaredRepoPattern = regexp.MustCompile(`\bDeclaredRepos?\b|\bdeclared_repo\b`)
 
+//sparkwing:critical
 func TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField(t *testing.T) {
 	root := moduleRoot(t)
 	found := map[string]bool{}

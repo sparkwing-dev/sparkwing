@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestPrefersDocumentationStatesEligibility(t *testing.T) {
 	tests := []struct {
 		file     string

@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestRequiresDocumentationStatesDispatchBehavior(t *testing.T) {
 	tests := []struct {
 		file     string

@@ -99,6 +99,7 @@ func TestGuardRejectsRawGitConstructors(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestRepositoryGitFixturesUseTheScrubbedEnvironment(t *testing.T) {
 	root, err := filepath.Abs("../../..")
 	if err != nil {

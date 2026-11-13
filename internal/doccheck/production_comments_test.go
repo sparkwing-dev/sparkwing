@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestProductionCommentsUseCurrentConfigFilename(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	for _, root := range []string{"cmd", "internal", "pkg", "sparkwing"} {
