@@ -37,9 +37,8 @@ result reporting never wait for uploads or closure.
 upload deadline from first signing, at most `limits.LogUploadURLTTL` (fifteen
 minutes). The controller supplies the run's persisted retention class after
 authorizing its writer. The signer copies the subject and derives the key from
-it. `LogPutSigner`
-returns URLs and headers for both `blob.Filesystem` and `blob.S3`, bound to
-the requested length and digest. The filesystem backend permits only an identical
+it. `LogPutSigner` returns URLs and headers for both `blob.Filesystem` and
+`blob.S3`, bound to the requested length and digest. The filesystem backend permits only an identical
 retry at an existing key. S3 signs a create-only condition and rejects every
 overwrite. Index zero selects the final manifest. A 412 alone cannot
 establish a matching payload.
@@ -94,8 +93,9 @@ against the real tenant and verifies that ended authority emits no bytes.
 authenticated claim through signing, filesystem PUTs, segment commits and a
 controller GET. It checks exact bytes and generated foreign-subject refusals.
 `TestLogSubmissionRoutesReplayLostPutAndCommit` replays a lost PUT response and
-a lost commit response through the same routes. Re-signing keeps the first
-deadline, a committed slot returns no URL, and the retained-byte charge and
+a lost commit response through the same routes, under a store clock that
+advances between signings. Re-signing keeps the first deadline, a committed
+slot returns no URL, and the retained-byte charge and
 segment record stay single.
 
 `TestCommittedDashboardLogsRecheckAuthorityBetweenSegments` revokes a real

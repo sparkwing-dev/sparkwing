@@ -227,8 +227,8 @@ read authority; persisted segments and seals govern reads.
 `internal/storage/logseg` owns the manifest and read completeness types.
 When a writer ends without a final commit, `Operator.SealAbandonedLogStreams`
 seals its registered stream incomplete after its final-tail grace. A replaced
-writer fence can seal immediately. Maintenance preserves committed segments;
-it does not list the bucket or adopt uncommitted objects. A late final commit
+writer fence can seal immediately. Sealing preserves committed segments; it
+does not list the bucket or adopt uncommitted objects. A late final commit
 must still satisfy the writer fence and the store's immutable seal.
 
 ### Upload URLs from the presigned data plane

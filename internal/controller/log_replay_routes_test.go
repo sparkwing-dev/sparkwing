@@ -8,21 +8,27 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 // A runner that loses the PUT or commit response replays the same slot through
 // the authenticated routes: storage and the retained-byte charge stay single.
 func TestLogSubmissionRoutesReplayLostPutAndCommit(t *testing.T) {
-	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	started := time.Now()
+	var elapsed atomic.Int64
+	clock := func() time.Time { return started.Add(time.Duration(elapsed.Load())) }
+	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, teststore.WithClock(clock))
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{
-		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{43}, 32),
+		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{43}, 32), LogNow: clock,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -104,6 +110,7 @@ func TestLogSubmissionRoutesReplayLostPutAndCommit(t *testing.T) {
 	if code := put(first); code != http.StatusCreated {
 		t.Fatalf("first PUT = %d", code)
 	}
+	elapsed.Add(int64(time.Minute))
 	again := sign()
 	if again.Committed || again.URL == "" || !again.ExpiresAt.Equal(first.ExpiresAt) || retained() != charged {
 		t.Fatalf("re-signed lost PUT committed=%v url=%v expires=%v, retained %d; want the same uncommitted slot until %v and charge %d", again.Committed, again.URL != "", again.ExpiresAt, retained(), first.ExpiresAt, charged)

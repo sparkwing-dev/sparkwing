@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,9 +30,13 @@ func r2LogTestConfigured(endpoint, bucket, profile string) (bool, error) {
 	if err != nil || u.Scheme != "https" || !strings.HasSuffix(u.Hostname(), ".r2.cloudflarestorage.com") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.Port() != "" {
 		return false, errors.New("SPARKWING_R2_TEST_ENDPOINT must be an HTTPS R2 account endpoint")
 	}
-	testName := func(s string) bool { return strings.Contains(s, "test") || strings.Contains(s, "scratch") }
+	testName := func(s string) bool {
+		return slices.ContainsFunc(strings.FieldsFunc(s, func(r rune) bool { return r == '-' || r == '_' }), func(part string) bool {
+			return part == "test" || part == "scratch"
+		})
+	}
 	if bucket == "" || !testName(bucket) || strings.ContainsAny(bucket, "/\\: ") || profile == "" || !testName(profile) {
-		return false, errors.New("set SPARKWING_R2_TEST_BUCKET and AWS_PROFILE to existing designated test/scratch resources")
+		return false, errors.New("set SPARKWING_R2_TEST_BUCKET and AWS_PROFILE to existing resources named with a test or scratch token")
 	}
 	return true, nil
 }
@@ -51,6 +56,10 @@ func TestR2LogTestConfiguration(t *testing.T) {
 		{"production bucket", endpoint, "sparkwing-production", "r2-test", false, true},
 		{"ambient credentials", endpoint, "sparkwing-test", "", false, true},
 		{"production profile", endpoint, "sparkwing-test", "production", false, true},
+		{"underscore token", endpoint, "sparkwing_scratch", "r2_test", true, false},
+		{"substring bucket", endpoint, "prod-latest", "r2-test", false, true},
+		{"embedded bucket", endpoint, "attestation-logs", "r2-test", false, true},
+		{"substring profile", endpoint, "sparkwing-test", "contest", false, true},
 		{"foreign endpoint", "https://objects.example", "sparkwing-test", "r2-test", false, true},
 		{"insecure endpoint", "http://account.r2.cloudflarestorage.com", "sparkwing-test", "r2-test", false, true},
 		{"URL credentials", "https://secret@account.r2.cloudflarestorage.com", "sparkwing-test", "r2-test", false, true},
@@ -156,7 +165,7 @@ func TestR2LogSigningRejectsChangedBytes(t *testing.T) {
 				if err != nil {
 					t.Fatalf("sign PUT (%T)", err)
 				}
-				body, changed := bytes.Clone(original), maps.Clone(headers)
+				target, body, changed := raw, bytes.Clone(original), maps.Clone(headers)
 				switch change {
 				case "larger":
 					body = append(body, 'x')
@@ -171,13 +180,24 @@ func TestR2LogSigningRejectsChangedBytes(t *testing.T) {
 				case "missing create-only":
 					delete(changed, "If-None-Match")
 				}
-				status, code := put(t, raw, changed, body)
+				if change == "larger" || change == "smaller" {
+					// safety: the checksum is signed too, so only a URL whose digest matches the sent bytes
+					// isolates the signed Content-Length as the one binding that can refuse.
+					target, changed, err = backend.SignLogPut(t.Context(), key, int64(len(original)), digest(string(body)), time.Now().Add(2*time.Minute))
+					if err != nil {
+						t.Fatalf("sign length-only PUT (%T)", err)
+					}
+				}
+				status, code := put(t, target, changed, body)
 				if change != "valid" {
 					if status < 400 || status >= 500 {
 						t.Fatalf("changed PUT status=%d code=%s, want storage refusal", status, code)
 					}
 					if change == "corrupt" && (status != http.StatusBadRequest || code != "BadDigest") {
 						t.Fatalf("body checksum refusal=%d %s, want 400 BadDigest", status, code)
+					}
+					if (change == "larger" || change == "smaller") && code == "BadDigest" {
+						t.Fatalf("length refusal=%d %s came from the checksum, not the signed Content-Length", status, code)
 					}
 					if _, err := client.HeadObject(t.Context(), &s3.HeadObjectInput{Bucket: aws.String(bucket), Key: aws.String(physical)}); !s3Error(err, "NotFound", "NoSuchKey") {
 						t.Fatalf("rejected PUT left an object or absence is unproven (%T)", err)

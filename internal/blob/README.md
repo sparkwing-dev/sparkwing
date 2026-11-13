@@ -424,8 +424,9 @@ upload/download path; a consumer must consume verified EOF before extraction.
 Cloudflare R2. It skips before loading credentials when both
 `SPARKWING_R2_TEST_ENDPOINT` and `SPARKWING_R2_TEST_BUCKET` are absent. Partial
 configuration fails. Explicit `AWS_PROFILE` is required. Bucket and profile
-names must contain `test` or `scratch`, and the endpoint must be an HTTPS R2
-account endpoint. These test-only inputs add no product configuration.
+names must each include a whole `test` or `scratch` token between `-` or `_`
+separators, so `sparkwing-test` and `r2_test` pass while `prod-latest` and
+`contest` fail. The endpoint must be an HTTPS R2 account endpoint. These test-only inputs add no product configuration.
 
 Use only an already-existing, confirmed test/scratch bucket and its existing
 credential profile. Do not create resources or point the proof at a production
@@ -435,13 +436,16 @@ repository's normal Xwing scratch and CPU admission wrapper:
 
 ```sh
 SPARKWING_R2_TEST_ENDPOINT=https://ACCOUNT.r2.cloudflarestorage.com \
-SPARKWING_R2_TEST_BUCKET=EXISTING-TEST-BUCKET AWS_PROFILE=r2-test \
+SPARKWING_R2_TEST_BUCKET=existing-test-bucket AWS_PROFILE=r2-test \
 go test ./internal/blob -run '^TestR2LogSigningRejectsChangedBytes$' -count=1 -v
 ```
 
 The test uses a fresh random prefix and both segment and manifest slots. It
-checks valid uploads, larger/smaller bodies with correct HTTP framing, corrupted
-same-length bytes under the original checksum, changed/missing checksum
+checks valid uploads and larger/smaller bodies with correct HTTP framing. The
+larger/smaller cases use a URL signed for the sent bytes' own SHA-256 but the
+original length, so only the signed Content-Length can refuse them, and R2's
+checksum error fails them. It also checks corrupted same-length bytes under the
+original checksum, changed/missing checksum
 headers, a missing create-only header and overwrite refusal. Each refused PUT
 must leave no object, and a valid retry using the original URL must succeed.
 A corrupted body must produce R2's checksum error, not a local Go transport
