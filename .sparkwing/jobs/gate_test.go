@@ -352,7 +352,7 @@ func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 
 func TestBuildAndTestKeepTheirCompilerDependencies(t *testing.T) {
 	w := inspectWork(t, &Gate{})
-	chain := []string{"vet", "build", "test"}
+	chain := []string{"vet", "build", "build-published-sdk", "test"}
 	for i := 1; i < len(chain); i++ {
 		if findStep(w, chain[i]) == nil {
 			t.Errorf("the gate must run step %q", chain[i])

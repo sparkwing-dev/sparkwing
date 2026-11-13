@@ -10,8 +10,9 @@ import (
 func TestMergeRecheckRejectsQATrustOnlyIntegrationBreak(t *testing.T) {
 	isolateTestHome(t)
 	r := newLandRemote(t)
+	configurePublishedSDKFixture(t, r.dev)
+	r.git(r.dev, "add", ".")
 	base := map[string]string{
-		"go.mod":                    "module fixture\n\ngo 1.26.0\n",
 		"internal/api.go":           "package internal\nfunc Value() int { return 1 }\n",
 		"bin/check-changelog.sh":    "exit 0\n",
 		"bin/check-api-spec.sh":     "exit 0\n",
@@ -39,7 +40,7 @@ func TestMergeRecheckRejectsQATrustOnlyIntegrationBreak(t *testing.T) {
 func TestMergeRecheckRetainsPushContractChecks(t *testing.T) {
 	for _, name := range []string{"changelog", "api-spec", "api-snapshot"} {
 		t.Run(name, func(t *testing.T) {
-			root := gateFixtureRepo(t)
+			root := publishedSDKFixture(t)
 			for _, check := range []string{"changelog", "api-spec", "api-snapshot"} {
 				body := "exit 0\n"
 				if check == name {
