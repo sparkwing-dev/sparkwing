@@ -2,80 +2,84 @@ package lease
 
 import (
 	"context"
-	"reflect"
-	"runtime"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-	"unsafe"
 )
 
-// safety: Model the state before the delivery worker first evaluates ctx.Done().
-func newUnstartedDiagnosticTrace(t *testing.T) *keeperTrace {
-	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
-	d := &Diagnostics{ctx: ctx, origin: processDiagnosticOrigin, queue: make(chan diagnosticRecord, 1)}
+type captureDoneContext struct {
+	context.Context
+	calls atomic.Int64
+}
+
+func (c *captureDoneContext) Done() <-chan struct{} {
+	c.calls.Add(1)
+	return c.Context.Done()
+}
+
+func newCaptureTestTrace(t *testing.T) *keeperTrace {
+	t.Helper()
+	base, cancel := context.WithCancel(t.Context())
+	ctx := &captureDoneContext{Context: base}
+	d := &Diagnostics{ctx: ctx, done: ctx.Done(), cancel: cancel, origin: processDiagnosticOrigin, queue: make(chan diagnosticRecord, 1)}
+	t.Cleanup(d.Close)
 	return d.start(t.Context(), Identity{})
+}
+
+func TestKeeperCaptureDoesNotCallContextAfterConstruction(t *testing.T) {
+	trace := newCaptureTestTrace(t)
+	trace.emit("execution_end", time.Time{}, time.Time{}, "ended", 0)
+	if calls := trace.diagnostics.ctx.(*captureDoneContext).calls.Load(); calls != 1 {
+		t.Fatalf("Done calls=%d, want only the construction call", calls)
+	}
 }
 
 func TestKeeperFirstCaptureDoesNotAllocateUnderLock(t *testing.T) {
 	traces := make([]*keeperTrace, 102)
 	for i := range traces {
-		traces[i] = newUnstartedDiagnosticTrace(t)
+		traces[i] = newCaptureTestTrace(t)
 	}
 	i := 0
 	allocations := testing.AllocsPerRun(100, func() { traces[i].emit("watch_arm", time.Time{}, time.Time{}, "", 0); i++ })
 	if allocations != 0 {
-		t.Fatalf("first capture allocates %.0f objects while owning trace.mu (lazy ctx.Done channel)", allocations)
+		t.Fatalf("first capture allocates %.0f objects", allocations)
 	}
-}
-
-func TestKeeperFirstCaptureDoesNotWaitForDeliveryContextMutex(t *testing.T) {
-	old := runtime.GOMAXPROCS(1)
-	defer runtime.GOMAXPROCS(old)
-	d := NewDiagnostics(t.Context(), func(context.Context, Event) error { return nil })
-	defer d.Close()
-	trace := d.start(t.Context(), Identity{})
-	// safety: Go 1.26 cancelCtx.Done initializes its channel under cancelCtx.mu.
-	// Model the delivery worker descheduled while owning that initialization lock.
-	value := reflect.ValueOf(d.ctx).Elem()
-	mu := (*sync.Mutex)(unsafe.Pointer(value.FieldByName("mu").UnsafeAddr()))
-	doneState := (*atomic.Value)(unsafe.Pointer(value.FieldByName("done").UnsafeAddr()))
-	mu.Lock()
-	if doneState.Load() == nil {
-		mu.Unlock()
-		t.Fatal("constructor returned before initializing the delivery Done channel")
-	}
-	t.Log("constructor initialized Done before capture")
-	done := make(chan struct{})
-	go func() { trace.emit("execution_end", time.Time{}, time.Time{}, "ended", 0); close(done) }()
-	timely := false
-	select {
-	case <-done:
-		timely = true
-	case <-time.After(100 * time.Millisecond):
-	}
-	mu.Unlock()
-	<-done
-	if !timely {
-		t.Fatal("capture waited for delivery context mutex despite TryLock on trace.mu")
+	for _, trace := range traces {
+		if calls := trace.diagnostics.ctx.(*captureDoneContext).calls.Load(); calls != 1 {
+			t.Fatalf("capture called Done: %d calls", calls)
+		}
 	}
 }
 
 func TestKeeperInitializedCaptureDoesNotAllocateUnderLock(t *testing.T) {
-	trace := newUnstartedDiagnosticTrace(t)
-	_ = trace.diagnostics.ctx.Done()
+	trace := newCaptureTestTrace(t)
 	allocations := testing.AllocsPerRun(100, func() { trace.emit("watch_arm", time.Time{}, time.Time{}, "", 0) })
 	if allocations != 0 {
-		t.Fatalf("initialized capture still allocates %.0f objects", allocations)
+		t.Fatalf("initialized capture allocates %.0f objects", allocations)
+	}
+	if calls := trace.diagnostics.ctx.(*captureDoneContext).calls.Load(); calls != 1 {
+		t.Fatalf("capture called Done: %d calls", calls)
 	}
 }
 
 func TestKeeperClosedRecorderCountsCaptureLoss(t *testing.T) {
 	d := NewDiagnostics(t.Context(), func(context.Context, Event) error { return nil })
+	defer d.Close()
+	if d.done == nil {
+		t.Fatal("constructor did not cache cancellation")
+	}
+	select {
+	case <-d.done:
+		t.Fatal("fresh recorder is closed")
+	default:
+	}
 	trace := d.start(t.Context(), Identity{})
 	d.Close()
+	select {
+	case <-d.done:
+	default:
+		t.Fatal("cached cancellation does not follow Close")
+	}
 	before := trace.lost.Load()
 	trace.emit("execution_end", time.Time{}, time.Time{}, "ended", 0)
 	if trace.lost.Load() != before+1 {

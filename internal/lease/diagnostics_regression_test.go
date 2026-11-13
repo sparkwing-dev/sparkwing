@@ -2,61 +2,46 @@ package lease
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 func TestKeeperDiagnosticContentionCannotDelayWatcher(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		name := "absent"
-		if enabled {
-			name = "enabled"
+	synctest.Test(t, func(t *testing.T) {
+		trace := newCaptureTestTrace(t)
+		ctx, cancel := context.WithCancelCause(t.Context())
+		defer cancel(context.Canceled)
+		updates := make(chan leaseUpdate)
+		expired, joined := make(chan struct{}), make(chan struct{})
+		go func() {
+			defer close(joined)
+			watch(ctx, func(err error) { cancel(err); close(expired) }, updates, time.Now().Add(time.Hour), trace)
+		}()
+		arm := <-trace.diagnostics.queue
+		if arm.event.Kind != "watch_arm" {
+			t.Fatalf("unexpected first capture: %+v", arm.event)
 		}
-		t.Run(name, func(t *testing.T) {
-			var trace *keeperTrace
-			var diagnostics *Diagnostics
-			armed := make(chan struct{}, 1)
-			if enabled {
-				diagnostics = NewDiagnostics(t.Context(), func(_ context.Context, e Event) error {
-					if e.Kind == "watch_arm" {
-						armed <- struct{}{}
-					}
-					return nil
-				})
-				defer diagnostics.Close()
-				trace = diagnostics.start(t.Context(), Identity{})
-			}
-			ctx, stop := context.WithCancel(t.Context())
-			defer stop()
-			updates := make(chan leaseUpdate)
-			expired := make(chan struct{})
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				watch(ctx, func(error) { close(expired); stop() }, updates, time.Now().Add(time.Hour), trace)
-			}()
-			if enabled {
-				<-armed
-				trace.mu.Lock()
-			}
-			// safety: Holding the capture mutex models a renewal goroutine descheduled in emit.
-			updates <- leaseUpdate{expires: time.Now().Add(10 * time.Millisecond), renewal: 1}
-			timely := false
-			select {
-			case <-expired:
-				timely = true
-			case <-time.After(100 * time.Millisecond):
-			}
-			if enabled {
-				trace.mu.Unlock()
-			}
-			<-expired
-			<-done
-			if !timely {
-				t.Fatal("watcher installed a 10ms expiry but could not cancel within 100ms while diagnostics mutex was held")
-			}
-		})
-	}
+		trace.mu.Lock()
+		defer trace.mu.Unlock()
+		updates <- leaseUpdate{expires: time.Now().Add(time.Second), renewal: 1}
+		synctest.Wait()
+		if trace.lost.Load() != 1 {
+			t.Fatal("watch reset did not report capture contention")
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case <-expired:
+		default:
+			t.Fatal("shortened expiry did not cancel while capture was held")
+		}
+		if !errors.Is(context.Cause(ctx), ErrSilent) {
+			t.Fatalf("expiry cause=%v", context.Cause(ctx))
+		}
+		<-joined
+	})
 }
 
 func TestKeeperDiagnosticsShareProcessMonotonicOrigin(t *testing.T) {
@@ -70,28 +55,33 @@ func TestKeeperDiagnosticsShareProcessMonotonicOrigin(t *testing.T) {
 }
 
 func TestKeeperDiagnosticContentionCountsLossWithoutBlockingEnd(t *testing.T) {
-	events := make(chan Event, 1)
-	d := NewDiagnostics(t.Context(), func(_ context.Context, e Event) error { events <- e; return nil })
-	defer d.Close()
-	trace := d.start(t.Context(), Identity{})
-	trace.mu.Lock()
-	done := make(chan struct{})
-	go func() { trace.emit("execution_end", time.Time{}, time.Time{}, "cancelled", 0); close(done) }()
-	timely := false
-	select {
-	case <-done:
-		timely = true
-	case <-time.After(time.Second):
-	}
-	trace.mu.Unlock()
-	<-done
-	if !timely {
-		t.Fatal("execution-end capture waited for diagnostic lock")
-	}
-	trace.emit("watch_reset", time.Time{}, time.Now(), "", 1)
-	e := <-events
-	if e.Dropped != 1 {
-		t.Fatalf("lost capture was not reported: %+v", e)
+	for _, kind := range []string{"watch_reset", "execution_end"} {
+		t.Run(kind, func(t *testing.T) {
+			trace := newCaptureTestTrace(t)
+			held, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			go func() { trace.mu.Lock(); close(held); <-release; trace.mu.Unlock(); close(joined) }()
+			<-held
+			defer func() {
+				select {
+				case <-joined:
+					return
+				default:
+					close(release)
+					<-joined
+				}
+			}()
+			trace.emit(kind, time.Time{}, time.Time{}, "ended", 0)
+			if trace.lost.Load() != 1 {
+				t.Fatal("held capture was not counted as loss")
+			}
+			close(release)
+			<-joined
+			trace.emit("watch_reset", time.Time{}, time.Now(), "", 1)
+			event := <-trace.diagnostics.queue
+			if event.event.Dropped != 1 {
+				t.Fatalf("lost capture was not reported: %+v", event.event)
+			}
+		})
 	}
 }
 
