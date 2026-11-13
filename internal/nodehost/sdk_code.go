@@ -222,7 +222,7 @@ func (h *sdkCode) eval(ctx context.Context, session *executorSession, input Node
 func executorRunContext(spec runspec.Spec) nodewire.RunContext {
 	request := spec.Request.Request
 	git := request.Git
-	context := nodewire.RunContext{RunID: spec.Request.RunID, Pipeline: request.Pipeline, StartedAt: spec.Request.AdmittedAt, NoMemo: spec.Resolved.Settings.Options.NoMemo.Value, DryRun: spec.Resolved.Settings.Options.DryRun.Value, StartAt: spec.Resolved.Settings.Options.StartAt.Value, StopAt: spec.Resolved.Settings.Options.StopAt.Value, Git: &nodewire.Git{SHA: git.SHA, Branch: git.Ref, DefaultBranch: spec.Resolved.DefaultBranch.Value, Repo: git.Repository.Display}, Trigger: &nodewire.Trigger{Source: string(request.Origin), User: request.Actor.Display}}
+	context := nodewire.RunContext{RunID: spec.Request.RunID, Pipeline: request.Pipeline, StartedAt: spec.Request.AdmittedAt, NoMemo: spec.Resolved.Settings.Options.NoMemo.Value, DryRun: spec.Resolved.Settings.Options.DryRun.Value, Git: &nodewire.Git{SHA: git.SHA, Branch: git.Ref, DefaultBranch: spec.Resolved.DefaultBranch.Value, Repo: git.Repository.Display}, Trigger: &nodewire.Trigger{Source: string(request.Origin), User: request.Actor.Display}}
 	if request.PullRequest.Set {
 		pr := request.PullRequest.Value
 		context.Trigger.PullRequest = &nodewire.PullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}

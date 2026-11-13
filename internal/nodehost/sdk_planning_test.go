@@ -153,7 +153,6 @@ func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
 	planner, input, fixture, processes := sdkPlanningFixture(t)
 	input.Run.StartedAt = time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	input.Run.DryRun, input.Run.NoMemo = true, true
-	input.Run.StartAt, input.Run.StopAt = "build", "verify"
 	input.Run.Git = &nodewire.Git{SHA: strings.Repeat("a", 40), Branch: "feature", DefaultBranch: "main", Repo: "acme/repo", RepoURL: "https://example.com/acme/repo.git"}
 	input.Run.Trigger = &nodewire.Trigger{Source: "webhook", User: "octocat", PullRequest: &nodewire.PullRequest{Number: 42, Action: "synchronize", BaseRef: "main", HeadRef: "feature"}}
 	sealed, err := json.Marshal(input.Run)

@@ -120,8 +120,9 @@ body starts.
 
 `RunContext` contains `RunID`, `Pipeline`, `Git`, `Trigger`, `StartedAt`, `DryRun`,
 `NoMemo`, `StartAt` and `StopAt`. These are the host's run snapshot. `StartAt`
-and `StopAt` hold the `--sw-start-at` and `--sw-stop-at` step bounds, so a `Plan`
-can refuse a selection it cannot honor. `sw.Inputs[T](ctx)` reads typed
+and `StopAt` hold the `--sw-start-at` and `--sw-stop-at` step bounds when the host
+forwards them, so a `Plan` can refuse a selection it cannot honor. A host that does
+not forward them leaves both empty. `sw.Inputs[T](ctx)` reads typed
 pipeline inputs from an execution callback. `sw.Runner(ctx)` returns the granted
 runner identity, including its name, type and labels.
 
