@@ -192,7 +192,7 @@ func TestLauncherActivationUsesJobStartTime(t *testing.T) {
 }
 
 func TestLauncherBoundsMissingImageEventProbes(t *testing.T) {
-	for _, failure := range []string{"missing", "events unavailable", "receipt unavailable"} {
+	for _, failure := range []string{"missing", "events unavailable", "receipt unavailable", "start time unavailable"} {
 		t.Run(failure, func(t *testing.T) {
 			l, kube, _, base := fixture()
 			control := &startupControl{controlFake: base}
@@ -211,7 +211,11 @@ func TestLauncherBoundsMissingImageEventProbes(t *testing.T) {
 				t.Fatalf("pods=%+v err=%v", pods, err)
 			}
 			pod := pods.Items[0].DeepCopy()
+			pod.CreationTimestamp = metav1.Now()
 			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "run-node", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()}}}}
+			if failure == "start time unavailable" {
+				pod.Status.ContainerStatuses[0].State.Running.StartedAt = metav1.Time{}
+			}
 			if err := kube.Tracker().Add(pod); err != nil {
 				t.Fatal(err)
 			}
@@ -233,7 +237,7 @@ func TestLauncherBoundsMissingImageEventProbes(t *testing.T) {
 			for _, o := range control.observed {
 				if o.Startup != nil {
 					found = true
-					if o.Startup.ContainerStartedAt == nil || o.Startup.ScheduledAt != nil || o.Startup.ImagePulledAt != nil {
+					if (o.Startup.ContainerStartedAt != nil) != (failure != "start time unavailable") || o.Startup.ScheduledAt != nil || o.Startup.ImagePulledAt != nil {
 						t.Fatalf("startup=%+v", o.Startup)
 					}
 				}

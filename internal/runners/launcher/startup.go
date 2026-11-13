@@ -41,15 +41,18 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 			timing.ScheduledAt = &at
 		}
 	}
+	started := false
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name != "run-node" {
 			continue
 		}
 		var at time.Time
 		if status.State.Running != nil {
+			started = true
 			at = status.State.Running.StartedAt.Time
 		}
 		if status.State.Terminated != nil {
+			started = true
 			at = status.State.Terminated.StartedAt.Time
 		}
 		if !at.IsZero() {
@@ -60,7 +63,7 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 	if timing.PodCreatedAt == nil && timing.ScheduledAt == nil && timing.ContainerStartedAt == nil {
 		return
 	}
-	if l.probeStartupImage(pod.UID, timing.ContainerStartedAt != nil) {
+	if l.probeStartupImage(pod.UID, started) {
 		events, err := l.Kube.CoreV1().Events(pod.Namespace).List(ctx, metav1.ListOptions{FieldSelector: "involvedObject.uid=" + string(pod.UID)})
 		if err != nil {
 			// safety: unavailable diagnostic events must not change execution or placement.
