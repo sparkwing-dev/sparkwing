@@ -248,3 +248,78 @@ func TestLauncherBoundsMissingImageEventProbes(t *testing.T) {
 		})
 	}
 }
+
+func TestLauncherBoundsImageEventProbesForPodsThatNeverStart(t *testing.T) {
+	for _, state := range []string{"pending", "unschedulable", "image backoff"} {
+		t.Run(state, func(t *testing.T) {
+			l, kube, _, base := fixture()
+			control := &startupControl{controlFake: base}
+			l.Control = control
+			if _, err := l.LaunchOne(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			pods, err := kube.CoreV1().Pods(l.Config.Namespace).List(t.Context(), metav1.ListOptions{})
+			if err != nil || len(pods.Items) != 1 {
+				t.Fatalf("pods=%+v err=%v", pods, err)
+			}
+			pod := pods.Items[0].DeepCopy()
+			pod.CreationTimestamp = metav1.Now()
+			pod.Status.Phase = corev1.PodPending
+			switch state {
+			case "unschedulable":
+				pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable}}
+			case "image backoff":
+				pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: metav1.Now()}}
+				pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "run-node", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}}}}
+			}
+			if err := kube.Tracker().Add(pod); err != nil {
+				t.Fatal(err)
+			}
+			polls := func() int {
+				n := 0
+				for _, a := range kube.Actions() {
+					if a.GetVerb() == "list" && a.GetResource().Resource == "events" {
+						n++
+					}
+				}
+				return n
+			}
+			for range 12 {
+				if err := l.Sync(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := polls(); got != 3 {
+				t.Fatalf("%s Pod image polls=%d, want 3 across 12 reconciliations", state, got)
+			}
+
+			pulled := metav1.Now()
+			event := &corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: "pulled", Namespace: pod.Namespace}, InvolvedObject: corev1.ObjectReference{Kind: "Pod", UID: pod.UID, FieldPath: "spec.containers{run-node}"}, Reason: "Pulled", FirstTimestamp: pulled}
+			if _, err := kube.CoreV1().Events(pod.Namespace).Create(t.Context(), event, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			pod.Status.Phase = corev1.PodRunning
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "run-node", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()}}}}
+			if err := kube.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), pod, pod.Namespace); err != nil {
+				t.Fatal(err)
+			}
+			for range 12 {
+				if err := l.Sync(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if after := polls() - 3; after < 1 || after > 3 {
+				t.Fatalf("image polls after start=%d, want between 1 and the post-start budget of 3", after)
+			}
+			reported := false
+			for _, o := range control.observed {
+				if o.Startup != nil && o.Startup.ImagePulledAt != nil && o.Startup.ImagePulledAt.Equal(pulled.Time.UTC()) {
+					reported = true
+				}
+			}
+			if !reported {
+				t.Fatal("image pull found after a spent pre-start budget was not reported")
+			}
+		})
+	}
+}

@@ -99,7 +99,7 @@ type Launcher struct {
 	identity           string
 	checked            map[types.UID]map[types.UID]bool
 	startupObserved    map[types.UID]capability.PodStartup
-	startupImageProbes map[types.UID]int
+	startupImageProbes map[types.UID]imageProbeBudget
 }
 
 func (l *Launcher) logger() *slog.Logger {
