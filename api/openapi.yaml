@@ -500,6 +500,10 @@ components:
           type: boolean
         reservation:
           type: boolean
+        startup:
+          anyOf:
+            - $ref: '#/components/schemas/internal.capability.PodStartup'
+            - type: "null"
         waited_for_fresh_node:
           type: boolean
       required:
@@ -574,6 +578,50 @@ components:
         - metered
       type: object
       x-sparkwing-go-type: capability.Metadata
+    internal.capability.PodStartup:
+      additionalProperties: true
+      properties:
+        container_started_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        image_pull_started_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        image_pulled_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        job_activated_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        job_created_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        pod_created_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        pod_uid:
+          type: string
+        scheduled_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+      required:
+        - pod_uid
+      type: object
+      x-sparkwing-go-type: capability.PodStartup
     internal.capability.PushScope:
       additionalProperties: true
       properties:

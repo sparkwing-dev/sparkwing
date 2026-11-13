@@ -19,7 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func renderObservedRun(ctx context.Context, reader controllerwire.RunReader, out io.Writer, detail controllerwire.RunDetail, opts runStatusOptions) error {
+func renderObservedRun(ctx context.Context, reader controllerwire.RunReader, out io.Writer, detail controllerwire.RunDetail, opts runStatusOptions, startup []startupObservation) error {
 	if opts.view == "receipt" {
 		receipt, err := reader.ReadReceipt(ctx, detail.ID)
 		if err != nil {
@@ -61,9 +61,12 @@ func renderObservedRun(ctx context.Context, reader controllerwire.RunReader, out
 		return writeRunErrors(out, detail, opts.format)
 	}
 	if opts.format == "json" {
-		return json.NewEncoder(out).Encode(hintedRunDetail{RunDetail: detail, Hint: planFailureHint(detail)})
+		return json.NewEncoder(out).Encode(hintedRunDetail{RunDetail: detail, Hint: planFailureHint(detail), Startup: startup})
 	}
-	return writeRunDetail(out, detail, opts)
+	if err := writeRunDetail(out, detail, opts); err != nil {
+		return err
+	}
+	return writeStartup(out, startup)
 }
 
 func invalidObservation(message string) error {
@@ -151,7 +154,8 @@ func writeRunReceipt(out io.Writer, receipt controllerwire.Receipt, format strin
 
 type hintedRunDetail struct {
 	controllerwire.RunDetail
-	Hint string `json:"hint,omitempty"`
+	Hint    string               `json:"hint,omitempty"`
+	Startup []startupObservation `json:"startup,omitempty"`
 }
 
 type runFailure struct {

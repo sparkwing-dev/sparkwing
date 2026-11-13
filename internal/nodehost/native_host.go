@@ -61,22 +61,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	config.Source.Base.Masker = config.Masks.masker
 	config.Source.BuildEnvironment = config.Masks.environment(config.Source.BuildEnvironment)
 	claimedSource := config.Source
-	observe := config.Source.Timing
-	config.Source.Timing = func(ctx context.Context, timing source.Timing) {
-		if observe != nil {
-			observe(ctx, timing)
-		}
-		attrs, err := json.Marshal(timing)
-		if err == nil {
-			err = config.PlanningLog(ctx, config.Masks.masker.Log(nodewire.FrameLog{
-				TS:    timing.StartedAt.Add(time.Duration(timing.DurationMS) * time.Millisecond).Format(time.RFC3339Nano),
-				Level: "info", Event: "preparation", Message: "source preparation", Attrs: attrs,
-			}))
-		}
-		if err != nil {
-			slog.WarnContext(ctx, "preparation timing could not be recorded", "stage", timing.Stage)
-		}
-	}
+	config.Source.Timing = preparationObserver(config.Source.Timing, config.PlanningLog)
 	processes := config.Processes
 	processes.Masks = config.Masks
 	processes.Session.Environments.Masks = config.Masks
@@ -187,4 +172,22 @@ type ExecutionOperations struct {
 type EvaluationOperations struct {
 	Bind         func(context.Context, EvaluationInput) (ProcessGrant, error)
 	ChildContext func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
+}
+
+func preparationObserver(observe func(context.Context, source.Timing), log func(context.Context, nodewire.FrameLog) error) func(context.Context, source.Timing) {
+	return func(ctx context.Context, timing source.Timing) {
+		if observe != nil {
+			observe(ctx, timing)
+		}
+		if log == nil {
+			return
+		}
+		attrs, err := json.Marshal(timing)
+		if err == nil {
+			err = log(ctx, nodewire.FrameLog{TS: timing.StartedAt.Add(time.Duration(timing.DurationMS) * time.Millisecond).Format(time.RFC3339Nano), Level: "info", Event: "preparation", Message: "source preparation", Attrs: attrs})
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "preparation timing could not be recorded", "stage", timing.Stage)
+		}
+	}
 }

@@ -75,6 +75,10 @@ func (l *Launcher) syncActive(ctx context.Context) (result error) {
 			observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
 		}
 		if remove {
+			// safety: terminal Pods retain startup state only until teardown; collect it without changing the teardown decision.
+			if err := l.checkJob(ctx, &job, binding, reservation); err != nil {
+				l.logger().DebugContext(ctx, "terminal Cloud startup timing unavailable")
+			}
 			errs = append(errs, teardownFault(job.Name, l.teardown(ctx, &job, reservation)))
 		}
 	}

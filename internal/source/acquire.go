@@ -35,7 +35,12 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	if options.Prepared != nil {
 		started := time.Now()
 		restored, err := options.Prepared.restore(ctx, spec, options)
-		options.RecordTiming(ctx, "restore", started, err == nil, restored != nil)
+		cache := &engine.SDKCache{Outcome: "miss"}
+		if restored != nil {
+			cache.Outcome = "hit"
+			cache.BytesFetched = &restored.cacheBytesFetched
+		}
+		options.recordTiming(ctx, "restore", started, err == nil, restored != nil, cache)
 		if restored != nil || err != nil {
 			return restored, err
 		}
@@ -93,7 +98,7 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 		Directory: entry.pipelineCheckout, PipelineDir: relative, SDK: options.SDK, Environment: environment, Masker: options.Base.Masker,
 		NoBincache: spec.NoBincache, HashAllFiles: spec.HashAllFiles,
 	})
-	options.RecordTiming(ctx, "sdk_install", started, err == nil, false)
+	options.recordTiming(ctx, "sdk_install", started, err == nil, false, command.Cache)
 	if err != nil {
 		return entry, fmt.Errorf("install source entry: %w", err)
 	}
@@ -123,7 +128,14 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 
 // RecordTiming emits a stage boundary through process logs and the host's run-log adapter.
 func (o Options) RecordTiming(ctx context.Context, stage string, started time.Time, success, reused bool) {
-	receipt := Timing{Stage: stage, StartedAt: started.UTC(), DurationMS: max(0, time.Since(started).Milliseconds()), Success: success, Reused: reused}
+	o.recordTiming(ctx, stage, started, success, reused, nil)
+}
+
+func (o Options) recordTiming(ctx context.Context, stage string, started time.Time, success, reused bool, cache *engine.SDKCache) {
+	if cache != nil && !cache.Valid() {
+		cache = nil
+	}
+	receipt := Timing{Cache: cache, Stage: stage, StartedAt: started.UTC(), DurationMS: max(0, time.Since(started).Milliseconds()), Success: success, Reused: reused}
 	slog.InfoContext(ctx, "source preparation", "stage", stage, "duration_ms", receipt.DurationMS, "success", success, "reused", reused)
 	if o.Timing != nil {
 		o.Timing(ctx, receipt)

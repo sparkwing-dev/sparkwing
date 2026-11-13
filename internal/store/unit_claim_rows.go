@@ -123,5 +123,11 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 	if count != 1 {
 		return holderRefusal()
 	}
-	return nil
+	_, err = appendEventTx(ctx, tx, claim.Team, claim.RunID, claim.NodeID, "owner_claimed", struct {
+		Kind             capability.UnitKind `json:"kind"`
+		Generation       int64               `json:"generation"`
+		SourceGeneration int64               `json:"source_generation,omitempty"`
+		ClaimedAt        time.Time           `json:"claimed_at"`
+	}{claim.Kind, int64(claim.Award.Generation), claim.SourceGeneration, tx.now(ctx)}, tx.now(ctx), true)
+	return err
 }

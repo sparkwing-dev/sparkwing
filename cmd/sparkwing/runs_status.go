@@ -92,6 +92,7 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 		wait = waitStatusPoll
 	}
 	var previous *controllerwire.RunDetail
+	var previousStartup []startupObservation
 	for {
 		detail, err := reader.ReadRun(ctx, inv.Value("run"))
 		if err != nil {
@@ -121,11 +122,19 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 				})
 			}
 		}
-		if previous == nil || opts.view == "tree" || !reflect.DeepEqual(detail, *previous) {
-			if err := renderObservedRun(ctx, reader, out, detail, opts); err != nil {
+		var startup []startupObservation
+		if logs, ok := reader.(controllerwire.LogReader); ok && (opts.view == "summary" || opts.view == "timeline") {
+			startup, err = readStartup(ctx, logs, detail, nil)
+			if err != nil {
+				return err
+			}
+		}
+		if previous == nil || opts.view == "tree" || !reflect.DeepEqual(detail, *previous) || !reflect.DeepEqual(startup, previousStartup) {
+			if err := renderObservedRun(ctx, reader, out, detail, opts, startup); err != nil {
 				return err
 			}
 			previous = &detail
+			previousStartup = startup
 		}
 		if isTerminalRunStatus(detail.Status) {
 			if opts.exitZero {

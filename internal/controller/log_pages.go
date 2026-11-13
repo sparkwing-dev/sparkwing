@@ -41,6 +41,7 @@ type logPageCursor struct {
 }
 
 var errLogPageFull = errors.New("log page is full")
+var errLogSelectionDone = errors.New("bounded log selection is complete")
 
 type logBudget struct {
 	ctx   context.Context
@@ -330,6 +331,9 @@ func appendSubjectLines(reader segmentLogs, subject blob.LogSubject, q controlle
 		fmt.Sscanf(q.Lines, "%d:%d", &start, &end)
 		first, last = max(first, start), min(last, end)
 	}
+	if cursor.Lines[key] >= last {
+		return nil
+	}
 	scan := &lineScanner{budget: budget, visit: func(raw []byte, length int64) error {
 		number, line := cursor.Lines[key]+1, string(raw)
 		record := controllerwire.LogRecord{RunID: subject.RunID, Subject: &subject, LineNo: number, Line: line}
@@ -353,11 +357,17 @@ func appendSubjectLines(reader segmentLogs, subject blob.LogSubject, q controlle
 				cursor.Matches[key]++
 			}
 		}
+		if number >= last {
+			return errLogSelectionDone
+		}
 		return nil
 	}}
 	result, err := reader.read(budget.ctx, subject, cursor.Offsets[key], scan)
 	if result.IncompleteReason != "" {
 		page.Incomplete = append(page.Incomplete, controllerwire.LogIncomplete{Subject: subject, Reason: result.IncompleteReason})
+	}
+	if errors.Is(err, errLogSelectionDone) {
+		return nil
 	}
 	if errors.Is(err, errLogPageFull) {
 		return nil
