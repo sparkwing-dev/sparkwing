@@ -131,9 +131,21 @@ review uses the supplied goal rather than inferring one from the branch name.
 Ordinary interactive lands keep their objective fallback. Queued lands refuse
 a changed submission or dirty checkout,
 merge fetched `origin/main` before capturing HEAD, then run source policy and
-the fast pre-push checks alongside review against that merged checkout. Once
-policy and review pass, the inline `affected-tests` job runs the same short
-and critical Go tests as the hosted Gate. Push waits for that job too.
+the fast pre-push checks against that merged checkout. After both pass, the
+inline `affected-tests` job runs review and the hosted Gate's affected short
+and critical Go tests as independent steps under one fail-fast owner. A review
+failure cancels in-flight tests through the existing step cancellation path,
+which joins child exit and drains output. A test failure cancels review.
+Push waits for policy, fast checks and both steps to pass on the same tree.
+The fast job reserves its compiler allowance separately (nine cores on a
+16-CPU host), releasing it before the combined job reserves seven test cores
+plus 0.25 for review. These reservations are admission accounting, not CPU
+limits. Fast checks have a 45-minute execution deadline and a 30-minute
+no-progress deadline. The combined job has 45-minute execution and no-progress
+deadlines, and each reviewer model call inside it stops after 30 minutes, so a
+silent reviewer cannot hold the land slot past review's own bound. Review
+starts after policy and fast checks; small-change measurements must include
+that start delay.
 They push only when the branch, HEAD and checkout still match. If main moves again,
 the push fails rather than merging an unchecked tree; enqueue again after
 inspecting the failure. A conflict aborts the merge and records its remedy in
@@ -174,7 +186,7 @@ checks. Each non-deletion main update must name the checked-out HEAD's OID;
 remedy before test selection. Every ref update is inspected, including main updates
 after other refs. Deletions add no affected tests. An explicit
 `sparkwing run pre-push` also runs the test phase. Queued Land
-runs that same test job after policy and its combined fast-check/review job.
+runs those test bodies alongside review after policy and fast checks pass.
 Ordinary Land already runs the full Gate and adds no duplicate test job.
 The hook and queued Land read the complete committed push range, including deletions and
 both paths of renames. An unrelated staged file cannot narrow the tests.
@@ -2479,11 +2491,14 @@ file. Other syntax and workflow checks remain active.
   every other run on the OS. It is not a way around a full queue. It does not
   move the user config directory, which answers to `XDG_CONFIG_HOME` and the
   per-file overrides, because what lives there is machine-wide and outlives any
-  one home. Every config write from a command running under a home of its own
-  is refused rather than sent to the machine's config, naming both paths and
-  the value that keeps the write inside the home: `SPARKWING_CONFIG` for
-  `config.yaml`, `SPARKWING_SECRETS_KEY_FILE` for the local secrets key. The
-  local secrets themselves live in the home's own `state.db`, and the home
+  one home. Config writes outside a redirected home are refused unless a
+  per-file override selects their destination. The refusal names both paths
+  and the override, such as `SPARKWING_CONFIG` for `config.yaml`. Local keys
+  follow the state home and are created there on first need. Without an
+  explicit selector, the default home keeps its existing config-directory key
+  even if a home-local key also exists. `SPARKWING_SECRETS_KEY_FILE` selects a
+  different key file. The local secrets themselves live in the home's own
+  `state.db`, and the home
   does not import the machine's `secrets.env` or `config.env`. No variable
   moves `version-hold`.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Uploaded

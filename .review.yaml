@@ -67,7 +67,7 @@ docs_only:
   reviewer: docs
 
 reviewers:
-  default: { model: codex-sol }
+  default: { model: claude-opus }
   docs: { model: claude-haiku }
   security: { model: claude-opus }
 

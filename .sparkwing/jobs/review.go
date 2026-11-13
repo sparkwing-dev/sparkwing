@@ -375,6 +375,11 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	return nil
 }
 
+// safety: a model call emits nothing until it answers, so this bound keeps a
+// hung reviewer from holding the serial land slot when review shares a job
+// whose no-progress deadline is longer than review's own.
+const reviewModelCallTimeout = 30 * time.Minute
+
 func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, profile, model string, prompt reviewPrompt) (bool, error) {
 	rv, err := d.reviewer(model)
 	if err != nil {
@@ -385,7 +390,12 @@ func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRe
 	resume := p.Rereview.SameReviewer && prev.Session != "" && prev.Model == model
 	call := func(session, text, mode string) (reviewAnswer, error) {
 		started := d.now()
-		answer, err := rv.review(ctx, d.root, session, text)
+		callCtx, cancel := context.WithTimeout(ctx, reviewModelCallTimeout)
+		answer, err := rv.review(callCtx, d.root, session, text)
+		if err != nil && ctx.Err() == nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("model call exceeded %s: %w", reviewModelCallTimeout, err)
+		}
+		cancel()
 		d.logf("review timing: phase=model profile=%s model=%s mode=%s elapsed=%s prompt_bytes=%d failed=%t", profile, model, mode, d.now().Sub(started), len(text), err != nil)
 		return answer, err
 	}

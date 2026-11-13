@@ -2,7 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -172,6 +171,9 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	}
 	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
 	logs := &localLogs{diagnosticReady: make(chan struct{}), principal: cfg.Principal, upload: cfg.Logs, masker: masker, run: run.Run.ID}
+	if cfg.Principal.Capability.Unit == capability.UnitNode {
+		logs.diagnosticNode = cfg.Principal.Capability.Binding.NodeID
+	}
 	if cfg.Principal.Capability.Unit != capability.UnitNode {
 		logs.bind(cfg.Principal, 0)
 	}
@@ -181,21 +183,14 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			return delivery.Err()
 		case <-logs.diagnosticReady:
 		}
-		raw, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		node := ""
-		if cfg.Principal.Capability.Unit == capability.UnitNode {
-			node = cfg.Principal.Capability.Binding.NodeID
-		}
-		return logs.write(delivery, run.Run.ID, node, nodewire.FrameLog{TS: event.Wall.Format(time.RFC3339Nano), Level: "debug", Event: "lease_keeper", Attrs: raw})
+		return logs.writeKeeper(delivery, event)
 	})
+	logs.diagnostics = diagnostics
 	closeResources = func() error {
-		diagnostics.Close()
 		logs.finish(ctx, "")
 		// State transitions already committed. Keep bearer transports alive for the bounded tail.
 		logs.flushes.Wait()
+		diagnostics.Close()
 		return closeHTTP()
 	}
 	processes := &NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://" + listener.Addr().String()}
