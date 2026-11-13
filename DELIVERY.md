@@ -2450,11 +2450,14 @@ file. Other syntax and workflow checks remain active.
   every other run on the OS. It is not a way around a full queue. It does not
   move the user config directory, which answers to `XDG_CONFIG_HOME` and the
   per-file overrides, because what lives there is machine-wide and outlives any
-  one home. Every config write from a command running under a home of its own
-  is refused rather than sent to the machine's config, naming both paths and
-  the value that keeps the write inside the home: `SPARKWING_CONFIG` for
-  `config.yaml`, `SPARKWING_SECRETS_KEY_FILE` for the local secrets key. The
-  local secrets themselves live in the home's own `state.db`, and the home
+  one home. Config writes outside a redirected home are refused unless a
+  per-file override selects their destination. The refusal names both paths
+  and the override, such as `SPARKWING_CONFIG` for `config.yaml`. Local keys
+  follow the state home and are created there on first need. Without an
+  explicit selector, the default home keeps its existing config-directory key
+  even if a home-local key also exists. `SPARKWING_SECRETS_KEY_FILE` selects a
+  different key file. The local secrets themselves live in the home's own
+  `state.db`, and the home
   does not import the machine's `secrets.env` or `config.env`. No variable
   moves `version-hold`.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Uploaded

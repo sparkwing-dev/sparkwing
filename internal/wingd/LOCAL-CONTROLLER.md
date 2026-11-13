@@ -25,8 +25,9 @@ not the service manager's process ancestry.
 The private native service definition retains the installing caller's home,
 configuration paths and secrets-key file selector. Generated and refreshed
 units always pin the selector. New homes use their own `secrets.key`, created
-owner-only at first seal. The default home retains an existing config key;
-redirected homes do not borrow it. Installation refuses keys
+owner-only at first seal. Without a selector, the default home's existing
+config key wins even when a home-local key exists. Redirected homes do not
+borrow it. Installation refuses keys
 supplied by value and asks for `SPARKWING_SECRETS_KEY_FILE`. Relative
 configuration and key-file paths become absolute before installation. Startup,
 login activation and forced restart therefore open the same configured key.

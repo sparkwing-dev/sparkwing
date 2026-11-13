@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const (
@@ -62,10 +63,6 @@ func KeyPath(home string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(home, keyFileName)
-	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
-		return path, nil
-	}
 	userHome, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -79,7 +76,7 @@ func KeyPath(home string) (string, error) {
 			return legacy, nil
 		}
 	}
-	return path, nil
+	return filepath.Join(home, keyFileName), nil
 }
 
 // errNoKeyToCreate reports a seal in a process that may not create the
@@ -390,16 +387,19 @@ func (k *Keyring) keyFailure(err error) error {
 
 func (k *Keyring) openFailure(err error) error {
 	source := k.path
+	repair := "restore the key that sealed this home's data or set " + KeyFileEnv + " to its file"
 	if k.fromEnv {
 		source = keyEnv
-	}
-	repair := "restore the key that sealed this home's data or set " + KeyFileEnv + " to its file"
-	if k.unselectedConfigKey != "" {
+		repair = "set " + keyEnv + " to the key that sealed this home's data, or unset " + keyEnv + " to use the key file " + k.path
+	} else if k.restore != "" {
+		repair = k.restore
+	} else if k.unselectedConfigKey != "" {
 		selected := k.unselectedConfigKey
 		if strings.ContainsAny(selected, " \t\r\n'\"\\$`;&|<>()*?[]{}!#~") {
 			selected = "'" + strings.ReplaceAll(selected, "'", `'\''`) + "'"
 		}
-		repair += "; this home no longer falls back to the shared config key " + k.unselectedConfigKey + "; if that key sealed this home's data, restore access with " + KeyFileEnv + "=" + selected
+		repair += "; the shared config key was not selected: " + k.unselectedConfigKey + "; if that key sealed this home's data, restore access with " + KeyFileEnv + "=" + selected
 	}
-	return fmt.Errorf("local secrets key %s: %w; %s", source, err, repair)
+	diagnostic := &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("local secrets key %s: %v", source, err), Hint: repair}
+	return fmt.Errorf("%w; %s%.0w", diagnostic, repair, err)
 }

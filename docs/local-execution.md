@@ -235,8 +235,8 @@ service definitions are not secret stores. Reinstall after changing those paths.
 A new home creates `$SPARKWING_HOME/secrets.key` on its first seal, including
 controller startup, with mode `0600`. Separate homes create separate keys.
 An explicit `SPARKWING_SECRETS_KEY_FILE` still selects that file. An existing
-`~/.sparkwing` home keeps its config-directory key when it has no home-local
-key. A redirected home never falls back to that config key. If an older
+`~/.sparkwing` home's existing config-directory key wins over a home-local
+key when no selector is set. A redirected home never falls back to that config key. If an older
 redirected home used it, set `SPARKWING_SECRETS_KEY_FILE` to its existing file
 before restarting. Key failures name the selected file and this override.
 Preserve the key with the home's backups. A home holding sealed data without

@@ -8,7 +8,8 @@ config-write guard refused to create that key outside the redirected home.
 need, including controller startup. Generated and refreshed systemd and launchd
 units pin their selected key file. Explicit `SPARKWING_SECRETS_KEY_FILE`
 selections stay in use. The default `~/.sparkwing` home retains an existing
-config-directory key when it has no home-local key.
+config-directory key even when a home-local key also exists. It never creates
+another key while that config key exists.
 
 An older redirected home that used the shared config key now refuses to open
 its sealed data until that file is selected explicitly. The refusal names both
@@ -27,3 +28,9 @@ controller. Reinstall an installed controller or schedule service after changing
 its selectors. Stop an on-demand controller before starting it with a changed
 selector. A missing or wrong key is never replaced over sealed data. Keep each
 home's key with its backups.
+
+A wrong `SPARKWING_SECRETS_KEY` value overrides every file selector. Replace
+that value with the original key, or unset it before using a file. Its refusal
+names the inline source and explains that precedence. Standalone controller
+key failures retain their credential-file repair instead of suggesting local
+CLI environment selectors. Secret-list API responses preserve these repairs.

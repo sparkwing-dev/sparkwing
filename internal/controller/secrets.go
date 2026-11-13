@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -153,7 +152,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a cap
 			}
 			value, err = openSecret(s.secretsCipher, bindingForRow(tn.Team(), &sec), sec.Value)
 			if err != nil {
-				return errors.New("stored secret did not open")
+				return err
 			}
 		}
 		out = append(out, secretJSON{

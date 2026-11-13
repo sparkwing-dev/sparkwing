@@ -430,3 +430,111 @@ func TestKeyringDefaultHomeKeepsLegacyConfigKey(t *testing.T) {
 		t.Fatalf("migrated existing key: %v", err)
 	}
 }
+
+func TestKeyringDefaultHomeRetainsConfigKeyWhenLocalFileExists(t *testing.T) {
+	user := t.TempDir()
+	t.Setenv("HOME", user)
+	t.Setenv("USERPROFILE", user)
+	t.Setenv("APPDATA", filepath.Join(user, "AppData", "Roaming"))
+	t.Setenv("SPARKWING_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv(KeyFileEnv, "")
+	t.Setenv(keyEnv, "")
+	t.Setenv(previousKeyEnv, "")
+	legacy, err := fssecure.ConfigFile("secrets.key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configKey := bytes.Repeat([]byte{1}, secrets.KeySize)
+	if err := os.WriteFile(legacy, configKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	local := filepath.Join(user, ".sparkwing", "secrets.key")
+	if err := os.MkdirAll(filepath.Dir(local), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	localKey := bytes.Repeat([]byte{2}, secrets.KeySize)
+	if err := os.WriteFile(local, localKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ring := loadRing(t)
+	if ring.path != legacy {
+		t.Fatalf("default key changed without any selectors: selected %s, existing config key is %s", ring.path, legacy)
+	}
+	old, err := secrets.NewCipher(configKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := old.Seal("existing-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ring.For(nil).Open(sealed); err != nil || got != "existing-value" {
+		t.Fatalf("default home lost its existing key: %q, %v", got, err)
+	}
+	sealed, err = ring.For(nil).Seal("new-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := old.Open(sealed); err != nil || got != "new-value" {
+		t.Fatalf("default home sealed under a second key: %q, %v", got, err)
+	}
+	t.Setenv(KeyFileEnv, local)
+	if _, err := loadRing(t).For(nil).Open(sealed); err == nil || strings.Contains(err.Error(), "no longer falls back") {
+		t.Fatalf("explicit selector gave the default home a false migration repair: %v", err)
+	}
+	for path, want := range map[string][]byte{legacy: configKey, local: localKey} {
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("changed existing key %s: %v", path, err)
+		}
+	}
+}
+
+func TestKeyringFailureRepairFollowsKeySource(t *testing.T) {
+	for _, source := range []string{"inline", "store"} {
+		t.Run(source, func(t *testing.T) {
+			path := keyFileIn(t, t.TempDir())
+			originalKey := bytes.Repeat([]byte{1}, secrets.KeySize)
+			if err := os.WriteFile(path, originalKey, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sealed, err := loadRing(t).For(nil).Seal("private-value")
+			if err != nil {
+				t.Fatal(err)
+			}
+			const credentialRepair = "restore the original secrets-key credential and restart"
+			var wrong *Keyring
+			if source == "inline" {
+				t.Setenv(keyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, secrets.KeySize)))
+				wrong = loadRing(t)
+			} else {
+				if err := os.WriteFile(path, bytes.Repeat([]byte{2}, secrets.KeySize), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				wrong, err = NewStoreKeyring(path, nil, credentialRepair)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err = wrong.For(nil).Open(sealed)
+			if err == nil || strings.Contains(err.Error(), KeyFileEnv) || strings.Contains(err.Error(), "private-value") {
+				t.Fatalf("key failure suggested an ineffective selector or leaked the value: %v", err)
+			}
+			if source == "inline" {
+				if !strings.Contains(err.Error(), keyEnv) || !strings.Contains(err.Error(), "unset "+keyEnv) {
+					t.Fatalf("inline failure lost its repair: %v", err)
+				}
+				t.Setenv(keyEnv, "")
+				if got, err := loadRing(t).For(nil).Open(sealed); err != nil || got != "private-value" {
+					t.Fatalf("inline repair failed: %q, %v", got, err)
+				}
+			} else if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), credentialRepair) {
+				t.Fatalf("store key failure lost its credential repair: %v", err)
+			}
+		})
+	}
+}
