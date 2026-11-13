@@ -31,7 +31,7 @@ func (PrePush) Help() string {
 		"a CHANGELOG.md entry for every covered surface the push changes (bin/check-changelog.sh), " +
 		"api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), the public API " +
 		"surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh), and `go build`, `go vet` and the " +
-		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. It repeats " +
+		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. After the workspace build, it builds root release commands with CGO disabled against the published SDK pin, without workspace, SDK replacement, vendor or alternate-modfile overrides. Publish SDK API changes and update the root pin before using them. It repeats " +
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
 		"judged by `gate`. Every fast check reads the committed change from the merge base with origin/main to HEAD, and never " +
@@ -195,7 +195,8 @@ func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	budget.step(w, "changelog", checkChangelogRequired)
 	budget.step(w, "api-spec", checkAPISpec)
 	budget.step(w, "api-snapshot", checkAPISnapshot)
-	budget.step(w, "build-touched", runBuildTouched)
+	build := budget.step(w, "build-touched", runBuildTouched)
+	budget.step(w, "build-published-sdk", runPublishedSDKBuildTouched).Needs(build)
 	budget.step(w, "vet-touched", runVetTouched)
 	budget.step(w, "lint-touched", runFastLintTouched)
 	budget.verdict(w)

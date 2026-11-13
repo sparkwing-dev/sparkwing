@@ -208,6 +208,9 @@ func TestGateAndMainPushContinueAfterAffectedPackageFailure(t *testing.T) {
 	for _, entry := range []string{"gate", "main-hook"} {
 		t.Run(entry, func(t *testing.T) {
 			root := gateFixtureRepo(t)
+			if entry == "gate" {
+				configurePublishedSDKFixture(t, root)
+			}
 			markers := t.TempDir()
 			writeGoFile(t, filepath.Join(root, "a_fail", "fixture_test.go"), "package fixture\nimport \"testing\"\nfunc TestFailure(t *testing.T) { t.Fatal(\"collect-all fixture failed\") }\n")
 			writeGoFile(t, filepath.Join(root, "z_later", "fixture_test.go"), fmt.Sprintf(`package fixture
@@ -219,7 +222,11 @@ func TestLaterCritical(t *testing.T) { if testing.Short() { t.Skip("full critica
 			gitCommitAll(t, root, "collect-all fixture")
 			runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 			base := gitOutput(t, root, "rev-parse", "HEAD")
-			writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.26.0\n")
+			mod := "module fixture\n\ngo 1.26.0\n// Select all fixture packages.\n"
+			if entry == "gate" {
+				mod += "require " + sdkModulePath + " v0.1.0\n"
+			}
+			writeGoFile(t, filepath.Join(root, "go.mod"), mod)
 			gitCommitAll(t, root, "select both packages")
 			job := "gate"
 			if entry == "main-hook" {
@@ -237,7 +244,7 @@ func TestLaterCritical(t *testing.T) { if testing.Short() { t.Skip("full critica
 				bin := t.TempDir()
 				writeDeliveryTool(t, filepath.Join(bin, "pnpm"), "#!/bin/sh\nprintf 'fixture frontend dependency install\\n'\n")
 				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-				for _, step := range []string{"vet", "build", "frontend-deps"} {
+				for _, step := range []string{"vet", "build", "build-published-sdk", "frontend-deps"} {
 					if _, err := host.RunStep(t.Context(), plan, job, step); err != nil {
 						t.Fatalf("Gate prerequisite %s: %v", step, err)
 					}
