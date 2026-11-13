@@ -239,7 +239,7 @@ An explicit `SPARKWING_SECRETS_KEY_FILE` still selects that file. An existing
 key when no selector is set. A redirected home never falls back to that config key. If an older
 redirected home used it, set `SPARKWING_SECRETS_KEY_FILE` to its existing file
 before restarting. A wrong or missing key names the selected file and this
-override. A damaged sealed value fails without a key repair.
+override. A malformed sealed value fails without a key repair.
 Preserve the key with the home's backups. A home holding sealed data without
 its key refuses to replace it.
 
