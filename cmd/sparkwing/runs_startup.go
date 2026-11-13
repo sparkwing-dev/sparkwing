@@ -146,9 +146,13 @@ func readStartup(ctx context.Context, logs controllerwire.LogReader, run control
 	}
 	// safety: launcher polls can carry successively more boundaries for one Pod; keep only its latest known values.
 	var result []startupObservation
-	indexes := map[string]int{}
+	type observationKey struct {
+		scope, job, pod, stage                string
+		generation, sourceGeneration, attempt int64
+	}
+	indexes := map[observationKey]int{}
 	for _, observation := range observations {
-		key := fmt.Sprintf("%s/%s/%d/%d/%d/%s/%s", observation.Scope, observation.JobID, observation.Generation, observation.SourceGeneration, observation.Attempt, observation.PodUID, observation.Stage)
+		key := observationKey{observation.Scope, observation.JobID, observation.PodUID, observation.Stage, observation.Generation, observation.SourceGeneration, observation.Attempt}
 		if index, ok := indexes[key]; ok {
 			if observation.At != nil {
 				result[index] = observation

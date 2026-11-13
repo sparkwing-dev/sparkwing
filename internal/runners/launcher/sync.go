@@ -102,6 +102,9 @@ func (l *Launcher) syncActive(ctx context.Context) (result error) {
 				continue
 			}
 			if err == nil {
+				if err := l.checkJob(ctx, job, observation.Binding, reservation); err != nil {
+					l.logger().DebugContext(ctx, "retired Cloud startup timing unavailable")
+				}
 				err = teardownFault(job.Name, l.teardown(ctx, job, reservation))
 			}
 			errs = append(errs, err)

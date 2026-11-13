@@ -59,6 +59,7 @@ func TestLauncherReportsOwnedPodStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	var observations []struct {
+		Unheld  bool
 		Startup *struct {
 			PodUID             string     `json:"pod_uid"`
 			ScheduledAt        *time.Time `json:"scheduled_at"`
@@ -75,6 +76,9 @@ func TestLauncherReportsOwnedPodStartup(t *testing.T) {
 			continue
 		}
 		found = true
+		if !o.Unheld {
+			t.Fatal("startup diagnostics must not renew preparation")
+		}
 		if o.Startup.PodUID != "owned-pod" || o.Startup.ScheduledAt == nil || !o.Startup.ScheduledAt.Equal(scheduled) || o.Startup.ImagePulledAt == nil || !o.Startup.ImagePulledAt.Equal(scheduled.Add(time.Second)) || o.Startup.ContainerStartedAt == nil || !o.Startup.ContainerStartedAt.Equal(scheduled.Add(2*time.Second)) {
 			t.Fatalf("startup=%+v", o.Startup)
 		}

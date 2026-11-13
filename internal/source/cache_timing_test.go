@@ -79,3 +79,25 @@ func TestPreparationReportsCacheOutcomeAndTransferredBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestSDKReadyRequiresAValidatedCommand(t *testing.T) {
+	f := newPreparedFixture(t, engineid.GoSDK)
+	install := f.options.InstallSDK
+	f.options.InstallSDK = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+		command, err := install(ctx, selected, request)
+		command.Directory = ""
+		return command, err
+	}
+	var observed *source.Timing
+	f.options.Timing = func(_ context.Context, receipt source.Timing) {
+		if receipt.Stage == "sdk_install" {
+			observed = &receipt
+		}
+	}
+	if _, err := source.Acquire(t.Context(), f.spec, f.options); err == nil {
+		t.Fatal("invalid command accepted")
+	}
+	if observed == nil || observed.Success {
+		t.Fatalf("invalid command reported SDK ready: %+v", observed)
+	}
+}

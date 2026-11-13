@@ -95,7 +95,7 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 	if reflect.DeepEqual(timing, prior) {
 		return
 	}
-	_, err = l.Control.Sync(ctx, []CloudJobObservation{{Binding: binding, Startup: &timing, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: r.NodeUID}})
+	_, err = l.Control.Sync(ctx, []CloudJobObservation{{Binding: binding, Startup: &timing, Unheld: true, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: r.NodeUID}})
 	if err != nil {
 		l.logger().WarnContext(ctx, "Cloud startup timing could not be recorded")
 		return

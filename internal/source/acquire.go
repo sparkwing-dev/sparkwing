@@ -98,21 +98,26 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 		Directory: entry.pipelineCheckout, PipelineDir: relative, SDK: options.SDK, Environment: environment, Masker: options.Base.Masker,
 		NoBincache: spec.NoBincache, HashAllFiles: spec.HashAllFiles,
 	})
-	options.recordTiming(ctx, "sdk_install", started, err == nil, false, command.Cache)
 	if err != nil {
+		options.recordTiming(ctx, "sdk_install", started, false, false, command.Cache)
 		return entry, fmt.Errorf("install source entry: %w", err)
 	}
 	entry.releaseSDK = command.Close
-	if err := context.Cause(ctx); err != nil {
-		return entry, err
+	err = context.Cause(ctx)
+	if err == nil && (command.Directory != entry.Directory || len(command.Command) == 0 || command.Command[0] == "") {
+		err = errors.New("source installer returned no SDK command")
 	}
-	if command.Directory != entry.Directory || len(command.Command) == 0 || command.Command[0] == "" {
-		return entry, errors.New("source installer returned no SDK command")
-	}
-	for _, arg := range command.Command {
-		if strings.ContainsRune(arg, '\x00') {
-			return entry, errors.New("source installer returned an invalid SDK command")
+	if err == nil {
+		for _, arg := range command.Command {
+			if strings.ContainsRune(arg, '\x00') {
+				err = errors.New("source installer returned an invalid SDK command")
+				break
+			}
 		}
+	}
+	options.recordTiming(ctx, "sdk_install", started, err == nil, false, command.Cache)
+	if err != nil {
+		return entry, err
 	}
 	entry.Command = append([]string{}, command.Command...)
 	if options.Prepared != nil && options.Prepared.Publish {
