@@ -102,8 +102,10 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 	var needs []sparkwing.Dep
 	if in.Queued {
 		policy := sparkwing.Job(plan, policyJobID, &policyJob{Checks: checks, Head: checks.Head}).Inline().Timeout(policyJobTimeout).Needs(pre)
+		// perf: the fast steps size their compilers from runtime.NumCPU, not the
+		// submitter's GOMAXPROCS, so the reservation counts the same CPUs.
 		fast := sparkwing.Job(plan, "fast", &PrePush{Checks: checks, Head: checks.Head}).Inline().
-			Timeout(affectedPushTestsTimeout).NoProgressTimeout(queuedFastNoProgressTimeout).
+			Timeout(queuedFastTimeout).NoProgressTimeout(queuedFastNoProgressTimeout).
 			Cores(float64(prePushReservationCores(runtime.NumCPU()))).Needs(pre)
 		joined := sparkwing.Job(plan, "affected-tests", &queuedLandChecks{args: in.ReviewArgs, branch: branch, Checks: checks, Head: checks.Head}).Inline().
 			Timeout(affectedPushTestsTimeout).NoProgressTimeout(affectedPushTestsTimeout).

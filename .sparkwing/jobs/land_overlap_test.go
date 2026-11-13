@@ -30,8 +30,8 @@ func TestQueuedLandOverlapsReviewAndTestsAfterFastChecks(t *testing.T) {
 	if fast.Cores != float64(prePushReservationCores(runtime.NumCPU())) {
 		t.Fatalf("fast reservation = %v", fast.Cores)
 	}
-	if fast.TimeoutMS != affectedPushTestsTimeout.Milliseconds() || fast.NoProgressMS != 30*60*1000 {
-		t.Fatalf("split fast checks lost the former combined job's deadlines: %+v", fast)
+	if fast.TimeoutMS != queuedFastTimeout.Milliseconds() || fast.NoProgressMS != queuedFastNoProgressTimeout.Milliseconds() {
+		t.Fatalf("fast checks lost their own deadlines: %+v", fast)
 	}
 	tier := inspectWork(t, &PrePush{})
 	if !slices.EqualFunc(fast.Steps, tier.Steps, func(a, b stepDocument) bool {

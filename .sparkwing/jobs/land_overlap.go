@@ -6,8 +6,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: splitting fast checks must retain their former review-job deadline.
-const queuedFastNoProgressTimeout = 30 * time.Minute
+// safety: queued fast checks keep the deadlines they had while they shared
+// review's job, independent of the affected-test deadline beside them.
+const (
+	queuedFastTimeout           = 45 * time.Minute
+	queuedFastNoProgressTimeout = 30 * time.Minute
+)
 
 type queuedLandChecks struct {
 	sparkwing.Base
