@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestOwnerPreparationTimesPlanningBeforeAcceptance(t *testing.T) {
@@ -135,5 +136,44 @@ func TestPreparationTimingSurvivesWithheldSDKOutputInCommittedRunLogs(t *testing
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("committed receipts=%+v, want %+v; log=%s", got, want, &body)
+	}
+}
+
+func TestOwnerPreparationMasksSecretTimingFields(t *testing.T) {
+	cfg, _ := nativeConfigFixture(t)
+	cfg.Principal.Capability.Unit = capability.UnitPlan
+	cfg.Refresh = func(context.Context) (capability.Principal, error) { return cfg.Principal, nil }
+	cfg.Storage = func(context.Context, capability.Principal) (StorageBinding, error) {
+		data := &nativeStorageFixture{}
+		return StorageBinding{Bytes: data, Records: data, Authority: blob.Authority{CapabilityRef: cfg.Principal.Capability.Prefix}}, nil
+	}
+	cfg.Logs = func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
+		return &nativeLogRecords{objects: map[string][]byte{}}, nil
+	}
+	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) {
+		return &processListener{closed: make(chan struct{})}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = services.Close() })
+	if err := services.Config.Masks.masker.Register("private-stage-token"); err != nil {
+		t.Fatal(err)
+	}
+	var frames []nodewire.FrameLog
+	services.Config.PlanningLog = func(_ context.Context, frame nodewire.FrameLog) error {
+		frames = append(frames, frame)
+		return nil
+	}
+	owner, _, _, err := NewNativeHost(services.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.Source.RecordTiming(t.Context(), "checkout private-stage-token", time.Now(), true, false)
+	if len(frames) != 1 || frames[0].Event != "preparation" {
+		t.Fatalf("preparation frames=%+v, want one", frames)
+	}
+	if attrs := frames[0].Attrs; bytes.Contains(attrs, []byte("private-stage-token")) || !bytes.Contains(attrs, []byte("***")) {
+		t.Fatalf("owner preparation frame escaped masking: %s", attrs)
 	}
 }
