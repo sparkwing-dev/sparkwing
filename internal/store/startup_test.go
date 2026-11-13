@@ -1,7 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,5 +115,28 @@ func TestLauncherStartupCanArriveAfterAwardEnds(t *testing.T) {
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE team='a' AND run_id='run' AND kind='cloud_startup'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("fast-finished Pod lost startup evidence: %d %v", count, err)
+	}
+}
+
+func TestOwnerClaimSurvivesTimingWriteFailure(t *testing.T) {
+	s, demand := unitClaimFixture(t)
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER reject_startup_timing BEFORE INSERT ON events WHEN NEW.kind='owner_claimed' BEGIN SELECT RAISE(ABORT,'timing sink unavailable'); END`)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil {
+		t.Fatalf("timing failure refused claim: %v", err)
+	}
+	if claim.Award.Generation != 1 {
+		t.Fatalf("claim = %+v", claim)
+	}
+	if !strings.Contains(logs.String(), "Owner claim timing could not be recorded") || !strings.Contains(logs.String(), `"lost_total":1`) {
+		t.Fatalf("timing loss was not logged and counted: %s", &logs)
+	}
+	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+		t.Fatalf("claim was not committed: %v", err)
 	}
 }

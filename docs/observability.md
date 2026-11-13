@@ -897,8 +897,11 @@ generation, and, when applicable, job, source generation, attempt and Pod UID.
 controller and runner clocks can differ, so a negative cross-clock interval is
 clock uncertainty, not negative work.
 
-The controller retains owner claim timestamps. Cloud records also retain Job
-creation/activation and Pod creation, so directly bound Pods can be diagnosed
+The controller records owner claim timestamps after the award commits, in a
+separate transaction bounded to one second. Recording failures leave the claim
+intact and emit a warning with a per-store cumulative `lost_total`.
+Cloud records retain Job creation, Job activation from `Job.Status.StartTime`,
+and Pod creation, so directly bound Pods can be diagnosed
 without inventing a scheduler timestamp. The Cloud launcher records
 `pod_scheduled` from the PodScheduled condition, `image_pull_started` and
 `image_pulled` from that Pod UID's run-node container events, and
@@ -906,7 +909,10 @@ without inventing a scheduler timestamp. The Cloud launcher records
 mean the image was already present. These timestamps describe the run-node
 container, including any preceding init-container wait. Missing Kubernetes
 events remain `null`; container start does not invent an image-pull timestamp.
-The launcher needs read access to Events in its job namespace.
+The launcher needs read access to Events in its job namespace. After container
+start, it tries Events at most three times, counting failures too. Missing
+image boundaries then remain unknown. A missing Job start time stays unknown
+even when an activation request annotation exists.
 
 Source preparation records checkout, engine selection, SDK installation,
 prepared-artifact restore/publication, describe and plan spans. Successful

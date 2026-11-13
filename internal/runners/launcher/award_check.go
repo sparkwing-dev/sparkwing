@@ -138,6 +138,7 @@ func (l *Launcher) forgetJobChecks(job types.UID) {
 	defer l.mu.Unlock()
 	for pod := range l.checked[job] {
 		delete(l.startupObserved, pod)
+		delete(l.startupImageProbes, pod)
 	}
 	delete(l.checked, job)
 }

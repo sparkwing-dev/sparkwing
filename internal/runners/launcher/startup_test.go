@@ -3,20 +3,31 @@ package launcher
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktesting "k8s.io/client-go/testing"
 )
 
 type startupControl struct {
 	*controlFake
-	observed []CloudJobObservation
+	observed    []CloudJobObservation
+	failStartup bool
 }
 
 func (c *startupControl) Sync(ctx context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
 	c.observed = append(c.observed, observations...)
+	if c.failStartup {
+		for _, o := range observations {
+			if o.Startup != nil {
+				return nil, errors.New("timing sink unavailable")
+			}
+		}
+	}
 	return c.controlFake.Sync(ctx, observations)
 }
 
@@ -125,5 +136,111 @@ func TestLauncherStopsProbingAStartedPreboundPod(t *testing.T) {
 	}
 	if before != 1 || count() != before {
 		t.Fatalf("started prebound Pod keeps polling image events: before=%d after=%d", before, count())
+	}
+}
+
+func TestLauncherActivationUsesJobStartTime(t *testing.T) {
+	for _, known := range []bool{true, false} {
+		t.Run(map[bool]string{true: "observed", false: "unknown"}[known], func(t *testing.T) {
+			l, kube, _, base := fixture()
+			control := &startupControl{controlFake: base}
+			l.Control = control
+			if _, err := l.LaunchOne(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			jobs, err := kube.BatchV1().Jobs(l.Config.Namespace).List(t.Context(), metav1.ListOptions{})
+			if err != nil || len(jobs.Items) != 1 {
+				t.Fatalf("jobs=%+v err=%v", jobs, err)
+			}
+			job := jobs.Items[0].DeepCopy()
+			request := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+			actual := metav1.NewTime(request.Add(30 * time.Second))
+			job.Annotations[launchAnnotation] = request.Format(time.RFC3339Nano)
+			if known {
+				job.Status.StartTime = &actual
+			}
+			if _, err := kube.BatchV1().Jobs(job.Namespace).Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			pods, err := kube.CoreV1().Pods(job.Namespace).List(t.Context(), metav1.ListOptions{})
+			if err != nil || len(pods.Items) != 1 {
+				t.Fatalf("pods=%+v err=%v", pods, err)
+			}
+			pod := pods.Items[0].DeepCopy()
+			pod.CreationTimestamp = metav1.NewTime(request.Add(31 * time.Second))
+			if err := kube.Tracker().Add(pod); err != nil {
+				t.Fatal(err)
+			}
+			control.observed = nil
+			if err := l.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			for _, o := range control.observed {
+				if o.Startup != nil {
+					if known && (o.Startup.JobActivatedAt == nil || !o.Startup.JobActivatedAt.Equal(actual.Time)) {
+						t.Fatalf("activation=%v, want actual Job start %v", o.Startup.JobActivatedAt, actual.Time)
+					}
+					if !known && o.Startup.JobActivatedAt != nil {
+						t.Fatalf("invented activation=%v from request annotation", o.Startup.JobActivatedAt)
+					}
+					return
+				}
+			}
+			t.Fatal("no startup observation")
+		})
+	}
+}
+
+func TestLauncherBoundsMissingImageEventProbes(t *testing.T) {
+	for _, failure := range []string{"missing", "events unavailable", "receipt unavailable"} {
+		t.Run(failure, func(t *testing.T) {
+			l, kube, _, base := fixture()
+			control := &startupControl{controlFake: base}
+			l.Control = control
+			if _, err := l.LaunchOne(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			control.failStartup = failure == "receipt unavailable"
+			if failure == "events unavailable" {
+				kube.PrependReactor("list", "events", func(ktesting.Action) (bool, runtime.Object, error) {
+					return true, nil, errors.New("events unavailable")
+				})
+			}
+			pods, err := kube.CoreV1().Pods(l.Config.Namespace).List(t.Context(), metav1.ListOptions{})
+			if err != nil || len(pods.Items) != 1 {
+				t.Fatalf("pods=%+v err=%v", pods, err)
+			}
+			pod := pods.Items[0].DeepCopy()
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "run-node", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()}}}}
+			if err := kube.Tracker().Add(pod); err != nil {
+				t.Fatal(err)
+			}
+			for range 12 {
+				if err := l.Sync(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			polls := 0
+			for _, a := range kube.Actions() {
+				if a.GetVerb() == "list" && a.GetResource().Resource == "events" {
+					polls++
+				}
+			}
+			if polls != 3 {
+				t.Fatalf("running Pod image polls=%d, want 3 across 12 reconciliations", polls)
+			}
+			found := false
+			for _, o := range control.observed {
+				if o.Startup != nil {
+					found = true
+					if o.Startup.ContainerStartedAt == nil || o.Startup.ScheduledAt != nil || o.Startup.ImagePulledAt != nil {
+						t.Fatalf("startup=%+v", o.Startup)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("container startup was not reported")
+			}
+		})
 	}
 }

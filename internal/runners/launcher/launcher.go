@@ -94,11 +94,12 @@ type Launcher struct {
 	// safety: unlocked because only Run's loop takes the warm sample.
 	foreignClassLogged time.Time
 
-	mu              sync.Mutex
-	waiting         map[string]*CloudJobAward
-	identity        string
-	checked         map[types.UID]map[types.UID]bool
-	startupObserved map[types.UID]capability.PodStartup
+	mu                 sync.Mutex
+	waiting            map[string]*CloudJobAward
+	identity           string
+	checked            map[types.UID]map[types.UID]bool
+	startupObserved    map[types.UID]capability.PodStartup
+	startupImageProbes map[types.UID]int
 }
 
 func (l *Launcher) logger() *slog.Logger {

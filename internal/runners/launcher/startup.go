@@ -26,7 +26,8 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 		at := job.CreationTimestamp.Time.UTC()
 		timing.JobCreatedAt = &at
 	}
-	if at, err := time.Parse(time.RFC3339Nano, job.Annotations[launchAnnotation]); err == nil {
+	if job.Status.StartTime != nil && !job.Status.StartTime.IsZero() {
+		at := job.Status.StartTime.Time.UTC()
 		timing.JobActivatedAt = &at
 	}
 	if !pod.CreationTimestamp.IsZero() {
@@ -59,34 +60,36 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 	if timing.PodCreatedAt == nil && timing.ScheduledAt == nil && timing.ContainerStartedAt == nil {
 		return
 	}
-	events, err := l.Kube.CoreV1().Events(pod.Namespace).List(ctx, metav1.ListOptions{FieldSelector: "involvedObject.uid=" + string(pod.UID)})
-	if err != nil {
-		// safety: unavailable diagnostic events must not change execution or placement.
-		l.logger().WarnContext(ctx, "Cloud startup image timing unavailable")
-	} else {
-		for _, event := range events.Items {
-			if event.InvolvedObject.UID != pod.UID || event.InvolvedObject.Kind != "Pod" || !strings.HasSuffix(event.InvolvedObject.FieldPath, "{run-node}") {
-				continue
-			}
-			at := event.FirstTimestamp.Time
-			if at.IsZero() {
-				at = event.EventTime.Time
-			}
-			if at.IsZero() {
-				at = event.LastTimestamp.Time
-			}
-			if at.IsZero() {
-				continue
-			}
-			at = at.UTC()
-			switch event.Reason {
-			case "Pulling":
-				if timing.ImagePullStartedAt == nil || at.Before(*timing.ImagePullStartedAt) {
-					timing.ImagePullStartedAt = &at
+	if l.probeStartupImage(pod.UID, timing.ContainerStartedAt != nil) {
+		events, err := l.Kube.CoreV1().Events(pod.Namespace).List(ctx, metav1.ListOptions{FieldSelector: "involvedObject.uid=" + string(pod.UID)})
+		if err != nil {
+			// safety: unavailable diagnostic events must not change execution or placement.
+			l.logger().WarnContext(ctx, "Cloud startup image timing unavailable")
+		} else {
+			for _, event := range events.Items {
+				if event.InvolvedObject.UID != pod.UID || event.InvolvedObject.Kind != "Pod" || !strings.HasSuffix(event.InvolvedObject.FieldPath, "{run-node}") {
+					continue
 				}
-			case "Pulled":
-				if timing.ImagePulledAt == nil || at.Before(*timing.ImagePulledAt) {
-					timing.ImagePulledAt = &at
+				at := event.FirstTimestamp.Time
+				if at.IsZero() {
+					at = event.EventTime.Time
+				}
+				if at.IsZero() {
+					at = event.LastTimestamp.Time
+				}
+				if at.IsZero() {
+					continue
+				}
+				at = at.UTC()
+				switch event.Reason {
+				case "Pulling":
+					if timing.ImagePullStartedAt == nil || at.Before(*timing.ImagePullStartedAt) {
+						timing.ImagePullStartedAt = &at
+					}
+				case "Pulled":
+					if timing.ImagePulledAt == nil || at.Before(*timing.ImagePulledAt) {
+						timing.ImagePulledAt = &at
+					}
 				}
 			}
 		}
@@ -95,7 +98,7 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 	if reflect.DeepEqual(timing, prior) {
 		return
 	}
-	_, err = l.Control.Sync(ctx, []CloudJobObservation{{Binding: binding, Startup: &timing, Unheld: true, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: r.NodeUID}})
+	_, err := l.Control.Sync(ctx, []CloudJobObservation{{Binding: binding, Startup: &timing, Unheld: true, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: r.NodeUID}})
 	if err != nil {
 		l.logger().WarnContext(ctx, "Cloud startup timing could not be recorded")
 		return
@@ -106,4 +109,22 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 	}
 	l.startupObserved[pod.UID] = timing
 	l.mu.Unlock()
+}
+
+// safety: missing or unreadable Events must not add API traffic for a running
+// Pod's whole lifetime, even when publishing its timing receipt also fails.
+func (l *Launcher) probeStartupImage(pod types.UID, started bool) bool {
+	if !started {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.startupImageProbes[pod] >= 3 {
+		return false
+	}
+	if l.startupImageProbes == nil {
+		l.startupImageProbes = map[types.UID]int{}
+	}
+	l.startupImageProbes[pod]++
+	return true
 }
