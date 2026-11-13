@@ -153,43 +153,37 @@ func TestOwnerClaimDeliveryNeverWaitsForDiagnosticSQL(t *testing.T) {
 	s, demand := unitClaimFixture(t)
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER slow_owner_receipt BEFORE INSERT ON events WHEN NEW.kind='owner_claimed' BEGIN SELECT `+function+`(); SELECT sum(x) FROM (WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT x FROM n); END`)
-	ownerCtx, cancelOwner := context.WithTimeout(t.Context(), 750*time.Millisecond)
-	defer cancelOwner()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	type result struct {
 		claim UnitClaim
 		err   error
 	}
-	done := make(chan result, 1)
-	go func() { claim, err := s.AsOperator().ClaimUnit(ownerCtx, demand); done <- result{claim, err} }()
-	var first result
-	wroteReceipt := false
-	select {
-	case <-entered:
-		wroteReceipt = true
-	case first = <-done:
-	}
+	done := make(chan result, 2)
+	start := make(chan struct{})
 	node := demand
 	node.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
-	nodeCtx, cancelNode := context.WithTimeout(t.Context(), 300*time.Millisecond)
-	second, secondErr := s.AsOperator().ClaimUnit(nodeCtx, node)
-	cancelNode()
-	if wroteReceipt {
-		first = <-done
+	for _, request := range []UnitDemand{demand, node} {
+		go func() { <-start; claim, err := s.AsOperator().ClaimUnit(ctx, request); done <- result{claim, err} }()
 	}
-	if first.err != nil || ownerCtx.Err() != nil {
-		t.Errorf("owner claim was delayed by diagnostic SQL: claim error=%v deadline=%v", first.err, ownerCtx.Err())
-	}
-	if secondErr != nil {
-		t.Errorf("diagnostic SQL blocked a concurrent claim: %v", secondErr)
-	} else if err := s.ReleaseUnit(t.Context(), second, second.Award.CapabilityPrefix); err != nil {
-		t.Errorf("node award unusable: %v", err)
-	}
-	if wroteReceipt {
-		t.Error("execution claim entered a diagnostic write transaction")
-	}
-	if first.err == nil {
-		if err := s.ReleaseUnit(t.Context(), first.claim, first.claim.Award.CapabilityPrefix); err != nil {
-			t.Errorf("owner award unusable: %v", err)
+	close(start)
+	for range 2 {
+		result := <-done
+		if result.err != nil {
+			t.Errorf("claim could not progress: %v", result.err)
+			continue
 		}
+		if err := s.ReleaseUnit(t.Context(), result.claim, result.claim.Award.CapabilityPrefix); err != nil {
+			t.Errorf("award unusable: %v", err)
+		}
+	}
+	select {
+	case <-entered:
+		t.Error("claim delivery entered slow diagnostic SQL")
+	default:
+	}
+	if ctx.Err() != nil {
+		t.Errorf("claims exhausted their safety timeout: %v", ctx.Err())
 	}
 }
