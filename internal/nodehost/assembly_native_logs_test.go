@@ -748,8 +748,10 @@ func retrySealsBeforeFence(t *testing.T, keeper bool) {
 		}
 		logs.bind(principal, int64(started.Attempt))
 		if keeper {
-			_, stop := lease.Keeper{Diagnostics: logs.diagnostics, Lease: time.Minute, Interval: time.Second, Identity: lease.Identity{Role: "NODE", Run: input.Accepted.RunID, Node: "job"},
-				Renew: func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }}.Run(t.Context())
+			_, stop := lease.Keeper{
+				Diagnostics: logs.diagnostics, Lease: time.Minute, Interval: time.Second, Identity: lease.Identity{Role: "NODE", Run: input.Accepted.RunID, Node: "job"},
+				Renew: func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil },
+			}.Run(t.Context())
 			defer stop()
 			synctest.Wait()
 		}
