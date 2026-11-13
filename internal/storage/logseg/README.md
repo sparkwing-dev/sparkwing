@@ -33,10 +33,11 @@ incomplete and run details retain its stream. Failed uploads emit a masked opera
 error. Log I/O holds no lock shared across jobs, and native host acceptance and
 result reporting never wait for uploads or closure.
 
-`Signer` signs one segment or manifest URL with a fifteen-minute expiry. The
-controller supplies the run's persisted retention class after authorizing its
-writer. A required callback checks the class lifecycle before any URL is signed.
-The signer copies the subject and derives the key from it. `LogPutSigner`
+`Signer` signs one segment or manifest URL. Its expiry is the slot's fixed
+upload deadline from first signing, at most `limits.LogUploadURLTTL` (fifteen
+minutes). The controller supplies the run's persisted retention class after
+authorizing its writer. The signer copies the subject and derives the key from
+it. `LogPutSigner`
 returns URLs and headers for both `blob.Filesystem` and `blob.S3`, bound to
 the requested length and digest. The filesystem backend permits only an identical
 retry at an existing key. S3 signs a create-only condition and rejects every
@@ -92,6 +93,10 @@ against the real tenant and verifies that ended authority emits no bytes.
 `TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject` drives an
 authenticated claim through signing, filesystem PUTs, segment commits and a
 controller GET. It checks exact bytes and generated foreign-subject refusals.
+`TestLogSubmissionRoutesReplayLostPutAndCommit` replays a lost PUT response and
+a lost commit response through the same routes. Re-signing keeps the first
+deadline, a committed slot returns no URL, and the retained-byte charge and
+segment record stay single.
 
 `TestCommittedDashboardLogsRecheckAuthorityBetweenSegments` revokes a real
 SQLite capability after the first segment is written. The next segment is

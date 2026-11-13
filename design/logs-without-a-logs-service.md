@@ -449,8 +449,9 @@ never receives a secret value, so it cannot unmask anything it serves.
 
 ### Retention
 
-Retention is an object lifecycle rule per retention class, applied by key
-prefix:
+Retention is a class per key prefix. Sparkwing's maintenance pass deletes
+each log object once its slot is older than the class, then stops counting it
+([log slot accounting](../internal/store/STORE-DATA.md#log-slot-accounting)):
 
 | Class prefix | Expires after | Who gets it |
 |---|---|---|
@@ -462,16 +463,16 @@ prefix:
   prefix. A team that later gains or loses credits changes the class of
   new runs only.
 - A per-team retention beyond these two is an operator-defined class: the
-  operator adds `logs/r<days>/` with a matching lifecycle rule and maps the
-  team to it in controller config. S3 allows 1,000 lifecycle rules per
-  bucket, far more than any class list needs.
-- The operator owns the lifecycle rules (Terraform, the console or
-  `aws s3api put-bucket-lifecycle-configuration`). At boot the controller
-  reads the bucket's lifecycle configuration and refuses to issue log URLs
-  into a class with no matching expiry rule, naming the missing rule. It
-  never writes lifecycle rules itself, because a put replaces the bucket's
-  whole configuration, including rules the operator owns for other
-  prefixes.
+  operator adds `logs/r<days>/` and maps the team to it in controller
+  config.
+- A bucket lifecycle rule per class is an operator-owned backstop, set
+  longer than the class (Terraform, the console or
+  `aws s3api put-bucket-lifecycle-configuration`). At startup the controller
+  reads the bucket's lifecycle configuration once per class and warns when a
+  class has no matching expiry rule. Uploads continue, and no request path
+  reads bucket rules. The controller never writes lifecycle rules, because a
+  put replaces the bucket's whole configuration, including rules the
+  operator owns for other prefixes.
 - Run deletion and team deletion delete by prefix from the controller
   (`internal/controller/deletion.go`), replacing the call to the logs service and
   its `logs.delete` token.
@@ -607,7 +608,7 @@ has run there.
 | Segment PUT fails | the sink retries with backoff from 200 ms to 2 s, three times, then keeps the bytes in the spool and retries at the next cut | after finish-time retries fail, the manifest records `incomplete`, reason `upload failed`, and a `logs_drop` event fires as it does for logbatch today |
 | Controller unreachable | uploads pause; cut segments stay in the spool and retry with backoff, and the claim heartbeat fails, so the claim is lost on the existing schedule | as for runner loss once the claim expires; a runner lost meanwhile loses the outage's log |
 | Object store unreachable | uploads fail and the spool grows on local disk | as for a failed PUT; the controller's read path returns 503 naming the store |
-| Signed URL expired | the retry signs the same segment again, free | none needed |
+| Signed URL expired | re-signing returns the slot's first deadline; after it, an uncommitted slot is refused with 409 and stays counted until maintenance deletes it | as for a failed PUT |
 | Retry writes a segment twice | S3 refuses overwrite with 412; filesystem permits identical bytes only | commit verifies the stored object before recording it |
 | Superseded attempt keeps writing | its URLs name its own attempt and generation; the controller refuses to sign more | the reader serves the latest attempt |
 | Spool disk full | the sink cannot keep records | dropped lines counted in the manifest and a `logs_drop` event, as today's drop policy |
@@ -616,7 +617,7 @@ has run there.
 | Watch lease stuck on | a runner pushes to the ring for at most one lease after the viewer leaves | lease expiry |
 | Ring evicts lines during a burst | the live stream waits for the next segment | seq gap check in the controller |
 | Controller restart | ring and watches are lost | viewers reconnect, read segments, renew watches |
-| Lifecycle rule missing | logs never expire | the controller refuses to issue URLs into that class and names the missing rule |
+| Lifecycle backstop rule missing | none while maintenance runs; the maintenance pass still deletes each object at its class age | the controller warns once per class at startup |
 | Old SDK pipeline binary on a laptop with a remote profile | the log stays local | the remote copy is sealed `incomplete`, reason `not uploaded` |
 
 ## Decisions for Korey
@@ -651,11 +652,11 @@ Each item names a recommendation concrete enough that "yes" answers it.
    bind storage to admitted bytes. A controller outage pauses signing while
    the runner spools. Real R2 rejection remains a provider acceptance check,
    separate from signed-header unit coverage.
-6. **Retention mechanism.** Retention classes as key prefixes with one
-   lifecycle rule each, owned by the operator and verified by the
-   controller at boot, rather than object tags or a controller sweeper.
-   Recommendation: prefixes. Tags cost $0.01 per 10,000 per month and must
-   be signed into every URL; a sweeper is the code this removes.
+6. **Retention mechanism.** Retention classes as key prefixes. Sparkwing's
+   maintenance pass deletes each object at its class age, and an
+   operator-owned lifecycle rule per class, checked with a warning at
+   startup, is a longer backstop. Object tags were rejected: they cost $0.01
+   per 10,000 per month and must be signed into every URL.
 7. **Per-team retention.** Two built-in classes (90 d with credits, 30 d
    without) plus operator-defined classes mapped per team; a team's change
    of standing affects new runs only. Recommendation: yes.
