@@ -104,7 +104,6 @@ func TestLogSubmissionRoutesReplayLostPutAndCommit(t *testing.T) {
 	if code := put(first); code != http.StatusCreated {
 		t.Fatalf("first PUT = %d", code)
 	}
-	// Lost PUT response: the runner cannot tell whether its bytes landed.
 	again := sign()
 	if again.Committed || again.URL == "" || !again.ExpiresAt.Equal(first.ExpiresAt) || retained() != charged {
 		t.Fatalf("re-signed lost PUT committed=%v url=%v expires=%v, retained %d; want the same uncommitted slot until %v and charge %d", again.Committed, again.URL != "", again.ExpiresAt, retained(), first.ExpiresAt, charged)
@@ -113,7 +112,6 @@ func TestLogSubmissionRoutesReplayLostPutAndCommit(t *testing.T) {
 		t.Fatalf("replayed identical PUT = %d", code)
 	}
 	commit()
-	// Lost commit response: re-signing reports the slot committed and grants no URL.
 	if replay := sign(); !replay.Committed || replay.URL != "" || len(replay.Headers) != 0 {
 		t.Fatalf("re-signed committed slot committed=%v url=%v headers=%d; want committed with no upload URL", replay.Committed, replay.URL != "", len(replay.Headers))
 	}

@@ -146,7 +146,7 @@ func TestFilesystemLogRefusalsLeaveTheSlotEmpty(t *testing.T) {
 					}
 				}
 			}
-			// The digest alone would refuse this body too, but only after storing all of it.
+			// safety: the digest alone would refuse this body too, but only after storing all of it.
 			flood := &countingReader{r: io.LimitReader(zeroReader{}, 1<<20)}
 			oversized := httptest.NewRequest(http.MethodPut, signed, flood)
 			oversized.ContentLength = -1
