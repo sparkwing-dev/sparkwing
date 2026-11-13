@@ -101,6 +101,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 			if service == nil || service.Masks == nil || service.Masks.masker == nil || service.RunID != auth.Binding.RunID || auth.Binding.Kind != capability.BindingTrigger && service.Job.ID != auth.Binding.NodeID || service.RunID == "" || service.Job.ID == "" {
 				return executorError(hosterr.SpecDrift, "service binding differs from its live process")
 			}
+			request = request.WithContext(withProcessTiming(request.Context(), service))
 			if service.lifetime != nil {
 				ctx, cancel := context.WithCancel(request.Context())
 				stop := context.AfterFunc(service.lifetime, cancel)

@@ -11,8 +11,8 @@ import (
 )
 
 type requestDiagnostic struct {
-	run, node string
-	timing    otelutil.OperationTiming
+	write  func(context.Context, nodewire.FrameLog) error
+	timing otelutil.OperationTiming
 }
 type requestDiagnostics struct {
 	queue   chan requestDiagnostic
@@ -22,7 +22,7 @@ type requestDiagnostics struct {
 	done    chan struct{}
 }
 
-func newRequestDiagnostics(ctx context.Context, write func(context.Context, string, string, nodewire.FrameLog) error) *requestDiagnostics {
+func newRequestDiagnostics(ctx context.Context) *requestDiagnostics {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	d := &requestDiagnostics{queue: make(chan requestDiagnostic, 64), ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	go func() {
@@ -37,7 +37,7 @@ func newRequestDiagnostics(ctx context.Context, write func(context.Context, stri
 					otelutil.OperationTiming
 					Dropped uint64 `json:"dropped"`
 				}{record.timing, lost})
-				if err != nil || write(ctx, record.run, record.node, nodewire.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "debug", Event: "request_timing", Attrs: raw}) != nil {
+				if err != nil || record.write(ctx, nodewire.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "debug", Event: "request_timing", Attrs: raw}) != nil {
 					d.dropped.Add(lost + 1)
 				}
 			}
@@ -46,15 +46,20 @@ func newRequestDiagnostics(ctx context.Context, write func(context.Context, stri
 	return d
 }
 
-func (d *requestDiagnostics) observe(run, node string, timing otelutil.OperationTiming) {
-	select {
-	case <-d.ctx.Done():
-		return
-	default:
+func (d *requestDiagnostics) observer(write func(context.Context, nodewire.FrameLog) error) func(otelutil.OperationTiming) {
+	if write == nil {
+		return nil
 	}
-	select {
-	case d.queue <- requestDiagnostic{run, node, timing}:
-	default:
-		d.dropped.Add(1)
+	return func(timing otelutil.OperationTiming) {
+		select {
+		case <-d.ctx.Done():
+			return
+		default:
+		}
+		select {
+		case d.queue <- requestDiagnostic{write: write, timing: timing}:
+		default:
+			d.dropped.Add(1)
+		}
 	}
 }

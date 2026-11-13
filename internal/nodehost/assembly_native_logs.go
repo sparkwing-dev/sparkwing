@@ -297,12 +297,7 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	if err != nil {
 		return err
 	}
-	// safety: The host stamp survives masking and is never decoded from SDK protocol frames.
-	body, err := json.Marshal(struct {
-		nodewire.FrameLog
-		LeaseKeeper   bool `json:"host_lease_keeper,omitempty"`
-		RequestTiming bool `json:"host_request_timing,omitempty"`
-	}{l.masker.Log(frame), frame.Event == "lease_keeper", frame.Event == "request_timing"})
+	body, err := l.marshalLogFrame(frame)
 	if err != nil {
 		return err
 	}
@@ -313,4 +308,30 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 		l.alert(node, err)
 	}
 	return nil
+}
+
+func (l *localLogs) requestTimingWriter(run, node string) func(context.Context, nodewire.FrameLog) error {
+	if run != l.run || l.masker == nil {
+		return nil
+	}
+	stream, err := l.open(node, false)
+	if err != nil {
+		return nil
+	}
+	return func(ctx context.Context, frame nodewire.FrameLog) error {
+		body, err := l.marshalLogFrame(frame)
+		if err != nil {
+			return err
+		}
+		return stream.write(ctx, body, true)
+	}
+}
+
+func (l *localLogs) marshalLogFrame(frame nodewire.FrameLog) ([]byte, error) {
+	// safety: The host stamp survives masking and is never decoded from SDK protocol frames.
+	return json.Marshal(struct {
+		nodewire.FrameLog
+		LeaseKeeper   bool `json:"host_lease_keeper,omitempty"`
+		RequestTiming bool `json:"host_request_timing,omitempty"`
+	}{l.masker.Log(frame), frame.Event == "lease_keeper", frame.Event == "request_timing"})
 }

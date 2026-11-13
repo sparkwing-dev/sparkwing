@@ -12,14 +12,15 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestControllerRequestTimingPropagatesWithoutSecrets(t *testing.T) {
@@ -114,16 +115,16 @@ func TestControllerTimingNeverRecordsCredentialOrTransportErrors(t *testing.T) {
 	}
 }
 
-type slowControllerBody struct{}
+type slowControllerBody struct{ wait func() }
 
-func (slowControllerBody) Read([]byte) (int, error) { time.Sleep(2 * time.Second); return 0, io.EOF }
+func (b slowControllerBody) Read([]byte) (int, error) { b.wait(); return 0, io.EOF }
 
 func TestSlowControllerResponsePhasesWithoutCollector(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var records []otelutil.OperationTiming
 		ctx := otelutil.WithTimingObserver(t.Context(), func(timing otelutil.OperationTiming) { records = append(records, timing) })
 		review, err := NewRunReview(EngineOptions{URL: "https://controller.example/private-token", Bearer: func(context.Context) (string, error) { time.Sleep(time.Second); return "private-bearer", nil }, HTTP: &http.Client{Transport: engineTransport(func(*http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(slowControllerBody{})}, nil
+			return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(slowControllerBody{wait: func() { time.Sleep(2 * time.Second) }})}, nil
 		})}})
 		if err != nil {
 			t.Fatal(err)

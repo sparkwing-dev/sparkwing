@@ -28,15 +28,15 @@ func (o *annotationObservation) observe(timing otelutil.OperationTiming) {
 	}
 }
 
-func traceAnnotation(next http.Handler) http.Handler {
+func observeProcessRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/node/v1/annotations" {
-			next.ServeHTTP(w, r)
-			return
-		}
 		observation := &annotationObservation{id: rand.Text()}
 		ctx := context.WithValue(r.Context(), annotationObservationKey{}, observation)
 		ctx = otelutil.WithTimingObserver(ctx, observation.observe)
+		if r.Method != http.MethodPost || r.URL.Path != "/node/v1/annotations" {
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
 		ctx, timing := otelutil.StartOperation(ctx, "nodehost.annotation")
 		response := &annotationResponse{ResponseWriter: w, status: 0}
 		defer func() {

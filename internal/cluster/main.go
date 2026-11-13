@@ -71,10 +71,11 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		usage(os.Stderr)
 		os.Exit(2)
 	}
+	// safety: A signal received during export must not erase an already-returned failure.
+	cleanStop := err != nil && (os.Args[1] == "start" || os.Args[1] == "warm") && ctx.Err() != nil && runners.OnlyCancellation(err, context.Cause(ctx))
 	finishTelemetry(err)
 	if err != nil {
-		// safety: only the signal-owned context can attribute downstream cancellation to shutdown.
-		if (os.Args[1] == "start" || os.Args[1] == "warm") && ctx.Err() != nil && runners.OnlyCancellation(err, context.Cause(ctx)) {
+		if cleanStop {
 			return
 		}
 		writeRunnerError(os.Stderr, os.Args[1], err)

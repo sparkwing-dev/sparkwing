@@ -57,13 +57,16 @@ type Telemetry struct {
 	// Config.Prometheus was set.
 	PromHandler http.Handler
 
-	shutdowns []func(context.Context) error
+	shutdowns    []func(context.Context) error
+	redactErrors bool
 }
 
 func (t *Telemetry) Shutdown(ctx context.Context) error {
 	for _, fn := range t.shutdowns {
 		if err := fn(ctx); err != nil {
-			log.Printf("warning: otel shutdown error: %v", err)
+			if !t.redactErrors {
+				log.Printf("warning: otel shutdown error: %v", err)
+			}
 		}
 	}
 	return nil
@@ -74,7 +77,10 @@ func meter(name string) metric.Meter {
 }
 
 func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
-	t := &Telemetry{}
+	t := &Telemetry{redactErrors: cfg.TracesOnly}
+	if cfg.TracesOnly {
+		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) { fmt.Fprintln(os.Stderr, "warning: trace export failed; check OTEL exporter settings") }))
+	}
 	wrap := cfg.WrapLogHandler
 	if wrap == nil {
 		wrap = func(h slog.Handler) slog.Handler { return h }
@@ -89,7 +95,6 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		} else if cfg.WrapLogHandler != nil {
 			slog.SetDefault(slog.New(wrap(configuredHandler())))
 		}
-
 	}
 
 	serviceName := cfg.ServiceName
@@ -130,7 +135,11 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		traceExporter, err := otlptracehttp.New(traceCtx)
 		traceCancel()
 		if err != nil {
-			log.Printf("warning: otel OTLP trace exporter failed: %v", err)
+			if cfg.TracesOnly {
+				fmt.Fprintln(os.Stderr, "warning: trace exporter setup failed; check OTEL exporter settings")
+			} else {
+				log.Printf("warning: otel OTLP trace exporter failed: %v", err)
+			}
 		} else {
 			tp := sdktrace.NewTracerProvider(
 				sdktrace.WithResource(res),

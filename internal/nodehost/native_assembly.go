@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -191,7 +192,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		}
 		return logs.write(delivery, run.Run.ID, node, nodewire.FrameLog{TS: event.Wall.Format(time.RFC3339Nano), Level: "debug", Event: "lease_keeper", Attrs: raw})
 	})
-	requestTimings := newRequestDiagnostics(ctx, logs.write)
+	requestTimings := newRequestDiagnostics(ctx)
 	closeResources = func() error {
 		requestTimings.cancel()
 		diagnostics.Close()
@@ -203,7 +204,9 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	processes := &NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://" + listener.Addr().String()}
 	claims.processes = processes
 	processes.Log = logs.write
-	processes.Timing = requestTimings.observe
+	processes.Timing = func(run, node string) func(otelutil.OperationTiming) {
+		return requestTimings.observer(logs.requestTimingWriter(run, node))
+	}
 	delegate := func(ctx context.Context, node string, generation, attempt int64) (ProcessGrant, error) {
 		grant, err := claims.delegate(ctx, node, generation, attempt)
 		if err == nil {
@@ -291,7 +294,7 @@ func localProcessHTTP(ctx context.Context, listener net.Listener, handler http.H
 	var closeErr error
 	start := func() {
 		startOnce.Do(func() {
-			go func() { done <- wingd.ServeLocalHTTP(ctx, listener, traceAnnotation(handler), nil, nil) }()
+			go func() { done <- wingd.ServeLocalHTTP(ctx, listener, observeProcessRequests(handler), nil, nil) }()
 		})
 	}
 	return start, func() error {

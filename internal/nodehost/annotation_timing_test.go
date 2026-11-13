@@ -12,12 +12,15 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
 func TestAnnotationTimingIncludesFreshAuthorizationAndAcknowledgement(t *testing.T) {
@@ -128,7 +131,7 @@ func TestSlowAnnotationRecordsWithoutCollector(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/node/v1/annotations", strings.NewReader(`{"level":"info","message":"private-token","step":"body"}`))
 		req.Header.Set("Authorization", "Bearer "+bearer)
 		response := httptest.NewRecorder()
-		traceAnnotation(fixture.handler).ServeHTTP(response, req)
+		observeProcessRequests(fixture.handler).ServeHTTP(response, req)
 		if response.Code != 200 {
 			t.Fatal(response.Body.String())
 		}
@@ -149,17 +152,21 @@ func TestSlowAnnotationRecordsWithoutCollector(t *testing.T) {
 
 type timedParentAuthentication struct {
 	capability.AuthenticationReader
+	wait func()
 }
 
 func (p timedParentAuthentication) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
-	time.Sleep(2 * time.Second)
+	p.wait()
 	return p.AuthenticationReader.ReadAuthentication(ctx, lookup, evidence)
 }
 
-type timedParentBinding struct{ capability.BindingChecker }
+type timedParentBinding struct {
+	capability.BindingChecker
+	wait func()
+}
 
 func (p timedParentBinding) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
-	time.Sleep(2 * time.Second)
+	p.wait()
 	return p.BindingChecker.CheckBinding(ctx, principal, rule, target)
 }
 
@@ -169,9 +176,9 @@ func TestSlowAnnotationAuthorizationAttribution(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				fixture := start(t, func(deps *ProcessAuthorityDependencies) {
 					if phase == "parent_auth" {
-						deps.Parent = timedParentAuthentication{deps.Parent}
+						deps.Parent = timedParentAuthentication{deps.Parent, func() { time.Sleep(2 * time.Second) }}
 					} else {
-						deps.Bindings = timedParentBinding{deps.Bindings}
+						deps.Bindings = timedParentBinding{deps.Bindings, func() { time.Sleep(2 * time.Second) }}
 					}
 				})
 				service := newService(t)
@@ -182,7 +189,7 @@ func TestSlowAnnotationAuthorizationAttribution(t *testing.T) {
 				req := httptest.NewRequest(http.MethodPost, "/node/v1/annotations", strings.NewReader(`{"level":"info","message":"note","step":"body"}`))
 				req.Header.Set("Authorization", "Bearer "+bearer)
 				response := httptest.NewRecorder()
-				traceAnnotation(fixture.handler).ServeHTTP(response, req)
+				observeProcessRequests(fixture.handler).ServeHTTP(response, req)
 				if response.Code != 200 {
 					t.Fatal(response.Body.String())
 				}
@@ -221,7 +228,7 @@ func TestCancelledAnnotationRetainsSlowTiming(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/node/v1/annotations", strings.NewReader(`{"level":"info","message":"note","step":"body"}`)).WithContext(ctx)
 		req.Header.Set("Authorization", "Bearer "+bearer)
 		response := httptest.NewRecorder()
-		traceAnnotation(fixture.handler).ServeHTTP(response, req)
+		observeProcessRequests(fixture.handler).ServeHTTP(response, req)
 		if response.Code < 400 {
 			t.Fatal("canceled persistence was acknowledged as success")
 		}
@@ -232,6 +239,39 @@ func TestCancelledAnnotationRetainsSlowTiming(t *testing.T) {
 			if record.Success || record.DurationMS != 1000 {
 				t.Fatalf("cancellation timing changed: %+v", record)
 			}
+		}
+	})
+}
+
+func TestSlowServiceRPCUsesHostTimingContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fixture := start(t)
+		service := newService(t)
+		var records []otelutil.OperationTiming
+		service.observeTiming = func(timing otelutil.OperationTiming) { records = append(records, timing) }
+		reader, err := client.NewRunReader(client.EngineOptions{URL: "http://controller.example", HTTP: &http.Client{Transport: routeTransport{handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(2 * time.Second)
+			if err := json.NewEncoder(w).Encode(controllerwire.RunDetail{ID: "run-1"}); err != nil {
+				t.Error(err)
+			}
+		})}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		service.Summary = func(ctx context.Context, _ capability.Authorized, _ nodewire.SummaryRequest) error {
+			_, err := reader.ReadRun(ctx, "run-1")
+			return err
+		}
+		bearer := admitService(t, fixture, service)
+		req := httptest.NewRequest(http.MethodPost, "/node/v1/summary", strings.NewReader(`{"markdown":"note","step":"body"}`))
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		response := httptest.NewRecorder()
+		observeProcessRequests(fixture.handler).ServeHTTP(response, req)
+		if response.Code != http.StatusOK {
+			t.Fatal(response.Body.String())
+		}
+		if len(records) != 1 || records[0].DurationMS != 2000 || records[0].RequestID == "" {
+			t.Fatalf("slow service RPC lost its job timing: %+v", records)
 		}
 	})
 }

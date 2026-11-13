@@ -891,9 +891,14 @@ bearer-provider timing and HTTP connection, DNS, dial, TLS, request-write,
 first-response-byte and response-body/decode phases when those phases occur.
 A reused connection has no DNS, dial or TLS phase.
 
+Native SDK service RPCs share the host timing observer, including services other
+than annotations.
+
 Runner `start`, `warm` and `run-node` export these traces when the existing
 `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set.
 They use `OTEL_TRACES_SAMPLER_ARG` and flush for at most five seconds on exit.
+Exporter failures report a fixed warning without endpoint values or response
+bodies. Flush cannot change the command's already-decided exit outcome.
 With neither trace endpoint configured, they start no exporter. This does not
 configure a CLI or wingd exporter or enable runner log export.
 
@@ -916,6 +921,8 @@ annotation text, request bodies or error messages.
 
 A bounded, nonblocking host queue isolates diagnostic capture from request
 acknowledgement. Later records report queue/delivery loss as `dropped`.
+Queued records retain the log stream captured at SDK delegation. Closing that
+stream discards a late record; it cannot enter a successor attempt.
 Diagnostics append only to an already-bound log stream, share its byte and
 retention limits, and ride the next ordinary log cut or final seal. A closed
 stream, shutdown or queue overflow can discard a diagnostic. Missing records

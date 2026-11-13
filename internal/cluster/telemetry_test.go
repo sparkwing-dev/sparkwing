@@ -29,8 +29,9 @@ func TestRunnerExportsAndFlushesConfiguredTracing(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, verb := range []string{"start", "warm", "run-node"} {
-		for _, configured := range []bool{false, true} {
-			t.Run(verb+"/"+map[bool]string{false: "unset", true: "configured"}[configured], func(t *testing.T) {
+		for _, mode := range []string{"unset", "configured", "refused"} {
+			configured := mode != "unset"
+			t.Run(verb+"/"+mode, func(t *testing.T) {
 				var mu sync.Mutex
 				var exported bytes.Buffer
 				collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +43,11 @@ func TestRunnerExportsAndFlushesConfiguredTracing(t *testing.T) {
 					exported.Write(body)
 					mu.Unlock()
 					w.Header().Set("Content-Type", "application/x-protobuf")
+					if mode == "refused" {
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = w.Write([]byte("private-exporter-body-token"))
+						return
+					}
 					w.WriteHeader(http.StatusOK)
 				}))
 				defer collector.Close()
@@ -51,12 +57,18 @@ func TestRunnerExportsAndFlushesConfiguredTracing(t *testing.T) {
 					t.Setenv(key, "")
 				}
 				if configured {
-					t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", collector.URL+"/v1/traces")
+					t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", collector.URL+"/private-exporter-path-token")
 				}
 				t.Setenv("OTEL_TRACES_SAMPLER_ARG", "1")
 				command := exec.CommandContext(t.Context(), executable, "-test.run=^TestRunnerExportsAndFlushesConfiguredTracing$")
-				if output, err := command.CombinedOutput(); err != nil {
+				output, err := command.CombinedOutput()
+				if err != nil {
 					t.Fatalf("runner: %s %v", output, err)
+				}
+				for _, secret := range []string{"private-exporter-path-token", "private-exporter-body-token"} {
+					if bytes.Contains(output, []byte(secret)) {
+						t.Errorf("trace-export failure leaked endpoint or body: %s", output)
+					}
 				}
 				mu.Lock()
 				data := bytes.Clone(exported.Bytes())
