@@ -64,6 +64,9 @@ const (
 )
 
 func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc sparkwing.RunContext) error {
+	if err := refuseLandStepBounds(rc); err != nil {
+		return err
+	}
 	// safety: immutable local repository metadata retains the owner path when
 	// a later SDK process starts in a snapshot of the pre-merge commit. Planning
 	// does no I/O; authorizing callbacks bind to and verify that owner at runtime.
