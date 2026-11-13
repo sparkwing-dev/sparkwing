@@ -160,6 +160,16 @@ func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error) {
 
 // Append stores data, one or more newline-terminated lines.
 func (s *Sink) Append(data []byte) error {
+	return s.append(data, true)
+}
+
+// AppendDiagnostic retains best-effort diagnostics without starting an upload timer.
+// Real output, the segment size bound and sealing still cut the buffered bytes.
+func (s *Sink) AppendDiagnostic(data []byte) error {
+	return s.append(data, false)
+}
+
+func (s *Sink) append(data []byte, schedule bool) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -189,7 +199,7 @@ func (s *Sink) Append(data []byte) error {
 	s.lines += n
 	if s.written-s.cutOff >= s.opts.SegmentBytes {
 		s.cutLocked()
-	} else if s.stopTimer == nil {
+	} else if schedule && s.stopTimer == nil {
 		s.stopTimer = s.opts.AfterFunc(s.opts.Interval, s.cutOnInterval)
 	}
 	return nil

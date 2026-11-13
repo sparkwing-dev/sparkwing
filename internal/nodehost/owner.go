@@ -248,6 +248,7 @@ func (h *OwnerHost) keepOwner(parent context.Context, actor runstate.Actor, comp
 
 func (h *OwnerHost) keepUnit(parent context.Context, actor runstate.Actor, computing func() bool) (context.Context, func()) {
 	keeper := h.Lease
+	keeper.Identity = lease.Identity{Role: "OWNER", Unit: string(actor.Owner.Kind), Run: string(actor.Owner.RunID), Node: string(actor.Owner.SourceNodeID), Generation: int64(actor.Owner.Generation)}
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := h.Renew(ctx, actor, computing())
 		return lease.Beat{ExpiresAt: beat.ExpiresAt, CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
