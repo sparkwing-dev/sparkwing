@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -589,4 +590,26 @@ func TestReviewClarifiedObjectiveReassessesUnchangedTree(t *testing.T) {
 	if len(fx.def.calls) != 3 {
 		t.Fatal("unchanged brief did not reuse saved verdict")
 	}
+}
+
+type hangingReviewer struct{}
+
+func (hangingReviewer) review(ctx context.Context, _, _, _ string) (reviewAnswer, error) {
+	<-ctx.Done()
+	return reviewAnswer{}, ctx.Err()
+}
+
+func TestReviewModelCallStopsAtItsOwnBound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fx := newReviewFixture(t)
+		fx.deps.reviewer = func(string) (reviewer, error) { return hangingReviewer{}, nil }
+		started := time.Now()
+		_, _, err := runReview(t.Context(), fx.deps, testPolicy(t), reviewInputs{branch: "work", brief: "Bound a silent reviewer"})
+		if err == nil || !strings.Contains(err.Error(), "model call exceeded 30m0s") || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("a silent reviewer was not stopped at its own bound: %v", err)
+		}
+		if elapsed := time.Since(started); elapsed != reviewModelCallTimeout {
+			t.Fatalf("silent reviewer ran %s, want %s", elapsed, reviewModelCallTimeout)
+		}
+	})
 }
