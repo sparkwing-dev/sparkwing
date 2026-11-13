@@ -11,7 +11,6 @@ import (
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-// requestDiagnosticsDrain bounds how long shutdown waits for queued timing records.
 const requestDiagnosticsDrain = 2 * time.Second
 
 type requestDiagnostic struct {
@@ -65,8 +64,6 @@ func (d *requestDiagnostics) deliver(record requestDiagnostic) {
 	}
 }
 
-// close stops intake and delivers records already queued. It returns within the
-// drain bound; a delivery still running then sees a cancelled context.
 func (d *requestDiagnostics) close() {
 	d.mu.Lock()
 	already := d.closed
@@ -76,6 +73,7 @@ func (d *requestDiagnostics) close() {
 		return
 	}
 	close(d.stop)
+	// safety: Shutdown waits for queued records but never past the bound; a stuck delivery sees a cancelled context.
 	bound := time.NewTimer(requestDiagnosticsDrain)
 	defer bound.Stop()
 	select {

@@ -14,11 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 )
 
-// runnerTelemetry exports traces only when an OTEL trace endpoint is set.
-// run-node is one bounded unit, so its requests share a root span. start and
-// warm can run for days; a lifetime root would put every request in one
-// unbounded trace and make one sampling decision for all of them, so each
-// request starts its own trace and only a short startup marker is recorded.
 func runnerTelemetry(ctx context.Context, command, version string) (context.Context, func(error), error) {
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" && os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") == "" {
 		return ctx, func(error) {}, nil
@@ -28,6 +23,8 @@ func runnerTelemetry(ctx context.Context, command, version string) (context.Cont
 		return ctx, nil, err
 	}
 	finishRoot := func(error) {}
+	// safety: start and warm run for days; a lifetime root would put every request in one unbounded
+	// trace under one sampling decision, so only bounded run-node keeps a root span.
 	if command == "run-node" {
 		var root *otelutil.Operation
 		ctx, root = otelutil.StartOperation(ctx, "runner "+command)
@@ -46,7 +43,6 @@ func runnerTelemetry(ctx context.Context, command, version string) (context.Cont
 	}, nil
 }
 
-// requestsHelp reports whether args ask for command help, which exits without work to trace.
 func requestsHelp(command string, args []string) bool {
 	_, err := runnerflags.Parse(command, args, io.Discard, io.Discard)
 	return errors.Is(err, flag.ErrHelp)

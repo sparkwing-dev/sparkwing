@@ -37,9 +37,8 @@ var processRoutes = func() *http.ServeMux {
 	return mux
 }()
 
-// processRoute returns the registered route template, never the request path,
-// so SDK-chosen path values such as secret names stay out of diagnostics.
 func processRoute(r *http.Request) string {
+	// safety: Report the registered template, never the path, so SDK-chosen values such as secret names stay out.
 	_, pattern := processRoutes.Handler(r)
 	return pattern
 }
