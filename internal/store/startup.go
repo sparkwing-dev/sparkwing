@@ -26,9 +26,20 @@ func (s *Store) recordLauncherStartup(ctx context.Context, authority capability.
 		if !launcherClaimant(claimant.Capability) {
 			return bindingRefusal()
 		}
+		unit, err := decodeAwardUnit(observation.Award.Kind, observation.Award.ID)
+		if err != nil {
+			return err
+		}
+		team, err := tx.operator.claimTargetTeamTx(ctx, tx, claimant.Capability, unit)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		// safety: fast Pods can finish before the launcher polls; diagnostics require the exact historical award owned by this live launcher.
 		var prefix string
-		err = tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE parent_kind=? AND parent_id=? AND subject_kind=? AND subject_id=? AND unit_kind=? AND unit_id=? AND bind_holder=? AND COALESCE(eval_unit_generation,bind_generation)=? AND issuance IN ('award','exchange') ORDER BY created_at LIMIT 1`, root.Authority.Kind, root.Authority.ID, claimant.Capability.Subject.Kind, claimant.Capability.Subject.ID, observation.Award.Kind, observation.Award.ID, observation.Award.Holder, observation.Award.Generation).Scan(&prefix)
+		err = tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND parent_kind=? AND parent_id=? AND subject_kind=? AND subject_id=? AND unit_kind=? AND unit_id=? AND bind_holder=? AND COALESCE(eval_unit_generation,bind_generation)=? AND issuance IN ('award','exchange') ORDER BY created_at LIMIT 1`, team, root.Authority.Kind, root.Authority.ID, claimant.Capability.Subject.Kind, claimant.Capability.Subject.ID, observation.Award.Kind, observation.Award.ID, observation.Award.Holder, observation.Award.Generation).Scan(&prefix)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -39,14 +50,9 @@ func (s *Store) recordLauncherStartup(ctx context.Context, authority capability.
 		if err != nil {
 			return err
 		}
-		if award.Parent == nil || *award.Parent != root.Authority || award.Subject != claimant.Capability.Subject || award.Unit != observation.Award.Kind || award.UnitID != observation.Award.ID || award.Binding.Holder != observation.Award.Holder {
+		if Team(award.Team) != team || award.Parent == nil || *award.Parent != root.Authority || award.Subject != claimant.Capability.Subject || award.Unit != observation.Award.Kind || award.UnitID != observation.Award.ID || award.Binding.Holder != observation.Award.Holder {
 			return bindingRefusal()
 		}
-		unit, err := decodeAwardUnit(observation.Award.Kind, observation.Award.ID)
-		if err != nil {
-			return err
-		}
-		team := Team(award.Team)
 		if err := lockStateRunTx(ctx, tx, team, string(unit.RunID)); err != nil {
 			return err
 		}
@@ -59,13 +65,11 @@ func (s *Store) recordLauncherStartup(ctx context.Context, authority capability.
 		for rows.Next() {
 			var body []byte
 			if err := rows.Scan(&body); err != nil {
-				_ = rows.Close()
-				return err
+				return errors.Join(err, rows.Close())
 			}
 			var receipt cloudStartupReceipt
 			if err := json.Unmarshal(body, &receipt); err != nil {
-				_ = rows.Close()
-				return err
+				return errors.Join(err, rows.Close())
 			}
 			if receipt.Award == observation.Award && receipt.Startup.PodUID == incoming.PodUID {
 				prior = &receipt.Startup
@@ -73,8 +77,7 @@ func (s *Store) recordLauncherStartup(ctx context.Context, authority capability.
 			}
 		}
 		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 		if err := rows.Close(); err != nil {
 			return err

@@ -87,3 +87,43 @@ func TestLauncherReportsOwnedPodStartup(t *testing.T) {
 		t.Fatalf("owned pod startup missing: %s", body)
 	}
 }
+
+func TestLauncherStopsProbingAStartedPreboundPod(t *testing.T) {
+	l, kube, _, _ := fixture()
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	pods, err := kube.CoreV1().Pods(l.Config.Namespace).List(t.Context(), metav1.ListOptions{})
+	if err != nil || len(pods.Items) != 1 {
+		t.Fatalf("pods=%+v %v", pods, err)
+	}
+	pod := pods.Items[0].DeepCopy()
+	now := metav1.Now()
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "run-node", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: now}}}}
+	if err := kube.Tracker().Add(pod); err != nil {
+		t.Fatal(err)
+	}
+	event := &corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: "pulled", Namespace: pod.Namespace}, InvolvedObject: corev1.ObjectReference{Kind: "Pod", UID: pod.UID, FieldPath: "spec.containers{run-node}"}, Reason: "Pulled", FirstTimestamp: now}
+	if _, err := kube.CoreV1().Events(pod.Namespace).Create(t.Context(), event, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		n := 0
+		for _, a := range kube.Actions() {
+			if a.GetVerb() == "list" && a.GetResource().Resource == "events" {
+				n++
+			}
+		}
+		return n
+	}
+	before := count()
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if before != 1 || count() != before {
+		t.Fatalf("started prebound Pod keeps polling image events: before=%d after=%d", before, count())
+	}
+}

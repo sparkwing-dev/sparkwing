@@ -18,7 +18,7 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 	l.mu.Lock()
 	prior := l.startupObserved[pod.UID]
 	l.mu.Unlock()
-	if prior.ScheduledAt != nil && prior.ImagePulledAt != nil && prior.ContainerStartedAt != nil {
+	if prior.ImagePulledAt != nil && prior.ContainerStartedAt != nil {
 		return
 	}
 	timing := capability.PodStartup{PodUID: string(pod.UID)}
