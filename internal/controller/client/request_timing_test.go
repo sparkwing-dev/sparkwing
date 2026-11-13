@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -123,7 +123,7 @@ func TestSlowControllerResponsePhasesWithoutCollector(t *testing.T) {
 		var records []otelutil.OperationTiming
 		ctx := otelutil.WithTimingObserver(t.Context(), func(timing otelutil.OperationTiming) { records = append(records, timing) })
 		review, err := NewRunReview(EngineOptions{URL: "https://controller.example/private-token", Bearer: func(context.Context) (string, error) { time.Sleep(time.Second); return "private-bearer", nil }, HTTP: &http.Client{Transport: engineTransport(func(*http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: 204, Header: make(http.Header), Body: io.NopCloser(slowControllerBody{})}, nil
+			return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(slowControllerBody{})}, nil
 		})}})
 		if err != nil {
 			t.Fatal(err)

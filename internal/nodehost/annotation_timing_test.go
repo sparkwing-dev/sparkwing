@@ -3,7 +3,6 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -61,7 +61,7 @@ func TestAnnotationTimingIncludesFreshAuthorizationAndAcknowledgement(t *testing
 		if err == nil {
 			_, _ = io.Copy(io.Discard, response.Body)
 			err = response.Body.Close()
-			if response.StatusCode != 200 {
+			if response.StatusCode != http.StatusOK {
 				t.Errorf("annotation status %d", response.StatusCode)
 			}
 		}

@@ -11,6 +11,7 @@ import (
 )
 
 type annotationObservationKey struct{}
+
 type annotationObservation struct {
 	mu   sync.Mutex
 	sink func(otelutil.OperationTiming)

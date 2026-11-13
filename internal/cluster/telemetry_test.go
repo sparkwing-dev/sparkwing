@@ -42,7 +42,7 @@ func TestRunnerExportsAndFlushesConfiguredTracing(t *testing.T) {
 					exported.Write(body)
 					mu.Unlock()
 					w.Header().Set("Content-Type", "application/x-protobuf")
-					w.WriteHeader(200)
+					w.WriteHeader(http.StatusOK)
 				}))
 				defer collector.Close()
 				t.Setenv("SPARKWING_TEST_TELEMETRY_HELPER", "1")
