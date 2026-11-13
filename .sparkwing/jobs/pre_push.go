@@ -58,7 +58,7 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 		return err
 	}
 	if !hook || len(updates) > 0 {
-		affectedPushTestsJobNode(plan, false).Needs(fast)
+		affectedPushTestsJobNode(plan).Needs(fast)
 	}
 	return nil
 }
@@ -152,12 +152,8 @@ type affectedPushTestsJob struct {
 	Checks *queuedChecks
 }
 
-func affectedPushTestsJobNode(plan *sparkwing.Plan, queued bool, checks ...*queuedChecks) *sparkwing.JobNode {
-	j := &affectedPushTestsJob{queued: queued}
-	if len(checks) > 0 && checks[0] != nil {
-		j.Checks, j.Head = checks[0], checks[0].Head
-	}
-	return sparkwing.Job(plan, "affected-tests", j).
+func affectedPushTestsJobNode(plan *sparkwing.Plan) *sparkwing.JobNode {
+	return sparkwing.Job(plan, "affected-tests", &affectedPushTestsJob{}).
 		Timeout(affectedPushTestsTimeout).
 		NoProgressTimeout(affectedPushTestsTimeout).
 		Cores(float64(goStepParallelism(affectedPushHost())))
