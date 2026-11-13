@@ -26,6 +26,12 @@ func NewManagedUnitManager(host crontimer.Host) (ManagedUnitManager, error) {
 	}
 	host.Home, host.SparkwingHome = filepath.Clean(host.Home), filepath.Clean(host.SparkwingHome)
 	host.Env = maps.Clone(host.Env)
+	if host.Env == nil {
+		host.Env = make(map[string]string)
+	}
+	if host.Env["SPARKWING_SECRETS_KEY_FILE"] == "" {
+		host.Env["SPARKWING_SECRETS_KEY_FILE"] = filepath.Join(host.SparkwingHome, "secrets.key")
+	}
 	logPath, err := LogPath(host.SparkwingHome)
 	if err != nil {
 		return nil, err
@@ -226,6 +232,9 @@ func (m *nativeUnits) Refresh(ctx context.Context, executable, version string) e
 	body, err = unitfile.RewriteCommand(m.host.GOOS, body, append([]string{executable}, unit.Arguments...), version)
 	if err == nil {
 		body, err = unitfile.RewriteWorkingDirectory(m.host.GOOS, body, m.host.SparkwingHome)
+	}
+	if err == nil {
+		body, err = unitfile.PinEnvironment(m.host.GOOS, body, "SPARKWING_SECRETS_KEY_FILE", m.host.Env["SPARKWING_SECRETS_KEY_FILE"])
 	}
 	if err != nil {
 		return err

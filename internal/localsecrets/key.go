@@ -1,7 +1,6 @@
 // Package localsecrets keeps this machine's secrets in the local runs store,
-// sealed with the controller's cipher under a key that lives in the user
-// config directory rather than in SPARKWING_HOME, so a copied or backed-up
-// state.db carries only ciphertext.
+// sealed with the controller's cipher under a private key belonging to its
+// SPARKWING_HOME. Existing default homes retain their user-config key.
 //
 // The controller that owns the local store seals and opens its secrets through
 // this package. Clients use its API instead of opening the store.
@@ -17,11 +16,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -32,8 +32,7 @@ const (
 	// previousKeyEnv carries a retired key that values may still be sealed
 	// under, until `sparkwing secrets rotate` reseals them.
 	previousKeyEnv = "SPARKWING_SECRETS_PREVIOUS_KEY"
-	// KeyFileEnv names the key file in place of secrets.key in the config
-	// directory.
+	// KeyFileEnv selects a key file instead of the home-local default.
 	KeyFileEnv = "SPARKWING_SECRETS_KEY_FILE"
 
 	keyFileName = "secrets.key"
@@ -45,14 +44,42 @@ const (
 // machine has no secrets key yet.
 var errNoKey = errors.New("no local secrets key")
 
-// keyPath reports where this machine's secrets key file lives:
-// $SPARKWING_SECRETS_KEY_FILE when set, else secrets.key in the sparkwing
-// config directory.
-func keyPath() (string, error) {
+// KeyPath resolves the selected key file for home. An empty home uses the
+// process's SPARKWING_HOME. Existing default homes retain their config key;
+// other homes never fall back to that key. An explicit KeyFileEnv wins.
+func KeyPath(home string) (string, error) {
 	if v := os.Getenv(KeyFileEnv); v != "" {
-		return v, nil
+		return filepath.Abs(v)
 	}
-	return fssecure.ConfigFile(keyFileName)
+	if home == "" {
+		p, err := paths.DefaultPaths()
+		if err != nil {
+			return "", err
+		}
+		home = p.Root
+	}
+	home, err := filepath.Abs(home)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(home, keyFileName)
+	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+		return path, nil
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if home == filepath.Join(userHome, ".sparkwing") {
+		legacy, err := fssecure.ConfigFile(keyFileName)
+		if err != nil {
+			return "", err
+		}
+		if _, err := os.Lstat(legacy); !errors.Is(err, fs.ErrNotExist) {
+			return legacy, nil
+		}
+	}
+	return path, nil
 }
 
 // errNoKeyToCreate reports a seal in a process that may not create the
@@ -61,6 +88,8 @@ var errNoKeyToCreate = errors.New("no local secrets key")
 
 // KeyringOptions choose how [LoadKeyring] treats this process.
 type KeyringOptions struct {
+	// Home selects the store home. Empty uses the process's SPARKWING_HOME.
+	Home string
 	// Create lets the first seal create the key file. Only the process that
 	// owns the machine's store may create it.
 	Create bool
@@ -70,11 +99,12 @@ type KeyringOptions struct {
 // comes from [keyEnv] or the key file; a keyring with neither creates the
 // file on its first seal when [KeyringOptions.Create] allows it.
 type Keyring struct {
-	path      string
-	fromEnv   bool
-	mayCreate bool
-	previous  []byte
-	restore   string
+	path                string
+	fromEnv             bool
+	mayCreate           bool
+	previous            []byte
+	restore             string
+	unselectedConfigKey string
 
 	mu     sync.Mutex
 	cipher *secrets.Cipher
@@ -83,7 +113,7 @@ type Keyring struct {
 // LoadKeyring reads the key from [keyEnv], or from the key file when the
 // variable is unset; a missing file is not an error.
 func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
-	path, err := keyPath()
+	path, err := KeyPath(opts.Home)
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +126,20 @@ func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 		return nil, err
 	}
 	k := &Keyring{path: path, previous: previous, fromEnv: current != nil, mayCreate: opts.Create}
+	if os.Getenv(KeyFileEnv) == "" && current == nil {
+		legacy, err := fssecure.ConfigFile(keyFileName)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Lstat(legacy); legacy != path && !errors.Is(err, fs.ErrNotExist) {
+			k.unselectedConfigKey = legacy
+		}
+	}
+
 	if current == nil {
 		current, err = readKeyFile(path)
 		if err != nil {
-			return nil, err
+			return nil, k.keyFailure(err)
 		}
 	}
 	if current == nil {
@@ -124,7 +164,7 @@ func NewStoreKeyring(path string, previous []byte, restore string) (*Keyring, er
 	k := &Keyring{path: path, previous: previous, mayCreate: true, restore: restore}
 	current, err := readKeyFile(path)
 	if err != nil {
-		return nil, err
+		return nil, k.keyFailure(err)
 	}
 	if current != nil {
 		if k.cipher, err = newCipher(current, previous); err != nil {
@@ -210,8 +250,11 @@ func (k *Keyring) loaded() (*secrets.Cipher, error) {
 		return k.cipher, nil
 	}
 	key, err := readKeyFile(k.path)
-	if err != nil || key == nil {
-		return nil, err
+	if err != nil {
+		return nil, k.keyFailure(err)
+	}
+	if key == nil {
+		return nil, nil
 	}
 	if k.cipher, err = newCipher(key, k.previous); err != nil {
 		return nil, err
@@ -239,16 +282,10 @@ func (k *Keyring) ensure(ctx context.Context, st *store.Operator) (*secrets.Ciph
 			"local secret with `sparkwing secrets set`, which starts the daemon; if the daemon runs with %s, "+
 			"set it for this process too%.0w", errNoKeyToCreate, k.path, keyEnv, secrets.ErrKeyRefused)
 	}
-	// safety: a store keyring's file sits beside the database the process
-	// already writes, so only the machine key in the config directory is guarded.
-	if k.restore == "" {
-		if err := configguard.GuardWrite("the local secrets key", KeyFileEnv, k.path); err != nil {
-			return nil, fmt.Errorf("%w%.0w", err, secrets.ErrKeyRefused)
-		}
-	}
+
 	key, err := k.create()
 	if err != nil {
-		return nil, err
+		return nil, k.keyFailure(err)
 	}
 	if k.cipher, err = newCipher(key, k.previous); err != nil {
 		return nil, err
@@ -346,8 +383,25 @@ func (k *Keyring) missingLocked(ctx context.Context, st *store.Operator) error {
 		return fmt.Errorf("%w: the secrets store holds values sealed under a key this process does not have, "+
 			"so it will not create a new one at %s. %s%.0w", errNoKey, k.path, k.restore, secrets.ErrKeyRefused)
 	}
-	return fmt.Errorf("%w: the local secrets store holds values sealed under a key this process does not have, "+
-		"so it will not create a new one. Restore that key to %s, or set %s to it (base64 of its 32 bytes) "+
-		"in the environment the sparkwing daemon starts in, then run `sparkwing daemon restart`%.0w",
-		errNoKey, k.path, keyEnv, secrets.ErrKeyRefused)
+	return k.keyFailure(fmt.Errorf("%w: the local secrets store already holds sealed values, so it will not create a replacement key", errNoKey))
+}
+
+func (k *Keyring) keyFailure(err error) error {
+	return fmt.Errorf("%w%.0w", k.openFailure(err), secrets.ErrKeyRefused)
+}
+
+func (k *Keyring) openFailure(err error) error {
+	source := k.path
+	if k.fromEnv {
+		source = keyEnv
+	}
+	repair := "restore the key that sealed this home's data or set " + KeyFileEnv + " to its file"
+	if k.unselectedConfigKey != "" {
+		selected := k.unselectedConfigKey
+		if strings.ContainsAny(selected, " \t\r\n'\"\\$`;&|<>()*?[]{}!#~") {
+			selected = "'" + strings.ReplaceAll(selected, "'", `'\''`) + "'"
+		}
+		repair += "; this home no longer falls back to the shared config key " + k.unselectedConfigKey + "; if that key sealed this home's data, restore access with " + KeyFileEnv + "=" + selected
+	}
+	return fmt.Errorf("local secrets key %s: %w; %s", source, err, repair)
 }

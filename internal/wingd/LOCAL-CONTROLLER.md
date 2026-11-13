@@ -23,7 +23,10 @@ the handoff stopped. It starts no fallback controller because the managed unit
 may already be active. These checks establish activation and successor identity,
 not the service manager's process ancestry.
 The private native service definition retains the installing caller's home,
-configuration paths and secrets-key file selector. Installation refuses keys
+configuration paths and secrets-key file selector. Generated and refreshed
+units always pin the selector. New homes use their own `secrets.key`, created
+owner-only at first seal. The default home retains an existing config key;
+redirected homes do not borrow it. Installation refuses keys
 supplied by value and asks for `SPARKWING_SECRETS_KEY_FILE`. Relative
 configuration and key-file paths become absolute before installation. Startup,
 login activation and forced restart therefore open the same configured key.

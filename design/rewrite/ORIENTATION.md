@@ -242,6 +242,7 @@ Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckM
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| New local homes create private keys at first seal; explicit selectors and the default home's existing config key remain stable, and failed opens name the selected key | `internal/localsecrets/key.go`: `KeyPath`, `Keyring.ensure`; `cipher.go`: `Cipher.OpenBound` | `internal/localsecrets/key_test.go`: `TestKeyringNewHomesCreateTheirOwnKeys`, `TestKeyringDefaultHomeKeepsLegacyConfigKey`, `TestKeyringOpenFailureNamesSelectedKey`; `cmd/sparkwing/local_restart_secrets_test.go`: `TestLocalControllerKeySetupRefusalRetainsConfigurationRepair` |
 | Which secrets a run receives (decisions 66, 68, 70) | `binding_secret.go`: `runSecretSelection` | `secret_selection_test.go`; `internal/controller/secrets_encryption_test.go`: `TestSecrets_AssertedRunReadsOnlySharedSecrets` |
 | Optional secret declarations survive checkout planning and plan acceptance | `internal/nodehost/checkout_planning.go`: `PrepareCheckout`; `plan_seal.go`: `preparePlanSealTx` | `internal/nodehost/owner_secret_preflight_test.go`: `TestCheckoutSecretOptionalitySurvivesPlanAcceptance` |
 | Optional declared secrets unavailable to the run read as missing and undeclared names remain refused | `binding_secret.go`: `bindingSecretTx` | `internal/controller/optional_secret_test.go`: `TestSecrets_OptionalUnavailableReadsAreMissing` |

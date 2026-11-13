@@ -210,10 +210,21 @@ func TestKeyring_PreviousKeyOpensWhatTheOldKeySealed(t *testing.T) {
 	}
 	sealRow(t, old, st, "TOKEN", "abc")
 
+	bound, err := old.SealBound(secrets.PurposeSetting, "", "saved", "settings", false, true, "old-value")
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv(keyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, secrets.KeySize)))
 	t.Setenv(previousKeyEnv, base64.StdEncoding.EncodeToString(oldKey))
 	if got, err := openRow(t, loadRing(t).For(st.AsOperator()), st, "TOKEN"); err != nil || got != "abc" {
 		t.Errorf("opened %q, %v under the previous key; want abc", got, err)
+	}
+	c := loadRing(t).For(st.AsOperator())
+	if _, err := c.OpenBoundCurrent(secrets.PurposeSetting, "", "saved", "settings", false, true, bound); err == nil || errors.Is(err, secrets.ErrKeyRefused) {
+		t.Fatalf("current-key miss prevents rotation fallback: %v", err)
+	}
+	if got, err := c.OpenBound(secrets.PurposeSetting, "", "saved", "settings", false, true, bound); err != nil || got != "old-value" {
+		t.Fatalf("previous-key fallback: %q, %v", got, err)
 	}
 }
 
@@ -299,5 +310,123 @@ func TestKeyring_OnlyACreatingProcessMakesTheKey(t *testing.T) {
 	sealRow(t, loadRing(t).For(st.AsOperator()), st, "TOKEN", "abc")
 	if got, err := openRow(t, ring.For(st.AsOperator()), st, "TOKEN"); err != nil || got != "abc" {
 		t.Fatalf("the non-creating process opened %q, %v once the key existed; want abc", got, err)
+	}
+}
+
+func TestKeyringOpenFailureNamesSelectedKey(t *testing.T) {
+	st := openStore(t)
+	keyFileIn(t, t.TempDir())
+	original := loadRing(t).For(st.AsOperator())
+	legacy, err := original.Seal("private-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := original.SealBound(secrets.PurposeSecret, "local", "TOKEN", "", true, true, "private-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := keyFileIn(t, t.TempDir())
+	if err := os.WriteFile(path, bytes.Repeat([]byte{9}, secrets.KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrong := loadRing(t).For(st.AsOperator())
+	for _, open := range []func() (string, error){
+		func() (string, error) { return wrong.Open(legacy) },
+		func() (string, error) {
+			return wrong.OpenBound(secrets.PurposeSecret, "local", "TOKEN", "", true, true, bound)
+		},
+		func() (string, error) {
+			return wrong.OpenBoundCurrent(secrets.PurposeSecret, "local", "TOKEN", "", true, true, bound)
+		},
+	} {
+		_, err := open()
+		if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), KeyFileEnv) || strings.Contains(err.Error(), "private-value") {
+			t.Fatalf("key failure lost its private repair: %v", err)
+		}
+	}
+}
+
+func TestKeyringNewHomesCreateTheirOwnKeys(t *testing.T) {
+	user := t.TempDir()
+	t.Setenv("HOME", user)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
+	t.Setenv(KeyFileEnv, "")
+	t.Setenv(keyEnv, "")
+	t.Setenv(previousKeyEnv, "")
+	legacyPath := filepath.Join(user, "config", "sparkwing", "secrets.key")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacyKey := bytes.Repeat([]byte{7}, secrets.KeySize)
+	if err := os.WriteFile(legacyPath, legacyKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var keys [][]byte
+	for range 2 {
+		home := t.TempDir()
+		t.Setenv("SPARKWING_HOME", home)
+		sealed, err := loadRing(t).For(nil).Seal("private-value")
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(home, "secrets.key")
+		key, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("new home did not create its own key: %v", err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(key) != secrets.KeySize || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 || bytes.Equal(key, legacyKey) {
+			t.Fatal("new home reused a key or created a nonprivate key")
+		}
+		if got, err := loadRing(t).For(nil).Open(sealed); err != nil || got != "private-value" {
+			t.Fatalf("existing home did not reopen: %q, %v", got, err)
+		}
+		unchanged, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(key, unchanged) {
+			t.Fatalf("existing home changed its key: %v", err)
+		}
+		keys = append(keys, key)
+	}
+	if bytes.Equal(keys[0], keys[1]) {
+		t.Fatal("separate homes share a key")
+	}
+	unchanged, err := os.ReadFile(legacyPath)
+	if err != nil || !bytes.Equal(unchanged, legacyKey) {
+		t.Fatalf("changed legacy key: %v", err)
+	}
+}
+
+func TestKeyringDefaultHomeKeepsLegacyConfigKey(t *testing.T) {
+	user := t.TempDir()
+	t.Setenv("HOME", user)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
+	t.Setenv("SPARKWING_HOME", filepath.Join(user, ".sparkwing"))
+	t.Setenv(KeyFileEnv, "")
+	t.Setenv(keyEnv, "")
+	t.Setenv(previousKeyEnv, "")
+	path := filepath.Join(user, "config", "sparkwing", "secrets.key")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	key := bytes.Repeat([]byte{4}, secrets.KeySize)
+	if err := os.WriteFile(path, key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := secrets.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := old.Seal("existing-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := loadRing(t).For(nil).Open(sealed); err != nil || got != "existing-value" {
+		t.Fatalf("existing default home lost its key: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(user, ".sparkwing", "secrets.key")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("migrated existing key: %v", err)
 	}
 }
