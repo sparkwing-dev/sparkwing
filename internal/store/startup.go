@@ -37,7 +37,8 @@ func (s *Store) recordLauncherStartup(ctx context.Context, authority capability.
 		if err != nil {
 			return err
 		}
-		// safety: fast Pods can finish before the launcher polls; diagnostics require the exact historical award owned by this live launcher.
+		// safety: fast Pods can finish before the launcher polls; diagnostics still require
+		// the exact historical award owned by this live launcher.
 		var prefix string
 		err = tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND parent_kind=? AND parent_id=? AND subject_kind=? AND subject_id=? AND unit_kind=? AND unit_id=? AND bind_holder=? AND COALESCE(eval_unit_generation,bind_generation)=? AND issuance IN ('award','exchange') ORDER BY created_at LIMIT 1`, team, root.Authority.Kind, root.Authority.ID, claimant.Capability.Subject.Kind, claimant.Capability.Subject.ID, observation.Award.Kind, observation.Award.ID, observation.Award.Holder, observation.Award.Generation).Scan(&prefix)
 		if errors.Is(err, sql.ErrNoRows) {
