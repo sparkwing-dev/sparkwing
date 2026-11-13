@@ -80,7 +80,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		defer close(cancelDone)
 		if k.WaitCancellation != nil {
 			if requested := k.WaitCancellation(unit); requested != nil {
-				trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, "", "wait")
+				trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, captureNote{cancelSource: "wait"})
 				cancel(requested)
 			}
 		}
@@ -119,7 +119,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			if err != nil {
 				outcome, code = "error", renewalErrorCode(err)
 			}
-			trace.capture("renewal_finish", time.Time{}, time.Time{}, outcome, 0, code, "")
+			trace.capture("renewal_finish", time.Time{}, time.Time{}, outcome, 0, captureNote{errorCode: code})
 			if unit.Err() != nil {
 				return
 			}
@@ -138,11 +138,11 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 						expires, serverWall = server, beat.ExpiresAt.Round(0)
 					}
 				}
-				trace.emit("expiry_selected", time.Time{}, expires, "", 0)
+				trace.capture("expiry_selected", time.Time{}, expires, "", 0, captureNote{wallBound: !serverWall.IsZero()})
 				if beat.CancelRequested {
 					// safety: recording before the watcher handoff keeps its reset from contending
 					// with this record, and the record still precedes the cancellation it reports.
-					trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, "", "renewal")
+					trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, captureNote{cancelSource: "renewal"})
 				}
 				if expired() {
 					hardCancel(ErrSilent)

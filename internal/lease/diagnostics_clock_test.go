@@ -258,3 +258,83 @@ func TestKeeperRecordsCancellationRequestsBeforeActing(t *testing.T) {
 		})
 	}
 }
+
+func TestKeeperMarksExpiriesTheServerWallBounds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		diagnostics, recorded := collectDiagnostics(t)
+		start := time.Now()
+		beats := []Beat{{ExpiresAt: start.Add(30 * time.Second).Round(0)}, {}, {ExpiresAt: start.Add(time.Hour).Round(0)}}
+		calls := 0
+		renewed := make(chan int)
+		keeper := Keeper{
+			Lease: time.Minute, Interval: 10 * time.Second, Diagnostics: diagnostics, Identity: Identity{Role: "OWNER", Run: "r"},
+			Renew: func(context.Context) (Beat, error) {
+				quietStart(&calls)
+				return beats[calls-1], nil
+			},
+			Observe: func(Beat) { renewed <- calls },
+		}
+		_, stop := keeper.Run(t.Context())
+		for range beats {
+			<-renewed
+		}
+		synctest.Wait()
+		all := recorded.all()
+		stop()
+		var marks []bool
+		for _, event := range ofKind(all, "expiry_selected") {
+			marks = append(marks, event.ExpiresWallBound)
+		}
+		// safety: only the first selection is the server's expiry; an absent or later one leaves the local bound.
+		if len(marks) != 3 || !marks[0] || marks[1] || marks[2] {
+			t.Fatalf("expiry_selected wall-bound marks=%v in %+v", marks, all)
+		}
+		if resets := ofKind(all, "watch_reset"); len(resets) == 0 || !resets[0].ExpiresWallBound {
+			t.Fatalf("first watch_reset lacks the wall-bound mark: %+v", resets)
+		}
+	})
+}
+
+func TestKeeperStopsWithoutRenewingAfterResumeWithNetworkDown(t *testing.T) {
+	// safety: after a resume the wall clock is past the server expiry while renewals fail
+	// transiently, so the loop must stop at its top or post-renewal check instead of retrying
+	// until the monotonic expiry.
+	for _, phase := range []string{"before renewal", "during renewal"} {
+		t.Run(phase, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				var skew atomic.Int64
+				calls := 0
+				renewed := make(chan struct{}, 1)
+				keeper := Keeper{
+					Lease: time.Minute, Interval: 10 * time.Second,
+					wall: func() time.Time { return time.Now().Add(time.Duration(skew.Load())) },
+					Renew: func(context.Context) (Beat, error) {
+						calls++
+						if calls == 1 {
+							return Beat{ExpiresAt: start.Add(30 * time.Second).Round(0)}, nil
+						}
+						if phase == "during renewal" {
+							skew.Store(int64(time.Minute))
+						}
+						return Beat{}, &apierr.Error{Code: hosterr.Unavailable}
+					},
+					Observe: func(Beat) { renewed <- struct{}{} },
+				}
+				unit, stop := keeper.Run(t.Context())
+				defer stop()
+				<-renewed
+				want := 2
+				if phase == "before renewal" {
+					skew.Store(int64(time.Minute))
+					want = 1
+				}
+				<-unit.Done()
+				// safety: both phases must stop at the 10 s wake itself, not one renewal interval later.
+				if !errors.Is(context.Cause(unit), ErrSilent) || calls != want || time.Since(start) != 10*time.Second {
+					t.Fatalf("cause=%v renewals=%d after %v, want ErrSilent after %d at 10s", context.Cause(unit), calls, time.Since(start), want)
+				}
+			})
+		})
+	}
+}

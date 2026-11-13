@@ -76,7 +76,11 @@ type Event struct {
 	OriginMonoAfter  int64 `json:"origin_mono_after_ns,omitempty"`
 	// The *Mono offsets restate targets on the origin's monotonic clock. Each is absent when its
 	// target carries no monotonic reading, as a wall-only deadline does.
-	ExpiresMono           int64 `json:"expires_mono_ns,omitempty"`
+	ExpiresMono int64 `json:"expires_mono_ns,omitempty"`
+	// ExpiresWallBound marks an expiry the renewal loop also enforces on the wall clock, because it
+	// came from the server. Such a lease ends no later than ExpiresMono and earlier after a forward
+	// wall-clock step; an unmarked expiry is purely monotonic.
+	ExpiresWallBound      bool  `json:"expires_wall_bound,omitempty"`
 	DeadlineMono          int64 `json:"deadline_mono_ns,omitempty"`
 	ExecutionDeadlineMono int64 `json:"execution_deadline_mono_ns,omitempty"`
 }
@@ -215,7 +219,7 @@ type keeperTrace struct {
 	sequence, renewal                          uint64
 	sent, expires, deadline, executionDeadline time.Time
 	deadlineMono, executionDeadlineMono        int64
-	inFlight                                   bool
+	inFlight, wallBound                        bool
 	lost                                       atomic.Uint64
 	lostAtOpen                                 atomic.Uint64
 	delivered                                  atomic.Uint64
@@ -238,12 +242,17 @@ func (d *Diagnostics) start(ctx context.Context, identity Identity) *keeperTrace
 }
 
 func (t *keeperTrace) emit(kind string, sent, expires time.Time, outcome string, watchRenewal uint64) uint64 {
-	return t.capture(kind, sent, expires, outcome, watchRenewal, "", "")
+	return t.capture(kind, sent, expires, outcome, watchRenewal, captureNote{})
 }
 
 // safety: capture never waits; between a cutoff and the next open it records nothing, and still
 // updates keeper state when it wins the trace lock.
-func (t *keeperTrace) capture(kind string, sent, expires time.Time, outcome string, watchRenewal uint64, errorCode, cancelSource string) uint64 {
+type captureNote struct {
+	errorCode, cancelSource string
+	wallBound               bool
+}
+
+func (t *keeperTrace) capture(kind string, sent, expires time.Time, outcome string, watchRenewal uint64, note captureNote) uint64 {
 	if t == nil {
 		return 0
 	}
@@ -272,6 +281,9 @@ func (t *keeperTrace) capture(kind string, sent, expires time.Time, outcome stri
 	if kind == "renewal_finish" {
 		t.inFlight = false
 	}
+	if kind == "expiry_selected" {
+		t.wallBound = note.wallBound
+	}
 	if !expires.IsZero() {
 		t.expires = expires
 	}
@@ -285,7 +297,7 @@ func (t *keeperTrace) capture(kind string, sent, expires time.Time, outcome stri
 	before := time.Since(t.diagnostics.origin).Nanoseconds()
 	wall := time.Now().UTC()
 	after := time.Since(t.diagnostics.origin).Nanoseconds()
-	e := Event{WatchRenewal: t.watchRenewal, BootID: t.diagnostics.boot, Platform: runtime.GOOS, ProcessBirth: t.diagnostics.birth, IdentityComplete: t.diagnostics.birth != "" && (runtime.GOOS != "linux" || t.diagnostics.boot != ""), ClockOrigin: t.diagnostics.origin.UTC(), Identity: t.identity, Instance: t.instance, PID: os.Getpid(), Sequence: t.sequence, Dropped: t.lost.Load(), Kind: kind, MonoBefore: before, Wall: wall, MonoAfter: after, Sent: t.sent, ExpiresAt: t.expires, Deadline: t.deadline, ExecutionDeadline: t.executionDeadline, Renewal: t.renewal, InFlight: t.inFlight, Outcome: outcome, ErrorCode: errorCode, CancelSource: cancelSource, ExpiresMono: monoOffset(t.diagnostics.origin, t.expires), DeadlineMono: t.deadlineMono, ExecutionDeadlineMono: t.executionDeadlineMono}
+	e := Event{WatchRenewal: t.watchRenewal, BootID: t.diagnostics.boot, Platform: runtime.GOOS, ProcessBirth: t.diagnostics.birth, IdentityComplete: t.diagnostics.birth != "" && (runtime.GOOS != "linux" || t.diagnostics.boot != ""), ClockOrigin: t.diagnostics.origin.UTC(), Identity: t.identity, Instance: t.instance, PID: os.Getpid(), Sequence: t.sequence, Dropped: t.lost.Load(), Kind: kind, MonoBefore: before, Wall: wall, MonoAfter: after, Sent: t.sent, ExpiresAt: t.expires, Deadline: t.deadline, ExecutionDeadline: t.executionDeadline, Renewal: t.renewal, InFlight: t.inFlight, Outcome: outcome, ErrorCode: note.errorCode, CancelSource: note.cancelSource, ExpiresMono: monoOffset(t.diagnostics.origin, t.expires), ExpiresWallBound: t.wallBound, DeadlineMono: t.deadlineMono, ExecutionDeadlineMono: t.executionDeadlineMono}
 	e.OriginMonoBefore, e.OriginMonoAfter = originBracket()
 	select {
 	case <-t.diagnostics.done:

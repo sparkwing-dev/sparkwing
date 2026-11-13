@@ -64,8 +64,10 @@ the expiry and the inherited deadlines as offsets from the same origin. Each is
 absent when its target has only a wall time, as an inherited deadline decoded
 from a Cloud award does. The keeper holds a server-supplied expiry on the
 monotonic clock and still enforces the server's wall expiry, stopping at
-whichever comes first, so `expires_mono_ns` bounds when it stops. A forward
-wall-clock step, such as one after a host suspend, can end the lease earlier.
+whichever comes first. It therefore stops no later than `expires_mono_ns`.
+`expires_wall_bound: true` marks an expiry that came from the server, which a
+forward wall-clock step, such as one after a host suspend, can end earlier. An
+unmarked expiry is purely monotonic.
 A failed renewal's `renewal_finish` carries `error_code`: the wire error code,
 or `unclassified` when the error has none. It never carries the message. A
 `cancel_requested` record, with `cancel_source` set to `renewal` or `wait`, is
