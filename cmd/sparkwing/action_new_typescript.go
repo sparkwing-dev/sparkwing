@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-const typeScriptSDKVersion = "0.72.3"
+const typeScriptSDKVersion = "0.72.4"
 
 func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode string) error {
 	name := inv.Value("pipeline")

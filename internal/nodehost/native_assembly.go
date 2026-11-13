@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -170,11 +171,28 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		return NativeServices{}, err
 	}
 	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
-	logs := &localLogs{principal: cfg.Principal, upload: cfg.Logs, masker: masker, run: run.Run.ID}
+	logs := &localLogs{diagnosticReady: make(chan struct{}), principal: cfg.Principal, upload: cfg.Logs, masker: masker, run: run.Run.ID}
 	if cfg.Principal.Capability.Unit != capability.UnitNode {
 		logs.bind(cfg.Principal, 0)
 	}
+	diagnostics := lease.NewDiagnostics(ctx, func(delivery context.Context, event lease.Event) error {
+		select {
+		case <-delivery.Done():
+			return delivery.Err()
+		case <-logs.diagnosticReady:
+		}
+		raw, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		node := ""
+		if cfg.Principal.Capability.Unit == capability.UnitNode {
+			node = cfg.Principal.Capability.Binding.NodeID
+		}
+		return logs.write(delivery, run.Run.ID, node, nodewire.FrameLog{TS: event.Wall.Format(time.RFC3339Nano), Level: "debug", Event: "lease_keeper", Attrs: raw})
+	})
 	closeResources = func() error {
+		diagnostics.Close()
 		logs.finish(ctx, "")
 		// State transitions already committed. Keep bearer transports alive for the bounded tail.
 		logs.flushes.Wait()
@@ -222,7 +240,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	follower := stateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	debug := storeDebugBoundary{store: cfg.Store, follower: follower}
 	config := NativeHostConfig{
-		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
+		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Diagnostics: diagnostics, Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
 		Validation: nodeproto.ValidationContext{Placement: store.RequestPlacement(run.Run.Request.Request)},
 		Admission:  cfg.Admission,
