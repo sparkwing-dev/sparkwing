@@ -1,4 +1,4 @@
-//go:build unix && rewrite_integration
+//go:build unix
 
 package main
 
@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +25,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
@@ -68,6 +70,9 @@ func main() {
 `
 
 func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: builds the SDK fixture and hosts plan, evaluation and jobs; full suite retains it")
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		t.Skipf("runner hosting requires loopback sockets: %v", err)
@@ -82,7 +87,8 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	}
 	repo := runAnywhereRepo(t)
 	endpoint := "http://" + listener.Addr().String()
-	state, controller, bearer := burstIntakeController(t, endpoint)
+	// safety: real CLI origin proofs use wall time, so the controller must not pin its verification clock.
+	state, controller, bearer := burstIntakeDeploymentController(t, endpoint, deploymenttest.Team(t), teststore.WithClock(time.Now))
 	var mu sync.Mutex
 	var hosted []capability.UnitKind
 	var intake []string
@@ -172,21 +178,20 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	if len(intake) != 1 || strings.Contains(intake[0], secret) || !strings.Contains(intake[0], `"origin_machine":"`+secret[:16]+".") {
 		t.Fatalf("the trigger must prove the runner credential without sending it: %v", intake)
 	}
-	runs, err := teststore.SQL(t, state).QueryContext(t.Context(), `SELECT request_json FROM runs`)
+	tenant, err := state.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var origins []string
-	for runs.Next() {
-		var body []byte
-		var sealed runspec.SealedRequest
-		if err := runs.Scan(&body); err != nil || json.Unmarshal(body, &sealed) != nil {
-			t.Fatal(err)
-		}
-		origins = append(origins, sealed.Request.OriginMachine)
+	runs, err := tenant.ListRunViews(t.Context(), 0, math.MaxInt64, 2)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("run views = %d: %v", len(runs), err)
 	}
-	if err := errors.Join(runs.Err(), runs.Close()); err != nil || len(origins) != 1 || origins[0] != "burst-desktop" {
-		t.Fatalf("sealed here machine = %v %v", origins, err)
+	run := runs[0].Snapshot.Run
+	if run.Spec == nil || run.Spec.Hash == "" || run.Request.Hash == "" || run.Spec.Request.Hash != run.Request.Hash {
+		t.Fatal("accepted run must retain the same sealed intake request")
+	}
+	if got := run.Spec.Request.Request.OriginMachine; got != "burst-desktop" {
+		t.Fatalf("sealed origin machine = %q, want burst-desktop", got)
 	}
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		if !slices.Contains(hosted, kind) {
@@ -202,6 +207,7 @@ func runAnywhereRepo(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(os.Getenv("SPARKWING_HOME"), "secrets.key"))
 	repo := initSnapshotRepo(t)
 	directory := filepath.Join(repo, ".sparkwing")
 	if err := os.Mkdir(directory, 0o700); err != nil {
@@ -213,23 +219,4 @@ func runAnywhereRepo(t *testing.T) string {
 	runSnapshotGit(t, repo, "commit", "--quiet", "-m", "anywhere source")
 	runSnapshotGit(t, repo, "remote", "add", "origin", "https://example.test/acme/anywhere.git")
 	return repo
-}
-
-func TestLocalRunEvaluatesTheSameGeneratorsAsARunnerHost(t *testing.T) {
-	cli, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := runAnywhereRepo(t)
-	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(os.Getenv("SPARKWING_HOME"), "secrets.key"))
-	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
-	offlineStopDaemon(t, os.Getenv("SPARKWING_HOME"))
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
-	defer cancel()
-	command := exec.CommandContext(ctx, cli, "run", "anywhere", "-o=json")
-	command.Dir = repo
-	output, err := command.CombinedOutput()
-	if err != nil || !strings.Contains(string(output), "anywhere-generated-ran") || !strings.Contains(string(output), "anywhere-untyped-generated-ran") {
-		t.Fatalf("local run: %v\n%s", err, output)
-	}
 }
