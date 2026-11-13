@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -266,11 +267,7 @@ func flattenOneLine(s string) string {
 	if s == "" {
 		return ""
 	}
-	const maxLen = 80
-	if len(s) > maxLen {
-		s = strings.TrimSpace(s[:maxLen-1]) + "…"
-	}
-	return s
+	return opsview.DisplayText(s, 80)
 }
 
 func summarizePipelineTriggers(t pipelines.Triggers) string {

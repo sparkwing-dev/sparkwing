@@ -20,6 +20,124 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.72.8] - 2026-11-13
+
+### Added
+
+- **orchestrator:** Record lease keeper timing in structured run logs
+  OWNER and NODE traces expose renewal timing, effective expiry and watcher resets
+  through existing run-log permissions. Human log views hide these best-effort
+  diagnostics; JSON retains them and identifies dropped records. Diagnostic bytes
+  share real-output cuts or the final seal instead of starting upload timers.
+
+### Fixed
+
+- **runner:** Prevent intermittent pipeline failures when a job finishes during a state refresh
+
+
+- **runner + test harness:** Fail attempts when command-session cleanup fails
+  The host retains session-capture and cancellation cleanup failures through
+  Close, even if an SDK step returns success. Command results keep the observed
+  exit code, signal and output using the existing published SDK fields.
+  Test hosts also preserve completed command results when their adapter fails.
+  `start_error` stays reserved for commands that never started. Already-gone
+  sessions remain successful. The queued-land cancellation fixture accepts Linux
+  terminal states Z, X and x, retains its live-process assertion and reports
+  process birth, group, session and step-error diagnostics on failure.
+
+
+- **cli:** Completion hints and documentation listings keep complete UTF-8 characters
+  Long pipeline hints, documentation titles and documentation or migration summaries
+  use the shared terminal-safe display limits. JSON retains the full source fields.
+
+
+- **Example pipeline:** Allow two minutes for the simulated deploy job and its controller reporting acknowledgements
+  The previous 30-second job deadline could expire while an annotation was awaiting acknowledgement on a loaded host. Apply and rollout still wait for their reports to finish, and a stalled job remains bounded.
+
+
+- **runner:** Report stopped claim intake while held work drains
+  Fatal claim failures immediately degrade runner readiness and log an error,
+  with periodic warnings and the remaining held-unit count. Valid held work
+  keeps running and the runner exits after it finishes.
+
+
+- **delivery:** Check root release builds against the published Go SDK before landing
+  Full and affected gates, pre-push and merge rechecks compile the CLI, controller
+  and runner against the published pin without the workspace or an SDK replacement.
+  Per-land checks cover the host plus linux/arm64, sharing their compiler allowance.
+  Full Gate and nightly checks cover all six release OS/architecture targets. Package-owned Markdown inputs also select this check,
+  including deletions. Local SDK APIs can no
+  longer hide an unpublished dependency. Publish the standalone SDK change and
+  bump the root pin before using its new API.
+
+
+- **release:** Reuse the shared per-package deadline for broad short tests
+  Local release cuts use the same bounded 25-minute package policy as the land
+  gate, rather than Go's ten-minute default. Existing concurrency and the
+  release job deadline remain unchanged.
+
+
+- **land:** Keep reviewer prompts valid UTF-8 without hiding text changes
+  Text-like patches escape invalid bytes and literal backslashes with a decoding
+  rule. Binary summaries identify unreviewed content, exact blobs, modes, sizes
+  and SHA-256 hashes, with safe inspection commands and an inspection requirement
+  before approval. Binary summaries block independently of model output and
+  cached verdicts. Only non-strict, non-executable files without a shebang and
+  with a known asset extension remain summary-only: png, jpg, jpeg, gif, webp,
+  ico, svgz, woff, woff2, ttf, otf, pdf, zip, gz and tgz. There is no override for
+  that block; `--skip` refuses it. Raw Git filenames, including colons, match
+  strict routes literally. Finding locations bind to the longest changed filename
+  before numeric line/column parsing, preserving filenames with numeric colons.
+  Open findings with unmatched or malformed locations block and cannot be skipped,
+  including cached verdicts. Strict review includes both endpoints of renames and copies from a NUL-delimited name-status inventory,
+  preserving raw filenames. Strict profile selection happens in Go from one
+  complete patch: raw filename bytes never cross JSON command arguments. A
+  changed file with no rendered patch blocks independently of model output or
+  cached verdicts, including ordinary assets; `--skip` cannot clear that block.
+  Restored coverage must reach the reviewers before an earlier pass can be reused.
+  Repository diff attributes cannot suppress readable text changes. Ordinary UTF-8
+  text hunks keep their bytes, and truncation respects character boundaries.
+
+
+- **CLI:** Preserve UTF-8 rune boundaries in Spark resolver-error summaries
+  Pretty output applies the shared display limit before a multibyte character can be split. JSON keeps the full original error.
+
+
+- **runner:** Retire the standalone local runner before closing its controller
+  Standalone runs no longer leave a supervised runner waiting on a controller that has already exited.
+  Stop retries against the same controller keep waiting for the retiring process after it enters draining.
+
+
+- **tests:** Ordinary test runs keep native user service managers untouched
+  Workflow fixtures use a test-only unmanaged runner backend. Managed-service
+  qualification requires an explicit opt-in in a quiet window.
+
+
+- **sdk:** Republish the TypeScript SDK as 0.72.4 after the release input set changed
+  Existing signed entries keep their recorded digests. New TypeScript pipelines
+  pin 0.72.4.
+
+
+- **release:** Keep unit-only TypeScript SDK edits out of release decisions
+  Hosted and pre-tag checks include tracked SDK inputs by default, including new
+  paths and automatically packed files such as LICENSE. Known unit tests,
+  examples and unpublished notes
+  no longer force SDK version bumps. The entire nativehost fixture tree remains
+  included because Windows publication runs it and records it in receipts.
+  Adopting the narrower input set changes existing digests and needs a new SDK
+  version once. Recoveries of pre-change entries also refuse the new hash;
+  published policy entries are unchanged.
+
+### Security
+
+- **delivery:** Bind queued landing checks to the merged owner tree
+  Policy, fast checks, review and affected tests run on the merged owner
+  checkout and record their checked tree. Verification and push refuse missing,
+  failed or mismatched check receipts, so a passing pre-merge snapshot cannot
+  authorize a different tree. Queued review uses its pinned main SHA and owner
+  checkout instead of relying on a worker clone's remote-tracking refs.
+  Standalone review also requires a matching base before reusing a cached verdict.
+
 ## [v0.72.7] - 2026-11-12
 
 ### Changed

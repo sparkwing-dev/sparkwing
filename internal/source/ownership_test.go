@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestGitAcquisitionHasOneOwner(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {

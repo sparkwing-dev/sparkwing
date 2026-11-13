@@ -13,6 +13,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestEveryTestPackageRunsInsideTheSandbox(t *testing.T) {
 	root := moduleRoot(t)
 	dirs := map[string][]string{}

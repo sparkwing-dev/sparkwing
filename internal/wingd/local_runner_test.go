@@ -370,3 +370,35 @@ func TestControllerStopRetiresAnActivatingSuccessorAndRefusesLaterOnes(t *testin
 		}
 	})
 }
+
+func TestControllerStopRetryWaitsForPersistedDrainingRunner(t *testing.T) {
+	birth, err := admissionProcessBirth(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+		fixture := &runnerSetFixture{instances: map[string]localhostwire.LocalRunnerInstance{
+			"held": {ID: "held", PID: os.Getpid(), ProcessBirth: birth, State: "active"},
+		}}
+		d.cfg.Runs = fixture
+		for attempt := 1; attempt <= 2; attempt++ {
+			response := httptest.NewRecorder()
+			d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(response, controllerHTTPRequest(t, http.MethodPost, "drain?runner=retire", "", true))
+			if fixture.state("held") != "draining" {
+				t.Fatal("drain did not persist before timeout")
+			}
+			if response.Code != http.StatusInternalServerError {
+				t.Fatalf("stop attempt %d closed controller with live draining runner: %d %s", attempt, response.Code, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), "held") {
+				t.Fatalf("stop attempt %d lost runner identity: %s", attempt, response.Body.String())
+			}
+			select {
+			case <-d.quit:
+				t.Fatalf("stop attempt %d closed controller before runner exit", attempt)
+			default:
+			}
+		}
+	})
+}

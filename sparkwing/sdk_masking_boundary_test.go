@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestSDKHasNoMaskerOrAutomaticRegistration(t *testing.T) {
 	var files []string
 	if err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {

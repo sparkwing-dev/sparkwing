@@ -117,6 +117,7 @@ func TestMigrationGuidanceUsesSealedRunIntake(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")

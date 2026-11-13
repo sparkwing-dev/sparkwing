@@ -509,6 +509,9 @@ func (s *protocolSession) deliverProtocolReply(reply nodewire.Reply) error {
 }
 
 func (s *protocolSession) attributeProtocolLog(log nodewire.FrameLog) nodewire.FrameLog {
+	if log.Event == "lease_keeper" {
+		log.Event = "sdk_lease_keeper"
+	}
 	if log.Step == "" {
 		return log
 	}

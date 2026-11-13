@@ -20,15 +20,17 @@ import (
 )
 
 type localLogs struct {
-	mu        sync.Mutex
-	flushes   sync.WaitGroup
-	run       string
-	masker    *secrets.Masker
-	principal capability.Principal
-	nodes     map[string]capability.Principal
-	upload    func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
-	streams   map[string]*localLogStream
-	closed    bool
+	diagnosticReady chan struct{}
+	diagnosticBound sync.Once
+	mu              sync.Mutex
+	flushes         sync.WaitGroup
+	run             string
+	masker          *secrets.Masker
+	principal       capability.Principal
+	nodes           map[string]capability.Principal
+	upload          func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
+	streams         map[string]*localLogStream
+	closed          bool
 }
 
 type logHostStore struct {
@@ -127,7 +129,7 @@ type localLogStream struct {
 	closed  bool
 }
 
-func (s *localLogStream) write(ctx context.Context, body []byte) error {
+func (s *localLogStream) write(ctx context.Context, body []byte, diagnostic bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -143,6 +145,9 @@ func (s *localLogStream) write(ctx context.Context, body []byte) error {
 		if s.failed {
 			s.sink.MarkIncomplete()
 		}
+	}
+	if diagnostic {
+		return s.sink.AppendDiagnostic(body)
 	}
 	return s.sink.Append(body)
 }
@@ -177,8 +182,11 @@ func (l *localLogs) bind(p capability.Principal, attempt int64) {
 		l.nodes[node] = p
 		l.mu.Unlock()
 	}
-	if _, err := l.open(node); err != nil {
+	if _, err := l.open(node, true); err != nil {
 		l.alert(node, err)
+	}
+	if l.diagnosticReady != nil {
+		l.diagnosticBound.Do(func() { close(l.diagnosticReady) })
 	}
 }
 
@@ -242,7 +250,7 @@ func (u *logUpload) PutManifest(ctx context.Context, manifest logseg.Manifest) e
 	return up.PutManifest(ctx, manifest)
 }
 
-func (l *localLogs) open(node string) (*localLogStream, error) {
+func (l *localLogs) open(node string, create bool) (*localLogStream, error) {
 	p, subject, err := l.subject(node)
 	if err != nil {
 		return nil, err
@@ -261,6 +269,9 @@ func (l *localLogs) open(node string) (*localLogStream, error) {
 	}
 	stream := l.streams[string(key)]
 	if stream == nil {
+		if !create {
+			return nil, logseg.ErrClosed
+		}
 		stream = &localLogStream{subject: subject, upload: &logUpload{open: func(ctx context.Context) (logseg.Uploader, error) { return l.upload(ctx, p, subject) }}}
 		l.streams[string(key)] = stream
 	}
@@ -274,19 +285,29 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	if run != l.run || l.masker == nil {
 		return errors.New("local logs require the awarded run and shared masker")
 	}
-	stream, err := l.open(node)
+	stream, err := l.open(node, frame.Event != "lease_keeper")
 	if errors.Is(err, logseg.ErrClosed) {
+		if frame.Event == "lease_keeper" {
+			return err
+		}
 		l.alert(node, err)
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(l.masker.Log(frame))
+	// safety: The host stamp survives masking and is never decoded from SDK protocol frames.
+	body, err := json.Marshal(struct {
+		nodewire.FrameLog
+		LeaseKeeper bool `json:"host_lease_keeper,omitempty"`
+	}{l.masker.Log(frame), frame.Event == "lease_keeper"})
 	if err != nil {
 		return err
 	}
-	if err := stream.write(ctx, body); err != nil {
+	if err := stream.write(ctx, body, frame.Event == "lease_keeper"); err != nil {
+		if frame.Event == "lease_keeper" {
+			return err
+		}
 		l.alert(node, err)
 	}
 	return nil

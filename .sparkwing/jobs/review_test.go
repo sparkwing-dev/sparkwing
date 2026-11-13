@@ -80,8 +80,8 @@ func TestRepositoryReviewPolicyParses(t *testing.T) {
 		{"docs/admission.md", ".review.yaml"},
 		{},
 	} {
-		if got := p.defaultModel(mixed); got != "codex-sol" {
-			t.Errorf("%v routes to %q, want codex-sol", mixed, got)
+		if want := p.Reviewers[defaultReviewer].Model; p.defaultModel(mixed) != want {
+			t.Errorf("%v routes to %q, want the default reviewer %q", mixed, p.defaultModel(mixed), want)
 		}
 	}
 }

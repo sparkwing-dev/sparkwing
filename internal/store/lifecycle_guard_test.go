@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestLifecycleGuard_StatusLiteralsStayCanonical(t *testing.T) {
 	root := moduleRoot(t)
 	storeSrc := storePackageSource(t)

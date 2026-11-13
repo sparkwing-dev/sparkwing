@@ -19,6 +19,7 @@ var allowed = map[string]bool{
 
 var ansiPattern = regexp.MustCompile(`\\033\[|\\x1b\[`)
 
+//sparkwing:critical
 func TestNoRawANSIOutsideAllowed(t *testing.T) {
 	root := moduleRoot(t)
 	var offenders []string

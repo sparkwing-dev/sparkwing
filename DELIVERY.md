@@ -235,6 +235,24 @@ not an aggregate CPU cap: seven test processes can each use seven Go execution
 threads, besides compiler and nested subprocess work. The job reports package
 counts, critical-test counts, failures, package timings and test timings.
 
+Repository-scanning source guards carry the existing `//sparkwing:critical`
+tag because their filesystem reads are absent from the import graph. Every Go
+input change, including a test in another committed module, runs the named Git
+fixture, source ownership, ANSI, SQL ownership, configuration-directory,
+environment documentation, source-hint, SDK documentation, SDK boundary and SDK sandbox guards
+without `-short`. The guard inventory and its cross-module selection are pinned
+by `TestAffectedTestsAlwaysSelectRepositoryScanningGuards`; an unsafe unrelated
+Git fixture is exercised by
+`TestAffectedTestsRejectUnsafeGitInUnrelatedTestPackages`. These tags share the
+existing critical phase and deadline. Documentation-only selection is unchanged.
+
+Measured on 2026-11-12, 13 guard bodies excluding the SDK documentation guards
+summed to 5.54 seconds in one shared-host run. The eight-package command for the 11 root guards took
+81.09 seconds wall and 137.45 seconds CPU, including compilation and waited
+children, at load1 13.2-17.5. The two SDK guards ran with `-race` in 5.75 seconds
+wall and 4.40 seconds CPU. These mixed-cache command timings do not measure
+incremental Land latency. The critical-size guard counts all committed modules.
+
 The shared affected-test runner sets nonempty `GOFLAGS=-mod=readonly` for
 selection and execution. This overrides process and saved flags while keeping
 other saved Go settings, including `GOPROXY`, `GOPRIVATE` and `GONOSUMDB`.
@@ -1457,6 +1475,17 @@ file. Other syntax and workflow checks remain active.
   private fixture homes, fake HTTP transports and a private in-process daemon,
   not Docker containers or managed user services. Other packages' tagged
   `rewrite_integration` suites remain outside this coverage claim.
+  The CLI’s `TestRunAnywhereRunnerHostsPlanEvaluationAndJobs` is also an
+  ordinary Unix test. Full Gate and nightly/dispatch full suites run its
+  personal-runner plan, evaluation, generated jobs and sealed-origin assertions
+  without a build tag. Short-mode affected and release tests visibly skip this
+  SDK-build case; it uses the unmanaged test backend and manager PATH guards,
+  so no native service-qualification window is needed. Its fixture selects a
+  private key file and a live controller clock for the real CLI’s signed origin
+  proof. Other CLI integration cases retain their existing tags.
+  On a shared Linux host its repaired test body took 37.05 seconds, including
+  SDK fixture preparation and actual CLI/runner subprocess execution. This is
+  an observed full-test cost, not a new deadline or an end-to-end gate budget.
   On a shared Linux host, these cases took 4.81 seconds of an 11.56-second
   cluster suite; a warm-cache command took 15.02 seconds wall time. Cold
   compilation of the baseline cluster suite took 202.90 seconds including
