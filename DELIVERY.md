@@ -1445,6 +1445,17 @@ file. Other syntax and workflow checks remain active.
   private fixture homes, fake HTTP transports and a private in-process daemon,
   not Docker containers or managed user services. Other packages' tagged
   `rewrite_integration` suites remain outside this coverage claim.
+  The CLI’s `TestRunAnywhereRunnerHostsPlanEvaluationAndJobs` is also an
+  ordinary Unix test. Full Gate and nightly/dispatch full suites run its
+  personal-runner plan, evaluation, generated jobs and sealed-origin assertions
+  without a build tag. Short-mode affected and release tests visibly skip this
+  SDK-build case; it uses the unmanaged test backend and manager PATH guards,
+  so no native service-qualification window is needed. Its fixture selects a
+  private key file and a live controller clock for the real CLI’s signed origin
+  proof. Other CLI integration cases retain their existing tags.
+  On a shared Linux host its repaired test body took 37.05 seconds, including
+  SDK fixture preparation and actual CLI/runner subprocess execution. This is
+  an observed full-test cost, not a new deadline or an end-to-end gate budget.
   On a shared Linux host, these cases took 4.81 seconds of an 11.56-second
   cluster suite; a warm-cache command took 15.02 seconds wall time. Cold
   compilation of the baseline cluster suite took 202.90 seconds including
