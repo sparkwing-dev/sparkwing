@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -67,6 +68,7 @@ type Daemon struct {
 	draining           bool
 	runnerWake         runnerWake
 	runnerChanges      runnerGate
+	retiringRunner     *localhostwire.LocalRunnerInstance
 	shuttingDown       bool
 	localActivity      LocalActivity
 	dashboardConns     int

@@ -53,7 +53,7 @@ be combined with `--sw-detached`.
 
 For standalone CI, `--sw-allow-unadmitted` starts an exclusive in-process
 controller. It stays available through the here claim, execution and log
-following, then shuts down before the command returns. It cannot detach or
+following, retires its supervised local runner, then shuts down before the command returns. It cannot detach or
 share a home with another running controller.
 
 ```sh

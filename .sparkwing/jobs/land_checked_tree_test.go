@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 func TestQueuedLandRequiresTheCheckedTreeBeforePushing(t *testing.T) {
@@ -41,7 +43,7 @@ func TestQueuedLandRequiresTheCheckedTreeBeforePushing(t *testing.T) {
 	if count := strings.TrimSpace(gitOutput(t, snapshot, "rev-list", "--count", "HEAD")); count != "1" {
 		t.Fatal(count)
 	}
-	if _, err := exec.Command("git", "-C", snapshot, "rev-parse", "--verify", "origin/main").CombinedOutput(); err == nil {
+	if _, err := testgit.Command("git", "-C", snapshot, "rev-parse", "--verify", "origin/main").CombinedOutput(); err == nil {
 		t.Fatal("probe unexpectedly has origin/main")
 	}
 	t.Chdir(snapshot)

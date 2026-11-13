@@ -601,7 +601,9 @@ A sparks library can list others in its manifest `dependencies`. This is
 informational - actual Go module resolution happens through the library's
 own `go.mod`. `spark lint` checks that each entry has a `source` and a
 `version`; nothing else reads the list. `sparkwing pipeline sparks list`
-renders the consumer's `sparks:` block, not library manifests.
+renders the consumer's `sparks:` block, not library manifests. Pretty output
+shows a bounded, escaped resolver-error summary without splitting UTF-8 runes.
+JSON retains the complete original resolver error.
 
 ## Non-goals
 

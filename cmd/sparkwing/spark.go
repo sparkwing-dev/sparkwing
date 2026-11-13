@@ -147,10 +147,7 @@ func shortErr(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
-	if len(s) > 60 {
-		s = s[:57] + "..."
-	}
-	return s
+	return opsview.DisplayText(s, 60)
 }
 
 type sparkManifest struct {
