@@ -59,6 +59,9 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if unit.Kind == ManagedController && (!strings.Contains(string(body), "SPARKWING_SECRETS_KEY_FILE") || !strings.Contains(string(body), filepath.Join(host.SparkwingHome, "secrets.key"))) {
+					t.Fatalf("unit did not pin its home key: %s", body)
+				}
 				if unit.Kind == ManagedController {
 					if goos == "darwin" {
 						if err := xml.Unmarshal(body, new(struct{})); err != nil {
@@ -77,8 +80,10 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 				}
 				if unit.Kind == ManagedController {
 					if goos == "linux" {
+						body = []byte(strings.Replace(string(body), "Environment=SPARKWING_SECRETS_KEY_FILE="+filepath.Join(host.SparkwingHome, "secrets.key")+"\n", "", 1))
 						body = []byte(strings.Replace(string(body), "WorkingDirectory="+unitfile.SystemdWord(host.SparkwingHome)+"\n", "", 1))
 					} else {
+						body = []byte(strings.Replace(string(body), "<key>SPARKWING_SECRETS_KEY_FILE</key><string>"+unitfile.XMLText(filepath.Join(host.SparkwingHome, "secrets.key"))+"</string>\n", "", 1))
 						body = []byte(strings.Replace(string(body), "<key>WorkingDirectory</key><string>"+unitfile.XMLText(host.SparkwingHome)+"</string>\n", "", 1))
 					}
 					if err := os.WriteFile(unit.Name, body, 0o600); err != nil {
@@ -113,6 +118,9 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 			directory := "WorkingDirectory=" + unitfile.SystemdWord(host.SparkwingHome) + "\n"
 			if goos == "darwin" {
 				directory = "<key>WorkingDirectory</key><string>" + unitfile.XMLText(host.SparkwingHome) + "</string>"
+			}
+			if !strings.Contains(string(body), "SPARKWING_SECRETS_KEY_FILE") {
+				t.Fatalf("refresh did not pin the controller key: %s", body)
 			}
 			if !strings.Contains(string(body), directory) {
 				t.Fatalf("refresh did not upgrade existing controller directory: %s", body)

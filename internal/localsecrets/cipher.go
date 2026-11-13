@@ -2,7 +2,6 @@ package localsecrets
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -33,7 +32,11 @@ func (c *Cipher) Open(envelope string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return inner.Open(envelope)
+	plain, err := inner.Open(envelope)
+	if err != nil {
+		return "", c.ring.openFailure(err)
+	}
+	return plain, nil
 }
 
 func (c *Cipher) SealBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error) {
@@ -49,7 +52,11 @@ func (c *Cipher) OpenBound(purpose secrets.Purpose, team, name, scope string, sh
 	if err != nil {
 		return "", err
 	}
-	return inner.OpenBound(purpose, team, name, scope, shared, masked, envelope)
+	plain, err := inner.OpenBound(purpose, team, name, scope, shared, masked, envelope)
+	if err != nil {
+		return "", c.ring.openFailure(err)
+	}
+	return plain, nil
 }
 
 func (c *Cipher) OpenBoundCurrent(purpose secrets.Purpose, team, name, scope string, shared, masked bool, envelope string) (string, error) {
@@ -57,7 +64,11 @@ func (c *Cipher) OpenBoundCurrent(purpose secrets.Purpose, team, name, scope str
 	if err != nil {
 		return "", err
 	}
-	return inner.OpenBoundCurrent(purpose, team, name, scope, shared, masked, envelope)
+	plain, err := inner.OpenBoundCurrent(purpose, team, name, scope, shared, masked, envelope)
+	if err != nil {
+		return "", c.ring.openFailure(err)
+	}
+	return plain, nil
 }
 
 func (c *Cipher) opener() (*secrets.Cipher, error) {
@@ -66,7 +77,7 @@ func (c *Cipher) opener() (*secrets.Cipher, error) {
 		return nil, err
 	}
 	if inner == nil {
-		return nil, fmt.Errorf("%w: restore the existing local secrets key before retrying%.0w", errNoKey, secrets.ErrKeyRefused)
+		return nil, c.ring.keyFailure(errNoKey)
 	}
 	return inner, nil
 }

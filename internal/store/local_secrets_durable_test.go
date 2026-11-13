@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func durableSecretStore(t *testing.T, path string, cipher SessionKeyCipher) *Store {
@@ -251,5 +252,26 @@ func TestDurableLocalSecretsAndObjectKeyRotateTogether(t *testing.T) {
 	reopened, err := s.AsOperator().LocalObjectSigningKey(t.Context(), next)
 	if err != nil || !bytes.Equal(key, reopened) {
 		t.Fatal("rotation changed signing key")
+	}
+}
+
+func TestLocalObjectSigningKeyBlamesTheKeyOnlyForKeyMisses(t *testing.T) {
+	s := durableSecretStore(t, filepath.Join(t.TempDir(), "state.db"), durableSecretCipher(t))
+	if _, err := s.AsOperator().LocalObjectSigningKey(t.Context(), s.localSecretsCipher); err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := secrets.NewCipher(bytes.Repeat([]byte{44}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diagnostic *apierr.Error
+	if _, err := s.AsOperator().LocalObjectSigningKey(t.Context(), foreign); !errors.As(err, &diagnostic) || diagnostic.Code != apierr.BadRequest {
+		t.Fatalf("a signing key sealed under another key lost its key diagnostic: %v", err)
+	}
+	if _, err := s.db.ExecContext(t.Context(), `UPDATE settings SET value=? WHERE key=?`, []byte(secrets.BoundPrefix+"!!!"), metaKeyLocalObjects); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().LocalObjectSigningKey(t.Context(), s.localSecretsCipher); err == nil || errors.As(err, &diagnostic) {
+		t.Fatalf("a corrupt signing key was blamed on the secrets key: %v", err)
 	}
 }

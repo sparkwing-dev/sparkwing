@@ -121,6 +121,13 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 	if err == nil {
 		body, err = unitfile.RewriteWorkingDirectory(h.GOOS, body, h.SparkwingHome)
 	}
+	if err == nil {
+		key := h.Env["SPARKWING_SECRETS_KEY_FILE"]
+		if key == "" {
+			key = filepath.Join(h.SparkwingHome, "secrets.key")
+		}
+		body, err = unitfile.PinEnvironment(h.GOOS, body, "SPARKWING_SECRETS_KEY_FILE", key)
+	}
 	if err != nil {
 		return state, err
 	}

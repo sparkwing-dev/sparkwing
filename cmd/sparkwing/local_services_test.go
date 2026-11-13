@@ -28,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testhome"
 )
 
 func TestLocalServicesRejectInvalidAdmissionBeforeConstruction(t *testing.T) {
@@ -509,5 +510,21 @@ func TestManagedControllerDefinitionKeepsPathsWithoutInlineSecrets(t *testing.T)
 				t.Fatalf("service file permissions: %v, %v", info, err)
 			}
 		})
+	}
+}
+
+func TestManagedControllerPinsTheSelectedHomeKey(t *testing.T) {
+	user := t.TempDir()
+	testhome.Set(t, user)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", "")
+	t.Setenv("SPARKWING_HOME", filepath.Join(user, "ambient-home"))
+	home := filepath.Join(user, "selected-home")
+	host, err := localServiceHost(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := host.Env["SPARKWING_SECRETS_KEY_FILE"]; got != filepath.Join(home, "secrets.key") {
+		t.Fatalf("service selected key %q for home %q", got, home)
 	}
 }

@@ -227,9 +227,22 @@ separate `SPARKWING_HOME`.
 The controller remains running while idle. `sparkwing daemon stop` stops it.
 Linux and macOS support an installed login service through `daemon install`.
 The service retains the installing caller's home, config and secrets-key file
-paths. Use `SPARKWING_SECRETS_KEY_FILE` for a service. Installation refuses
+paths. Every generated systemd or launchd definition pins
+`SPARKWING_SECRETS_KEY_FILE`, including definitions upgraded by a machine
+update. Installation refuses
 `SPARKWING_SECRETS_KEY` and `SPARKWING_SECRETS_PREVIOUS_KEY` values because native
 service definitions are not secret stores. Reinstall after changing those paths.
+A new home creates `$SPARKWING_HOME/secrets.key` on its first seal, including
+controller startup, with mode `0600`. Separate homes create separate keys.
+An explicit `SPARKWING_SECRETS_KEY_FILE` still selects that file. An existing
+`~/.sparkwing` home's existing config-directory key wins over a home-local
+key when no selector is set. A redirected home never falls back to that config key. If an older
+redirected home used it, set `SPARKWING_SECRETS_KEY_FILE` to its existing file
+before restarting. A wrong or missing key names the selected file and this
+override. A malformed sealed value fails without a key repair.
+Preserve the key with the home's backups. A home holding sealed data without
+its key refuses to replace it.
+
 Windows supports the foreground controller. Machine updates refresh managed
 controller and schedule units together. See [local dashboard](native-mode.md).
 

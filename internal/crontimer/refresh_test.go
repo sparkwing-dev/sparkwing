@@ -26,6 +26,17 @@ func TestRefreshKeepsCapturedTimerSettings(t *testing.T) {
 				t.Fatal(err)
 			}
 			original := read(t, installed.Path)
+			driver := installed.Path
+			assignment := "    <key>SPARKWING_SECRETS_KEY_FILE</key>\n    <string>" + unitfile.XMLText(filepath.Join(h.SparkwingHome, "secrets.key")) + "</string>\n"
+			if goos == "linux" {
+				driver = filepath.Join(UnitDir(h), h.serviceName())
+				assignment = "Environment=" + unitfile.Assignment("SPARKWING_SECRETS_KEY_FILE", filepath.Join(h.SparkwingHome, "secrets.key")) + "\n"
+			}
+			before := read(t, driver)
+			if err := os.WriteFile(driver, []byte(strings.Replace(before, assignment, "", 1)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
 			e.calls = nil
 			h.Binary = filepath.Join(h.Home, "updated % bin", "sparkwing")
 			h.Version = "v1.2.4"
@@ -51,6 +62,9 @@ func TestRefreshKeepsCapturedTimerSettings(t *testing.T) {
 				}
 			}
 			body := read(t, path)
+			if !strings.Contains(body, "SPARKWING_SECRETS_KEY_FILE") || !strings.Contains(body, filepath.Join(h.SparkwingHome, "secrets.key")) {
+				t.Fatalf("timer did not pin its home key: %s", body)
+			}
 			if !strings.Contains(body, "captured/tools") || !strings.Contains(body, "proxy.example") || strings.Contains(body, "ambient") || strings.Contains(body, "SPARKWING_HOME") || strings.Contains(body, "crons tick") {
 				t.Fatalf("refresh lost captured settings or restored removed plumbing:\n%s", body)
 			}

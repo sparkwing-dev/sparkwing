@@ -283,6 +283,9 @@ func envPairs(h Host) [][2]string {
 		}
 		merged[k] = v
 	}
+	if merged["SPARKWING_SECRETS_KEY_FILE"] == "" {
+		merged["SPARKWING_SECRETS_KEY_FILE"] = filepath.Join(h.SparkwingHome, "secrets.key")
+	}
 	pairs := make([][2]string, 0, len(merged))
 	for _, k := range slices.Sorted(maps.Keys(merged)) {
 		pairs = append(pairs, [2]string{k, merged[k]})

@@ -28,6 +28,11 @@ const boundAADLabel = "sparkwing/secret/v3\x00"
 // client instead of masking it as an internal error.
 var ErrKeyRefused = errors.New("secrets key refused")
 
+// ErrKeyMismatch marks an envelope that no configured key authenticates: it
+// was sealed under another key, or altered. Malformed envelopes and unknown
+// purposes fail without it, since a different key would not open them either.
+var ErrKeyMismatch = errors.New("no configured key opens the value")
+
 const KeySize = chacha20poly1305.KeySize
 
 // Purpose names the kind of row a bound envelope belongs to and is authenticated with it.
@@ -200,7 +205,7 @@ func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
 			return string(plain), nil
 		}
 	}
-	return "", fmt.Errorf("secrets cipher: open: %w", err)
+	return "", fmt.Errorf("secrets cipher: open: %w%.0w", err, ErrKeyMismatch)
 }
 
 func IsEncrypted(v string) bool {
