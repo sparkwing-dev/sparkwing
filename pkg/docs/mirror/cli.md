@@ -20,7 +20,9 @@ line, with an empty stream for no results. Errors go to stderr.
 
 Human-readable fields quote C0/C1 controls, DEL and bidirectional formatting
 characters as visible escapes. Truncated summaries keep complete UTF-8 runes
-within their byte limit. JSON records retain the original field values.
+within their byte limit. Pipeline completion hints and documentation listing
+titles and summaries use the same escaping and rune-safe limits. JSON records
+retain the original field values.
 Run statistics, schedule and repository metadata, and attributed log searches
 also escape their fields in plain mode.
 Use `runs logs -o plain` for the original log text, including terminal controls.
