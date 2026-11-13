@@ -1,6 +1,6 @@
 {
   "name": "@sparkwing/sdk",
-  "version": "0.72.3",
+  "version": "0.72.4",
   "description": "TypeScript SDK for Sparkwing pipelines",
   "license": "Elastic-2.0",
   "repository": {
