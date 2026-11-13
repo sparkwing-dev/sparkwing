@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
@@ -20,6 +21,7 @@ type NativeProcesses struct {
 	URL         string
 	Session     ProtocolSessionConfig
 	Log         func(context.Context, string, string, nodewire.FrameLog) error
+	Timing      func(string, string, otelutil.OperationTiming)
 }
 
 // Delegate creates fresh service authority and cleanup registrations for one SDK process.
@@ -30,6 +32,9 @@ func (p *NativeProcesses) Delegate(ctx context.Context, parent capability.Creden
 	}
 	services.Masks, services.Cleanups = p.Masks.job(services.RunID, services.Job.ID), &ProcessCleanups{}
 	services.activity = &nativeProcessActivity{}
+	if p.Timing != nil {
+		services.observeTiming = func(timing otelutil.OperationTiming) { p.Timing(services.RunID, services.Job.ID, timing) }
+	}
 	issued, revoke, err := p.Authorities.delegate(ctx, parent, spec, &services)
 	if err != nil {
 		p.Masks.releaseJob(services.RunID, services.Job.ID)

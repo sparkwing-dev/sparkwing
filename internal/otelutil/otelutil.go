@@ -35,6 +35,9 @@ import (
 type Config struct {
 	ServiceName string
 
+	// TracesOnly leaves process logging and metrics untouched.
+	TracesOnly bool
+
 	Version string
 
 	// Prometheus installs a meter provider whose instruments Telemetry.PromHandler
@@ -76,14 +79,17 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	if wrap == nil {
 		wrap = func(h slog.Handler) slog.Handler { return h }
 	}
-	if cfg.Log != (logutil.Options{}) {
-		h, err := cfg.Log.Handler(os.Stderr)
-		if err != nil {
-			return nil, err
+	if !cfg.TracesOnly {
+		if cfg.Log != (logutil.Options{}) {
+			h, err := cfg.Log.Handler(os.Stderr)
+			if err != nil {
+				return nil, err
+			}
+			slog.SetDefault(slog.New(wrap(h)))
+		} else if cfg.WrapLogHandler != nil {
+			slog.SetDefault(slog.New(wrap(configuredHandler())))
 		}
-		slog.SetDefault(slog.New(wrap(h)))
-	} else if cfg.WrapLogHandler != nil {
-		slog.SetDefault(slog.New(wrap(configuredHandler())))
+
 	}
 
 	serviceName := cfg.ServiceName
@@ -103,7 +109,7 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		res = resource.Default()
 	}
 
-	if cfg.Prometheus {
+	if cfg.Prometheus && !cfg.TracesOnly {
 		registry := promclient.NewRegistry()
 		promExporter, err := prometheus.New(prometheus.WithRegisterer(registry))
 		if err != nil {
@@ -135,6 +141,11 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 			t.shutdowns = append(t.shutdowns, tp.Shutdown)
 			log.Printf("otel: traces enabled (OTLP)")
 		}
+	}
+
+	if cfg.TracesOnly {
+		otel.SetTextMapPropagator(propagation.TraceContext{})
+		return t, nil
 	}
 
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != "" {

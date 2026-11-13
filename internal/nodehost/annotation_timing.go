@@ -1,0 +1,84 @@
+package nodehost
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"net/http"
+	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+)
+
+type annotationObservationKey struct{}
+type annotationObservation struct {
+	mu   sync.Mutex
+	sink func(otelutil.OperationTiming)
+	id   string
+}
+
+func (o *annotationObservation) observe(timing otelutil.OperationTiming) {
+	o.mu.Lock()
+	sink := o.sink
+	o.mu.Unlock()
+	if sink != nil {
+		timing.RequestID = o.id
+		sink(timing)
+	}
+}
+
+func traceAnnotation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/node/v1/annotations" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		observation := &annotationObservation{id: rand.Text()}
+		ctx := context.WithValue(r.Context(), annotationObservationKey{}, observation)
+		ctx = otelutil.WithTimingObserver(ctx, observation.observe)
+		ctx, timing := otelutil.StartOperation(ctx, "nodehost.annotation")
+		response := &annotationResponse{ResponseWriter: w, status: 0}
+		defer func() {
+			err := ctx.Err()
+			if response.status >= 400 {
+				err = errors.New("annotation refused")
+			}
+			timing.Finish(err)
+		}()
+		next.ServeHTTP(response, r.WithContext(ctx))
+	})
+}
+
+type annotationResponse struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *annotationResponse) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *annotationResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func withProcessTiming(ctx context.Context, service *ProcessServices) context.Context {
+	if observation, ok := ctx.Value(annotationObservationKey{}).(*annotationObservation); ok {
+		observation.mu.Lock()
+		observation.sink = service.observeTiming
+		observation.mu.Unlock()
+		return ctx
+	}
+	if service.observeTiming != nil {
+		return otelutil.WithTimingObserver(ctx, service.observeTiming)
+	}
+	return ctx
+}
+
+func (w *annotationResponse) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}

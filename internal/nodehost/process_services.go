@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -33,6 +34,7 @@ import (
 type ProcessServices struct {
 	lifetime       context.Context
 	activity       *nativeProcessActivity
+	observeTiming  func(otelutil.OperationTiming)
 	SourceBindings capability.BindingChecker
 	RunID          string
 	Job            nodewire.JobSpec
@@ -302,7 +304,10 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		}
 		body.Message = limits.Record(s.Masks.mask(body.Message))
 		body.File = s.Masks.mask(body.File)
-		return s.Annotation(ctx, auth, body)
+		writeCtx, timing := otelutil.StartOperation(withProcessTiming(ctx, s), "nodehost.annotation_write")
+		err := s.Annotation(writeCtx, auth, body)
+		timing.Finish(err)
+		return err
 	case "/node/v1/summary":
 		var body nodewire.SummaryRequest
 		if err := decodeService(request, &body); err != nil {

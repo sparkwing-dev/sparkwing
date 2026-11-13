@@ -285,9 +285,10 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	if run != l.run || l.masker == nil {
 		return errors.New("local logs require the awarded run and shared masker")
 	}
-	stream, err := l.open(node, frame.Event != "lease_keeper")
+	diagnostic := frame.Event == "lease_keeper" || frame.Event == "request_timing"
+	stream, err := l.open(node, !diagnostic)
 	if errors.Is(err, logseg.ErrClosed) {
-		if frame.Event == "lease_keeper" {
+		if diagnostic {
 			return err
 		}
 		l.alert(node, err)
@@ -299,13 +300,14 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	// safety: The host stamp survives masking and is never decoded from SDK protocol frames.
 	body, err := json.Marshal(struct {
 		nodewire.FrameLog
-		LeaseKeeper bool `json:"host_lease_keeper,omitempty"`
-	}{l.masker.Log(frame), frame.Event == "lease_keeper"})
+		LeaseKeeper   bool `json:"host_lease_keeper,omitempty"`
+		RequestTiming bool `json:"host_request_timing,omitempty"`
+	}{l.masker.Log(frame), frame.Event == "lease_keeper", frame.Event == "request_timing"})
 	if err != nil {
 		return err
 	}
-	if err := stream.write(ctx, body, frame.Event == "lease_keeper"); err != nil {
-		if frame.Event == "lease_keeper" {
+	if err := stream.write(ctx, body, diagnostic); err != nil {
+		if diagnostic {
 			return err
 		}
 		l.alert(node, err)

@@ -17,8 +17,10 @@ import (
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"go.opentelemetry.io/otel/propagation"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -36,11 +38,13 @@ type engineClient struct {
 	launcher bool
 }
 
-func (c *engineClient) request(ctx context.Context, method, pattern, path, key string, input, output any) error {
+func (c *engineClient) request(ctx context.Context, method, pattern, path, key string, input, output any) (resultErr error) {
 	policy, ok := capability.LookupRoute(method, pattern)
 	if !ok {
 		return &apierr.Error{Code: hosterr.PolicyMissing, Message: "controller route has no policy"}
 	}
+	ctx, timing := traceControllerRequest(ctx, method, pattern)
+	defer func() { timing.Phase("rpc.complete"); timing.Finish(resultErr) }()
 	var body []byte
 	if input != nil {
 		var err error
@@ -53,6 +57,8 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 	if err != nil {
 		return fmt.Errorf("create controller request: %w", err)
 	}
+	// safety: propagate trace identity only; baggage can contain arbitrary caller data.
+	(propagation.TraceContext{}).Inject(ctx, propagation.HeaderCarrier(req.Header))
 	req.Header.Set("Accept", "application/json")
 	if claim, ok := input.(controllerwire.ClaimRequest); ok && claim.MaxConcurrent > 0 {
 		req.Header.Set(controllerwire.RunnerMaxConcurrentHeader, strconv.Itoa(claim.MaxConcurrent))
@@ -67,7 +73,9 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		req.Header.Set("Idempotency-Key", key)
 	}
 	if c.bearer != nil {
-		bearer, err := c.bearer(ctx)
+		bearerCtx, bearerTiming := otelutil.StartOperation(ctx, "controller.bearer")
+		bearer, err := c.bearer(bearerCtx)
+		bearerTiming.Finish(err)
 		if err != nil {
 			return err
 		}
@@ -104,6 +112,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		if recoverIntake {
 			wait = time.Duration(1<<attempt) * 100 * time.Millisecond
 		}
+		timing.Phase("http.attempt")
 		resp, requestErr := c.http.Do(req)
 		if requestErr != nil {
 			if !mayRetry || attempt >= retries || ctx.Err() != nil || !RetryableTransportError(requestErr) {
@@ -114,6 +123,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 			}
 		} else {
 			retry, err := c.readResponse(resp, output)
+			timing.Phase("http.response_body_complete")
 			if !mayRetry || attempt >= retries || !retry || ctx.Err() != nil {
 				if err != nil {
 					return fmt.Errorf("controller %s %s: %w", req.Method, req.URL.Path, err)

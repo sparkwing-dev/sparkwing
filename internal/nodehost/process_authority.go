@@ -14,6 +14,7 @@ import (
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -177,13 +178,18 @@ func (a *ProcessAuthorities) Close() error {
 }
 
 // ReadAuthentication joins fresh parent ancestry with this process's in-memory lifetime.
-func (a *ProcessAuthorities) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
+func (a *ProcessAuthorities) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (result capability.AuthenticationSnapshot, resultErr error) {
 	if err := context.Cause(ctx); err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
 	a.mu.RLock()
 	entry := a.live[lookup.Digest]
 	a.mu.RUnlock()
+	if entry != nil {
+		ctx = withProcessTiming(ctx, entry.services)
+	}
+	ctx, timing := otelutil.StartOperation(ctx, "nodehost.parent_auth")
+	defer func() { timing.Finish(resultErr) }()
 	if lookup.Class != capability.CredentialBearer {
 		return capability.AuthenticationSnapshot{}, processUnauthenticated()
 	}
@@ -193,6 +199,7 @@ func (a *ProcessAuthorities) ReadAuthentication(ctx context.Context, lookup capa
 		}
 		return capability.AuthenticationSnapshot{}, processUnauthenticated()
 	}
+
 	snapshot, err := a.deps.Parent.ReadAuthentication(ctx, entry.parent, evidence)
 	if err != nil {
 		return capability.AuthenticationSnapshot{}, err
@@ -234,11 +241,14 @@ func (a *ProcessAuthorities) Resolve(ctx context.Context, authorized capability.
 }
 
 // CheckBinding checks process ownership before consulting the bound resource relations.
-func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
+func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) (resultErr error) {
 	service, err := a.Resolve(ctx, capability.Authorized{Principal: principal, Binding: principal.Capability.Binding})
 	if err != nil {
 		return err
 	}
+	ctx = withProcessTiming(ctx, service)
+	ctx, timing := otelutil.StartOperation(ctx, "nodehost.binding")
+	defer func() { timing.Finish(resultErr) }()
 	binding := principal.Capability.Binding
 	if target.RunID != "" && target.RunID != binding.RunID || target.Team != "" && target.Team != principal.Capability.Team {
 		return processBindingDenied()
