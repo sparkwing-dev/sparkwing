@@ -79,6 +79,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		defer close(cancelDone)
 		if k.WaitCancellation != nil {
 			if requested := k.WaitCancellation(unit); requested != nil {
+				trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, "", "wait")
 				cancel(requested)
 			}
 		}
@@ -103,11 +104,11 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			sent := time.Now()
 			renewal := trace.emit("renewal_start", sent, time.Time{}, "", 0)
 			beat, err := k.Renew(unit)
-			outcome := "success"
+			outcome, code := "success", ""
 			if err != nil {
-				outcome = "error"
+				outcome, code = "error", renewalErrorCode(err)
 			}
-			trace.emit("renewal_finish", time.Time{}, time.Time{}, outcome, 0)
+			trace.capture("renewal_finish", time.Time{}, time.Time{}, outcome, 0, code, "")
 			if unit.Err() != nil {
 				return
 			}
@@ -118,10 +119,20 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			}
 			if err == nil {
 				expires = sent.Add(k.Lease)
-				if !beat.ExpiresAt.IsZero() && beat.ExpiresAt.Before(expires) {
-					expires = beat.ExpiresAt
+				if !beat.ExpiresAt.IsZero() {
+					// safety: restating the decoded wall expiry on the monotonic clock keeps a later
+					// wall-clock step from moving it.
+					now := time.Now()
+					if server := now.Add(beat.ExpiresAt.Sub(now)); server.Before(expires) {
+						expires = server
+					}
 				}
 				trace.emit("expiry_selected", time.Time{}, expires, "", 0)
+				if beat.CancelRequested {
+					// safety: recording before the watcher handoff keeps its reset from contending
+					// with this record, and the record still precedes the cancellation it reports.
+					trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, "", "renewal")
+				}
 				if !expires.After(time.Now()) {
 					hardCancel(ErrSilent)
 					cancel(ErrSilent)
@@ -173,6 +184,15 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		<-cancelDone
 		<-executionDone
 	}
+}
+
+func renewalErrorCode(err error) string {
+	// safety: only the wire code is recorded, because an error message can carry run or user text.
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure != nil && failure.Code != "" {
+		return string(failure.Code)
+	}
+	return "unclassified"
 }
 
 func retryAfter(err error) time.Duration {

@@ -56,6 +56,19 @@ deadlines. A reset retains the originating renewal number even when a newer
 renewal is in flight. All recorders in one process share the same monotonic origin.
 Clock samples pair process-relative monotonic durations with wall time;
 process birth and boot identity indicate whether process identity is complete.
+On Linux, `origin_mono_before_ns` and `origin_mono_after_ns` bracket that shared
+origin on `CLOCK_MONOTONIC`, the clock behind every `mono_*_ns` duration. A
+sample's position on that clock is the bracket plus its duration.
+`expires_mono_ns`, `deadline_mono_ns` and `execution_deadline_mono_ns` restate
+the expiry and the inherited deadlines as offsets from the same origin. Each is
+absent when its target has only a wall time. The keeper moves a server-supplied
+expiry onto the monotonic clock when it arrives, so a later wall-clock step
+cannot move that expiry.
+A failed renewal's `renewal_finish` carries `error_code`: the wire error code,
+or `unclassified` when the error has none. It never carries the message. A
+`cancel_requested` record, with `cancel_source` set to `renewal` or `wait`, is
+captured before the keeper acts on a cancellation request. A complete window
+without one saw no request.
 The records contain no lease bearer or renewal payload.
 
 Delivery is best effort and cannot delay renewal, expiry or stop. Capture never
