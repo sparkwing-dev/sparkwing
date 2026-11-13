@@ -3548,6 +3548,12 @@ components:
             - type: "null"
         number:
           type: integer
+        owner_claims:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.runstate.OwnerClaimTime'
+              type: array
+            - type: "null"
         reason:
           type: string
         retry:
@@ -6741,6 +6747,26 @@ components:
         - ManifestRecord
       type: object
       x-sparkwing-go-type: runstate.NodeRow
+    internal.runstate.OwnerClaimTime:
+      additionalProperties: true
+      properties:
+        awarded_at:
+          format: date-time
+          type: string
+        generation:
+          type: integer
+        job_id:
+          type: string
+        kind:
+          type: string
+        source_generation:
+          type: integer
+      required:
+        - kind
+        - generation
+        - awarded_at
+      type: object
+      x-sparkwing-go-type: runstate.OwnerClaimTime
     internal.runstate.OwnerExecution:
       additionalProperties: true
       properties:

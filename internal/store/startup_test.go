@@ -1,34 +1,37 @@
 package store
 
 import (
-	"bytes"
+	"context"
+	"crypto/rand"
+	"database/sql/driver"
 	"encoding/json"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	modernsqlite "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestOwnerClaimTimeSurvivesLeaseSettlement(t *testing.T) {
 	s, _, claim, now := launcherSnapshotFixture(t, capability.UnitPlan)
+	awardedAt := *now
+	*now = now.Add(time.Second)
+	exchanged, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.Award.CapabilityPrefix = exchanged.Capability.Prefix
 	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 		t.Fatal(err)
 	}
-	var body []byte
-	if err := s.db.QueryRow(`SELECT payload FROM events WHERE team='a' AND run_id='run' AND kind='owner_claimed'`).Scan(&body); err != nil {
-		t.Fatalf("owner claim time unavailable: %v", err)
-	}
-	var receipt struct {
-		Generation int64     `json:"generation"`
-		ClaimedAt  time.Time `json:"claimed_at"`
-	}
-	if err := json.Unmarshal(body, &receipt); err != nil {
+	view, err := (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Generation != int64(claim.Award.Generation) || !receipt.ClaimedAt.Equal(*now) {
-		t.Fatalf("wrong claim receipt: %s", body)
+	if len(view.OwnerClaims) != 1 || view.OwnerClaims[0].Generation != int64(claim.Award.Generation) || !view.OwnerClaims[0].AwardedAt.Equal(awardedAt) {
+		t.Fatalf("wrong owner award timing: %+v", view.OwnerClaims)
 	}
 }
 
@@ -118,25 +121,75 @@ func TestLauncherStartupCanArriveAfterAwardEnds(t *testing.T) {
 	}
 }
 
-func TestOwnerClaimSurvivesTimingWriteFailure(t *testing.T) {
+func TestOwnerClaimNeverWritesDiagnosticEvents(t *testing.T) {
 	s, demand := unitClaimFixture(t)
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER reject_startup_timing BEFORE INSERT ON events WHEN NEW.kind='owner_claimed' BEGIN SELECT RAISE(ABORT,'timing sink unavailable'); END`)
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-	defer slog.SetDefault(previous)
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
-		t.Fatalf("timing failure refused claim: %v", err)
-	}
-	if claim.Award.Generation != 1 {
-		t.Fatalf("claim = %+v", claim)
-	}
-	if !strings.Contains(logs.String(), "Owner claim timing could not be recorded") || !strings.Contains(logs.String(), `"lost_total":1`) {
-		t.Fatalf("timing loss was not logged and counted: %s", &logs)
+		t.Fatal(err)
 	}
 	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
-		t.Fatalf("claim was not committed: %v", err)
+		t.Fatal(err)
+	}
+	view, err := (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
+	if err != nil || len(view.OwnerClaims) != 1 {
+		t.Fatalf("owner timing=%+v error=%v", view.OwnerClaims, err)
+	}
+}
+
+func TestOwnerClaimDeliveryNeverWaitsForDiagnosticSQL(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	function := "mark_owner_receipt_" + strings.ToLower(rand.Text())
+	if err := modernsqlite.RegisterScalarFunction(function, 0, func(*modernsqlite.FunctionContext, []driver.Value) (driver.Value, error) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		return int64(1), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s, demand := unitClaimFixture(t)
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER slow_owner_receipt BEFORE INSERT ON events WHEN NEW.kind='owner_claimed' BEGIN SELECT `+function+`(); SELECT sum(x) FROM (WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT x FROM n); END`)
+	ownerCtx, cancelOwner := context.WithTimeout(t.Context(), 750*time.Millisecond)
+	defer cancelOwner()
+	type result struct {
+		claim UnitClaim
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() { claim, err := s.AsOperator().ClaimUnit(ownerCtx, demand); done <- result{claim, err} }()
+	var first result
+	wroteReceipt := false
+	select {
+	case <-entered:
+		wroteReceipt = true
+	case first = <-done:
+	}
+	node := demand
+	node.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
+	nodeCtx, cancelNode := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	second, secondErr := s.AsOperator().ClaimUnit(nodeCtx, node)
+	cancelNode()
+	if wroteReceipt {
+		first = <-done
+	}
+	if first.err != nil || ownerCtx.Err() != nil {
+		t.Errorf("owner claim was delayed by diagnostic SQL: claim error=%v deadline=%v", first.err, ownerCtx.Err())
+	}
+	if secondErr != nil {
+		t.Errorf("diagnostic SQL blocked a concurrent claim: %v", secondErr)
+	} else if err := s.ReleaseUnit(t.Context(), second, second.Award.CapabilityPrefix); err != nil {
+		t.Errorf("node award unusable: %v", err)
+	}
+	if wroteReceipt {
+		t.Error("execution claim entered a diagnostic write transaction")
+	}
+	if first.err == nil {
+		if err := s.ReleaseUnit(t.Context(), first.claim, first.claim.Award.CapabilityPrefix); err != nil {
+			t.Errorf("owner award unusable: %v", err)
+		}
 	}
 }

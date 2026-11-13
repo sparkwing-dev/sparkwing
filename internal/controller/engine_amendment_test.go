@@ -149,11 +149,11 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 	}
 	engineSQL(t, server.Store, `UPDATE triggers SET generation=generation+1 WHERE id='run'`)
 	events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 10)
-	if err != nil || len(events) != 3 || events[0].Kind != "owner_claimed" || events[1].Kind != "job_claimed" {
+	if err != nil || len(events) != 2 || events[0].Kind != "job_claimed" {
 		t.Fatalf("cancel events: %+v, %v", events, err)
 	}
 	var cancellation runstate.NodeResult
-	if err := json.Unmarshal(events[2].Payload, &cancellation); err != nil || events[2].Kind != "job_cancel_requested" || cancellation.Reason != "user_cancelled" {
+	if err := json.Unmarshal(events[1].Payload, &cancellation); err != nil || events[1].Kind != "job_cancel_requested" || cancellation.Reason != "user_cancelled" {
 		t.Fatalf("cancel reason: %+v, %v", cancellation, err)
 	}
 	if _, err := server.cancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: "user_cancelled"}); err == nil {

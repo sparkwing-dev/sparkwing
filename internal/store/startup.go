@@ -5,9 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"reflect"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -94,26 +92,4 @@ func (s *Store) recordLauncherStartup(ctx context.Context, authority capability.
 		_, err = appendEventTx(ctx, tx, team, string(unit.RunID), string(unit.NodeID), "cloud_startup", cloudStartupReceipt{Award: observation.Award, Unit: unit, Startup: incoming}, tx.now(ctx), false)
 		return err
 	})
-}
-
-// safety: timing storage has its own bounded transaction after the award commits, so
-// even a PostgreSQL statement failure cannot roll back or refuse the execution claim.
-func (s *Store) recordOwnerClaimTime(ctx context.Context, claim UnitClaim, claimedAt time.Time) {
-	writeCtx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	err := s.inTx(writeCtx, func(tx *storeTx) error {
-		if err := lockStateRunTx(writeCtx, tx, claim.Team, claim.RunID); err != nil {
-			return err
-		}
-		_, err := appendEventTx(writeCtx, tx, claim.Team, claim.RunID, claim.NodeID, "owner_claimed", struct {
-			Kind             capability.UnitKind `json:"kind"`
-			Generation       int64               `json:"generation"`
-			SourceGeneration int64               `json:"source_generation,omitempty"`
-			ClaimedAt        time.Time           `json:"claimed_at"`
-		}{claim.Kind, int64(claim.Award.Generation), claim.SourceGeneration, claimedAt}, claimedAt, false)
-		return err
-	})
-	if err != nil {
-		slog.WarnContext(ctx, "Owner claim timing could not be recorded", "kind", claim.Kind, "run", claim.RunID, "lost_total", s.ownerClaimTimingLost.Add(1), "error", err)
-	}
 }

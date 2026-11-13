@@ -32,6 +32,14 @@ type startupObservation struct {
 }
 
 func readStartup(ctx context.Context, logs controllerwire.LogReader, run controllerwire.RunDetail, events []controllerwire.LogRecord) ([]startupObservation, error) {
+	var observations []startupObservation
+	for _, claim := range run.OwnerClaims {
+		if claim.AwardedAt.IsZero() || claim.Generation <= 0 || !slices.Contains([]capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval}, claim.Kind) {
+			continue
+		}
+		at := claim.AwardedAt
+		observations = append(observations, startupObservation{Scope: string(claim.Kind), JobID: claim.JobID, Generation: claim.Generation, SourceGeneration: claim.SourceGeneration, Stage: "claim", At: &at})
+	}
 	if events == nil {
 		var err error
 		events, err = readRunEvents(ctx, logs, run.ID)
@@ -39,22 +47,10 @@ func readStartup(ctx context.Context, logs controllerwire.LogReader, run control
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			return []startupObservation{{Scope: "run", Stage: "startup_unavailable"}}, nil
+			return append(observations, startupObservation{Scope: "run", Stage: "startup_unavailable"}), nil
 		}
 	}
-	var observations []startupObservation
 	for _, event := range events {
-		if event.Event == "owner_claimed" {
-			var receipt struct {
-				Kind             string    `json:"kind"`
-				Generation       int64     `json:"generation"`
-				SourceGeneration int64     `json:"source_generation"`
-				ClaimedAt        time.Time `json:"claimed_at"`
-			}
-			if json.Unmarshal([]byte(event.Line), &receipt) == nil && !receipt.ClaimedAt.IsZero() {
-				observations = append(observations, startupObservation{Scope: receipt.Kind, JobID: event.JobID, Generation: receipt.Generation, SourceGeneration: receipt.SourceGeneration, Stage: "claim", At: &receipt.ClaimedAt})
-			}
-		}
 		if event.Event != "cloud_startup" {
 			continue
 		}

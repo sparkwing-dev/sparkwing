@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -49,8 +48,7 @@ type UnitClaim struct {
 	Award            runstate.ClaimAward
 	Owner            runstate.OwnerLeaseRef
 	// Bearer is the one-time C2 issuance result; trusted transport must deliver it without storing or logging it.
-	Bearer    []byte `json:"-"`
-	claimedAt time.Time
+	Bearer []byte `json:"-"`
 }
 
 // ClaimUnit selects one eligible unit and rechecks its requirements before

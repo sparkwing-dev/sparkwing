@@ -70,9 +70,6 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		}
 		return UnitClaim{}, err
 	}
-	if out.Kind != capability.UnitNode {
-		o.s.recordOwnerClaimTime(ctx, out, out.claimedAt)
-	}
 	return out, nil
 }
 
@@ -259,7 +256,6 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	}
 	deadline = until
 	current := tx.now(ctx)
-	claim.claimedAt = current
 	if !deadline.After(current) {
 		return UnitClaim{}, holderRefusal()
 	}

@@ -30,6 +30,5 @@
   "debug.resumed",
   "secret_preflight_refused",
   "stray_session_reaped",
-  "owner_claimed",
   "cloud_startup"
 ]

@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 type startupReader struct {
@@ -23,9 +25,9 @@ func TestStartupAppearsInRunStatusAndTiming(t *testing.T) {
 	run, steps, events := timingFixture()
 	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "team", RunID: run.ID, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 2}}
 	run.Logs = []blob.LogSubject{subject}
-	claim := controllerwire.LogRecord{RunID: run.ID, Event: "owner_claimed", Time: at(-20), Line: `{"kind":"plan","generation":2,"claimed_at":"2026-11-04T11:59:40Z"}`}
+	run.OwnerClaims = []runstate.OwnerClaimTime{{Kind: capability.UnitPlan, Generation: 2, AwardedAt: *at(-20)}}
 	cloud := controllerwire.LogRecord{RunID: run.ID, Event: "cloud_startup", Time: at(-15), Line: `{"award":{"kind":"plan","generation":2},"unit":{"Kind":"plan"},"startup":{"pod_uid":"pod","scheduled_at":"2026-11-04T11:59:41Z","image_pulled_at":"2026-11-04T11:59:43Z","container_started_at":"2026-11-04T11:59:44Z"}}`}
-	events = append(events, claim, cloud)
+	events = append(events, cloud)
 	preparation := controllerwire.LogRecord{RunID: run.ID, Subject: &subject, Time: at(-5), LineNo: 1, Line: `{"event":"preparation","attrs":{"stage":"sdk_install","started_at":"2026-11-04T11:59:45Z","duration_ms":10000,"success":true,"cache":{"outcome":"compile","bytes_fetched":0}}}`}
 	logs := fakeLogReader{read: func(_ context.Context, _ string, q controllerwire.LogQuery) (controllerwire.LogPage, error) {
 		if q.EventsOnly {
@@ -71,7 +73,7 @@ func TestStartupAppearsInRunStatusAndTiming(t *testing.T) {
 }
 
 func TestStartupReadFailureLeavesStatusAvailable(t *testing.T) {
-	run := controllerwire.RunDetail{ID: "run", Status: "success"}
+	run := controllerwire.RunDetail{ID: "run", Status: "success", OwnerClaims: []runstate.OwnerClaimTime{{Kind: capability.UnitPlan, Generation: 1, AwardedAt: *at(-20)}}}
 	reader := startupReader{statusReader: &statusReader{details: []controllerwire.RunDetail{run}}, fakeLogReader: fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
 		return controllerwire.LogPage{}, errors.New("private transport diagnostic")
 	}}}
@@ -79,7 +81,7 @@ func TestStartupReadFailureLeavesStatusAvailable(t *testing.T) {
 	if err := observeRunStatus(t.Context(), statusInvocation(t), reader, &out, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "startup_unavailable") || strings.Contains(out.String(), "private transport diagnostic") {
+	if !strings.Contains(out.String(), "startup_unavailable") || !strings.Contains(out.String(), "claim") || strings.Contains(out.String(), "private transport diagnostic") {
 		t.Fatalf("unavailable diagnostic replaced or contaminated status: %s", &out)
 	}
 }

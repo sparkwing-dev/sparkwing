@@ -23,6 +23,7 @@ type RunView struct {
 	Reason                 string
 	SecretPreflightRefusal string
 	Attempts               []runstate.NodeAttempt
+	OwnerClaims            []runstate.OwnerClaimTime
 	Logs                   []blob.LogSubject
 	Failures               []RunFailure
 	// JobResults holds each job's masked summary and annotations from its current attempt.
@@ -129,6 +130,9 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 		return RunView{}, err
 	}
 	if err := fillAdmissionWaitsTx(ctx, tx, team, &view.Snapshot); err != nil {
+		return RunView{}, err
+	}
+	if view.OwnerClaims, err = readOwnerClaimTimesTx(ctx, tx, team, runID); err != nil {
 		return RunView{}, err
 	}
 	return view, nil
@@ -285,4 +289,24 @@ func readRunLogSubjectsTx(ctx context.Context, tx *storeTx, team Team, runID str
 		subjects = append(subjects, subject)
 	}
 	return subjects, errors.Join(rows.Err(), rows.Close())
+}
+
+// safety: original awards survive lease settlement and exchange; only their public
+// timing/fence fields are selected, never credential material or live authority.
+func readOwnerClaimTimesTx(ctx context.Context, tx *storeTx, team Team, run string) ([]runstate.OwnerClaimTime, error) {
+	rows, err := tx.queryContext(ctx, `SELECT unit_kind,COALESCE(bind_node,''),COALESCE(eval_unit_generation,bind_generation),CASE WHEN unit_kind='eval' THEN bind_generation ELSE 0 END,created_at FROM capabilities WHERE team=? AND bind_run=? AND audience='controller' AND issuance='award' AND unit_kind IN ('trigger','plan','eval') AND created_at>0 AND COALESCE(eval_unit_generation,bind_generation)>0 ORDER BY created_at,unit_kind,bind_node,bind_generation`, team, run)
+	if err != nil {
+		return nil, err
+	}
+	var claims []runstate.OwnerClaimTime
+	for rows.Next() {
+		var claim runstate.OwnerClaimTime
+		var at int64
+		if err := rows.Scan(&claim.Kind, &claim.JobID, &claim.Generation, &claim.SourceGeneration, &at); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		claim.AwardedAt = time.Unix(0, at).UTC()
+		claims = append(claims, claim)
+	}
+	return claims, errors.Join(rows.Err(), rows.Close())
 }

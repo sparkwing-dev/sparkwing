@@ -34,6 +34,7 @@ type RunStatusFacts struct {
 	SecretPreflightRefusal string
 	Snapshot               store.RunSnapshot
 	Attempts               []runstate.NodeAttempt
+	OwnerClaims            []runstate.OwnerClaimTime
 	Logs                   []blob.LogSubject
 	Failures               []store.RunFailure
 	JobResults             []store.JobResult
@@ -91,8 +92,9 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 	detail := controllerwire.RunDetail{
 		Reason: facts.Reason, ID: run.ID, Number: run.Number, Team: string(run.Team), Status: string(run.State), StateSeq: run.StateSeq,
 		Inputs: runspec.DisplayRequest(run.Request), Jobs: make([]controllerwire.JobDetail, 0, len(facts.Snapshot.Nodes)),
-		Logs:    append([]blob.LogSubject{}, facts.Logs...),
-		Notices: append([]engineid.Notice{}, facts.Notices...), StartedAt: run.StartedAt,
+		OwnerClaims: append([]runstate.OwnerClaimTime(nil), facts.OwnerClaims...),
+		Logs:        append([]blob.LogSubject{}, facts.Logs...),
+		Notices:     append([]engineid.Notice{}, facts.Notices...), StartedAt: run.StartedAt,
 		FinishedAt: run.FinishedAt, CancelRequestedAt: run.CancelRequestedAt,
 	}
 	if reason := run.Request.Provenance.UnverifiedReason(); reason != "" {
@@ -314,7 +316,7 @@ func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.T
 }
 
 func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView) (RunStatusFacts, error) {
-	facts := RunStatusFacts{Reason: view.Reason, SecretPreflightRefusal: view.SecretPreflightRefusal, Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults, HostIneligible: view.HostIneligible}
+	facts := RunStatusFacts{Reason: view.Reason, SecretPreflightRefusal: view.SecretPreflightRefusal, Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, OwnerClaims: view.OwnerClaims, Failures: view.Failures, JobResults: view.JobResults, HostIneligible: view.HostIneligible}
 	if spec := view.Snapshot.Run.Spec; spec != nil && spec.Resolved.Engine.Pin.SDK == engineid.GoSDK && spec.Resolved.Engine.Pin.Replacement != "" {
 		// bug: a replacement runs the installed engine, which Resolve never holds to release policy, and a main
 		// build's engine version is a pseudo-version that Evaluate refuses as an invalid release.

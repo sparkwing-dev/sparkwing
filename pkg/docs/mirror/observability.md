@@ -897,9 +897,11 @@ generation, and, when applicable, job, source generation, attempt and Pod UID.
 controller and runner clocks can differ, so a negative cross-clock interval is
 clock uncertainty, not negative work.
 
-The controller records owner claim timestamps after the award commits, in a
-separate transaction bounded to one second. Recording failures leave the claim
-intact and emit a warning with a per-store cumulative `lost_total`.
+Owner claim milestones use the original award capability's persisted issuance
+time, returned in run detail as `owner_claims[].awarded_at`. They are derived on
+reads, with no diagnostic write or work on the claim path. Lease settlement and
+bootstrap exchange do not change that original timestamp. Once expired awards
+are pruned by credential retention, those historical milestones are unknown.
 Cloud records retain Job creation, Job activation from `Job.Status.StartTime`,
 and Pod creation, so directly bound Pods can be diagnosed
 without inventing a scheduler timestamp. The Cloud launcher records
