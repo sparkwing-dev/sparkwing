@@ -341,7 +341,7 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	return nil
 }
 
-// safety: keeper records go only to the currently bound stream and never open another writer.
+// safety: keeper records go to the stream bound when the sink runs and never open another writer.
 func (l *localLogs) writeKeeper(ctx context.Context, event lease.Event) error {
 	l.mu.Lock()
 	stream := l.diagnosticStream

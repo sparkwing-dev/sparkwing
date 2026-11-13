@@ -42,11 +42,13 @@ are renamed `sdk_lease_keeper` and stay visible as application records.
 Diagnostic-only bytes do not start an upload timer. They ride the next real-output
 cut or the final seal; the existing segment-size and total-byte bounds still apply.
 Diagnostics only append to an already-bound stream, and no diagnostic opens a
-writer. Each bound stream holds one observation window: it opens when the stream
-binds and closes when the stream detaches. Records already queued for that
-stream drain into it before it seals. A retried job attempt binds a new stream
-and opens the next window once the previous one has sealed. Keeper events between
-two windows are not recorded.
+writer. Each bound stream holds one observation window, which closes when the
+stream detaches. The first window opens when diagnostics start, so records
+captured before the first bind land in the first stream. Records already queued
+for a stream drain into it before it seals. A retried job attempt binds a new
+stream and opens the next window once the previous one has sealed. Keeper events
+between two windows are not recorded. A stream that detaches before its window
+opens gets no summary.
 
 Each keeper instance records its OWNER or NODE role, unit generation, renewal
 sequence, selected expiry and watcher reset, renewal-in-flight state and inherited

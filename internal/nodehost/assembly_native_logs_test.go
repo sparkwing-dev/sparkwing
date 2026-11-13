@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -699,6 +701,21 @@ func TestNativeLogsSealFiftyMillionPayloadBytes(t *testing.T) {
 }
 
 func TestRetrySealsPreviousAttemptBeforeFenceAdvances(t *testing.T) {
+	t.Run("output", func(t *testing.T) { retrySealsBeforeFence(t, false) })
+	t.Run("keeper diagnostics", func(t *testing.T) { retrySealsBeforeFence(t, true) })
+}
+
+type bodyLogUploader struct {
+	*fencedLogUploader
+	bodies [][]byte
+}
+
+func (u *bodyLogUploader) PutSegment(ctx context.Context, segment logseg.Segment, body []byte) error {
+	u.bodies = append(u.bodies, bytes.Clone(body))
+	return u.fencedLogUploader.PutSegment(ctx, segment, body)
+}
+
+func retrySealsBeforeFence(t *testing.T, keeper bool) {
 	synctest.Test(t, func(t *testing.T) {
 		now := time.Now()
 		f := newStoreHostFixture(t, nodewire.PlanDoc{Jobs: []nodewire.JobSpec{{ID: "job", Retry: &nodewire.RetrySpec{Attempts: 3}, Steps: []nodewire.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
@@ -719,12 +736,23 @@ func TestRetrySealsPreviousAttemptBeforeFenceAdvances(t *testing.T) {
 		gate := make(chan struct{})
 		close(gate)
 		first := blob.LogSubject{Kind: blob.LogJobAttempt, Team: principal.Capability.Team, RunID: input.Accepted.RunID, Attempt: &runspec.AttemptIdentity{Team: principal.Capability.Team, RunID: input.Accepted.RunID, NodeID: "job", Generation: int64(input.Generation), Attempt: int64(started.Attempt)}}
-		uploader := &fencedLogUploader{tenant: f.Tenant, commit: store.SegmentCommit{Subject: first, Actor: actor, RetentionClass: "r30"}, gate: gate, wait: func() { time.Sleep(3 * time.Second) }}
+		uploader := &bodyLogUploader{fencedLogUploader: &fencedLogUploader{tenant: f.Tenant, commit: store.SegmentCommit{Subject: first, Actor: actor, RetentionClass: "r30"}, gate: gate, wait: func() { time.Sleep(3 * time.Second) }}}
 		logs := &localLogs{run: input.Accepted.RunID, masker: secrets.NewMasker(), upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
 			return uploader, nil
 		}}
 		t.Cleanup(logs.flushes.Wait)
+		if keeper {
+			logs.diagnosticNode = "job"
+			logs.diagnostics = lease.NewDiagnostics(t.Context(), logs.writeKeeper)
+			defer logs.diagnostics.Close()
+		}
 		logs.bind(principal, int64(started.Attempt))
+		if keeper {
+			_, stop := lease.Keeper{Diagnostics: logs.diagnostics, Lease: time.Minute, Interval: time.Second, Identity: lease.Identity{Role: "NODE", Run: input.Accepted.RunID, Node: "job"},
+				Renew: func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }}.Run(t.Context())
+			defer stop()
+			synctest.Wait()
+		}
 		if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodewire.FrameLog{Message: "attempt one output"}); err != nil {
 			t.Fatal(err)
 		}
@@ -743,6 +771,21 @@ func TestRetrySealsPreviousAttemptBeforeFenceAdvances(t *testing.T) {
 		stream, err := f.Tenant.ReadLogSegments(t.Context(), runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: reader.Prefix}}, blob.LogReadRequest{Subject: first})
 		if err != nil || !stream.Complete || len(stream.Segments) != 1 {
 			t.Fatalf("previous attempt's logs were lost or left unsealed: %+v %v", stream, err)
+		}
+		if keeper {
+			var body bytes.Buffer
+			for _, stored := range uploader.bodies {
+				zr, err := gzip.NewReader(bytes.NewReader(stored))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := io.Copy(&body, zr); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !strings.Contains(body.String(), `"kind":"summary"`) || !strings.Contains(body.String(), `"host_lease_keeper":true`) {
+				t.Fatalf("fenced attempt log has no keeper summary: %s", body.String())
+			}
 		}
 	})
 }

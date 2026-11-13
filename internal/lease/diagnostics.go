@@ -202,7 +202,8 @@ func (d *Diagnostics) start(ctx context.Context, identity Identity) *keeperTrace
 	return trace
 }
 
-// safety: emit never waits; between a cutoff and the next open it updates keeper state but captures nothing.
+// safety: emit never waits; between a cutoff and the next open it captures nothing, and still
+// updates keeper state when it wins the trace lock.
 func (t *keeperTrace) emit(kind string, sent, expires time.Time, outcome string, watchRenewal uint64) uint64 {
 	if t == nil {
 		return 0
@@ -274,14 +275,17 @@ func (d *Diagnostics) mark() clockMark {
 	return clockMark{before: before, wall: wall, after: time.Since(d.origin).Nanoseconds()}
 }
 
-// Cutoff ends capture admission for the current window. It neither waits for queued
-// delivery nor stops a keeper; renewal and expiry continue unobserved until Open.
+// Cutoff ends capture admission when the bound stream detaches. It neither waits for
+// queued delivery nor stops a keeper; renewal and expiry continue unobserved until Open.
+// It also cancels an Open still waiting on a previous seal, because that open's stream
+// has now detached.
 func (d *Diagnostics) Cutoff() {
 	if d == nil {
 		return
 	}
 	d.lifecycle.Lock()
 	defer d.lifecycle.Unlock()
+	d.reopen = false
 	d.cutoffLocked()
 }
 
@@ -298,7 +302,9 @@ func (d *Diagnostics) cutoffLocked() {
 // then writes one summary per keeper instance. It reports whether every summary landed and
 // the window lost nothing. The sink must append only to the stream that window was bound to
 // and must honor its context: when ctx ends first, Seal returns false, remaining records
-// count as lost and no summary is written. Each window seals at most once.
+// count as lost and no summary is written. Each window seals at most once. A record the sink
+// accepts but then discards, such as one past a truncated stream, still counts as delivered.
+// Because truncation persists, the summary is discarded with it, which also means incomplete.
 func (d *Diagnostics) Seal(ctx context.Context, sink func(context.Context, Event) error) bool {
 	if d == nil {
 		return false

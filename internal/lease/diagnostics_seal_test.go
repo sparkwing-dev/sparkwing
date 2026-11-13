@@ -296,3 +296,40 @@ func TestKeeperRenewsWhileSealIsStalled(t *testing.T) {
 		}
 	})
 }
+
+func TestKeeperDiagnosticsCutoffCancelsAnOpenForADetachedStream(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		entered, release := make(chan struct{}), make(chan struct{})
+		diagnostics := NewDiagnostics(t.Context(), func(context.Context, Event) error { return nil })
+		defer diagnostics.Close()
+		trace := diagnostics.start(t.Context(), Identity{Role: "NODE", Run: "detached"})
+		trace.emit("watch_arm", time.Time{}, time.Now().Add(time.Minute), "", 0)
+		synctest.Wait()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		result := make(chan bool)
+		go func() {
+			result <- diagnostics.Seal(ctx, func(context.Context, Event) error {
+				close(entered)
+				<-release
+				return nil
+			})
+		}()
+		<-entered
+		diagnostics.Open()
+		diagnostics.Cutoff()
+		close(release)
+		if !<-result {
+			t.Fatal("seal refused")
+		}
+		trace.emit("watch_reset", time.Time{}, time.Now().Add(time.Minute), "", 1)
+		if trace.sequence != 1 {
+			t.Fatal("a window opened for a stream that had already detached")
+		}
+		diagnostics.Open()
+		trace.emit("watch_reset", time.Time{}, time.Now().Add(time.Minute), "", 1)
+		if trace.sequence != 2 {
+			t.Fatal("the next bound stream did not open a window")
+		}
+	})
+}
