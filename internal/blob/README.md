@@ -417,3 +417,37 @@ that same run can read. Bootstrap, delegated and remote-cache readers are refuse
 The prepared edge grants no access across runs, including retries in a new run.
 The record follows run retention. Bytes use the ordinary authenticated, verified
 upload/download path; a consumer must consume verified EOF before extraction.
+
+## R2 log signing acceptance
+
+`TestR2LogSigningRejectsChangedBytes` exercises the production signer against
+Cloudflare R2. It skips before loading credentials when both
+`SPARKWING_R2_TEST_ENDPOINT` and `SPARKWING_R2_TEST_BUCKET` are absent. Partial
+configuration fails. Explicit `AWS_PROFILE` is required. Bucket and profile
+names must contain `test` or `scratch`, and the endpoint must be an HTTPS R2
+account endpoint. These test-only inputs add no product configuration.
+
+Use only an already-existing, confirmed test/scratch bucket and its existing
+credential profile. Do not create resources or point the proof at a production
+bucket. With an isolated HOME, point `AWS_CONFIG_FILE` and
+`AWS_SHARED_CREDENTIALS_FILE` at those existing read-only files. Run through the
+repository's normal Xwing scratch and CPU admission wrapper:
+
+```sh
+SPARKWING_R2_TEST_ENDPOINT=https://ACCOUNT.r2.cloudflarestorage.com \
+SPARKWING_R2_TEST_BUCKET=EXISTING-TEST-BUCKET AWS_PROFILE=r2-test \
+go test ./internal/blob -run '^TestR2LogSigningRejectsChangedBytes$' -count=1 -v
+```
+
+The test uses a fresh random prefix and both segment and manifest slots. It
+checks valid uploads, larger/smaller bodies with correct HTTP framing, corrupted
+same-length bytes under the original checksum, changed/missing checksum
+headers, a missing create-only header and overwrite refusal. Each refused PUT
+must leave no object, and a valid retry using the original URL must succeed.
+A corrupted body must produce R2's checksum error, not a local Go transport
+length error. Successful writes are read back byte-for-byte.
+
+Cleanup deletes only that invocation's exact keys, requires HEAD absence for
+each, and requires an empty prefix listing. Cleanup errors fail the test.
+Logs retain statuses, error codes and request IDs, never signed query strings
+or credential values. An unconfigured skip leaves live provider proof pending.

@@ -92,10 +92,10 @@ flowchart LR
     SINK -->|heartbeat| HB[claim or run heartbeat]
   end
   HB -->|reply: watched| SINK
-  SINK -->|per segment: size, MD5, SHA-256| CTL[controller]
-  CTL -->|one PUT signed for that size and MD5| SINK
-  SINK -->|finish: POST manifest| CTL
-  CTL -->|manifest, checked against signed segments| OBJ[(object store)]
+  SINK -->|per slot: tagged subject, size, SHA-256| CTL[controller]
+  CTL -->|one exact-size, checksum-bound, create-only PUT| SINK
+  SINK -->|index 0: signed manifest PUT| OBJ[(object store)]
+  SINK -->|commit segments and final manifest check| CTL
   RING[controller live ring] --> CTL
   CTL -->|reads: list, get, verify, serve| OBJ
   VIEW[dashboard or CLI follow] -->|open stream: sets watched| CTL
@@ -182,23 +182,26 @@ no limit is new.
   library and every reader decodes it; zstd would add a dependency for
   roughly 20 % smaller objects.
 
-The controller records the node attempt's log prefix in its run store when
-the writer first asks for its attempt, so readers never guess a retention
-class.
+Attempt start and owner award/exchange register tagged log streams in the store.
+The controller derives each object key from the authorized subject and the run's
+persisted retention class. Readers use committed store records.
 
 ### Manifest
 
-The sink posts the manifest to the controller last. The controller checks
-every segment it lists against the size and SHA-256 it signed, then writes
-it. It seals the log.
+The sink uploads the final manifest through signed slot index zero, with the
+same exact-length, SHA-256 and immutable-object checks as a segment. Its final
+commit sends the segment list and the manifest size/digest to the controller.
+The controller verifies the stored bytes, then atomically records segments and
+seals the stream under the current writer fence. Physical manifests grant no
+read authority; persisted segments and seals govern reads.
 
 ```json
 {
   "version": 1,
-  "run": "run_01J9...",
-  "node": "build",
-  "attempt": 1,
-  "generation": 3,
+  "subject": {
+    "kind": "job_attempt", "team": "acme", "run_id": "run-1",
+    "attempt": {"team": "acme", "run_id": "run-1", "job_id": "build", "attempt": 1, "generation": 3}
+  },
   "status": "complete",
   "reason": "",
   "sealed_by": "node",
@@ -220,88 +223,76 @@ it. It seals the log.
 |---|---|
 | `status` | `complete`, `incomplete` or `cut_off`; the reader derives `streaming` from a missing manifest on a running node |
 | `reason` | for anything but `complete`: `runner lost`, `upload failed`, `byte cap`, `sequence gap` |
-| `sealed_by` | `node` when the sink wrote it, `controller` when the controller sealed an abandoned attempt |
+| `sealed_by` | `node` for a physical manifest uploaded by the sink; controller maintenance seals store records |
 | `gaps` | sequence ranges the sink never received, from the child's sequence headers |
 | `segments[].sha256` | digest of the stored (compressed) object; the reader verifies every segment it serves |
 | `segments[].lines`, `first_seq`, `last_seq` | let a tail or head read fetch only the segments it needs |
 
-The existing `Completeness` and `State*` types move out of `pkg/logs` next
-to the manifest so `internal/backend/completeness.go` and the dashboard's
-completeness route keep their contract.
-
-When an attempt ends without a manifest, the controller seals it. Two
-triggers do this:
-
-- the claim reaper, when the attempt's claim lease expires (2 min) or the
-  run reaper fires (3 min without a run heartbeat);
-- a reader that finds a terminal node with no manifest.
-
-Either lists the attempt's prefix and writes a manifest with `status:
-incomplete`, `reason: runner lost`, `sealed_by: controller` and the
-segments it found. A gap in segment numbers also yields `incomplete`.
-Writing the manifest is a conditional create (`If-None-Match: *`, which
-the controller's S3 client already uses in `internal/controller/direct_upload.go`),
-so a late node seal and a controller seal cannot both win.
+`internal/storage/logseg` owns the manifest and read completeness types.
+When a writer ends without a final commit, `Operator.SealAbandonedLogStreams`
+seals its registered stream incomplete after its final-tail grace. A replaced
+writer fence can seal immediately. Maintenance preserves committed segments;
+it does not list the bucket or adopt uncommitted objects. A late final commit
+must still satisfy the writer fence and the store's immutable seal.
 
 ### Upload URLs from the presigned data plane
 
-Today's data plane issues one URL per call and checks size and SHA-256
-against a reservation before a commit copy (`internal/controller/direct_upload.go`,
-`internal/store/direct_upload.go`). That suits content-addressed artifacts and
-costs three round trips per object. Log segments need neither the commit
-copy nor content addressing: the key is fixed by run, node, attempt and
-number, and only the claim holder may write it.
-
-A sink seals a segment before it asks for its URL: it compresses and
-hashes the segment, then asks for one presigned PUT for exactly those
-bytes.
+A sink compresses and hashes each sealed segment before requesting one PUT.
+The controller authorizes its tagged subject and opens a fixed upload slot
+before signing. The final manifest uses index zero; segments use positive
+indexes. Both `blob.S3.SignLogPut` and `blob.Filesystem.SignLogPut` implement
+this contract through `logseg.Signer`.
 
 ```text
-POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments
-  request:  {"attempt": 1, "generation": 3, "n": 17, "size": 22301,
-             "md5": "<base64>", "sha256": "<hex>"}
-  response: {"attempt": 1, "generation": 3, "prefix": "...", "url": "...",
-             "headers": {"Content-MD5": "..."}, "expires_at": "...", "watched": false}
-POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest
-  request:  the manifest, at most 4 MiB
+POST /api/v1/runs/{run}/jobs/{job}/log-segments
+  request:  {"subject": <tagged attempt>, "index": 17, "size": 22301,
+             "digest": "<lowercase SHA-256 hex>"}
+  response: {"subject": <same subject>, "index": 17, "retention_class": "r30",
+             "url": "...", "headers": {"Content-Length": "22301",
+             "X-Amz-Checksum-Sha256": "<base64 SHA-256>", "If-None-Match": "*"},
+             "expires_at": "..."}
+POST /api/v1/runs/{run}/jobs/{job}/log-manifest
+  request:  {"subject": <same subject>, "segments": [...], "final": true,
+             "manifest": {"index": 0, "size": <stored bytes>, "digest": "<hex>"}}
 ```
 
-- Auth: the claim token route group, falling back to `runs.state` plus
-  `claimedBy` for a runner token, the same pairing `output-upload` uses
-  (`outputCallerFor` in `internal/store/node_output.go`). A laptop run against
-  a remote profile uses the run owner's token on a run it created. The
-  controller refuses a superseded attempt or generation, so a fenced-out
-  runner cannot write the new attempt's log.
-- Request `n: 0` signs nothing; it names the attempt and records where
-  its log lives. The sink makes it when the node's first line arrives.
-- The S3 presign sets `ContentLength` and `ContentMD5` on the
-  `PutObjectInput`, so both are signed headers and the store refuses any
-  other body. The controller charges the team exactly `size` when it
-  signs, so a writer stores what it paid for and nothing else.
-- Signing is idempotent per attempt and segment number: the same `n` with
-  the same size and digests is free and returns a fresh URL, which is how
-  a retried upload gets one; other bytes under a signed `n` are refused
-  with 409. The run store keeps one row per signed segment
-  (`node_log_segments`) and the attempt's running total.
-- The controller enforces the per-node cap: it refuses a segment that
-  would take the attempt's stored bytes past 64 MiB plus one segment of
-  gzip headroom.
-- The manifest goes through the controller, which checks each listed
-  segment against the size and SHA-256 it signed and writes it with the
-  conditional create the abandoned-attempt seal uses. No manifest URL
-  exists.
-- A launcher pod's child, and a runner's brokered child, report the node's
-  outcome before the process that holds the log seals it, and reporting
-  ends the claim token's claim. An ended claim may
-  still sign its own attempt's segments and post its manifest for
-  `SealGrace` (60 s) after the attempt ended, while no later claim holds
-  the node; it may not touch any other attempt.
-- URL lifetime is 15 min, the existing presign TTL, though the sink uses
-  each URL at once.
-- A controller with no object store issues HMAC-signed PUT URLs to its own
-  disk, the mechanism outputs already use (`PUT /api/v1/outputs/uploads/{id}`
-  in `internal/controller/server.go`). The size and MD5 are signed fields, and
-  the disk handler checks both against the body.
+Trigger, plan and eval owners use the matching `/api/v1/claims/{claim}` routes
+with an owner-unit subject. Eval includes both its lease generation and the
+immutable source generation.
+
+- The signing and commit routes authenticate the writer's exact team, run,
+  attempt or unit, holder and generation. A superseded fence cannot write
+  another attempt's or owner's records.
+- S3 presigning includes `ContentLength`, `ChecksumSHA256` and `IfNoneMatch`
+  in `PutObjectInput`. The returned headers bind the exact stored length,
+  base64 SHA-256 and create-only condition. Filesystem capabilities bind the
+  method, derived key, size, SHA-256 and expiry; the handler verifies the body
+  before publication.
+- `Tenant.OpenLogSlot` admits one object and its first signed size before any
+  URL exists. The size remains counted until Sparkwing deletes the object,
+  including when upload or commit fails. Re-signing cannot enlarge that size
+  or extend the first signing's fifteen-minute deadline. A committed slot
+  reports `committed: true` without another URL. See
+  [log slot accounting](../internal/store/STORE-DATA.md#log-slot-accounting).
+- Encoded segments are bounded to 8 MiB and manifests to 4 MiB. Committed
+  decoded bytes are bounded to 64 MiB per attempt. Signing and commit have
+  separate checks; an uncommitted signed slot still counts as retained storage.
+- S3 refuses every overwrite with 412, including an identical retry after a
+  lost PUT response. Filesystem uploads permit an identical replay and refuse
+  different bytes. A 412 proves only that an object exists. The controller
+  reads and verifies segment bytes before recording them and checks the final
+  manifest's exact stored size and SHA-256 before sealing.
+- Completed claims retain only their own final-tail signing and commit authority
+  for `limits.LogSealGrace` (60 seconds), under the original writer fence.
+  A retry, replacement generation or ended credential ancestry cannot gain
+  authority through this allowance. Already issued PUTs retain their fixed
+  storage deadline; they grant no record, read or execution authority.
+
+The provider-level proof is `TestR2LogSigningRejectsChangedBytes` in
+`internal/blob`. Its opt-in configuration and cleanup requirements are in the
+[backend contract](../internal/blob/README.md#r2-log-signing-acceptance).
+Presigned-header unit tests establish what was signed, not whether R2 rejects
+an invalid body. A live pass requires an existing designated test bucket.
 
 The cost of asking per segment is availability: a controller outage pauses
 uploads. The sink keeps cut segments in its spool, within the node's 64 MiB
@@ -620,11 +611,11 @@ has run there.
 | Controller unreachable | uploads pause; cut segments stay in the spool and retry with backoff, and the claim heartbeat fails, so the claim is lost on the existing schedule | as for runner loss once the claim expires; a runner lost meanwhile loses the outage's log |
 | Object store unreachable | uploads fail and the spool grows on local disk | as for a failed PUT; the controller's read path returns 503 naming the store |
 | Signed URL expired | the retry signs the same segment again, free | none needed |
-| Retry writes a segment twice | the key is fixed per number, so the second PUT overwrites identical bytes | the manifest digest matches |
+| Retry writes a segment twice | S3 refuses overwrite with 412; filesystem permits identical bytes only | commit verifies the stored object before recording it |
 | Superseded attempt keeps writing | its URLs name its own attempt and generation; the controller refuses to sign more | the reader serves the latest attempt |
 | Spool disk full | the sink cannot keep records | dropped lines counted in the manifest and a `logs_drop` event, as today's drop policy |
 | Segment missing or digest mismatch at read | the reader serves what verifies and stops at the first bad segment | completeness `incomplete`, naming the segment |
-| Node seal and controller seal race | conditional create on the manifest lets one win | the loser's write fails and it rereads |
+| Node final commit and controller seal race | the store serializes the writer fence and immutable seal | only identical final commits replay |
 | Watch lease stuck on | a runner pushes to the ring for at most one lease after the viewer leaves | lease expiry |
 | Ring evicts lines during a burst | the live stream waits for the next segment | seq gap check in the controller |
 | Controller restart | ring and watches are lost | viewers reconnect, read segments, renew watches |
@@ -651,16 +642,18 @@ Each item names a recommendation concrete enough that "yes" answers it.
 4. **URL issuance.** A `log-segments` route that signs one segment's PUT
    per call, after the sink sealed it, rather than the reserve, PUT and
    commit flow artifacts use. Recommendation: yes.
-5. **Segment size enforcement.** Decided: each segment's presigned PUT
-   signs its exact `Content-Length` and `Content-MD5`, the controller
-   charges that size when it signs and enforces the 64 MiB cap, and the
-   manifest goes through the controller, which checks it against the
-   signed segments. This replaced unsized PUTs issued 16 at a time, which
-   let anyone holding a URL store an object of any size and charged the
-   writer's own report. Signed headers need no POST policy, which
-   Cloudflare R2 lacks. The cost is a controller round trip per segment:
-   a controller outage pauses uploads, and a runner that dies during one
-   loses up to the outage's length of log.
+5. **Segment size enforcement.** Each segment and final manifest PUT signs
+   exact `Content-Length`, `X-Amz-Checksum-Sha256` and `If-None-Match: *`.
+   The controller admits and counts the first slot size before signing.
+   Re-signing preserves its size and original fifteen-minute deadline.
+   Index zero uploads the final manifest, then a controller commit verifies
+   stored bytes and seals the stream in the store. Reads trust committed
+   records, not physical manifests or bucket listings. This supersedes the
+   MD5/controller-body-manifest proposal. Unsized URLs issued sixteen at a
+   time allowed physical growth beyond reported usage; exact-size signatures
+   bind storage to admitted bytes. A controller outage pauses signing while
+   the runner spools. Real R2 rejection remains a provider acceptance check,
+   separate from signed-header unit coverage.
 6. **Retention mechanism.** Retention classes as key prefixes with one
    lifecycle rule each, owned by the operator and verified by the
    controller at boot, rather than object tags or a controller sweeper.
