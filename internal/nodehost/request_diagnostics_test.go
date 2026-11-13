@@ -5,7 +5,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -32,7 +35,6 @@ func TestRequestDiagnosticsCannotBlockTheCaller(t *testing.T) {
 			return ctx.Err()
 		}
 	})
-	defer d.cancel()
 	observe(otelutil.OperationTiming{Operation: "nodehost.annotation", DurationMS: 2000})
 	<-entered
 	for range 1000 {
@@ -41,9 +43,8 @@ func TestRequestDiagnosticsCannotBlockTheCaller(t *testing.T) {
 	if d.dropped.Load() == 0 {
 		t.Error("full diagnostic queue did not report loss")
 	}
-	d.cancel()
 	close(release)
-	<-d.done
+	d.close()
 }
 
 func TestRequestDiagnosticsSurviveExecutionCancellation(t *testing.T) {
@@ -63,8 +64,66 @@ func TestRequestDiagnosticsSurviveExecutionCancellation(t *testing.T) {
 	if frame.Event != "request_timing" {
 		t.Fatal("slow cancellation diagnostic disappeared")
 	}
-	d.cancel()
+	d.close()
+}
+
+func TestRequestDiagnosticsDrainQueuedRecordsAtClose(t *testing.T) {
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	var mu sync.Mutex
+	var delivered []string
+	d := newRequestDiagnostics(t.Context())
+	observe := d.observer(func(ctx context.Context, frame nodewire.FrameLog) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		mu.Lock()
+		delivered = append(delivered, string(frame.Attrs))
+		mu.Unlock()
+		return nil
+	})
+	observe(otelutil.OperationTiming{Operation: "first"})
+	<-entered
+	for range 5 {
+		observe(otelutil.OperationTiming{Operation: "queued"})
+	}
+	closed := make(chan struct{})
+	go func() { d.close(); close(closed) }()
+	<-d.stop
+	close(release)
+	<-closed
 	<-d.done
+	observe(otelutil.OperationTiming{Operation: "after close"})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(delivered) != 6 {
+		t.Fatalf("close delivered %d of 6 accepted records", len(delivered))
+	}
+	if d.dropped.Load() != 1 {
+		t.Fatalf("record after close was not counted as dropped: %d", d.dropped.Load())
+	}
+}
+
+func TestRequestDiagnosticsCloseIsBounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		entered, release := make(chan struct{}), make(chan struct{})
+		d := newRequestDiagnostics(t.Context())
+		observe := d.observer(func(context.Context, nodewire.FrameLog) error {
+			close(entered)
+			<-release
+			return nil
+		})
+		observe(otelutil.OperationTiming{Operation: "stuck"})
+		<-entered
+		started := time.Now()
+		d.close()
+		if waited := time.Since(started); waited != requestDiagnosticsDrain {
+			t.Fatalf("close waited %v, want the %v drain bound", waited, requestDiagnosticsDrain)
+		}
+		close(release)
+		<-d.done
+	})
 }
 
 func TestRequestTimingWriterKeepsItsAttemptFence(t *testing.T) {

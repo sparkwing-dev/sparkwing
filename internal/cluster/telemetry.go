@@ -2,13 +2,23 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
+	flag "github.com/spf13/pflag"
+
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 )
 
+// runnerTelemetry exports traces only when an OTEL trace endpoint is set.
+// run-node is one bounded unit, so its requests share a root span. start and
+// warm can run for days; a lifetime root would put every request in one
+// unbounded trace and make one sampling decision for all of them, so each
+// request starts its own trace and only a short startup marker is recorded.
 func runnerTelemetry(ctx context.Context, command, version string) (context.Context, func(error), error) {
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" && os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") == "" {
 		return ctx, func(error) {}, nil
@@ -17,13 +27,27 @@ func runnerTelemetry(ctx context.Context, command, version string) (context.Cont
 	if err != nil {
 		return ctx, nil, err
 	}
-	ctx, operation := otelutil.StartOperation(ctx, "runner "+command)
+	finishRoot := func(error) {}
+	if command == "run-node" {
+		var root *otelutil.Operation
+		ctx, root = otelutil.StartOperation(ctx, "runner "+command)
+		finishRoot = root.Finish
+	} else {
+		_, marker := otelutil.StartOperation(ctx, "runner "+command)
+		marker.Finish(nil)
+	}
 	return ctx, func(err error) {
-		operation.Finish(err)
+		finishRoot(err)
 		flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if telemetry.Shutdown(flush) != nil {
 			fmt.Fprintln(os.Stderr, "warning: runner trace flush failed")
 		}
 	}, nil
+}
+
+// requestsHelp reports whether args ask for command help, which exits without work to trace.
+func requestsHelp(command string, args []string) bool {
+	_, err := runnerflags.Parse(command, args, io.Discard, io.Discard)
+	return errors.Is(err, flag.ErrHelp)
 }

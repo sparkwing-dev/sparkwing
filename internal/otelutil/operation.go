@@ -19,6 +19,7 @@ type OperationTiming struct {
 	Phases        []OperationPhase `json:"phases,omitempty"`
 	StartedAt     time.Time        `json:"started_at"`
 	RequestID     string           `json:"request_id,omitempty"`
+	Route         string           `json:"route,omitempty"`
 	TraceID       string           `json:"trace_id,omitempty"`
 	SpanID        string           `json:"span_id,omitempty"`
 	DroppedPhases int              `json:"dropped_phases,omitempty"`

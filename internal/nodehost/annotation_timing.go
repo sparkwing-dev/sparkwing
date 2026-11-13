@@ -13,9 +13,10 @@ import (
 type annotationObservationKey struct{}
 
 type annotationObservation struct {
-	mu   sync.Mutex
-	sink func(otelutil.OperationTiming)
-	id   string
+	mu    sync.Mutex
+	sink  func(otelutil.OperationTiming)
+	id    string
+	route string
 }
 
 func (o *annotationObservation) observe(timing otelutil.OperationTiming) {
@@ -23,14 +24,29 @@ func (o *annotationObservation) observe(timing otelutil.OperationTiming) {
 	sink := o.sink
 	o.mu.Unlock()
 	if sink != nil {
-		timing.RequestID = o.id
+		timing.RequestID, timing.Route = o.id, o.route
 		sink(timing)
 	}
 }
 
+var processRoutes = func() *http.ServeMux {
+	mux := http.NewServeMux()
+	for _, route := range processServiceRouteTable {
+		mux.Handle(route.method+" "+route.path, http.NotFoundHandler())
+	}
+	return mux
+}()
+
+// processRoute returns the registered route template, never the request path,
+// so SDK-chosen path values such as secret names stay out of diagnostics.
+func processRoute(r *http.Request) string {
+	_, pattern := processRoutes.Handler(r)
+	return pattern
+}
+
 func observeProcessRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		observation := &annotationObservation{id: rand.Text()}
+		observation := &annotationObservation{id: rand.Text(), route: processRoute(r)}
 		ctx := context.WithValue(r.Context(), annotationObservationKey{}, observation)
 		ctx = otelutil.WithTimingObserver(ctx, observation.observe)
 		if r.Method != http.MethodPost || r.URL.Path != "/node/v1/annotations" {

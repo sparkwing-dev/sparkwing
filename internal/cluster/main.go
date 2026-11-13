@@ -41,7 +41,7 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	finishTelemetry := func(error) {}
-	if os.Args[1] == "start" || os.Args[1] == "warm" || os.Args[1] == "run-node" {
+	if (os.Args[1] == "start" || os.Args[1] == "warm" || os.Args[1] == "run-node") && !requestsHelp(os.Args[1], os.Args[2:]) {
 		ctx, finishTelemetry, err = runnerTelemetry(ctx, os.Args[1], version)
 		if err != nil {
 			writeRunnerError(os.Stderr, os.Args[1], err)

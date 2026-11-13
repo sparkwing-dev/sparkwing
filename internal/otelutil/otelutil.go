@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-logr/logr"
 	promclient "github.com/prometheus/client_golang/prometheus"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -79,6 +80,8 @@ func meter(name string) metric.Meter {
 func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	t := &Telemetry{redactErrors: cfg.TracesOnly}
 	if cfg.TracesOnly {
+		// safety: OTel's internal logger prints raw endpoint values, including userinfo, path and query.
+		otel.SetLogger(logr.Discard())
 		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) { fmt.Fprintln(os.Stderr, "warning: trace export failed; check OTEL exporter settings") }))
 	}
 	wrap := cfg.WrapLogHandler

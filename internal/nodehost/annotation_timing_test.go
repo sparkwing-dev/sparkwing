@@ -139,7 +139,7 @@ func TestSlowAnnotationRecordsWithoutCollector(t *testing.T) {
 			t.Fatalf("slow write/root records=%d, want 2: %+v", len(records), records)
 		}
 		for _, record := range records {
-			if record.DurationMS != 2000 || record.RequestID == "" || record.RequestID != records[0].RequestID || !record.Success {
+			if record.DurationMS != 2000 || record.RequestID == "" || record.RequestID != records[0].RequestID || !record.Success || record.Route != "POST /node/v1/annotations" {
 				t.Fatalf("slow timing lost: %+v", record)
 			}
 		}
@@ -273,5 +273,23 @@ func TestSlowServiceRPCUsesHostTimingContext(t *testing.T) {
 		if len(records) != 1 || records[0].DurationMS != 2000 || records[0].RequestID == "" {
 			t.Fatalf("slow service RPC lost its job timing: %+v", records)
 		}
+		if records[0].Route != "POST /node/v1/summary" {
+			t.Fatalf("slow service RPC does not name its route: %+v", records[0])
+		}
 	})
+}
+
+func TestProcessRouteNamesTemplatesOnly(t *testing.T) {
+	for _, tc := range []struct{ method, path, want string }{
+		{http.MethodPost, "/node/v1/annotations", "POST /node/v1/annotations"},
+		{http.MethodPost, "/node/v1/summary", "POST /node/v1/summary"},
+		{http.MethodGet, "/node/v1/secrets/private-secret-name", "GET /node/v1/secrets/{name}"},
+		{http.MethodGet, "/node/v1/children/private-run/await", "GET /node/v1/children/{run}/await"},
+		{http.MethodGet, "/node/v1/summary", ""},
+		{http.MethodPost, "/node/v1/private-unknown", ""},
+	} {
+		if got := processRoute(httptest.NewRequest(tc.method, tc.path, nil)); got != tc.want {
+			t.Errorf("%s %s route=%q, want %q", tc.method, tc.path, got, tc.want)
+		}
+	}
 }

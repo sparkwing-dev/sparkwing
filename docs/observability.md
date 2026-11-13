@@ -897,24 +897,40 @@ than annotations.
 Runner `start`, `warm` and `run-node` export these traces when the existing
 `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set.
 They use `OTEL_TRACES_SAMPLER_ARG` and flush for at most five seconds on exit.
+`run-node` puts its requests under one `runner run-node` root span, because it
+runs one bounded unit. `start` and `warm` can run for days, so each request or
+annotation starts its own trace and gets its own sampling decision; they record
+only a short `runner start` or `runner warm` startup span. `--help` starts no
+exporter and does not wait for a flush.
 Exporter failures report a fixed warning without endpoint values or response
-bodies. Flush cannot change the command's already-decided exit outcome.
+bodies, and OTel's internal logger is silenced, so a malformed endpoint is not
+echoed either. Flush cannot change the command's already-decided exit outcome.
 With neither trace endpoint configured, they start no exporter. This does not
 configure a CLI or wingd exporter or enable runner log export.
 
-On any host, an annotation, parent-authentication check, binding check or
-controller RPC taking at least one second also produces a best-effort
-`request_timing` diagnostic in the job's existing run log. No collector is
-required. Read it with `sparkwing runs logs --run RUN --job JOB -o json`.
+On any host, one of these operations taking at least one second also produces
+a best-effort `request_timing` diagnostic in the job's existing run log:
+
+| Operation | Covers |
+| --- | --- |
+| `nodehost.annotation` | the whole SDK annotation request, through its acknowledgement |
+| `nodehost.parent_auth` | one fresh parent-authentication check |
+| `nodehost.binding` | the binding check |
+| `nodehost.annotation_write` | annotation persistence, after authorization |
+| `controller <METHOD> <route>` | one controller RPC, with its HTTP phases |
+| `controller.bearer` | fetching the controller credential for one RPC |
+
+No collector is required. Read it with `sparkwing runs logs --run RUN --job JOB -o json`.
 The host adds `host_request_timing: true` after secret masking; SDK protocol
 records cannot set that stamp, and SDK events using the reserved kind are
 renamed `sdk_request_timing`. CLI plain/pretty output and the dashboard hide
 host-stamped request timings even if masking changed their event name.
 
-Timing attributes contain a host-generated request correlation ID, operation,
-UTC start, elapsed milliseconds, success and phase offsets in milliseconds
-from operation start. Nested durations overlap and must not be added. Repeated
-phases identify retries; at most 128 phase entries are retained, with
+Timing attributes contain a host-generated request correlation ID, the SDK
+route template such as `POST /node/v1/summary` (never the request path), the
+operation, UTC start, elapsed milliseconds, success and phase offsets in
+milliseconds from operation start. Nested durations overlap and must not be
+added. Repeated phases identify retries; at most 128 phase entries are retained, with
 `dropped_phases` reporting overflow. Trace/span IDs are included when available.
 Names come from host constants or route templates, never URLs, credentials,
 annotation text, request bodies or error messages.
@@ -924,6 +940,8 @@ acknowledgement. Later records report queue/delivery loss as `dropped`.
 Queued records retain the log stream captured at SDK delegation. Closing that
 stream discards a late record; it cannot enter a successor attempt.
 Diagnostics append only to an already-bound log stream, share its byte and
-retention limits, and ride the next ordinary log cut or final seal. A closed
-stream, shutdown or queue overflow can discard a diagnostic. Missing records
-therefore do not prove that a request was fast.
+retention limits, and ride the next ordinary log cut or final seal. Host
+shutdown stops intake and delivers records already queued, waiting at most two
+seconds. A closed stream, a record arriving after shutdown starts, a delivery
+still running at that bound or queue overflow can discard a diagnostic.
+Missing records therefore do not prove that a request was fast.

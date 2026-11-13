@@ -54,6 +54,21 @@ type ProcessServices struct {
 
 var helperSequence atomic.Uint64
 
+var processServiceRouteTable = []struct{ method, path string }{
+	{http.MethodPost, "/node/v1/helpers"},
+	{http.MethodPost, "/node/v1/masks"},
+	{http.MethodPost, "/node/v1/annotations"},
+	{http.MethodPost, "/node/v1/summary"},
+	{http.MethodGet, "/node/v1/secrets/{name}"},
+	{http.MethodGet, "/node/v1/jobs/{job}/output"},
+	{http.MethodGet, "/node/v1/pipelines/{name}/latest"},
+	{http.MethodPost, "/node/v1/oidc-token"},
+	{http.MethodPost, "/node/v1/children"},
+	{http.MethodGet, "/node/v1/children/{run}/await"},
+	{http.MethodPost, "/node/v1/cleanups"},
+	{http.MethodDelete, "/node/v1/cleanups/{cleanup}"},
+}
+
 // ProcessEndpointRegistrar is implemented by the common policy router.
 type ProcessEndpointRegistrar interface {
 	Register(controllerwire.Endpoint) error
@@ -65,20 +80,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 	if router == nil || resolve == nil {
 		return errors.New("process services require policy router and live resolver")
 	}
-	for _, route := range []struct{ method, path string }{
-		{http.MethodPost, "/node/v1/helpers"},
-		{http.MethodPost, "/node/v1/masks"},
-		{http.MethodPost, "/node/v1/annotations"},
-		{http.MethodPost, "/node/v1/summary"},
-		{http.MethodGet, "/node/v1/secrets/{name}"},
-		{http.MethodGet, "/node/v1/jobs/{job}/output"},
-		{http.MethodGet, "/node/v1/pipelines/{name}/latest"},
-		{http.MethodPost, "/node/v1/oidc-token"},
-		{http.MethodPost, "/node/v1/children"},
-		{http.MethodGet, "/node/v1/children/{run}/await"},
-		{http.MethodPost, "/node/v1/cleanups"},
-		{http.MethodDelete, "/node/v1/cleanups/{cleanup}"},
-	} {
+	for _, route := range processServiceRouteTable {
 		path := route.path
 		endpoint := controllerwire.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: func(request *http.Request) (capability.RequestEvidence, error) {
 			return serviceEvidence(request, path)

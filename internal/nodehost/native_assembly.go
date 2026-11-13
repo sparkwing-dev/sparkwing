@@ -194,7 +194,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	})
 	requestTimings := newRequestDiagnostics(ctx)
 	closeResources = func() error {
-		requestTimings.cancel()
+		requestTimings.close()
 		diagnostics.Close()
 		logs.finish(ctx, "")
 		// State transitions already committed. Keep bearer transports alive for the bounded tail.
