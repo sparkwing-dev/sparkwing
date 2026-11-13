@@ -108,6 +108,96 @@ func TestFilesystemLogUploadsAreImmutableAndPutOnly(t *testing.T) {
 	}
 }
 
+// A refused body must leave its slot empty, so the original URL still accepts
+// the signed bytes afterwards. Unframed bodies reach the streaming check
+// rather than the Content-Length precheck.
+func TestFilesystemLogRefusalsLeaveTheSlotEmpty(t *testing.T) {
+	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	backend, err := NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	put := func(t *testing.T, url, body string, framed bool) int {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
+		if !framed {
+			r.ContentLength = -1
+		}
+		w := httptest.NewRecorder()
+		backend.ServeHTTP(w, r)
+		return w.Code
+	}
+	for _, name := range []string{"seg-000001.ndjson.gz", "manifest.json"} {
+		t.Run(name, func(t *testing.T) {
+			key := "logs/r30/teams/acme/runs/run-1/units/plan/g1/" + name
+			signed, _, err := backend.SignLogPut(t.Context(), key, 11, digest("first bytes"), now.Add(time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, framed := range []bool{true, false} {
+				for change, body := range map[string]string{"larger": "first bytes!", "smaller": "first byte", "corrupt": "first bytez"} {
+					if code := put(t, signed, body, framed); code != http.StatusBadRequest {
+						t.Fatalf("%s body framed=%v = %d, want 400", change, framed, code)
+					}
+					if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(key))); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("%s body framed=%v published an object: %v", change, framed, err)
+					}
+				}
+			}
+			// The digest alone would refuse this body too, but only after storing all of it.
+			flood := &countingReader{r: io.LimitReader(zeroReader{}, 1<<20)}
+			oversized := httptest.NewRequest(http.MethodPut, signed, flood)
+			oversized.ContentLength = -1
+			refused := httptest.NewRecorder()
+			backend.ServeHTTP(refused, oversized)
+			if refused.Code != http.StatusBadRequest || flood.n > 64<<10 {
+				t.Fatalf("unframed oversized body = %d after reading %d bytes, want 400 within one buffer", refused.Code, flood.n)
+			}
+			if code := put(t, signed, "first bytes", true); code != http.StatusCreated {
+				t.Fatalf("signed bytes after refusals = %d", code)
+			}
+			if code := put(t, signed, "first bytes", false); code != http.StatusCreated {
+				t.Fatalf("identical retry = %d", code)
+			}
+			other, _, err := backend.SignLogPut(t.Context(), key, 11, digest("other bytes"), now.Add(time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code := put(t, other, "other bytes", true); code != http.StatusBadRequest {
+				t.Fatalf("replacement with its own signature = %d", code)
+			}
+			r, err := backend.Get(t.Context(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := io.ReadAll(r)
+			if err = errors.Join(err, r.Close()); err != nil || string(got) != "first bytes" {
+				t.Fatalf("stored = %q, %v", got, err)
+			}
+		})
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
 func TestFilesystemLogSigningRejectsInvalidObjects(t *testing.T) {
 	now := time.Now()
 	backend, err := NewFilesystem(FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now }})
