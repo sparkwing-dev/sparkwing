@@ -238,6 +238,7 @@ func keepNode(parent context.Context, keeper lease.Keeper, state interface {
 	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 }, ref runspec.NodeRef, actor runstate.Actor,
 ) (context.Context, func()) {
+	keeper.Identity = lease.Identity{Role: "NODE", Unit: "node", Run: string(ref.RunID), Node: string(ref.NodeID), Generation: int64(actor.Generation)}
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := state.RenewNodeClaim(ctx, ref, actor)
 		return lease.Beat{ExpiresAt: beat.ExpiresAt, CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err

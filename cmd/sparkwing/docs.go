@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -367,15 +368,9 @@ func renderDocsList(entries []docs.Entry, output string) error {
 			color.Bold(fmt.Sprintf("%-*s", titleW, "TITLE")),
 			color.Bold("SUMMARY"))
 		for _, e := range entries {
-			title := e.Title
-			if len(title) > titleW {
-				title = title[:titleW-1] + "…"
-			}
-			summary := e.Summary
+			title := opsview.DisplayText(e.Title, titleW)
 			const summaryCap = 70
-			if len(summary) > summaryCap {
-				summary = summary[:summaryCap-1] + "…"
-			}
+			summary := opsview.DisplayText(e.Summary, summaryCap)
 			fmt.Printf("%-*s  %-*s  %s\n", slugW, e.Slug, titleW, title, color.Dim(summary))
 		}
 		return nil

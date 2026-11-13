@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 
 	"golang.org/x/mod/semver"
 
@@ -243,11 +244,8 @@ func renderMigrationsList(entries []docs.MigrationEntry, output string) error {
 			color.Bold(fmt.Sprintf("%7s", "BYTES")),
 			color.Bold("SUMMARY"))
 		for _, e := range entries {
-			summary := e.Summary
 			const summaryCap = 70
-			if len(summary) > summaryCap {
-				summary = summary[:summaryCap-1] + "…"
-			}
+			summary := opsview.DisplayText(e.Summary, summaryCap)
 			fmt.Printf("%-*s  %-*s  %7d  %s\n",
 				verW, e.Version,
 				dateW, e.Date,
