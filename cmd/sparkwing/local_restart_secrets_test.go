@@ -228,6 +228,14 @@ func TestRedirectedLegacyHomeNamesBothKeysAndExactRepair(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "secrets.key")); !os.IsNotExist(err) {
 		t.Fatalf("refusal created a replacement key: %v", err)
 	}
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(home, "secrets.key"))
+	owner, err = cfg.Open(t.Context(), home)
+	if owner != nil {
+		_ = owner.Close()
+	}
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Message+refusal.Hint, "SPARKWING_SECRETS_KEY_FILE="+legacy) {
+		t.Fatalf("unit-pinned key lost the legacy repair: %v", err)
+	}
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", legacy)
 	owner, err = cfg.Open(t.Context(), home)
 	if err != nil {

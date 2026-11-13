@@ -126,13 +126,11 @@ func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 		return nil, err
 	}
 	k := &Keyring{path: path, previous: previous, fromEnv: current != nil, mayCreate: opts.Create}
-	if os.Getenv(KeyFileEnv) == "" && current == nil {
-		legacy, err := fssecure.ConfigFile(keyFileName)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := os.Lstat(legacy); legacy != path && !errors.Is(err, fs.ErrNotExist) {
-			k.unselectedConfigKey = legacy
+	if current == nil {
+		if legacy, err := fssecure.ConfigFile(keyFileName); err == nil && legacy != path {
+			if _, err := os.Lstat(legacy); !errors.Is(err, fs.ErrNotExist) {
+				k.unselectedConfigKey = legacy
+			}
 		}
 	}
 
