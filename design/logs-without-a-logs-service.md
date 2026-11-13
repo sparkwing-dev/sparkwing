@@ -97,7 +97,7 @@ flowchart LR
   SINK -->|index 0: signed manifest PUT| OBJ[(object store)]
   SINK -->|commit segments and final manifest check| CTL
   RING[controller live ring] --> CTL
-  CTL -->|reads: list, get, verify, serve| OBJ
+  CTL -->|authorized committed segments: get, verify, serve| OBJ
   VIEW[dashboard or CLI follow] -->|open stream: sets watched| CTL
 ```
 
@@ -159,24 +159,20 @@ no limit is new.
 ### Segment naming
 
 ```text
-<prefix>/logs/r<days>/teams/<team>/runs/<run>/<node>/a<attempt>-g<gen>/seg-000001.ndjson.gz
-<prefix>/logs/r<days>/teams/<team>/runs/<run>/<node>/a<attempt>-g<gen>/manifest.json
+<prefix>/logs/r<days>/teams/<team>/runs/<run>/jobs/<job>/a<attempt>-g<gen>/seg-000001.ndjson.gz
+<prefix>/logs/r<days>/teams/<team>/runs/<run>/jobs/<job>/a<attempt>-g<gen>/manifest.json
+<prefix>/logs/r<days>/teams/<team>/runs/<run>/units/plan/g<gen>/seg-000001.ndjson.gz
+<prefix>/logs/r<days>/teams/<team>/runs/<run>/units/eval/<source>/s<source-gen>-g<eval-gen>/seg-000001.ndjson.gz
 ```
 
-- `r<days>` is the retention class (see Retention). It leads the key so one
-  lifecycle rule per class covers every team.
-- `teams/<team>` keeps the `internal/teamblob` namespace, so the storage
-  pass's per-team listing and team deletion keep working by prefix. A run
-  with no team uses `teams/_` rather than the bucket root, which the logs
-  archive uses today.
-- `<node>` is the node ID with `/` replaced by `__`, as the logs service
-  does, after `storage.SafeRelPath` validation.
-- `a<attempt>-g<gen>` matches the output key scheme
-  (`outputs/<run>/<node>/a<attempt>-g<gen>-...` in
-  `internal/store/node_output.go`), so a retried or re-claimed attempt never
-  writes into another attempt's log.
-- Segment numbers are six-digit, zero-padded and dense from 1, so a
-  listing sorts in write order and a gap is visible without a manifest.
+- `r<days>` is the run's persisted retention class. Every subject requires an
+  explicit team and run. A job attempt and an owner unit have separate prefixes.
+- `blob.LogSubjectPrefix` owns key derivation and escapes job/source IDs without
+  collisions. Trigger and plan units each carry their own generation. Eval
+  additionally carries its immutable source generation.
+- Attempt ordinal and claim generation keep retries in distinct streams.
+  Segment numbers are zero-padded to at least six digits, dense from one.
+  Only committed segment records select readable objects.
 - Each segment is gzip-compressed NDJSON of masked `sparkwing.LogRecord`
   lines, each carrying its sequence number. gzip is in the standard
   library and every reader decodes it; zstd would add a dependency for
@@ -374,7 +370,7 @@ sequenceDiagram
   participant R as runner sink
   V->>C: GET /runs/{id}/logs/{node}/stream
   C->>C: register watch (30 s lease)
-  C->>O: LIST attempt prefix
+  C->>C: authorize and select committed segment ranges
   C->>O: GET seg-1..seg-k, verify sha256
   C-->>V: records 1..last_seq(k)
   R->>C: heartbeat
@@ -383,8 +379,10 @@ sequenceDiagram
   C-->>V: ring records with seq > last_seq(k)
   Note over C,V: a seq gap waits for the next segment, then fills from it
   R->>O: PUT seg-(k+1) on the 10 s cadence
-  R->>C: POST manifest at finish
-  C-->>V: end of stream once the manifest lands
+  R->>C: sign final manifest slot
+  R->>O: PUT manifest.json
+  R->>C: commit segments and final manifest check
+  C-->>V: end of stream once the store seal commits
 ```
 
 - The controller stitches by sequence number: segments first, then ring
@@ -408,11 +406,10 @@ sequenceDiagram
   participant C as controller
   participant O as object store
   V->>C: GET /runs/{id}/logs/{node}?tail=200
-  C->>C: authorize (logs.read, team scope), look up the attempt prefix
-  C->>O: GET manifest.json
+  C->>C: authorize logs.read and select committed segments and seal
   C->>O: GET only the segments the tail needs
   C->>C: verify sha256, decompress, apply tail, head, lines, grep
-  C-->>V: records plus completeness from the manifest
+  C-->>V: records plus completeness from the store seal
 ```
 
 The controller proxies reads; it does not hand presigned GET URLs to
