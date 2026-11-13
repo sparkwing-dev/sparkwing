@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -30,7 +31,7 @@ func (o *Operator) LocalObjectSigningKey(ctx context.Context, cipher SessionKeyC
 		}
 		envelope, err = cipher.SealBound(secrets.PurposeSetting, "", metaKeyLocalObjects, "settings", false, true, hex.EncodeToString(minted))
 		if errors.Is(err, secrets.ErrKeyRefused) {
-			return nil, &apierr.Error{Code: apierr.BadRequest, Message: "local object signing key encryption failed", Hint: "Restore the existing local secrets key or set SPARKWING_SECRETS_KEY_FILE to a private key file inside SPARKWING_HOME before starting the controller"}
+			return nil, &apierr.Error{Code: apierr.BadRequest, Message: "local object signing key encryption failed", Hint: err.Error()}
 		}
 		if err != nil || !secrets.IsBound(envelope) {
 			return nil, errors.New("local object signing key encryption failed")
@@ -49,11 +50,11 @@ func (o *Operator) LocalObjectSigningKey(ctx context.Context, cipher SessionKeyC
 		return nil, errors.New("local object signing key is not sealed")
 	}
 	plain, err := cipher.OpenBound(secrets.PurposeSetting, "", metaKeyLocalObjects, "settings", false, true, envelope)
+	if errors.Is(err, secrets.ErrKeyMismatch) || errors.Is(err, secrets.ErrKeyRefused) {
+		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "local object signing key cannot be opened", Hint: err.Error()}
+	}
 	if err != nil {
-		if errors.Is(err, secrets.ErrKeyRefused) {
-			return nil, &apierr.Error{Code: apierr.BadRequest, Message: "local object signing key cannot be opened", Hint: "Restore the original local secrets key or set SPARKWING_SECRETS_KEY_FILE to the original private key file inside SPARKWING_HOME before starting the controller"}
-		}
-		return nil, errors.New("local object signing key cannot be opened; restore the local secrets key")
+		return nil, fmt.Errorf("local object signing key cannot be opened: %w", err)
 	}
 	key, err := hex.DecodeString(plain)
 	if err != nil || len(key) != sha256.Size {

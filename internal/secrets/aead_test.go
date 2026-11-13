@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -239,4 +240,42 @@ func TestDecodeKey(t *testing.T) {
 func encodeKey(t *testing.T, key []byte) string {
 	t.Helper()
 	return base64StdEncode(key)
+}
+
+func TestCipher_OnlyAuthenticationMissesReportKeyMismatch(t *testing.T) {
+	key, _ := GenerateKey()
+	other, _ := GenerateKey()
+	c, _ := NewCipher(key)
+	wrong, _ := NewCipher(other)
+	env, _ := c.SealBound(PurposeSecret, "acme", "TOKEN", "", false, true, "hello")
+
+	if _, err := wrong.OpenBound(PurposeSecret, "acme", "TOKEN", "", false, true, env); !errors.Is(err, ErrKeyMismatch) {
+		t.Fatalf("a value sealed under another key did not report a key mismatch: %v", err)
+	}
+	for name, open := range map[string]func() error{
+		"bad encoding": func() error {
+			_, err := c.OpenBound(PurposeSecret, "acme", "TOKEN", "", false, true, BoundPrefix+"!!!")
+			return err
+		},
+		"too short": func() error {
+			_, err := c.OpenBound(PurposeSecret, "acme", "TOKEN", "", false, true, BoundPrefix+base64StdEncode([]byte("x")))
+			return err
+		},
+		"unknown purpose": func() error {
+			_, err := c.OpenBound(Purpose("unknown"), "acme", "TOKEN", "", false, true, env)
+			return err
+		},
+		"unsealed": func() error {
+			_, err := c.OpenBound(PurposeSecret, "acme", "TOKEN", "", false, true, "plain")
+			return err
+		},
+		"bound envelope opened unbound": func() error {
+			_, err := c.Open(env)
+			return err
+		},
+	} {
+		if err := open(); err == nil || errors.Is(err, ErrKeyMismatch) {
+			t.Errorf("%s: want a failure that does not blame the key, got %v", name, err)
+		}
+	}
 }

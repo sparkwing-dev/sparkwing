@@ -90,9 +90,9 @@ func localServiceHost(home string) (crontimer.Host, error) {
 	if err != nil {
 		return crontimer.Host{}, err
 	}
-	keyPath := os.Getenv(localsecrets.KeyFileEnv)
-	if keyPath == "" {
-		keyPath = filepath.Join(configHome, "sparkwing", "secrets.key")
+	keyPath, err := localsecrets.KeyPath(home)
+	if err != nil {
+		return crontimer.Host{}, err
 	}
 	for name, value := range map[string]string{userconfig.PathEnv: configPath, localsecrets.KeyFileEnv: keyPath} {
 		environment[name], err = filepath.Abs(value)
@@ -139,7 +139,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (localc
 }
 
 func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding, now func() time.Time) (_ localcontroller.Services, err error) {
-	keyring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
+	keyring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Home: b.Home, Create: true})
 	if err != nil {
 		return localcontroller.Services{}, err
 	}

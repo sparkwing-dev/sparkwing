@@ -135,6 +135,17 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	return nil
 }
 
+// safety: only the local daemon's keyring returns a typed key diagnostic, to
+// the operator who owns that key. Any other failure reaches the client masked,
+// and its cause leads the server's length-capped log line.
+func storedSecretError(err error) error {
+	var diagnostic *apierr.Error
+	if errors.As(err, &diagnostic) {
+		return err
+	}
+	return errors.Join(err, &apierr.Error{Code: hosterr.Internal, Message: "stored secret did not open"})
+}
+
 func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	tn, err := s.credentialInventory(r.Context(), a.Target.Team)
 	if err != nil {
@@ -153,7 +164,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a cap
 			}
 			value, err = openSecret(s.secretsCipher, bindingForRow(tn.Team(), &sec), sec.Value)
 			if err != nil {
-				return errors.New("stored secret did not open")
+				return storedSecretError(err)
 			}
 		}
 		out = append(out, secretJSON{
