@@ -41,8 +41,12 @@ leave gaps in those numbers. SDK protocol records using this reserved event kind
 are renamed `sdk_lease_keeper` and stay visible as application records.
 Diagnostic-only bytes do not start an upload timer. They ride the next real-output
 cut or the final seal; the existing segment-size and total-byte bounds still apply.
-Diagnostics only append to an already-bound stream. After attempt detachment,
-they count as loss and cannot create another writer.
+Diagnostics only append to an already-bound stream, and no diagnostic opens a
+writer. Each bound stream holds one observation window: it opens when the stream
+binds and closes when the stream detaches. Records already queued for that
+stream drain into it before it seals. A retried job attempt binds a new stream
+and opens the next window once the previous one has sealed. Keeper events between
+two windows are not recorded.
 
 Each keeper instance records its OWNER or NODE role, unit generation, renewal
 sequence, selected expiry and watcher reset, renewal-in-flight state and inherited
@@ -54,11 +58,31 @@ The records contain no lease bearer or renewal payload.
 
 Delivery is best effort and cannot delay renewal, expiry or stop. Capture never
 waits for another capture: lock contention drops the record and increments loss.
-Missing sequence numbers, a nonzero dropped count, incomplete identity, or a missing execution-end
-record make a trace incomplete. A zero inherited deadline does not imply that a
-lease watcher has no expiry. Log closure or lost writer authority can discard a
-tail; diagnostics do not extend log authority or execution lifetime. These records
-share the run's existing log storage limits, retention and upload policy.
+At sealing, the host spends at most 100 ms of the existing retry-tail wait
+draining the stream's queued diagnostics. It then writes one `kind: summary`
+record per keeper instance. `summary.as_of_seal` marks a record that covers only
+its window. `open_mono_before_ns`, `open_wall` and `open_mono_after_ns` record the
+window's start, and `seal_mono_before_ns`, `seal_wall` and `seal_mono_after_ns`
+record its cutoff. `last_delivered_sequence` is the last data sequence appended to
+this stream. `captured` is the instance's last data sequence. `lost` totals the
+instance's contention drops, queue overflows and delivery failures. A snapshot
+that was captured and then lost counts in both. `drain_complete` is true only when
+the window lost nothing. The summary repeats the last captured sequence and does
+not consume one of its own.
+
+A window's trace is complete when its stream has a host-stamped summary with
+`drain_complete: true` and complete identity, and data sequences run without gaps
+up to `captured`. The claim ends at the cutoff. The keeper keeps renewing through
+the finish write, and later events fall outside the claim. `execution_end` does
+not mark the final sequence and may fall after the cutoff. A missing summary
+means incomplete diagnostics. That happens when the drain budget expires or the
+summary write fails. Neither condition changes the run outcome or the log
+lifecycle.
+
+A zero inherited deadline does not imply that a lease watcher has no expiry. Log
+closure or lost writer authority can discard a tail; diagnostics do not extend log
+authority or execution lifetime. These records share the run's existing log
+storage limits, retention and upload policy.
 
 Search several runs with `sparkwing runs grep --grep PATTERN --pipeline check`.
 Search output retains its continuation even when a page has no matching lines.
