@@ -57,10 +57,14 @@ func TestCritical(t *testing.T) { if testing.Short() { t.Skip("critical class") 
 				return (&PrePush{}).Plan(ctx, plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
 			})
 			t.Run("reservation", func(t *testing.T) {
+				reservation := float64(want)
+				if queued {
+					reservation += lightJobCores
+				}
 				for _, job := range doc.Jobs {
 					if job.ID == "affected-tests" {
-						if job.Cores != float64(want) {
-							t.Fatalf("reserved %g cores, want %d regardless of submitter limits", job.Cores, want)
+						if job.Cores != reservation {
+							t.Fatalf("reserved %g cores, want %g regardless of submitter limits", job.Cores, reservation)
 						}
 						return
 					}

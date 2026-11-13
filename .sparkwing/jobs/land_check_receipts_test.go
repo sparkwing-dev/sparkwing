@@ -163,14 +163,16 @@ func TestQueuedLandReplanningInASnapshotChecksTheMergedOwner(t *testing.T) {
 			switch job.ID {
 			case "policy":
 				expected = append(expected, "policy/"+step.ID)
-			case "review":
-				if step.ID == "review" {
-					expected = append(expected, "review/review")
-				} else if step.ID != "budget" {
+			case "fast":
+				if step.ID != "budget" {
 					expected = append(expected, "fast/"+step.ID)
 				}
 			case "affected-tests":
-				expected = append(expected, "affected-tests/"+step.ID)
+				if step.ID == "review" {
+					expected = append(expected, "review/review")
+				} else {
+					expected = append(expected, "affected-tests/"+step.ID)
+				}
 			}
 		}
 	}
@@ -186,7 +188,7 @@ func TestQueuedLandReplanningInASnapshotChecksTheMergedOwner(t *testing.T) {
 		t.Run(which, func(t *testing.T) {
 			t.Chdir(snapshot)
 			h, p, _ := queuedSourcePlan(t, r.dev, submitted, pinned, map[string]json.RawMessage{"preconditions": raw})
-			job, step := "review", "build-touched"
+			job, step := "fast", "build-touched"
 			if which == "affected" {
 				job, step = "affected-tests", "test"
 			}
@@ -299,7 +301,7 @@ func TestQueuedLandCompleteReceiptsAuthorizeOnlyTheMergedOwner(t *testing.T) {
 	runTestGit(t, snapshot, "init", "--quiet")
 	runTestGit(t, snapshot, "fetch", "--quiet", "--depth=1", r.dev, submitted)
 	runTestGit(t, snapshot, "checkout", "--quiet", "--detach", "FETCH_HEAD")
-	for _, jobID := range []string{"policy", "review", "affected-tests", "land"} {
+	for _, jobID := range []string{"policy", "fast", "affected-tests", "land"} {
 		t.Chdir(snapshot)
 		h, p, doc := queuedSourcePlan(t, r.dev, submitted, pinned, map[string]json.RawMessage{"preconditions": raw})
 		for _, job := range doc.Jobs {

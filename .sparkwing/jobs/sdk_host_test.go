@@ -26,6 +26,7 @@ type jobDocument struct {
 	Needs           []string `json:"deps"`
 	Steps           []stepDocument
 	TimeoutMS       int64   `json:"timeout_ms"`
+	NoProgressMS    int64   `json:"no_progress_timeout_ms"`
 	Cores           float64 `json:"cores"`
 	Requires        []string
 	Inline          bool
