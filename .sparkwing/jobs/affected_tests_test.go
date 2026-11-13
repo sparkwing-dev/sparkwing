@@ -225,8 +225,10 @@ func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := 0
-	for _, tests := range critical["."] {
-		count += len(tests)
+	for _, dirs := range critical {
+		for _, tests := range dirs {
+			count += len(tests)
+		}
 	}
 	for _, dir := range []string{"internal/controller", "internal/capability", "internal/store", "internal/runspec", "internal/secrets"} {
 		if len(critical["."][dir]) == 0 {
@@ -234,8 +236,8 @@ func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 		}
 	}
 	// perf: the critical set runs on every gate, so it stays a few dozen tests.
-	if count == 0 || count > 50 {
-		t.Errorf("critical set holds %d tests, want between 1 and 50", count)
+	if count == 0 || count > 60 {
+		t.Errorf("critical set holds %d tests, want between 1 and 60", count)
 	}
 }
 

@@ -234,6 +234,13 @@ Git fixture is exercised by
 `TestAffectedTestsRejectUnsafeGitInUnrelatedTestPackages`. These tags share the
 existing critical phase and deadline. Documentation-only selection is unchanged.
 
+Measured on 2026-11-12, the 13 newly tagged guard bodies summed to 5.54 seconds
+in one shared-host run. The eight-package command for the 11 root guards took
+81.09 seconds wall and 137.45 seconds CPU, including compilation and waited
+children, at load1 13.2-17.5. The two SDK guards ran with `-race` in 5.75 seconds
+wall and 4.40 seconds CPU. These mixed-cache command timings do not measure
+incremental Land latency. The critical-size guard counts all committed modules.
+
 The shared affected-test runner sets nonempty `GOFLAGS=-mod=readonly` for
 selection and execution. This overrides process and saved flags while keeping
 other saved Go settings, including `GOPROXY`, `GOPRIVATE` and `GONOSUMDB`.
