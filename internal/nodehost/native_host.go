@@ -175,7 +175,7 @@ type EvaluationOperations struct {
 	ChildContext func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 }
 
-// preparationObserver masks each frame before any sink sees it, since timing attrs echo stage and cache fields.
+// safety: timing attrs echo stage and cache fields, so every sink receives frames only after masking.
 func preparationObserver(observe func(context.Context, source.Timing), masker *secrets.Masker, log func(context.Context, nodewire.FrameLog) error) func(context.Context, source.Timing) {
 	return func(ctx context.Context, timing source.Timing) {
 		if observe != nil {

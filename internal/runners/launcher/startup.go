@@ -114,14 +114,11 @@ func (l *Launcher) observeStartup(ctx context.Context, job *batchv1.Job, binding
 	l.mu.Unlock()
 }
 
-// imageProbeBudget counts Events LISTs before and after the run-node container starts.
 type imageProbeBudget struct{ beforeStart, afterStart int }
 
-// safety: missing or unreadable Events must not add API traffic for a Pod's
-// whole lifetime, whether it never starts (unschedulable, image backoff) or runs
-// for hours, even when publishing its timing receipt also fails. Image Events
-// outlive the pull, so post-start probes still find what a spent pre-start
-// budget missed.
+// safety: missing or unreadable Events must not add API traffic for a Pod's whole lifetime, whether it never
+// starts (unschedulable, image backoff) or runs for hours, even when publishing its receipt fails. Image Events
+// outlive the pull, so post-start probes still find what a spent pre-start budget missed.
 func (l *Launcher) probeStartupImage(pod types.UID, started bool) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
