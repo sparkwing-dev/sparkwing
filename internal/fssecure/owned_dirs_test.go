@@ -47,6 +47,8 @@ type modeCall struct {
 }
 
 // safety: a convention nudge for config-directory writers, not a boundary; an unresolvable mode passes.
+//
+//sparkwing:critical
 func TestConfigDirectoryWritersDoNotMkdirGroupReadable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
