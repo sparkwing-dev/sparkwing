@@ -26,12 +26,15 @@ func TestOwnerClaimTimeSurvivesLeaseSettlement(t *testing.T) {
 	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 		t.Fatal(err)
 	}
+	*now = now.Add(time.Second)
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET status='success',finished_at=?`, now.UnixNano())
+	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=? WHERE bind_run='run'`, now.UnixNano())
 	view, err := (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(view.OwnerClaims) != 1 || view.OwnerClaims[0].Generation != int64(claim.Award.Generation) || !view.OwnerClaims[0].AwardedAt.Equal(awardedAt) {
-		t.Fatalf("wrong owner award timing: %+v", view.OwnerClaims)
+		t.Fatalf("wrong owner award timing after the run finished: %+v", view.OwnerClaims)
 	}
 }
 
