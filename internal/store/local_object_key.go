@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -49,8 +50,11 @@ func (o *Operator) LocalObjectSigningKey(ctx context.Context, cipher SessionKeyC
 		return nil, errors.New("local object signing key is not sealed")
 	}
 	plain, err := cipher.OpenBound(secrets.PurposeSetting, "", metaKeyLocalObjects, "settings", false, true, envelope)
-	if err != nil {
+	if errors.Is(err, secrets.ErrKeyMismatch) || errors.Is(err, secrets.ErrKeyRefused) {
 		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "local object signing key cannot be opened", Hint: err.Error()}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("local object signing key cannot be opened: %w", err)
 	}
 	key, err := hex.DecodeString(plain)
 	if err != nil || len(key) != sha256.Size {

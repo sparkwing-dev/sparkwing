@@ -31,6 +31,8 @@ home's key with its backups.
 
 A wrong `SPARKWING_SECRETS_KEY` value overrides every file selector. Replace
 that value with the original key, or unset it before using a file. Its refusal
-names the inline source and explains that precedence. Standalone controller
-key failures retain their credential-file repair instead of suggesting local
-CLI environment selectors. Secret-list API responses preserve these repairs.
+names the inline source and explains that precedence. The local daemon's
+secret-list API returns these repairs. Standalone controller key failures keep
+their credential-file repair in the controller's log, and its API returns a
+generic internal error, because team members who can list secrets should not
+see the server's key path.

@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testhome"
 )
 
 func TestLocalControllerKeySetupRefusalRetainsConfigurationRepair(t *testing.T) {
@@ -191,7 +192,7 @@ func TestRedirectedLegacyHomeNamesBothKeysAndExactRepair(t *testing.T) {
 	user := t.TempDir()
 	home := filepath.Join(user, "redirected")
 	legacy := filepath.Join(user, "config", "sparkwing", "secrets.key")
-	t.Setenv("HOME", user)
+	testhome.Set(t, user)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "config.yaml"))
@@ -254,7 +255,7 @@ func TestLocalControllerKeyFollowsCapturedHome(t *testing.T) {
 	user := t.TempDir()
 	ambient := filepath.Join(user, "ambient")
 	selected := filepath.Join(user, "selected")
-	t.Setenv("HOME", user)
+	testhome.Set(t, user)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
 	t.Setenv("SPARKWING_HOME", ambient)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(selected, "config.yaml"))

@@ -19,6 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testhome"
 )
 
 func keyFileIn(t *testing.T, dir string) string {
@@ -348,7 +350,7 @@ func TestKeyringOpenFailureNamesSelectedKey(t *testing.T) {
 
 func TestKeyringNewHomesCreateTheirOwnKeys(t *testing.T) {
 	user := t.TempDir()
-	t.Setenv("HOME", user)
+	testhome.Set(t, user)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
 	t.Setenv(KeyFileEnv, "")
 	t.Setenv(keyEnv, "")
@@ -401,7 +403,7 @@ func TestKeyringNewHomesCreateTheirOwnKeys(t *testing.T) {
 
 func TestKeyringDefaultHomeKeepsLegacyConfigKey(t *testing.T) {
 	user := t.TempDir()
-	t.Setenv("HOME", user)
+	testhome.Set(t, user)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
 	t.Setenv("SPARKWING_HOME", filepath.Join(user, ".sparkwing"))
 	t.Setenv(KeyFileEnv, "")
@@ -433,8 +435,7 @@ func TestKeyringDefaultHomeKeepsLegacyConfigKey(t *testing.T) {
 
 func TestKeyringDefaultHomeRetainsConfigKeyWhenLocalFileExists(t *testing.T) {
 	user := t.TempDir()
-	t.Setenv("HOME", user)
-	t.Setenv("USERPROFILE", user)
+	testhome.Set(t, user)
 	t.Setenv("APPDATA", filepath.Join(user, "AppData", "Roaming"))
 	t.Setenv("SPARKWING_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -536,5 +537,70 @@ func TestKeyringFailureRepairFollowsKeySource(t *testing.T) {
 				t.Fatalf("store key failure lost its credential repair: %v", err)
 			}
 		})
+	}
+}
+
+func TestKeyringOpenFailureBlamesTheKeyOnlyForKeyMisses(t *testing.T) {
+	path := keyFileIn(t, t.TempDir())
+	if err := os.WriteFile(path, bytes.Repeat([]byte{1}, secrets.KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := secrets.NewCipher(bytes.Repeat([]byte{2}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := foreign.SealBound(secrets.PurposeSecret, "default", "NAME", "", true, false, "private-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := loadRing(t).For(nil)
+	_, err = c.OpenBound(secrets.PurposeSecret, "default", "NAME", "", true, false, sealed)
+	var diagnostic *apierr.Error
+	if !errors.As(err, &diagnostic) || !strings.Contains(diagnostic.Message, path) || !strings.Contains(diagnostic.Hint, KeyFileEnv) {
+		t.Fatalf("a key miss lost its named-key diagnostic: %v", err)
+	}
+	for name, open := range map[string]func() error{
+		"bad encoding": func() error {
+			_, err := c.OpenBound(secrets.PurposeSecret, "default", "NAME", "", true, false, secrets.BoundPrefix+"!!!")
+			return err
+		},
+		"unknown purpose": func() error {
+			_, err := c.OpenBound(secrets.Purpose("unknown"), "default", "NAME", "", true, false, sealed)
+			return err
+		},
+	} {
+		err := open()
+		if err == nil || errors.As(err, &diagnostic) || strings.Contains(err.Error(), KeyFileEnv) ||
+			strings.Contains(err.Error(), "restore") || strings.Contains(err.Error(), path) {
+			t.Errorf("%s: a failure that is not the key's carries a key repair: %v", name, err)
+		}
+	}
+}
+
+func TestStoreKeyringKeepsKeyDetailOutOfClientDiagnostics(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.key")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{1}, secrets.KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const restore = "Restore that key to the controller volume"
+	ring, err := NewStoreKeyring(path, nil, restore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := secrets.NewCipher(bytes.Repeat([]byte{2}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := foreign.SealBound(secrets.PurposeSecret, "default", "NAME", "", true, false, "private-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ring.For(nil).OpenBound(secrets.PurposeSecret, "default", "NAME", "", true, false, sealed)
+	var diagnostic *apierr.Error
+	if err == nil || errors.As(err, &diagnostic) {
+		t.Fatalf("a controller keyring returned a client-facing key diagnostic: %v", err)
+	}
+	if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), restore) || strings.Contains(err.Error(), "private-value") {
+		t.Fatalf("a controller keyring lost the operator detail its server logs: %v", err)
 	}
 }

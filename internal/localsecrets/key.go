@@ -52,22 +52,18 @@ func KeyPath(home string) (string, error) {
 	if v := os.Getenv(KeyFileEnv); v != "" {
 		return filepath.Abs(v)
 	}
+	p := paths.PathsAt(home)
 	if home == "" {
-		p, err := paths.DefaultPaths()
-		if err != nil {
+		var err error
+		if p, err = paths.DefaultPaths(); err != nil {
 			return "", err
 		}
-		home = p.Root
 	}
-	home, err := filepath.Abs(home)
+	root, err := filepath.Abs(p.Root)
 	if err != nil {
 		return "", err
 	}
-	userHome, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	if home == filepath.Join(userHome, ".sparkwing") {
+	if paths.PathsAt(root).IsOperatorHome() {
 		legacy, err := fssecure.ConfigFile(keyFileName)
 		if err != nil {
 			return "", err
@@ -76,7 +72,7 @@ func KeyPath(home string) (string, error) {
 			return legacy, nil
 		}
 	}
-	return filepath.Join(home, keyFileName), nil
+	return filepath.Join(root, keyFileName), nil
 }
 
 // errNoKeyToCreate reports a seal in a process that may not create the
@@ -99,6 +95,7 @@ type Keyring struct {
 	path                string
 	fromEnv             bool
 	mayCreate           bool
+	clientDiagnostic    bool
 	previous            []byte
 	restore             string
 	unselectedConfigKey string
@@ -122,7 +119,7 @@ func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 	if err != nil {
 		return nil, err
 	}
-	k := &Keyring{path: path, previous: previous, fromEnv: current != nil, mayCreate: opts.Create}
+	k := &Keyring{path: path, previous: previous, fromEnv: current != nil, mayCreate: opts.Create, clientDiagnostic: true}
 	if current == nil {
 		if legacy, err := fssecure.ConfigFile(keyFileName); err == nil && legacy != path {
 			if _, err := os.Lstat(legacy); !errors.Is(err, fs.ErrNotExist) {
@@ -382,10 +379,23 @@ func (k *Keyring) missingLocked(ctx context.Context, st *store.Operator) error {
 }
 
 func (k *Keyring) keyFailure(err error) error {
-	return fmt.Errorf("%w%.0w", k.openFailure(err), secrets.ErrKeyRefused)
+	return fmt.Errorf("%w%.0w", k.describe(err), secrets.ErrKeyRefused)
 }
 
+// safety: only a value no configured key opens names the key; a malformed
+// envelope or unknown purpose is the value's fault, and a key repair would mislead.
 func (k *Keyring) openFailure(err error) error {
+	if !errors.Is(err, secrets.ErrKeyMismatch) {
+		return err
+	}
+	return k.describe(err)
+}
+
+// safety: the key's path and repair are operator detail. Only the local
+// daemon's keyring answers the operator who owns that key, so only it returns
+// them as a client diagnostic; a controller keyring leaves them in the error
+// its server logs and masks.
+func (k *Keyring) describe(err error) error {
 	source := k.path
 	repair := "restore the key that sealed this home's data or set " + KeyFileEnv + " to its file"
 	if k.fromEnv {
@@ -399,6 +409,9 @@ func (k *Keyring) openFailure(err error) error {
 			selected = "'" + strings.ReplaceAll(selected, "'", `'\''`) + "'"
 		}
 		repair += "; the shared config key was not selected: " + k.unselectedConfigKey + "; if that key sealed this home's data, restore access with " + KeyFileEnv + "=" + selected
+	}
+	if !k.clientDiagnostic {
+		return fmt.Errorf("local secrets key %s: %w; %s", source, err, repair)
 	}
 	diagnostic := &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("local secrets key %s: %v", source, err), Hint: repair}
 	return fmt.Errorf("%w; %s%.0w", diagnostic, repair, err)

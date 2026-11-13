@@ -26,6 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testhome"
 )
 
 func TestSecrets_ManagementClientListsScopedAndSharedSecrets(t *testing.T) {
@@ -457,7 +458,7 @@ func TestSecrets_WriteKeepsOnlyOnPool(t *testing.T) {
 
 func TestSecrets_ListPreservesLocalKeyDiagnostic(t *testing.T) {
 	user := t.TempDir()
-	t.Setenv("HOME", user)
+	testhome.Set(t, user)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
 	path := filepath.Join(user, "selected.key")
 	t.Setenv(localsecrets.KeyFileEnv, path)
@@ -496,5 +497,66 @@ func TestSecrets_ListPreservesLocalKeyDiagnostic(t *testing.T) {
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || !strings.Contains(failure.Message+failure.Hint, path) || !strings.Contains(failure.Message+failure.Hint, localsecrets.KeyFileEnv) || strings.Contains(failure.Message+failure.Hint, private) {
 		t.Fatalf("management client lost the key repair: %v", err)
+	}
+}
+
+func TestSecrets_ListMasksControllerKeyFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.key")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{1}, secrets.KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const restore = "Restore that key to the controller volume"
+	ring, err := localsecrets.NewStoreKeyring(path, nil, restore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newBrowserFixture(t, nil)
+	f.srv.WithSecretsCipher(ring.For(f.st.AsOperator()))
+	foreign, err := secrets.NewCipher(bytes.Repeat([]byte{2}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const private = "private-unreadable-variable"
+	sealed, err := store.SealSecret(foreign, store.DefaultTeam, store.Secret{Name: "VARIABLE", Value: private, Shared: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := teststore.SeedSecret(f.st, store.DefaultTeam, sealed.Row(), time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets", "Bearer "+f.token, nil)
+	if code != http.StatusInternalServerError || strings.Contains(body, path) || strings.Contains(body, restore) ||
+		strings.Contains(body, localsecrets.KeyFileEnv) || strings.Contains(body, private) {
+		t.Fatalf("a team member's secret list exposed the controller's key detail: HTTP %d %s", code, body)
+	}
+	if logs := f.logs.String(); !strings.Contains(logs, path) || strings.Contains(logs, private) {
+		t.Fatalf("the server log lost the operator's key detail:\n%s", logs)
+	}
+}
+
+func TestSecrets_ListGivesNoKeyRepairForCorruptValues(t *testing.T) {
+	user := t.TempDir()
+	testhome.Set(t, user)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(user, "config"))
+	path := filepath.Join(user, "selected.key")
+	t.Setenv(localsecrets.KeyFileEnv, path)
+	t.Setenv("SPARKWING_SECRETS_KEY", "")
+	t.Setenv("SPARKWING_SECRETS_PREVIOUS_KEY", "")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{1}, secrets.KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newBrowserFixture(t, nil)
+	f.srv.WithSecretsCipher(ring.For(f.st.AsOperator()))
+	if err := teststore.SeedSecret(f.st, store.DefaultTeam, store.Secret{Name: "VARIABLE", Value: secrets.BoundPrefix + "!!!", Shared: true}, time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets", "Bearer "+f.token, nil)
+	if code != http.StatusInternalServerError || strings.Contains(body, path) || strings.Contains(body, localsecrets.KeyFileEnv) ||
+		strings.Contains(strings.ToLower(body), "restore") {
+		t.Fatalf("a corrupt value was blamed on the key: HTTP %d %s", code, body)
 	}
 }
