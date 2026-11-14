@@ -332,7 +332,11 @@ class (`not_found`, `team` or `binding`), the credential kind (`account`,
 `runner`, `trigger`, `plan`, `node`, `eval`, `service`, `operator` or `local`) and
 how it was presented. It never holds the request path, body, the identifiers the
 request named or another team's identity. Each credential, route and class keeps
-at most one row per hour, so a probe loop cannot flood the table. A missing
+at most one row per hour, and each team at most 300 rows per hour on each
+controller, so a probe loop cannot flood the table. Refusals past a team's cap
+are counted in one `access.refused_suppressed` row for that hour, written by the
+controller's first refusal of the next hour. A credential without a team leaves
+no row. A missing
 resource in the caller's own team is audited by the same rule, and the response
 to a refused request stays byte-identical to the response for a missing
 resource. Only deployment operators read these rows, through the operator team

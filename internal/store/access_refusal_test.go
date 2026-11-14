@@ -87,12 +87,15 @@ func TestAccessRefusalAcceptsOnlyRegisteredRoutesAndClosedClasses(t *testing.T) 
 		Authority:  capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "swk_prefix"},
 		Capability: capability.Capability{Team: "b", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "acct-b"}},
 	}
+	teamless := p
+	teamless.Capability.Team = ""
 	at := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
 	for _, tc := range []store.AccessRefusal{
 		{At: at, Principal: p, Method: "POST", Route: "/api/v1/runs/run-a/cancel", Refusal: "not_found"},
 		{At: at, Principal: p, Method: "GET", Route: "/api/v1/runs/{run}/cancel", Refusal: "not_found"},
 		{At: at, Principal: p, Method: "POST", Route: "/api/v1/runs/{run}/cancel", Refusal: "exists_elsewhere"},
 		{Principal: p, Method: "POST", Route: "/api/v1/runs/{run}/cancel", Refusal: "not_found"},
+		{At: at, Principal: teamless, Method: "POST", Route: "/api/v1/runs/{run}/cancel", Refusal: "not_found"},
 	} {
 		if err := st.AsOperator().RecordAccessRefusal(t.Context(), tc); !errors.Is(err, store.ErrInvalidInput) {
 			t.Errorf("%+v: err = %v, want invalid input", tc, err)
@@ -101,4 +104,51 @@ func TestAccessRefusalAcceptsOnlyRegisteredRoutesAndClosedClasses(t *testing.T) 
 	if rows := teststore.AccessRefusals(t, st); len(rows) != 0 {
 		t.Fatalf("invalid refusals wrote rows: %+v", rows)
 	}
+}
+
+func TestAccessSuppressionSummaryIsOnePerTeamAndWindow(t *testing.T) {
+	accessRefusalDialects(t, func(t *testing.T, st *store.Store) {
+		teststore.SeedTeam(t, st, "b")
+		op := st.AsOperator()
+		window := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+		at := window.Add(store.AccessRefusalWindow)
+		for _, s := range []store.AccessSuppression{
+			{At: at, Team: "b", Window: window, Suppressed: 360},
+			{At: at.Add(time.Minute), Team: "b", Window: window, Suppressed: 12},
+			{At: at.Add(store.AccessRefusalWindow), Team: "b", Window: at, Suppressed: 5},
+		} {
+			if err := op.RecordAccessSuppression(t.Context(), s); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, bad := range []store.AccessSuppression{
+			{At: at, Window: window, Suppressed: 1},
+			{At: at, Team: "b", Window: window},
+			{Team: "b", Window: window, Suppressed: 1},
+		} {
+			if err := op.RecordAccessSuppression(t.Context(), bad); !errors.Is(err, store.ErrInvalidInput) {
+				t.Errorf("%+v: err = %v, want invalid input", bad, err)
+			}
+		}
+		events, err := forTeamTenant(t, st, "b").BusinessEvents(t.Context(), "access.refused_suppressed", 10, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != 2 {
+			t.Fatalf("summaries = %+v, want one per window", events)
+		}
+		first := events[len(events)-1]
+		if first.Actor != "controller" || first.Attrs["suppressed"] != float64(360) || first.Attrs["window_start"] != float64(window.Unix()) || len(first.Attrs) != 2 {
+			t.Fatalf("summary = %+v", first)
+		}
+	})
+}
+
+func forTeamTenant(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
+	t.Helper()
+	tenant, err := st.ForTeam(t.Context(), team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tenant
 }

@@ -287,6 +287,12 @@ type auditAccessRefusal struct {
 	Presentation string `json:"presentation"`
 }
 
+// safety: the summary counts refusals a team made past its per-window cap; it names no actor or route.
+type auditAccessSuppressed struct {
+	Window     int64 `json:"window_start"`
+	Suppressed int64 `json:"suppressed"`
+}
+
 // These closed variants are the only audit inputs. Adding a kind requires a closed payload
 // and its projection here; arbitrary attrs and caller prose cannot enter it.
 type auditPayload interface{ isAuditPayload() }
@@ -316,6 +322,7 @@ func (auditSourceRelease) isAuditPayload()        {}
 func (auditOIDCMint) isAuditPayload()             {}
 func (auditDeviceLogin) isAuditPayload()          {}
 func (auditAccessRefusal) isAuditPayload()        {}
+func (auditAccessSuppressed) isAuditPayload()     {}
 
 func auditOneOf[T ~string](value T, choices ...string) bool {
 	for _, choice := range choices {
@@ -447,9 +454,13 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		}
 		ev.Kind, ev.SubjectID = "access.refused", digestAudit(string(identity)).String()
 		_, routed := capability.LookupRoute(p.Method, p.Route)
-		valid = routed && p.Window > 0 && auditOneOf(p.Refusal, "not_found", "team", "binding") &&
+		valid = routed && c.Team != "" && p.Window > 0 && auditOneOf(p.Refusal, "not_found", "team", "binding") &&
 			auditOneOf(p.Credential, "account", "runner", "service", "operator", "local", string(capability.UnitTrigger), string(capability.UnitPlan), string(capability.UnitNode), string(capability.UnitEval)) &&
 			auditOneOf(p.Presentation, string(capability.CredentialBearer), string(capability.CredentialSession), string(capability.CredentialConsole), string(capability.CredentialPeer))
+	case auditAccessSuppressed:
+		actorAllowed = c.Actor.system == auditController
+		ev.Kind, ev.SubjectID = "access.refused_suppressed", strconv.FormatInt(p.Window, 10)
+		valid = c.Team != "" && p.Window > 0 && p.Suppressed > 0
 	case auditSourceRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, ev.Account, repeat = "git_credential.released", p.CredentialID.String(), p.RunID, p.AccountID, true
 	default:

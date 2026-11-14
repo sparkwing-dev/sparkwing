@@ -6,5 +6,6 @@
   `access.refused` audit event in the caller's own team. The event records the
   actor, method, route template, refusal class and credential kind, never the
   request path, body or the identifiers it named. Each credential, route and
-  class keeps at most one event per hour. Responses are unchanged: a refused
-  request still answers exactly like a missing resource.
+  class keeps at most one event per hour, and each team at most 300 per hour;
+  the rest are counted in one `access.refused_suppressed` event. Responses are
+  unchanged: a refused request still answers exactly like a missing resource.

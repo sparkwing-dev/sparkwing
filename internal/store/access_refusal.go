@@ -24,7 +24,8 @@ type AccessRefusal struct {
 
 // RecordAccessRefusal audits a refusal as access.refused in the acting
 // principal's team, keeping at most one row per actor, route, class and
-// credential kind in each AccessRefusalWindow.
+// credential kind in each AccessRefusalWindow. A principal without a team
+// is refused, because no team view could read its row.
 func (o *Operator) RecordAccessRefusal(ctx context.Context, r AccessRefusal) error {
 	if r.At.IsZero() {
 		return fmt.Errorf("%w: refusal time is required", ErrInvalidInput)
@@ -35,6 +36,26 @@ func (o *Operator) RecordAccessRefusal(ctx context.Context, r AccessRefusal) err
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		return o.recordAudit(ctx, tx, auditContext{At: r.At, Team: Team(r.Principal.Capability.Team), Actor: auditPrincipalActor(r.Principal)}, payload)
+	})
+}
+
+// AccessSuppression counts the refusals one team made in a window after it
+// reached the controller's per-team cap, and so left no access.refused row.
+type AccessSuppression struct {
+	At         time.Time
+	Team       Team
+	Window     time.Time
+	Suppressed int64
+}
+
+// RecordAccessSuppression writes one access.refused_suppressed summary per team
+// and window, attributed to the controller.
+func (o *Operator) RecordAccessSuppression(ctx context.Context, s AccessSuppression) error {
+	if s.At.IsZero() || s.Window.IsZero() {
+		return fmt.Errorf("%w: suppression times are required", ErrInvalidInput)
+	}
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		return o.recordAudit(ctx, tx, auditContext{At: s.At, Team: s.Team, Actor: auditActor{system: auditController}}, auditAccessSuppressed{Window: s.Window.Unix(), Suppressed: s.Suppressed})
 	})
 }
 

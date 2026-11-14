@@ -1,10 +1,11 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -77,52 +78,117 @@ func refusalProbe(h http.Handler, bearer, method, path, body string) probeResult
 	return probeResult{w.Code, w.Body.String()}
 }
 
-func TestRefusalAuditWritesOncePerKeyAndWindow(t *testing.T) {
-	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
-	var writes []store.AccessRefusal
-	fail := false
-	audit := &refusalAudit{
-		now:    func() time.Time { return now },
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+type refusalAuditFake struct {
+	now       time.Time
+	fail      bool
+	writes    []store.AccessRefusal
+	summaries []store.AccessSuppression
+	log       bytes.Buffer
+}
+
+func (f *refusalAuditFake) audit() *refusalAudit {
+	return &refusalAudit{
+		now:    func() time.Time { return f.now },
+		logger: slog.New(slog.NewTextHandler(&f.log, nil)),
 		record: func(_ context.Context, r store.AccessRefusal) error {
-			if fail {
+			if f.fail {
 				return errors.New("store unavailable")
 			}
-			writes = append(writes, r)
+			f.writes = append(f.writes, r)
+			return nil
+		},
+		suppress: func(_ context.Context, s store.AccessSuppression) error {
+			f.summaries = append(f.summaries, s)
 			return nil
 		},
 	}
-	p := capability.Principal{Class: capability.CredentialBearer, Capability: capability.Capability{Team: "b", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "acct-b"}}}
-	probe := routepolicy.Refusal{Principal: p, Method: "POST", Pattern: "/api/v1/runs/{run}/cancel", Class: routepolicy.RefusalNotFound}
+}
+
+func refusalFrom(team, subject, pattern string) routepolicy.Refusal {
+	p := capability.Principal{Class: capability.CredentialBearer, Capability: capability.Capability{Team: team, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: subject}}}
+	return routepolicy.Refusal{Principal: p, Method: "POST", Pattern: pattern, Class: routepolicy.RefusalNotFound}
+}
+
+func TestRefusalAuditWritesOncePerKeyAndWindow(t *testing.T) {
+	f := &refusalAuditFake{now: time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)}
+	audit := f.audit()
+	probe := refusalFrom("b", "runner-1", "/api/v1/runs/{run}/cancel")
 	for range 100 {
 		audit.note(t.Context(), probe)
 	}
-	if len(writes) != 1 {
-		t.Fatalf("100 probes in one window made %d writes", len(writes))
+	if len(f.writes) != 1 {
+		t.Fatalf("100 probes in one window made %d writes", len(f.writes))
 	}
-	other := probe
-	other.Pattern = "/api/v1/runs/{run}"
-	audit.note(t.Context(), other)
-	now = now.Add(store.AccessRefusalWindow)
+	audit.note(t.Context(), refusalFrom("b", "runner-1", "/api/v1/runs/{run}"))
+	f.now = f.now.Add(store.AccessRefusalWindow)
 	audit.note(t.Context(), probe)
-	if len(writes) != 3 {
-		t.Fatalf("a new route and a new window made %d writes in total, want 3", len(writes))
+	if len(f.writes) != 3 {
+		t.Fatalf("a new route and a new window made %d writes in total, want 3", len(f.writes))
 	}
-	fail = true
-	retry := probe
-	retry.Class = routepolicy.RefusalBinding
-	audit.note(t.Context(), retry)
-	fail = false
-	audit.note(t.Context(), retry)
-	if len(writes) != 4 {
-		t.Fatalf("a failed write was not retried: %d writes", len(writes))
+	audit.note(t.Context(), refusalFrom("", "operator", "/api/v1/runs/{run}/cancel"))
+	if len(f.writes) != 3 {
+		t.Fatal("a principal without a team wrote a row no team view can read")
 	}
-	for i := range maxRefusalKeys + 10 {
-		next := probe
-		next.Principal.Capability.Subject.ID = "acct-" + string(rune('a'+i%26)) + time.Duration(i).String()
-		audit.note(t.Context(), next)
+}
+
+// One team's many credentials stop at the per-team cap, the overflow is counted in
+// one summary when the window rolls, and other teams keep their own budget.
+func TestRefusalAuditCapsEachTeamAndSummarizesTheRest(t *testing.T) {
+	start := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	f := &refusalAuditFake{now: start}
+	audit := f.audit()
+	const runners = refusalTeamKeys + 120
+	for i := range runners {
+		for range 3 {
+			audit.note(t.Context(), refusalFrom("b", fmt.Sprintf("runner-%d", i), "/api/v1/runs/{run}/claim"))
+		}
 	}
-	if len(audit.seen) > maxRefusalKeys || len(writes) != 4+maxRefusalKeys+10 {
-		t.Fatalf("seen=%d writes=%d", len(audit.seen), len(writes))
+	if len(f.writes) != refusalTeamKeys {
+		t.Fatalf("team b wrote %d rows, want its cap %d", len(f.writes), refusalTeamKeys)
+	}
+	audit.note(t.Context(), refusalFrom("c", "runner-c", "/api/v1/runs/{run}/claim"))
+	if len(f.writes) != refusalTeamKeys+1 || f.writes[len(f.writes)-1].Principal.Capability.Team != "c" {
+		t.Fatal("team b's cap cost team c its row")
+	}
+	if len(f.summaries) != 0 {
+		t.Fatalf("summary written before the window ended: %+v", f.summaries)
+	}
+	f.now = start.Add(store.AccessRefusalWindow)
+	audit.note(t.Context(), refusalFrom("c", "runner-c", "/api/v1/runs/{run}/claim"))
+	audit.note(t.Context(), refusalFrom("c", "runner-c", "/api/v1/runs/{run}"))
+	want := store.AccessSuppression{At: f.now, Team: "b", Window: start, Suppressed: 120 * 3}
+	if len(f.summaries) != 1 || f.summaries[0] != want {
+		t.Fatalf("summaries = %+v, want only %+v", f.summaries, want)
+	}
+	audit.note(t.Context(), refusalFrom("b", "runner-0", "/api/v1/runs/{run}/claim"))
+	if got := f.writes[len(f.writes)-1]; got.Principal.Capability.Team != "b" || len(audit.teams["b"].keys) != 1 {
+		t.Fatal("the new window did not reset team b's keys")
+	}
+}
+
+// A store that keeps refusing writes warns once a minute with a failure count, not once per probe.
+func TestRefusalAuditRateLimitsFailureWarnings(t *testing.T) {
+	start := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	f := &refusalAuditFake{now: start, fail: true}
+	audit := f.audit()
+	for i := range 50 {
+		audit.note(t.Context(), refusalFrom("b", "runner-1", "/api/v1/runs/{run}/cancel"))
+		f.now = f.now.Add(time.Second)
+		if i == 0 && strings.Count(f.log.String(), "access refusal audit failed") != 1 {
+			t.Fatalf("first failure did not warn: %s", f.log.String())
+		}
+	}
+	if n := strings.Count(f.log.String(), "access refusal audit failed"); n != 1 {
+		t.Fatalf("50 failures in 50s warned %d times", n)
+	}
+	f.now = start.Add(refusalWarnEvery)
+	audit.note(t.Context(), refusalFrom("b", "runner-1", "/api/v1/runs/{run}/cancel"))
+	if n := strings.Count(f.log.String(), "access refusal audit failed"); n != 2 || !strings.Contains(f.log.String(), "failures=50") {
+		t.Fatalf("after a minute: %d warnings: %s", n, f.log.String())
+	}
+	f.fail = false
+	audit.note(t.Context(), refusalFrom("b", "runner-1", "/api/v1/runs/{run}/cancel"))
+	if len(f.writes) != 1 {
+		t.Fatalf("a failed key was not retried once the store recovered: %d writes", len(f.writes))
 	}
 }
