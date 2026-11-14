@@ -191,6 +191,19 @@ workspace selection. Concurrent jobs preserve unchanged SDK packages, and removi
 unchanged and validates the installed SDK against the exact native pin.
 Root lifecycle scripts run on each preparation. Other dependencies are reconciled
 only after npm's frozen-lockfile check passes.
+After a verified installation, preparation writes `node_modules/.sparkwing-sdk-receipt`.
+The receipt digests `package.json`, the lockfile, npm's `node_modules/.package-lock.json`,
+the installed SDK manifest, every `package.json`, lockfile and `.npmrc` in the
+pipeline directory and its ancestors, the user, global and builtin npm configuration,
+`npm_config_*`, `HOME`, `NODE_ENV`, `NODE_OPTIONS`, `NODE_PATH` and `PREFIX`, the
+`node` and `npm` executables, and local tarball dependencies. A later preparation
+whose inputs match skips both npm commands and still validates the SDK pin. Any
+difference, an unreadable input, a copied local directory dependency or a root
+lifecycle script (`preinstall`, `install`, `postinstall`, `prepublish`,
+`preprepare`, `prepare`, `postprepare` or `dependencies`) runs the npm commands
+above. Preparation removes the receipt before npm writes and rewrites it only
+after the SDK verifies, all under the lockfile lock, so an interrupted install
+never matches.
 Each installation makes one helper attempt with a ten-minute deadline. Failure
 stops the install, reports the cause, and kills and reaps its helper process tree.
 Verification then compiles Go packages or type-checks TypeScript and runs list,

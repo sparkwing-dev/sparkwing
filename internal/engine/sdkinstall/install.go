@@ -217,7 +217,8 @@ func selectionInputs(dir string, environment procenv.Env) ([]string, string) {
 
 func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (_ []string, result error) {
 	// bug: npm ci removes packages beneath running SDK processes. Serialize npm's
-	// incremental installs so npm owns reuse without replacing an unchanged tree.
+	// incremental installs and receipt reads and writes so no preparation replaces or
+	// trusts a tree another preparation is still writing.
 	lock, err := os.Open(filepath.Join(dir, pin.Lockfile))
 	if err != nil {
 		return nil, err
@@ -231,27 +232,39 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 	}
 
 	var manifest struct{ Main string }
-	body, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	manifestBody, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(body, &manifest); err != nil {
+	if err := json.Unmarshal(manifestBody, &manifest); err != nil {
 		return nil, err
 	}
 	if manifest.Main == "" {
 		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "TypeScript package.json requires a main entry", Hint: `Set "main": "index.ts" in ` + filepath.Join(dir, "package.json") + " (use the existing pipeline entry file), then retry"}
 	}
-	// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
-	body, err = installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")
-	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
-		return nil, err
+	// perf: two npm processes cost 1-2 s per preparation and a local run prepares two or three
+	// times; an unchanged verified tree skips both.
+	fingerprint, err := typeScriptInstallFingerprint(dir, pin.Lockfile, manifestBody, environment)
+	if err != nil {
+		fingerprint = ""
 	}
-	body, err = installTool(ctx, dir, environment, "npm", "install", "--no-save", "--no-audit", "--no-fund")
-	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
-		return nil, err
+	reused := reuseTypeScriptInstall(dir, fingerprint)
+	if !reused {
+		if err := discardTypeScriptReceipt(dir); err != nil {
+			return nil, err
+		}
+		// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
+		body, err := installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")
+		if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+			return nil, err
+		}
+		body, err = installTool(ctx, dir, environment, "npm", "install", "--no-save", "--no-audit", "--no-fund")
+		if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+			return nil, err
+		}
 	}
 	installedManifest := filepath.Join(dir, "node_modules", "@sparkwing", "sdk", "package.json")
-	body, err = os.ReadFile(installedManifest)
+	body, err := os.ReadFile(installedManifest)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +281,15 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 		return nil, fmt.Errorf("TypeScript installation requires Node.js on PATH: %w", err)
 	}
 	node, err = filepath.Abs(node)
-	return []string{node, main}, err
+	if err != nil {
+		return nil, err
+	}
+	if !reused {
+		if err := recordTypeScriptInstall(dir, pin.Lockfile, manifestBody, environment); err != nil {
+			return nil, err
+		}
+	}
+	return []string{node, main}, nil
 }
 
 func installTool(ctx context.Context, dir string, environment procenv.Env, name string, args ...string) ([]byte, error) {
