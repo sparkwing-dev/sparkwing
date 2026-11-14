@@ -292,7 +292,10 @@ func TestMisspelledFlagsAndValuesSuggestTheNearestSpelling(t *testing.T) {
 }
 
 func TestRunStatusesMatchStoredRunStates(t *testing.T) {
-	want := []string{string(runstate.RunPending), string(runstate.RunRunning), string(runstate.RunSuccess), string(runstate.RunDryRun), string(runstate.RunFailed), string(runstate.RunCancelled)}
+	var want []string
+	for _, state := range runstate.RunStates() {
+		want = append(want, string(state))
+	}
 	if !slices.Equal(RunStatuses(), want) {
 		t.Fatalf("RunStatuses() = %v, want %v", RunStatuses(), want)
 	}

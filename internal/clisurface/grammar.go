@@ -1,6 +1,8 @@
 // Package clisurface owns the final command grammar independently of execution.
 package clisurface
 
+import "github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 // Authority separates team credentials from deployment and in-pod powers.
 type Authority string
 
@@ -59,5 +61,10 @@ const (
 
 // RunStatuses lists the stored run states a --status filter can match.
 func RunStatuses() []string {
-	return []string{"pending", "running", "success", "dry_run", "failed", "cancelled"}
+	states := runstate.RunStates()
+	out := make([]string, len(states))
+	for i, state := range states {
+		out[i] = string(state)
+	}
+	return out
 }
