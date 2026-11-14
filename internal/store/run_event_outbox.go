@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runevents"
 )
 
-// RunEventDeliveryWindow is how long a delivery is retried before it is marked failed.
-const RunEventDeliveryWindow = 24 * time.Hour
-
 // safety: cancel reasons can be caller-supplied prose, so only code-shaped
 // reasons reach a receiver.
 var runEventReasonCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
@@ -77,9 +74,8 @@ func writeRunEventDeliveriesTx(ctx context.Context, tx *storeTx, team Team, row 
 		return err
 	}
 	id := runevents.ID(row.ID, row.StateSeq)
-	at := now.UnixNano()
 	for _, sub := range matched {
-		if _, err := tx.execContext(ctx, `INSERT INTO run_event_deliveries(team,subscription_id,event_id,run_id,event_type,body,state,attempts,next_at,deadline_at,created_at) VALUES (?,?,?,?,?,?,'pending',0,?,?,?)`, team, sub.ID, id, row.ID, event, body, at, now.Add(RunEventDeliveryWindow).UnixNano(), at); err != nil {
+		if err := insertRunEventDeliveryTx(ctx, tx, team, runEventDelivery{SubscriptionID: sub.ID, EventID: id, RunID: row.ID, EventType: event, Body: body}, now); err != nil {
 			return err
 		}
 	}
