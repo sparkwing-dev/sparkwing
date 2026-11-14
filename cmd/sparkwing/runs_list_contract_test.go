@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 type listingReader struct {
@@ -309,5 +310,43 @@ func TestRunListingRefusalsIncludeRepairExamples(t *testing.T) {
 	}
 	if reads != 1 {
 		t.Fatalf("repair did not read controller: %d", reads)
+	}
+}
+
+func TestEmptyPipelineFilterSuggestsTheListedSpelling(t *testing.T) {
+	project := &projectconfig.Config{Pipelines: []projectconfig.Pipeline{{Name: "nightly", Entrypoint: "Nightly"}, {Name: "build", Entrypoint: "Build"}}}
+	for name, want := range map[string]string{
+		"nighty":  `no runs of pipeline "nighty"; sparkwing.yaml lists no such pipeline. Did you mean --pipeline nightly?`,
+		"nightly": "",
+		"deploy":  "",
+	} {
+		if got := pipelineFilterNote(project, name); got != want {
+			t.Errorf("%s: note %q, want %q", name, got, want)
+		}
+	}
+	if got := pipelineFilterNote(nil, "nighty"); got != "" {
+		t.Errorf("no project: note %q", got)
+	}
+}
+
+func TestRunStatusFilterRefusesUnknownStates(t *testing.T) {
+	const states = "--status requires one of pending, running, success, dry_run, failed, cancelled, optionally prefixed with ! to exclude it"
+	for args, want := range map[string]string{
+		"runs list --status succes":           states + "; did you mean success?",
+		"runs list --status !faild":           states + "; did you mean !failed?",
+		"runs list --status nope":             states,
+		"runs grep --grep x --status faild":   states + "; did you mean failed?",
+		"runs list --status !failed":          "",
+		"runs logs --grep x --status success": "",
+	} {
+		inv, err := clisurface.Parse("sparkwing", strings.Fields(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = parseRunQuery(inv, time.Now())
+		var usage *clisurface.UsageError
+		if want == "" && err != nil || want != "" && (!errors.As(err, &usage) || usage.Message != want) {
+			t.Errorf("%s: error %v, want %q", args, err, want)
+		}
 	}
 }

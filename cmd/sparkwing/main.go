@@ -162,6 +162,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if helpRequested {
 		return runSelectedHelp(dir, pipelineName, flags)
 	}
+	defer func() { resultErr = explainOutsideGit(context.Background(), filepath.Dir(dir), resultErr) }()
 	home, err := wingd.HomeDir("")
 	if err != nil {
 		return err

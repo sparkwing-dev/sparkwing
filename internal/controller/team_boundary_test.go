@@ -599,8 +599,17 @@ func TestTeamBoundary_SecretsStayWithTheirTeam(t *testing.T) {
 				t.Errorf("team A %s's list carries the secret's value: %s", member.name, body)
 			}
 		}
-		if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil); code != http.StatusForbidden || strings.Contains(body, "team-a-secret-value") {
+		if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil); code != http.StatusForbidden || strings.Contains(body, "team-a-secret-value") || !strings.Contains(body, `secret \"DEPLOY_KEY\" is masked`) || !strings.Contains(body, "secrets set --variable") {
 			t.Errorf("team A owner session read its secret back = %d: %s", code, body)
+		}
+		missingCode, missingBody := f.do("GET", "/api/v1/secrets/NEVER_SET", f.ownerB, nil)
+		for _, other := range []struct{ name, auth string }{{"team B owner", f.ownerB}, {"team B token", f.everyScopeB}} {
+			for _, name := range []string{"DEPLOY_KEY", "REGION", "NEVER_SET"} {
+				code, body := f.do("GET", "/api/v1/secrets/"+name, other.auth, nil)
+				if code != missingCode || strings.ReplaceAll(body, name, "NEVER_SET") != missingBody {
+					t.Errorf("GET /secrets/%s as %s = %d %q, want the missing-secret response %d %q", name, other.name, code, body, missingCode, missingBody)
+				}
+			}
 		}
 		for _, other := range []struct{ name, auth string }{{"team B owner", f.ownerB}, {"team B token", f.everyScopeB}} {
 			if code, body := f.do("GET", "/api/v1/secrets", other.auth, nil); code != http.StatusOK || strings.Contains(body, "DEPLOY_KEY") || strings.Contains(body, "REGION") {

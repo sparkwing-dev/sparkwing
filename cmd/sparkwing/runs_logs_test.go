@@ -522,3 +522,22 @@ func TestRunLogsHidesMaskedKeeperDiagnostic(t *testing.T) {
 		}
 	}
 }
+
+func TestRunsLogsWithoutRunOrGrepNamesBothChoices(t *testing.T) {
+	for args, want := range map[string]string{
+		"runs logs":                           "pass --run <id> to read a run's logs, or --grep <pattern> to search across runs; sparkwing runs list shows run IDs",
+		"runs logs --grep x --max-matches -1": "--max-matches must be nonnegative",
+		"runs grep --grep x --max-matches -1": "--max-matches must be nonnegative",
+	} {
+		inv, err := clisurface.Parse("sparkwing", strings.Fields(args))
+		if err == nil && inv.Command.Path == "sparkwing runs grep" {
+			_, err = parseLogSearch(inv, time.Now())
+		} else if err == nil {
+			_, err = parseRunLogs(inv)
+		}
+		var usage *clisurface.UsageError
+		if !errors.As(err, &usage) || usage.Message != want {
+			t.Errorf("%s: error %v, want %q", args, err, want)
+		}
+	}
+}

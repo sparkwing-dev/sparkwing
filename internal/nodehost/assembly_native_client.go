@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
@@ -74,21 +75,7 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 				if child.Status == "success" || child.Status == "memoized" {
 					result.Output, err = remote.ChildOutput(ctx, run, job)
 				} else {
-					source := child.Inputs.Git.Repository.Display
-					if source == "" {
-						source = string(child.Inputs.Git.Repository.Key)
-					}
-					if child.Inputs.Git.SHA != "" {
-						source += "@" + child.Inputs.Git.SHA
-					}
-					code := apierr.SDKError
-					if child.Reason == string(apierr.PlanFailed) {
-						code = apierr.PlanFailed
-					}
-					result.Error = &apierr.Error{
-						Code:    code,
-						Message: fmt.Sprintf("child pipeline %q from source %q ended %s: %s. Check the pipeline name and definition in the requested source, then run the parent again.", child.Inputs.Pipeline, source, child.Status, child.Failure),
-					}
+					result.Error = childFailure(child)
 				}
 			}
 			return result, err
@@ -96,4 +83,34 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 		return service, nil
 	}
 	return cfg
+}
+
+// safety: pipeline-name advice fits only a child that could not plan; a job
+// failure names the job, its error and the child run to inspect instead.
+func childFailure(child controllerwire.RunDetail) *apierr.Error {
+	inspect := fmt.Sprintf("Inspect it with `sparkwing runs status --run %s`.", child.ID)
+	if child.Reason == string(apierr.PlanFailed) {
+		source := child.Inputs.Git.Repository.Display
+		if source == "" {
+			source = string(child.Inputs.Git.Repository.Key)
+		}
+		if child.Inputs.Git.SHA != "" {
+			source += "@" + child.Inputs.Git.SHA
+		}
+		return &apierr.Error{
+			Code:    apierr.PlanFailed,
+			Message: fmt.Sprintf("child run %s of pipeline %q from source %q could not plan: %s. Check the pipeline name and definition in the requested source, then run the parent again.", child.ID, child.Inputs.Pipeline, source, child.Failure),
+		}
+	}
+	cause := child.Failure
+	for _, job := range child.Jobs {
+		if job.Error != "" && (job.Outcome == "failed" || job.Status == "failed") {
+			cause = fmt.Sprintf("job %q failed: %s", job.ID, job.Error)
+			break
+		}
+	}
+	if cause == "" {
+		return &apierr.Error{Code: apierr.SDKError, Message: fmt.Sprintf("child run %s of pipeline %q ended %s. %s", child.ID, child.Inputs.Pipeline, child.Status, inspect)}
+	}
+	return &apierr.Error{Code: apierr.SDKError, Message: fmt.Sprintf("child run %s of pipeline %q ended %s: %s. %s", child.ID, child.Inputs.Pipeline, child.Status, cause, inspect)}
 }

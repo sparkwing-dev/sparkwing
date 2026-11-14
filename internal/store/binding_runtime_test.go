@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"testing/quick"
 
@@ -128,6 +129,22 @@ func TestBindingDeclaredReadsDoNotGrantTheWholeRun(t *testing.T) {
 		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: node})
 		if (err == nil) != (node == "producer") {
 			t.Fatalf("read %q: %v", node, err)
+		}
+	}
+	err = s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: "sibling"})
+	if want := `job "job" does not depend on job "sibling", so it cannot read its output; add .Needs() on "sibling" to job "job" (a Ref captured by a closure adds no dependency)`; err == nil || err.Error() != want {
+		t.Fatalf("own-run non-dependency read = %v, want %q", err, want)
+	}
+	missing := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: "missing"})
+	rewriteSchemaExec(t, s.db, `INSERT OR IGNORE INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
+	for _, target := range []capability.Target{
+		{Team: "b", RunID: "run", NodeID: "sibling"},
+		{Team: "a", RunID: "other-run", NodeID: "sibling"},
+	} {
+		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, target)
+		var got, want *apierr.Error
+		if !errors.As(err, &got) || !errors.As(missing, &want) || !reflect.DeepEqual(*got, *want) {
+			t.Fatalf("foreign read %+v = %#v, want the missing-node refusal %#v", target, err, missing)
 		}
 	}
 	if err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: "producer", SourceGeneration: 4}); err == nil {

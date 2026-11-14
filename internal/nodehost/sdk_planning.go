@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -36,6 +37,10 @@ type PlanningProcessInput struct {
 	Debug       bool
 	// SecretArgs retains classifications sealed at intake even if describe marks them public.
 	SecretArgs []string
+	// Listed holds the pipeline names the project's sparkwing.yaml lists; nil
+	// when no project was read. An unregistered name it lacks is a mistyped
+	// pipeline, not a missing registration.
+	Listed []string
 }
 
 // PreparedPlanning supplies OwnerPlanning's validation and SDK planner.
@@ -109,11 +114,11 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		return errors.Join(err, logs.release(ctx))
 	})
 	if err != nil {
-		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, err, logs.known, input.Entrypoint)
+		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, err, logs.known, input)
 	}
 	declarationsKnown = logs.known
 	if prepared.Description.Error != nil {
-		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, prepared.Description.Error, logs.known, input.Entrypoint)
+		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, prepared.Description.Error, logs.known, input)
 	}
 	if declarationsOnly {
 		return prepared, nil
@@ -129,7 +134,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 			return session.call(ctx, nodewire.Request{Op: nodewire.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
-			return nil, p.planningError(ctx, nil, err, logs.known, input.Entrypoint)
+			return nil, p.planningError(ctx, nil, err, logs.known, input)
 		}
 		return raw, nil
 	}
@@ -146,6 +151,7 @@ func clonePlanningProcessInput(input PlanningProcessInput) PlanningProcessInput 
 	input.Entry = &entry
 	input.Args = maps.Clone(input.Args)
 	input.SecretArgs = slices.Clone(input.SecretArgs)
+	input.Listed = slices.Clone(input.Listed)
 	input.Environment.Names = slices.Clone(input.Environment.Names)
 	input.Runner.Labels = slices.Clone(input.Runner.Labels)
 	if input.Run.Git != nil {
@@ -210,8 +216,17 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 	return errors.Join(err, context.Cause(ctx))
 }
 
-func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.DeclarationGate, err error, known bool, entrypoint string) error {
+func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.DeclarationGate, err error, known bool, input PlanningProcessInput) error {
+	entrypoint := input.Entrypoint
 	if failure, ok := gate.UnregisteredEntrypoint(err); ok {
+		if input.Listed != nil && !slices.Contains(input.Listed, input.Run.Pipeline) {
+			failure.Message = p.Masker.Mask(fmt.Sprintf("no pipeline named %q: sparkwing.yaml does not list it and the SDK does not register it", input.Run.Pipeline))
+			failure.Hint = "Run `sparkwing pipeline list` to see the pipeline names."
+			if closest := sparkwingruntime.SuggestClosest(input.Run.Pipeline, input.Listed); closest != "" {
+				failure.Hint = p.Masker.Mask(fmt.Sprintf("Did you mean %q? ", closest)) + failure.Hint
+			}
+			return errors.Join(context.Cause(ctx), failure)
+		}
 		failure.Hint = p.Masker.Mask(fmt.Sprintf("Register the entrypoint by that name, sparkwing.Register(%q, factory), or set the pipeline's entrypoint: in sparkwing.yaml to a registered name.", entrypoint))
 		return errors.Join(context.Cause(ctx), failure)
 	}

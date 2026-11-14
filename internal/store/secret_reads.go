@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"slices"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -53,7 +56,9 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 			return err
 		}
 		if !claim && out.Masked {
-			return bindingRefusal()
+			// safety: the row is in the caller's own team, whose members already list
+			// masked names; another team's name read as missing above.
+			return hosterr.Authorization(hosterr.ReasonSecretMasked, fmt.Sprintf("secret %q is masked, so only a pipeline run that declares it can read its value; secrets get reads values stored with `sparkwing secrets set --variable`", out.Name))
 		}
 		if claim {
 			b := p.Capability.Binding

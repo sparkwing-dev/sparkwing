@@ -68,7 +68,7 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 		},
 	}
 	prepared, err := planner.Inspect(ctx, nodehost.PlanningProcessInput{
-		Entry: entry, Entrypoint: selection.source.Entrypoint, Environment: environment, Args: map[string]string{},
+		Entry: entry, Entrypoint: selection.source.Entrypoint, Listed: listedPipelines(selection.project), Environment: environment, Args: map[string]string{},
 		Run:    nodewire.RunContext{RunID: rand.Text(), Pipeline: selection.pipeline},
 		Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})

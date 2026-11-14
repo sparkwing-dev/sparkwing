@@ -56,3 +56,8 @@ type ExitCode int
 const (
 	ExitUsage ExitCode = 2
 )
+
+// RunStatuses lists the stored run states a --status filter can match.
+func RunStatuses() []string {
+	return []string{"pending", "running", "success", "dry_run", "failed", "cancelled"}
+}

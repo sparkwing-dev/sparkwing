@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -105,6 +107,11 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		}
 		if capability.ReadsJobOutput(job, output) {
 			return nil
+		}
+		if b.Kind == capability.BindingNode {
+			// safety: both jobs belong to the caller's own run and plan, so naming them
+			// reveals nothing; a node absent from that run was refused above.
+			return hosterr.Authorization(hosterr.ReasonBinding, fmt.Sprintf("job %q does not depend on job %q, so it cannot read its output; add .Needs() on %q to job %q (a Ref captured by a closure adds no dependency)", job.ID, output.ID, output.ID, job.ID))
 		}
 	}
 	return bindingRefusal()

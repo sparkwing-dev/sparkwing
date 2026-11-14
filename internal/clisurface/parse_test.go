@@ -3,8 +3,11 @@ package clisurface
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestParseTriggerProfilePosition(t *testing.T) {
@@ -266,5 +269,31 @@ func TestInvocationOutput(t *testing.T) {
 				t.Fatalf("format=%q terminal=%t: got %q, want %q", format, terminal, got, want)
 			}
 		}
+	}
+}
+
+func TestMisspelledFlagsAndValuesSuggestTheNearestSpelling(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"run", "build", "--dry-run"}, "flag --dry-run is not accepted; did you mean --sw-dry-run? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-dryrun"}, "unknown flag --sw-dryrun; did you mean --sw-dry-run? Pipeline arguments follow --"},
+		{[]string{"runs", "list", "--limt", "5"}, "unknown flag --limt; did you mean --limit?"},
+		{[]string{"runs", "status", "run-deadbeef"}, "unexpected positional argument; pass it as --run RUN_ID"},
+		{[]string{"runs", "list", "extra"}, "unexpected positional argument; sparkwing runs list takes flags only (see sparkwing runs list --help)"},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		var usage *UsageError
+		if !errors.As(err, &usage) || usage.Message != tc.want {
+			t.Errorf("%v: error %v, want %q", tc.args, err, tc.want)
+		}
+	}
+}
+
+func TestRunStatusesMatchStoredRunStates(t *testing.T) {
+	want := []string{string(runstate.RunPending), string(runstate.RunRunning), string(runstate.RunSuccess), string(runstate.RunDryRun), string(runstate.RunFailed), string(runstate.RunCancelled)}
+	if !slices.Equal(RunStatuses(), want) {
+		t.Fatalf("RunStatuses() = %v, want %v", RunStatuses(), want)
 	}
 }
