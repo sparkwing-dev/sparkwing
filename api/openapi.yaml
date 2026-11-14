@@ -4581,6 +4581,8 @@ components:
     internal.controllerwire.TimerStateView:
       additionalProperties: true
       properties:
+        activation_unknown:
+          type: boolean
         binary:
           type: string
         detail:
@@ -4603,6 +4605,7 @@ components:
         - path
         - binary
         - detail
+        - activation_unknown
       type: object
       x-sparkwing-go-type: controllerwire.TimerStateView
     internal.controllerwire.UserCodeRequest:

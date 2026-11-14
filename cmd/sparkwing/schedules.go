@@ -301,9 +301,10 @@ func listSchedules(ctx context.Context, inv clisurface.Invocation, opts schedule
 	return err
 }
 
-// safety: an installed timer whose activation could not be read still counts while its ticks land.
+// safety: an installed timer whose activation could not be read still counts while its ticks land;
+// one the service manager reports as off does not.
 func scheduleTimerFires(h controllerwire.HealthView) bool {
-	return h.Timer.Installed && !h.Timer.Foreign && !h.Timer.Stale && (h.Timer.Enabled || !h.TickStale)
+	return h.Timer.Installed && !h.Timer.Foreign && !h.Timer.Stale && (h.Timer.Enabled || h.Timer.ActivationUnknown && !h.TickStale)
 }
 
 func renderScheduleRecord(out io.Writer, value any, plain, format string) error {

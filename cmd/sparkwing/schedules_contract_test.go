@@ -267,7 +267,9 @@ func TestScheduleListWarnsWhenArmedSchedulesCannotFire(t *testing.T) {
 	}{
 		{"no timer", controllerwire.HealthView{Armed: 1, TickStale: true, Detail: detail}, true},
 		{"enabled", controllerwire.HealthView{Armed: 1, TickStale: true, Timer: controllerwire.TimerStateView{Installed: true, Enabled: true}}, false},
-		{"unknown activation but ticking", controllerwire.HealthView{Armed: 1, Timer: controllerwire.TimerStateView{Installed: true}}, false},
+		{"unknown activation but ticking", controllerwire.HealthView{Armed: 1, Timer: controllerwire.TimerStateView{Installed: true, ActivationUnknown: true}}, false},
+		{"unknown activation and silent", controllerwire.HealthView{Armed: 1, TickStale: true, Timer: controllerwire.TimerStateView{Installed: true, ActivationUnknown: true}}, true},
+		{"known disabled with a recent tick", controllerwire.HealthView{Armed: 1, Timer: controllerwire.TimerStateView{Installed: true}}, true},
 		{"removed timer with a recent tick", controllerwire.HealthView{Armed: 1, Detail: detail}, true},
 		{"other home", controllerwire.HealthView{Armed: 1, Timer: controllerwire.TimerStateView{Installed: true, Enabled: true, Stale: true}}, true},
 		{"nothing armed", controllerwire.HealthView{TickStale: true}, false},
@@ -284,6 +286,20 @@ func TestScheduleListWarnsWhenArmedSchedulesCannotFire(t *testing.T) {
 				t.Fatalf("warning does not say what to run: %q", out.String())
 			}
 		})
+	}
+}
+
+func TestScheduleTimerHealthFailsAKnownDisabledTimerBeforeItsTicksAge(t *testing.T) {
+	f := &scheduleHealthFixture{health: controllerwire.HealthView{Schedules: 1, Armed: 1, Detail: "the native schedule timer is installed but not enabled"}}
+	f.health.Timer.Installed = true
+	var out bytes.Buffer
+	if err := manageSchedules(t.Context(), scheduleInvocation(t, "list", "--timer", "-o", "plain"), f, &out); err == nil {
+		t.Fatalf("a disabled timer with a recent tick read healthy: %q", out.String())
+	}
+	f.health.Timer.ActivationUnknown = true
+	out.Reset()
+	if err := manageSchedules(t.Context(), scheduleInvocation(t, "list", "--timer", "-o", "plain"), f, &out); err != nil {
+		t.Fatalf("an unreadable timer whose ticks still land read unhealthy: %v", err)
 	}
 }
 

@@ -56,6 +56,9 @@ type TimerStateView struct {
 	Path      string `json:"path"`
 	Binary    string `json:"binary"`
 	Detail    string `json:"detail"`
+	// ActivationUnknown reports that the service manager could not be asked
+	// whether the timer is enabled, as opposed to answering that it is off.
+	ActivationUnknown bool `json:"activation_unknown"`
 }
 
 // TickView is the last tick recorded against the store. At is empty until one

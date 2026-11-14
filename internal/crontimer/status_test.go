@@ -73,7 +73,7 @@ func TestStatusRefusesUnknownOrDifferentNativeActivation(t *testing.T) {
 			}
 			exec.rules = []rule{test.failure}
 			state, err := Status(t.Context(), h)
-			if err == nil || state.Enabled {
+			if err == nil || state.Enabled || !state.ActivationUnknown {
 				t.Fatalf("status=%+v error=%v", state, err)
 			}
 		})
@@ -137,7 +137,7 @@ func TestStatusReportsAnUnloadedTimerAsNotEnabled(t *testing.T) {
 	}
 	exec.rules = []rule{{prefix: "systemctl --user show --property=", out: "FragmentPath=\nActiveState=inactive\nUnitFileState=\n"}}
 	state, err := Status(t.Context(), h)
-	if err != nil || !state.Installed || state.Enabled {
+	if err != nil || !state.Installed || state.Enabled || state.ActivationUnknown {
 		t.Fatalf("an unlinked timer read as unknown or enabled: %+v %v", state, err)
 	}
 }

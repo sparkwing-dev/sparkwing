@@ -92,6 +92,10 @@ type State struct {
 	// enabled and active, on launchd the job is loaded.
 	Enabled bool `json:"enabled"`
 
+	// ActivationUnknown reports that the service manager could not be asked,
+	// so Enabled is false without being known to be off.
+	ActivationUnknown bool `json:"activation_unknown,omitempty"`
+
 	// Path is the unit or plist path; on systemd it is the .timer.
 	Path string `json:"path"`
 
@@ -140,7 +144,7 @@ func Status(ctx context.Context, h Host) (State, error) {
 		}
 	}
 	if err != nil {
-		state.Enabled = false
+		state.Enabled, state.ActivationUnknown = false, true
 		return state, fmt.Errorf("crontimer: native timer activation is unknown: %w", err)
 	}
 	state.Detail = "native timer is installed but inactive or disabled"
