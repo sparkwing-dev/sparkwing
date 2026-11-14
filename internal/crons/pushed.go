@@ -45,7 +45,13 @@ func (s *Service) ControllerHealth(ctx context.Context, loopRunning bool) (Healt
 	now := s.now()
 	// safety: a loop that has never ticked is as unhealthy as one that stopped,
 	// which is what the local Health already says of a timer that never fired.
-	health.TickStale = tick.At.IsZero() || now.Sub(tick.At) > tickStaleAfter
+	since := tick.At
+	if health.Timer.Enabled && health.Timer.WrittenAt.After(since) {
+		// safety: a timer written moments ago has not had its first minute, so
+		// the staleness clock starts at the write rather than the last tick.
+		since = health.Timer.WrittenAt
+	}
+	health.TickStale = since.IsZero() || now.Sub(since) > tickStaleAfter
 	if health.Detail == "" {
 		health.Detail = health.describeController(now)
 	}
@@ -59,14 +65,23 @@ const controllerTimerDetail = "controller loop"
 
 func (h Health) describeController(now time.Time) string {
 	if h.Timer.Detail != controllerTimerDetail {
+		if h.Timer.Foreign {
+			return h.Timer.Detail
+		}
 		if !h.Timer.Installed {
 			return "no native schedule timer is installed; run `sparkwing schedules install` to enable automatic firing"
 		}
-		if !h.Timer.Enabled || h.Timer.Stale {
-			return "the native schedule timer is inactive or stale; run `sparkwing schedules install` to enable automatic firing"
+		if h.Timer.Stale {
+			return fmt.Sprintf("the native schedule timer %s ticks another Sparkwing home (%s); inspect it before reinstalling schedules", h.Timer.Path, h.Timer.Home)
+		}
+		if !h.Timer.Enabled {
+			return "the native schedule timer is installed but not enabled; run `sparkwing schedules install` to enable automatic firing"
 		}
 		if h.Armed > 0 && h.TickStale {
 			return "the native schedule timer has not ticked within three minutes; inspect its service-manager logs"
+		}
+		if h.LastTick.At.Before(h.Timer.WrittenAt) {
+			return fmt.Sprintf("%d schedule(s) armed; the native timer was just installed and ticks at the start of the next minute", h.Armed)
 		}
 		if h.LastTick.Error != "" {
 			return "the last tick reported: " + h.LastTick.Error

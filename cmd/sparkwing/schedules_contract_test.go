@@ -236,7 +236,7 @@ func (f *scheduleHealthFixture) ListSchedules(context.Context, controllerwire.Sc
 func TestScheduleManagementHealthDoesNotLoseFailureStatus(t *testing.T) {
 	for _, healthy := range []bool{true, false} {
 		f := &scheduleHealthFixture{health: controllerwire.HealthView{Schedules: 2, Armed: 2, Detail: "evaluator status", Remedy: "start the timer"}}
-		f.health.Timer.Enabled = healthy
+		f.health.Timer.Installed, f.health.Timer.Enabled = true, healthy
 		f.health.TickStale = !healthy
 		inv := scheduleInvocation(t, "list", "--timer", "-o", "json")
 		var out bytes.Buffer
@@ -244,6 +244,46 @@ func TestScheduleManagementHealthDoesNotLoseFailureStatus(t *testing.T) {
 		if (err == nil) != healthy || !strings.Contains(out.String(), `"detail":"evaluator status"`) {
 			t.Fatalf("health %t: %s %v", healthy, out.String(), err)
 		}
+	}
+}
+
+type scheduleListHealthFixture struct {
+	scheduleFixture
+	health controllerwire.HealthView
+}
+
+func (f *scheduleListHealthFixture) ListSchedules(ctx context.Context, q controllerwire.ScheduleQuery) (controllerwire.ScheduleOverview, error) {
+	result, err := f.scheduleFixture.ListSchedules(ctx, q)
+	result.Health = f.health
+	return result, err
+}
+
+func TestScheduleListWarnsWhenArmedSchedulesCannotFire(t *testing.T) {
+	const detail = "no native schedule timer is installed; run `sparkwing schedules install` to enable automatic firing"
+	for _, tc := range []struct {
+		name   string
+		health controllerwire.HealthView
+		warn   bool
+	}{
+		{"no timer", controllerwire.HealthView{Armed: 1, TickStale: true, Detail: detail}, true},
+		{"enabled", controllerwire.HealthView{Armed: 1, TickStale: true, Timer: controllerwire.TimerStateView{Installed: true, Enabled: true}}, false},
+		{"unknown activation but ticking", controllerwire.HealthView{Armed: 1, Timer: controllerwire.TimerStateView{Installed: true}}, false},
+		{"removed timer with a recent tick", controllerwire.HealthView{Armed: 1, Detail: detail}, true},
+		{"other home", controllerwire.HealthView{Armed: 1, Timer: controllerwire.TimerStateView{Installed: true, Enabled: true, Stale: true}}, true},
+		{"nothing armed", controllerwire.HealthView{TickStale: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &scheduleListHealthFixture{scheduleFixture: *scheduleFake(), health: tc.health}
+			var out bytes.Buffer
+			err := manageSchedules(t.Context(), scheduleInvocation(t, "list", "-o", "pretty"), f, &out)
+			warned := strings.Contains(out.String(), "warning: armed schedules will not fire automatically")
+			if err != nil || warned != tc.warn || !strings.Contains(out.String(), "check/nightly") {
+				t.Fatalf("warned=%t: %q %v", warned, out.String(), err)
+			}
+			if tc.warn && tc.health.Detail != "" && !strings.Contains(out.String(), tc.health.Detail) {
+				t.Fatalf("warning does not say what to run: %q", out.String())
+			}
+		})
 	}
 }
 

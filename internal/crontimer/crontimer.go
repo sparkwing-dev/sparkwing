@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
@@ -98,9 +99,14 @@ type State struct {
 	// itself, or empty when no managed file was parseable.
 	Binary string `json:"binary,omitempty"`
 
-	// Stale reports that Binary is not the binary the caller asked for, which
-	// happens when sparkwing is reinstalled somewhere else.
+	// Stale reports that the managed file ticks another Sparkwing home. The
+	// binary is not compared with the observer's own executable, because the
+	// controller may run from an engine release while the timer runs the CLI.
 	Stale bool `json:"stale"`
+
+	// WrittenAt is when sparkwing last wrote the managed file, so a timer that
+	// has not had its first minute yet is not mistaken for one that stopped.
+	WrittenAt time.Time `json:"-"`
 
 	// Detail is one sentence for a human.
 	Detail string `json:"detail,omitempty"`
@@ -123,7 +129,9 @@ func Status(ctx context.Context, h Host) (State, error) {
 				key, value, _ := strings.Cut(line, "=")
 				properties[key] = value
 			}
-			if !unitfile.SameSource(properties["FragmentPath"], state.Path) {
+			// safety: no fragment means systemd has not loaded the unit, which an
+			// install that stopped before linking leaves behind; it does not fire.
+			if properties["FragmentPath"] != "" && !unitfile.SameSource(properties["FragmentPath"], state.Path) {
 				err = errors.New("crontimer: service manager has no matching native timer registration")
 			} else {
 				state.Enabled = properties["ActiveState"] == "active" &&
@@ -162,6 +170,26 @@ func Install(ctx context.Context, h Host) (State, error) {
 		return installDarwin(ctx, h)
 	}
 	return State{}, unsupported(h.GOOS)
+}
+
+// Activate makes the service manager fire an installed timer, so reinstalling
+// schedules repairs a timer whose files were written but never enabled.
+// Launchd needs nothing here because [Refresh] already bootstraps the agent.
+func Activate(ctx context.Context, h Host) (State, error) {
+	if err := checkOperation(ctx, h); err != nil {
+		return State{}, err
+	}
+	state, err := Inspect(ctx, h)
+	if err != nil || h.GOOS != "linux" {
+		return state, err
+	}
+	if !state.Installed || state.Foreign || state.Stale {
+		return state, errors.New("crontimer: no timer for this home is installed to activate; reinstall schedules")
+	}
+	if _, err := refreshPreflight(ctx, h, state.Path); err != nil {
+		return state, err
+	}
+	return activateLinux(ctx, h, state)
 }
 
 // Uninstall disables the timer and removes the files sparkwing wrote. A
@@ -304,8 +332,4 @@ func requireBinary(h Host) error {
 		return fmt.Errorf("crontimer: Host.Binary must be absolute, got %q", h.Binary)
 	}
 	return nil
-}
-
-func staleAgainst(h Host, binary string) bool {
-	return binary != "" && h.Binary != "" && binary != h.Binary
 }

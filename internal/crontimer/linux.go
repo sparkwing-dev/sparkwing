@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -65,12 +66,25 @@ func installLinux(ctx context.Context, h Host) (State, error) {
 	if err := writeManaged(servicePath, serviceUnit(h)); err != nil {
 		return State{Path: timerPath}, err
 	}
-	if err := writeManaged(timerPath, timerUnit(h)); err != nil {
-		return State{Path: timerPath}, err
-	}
+	return activateLinux(ctx, h, commandState(h, timerPath, serviceUnit(h)))
+}
 
-	state := commandState(h, timerPath, serviceUnit(h))
+func activateLinux(ctx context.Context, h Host, state State) (State, error) {
+	servicePath, timerPath, err := linuxPaths(h)
+	if err != nil {
+		return state, err
+	}
+	// safety: the timer unit carries no captured settings, so rewriting it only
+	// restarts the first-tick grace that health measures from its write time.
+	if err := writeManaged(timerPath, timerUnit(h)); err != nil {
+		state.Detail = "the timer's service file is written but its timer file is not"
+		return state, err
+	}
+	if info, err := os.Stat(timerPath); err == nil {
+		state.WrittenAt = info.ModTime()
+	}
 	if err := runRefresh(ctx, h, "systemctl", "--user", "link", servicePath, timerPath); err != nil {
+		state.Detail = "the timer's files are written but systemd did not link them"
 		return state, err
 	}
 	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
@@ -82,7 +96,7 @@ func installLinux(ctx context.Context, h Host) (State, error) {
 		return state, fmt.Errorf("crontimer: systemctl --user enable --now %s: %w: %s", h.timerName(), err, strings.TrimSpace(out))
 	}
 	state.Enabled = true
-	state.Detail = fmt.Sprintf("%s is enabled and runs %s __tick every minute", h.timerName(), h.Binary)
+	state.Detail = fmt.Sprintf("%s is enabled and runs %s __tick every minute", h.timerName(), state.Binary)
 	return state, nil
 }
 
@@ -111,8 +125,13 @@ func uninstallLinux(ctx context.Context, h Host) (State, error) {
 		if err := unitfile.CheckSystemdSource(ctx, h.Exec, h.serviceName(), servicePath); err != nil {
 			return State{Path: timerPath}, err
 		}
-		if out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", h.timerName(), h.serviceName()); err != nil && !notLoaded(out) {
-			disableErr = fmt.Errorf("crontimer: systemctl --user disable --now %s: %w: %s", h.timerName(), err, strings.TrimSpace(out))
+		// safety: disable removes a linked unit's only path, and a timer still
+		// active when its service vanishes is left failed in the user manager,
+		// so the timer stops before anything is unlinked.
+		for _, verb := range []string{"stop", "disable"} {
+			if out, err := h.run(ctx, "systemctl", "--user", verb, h.timerName(), h.serviceName()); err != nil && !notLoaded(out) {
+				disableErr = errors.Join(disableErr, fmt.Errorf("crontimer: systemctl --user %s %s: %w: %s", verb, h.timerName(), err, strings.TrimSpace(out)))
+			}
 		}
 	}
 	if err := removeManaged(service, timer); err != nil {
@@ -124,6 +143,13 @@ func uninstallLinux(ctx context.Context, h Host) (State, error) {
 	}
 	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 		return state, errors.Join(disableErr, fmt.Errorf("crontimer: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out)))
+	}
+	if loaded == "" {
+		// safety: a tick that failed leaves its service failed after the files go;
+		// clearing these exact names keeps the user manager free of residue.
+		if out, err := h.run(ctx, "systemctl", "--user", "reset-failed", h.timerName(), h.serviceName()); err != nil && !notLoaded(out) {
+			disableErr = errors.Join(disableErr, fmt.Errorf("crontimer: systemctl --user reset-failed %s: %w: %s", h.timerName(), err, strings.TrimSpace(out)))
+		}
 	}
 	if disableErr != nil {
 		state.Detail = "the timer's files are removed but systemd reported an error stopping it"

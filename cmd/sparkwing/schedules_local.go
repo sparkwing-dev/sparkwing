@@ -37,6 +37,7 @@ type localScheduleServices struct {
 	pin            func(context.Context, string, bool) (controllerwire.ScheduleView, error)
 	tick           func(context.Context, bool) (controllerwire.TickView, error)
 	installTimer   func(context.Context, wingd.LocalStartOptions) error
+	activateTimer  func(context.Context) error
 	uninstallTimer func(context.Context) error
 }
 
@@ -93,6 +94,10 @@ func resolveLocalScheduleServices(ctx context.Context, home string) (localSchedu
 			_, err := crontimer.Install(ctx, host)
 			return err
 		},
+		activateTimer: func(ctx context.Context) error {
+			_, err := crontimer.Activate(ctx, host)
+			return err
+		},
 		uninstallTimer: func(ctx context.Context) error {
 			_, err := crontimer.Uninstall(ctx, host)
 			return err
@@ -110,47 +115,54 @@ func validateLocalSchedules(services localScheduleServices) error {
 	return nil
 }
 
-func prepareScheduleTimer(ctx context.Context, services localScheduleServices, goos string, install bool) (func(context.Context) error, error) {
+// safety: fresh marks a timer this call creates, so an install that then arms nothing removes it again.
+func prepareScheduleTimer(ctx context.Context, services localScheduleServices, goos string, install bool) (_ func(context.Context) error, fresh bool, _ error) {
 	if goos == "windows" {
-		return func(context.Context) error { return nil }, nil
+		return func(context.Context) error { return nil }, false, nil
 	}
 	if services.units == nil {
-		return nil, scheduleUnavailable("the managed-unit manager")
+		return nil, false, scheduleUnavailable("the managed-unit manager")
 	}
 	units, err := services.units.Inspect(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	installed := false
 	for _, unit := range units {
 		if unit.Kind == wingd.ManagedSchedule {
 			if unit.Home != services.options.Home {
-				return nil, fmt.Errorf("schedule timer belongs to another state home")
+				return nil, false, fmt.Errorf("schedule timer belongs to another state home")
 			}
 			installed = true
 		}
 	}
 	if install && installed {
+		if services.activateTimer == nil {
+			return nil, false, scheduleUnavailable("native schedule timer activation")
+		}
 		return func(ctx context.Context) error {
-			return services.units.Refresh(ctx, services.options.Executable, services.options.Version)
-		}, nil
+			if err := services.units.Refresh(ctx, services.options.Executable, services.options.Version); err != nil {
+				return err
+			}
+			return services.activateTimer(ctx)
+		}, false, nil
 	}
 	if install {
-		if services.installTimer == nil {
-			return nil, scheduleUnavailable("native schedule timer installation")
+		if services.installTimer == nil || services.uninstallTimer == nil {
+			return nil, false, scheduleUnavailable("native schedule timer installation")
 		}
-		return func(ctx context.Context) error { return services.installTimer(ctx, services.options) }, nil
+		return func(ctx context.Context) error { return services.installTimer(ctx, services.options) }, true, nil
 	}
 	if installed {
 		if services.uninstallTimer == nil {
-			return nil, scheduleUnavailable("native schedule timer removal")
+			return nil, false, scheduleUnavailable("native schedule timer removal")
 		}
-		return services.uninstallTimer, nil
+		return services.uninstallTimer, false, nil
 	}
-	return func(context.Context) error { return nil }, nil
+	return func(context.Context) error { return nil }, false, nil
 }
 
-func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts scheduleOptions, out io.Writer, command scheduleCommand) error {
+func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts scheduleOptions, out io.Writer, command scheduleCommand) (err error) {
 	if err := validateServiceSecretsKeys(); err != nil {
 		return err
 	}
@@ -188,13 +200,24 @@ func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts 
 		skipped = append(skipped, other)
 		count += len(declarations)
 	}
-	var timer func(context.Context) error
+	rollback := false
 	if count > 0 && !inv.Bool("no-timer") {
-		timer, err = prepareScheduleTimer(ctx, services, command.goos, true)
+		timer, fresh, err := prepareScheduleTimer(ctx, services, command.goos, true)
 		if err != nil {
 			return err
 		}
+		// safety: the timer goes in before anything is armed, so a timer that
+		// cannot fire never leaves schedules that look armed.
+		if err := timer(ctx); err != nil {
+			return fmt.Errorf("the schedule timer could not be installed, so no schedule was armed: %w; fix that and run `sparkwing schedules install` again", err)
+		}
+		rollback = fresh
 	}
+	defer func() {
+		if err != nil && rollback {
+			err = errors.Join(err, services.uninstallTimer(ctx))
+		}
+	}()
 	if _, err := ensureLocalController(ctx, services.options.Home, func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: services.lifecycle, options: services.options}, nil
 	}); err != nil {
@@ -207,13 +230,11 @@ func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts 
 			if err != nil {
 				return err
 			}
+			rollback = false
 		}
 		if err := renderScheduleInstallation(out, scheduleInstallation{Repo: request.RepoPath, ScheduleRepoWritten: result, Skipped: skipped[i]}, opts.format); err != nil {
 			return err
 		}
-	}
-	if timer != nil {
-		return timer(ctx)
 	}
 	return nil
 }
@@ -233,7 +254,7 @@ func changeLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts s
 	var timer func(context.Context) error
 	var root string
 	if uninstall {
-		timer, err = prepareScheduleTimer(ctx, services, command.goos, false)
+		timer, _, err = prepareScheduleTimer(ctx, services, command.goos, false)
 		if err != nil {
 			return err
 		}

@@ -269,7 +269,7 @@ func listSchedules(ctx context.Context, inv clisurface.Invocation, opts schedule
 		if err != nil {
 			return err
 		}
-		if h.Armed > 0 && (h.Timer.Foreign || h.Timer.Stale || h.TickStale || h.LastTick.Error != "" || !h.Timer.Enabled && h.LastTick.At == "") {
+		if h.Armed > 0 && (!scheduleTimerFires(h) || h.TickStale || h.LastTick.Error != "") {
 			return exitError(1, fmt.Errorf("schedule evaluator is unhealthy: %s", h.Detail))
 		}
 		return nil
@@ -290,7 +290,20 @@ func listSchedules(ctx context.Context, inv clisurface.Invocation, opts schedule
 	if len(result.Schedules) == 0 && opts.format == "pretty" {
 		_, err = fmt.Fprintln(out, "no schedules are armed; run sparkwing schedules install")
 	}
+	if err == nil && result.Health.Armed > 0 && !scheduleTimerFires(result.Health) {
+		// safety: an armed row prints its next due time, which no timer will honor here.
+		warnings := io.Writer(os.Stderr)
+		if opts.format == "pretty" {
+			warnings = out
+		}
+		_, err = fmt.Fprintf(warnings, "warning: armed schedules will not fire automatically: %s\n", opsview.DisplayText(result.Health.Detail))
+	}
 	return err
+}
+
+// safety: an installed timer whose activation could not be read still counts while its ticks land.
+func scheduleTimerFires(h controllerwire.HealthView) bool {
+	return h.Timer.Installed && !h.Timer.Foreign && !h.Timer.Stale && (h.Timer.Enabled || !h.TickStale)
 }
 
 func renderScheduleRecord(out io.Writer, value any, plain, format string) error {
