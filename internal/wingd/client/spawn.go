@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -71,10 +72,31 @@ func spawnDetached(bin, home, version string) error {
 		_ = logF.Close()
 	}
 	if err := watchHostStart(cmd, bin, home); err != nil {
+		if scope {
+			if failure := scopeManagerFailure(); failure != nil {
+				return failure
+			}
+		}
 		return err
 	}
 	_ = cmd.Process.Release()
 	return nil
+}
+
+const scopeManagerProbeTimeout = 5 * time.Second
+
+// safety: systemd-run fails before sparkwing writes its log, so only the manager itself can say why.
+func scopeManagerFailure() *apierr.Error {
+	ctx, cancel := context.WithTimeout(context.Background(), scopeManagerProbeTimeout)
+	defer cancel()
+	output, err := procenv.ControlCommandContext(ctx, os.Environ(), "systemctl", "--user", "show-environment").CombinedOutput()
+	var exit *exec.ExitError
+	if err == nil || !errors.As(err, &exit) || strings.TrimSpace(string(output)) == "" {
+		return nil
+	}
+	failure := wingd.UserManagerUnreachable("systemd-run --user --scope", string(output))
+	failure.Hint = "This sparkwing runs inside a systemd service (INVOCATION_ID is set), so it starts the local controller in its own user scope. " + failure.Hint
+	return failure
 }
 
 func daemonCommandLine(bin string, args []string, scope bool) (string, []string) {

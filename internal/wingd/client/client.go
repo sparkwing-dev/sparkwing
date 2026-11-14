@@ -12,8 +12,10 @@ import (
 
 	"golang.org/x/mod/semver"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 var errProtocolTooOld = errors.New("wingd/client: daemon no longer serves this client's protocol")
@@ -231,6 +233,11 @@ func daemonStartupBudget(opts Options) time.Duration {
 
 var errDaemonDraining = errors.New("wingd/client: daemon is draining")
 
+var errControllerStillStopping = &apierr.Error{
+	Code: hosterr.Unavailable, Message: "the local controller is still stopping",
+	Hint: "A stop waits for the local runner to finish held work. Check with `sparkwing daemon status`, then retry.",
+}
+
 func spawnFailed(home, sock string, serr, dialErr error) error {
 	if u := unreachable(sock, dialErr); u != nil {
 		return u
@@ -238,7 +245,8 @@ func spawnFailed(home, sock string, serr, dialErr error) error {
 	if errors.Is(serr, ErrNoDaemon) || errors.Is(serr, errNoDaemonHost) {
 		return serr
 	}
-	if errors.Is(serr, errDaemonHostFailed) {
+	var explained *apierr.Error
+	if errors.As(serr, &explained) || errors.Is(serr, errDaemonHostFailed) {
 		return serr
 	}
 	if tail := daemonLogTail(home); tail != "" {
@@ -294,7 +302,13 @@ func (cl *Client) connect(ctx context.Context) error {
 	return cl.connectPaced(ctx, dialPaceMax)
 }
 
-func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error {
+func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) (err error) {
+	stopping := false
+	defer func() {
+		if err != nil && stopping && ctx.Err() != nil {
+			err = fmt.Errorf("%w: %w", errControllerStillStopping, err)
+		}
+	}()
 	opts := cl.opts
 	spawns := 0
 	drainWait := newRetry("wait for draining daemon", 0)
@@ -413,6 +427,7 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 		if ack.Draining {
 			// safety: draining can last for a full run; wait without a time cap but
 			// retain backoff to avoid a reconnect spin.
+			stopping = true
 			if err := drainWait.wait(ctx, errDaemonDraining); err != nil {
 				return err
 			}

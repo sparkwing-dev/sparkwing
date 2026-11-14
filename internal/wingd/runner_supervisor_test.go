@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func runnerSupervisorHost(t *testing.T) crontimer.Host {
@@ -56,8 +57,16 @@ func TestLocalRunnerSystemdManagerFailureNeverDetaches(t *testing.T) {
 				return "", nil
 			}
 			err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir())
-			if err == nil || !strings.Contains(err.Error(), "failed manager") {
-				t.Fatalf("startup = %v; want manager failure", err)
+			message := "failed manager"
+			if failing == "systemctl" {
+				message = "the local runner cannot start: the systemd user manager is unreachable (manager unavailable)"
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "systemctl --user status") || !strings.Contains(failure.Hint, "loginctl enable-linger") {
+					t.Fatalf("unreachable manager gave no fix: %#v", err)
+				}
+			}
+			if err == nil || !strings.Contains(err.Error(), message) {
+				t.Fatalf("startup = %v; want %q", err, message)
 			}
 			want := []string{"systemctl"}
 			if failing == "systemd-run" {

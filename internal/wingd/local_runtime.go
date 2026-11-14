@@ -18,7 +18,7 @@ import (
 type LocalController interface {
 	RunStore
 	Reconcile(context.Context) (LocalActivity, error)
-	Run(context.Context, func(LocalActivity) error) error
+	Run(context.Context, LocalReports) error
 	HTTP() localhostwire.LocalHTTP
 	Close() error
 }
@@ -241,7 +241,9 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	if ctx.Err() == nil {
 		session.ready = true
 		workers.Go(func() {
-			serve("controller workers", func() error { return controller.Run(ctx, d.setLocalActivity) })
+			serve("controller workers", func() error {
+				return controller.Run(ctx, LocalReports{Activity: d.setLocalActivity, Runner: d.reportLocalRunner})
+			})
 		})
 		r.changed()
 	}
@@ -395,7 +397,14 @@ func (r *localRuntime) statusLocked(session *localRuntimeSession) LocalStatus {
 	defer d.mu.Unlock()
 	activity := d.localActivity
 	activity.DashboardConnections += d.dashboardConns
-	status := LocalStatus{Running: session.ready && !d.shuttingDown && !d.draining, PID: os.Getpid(), Version: d.cfg.Version, Activity: activity, DashboardURL: session.logins.servingOrigin()}
+	status := LocalStatus{
+		Running: session.ready && !d.shuttingDown && !d.draining, Stopping: d.shuttingDown || d.draining,
+		PID: os.Getpid(), Version: d.cfg.Version, Activity: activity, DashboardURL: session.logins.servingOrigin(),
+		Runner: d.runnerState, RunnerError: d.runnerErr,
+	}
+	if status.Runner == "" {
+		status.Runner = LocalRunnerStarting
+	}
 	if session.dashboardErr != nil {
 		status.DashboardError = session.dashboardErr.Error()
 	}

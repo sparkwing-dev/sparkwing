@@ -221,10 +221,64 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("local runner %s (pid %d) is still running; controller shutdown is incomplete; run sparkwing dashboard open to let held work finish, then retry sparkwing daemon stop: %w", instance.ID, instance.PID, ctx.Err())
+			return &runnerHoldsWork{instance: *instance, cause: ctx.Err()}
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+// safety: carries the held runner so the stop can finish once that process exits.
+type runnerHoldsWork struct {
+	instance localhostwire.LocalRunnerInstance
+	cause    error
+}
+
+func (e *runnerHoldsWork) Error() string {
+	return fmt.Sprintf("local runner %s (pid %d) is still finishing held work: %v", e.instance.ID, e.instance.PID, e.cause)
+}
+
+func (e *runnerHoldsWork) Unwrap() error { return e.cause }
+
+func (e *runnerHoldsWork) failure() *apierr.Error {
+	return &apierr.Error{
+		Code:    hosterr.Unavailable,
+		Message: fmt.Sprintf("local runner %s (pid %d) is still finishing held work; the local controller stops on its own once that runner exits", e.instance.ID, e.instance.PID),
+		Hint:    "Run `sparkwing daemon status` to check; it reports stopped once the work finishes. Other sparkwing commands wait for the stop, then start a new controller.",
+	}
+}
+
+// safety: a stop that outlasted its wait leaves the controller draining with a runner that still needs it to accept
+// results; finishing here once that runner exits spares the user a second stop and later commands a wedged controller.
+func (d *Daemon) finishDrainAfterRunner(ctx context.Context, instance localhostwire.LocalRunnerInstance) {
+	d.runnerChanges.lock()
+	if d.finishingDrain {
+		d.runnerChanges.unlock()
+		return
+	}
+	d.finishingDrain = true
+	d.runnerChanges.unlock()
+	go func() {
+		for {
+			changed := d.runnerWake.subscribe()
+			if alive, err := LocalRunnerProcessAlive(instance); err == nil && !alive {
+				break
+			}
+			select {
+			case <-d.quit:
+				return
+			case <-changed:
+			case <-time.After(time.Second):
+			}
+		}
+		if err := d.retireLocalRunner(ctx); err != nil {
+			d.runnerChanges.lock()
+			d.finishingDrain = false
+			d.runnerChanges.unlock()
+			d.cfg.logf("local controller stop is incomplete after runner %s exited: %v", instance.ID, err)
+			return
+		}
+		d.shutdownWithReason("drain")
+	}()
 }
 
 var errControllerStopping = &apierr.Error{Code: hosterr.Unavailable, Message: "the local controller is stopping"}

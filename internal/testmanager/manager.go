@@ -106,6 +106,12 @@ func Scope(t testing.TB) {
 // Fail makes a selected manager fail without contacting the user's manager.
 func Fail(t testing.TB, name string) { t.Helper(); fake(t, name, "exit 73\n") }
 
+// FailWith makes a selected manager print message to stderr and exit 1, as systemd does without a reachable bus.
+func FailWith(t testing.TB, name, message string) {
+	t.Helper()
+	fake(t, name, "printf '%s\\n' "+shellWord(message)+" >&2\nexit 1\n")
+}
+
 func fake(t testing.TB, name, body string) {
 	t.Helper()
 	dir := t.TempDir()

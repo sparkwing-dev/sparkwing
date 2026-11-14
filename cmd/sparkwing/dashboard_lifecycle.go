@@ -38,23 +38,36 @@ type dashboardResult struct {
 	Dashboard      string            `json:"dashboard"`
 	URL            string            `json:"url,omitempty"`
 	DashboardError string            `json:"dashboard_error,omitempty"`
+	Runner         string            `json:"runner,omitempty"`
+	RunnerError    string            `json:"runner_error,omitempty"`
+	RunnerHint     string            `json:"runner_hint,omitempty"`
 	Activity       dashboardActivity `json:"activity"`
 	Warning        string            `json:"warning,omitempty"`
 }
 
 func localStatusResult(service, action string, status wingd.LocalStatus) dashboardResult {
 	state, dashboard := "stopped", "not_serving"
-	if status.Running {
+	switch {
+	case status.Running:
 		state = "running"
+	case status.Stopping && status.PID > 0:
+		state = "stopping"
 	}
 	if status.Running && status.DashboardURL != "" {
 		dashboard = "serving"
 	}
-	return dashboardResult{
+	result := dashboardResult{
 		Kind: "service", Tool: "sparkwing", Service: service, Action: action, State: state, Dashboard: dashboard,
 		PID: status.PID, Version: status.Version, Installed: status.Installed, URL: status.DashboardURL, DashboardError: status.DashboardError,
 		Activity: dashboardActivity{Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections},
 	}
+	if status.Running {
+		result.Runner = status.Runner
+		if status.RunnerError != nil {
+			result.RunnerError, result.RunnerHint = status.RunnerError.Message, status.RunnerError.Hint
+		}
+	}
+	return result
 }
 
 // safety: v0.67 and earlier ran the dashboard as its own process recorded in this file, which v0.68 never writes.
@@ -122,6 +135,16 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 				_, err = fmt.Fprintf(out, "dashboard: not serving: %s\n", opsview.DisplayText(result.DashboardError))
 			default:
 				_, err = fmt.Fprintln(out, "dashboard: not serving (sparkwing dashboard open starts the controller and prints a sign-in link)")
+			}
+		}
+		if err == nil && result.Runner != "" {
+			if result.RunnerError != "" {
+				_, err = fmt.Fprintf(out, "runner: %s: %s\n", result.Runner, opsview.DisplayText(result.RunnerError))
+			} else {
+				_, err = fmt.Fprintf(out, "runner: %s\n", result.Runner)
+			}
+			if err == nil && result.RunnerHint != "" {
+				_, err = fmt.Fprintf(out, "  hint: %s\n", opsview.DisplayText(result.RunnerHint))
 			}
 		}
 		if err == nil {

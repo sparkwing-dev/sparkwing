@@ -2,12 +2,15 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const stopPoll = 25 * time.Millisecond
@@ -29,6 +32,10 @@ func Stop(ctx context.Context, opts Options) error {
 	if err := cl.apiCall(ctx, http.MethodPost, path, nil, &ack); err != nil {
 		if dialMeansAbsent(err) {
 			return ErrNoDaemon
+		}
+		var failure *apierr.Error
+		if errors.As(err, &failure) && failure.Code == hosterr.Unavailable {
+			return failure
 		}
 		return fmt.Errorf("wingd/client: stop daemon: drain not acknowledged: %w", err)
 	}

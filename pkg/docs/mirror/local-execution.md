@@ -176,7 +176,11 @@ sparkwing doctor -o json
 ```
 
 Daemon status, stop and restart use the shared local lifecycle. JSON reports
-`state`, `version`, `pid`, `installed` and the four activity counts.
+`state`, `version`, `pid`, `installed` and the four activity counts. `state` is
+`running`, `stopping` while a stop waits for its runner, or `stopped`. A running
+controller also reports `runner`: `starting` until its first runner check, then
+`running` or `unavailable`. An unavailable runner adds `runner_error` and
+`runner_hint`, and pretty output prints them on its `runner:` line.
 They report the dashboard apart from the controller: `dashboard` is `serving`
 or `not_serving`, and while it serves, `url` is its address. Pretty output
 prints a `dashboard:` line either way. Every shared controller serves the
@@ -187,9 +191,10 @@ sign-in link. When the address is taken, the controller keeps admitting runs
 without a dashboard, and status reports the bind error as `dashboard_error`; it
 never moves to another port. `sparkwing daemon stop` stops the controller and
 its dashboard together and retires the local runner: the runner stops claiming
-work. If the runner remains alive when the stop wait ends, the command exits
-nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let
-held work finish, then retry `sparkwing daemon stop`. `sparkwing daemon restart`
+work. If the runner still holds jobs when the stop wait ends, the command exits
+nonzero and names the runner. The controller keeps accepting that runner's
+results and exits on its own once the runner does; commands that need a
+controller meanwhile wait for it, then start a new one. `sparkwing daemon restart`
 leaves the runner and its jobs running. A runner stop ignores only its own
 watch or drain cancellation; lifecycle failures remain errors, including when
 they occur alongside cancellation. Other cancellations remain errors, even if
@@ -262,8 +267,18 @@ SSH-only account with no GUI login, the user domain. Windows uses an embedded
 runner loop and does not have this process separation.
 
 A runner that cannot start does not stop the controller. Runs the CLI hosts,
-including `--sw-allow-unadmitted`, keep working. Queued jobs wait, and the
-controller log reports the cause while it retries with backoff of up to a minute.
+including `--sw-allow-unadmitted`, keep working. The controller retries with
+backoff of up to a minute and logs each attempt. While no runner can start,
+`sparkwing run` refuses new runs with the cause and a fix instead of queueing
+them, `sparkwing daemon status` prints the cause on its `runner:` line, and
+`sparkwing doctor` reports a `local_runner_unavailable` finding. Jobs already
+queued wait for a runner.
+
+On a systemd host the runner and, when sparkwing itself runs inside a systemd
+service (`INVOCATION_ID` is set), the controller's own scope need a reachable
+user manager. Without one, commands say so and name the fix: check
+`systemctl --user status` from a login session, or run
+`loginctl enable-linger $USER` once for SSH and service sessions.
 
 Installation drains and joins the existing owner before activating the managed
 service, then waits for the successor to acquire the same home and become ready.

@@ -222,14 +222,21 @@ func TestControllerStopRefusesAnUnretiredRunner(t *testing.T) {
 		}}
 		w := httptest.NewRecorder()
 		d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(w, controllerHTTPRequest(t, http.MethodPost, "drain?runner=retire", "", true))
-		if w.Code != http.StatusInternalServerError {
+		if w.Code != http.StatusServiceUnavailable {
 			t.Fatalf("stop response while its runner was still alive: %d %s", w.Code, w.Body.String())
 		}
-		for _, text := range []string{"held-runner", "shutdown is incomplete", "sparkwing dashboard open", "retry sparkwing daemon stop"} {
+		for _, text := range []string{"held-runner", "still finishing held work", "stops on its own", "sparkwing daemon status"} {
 			if !strings.Contains(w.Body.String(), text) {
 				t.Fatalf("incomplete shutdown lost %q: %s", text, w.Body.String())
 			}
 		}
+		select {
+		case <-d.quit:
+			t.Fatal("stop closed the controller while its runner still held work")
+		default:
+		}
+		// safety: the runner here is this test process, so only shutdown releases the controller's wait for it.
+		d.shutdownWithReason("test")
 	})
 }
 
@@ -388,7 +395,7 @@ func TestControllerStopRetryWaitsForPersistedDrainingRunner(t *testing.T) {
 			if fixture.state("held") != "draining" {
 				t.Fatal("drain did not persist before timeout")
 			}
-			if response.Code != http.StatusInternalServerError {
+			if response.Code != http.StatusServiceUnavailable {
 				t.Fatalf("stop attempt %d closed controller with live draining runner: %d %s", attempt, response.Code, response.Body.String())
 			}
 			if !strings.Contains(response.Body.String(), "held") {
@@ -400,5 +407,7 @@ func TestControllerStopRetryWaitsForPersistedDrainingRunner(t *testing.T) {
 			default:
 			}
 		}
+		// safety: the runner here is this test process, so only shutdown releases the controller's wait for it.
+		d.shutdownWithReason("test")
 	})
 }

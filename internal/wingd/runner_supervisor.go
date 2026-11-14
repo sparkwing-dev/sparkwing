@@ -14,10 +14,12 @@ import (
 	"strings"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // LocalRunnerServiceName identifies one runner instance in one state home.
@@ -125,9 +127,42 @@ func runnerManagerOutput(ctx context.Context, host crontimer.Host, name string, 
 		output = string(body)
 	}
 	if err != nil {
-		return "", fmt.Errorf("wingd: runner manager %s: %w: %s", name, err, strings.TrimSpace(output))
+		return "", &runnerManagerError{command: strings.Join(append([]string{name}, args...), " "), err: err, output: strings.TrimSpace(output)}
 	}
 	return output, nil
+}
+
+type runnerManagerError struct {
+	command, output string
+	err             error
+}
+
+func (e *runnerManagerError) Error() string {
+	return fmt.Sprintf("%s: %v: %s", e.command, e.err, e.output)
+}
+
+func (e *runnerManagerError) Unwrap() error { return e.err }
+
+// UserManagerHint tells a user how to restore the systemd user manager that local runners and scoped controllers need.
+const UserManagerHint = "Check it with `systemctl --user status` from your login session. " +
+	"In an SSH or service session, run `loginctl enable-linger $USER` once, then start a new session."
+
+// UserManagerUnreachable explains that what cannot start because this process cannot reach the systemd user
+// manager. detail is the service manager's own message.
+func UserManagerUnreachable(what, detail string) *apierr.Error {
+	return &apierr.Error{
+		Code:    hosterr.Unavailable,
+		Message: fmt.Sprintf("%s: the systemd user manager is unreachable (%s)", what, strings.TrimSpace(detail)),
+		Hint:    UserManagerHint,
+	}
+}
+
+func userManagerUnreachable(what string, err error) error {
+	var manager *runnerManagerError
+	if !errors.As(err, &manager) || manager.output == "" {
+		return err
+	}
+	return UserManagerUnreachable(what, manager.output)
 }
 
 // WaitLocalRunnerShutdown verifies that supervised Linux runners have exited after
@@ -195,7 +230,7 @@ func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPat
 		return errors.New("wingd: systemd boot marker is not a directory")
 	}
 	if err := runnerManagerCommand(ctx, host, "systemctl", "--user", "show-environment"); err != nil {
-		return err
+		return userManagerUnreachable("the local runner cannot start", err)
 	}
 	dir, err := localRunnerDirectory(host, id)
 	if err != nil {

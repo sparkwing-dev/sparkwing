@@ -222,8 +222,8 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 		State:    state, HTTP: server.HTTP(), Close: objects.Close,
 		Maintain: server.MaintainStorage,
 		Complete: server.ReconcileRunEffects,
-		Runner: func(ctx context.Context) error {
-			return superviseLocalRunnerProcess(ctx, timerHost)
+		Runner: func(ctx context.Context, report func(error)) error {
+			return superviseLocalRunnerProcess(ctx, timerHost, report)
 		},
 	}, nil
 }
