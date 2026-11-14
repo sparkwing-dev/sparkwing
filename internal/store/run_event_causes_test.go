@@ -80,14 +80,17 @@ func TestQueueTimeoutQueuesFinishedEventWithoutStart(t *testing.T) {
 	s, tenant, _ := maintenanceStore(t)
 	seedEventSubscriptions(t, s)
 	maintenanceRun(t, s, "run", 1, runstate.RunPending)
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json = ? WHERE team='a' AND id='run'`, []byte(`{"version":1,"admitted_at":"2027-01-01T00:00:00Z","request":{"options":{"claim_wait":{"set":true,"value":1}}},"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`))
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json = ?, repo_key='local:5e1f', repo_display='/home/someone/private-checkout' WHERE team='a' AND id='run'`, []byte(`{"version":1,"admitted_at":"2027-01-01T00:00:00Z","request":{"options":{"claim_wait":{"set":true,"value":1}}},"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`))
 	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
 	if _, err := tenant.TransitionRun(context.Background(), runstate.RunTransition{RunID: "run", To: runstate.RunFailed, Actor: actor, Cause: runstate.RunQueueTimeout}); err != nil {
 		t.Fatal(err)
 	}
 	got := queuedEvents(t, s, "a")
-	if len(got) != 1 || !strings.HasPrefix(got[0], "run.finished run/1 ") || !strings.Contains(got[0], `"status":"failed"`) || !strings.Contains(got[0], `"started_at":null`) {
+	if len(got) != 1 || !strings.HasPrefix(got[0], "run.finished run/1 ") || !strings.Contains(got[0], `"status":"failed"`) || !strings.Contains(got[0], `"started_at":null`) || !strings.Contains(got[0], `"key":"local:5e1f"`) {
 		t.Fatalf("queued %v", got)
+	}
+	if strings.Contains(got[0], "private-checkout") {
+		t.Fatalf("local checkout path reached the event: %s", got[0])
 	}
 }
 

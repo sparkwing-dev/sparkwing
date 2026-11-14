@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runevents"
@@ -32,6 +33,10 @@ func writeRunEventDeliveriesTx(ctx context.Context, tx *storeTx, team Team, row 
 	var parent sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT trigger_source,git_branch,git_sha,repo_key,repo_display,retry_of,parent_run_id FROM runs WHERE team=? AND id=?`, team, row.ID).Scan(&trigger, &branch, &sha, &repoKey, &repoDisplay, &retryOf, &parent); err != nil {
 		return err
+	}
+	if strings.HasPrefix(repoKey, "local:") {
+		// safety: a local repository's display is its checkout path, which events never carry.
+		repoDisplay = ""
 	}
 	var matched []RunEventSubscription
 	for _, sub := range subs {

@@ -50,8 +50,11 @@ func (s *Server) DeliverRunEvents(ctx context.Context) error {
 		<-ctx.Done()
 		return nil
 	}
-	local := s.dashboard != nil && s.dashboard.Local
-	return newRunEventDeliverer(s.operator, s.secretsCipher, webhook.Policy{Local: local}, s.logger).run(ctx)
+	d := newRunEventDeliverer(s.operator, s.secretsCipher, webhook.Policy{Local: s.dashboard != nil && s.dashboard.Local}, s.logger)
+	if s.dashboard != nil && s.dashboard.Version != "" {
+		d.userAgent = webhook.UserAgent(s.dashboard.Version)
+	}
+	return d.run(ctx)
 }
 
 func (d *runEventDeliverer) run(ctx context.Context) error {
