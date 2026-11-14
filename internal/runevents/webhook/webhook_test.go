@@ -183,11 +183,11 @@ func TestControllerPolicyPinsPublicAddresses(t *testing.T) {
 		}
 	}
 	if len(dialed) != 0 {
-		t.Fatalf("refused destinations dialled %v", dialed)
+		t.Fatalf("refused destinations dialed %v", dialed)
 	}
 	r := send("https://public.example.test:8443/hook")
 	if !slices.Equal(dialed, []string{"93.184.216.34:8443"}) || r.Code != CodeTransport && r.Code != CodeTLS {
-		t.Fatalf("dialled %v, result %+v", dialed, r)
+		t.Fatalf("dialed %v, result %+v", dialed, r)
 	}
 	if got := <-serverName; got != "public.example.test" {
 		t.Fatalf("TLS server name %q", got)

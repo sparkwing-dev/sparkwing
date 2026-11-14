@@ -7,11 +7,12 @@
   application/cloudevents+json` and Standard Webhooks headers
   (`webhook-id`, `webhook-timestamp`, `webhook-signature`), signed with the
   subscription's `whsec_` secret. Any non-2xx response or transport error is
-  retried with jittered backoff from 10 seconds up to one hour, honouring
+  retried with jittered backoff from 10 seconds up to one hour, honoring
   `Retry-After` up to one hour, for 24 hours; the delivery is then marked
   failed. Redirects are not followed. A controller sends only to HTTPS
   destinations whose resolved addresses are all public and connects to the
   address it checked; the local daemon also sends to `http` and loopback.
   Delivery is at least once: receivers deduplicate on `webhook-id`, which is
-  the event `id`. Deliveries left pending while the local daemon is stopped are
-  sent when it starts again, if their 24-hour window is still open.
+  the event `id`. The local daemon sends deliveries only while it runs: one
+  left pending while it is stopped is sent when it starts again, or marked
+  failed without an attempt once its 24-hour window has closed.

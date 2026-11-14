@@ -108,9 +108,8 @@ func (op *Operator) FinishRunEventDelivery(ctx context.Context, d RunEventDelive
 	var applied bool
 	err := op.s.inTx(ctx, func(tx *storeTx) error {
 		now := tx.now(ctx).UnixNano()
-		const fence = ` WHERE team=? AND subscription_id=? AND event_id=? AND state='sending' AND attempts=?`
 		var deadline int64
-		err := tx.QueryRowContext(ctx, `SELECT deadline_at FROM run_event_deliveries`+fence, d.Team, d.Subscription.ID, d.EventID, d.Attempts).Scan(&deadline)
+		err := tx.QueryRowContext(ctx, `SELECT deadline_at FROM run_event_deliveries WHERE team=? AND subscription_id=? AND event_id=? AND state='sending' AND attempts=?`, d.Team, d.Subscription.ID, d.EventID, d.Attempts).Scan(&deadline)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -124,7 +123,7 @@ func (op *Operator) FinishRunEventDelivery(ctx context.Context, d RunEventDelive
 				state, finished = "failed", now
 			}
 		}
-		result, err := tx.execContext(ctx, `UPDATE run_event_deliveries SET state=?,next_at=COALESCE(?,next_at),finished_at=?,send_until=NULL,last_status=?,last_error=?`+fence, state, next, finished, status, code, d.Team, d.Subscription.ID, d.EventID, d.Attempts)
+		result, err := tx.execContext(ctx, `UPDATE run_event_deliveries SET state=?,next_at=COALESCE(?,next_at),finished_at=?,send_until=NULL,last_status=?,last_error=? WHERE team=? AND subscription_id=? AND event_id=? AND state='sending' AND attempts=?`, state, next, finished, status, code, d.Team, d.Subscription.ID, d.EventID, d.Attempts)
 		if err != nil {
 			return err
 		}

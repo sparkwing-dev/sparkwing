@@ -13,7 +13,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,13 +38,12 @@ const (
 )
 
 const (
-	// AttemptTimeout bounds one attempt from dial to response headers and body drain.
+	// AttemptTimeout bounds one attempt from dial to response headers.
 	AttemptTimeout = 10 * time.Second
-	// MaxDelay caps both the backoff schedule and an honoured Retry-After.
-	MaxDelay = time.Hour
-	responseLimit = 64 << 10
-	contentType   = "application/cloudevents+json"
-	secretPrefix  = "whsec_"
+	// MaxDelay caps both the backoff schedule and an honored Retry-After.
+	MaxDelay     = time.Hour
+	contentType  = "application/cloudevents+json"
+	secretPrefix = "whsec_"
 )
 
 // safety: indexed by the 1-based attempt that just failed; later attempts reuse the last entry.
@@ -163,7 +161,7 @@ func (p Policy) CheckURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// safety: the address is resolved and checked here, then dialled directly, so
+// safety: the address is resolved and checked here, then dialed directly, so
 // a second resolution cannot swap in an address the check never saw.
 func (s *Sender) dial(ctx context.Context, network, address string) (net.Conn, error) {
 	if s.policy.Local {
@@ -231,7 +229,7 @@ func (s *Sender) Send(ctx context.Context, a Attempt) Result {
 	if err != nil {
 		return Result{Code: classify(err)}
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, responseLimit))
+	// safety: keep-alives are off, so the receiver's body is never read; closing ends the connection.
 	_ = resp.Body.Close()
 	result := Result{Status: resp.StatusCode, Delivered: resp.StatusCode >= 200 && resp.StatusCode < 300}
 	if !result.Delivered {

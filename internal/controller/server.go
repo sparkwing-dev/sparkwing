@@ -451,7 +451,12 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	actionsDone := make(chan struct{})
 	go func() { defer close(actionsDone); s.runActionsDispatcher(ctx) }()
 	deliveryDone := make(chan struct{})
-	go func() { defer close(deliveryDone); _ = s.DeliverRunEvents(ctx) }()
+	go func() {
+		defer close(deliveryDone)
+		if err := s.DeliverRunEvents(ctx); err != nil {
+			s.logger.Error("run event delivery stopped", "err", err)
+		}
+	}()
 	inboxDone := make(chan struct{})
 	go func() {
 		defer close(inboxDone)

@@ -188,7 +188,7 @@ func TestRunEventDeliveryRetriesOnScheduleWithTheSameEvent(t *testing.T) {
 	}
 }
 
-func TestRunEventDeliveryHonoursRetryAfterAndFailsAfterTheWindow(t *testing.T) {
+func TestRunEventDeliveryHonorsRetryAfterAndFailsAfterTheWindow(t *testing.T) {
 	h := newDeliveryHarness(t, webhook.Policy{Local: true})
 	rx := newReceiver(t, 429, 500)
 	rx.header = http.Header{"Retry-After": {"120"}}
