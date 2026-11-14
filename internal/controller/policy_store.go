@@ -101,7 +101,7 @@ func (s *Server) storeRouteAuthorization() routepolicy.Authorization {
 	}
 	return routepolicy.Authorization{
 		Authenticator: policyStoreAuthenticator{s}, Bindings: policyStoreBindings{s},
-		CheckCSRF: s.checkSessionCSRF,
+		CheckCSRF: s.checkSessionCSRF, NoteRefusal: newRefusalAudit(s.operator, s.logger).note,
 		Identify: func(r *http.Request) (capability.Presentation, error) {
 			if len(r.CookiesNamed(sessionCookieName)) == 0 && s.peerIdentity != nil {
 				return s.identifyPeer(r)
