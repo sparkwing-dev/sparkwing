@@ -183,7 +183,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing overflow set --minutes":                         "Monthly Cloud overflow allowance in minutes; zero stops new Cloud overflow while local and registered-machine work stays eligible.",
 	"sparkwing overflow set --uncapped":                        "Remove your saved monthly overflow cap; team standing and billing limits still apply.",
 	"sparkwing pipeline describe --secrets":                    "Print only the secrets the pipeline declares, each marked required or optional.",
-	"sparkwing pipeline describe --show-withheld":              "Print planning output and errors that were withheld because a pipeline failed discovery, masked only by known secrets, on this terminal and nowhere else.",
+	"sparkwing pipeline describe --show-withheld":              "Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs.",
 	"sparkwing pipeline lint --dir":                            "Analyze Go pipeline source in this directory instead of .sparkwing/jobs, or .sparkwing when there is no jobs directory.",
 	"sparkwing pipeline lint --rules":                          "Print the lint rules with what each forbids and why, without analyzing any source.",
 	"sparkwing pipeline new --hidden":                          "Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given.",

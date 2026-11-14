@@ -72,10 +72,11 @@ notice names how many pipelines failed and their error codes, never their names,
 and gives the isolated-home retry when that refusal is the only failure.
 Otherwise the notice and the withheld error name
 `sparkwing pipeline describe --pipeline <name> --show-withheld`. That command
-describes in the CLI process and prints the withheld output and errors on the
-invoking terminal only, masked by the values registered so far. A failed
-pipeline's own secret defaults are unknown, so that command, like running the
-pipeline code yourself, can print them. A
+describes in the CLI process and writes the withheld output and errors to its
+stderr, never to run logs or the describe cache, masked by the values registered
+so far. A failed pipeline's own secret defaults are unknown, so that command,
+like running the pipeline code yourself, prints them unmasked. Run it only where
+its stderr stays private, never in CI. A
 missing risk allowance is still named with its labels. Private
 declarations drive lookup, flag parsing and routing. Help, display and the
 describe cache use a separate presentation type. Incomplete discovery withholds
