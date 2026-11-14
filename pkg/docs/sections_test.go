@@ -290,3 +290,28 @@ func TestBreadcrumbMatchesRankBelowHeadingMatches(t *testing.T) {
 			hits[0].Slug, hits[0].Heading)
 	}
 }
+
+func TestVersionAndBreakingQueriesReachTheChangelog(t *testing.T) {
+	for _, q := range []string{"v0.70.0", "breaking", "breaking changes v0.70.0"} {
+		hits := docs.SearchSections(q)
+		if len(hits) == 0 || hits[0].Slug != docs.ChangelogSlug {
+			top := "nothing"
+			if len(hits) > 0 {
+				top = hits[0].Slug + "/" + hits[0].Heading
+			}
+			t.Errorf("SearchSections(%q) ranked %s first; want the changelog", q, top)
+		}
+	}
+}
+
+func TestWhenIsASearchableGuardKeyword(t *testing.T) {
+	hits := docs.SearchSections("when unless guard")
+	if len(hits) == 0 {
+		t.Fatal("no hits for a guard query")
+	}
+	for _, h := range hits {
+		if !strings.Contains(strings.ToLower(h.Body), "when") {
+			t.Errorf("SearchSections(%q) returned %s/%q, which never says when", "when unless guard", h.Slug, h.Heading)
+		}
+	}
+}

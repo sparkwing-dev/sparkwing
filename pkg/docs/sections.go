@@ -1,6 +1,8 @@
 package docs
 
 import (
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -155,18 +157,25 @@ func parseHeading(line string) (level int, text string, ok bool) {
 
 // safety: history ranks below every guide match. A changelog section spans a whole
 // release, so it contains nearly any word set and would outrank the answering guide.
-func nonCurrentPenalty(slug string) int {
-	if slug == ChangelogSlug || strings.HasPrefix(slug, "migrations/") {
+// A query naming a version or a breaking change is asking for that history.
+func nonCurrentPenalty(slug string, historyQuery bool) int {
+	if slug == ChangelogSlug && !historyQuery || strings.HasPrefix(slug, "migrations/") {
 		return 1000
 	}
 	return 0
 }
 
-// safety: every token must match, and question words match nearly every long section
+var versionToken = regexp.MustCompile(`^v?\d+\.\d+`)
+
+func asksForHistory(tokens []string) bool {
+	return slices.ContainsFunc(tokens, func(t string) bool { return t == "breaking" || versionToken.MatchString(t) })
+}
+
+// safety: every token must match, and these words match nearly every long section
 // by substring ("do" in "docker"), so "how do I add a secret" searches "add secret".
-var questionWords = map[string]bool{
+var stopWords = map[string]bool{
 	"how": true, "do": true, "does": true, "can": true, "what": true, "which": true,
-	"where": true, "when": true, "why": true, "is": true, "are": true, "the": true,
+	"where": true, "why": true, "is": true, "are": true, "the": true,
 	"an": true, "to": true, "of": true, "in": true, "my": true, "for": true, "with": true,
 }
 
@@ -177,7 +186,7 @@ func queryTokens(query string) []string {
 			continue
 		}
 		kept = append(kept, t)
-		if !questionWords[t] {
+		if !stopWords[t] {
 			content = append(content, t)
 		}
 	}
@@ -245,6 +254,7 @@ func SearchSections(query string) []Section {
 	if len(tokens) == 0 {
 		return nil
 	}
+	history := asksForHistory(tokens)
 	type scored struct {
 		Section
 		score int
@@ -287,7 +297,7 @@ func SearchSections(query string) []Section {
 				}
 			}
 			if all {
-				hits = append(hits, scored{Section: s, score: score - nonCurrentPenalty(e.Slug)})
+				hits = append(hits, scored{Section: s, score: score - nonCurrentPenalty(e.Slug, history)})
 			}
 		}
 	}
