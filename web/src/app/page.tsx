@@ -346,7 +346,7 @@ function LastDeployCard({ run }: { run: Run | null }) {
           Last deploy
         </div>
         <div className="flex items-center gap-2 mt-0.5">
-          <span className="font-mono text-sm text-violet-300 truncate">
+          <span className="max-w-full shrink-0 truncate font-mono text-sm text-violet-300">
             {run.pipeline}
           </span>
           {run.git_branch && (
