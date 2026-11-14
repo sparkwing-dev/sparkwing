@@ -326,6 +326,7 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) (err 
 		}
 		nc, derr := dial(ctx, wingd.APISocketBeside(cl.sock), opts.dialTimeout())
 		if derr != nil {
+			stopping = false
 			if opts.observeDialFailure != nil {
 				opts.observeDialFailure()
 			}
