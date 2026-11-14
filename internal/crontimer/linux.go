@@ -177,7 +177,7 @@ func firstForeign(files ...managed) string {
 }
 
 func foreignDetail(path string) string {
-	return fmt.Sprintf("%s exists but sparkwing did not write it, so sparkwing will not touch it", path)
+	return fmt.Sprintf("%s exists but sparkwing did not write it, so sparkwing will not touch it; move it aside to let sparkwing manage the timer", path)
 }
 
 func serviceUnit(h Host) string {

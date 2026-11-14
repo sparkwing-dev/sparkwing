@@ -75,11 +75,12 @@ type scheduleUnitsFixture struct {
 	wingd.ManagedUnitManager
 	calls *[]string
 	units []wingd.ManagedUnit
+	err   error
 }
 
 func (f scheduleUnitsFixture) Inspect(context.Context) ([]wingd.ManagedUnit, error) {
 	*f.calls = append(*f.calls, "inspect")
-	return f.units, nil
+	return f.units, f.err
 }
 
 func (f scheduleUnitsFixture) Refresh(context.Context, string, string) error {
@@ -238,6 +239,19 @@ func TestLocalScheduleInstallArmsNothingWhenTheTimerFails(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.calls, []string{"inspect", "install-timer"}) {
 		t.Fatalf("a failed timer still armed schedules: %v", f.calls)
+	}
+}
+
+func TestLocalScheduleInstallNamesTheNextStepForAForeignTimerFile(t *testing.T) {
+	f := newScheduleCommandFixture(t)
+	f.services.units = scheduleUnitsFixture{calls: &f.calls, err: errors.New("/u/sparkwing-crons.timer exists but sparkwing did not write it, so sparkwing will not touch it; move it aside to let sparkwing manage the timer")}
+	var out bytes.Buffer
+	err := runScheduleCommandArgs(t.Context(), []string{"install", "--no-prove", "-o", "plain"}, &out, f.command)
+	if err == nil || !strings.Contains(err.Error(), "no schedule was armed") || !strings.Contains(err.Error(), "move it aside") || !strings.Contains(err.Error(), "run `sparkwing schedules install` again") || out.Len() != 0 {
+		t.Fatalf("foreign timer refusal: %v %q", err, out.String())
+	}
+	if !reflect.DeepEqual(f.calls, []string{"inspect"}) {
+		t.Fatalf("a foreign timer file still armed schedules: %v", f.calls)
 	}
 }
 

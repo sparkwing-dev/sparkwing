@@ -125,13 +125,13 @@ func prepareScheduleTimer(ctx context.Context, services localScheduleServices, g
 	}
 	units, err := services.units.Inspect(ctx)
 	if err != nil {
-		return nil, false, err
+		return nil, false, timerRefusal(install, err)
 	}
 	installed := false
 	for _, unit := range units {
 		if unit.Kind == wingd.ManagedSchedule {
 			if unit.Home != services.options.Home {
-				return nil, false, fmt.Errorf("schedule timer belongs to another state home")
+				return nil, false, timerRefusal(install, fmt.Errorf("the schedule timer at %s belongs to another state home (%s)", unit.Name, unit.Home))
 			}
 			installed = true
 		}
@@ -160,6 +160,13 @@ func prepareScheduleTimer(ctx context.Context, services localScheduleServices, g
 		return services.uninstallTimer, false, nil
 	}
 	return func(context.Context) error { return nil }, false, nil
+}
+
+func timerRefusal(install bool, err error) error {
+	if !install {
+		return err
+	}
+	return fmt.Errorf("no schedule was armed because the schedule timer cannot be installed: %w; resolve that, then run `sparkwing schedules install` again", err)
 }
 
 func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts scheduleOptions, out io.Writer, command scheduleCommand) (err error) {
