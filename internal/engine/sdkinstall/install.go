@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -296,18 +297,28 @@ func installTool(ctx context.Context, dir string, environment procenv.Env, name 
 	return append(stdout.Bytes(), stderr.Bytes()...), nil
 }
 
+// safety: only a compiler diagnostic names a source position; module fetch and go.sum failures do not.
+var compilerPosition = regexp.MustCompile(`^[^\s:]+\.go:\d+(:\d+)?: `)
+
 // safety: compiler paths become repository-relative so a terminal or editor can open them.
 func compileRefusal(pipelineDir, output string) *apierr.Error {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
+	compiled := false
 	for i, line := range lines {
-		file, rest, found := strings.Cut(line, ":")
-		if found && pipelineDir != "" && strings.HasSuffix(file, ".go") && !filepath.IsAbs(file) && !strings.ContainsAny(file, " \t") {
+		if !compilerPosition.MatchString(line) {
+			continue
+		}
+		compiled = true
+		if file, rest, _ := strings.Cut(line, ":"); pipelineDir != "" && !filepath.IsAbs(file) {
 			lines[i] = filepath.ToSlash(filepath.Join(pipelineDir, file)) + ":" + rest
 		}
 	}
 	where := "the pipeline code"
 	if pipelineDir != "" && pipelineDir != "." {
 		where += " in " + filepath.ToSlash(pipelineDir)
+	}
+	if !compiled {
+		return &apierr.Error{Code: apierr.PlanFailed, Message: where + " failed to build:\n" + strings.Join(lines, "\n"), Hint: "Fix the problem the output above describes, then run the pipeline again."}
 	}
 	return &apierr.Error{Code: apierr.PlanFailed, Message: where + " does not compile:\n" + strings.Join(lines, "\n"), Hint: "Fix the errors above, then run the pipeline again."}
 }

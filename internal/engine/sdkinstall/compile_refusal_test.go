@@ -17,3 +17,11 @@ func TestCompileRefusalNamesRepositoryPathsAndPipelineCode(t *testing.T) {
 		t.Fatalf("root pipeline refusal = %q", root.Message)
 	}
 }
+
+func TestBuildFailureWithoutCompilerErrorsSaysItFailedToBuild(t *testing.T) {
+	output := "go: github.com/example/dep@v1.2.3: Get \"https://proxy.golang.org/...\": dial tcp: lookup proxy.golang.org: no such host"
+	got := compileRefusal(".sparkwing", output)
+	if got.Code != apierr.PlanFailed || got.Message != "the pipeline code in .sparkwing failed to build:\n"+output || got.Hint == "" {
+		t.Fatalf("build refusal = %+v", got)
+	}
+}
