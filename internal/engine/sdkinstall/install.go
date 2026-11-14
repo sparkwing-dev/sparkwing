@@ -296,8 +296,7 @@ func installTool(ctx context.Context, dir string, environment procenv.Env, name 
 	return append(stdout.Bytes(), stderr.Bytes()...), nil
 }
 
-// compileRefusal reports the compiler's errors as a pipeline code failure, with file
-// paths relative to the repository root so a terminal or editor can open them.
+// safety: compiler paths become repository-relative so a terminal or editor can open them.
 func compileRefusal(pipelineDir, output string) *apierr.Error {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for i, line := range lines {

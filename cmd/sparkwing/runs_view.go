@@ -261,8 +261,7 @@ func planFailureHint(detail controllerwire.RunDetail) string {
 	return fmt.Sprintf("the pipeline failed to plan, so no job ran; fix the error above, check it from the repository with `sparkwing pipeline plan --pipeline %s`, and trigger the run again", detail.Inputs.Pipeline)
 }
 
-// jobDetailText shows an ordinary job failure by the step that failed; its wire
-// reason, sdk_error, means only that the job's own code returned an error.
+// safety: the wire reason sdk_error means only that the job's own code returned an error.
 func jobDetailText(detail controllerwire.RunDetail, job controllerwire.JobDetail) string {
 	if job.StatusDetail != string(apierr.SDKError) {
 		return job.StatusDetail

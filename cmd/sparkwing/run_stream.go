@@ -16,27 +16,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-// failureLineBytes caps each line of a failure block, because a shell step's
-// error repeats its whole script on the first line.
+// safety: a shell step's error repeats its whole script on its first line.
 const failureLineBytes = 160
 
-// prettyHiddenEvents restate what the job's own output and the end-of-run block already show.
+// hack: these restate what the job's output and the end-of-run block already show.
 var prettyHiddenEvents = []string{
 	"run_started", "run_success", "run_dry_run",
 	"job_ready", "job_claimed", "job_started", "job_succeeded", "job_failed",
 }
 
-// prettyHiddenFrames are host bookkeeping: preparation timings and fail-fast counters.
 var prettyHiddenFrames = []string{"preparation", "work_fail_fast", "lease_keeper"}
 
-// logStream renders one run's records as `<job> | <text>` lines; it reads the run's
-// detail only to name the dependency behind an upstream cancellation.
 type logStream struct {
 	ctx    context.Context
 	run    string
 	runs   runDetailReader
 	detail *controllerwire.RunDetail
-	// admitted lists jobs whose printed admission wait ends with a grant still to show.
+	// safety: a grant shows only after a printed wait, so that wait line gets its answer.
 	admitted []string
 }
 
@@ -106,8 +102,9 @@ func (s *logStream) render(record controllerwire.LogRecord) (subject, text strin
 		return subject, step + " started", true
 	case "step_end":
 		var attrs map[string]json.RawMessage
-		_ = json.Unmarshal(frame.Attrs, &attrs)
-		return subject, stepEndText(step, attrs), true
+		if json.Unmarshal(frame.Attrs, &attrs) == nil {
+			return subject, stepEndText(step, attrs), true
+		}
 	}
 	return subject, frameLine(frame), true
 }
@@ -176,7 +173,6 @@ func (s *logStream) blockers(job string) []string {
 	return upstreamBlockers(*s.detail, job)
 }
 
-// upstreamBlockers names the needs of job that ended without success, in declaration order.
 func upstreamBlockers(detail controllerwire.RunDetail, job string) []string {
 	outcomes := map[string]string{}
 	var needs []string
@@ -207,8 +203,6 @@ func shortDuration(d time.Duration) string {
 	return d.Round(time.Second).String()
 }
 
-// writeFailureBlock explains a finished run that did not succeed: each failed job with
-// its step and error, each cancelled job with its cause, and the commands to look closer.
 func writeFailureBlock(out io.Writer, detail controllerwire.RunDetail, job, profile string) error {
 	var text strings.Builder
 	var failed []string
@@ -272,8 +266,7 @@ func writeFailureBlock(out io.Writer, detail controllerwire.RunDetail, job, prof
 	return err
 }
 
-// withSteps adds the run's steps, which run detail leaves to a separate read, so the
-// failure block can name the step that failed; without them it names only the job.
+// safety: run detail leaves steps to a separate read; without them the block names only the job.
 func withSteps(ctx context.Context, reader any, detail controllerwire.RunDetail) controllerwire.RunDetail {
 	steps, ok := reader.(interface {
 		ReadSteps(context.Context, string) (controllerwire.RunSteps, error)
@@ -296,7 +289,6 @@ func failedStep(detail controllerwire.RunDetail, job controllerwire.JobDetail) s
 	return ""
 }
 
-// shellWord quotes a job or profile name only when the shell would split or expand it.
 func shellWord(value string) string {
 	if value != "" && !strings.ContainsFunc(value, func(r rune) bool {
 		return !(r == '-' || r == '_' || r == '.' || r == '/' || r == ':' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z')

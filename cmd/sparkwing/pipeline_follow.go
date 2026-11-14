@@ -38,8 +38,7 @@ func runCompletionError(ctx context.Context, reader interface {
 	return statusExitCode(status)
 }
 
-// foregroundRunCompletion follows a failed run's last line with its failure block in
-// pretty and plain output; the block states the outcome, so no diagnostic repeats it.
+// safety: the failure block states the outcome, so no diagnostic repeats it.
 func foregroundRunCompletion(ctx context.Context, reader interface {
 	ReadRun(context.Context, string) (controllerwire.RunDetail, error)
 }, run, status, format string, out io.Writer,

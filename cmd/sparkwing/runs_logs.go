@@ -305,7 +305,6 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 	return err
 }
 
-// decodeFrame reads a structured job log line; anything else is raw output.
 func decodeFrame(line string) (nodewire.FrameLog, bool) {
 	var frame nodewire.FrameLog
 	if json.Unmarshal([]byte(line), &frame) != nil {
