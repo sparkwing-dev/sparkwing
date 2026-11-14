@@ -605,7 +605,7 @@ func TestTeamBoundary_SecretsStayWithTheirTeam(t *testing.T) {
 				t.Errorf("team A %s's list carries the secret's value: %s", member.name, body)
 			}
 		}
-		if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil); code != http.StatusForbidden || strings.Contains(body, "team-a-secret-value") || !strings.Contains(body, `secret \"DEPLOY_KEY\" is masked`) || !strings.Contains(body, "secrets set --variable") {
+		if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil); code != http.StatusForbidden || strings.Contains(body, "team-a-secret-value") || !strings.Contains(body, `secret \"DEPLOY_KEY\" is masked`) || !strings.Contains(body, "`sparkwing secrets set --secret DEPLOY_KEY --variable`") {
 			t.Errorf("team A owner session read its secret back = %d: %s", code, body)
 		}
 		missingCode, missingBody := f.do("GET", "/api/v1/secrets/NEVER_SET", f.ownerB, nil)

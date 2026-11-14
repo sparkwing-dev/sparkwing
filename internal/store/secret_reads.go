@@ -56,9 +56,9 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 			return err
 		}
 		if !claim && out.Masked {
-			// safety: the row is in the caller's own team, whose members already list
-			// masked names; another team's name read as missing above.
-			return hosterr.Authorization(hosterr.ReasonSecretMasked, fmt.Sprintf("secret %q is masked, so only a pipeline run that declares it can read its value; secrets get reads values stored with `sparkwing secrets set --variable`", out.Name))
+			// safety: the refusal is same-team only; another team's name read as
+			// missing above, and this team's masked rows already answered 403 here.
+			return hosterr.Authorization(hosterr.ReasonSecretMasked, maskedSecretRefusal(out))
 		}
 		if claim {
 			b := p.Capability.Binding
@@ -184,4 +184,12 @@ func selectedSecretTx(ctx context.Context, tx *storeTx, team Team, name string, 
 		return nil, "", ErrNotFound
 	}
 	return &rows[0].secret, rows[0].pool, nil
+}
+
+func maskedSecretRefusal(secret *Secret) string {
+	set := "sparkwing secrets set --secret " + secret.Name
+	if secret.Pipeline != "" && secret.RepoName != "" {
+		set += " --repo " + secret.RepoName + " --pipeline " + secret.Pipeline
+	}
+	return fmt.Sprintf("secret %q is masked, so only a pipeline run that declares it can read its value. To store a readable, unmasked value instead, run `%s --variable` and enter the value on stdin", secret.Name, set)
 }
