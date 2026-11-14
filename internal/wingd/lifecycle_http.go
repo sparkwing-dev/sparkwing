@@ -94,7 +94,7 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 			switch {
 			case errors.As(err, &holds):
 				d.finishDrainAfterRunner(context.WithoutCancel(r.Context()), holds.instance)
-				writeLoginFailure(w, holds.failure())
+				writeLoginFailure(w, holds.failure(d.layout.home))
 			case err != nil:
 				writeLoginFailure(w, &apierr.Error{Code: hosterr.Internal, Message: err.Error()})
 			default:

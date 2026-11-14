@@ -235,7 +235,8 @@ var errDaemonDraining = errors.New("wingd/client: daemon is draining")
 
 var errControllerStillStopping = &apierr.Error{
 	Code: hosterr.Unavailable, Message: "the local controller is still stopping",
-	Hint: "A stop waits for the local runner to finish held work. Check with `sparkwing daemon status`, then retry.",
+	Hint: "A stop waits for the local runner to finish held work. Check with `sparkwing daemon status`, then retry; " +
+		"`sparkwing daemon stop` names the runner and how to abandon that work.",
 }
 
 func spawnFailed(home, sock string, serr, dialErr error) error {

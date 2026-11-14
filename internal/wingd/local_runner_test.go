@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -225,7 +226,11 @@ func TestControllerStopRefusesAnUnretiredRunner(t *testing.T) {
 		if w.Code != http.StatusServiceUnavailable {
 			t.Fatalf("stop response while its runner was still alive: %d %s", w.Code, w.Body.String())
 		}
-		for _, text := range []string{"held-runner", "still finishing held work", "stops on its own", "sparkwing daemon status"} {
+		abandon := abandonRunnerCommand(d.layout.home, localhostwire.LocalRunnerInstance{ID: "held-runner", PID: os.Getpid()})
+		if info, err := os.Stat("/run/systemd/system"); runtime.GOOS == "linux" && err == nil && info.IsDir() && abandon != "systemctl --user kill --signal=SIGKILL "+LocalRunnerServiceName(d.layout.home, "held-runner")+".service" {
+			t.Fatalf("systemd runner abandon command = %q", abandon)
+		}
+		for _, text := range []string{"held-runner", "still finishing held work", "stops on its own", "sparkwing daemon status", "`sparkwing runs cancel` included", "the local controller is still stopping", abandon} {
 			if !strings.Contains(w.Body.String(), text) {
 				t.Fatalf("incomplete shutdown lost %q: %s", text, w.Body.String())
 			}

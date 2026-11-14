@@ -61,7 +61,7 @@ func TestLocalRunnerSystemdManagerFailureNeverDetaches(t *testing.T) {
 			if failing == "systemctl" {
 				message = "the local runner cannot start: the systemd user manager is unreachable (manager unavailable)"
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "systemctl --user status") || !strings.Contains(failure.Hint, "loginctl enable-linger") {
+				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "systemctl --user status") || !strings.Contains(failure.Hint, "loginctl enable-linger") || !strings.Contains(failure.Hint, "run `sparkwing daemon stop` from that session") {
 					t.Fatalf("unreachable manager gave no fix: %#v", err)
 				}
 			}

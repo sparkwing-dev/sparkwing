@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -239,12 +241,28 @@ func (e *runnerHoldsWork) Error() string {
 
 func (e *runnerHoldsWork) Unwrap() error { return e.cause }
 
-func (e *runnerHoldsWork) failure() *apierr.Error {
+func (e *runnerHoldsWork) failure(home string) *apierr.Error {
 	return &apierr.Error{
 		Code:    hosterr.Unavailable,
 		Message: fmt.Sprintf("local runner %s (pid %d) is still finishing held work; the local controller stops on its own once that runner exits", e.instance.ID, e.instance.PID),
-		Hint:    "Run `sparkwing daemon status` to check; it reports stopped once the work finishes. Other sparkwing commands wait for the stop, then start a new controller.",
+		Hint: "Until then, other sparkwing commands, `sparkwing runs cancel` included, wait briefly and fail with " +
+			"\"the local controller is still stopping\". `sparkwing daemon status` reports stopped once the work finishes. " +
+			"To abandon the held work now, run `" + abandonRunnerCommand(home, e.instance) + "`.",
 	}
+}
+
+// safety: a systemd runner's jobs run in its unit's cgroup, so only killing the unit ends them; stopping it waits for
+// the work.
+func abandonRunnerCommand(home string, instance localhostwire.LocalRunnerInstance) string {
+	switch runtime.GOOS {
+	case "windows":
+		return fmt.Sprintf("taskkill /F /T /PID %d", instance.PID)
+	case "linux":
+		if info, err := os.Stat("/run/systemd/system"); err == nil && info.IsDir() {
+			return "systemctl --user kill --signal=SIGKILL " + LocalRunnerServiceName(home, instance.ID) + ".service"
+		}
+	}
+	return fmt.Sprintf("kill -KILL %d", instance.PID)
 }
 
 // safety: a stop that outlasted its wait leaves the controller draining with a runner that still needs it to accept

@@ -193,8 +193,12 @@ never moves to another port. `sparkwing daemon stop` stops the controller and
 its dashboard together and retires the local runner: the runner stops claiming
 work. If the runner still holds jobs when the stop wait ends, the command exits
 nonzero and names the runner. The controller keeps accepting that runner's
-results and exits on its own once the runner does; commands that need a
-controller meanwhile wait for it, then start a new one. `sparkwing daemon restart`
+results and exits on its own once the runner does. Until then, commands that
+need the controller, `sparkwing runs cancel` included, wait briefly and fail
+with "the local controller is still stopping". To abandon the held work, kill
+the runner by the command the stop prints: on a systemd host,
+`systemctl --user kill --signal=SIGKILL` on its exact unit, because
+`systemctl --user stop` waits for the work. `sparkwing daemon restart`
 leaves the runner and its jobs running. A runner stop ignores only its own
 watch or drain cancellation; lifecycle failures remain errors, including when
 they occur alongside cancellation. Other cancellations remain errors, even if
@@ -278,7 +282,10 @@ On a systemd host the runner and, when sparkwing itself runs inside a systemd
 service (`INVOCATION_ID` is set), the controller's own scope need a reachable
 user manager. Without one, commands say so and name the fix: check
 `systemctl --user status` from a login session, or run
-`loginctl enable-linger $USER` once for SSH and service sessions.
+`loginctl enable-linger $USER` once for SSH and service sessions. A controller
+keeps the environment it started with, so after the fix run
+`sparkwing daemon stop` from the repaired session; the next command starts a
+controller that can reach the manager.
 
 Installation drains and joins the existing owner before activating the managed
 service, then waits for the successor to acquire the same home and become ready.

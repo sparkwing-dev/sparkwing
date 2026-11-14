@@ -157,12 +157,18 @@ func UserManagerUnreachable(what, detail string) *apierr.Error {
 	}
 }
 
+// safety: the controller keeps the environment it started with, so fixing the manager does not reach it; only a
+// controller started from the repaired session can.
+const controllerRestartHint = " Then run `sparkwing daemon stop` from that session, so the next sparkwing command starts a controller that can reach it."
+
 func userManagerUnreachable(what string, err error) error {
 	var manager *runnerManagerError
 	if !errors.As(err, &manager) || manager.output == "" {
 		return err
 	}
-	return UserManagerUnreachable(what, manager.output)
+	failure := UserManagerUnreachable(what, manager.output)
+	failure.Hint += controllerRestartHint
+	return failure
 }
 
 // WaitLocalRunnerShutdown verifies that supervised Linux runners have exited after
