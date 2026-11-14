@@ -119,6 +119,7 @@
         "cli-runs",
         "cli-schedules",
         "cli-secrets",
+        "cli-subscriptions",
         "cli-tokens",
         "cli-update",
         "cli-version"
