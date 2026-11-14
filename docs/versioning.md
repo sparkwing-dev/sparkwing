@@ -196,8 +196,9 @@ The receipt covers the inputs npm reads but does not write: `package.json`, the
 lockfile, every `package.json`, lockfile and `.npmrc` in the pipeline directory and
 its ancestors, the user, global and builtin npm configuration (the account's home
 directory when `HOME` is unset), `npm_config_*`, `HOME`, `NODE_ENV`, `NODE_OPTIONS`,
-`NODE_PATH` and `PREFIX`, the resolved `node` and `npm` executables, and local
-tarball dependencies. It also records npm's `node_modules/.package-lock.json` and
+`NODE_PATH` and `PREFIX`, the resolved `node` and `npm` executables, the manifest
+of every lockfile package outside `node_modules` (workspace members and linked
+sources), and local tarball dependencies. It also records npm's `node_modules/.package-lock.json` and
 the installed SDK manifest. These are not every input npm could read.
 A later preparation skips both npm commands only when these match and the tree
 passes npm's own hidden-lockfile check: every package it lists exists and no

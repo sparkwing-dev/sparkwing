@@ -113,3 +113,57 @@ func TestTypeScriptInstallWithoutHOMEIgnoresAWorkingDirectoryNPMRC(t *testing.T)
 		t.Fatal("a .npmrc in the preparing process's working directory invalidated the receipt")
 	}
 }
+
+// A workspace member's manifest is an npm input outside node_modules, so a dependency it gains
+// without a lockfile update must still reach npm's frozen-lockfile refusal.
+func TestTypeScriptInstallReceiptCoversWorkspaceMemberManifests(t *testing.T) {
+	npm, err := exec.LookPath("npm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	sdk, memberDep, dir := filepath.Join(root, "sdk"), filepath.Join(root, "memberdep"), filepath.Join(root, "pipeline")
+	member := filepath.Join(dir, "member")
+	for _, path := range []string{sdk, memberDep, member} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeInput(t, sdk, "package.json", []byte(`{"name":"@sparkwing/sdk","version":"0.68.0-qa.16","type":"module","exports":"./index.js"}`))
+	writeInput(t, sdk, "index.js", []byte(`export const value = "ready";`))
+	writeInput(t, memberDep, "package.json", []byte(`{"name":"memberdep","version":"1.0.0","main":"index.js"}`))
+	writeInput(t, memberDep, "index.js", []byte(`module.exports = 1;`))
+	pack := exec.CommandContext(t.Context(), npm, "pack", "--pack-destination", dir)
+	pack.Dir = memberDep
+	if output, err := pack.CombinedOutput(); err != nil {
+		t.Fatalf("pack: %v: %s", err, output)
+	}
+	writeInput(t, member, "package.json", []byte(`{"name":"member","version":"1.0.0","main":"index.js"}`))
+	writeInput(t, member, "index.js", []byte(`module.exports = 1;`))
+	writeInput(t, dir, "package.json", []byte(`{"main":"main.js","workspaces":["member"],"dependencies":{"@sparkwing/sdk":"file:../sdk"}}`))
+	writeInput(t, dir, "main.js", []byte(``))
+	lock := exec.CommandContext(t.Context(), npm, "install", "--package-lock-only", "--offline", "--ignore-scripts", "--no-audit", "--no-fund")
+	lock.Dir = dir
+	if output, err := lock.CombinedOutput(); err != nil {
+		t.Fatalf("lock: %v: %s", err, output)
+	}
+	request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.TypeScriptSDK})
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := func() (string, error) {
+		var output, diagnostics bytes.Buffer
+		err := Run(t.Context(), bytes.NewReader(request), &output, &diagnostics)
+		return diagnostics.String(), err
+	}
+	if diagnostics, err := install(); err != nil {
+		t.Fatalf("install: %v: %s", err, diagnostics)
+	}
+	if diagnostics, err := install(); err != nil || diagnostics != "" {
+		t.Fatalf("unchanged verified tree ran npm again: %v: %q", err, diagnostics)
+	}
+	writeInput(t, member, "package.json", []byte(`{"name":"member","version":"1.0.0","main":"index.js","dependencies":{"memberdep":"file:../memberdep-1.0.0.tgz"}}`))
+	if diagnostics, err := install(); err == nil {
+		t.Fatalf("a workspace member dependency missing from the lockfile reused the receipt: npm output %q", diagnostics)
+	}
+}

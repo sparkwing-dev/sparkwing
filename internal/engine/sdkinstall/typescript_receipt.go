@@ -128,7 +128,7 @@ func typeScriptInstallInputs(dir, lockfile string, environment procenv.Env) (str
 		}
 		root = parent
 	}
-	if err := digestLocalTarballs(digest, dir, lockfile); err != nil {
+	if err := digestLockfilePackages(digest, dir, lockfile); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(digest.Sum(nil)), nil
@@ -179,9 +179,10 @@ func executableIdentity(digest hash.Hash, name string) (string, error) {
 	return path, nil
 }
 
-// safety: npm copies local tarballs into the tree, so their bytes can change under an unchanged lockfile path.
-// A copied local directory cannot be digested cheaply and disables reuse; a linked one shows changes live.
-func digestLocalTarballs(digest hash.Hash, dir, lockfile string) error {
+// safety: npm reads the manifest of every lockfile package outside node_modules (workspace members and linked
+// sources), and copies local tarballs, whose bytes can change under an unchanged lockfile path. A copied local
+// directory cannot be digested cheaply and disables reuse; a linked one shows changes live.
+func digestLockfilePackages(digest hash.Hash, dir, lockfile string) error {
 	body, err := os.ReadFile(filepath.Join(dir, lockfile))
 	if err != nil {
 		return err
@@ -197,6 +198,18 @@ func digestLocalTarballs(digest hash.Hash, dir, lockfile string) error {
 	}
 	if err := json.Unmarshal(body, &lock); err != nil {
 		return err
+	}
+	locations := make([]string, 0, len(lock.Packages))
+	for location := range lock.Packages {
+		if location != "" && location != "node_modules" && !strings.HasPrefix(location, "node_modules/") {
+			locations = append(locations, location)
+		}
+	}
+	slices.Sort(locations)
+	for _, location := range locations {
+		if err := digestFile(digest, filepath.Join(dir, filepath.FromSlash(location), "package.json"), false); err != nil {
+			return err
+		}
 	}
 	var sources []string
 	for _, entries := range []map[string]entry{lock.Packages, lock.Dependencies} {
