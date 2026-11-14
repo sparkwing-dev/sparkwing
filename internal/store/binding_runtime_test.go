@@ -10,6 +10,7 @@ import (
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
@@ -132,8 +133,13 @@ func TestBindingDeclaredReadsDoNotGrantTheWholeRun(t *testing.T) {
 		}
 	}
 	err = s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: "sibling"})
-	if want := `job "job" does not depend on job "sibling", so it cannot read its output; add .Needs() on "sibling" to job "job" (a Ref captured by a closure adds no dependency)`; err == nil || err.Error() != want {
+	if want := `job "job" does not depend on job "sibling", so it cannot read its output; add .Needs() (Go) or .needs() (TypeScript) on "sibling" to job "job"`; err == nil || err.Error() != want {
 		t.Fatalf("own-run non-dependency read = %v, want %q", err, want)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET spec_json=CAST(json_set(COALESCE(CAST(spec_json AS TEXT),'{}'),'$.resolved.engine.pin.sdk','go') AS BLOB),spec_hash='spec',sealed_at=1,plan_json=COALESCE(plan_json,CAST('{}' AS BLOB)),plan_hash='plan' WHERE id='run'`)
+	err = s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: "sibling"})
+	if want := `job "job" does not depend on job "sibling", so it cannot read its output; add .Needs() on "sibling" to job "job" (a Ref captured by a closure adds no dependency)`; err == nil || err.Error() != want {
+		t.Fatalf("Go run non-dependency read = %v, want %q", err, want)
 	}
 	missing := s.AsOperator().CheckBinding(t.Context(), p, capability.BindReadSet, capability.Target{Team: "a", RunID: "run", NodeID: "missing"})
 	rewriteSchemaExec(t, s.db, `INSERT OR IGNORE INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
@@ -325,5 +331,17 @@ func TestBoundDelegateRevocationRequiresTheAccountOwner(t *testing.T) {
 	var revoked int
 	if err := s.queryRow(t.Context(), `SELECT count(*) FROM capabilities WHERE prefix=? AND revoked_at IS NOT NULL`, child.Prefix).Scan(&revoked); err != nil || revoked != 1 {
 		t.Fatalf("delegate revocation: %d %v", revoked, err)
+	}
+}
+
+func TestNeedsAdviceUsesTheRunsSDKSpelling(t *testing.T) {
+	for sdk, want := range map[engineid.SDKKind]string{
+		engineid.GoSDK:         `add .Needs() on "slow" to job "after" (a Ref captured by a closure adds no dependency)`,
+		engineid.TypeScriptSDK: `add .needs() on "slow" to job "after"`,
+		"":                     `add .Needs() (Go) or .needs() (TypeScript) on "slow" to job "after"`,
+	} {
+		if got := needsAdvice(sdk, "after", "slow"); got != want {
+			t.Errorf("%q: %q, want %q", sdk, got, want)
+		}
 	}
 }

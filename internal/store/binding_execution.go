@@ -8,6 +8,7 @@ import (
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
@@ -111,7 +112,11 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if b.Kind == capability.BindingNode {
 			// safety: both jobs belong to the caller's own run and plan, so naming them
 			// reveals nothing; a node absent from that run was refused above.
-			return hosterr.Authorization(hosterr.ReasonBinding, fmt.Sprintf("job %q does not depend on job %q, so it cannot read its output; add .Needs() on %q to job %q (a Ref captured by a closure adds no dependency)", job.ID, output.ID, output.ID, job.ID))
+			sdk := engineid.SDKKind("")
+			if snapshot.Run.Spec != nil {
+				sdk = snapshot.Run.Spec.Resolved.Engine.Pin.SDK
+			}
+			return hosterr.Authorization(hosterr.ReasonBinding, fmt.Sprintf("job %q does not depend on job %q, so it cannot read its output; %s", job.ID, output.ID, needsAdvice(sdk, job.ID, output.ID)))
 		}
 	}
 	return bindingRefusal()
@@ -199,4 +204,16 @@ func bindingSourceTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 		return bindingRefusal()
 	}
 	return nil
+}
+
+// safety: an unknown SDK names both spellings rather than guessing one.
+func needsAdvice(sdk engineid.SDKKind, reader, producer string) string {
+	switch sdk {
+	case engineid.GoSDK:
+		return fmt.Sprintf("add .Needs() on %q to job %q (a Ref captured by a closure adds no dependency)", producer, reader)
+	case engineid.TypeScriptSDK:
+		return fmt.Sprintf("add .needs() on %q to job %q", producer, reader)
+	default:
+		return fmt.Sprintf("add .Needs() (Go) or .needs() (TypeScript) on %q to job %q", producer, reader)
+	}
 }
