@@ -40,7 +40,7 @@ const (
 const (
 	// AttemptTimeout bounds one attempt from dial to response headers.
 	AttemptTimeout = 10 * time.Second
-	// MaxDelay caps both the backoff schedule and an honored Retry-After.
+	// MaxDelay caps both the backoff schedule and how far a Retry-After can lengthen a wait.
 	MaxDelay     = time.Hour
 	contentType  = "application/cloudevents+json"
 	secretPrefix = "whsec_"
@@ -285,20 +285,21 @@ func retryAfter(value string, now time.Time) *time.Duration {
 	return &d
 }
 
-// Delay returns how long to wait after the given failed attempt (1-based).
-// A Retry-After replaces the schedule; otherwise the wait is uniform in
-// [base/2, base], so a failing receiver is never retried at once. jitter
-// returns a value in [0, n).
+// Delay returns how long to wait after the given failed attempt (1-based):
+// uniform in [base/2, base] over the schedule, so a failing receiver is never
+// retried at once. A Retry-After can lengthen that wait up to MaxDelay but never
+// shorten it. jitter returns a value in [0, n).
 func Delay(attempt int64, r Result, jitter func(n int64) int64) time.Duration {
-	if r.RetryAfter != nil {
-		return *r.RetryAfter
-	}
 	base := schedule[len(schedule)-1]
 	if attempt >= 1 && attempt <= int64(len(schedule)) {
 		base = schedule[attempt-1]
 	}
 	half := base / 2
-	return half + time.Duration(jitter(int64(half)+1))
+	wait := half + time.Duration(jitter(int64(half)+1))
+	if r.RetryAfter != nil {
+		wait = max(wait, *r.RetryAfter)
+	}
+	return wait
 }
 
 // UserAgent is the fixed User-Agent for a Sparkwing build version.

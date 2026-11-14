@@ -218,7 +218,7 @@ func TestSendTimesOutAfterAttemptTimeout(t *testing.T) {
 	})
 }
 
-func TestDelayUsesHalfToFullJitterAndRetryAfter(t *testing.T) {
+func TestDelayUsesHalfToFullJitterAndRetryAfterOnlyLengthensIt(t *testing.T) {
 	low := func(int64) int64 { return 0 }
 	high := func(n int64) int64 { return n - 1 }
 	for attempt, base := range map[int64]time.Duration{1: 10 * time.Second, 2: 30 * time.Second, 3: 2 * time.Minute, 4: 10 * time.Minute, 5: 30 * time.Minute, 6: time.Hour, 40: time.Hour} {
@@ -229,8 +229,13 @@ func TestDelayUsesHalfToFullJitterAndRetryAfter(t *testing.T) {
 			t.Errorf("attempt %d high = %v", attempt, got)
 		}
 	}
-	after := 3 * time.Second
-	if got := Delay(4, Result{RetryAfter: &after}, high); got != after {
-		t.Fatalf("retry after ignored: %v", got)
+	for _, tc := range []struct{ after, want time.Duration }{
+		{0, 5 * time.Second},
+		{time.Second, 5 * time.Second},
+		{2 * time.Minute, 2 * time.Minute},
+	} {
+		if got := Delay(1, Result{RetryAfter: &tc.after}, low); got != tc.want {
+			t.Errorf("Retry-After %v after attempt 1 waits %v, want %v", tc.after, got, tc.want)
+		}
 	}
 }
