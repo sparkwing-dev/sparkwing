@@ -96,7 +96,11 @@ func (p *admissionProgress) write(ctx context.Context, out io.Writer, format str
 				found = true
 				key := admissionMaterialState(state, waiter)
 				if !wait.printed || wait.last != key {
-					if _, err := fmt.Fprintf(out, "%s: %s\n", opsview.DisplayText(wait.record.JobID), opsview.DisplayText(opsview.AdmissionWaitLine(state, waiter))); err != nil {
+					separator := ": "
+					if format == "pretty" {
+						separator = " | "
+					}
+					if _, err := fmt.Fprintf(out, "%s%s%s\n", opsview.DisplayText(wait.record.JobID), separator, opsview.DisplayText(opsview.AdmissionWaitLine(state, waiter))); err != nil {
 						return err
 					}
 					wait.printed, wait.last = true, key

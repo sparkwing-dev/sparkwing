@@ -138,7 +138,7 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 	}
 	seen := map[string]bool{query.Cursor: true}
 	progress := admissionProgressFor(inv, reader, query)
-	stream := &logStream{ctx: ctx, run: inv.Value("run")}
+	stream := &logStream{ctx: ctx, run: inv.Value("run"), historical: !inv.Bool("follow")}
 	if runs != nil {
 		stream.runs = runs
 	} else {

@@ -34,6 +34,8 @@ type logStream struct {
 	detail *controllerwire.RunDetail
 	// safety: a grant shows only after a printed wait, so that wait line gets its answer.
 	admitted []string
+	// safety: a finished read hides queue waits, whose grants it cannot pair with them.
+	historical bool
 }
 
 type runDetailReader interface {
@@ -64,6 +66,9 @@ func (s *logStream) render(record controllerwire.LogRecord) (subject, text strin
 			return record.JobID, "admission granted after " + shortDuration(time.Duration(grant.WaitMS)*time.Millisecond), true
 		}
 		return record.JobID, "admission granted", true
+	}
+	if record.Event == runstate.EventAdmissionQueued && s.historical {
+		return "", "", false
 	}
 	if record.Event != "" {
 		if slices.Contains(prettyHiddenEvents, record.Event) {

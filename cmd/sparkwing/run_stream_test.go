@@ -94,7 +94,6 @@ test | running tests
 test | FAIL: TestWidget expected 3 got 4
 test | unit failed after 23ms
 test#2 | unit succeeded in 1.5s
-deploy | waiting for admission: needs 1.0 cores; 0.0 available
 deploy | cancelled: test did not succeed
 run | failed: test; cancelled: deploy
 
@@ -180,5 +179,20 @@ func TestPrettyStreamShowsASecretRefusalAsItsMessage(t *testing.T) {
 	want := "plan | pipeline \"ship\" did not start.\nplan |   - DEPLOY_TOKEN is unavailable.\nplan |     Fix: sparkwing secrets set --secret DEPLOY_TOKEN --file <path>\n"
 	if out.String() != want {
 		t.Fatalf("refusal line = %q, want %q", &out, want)
+	}
+}
+
+func TestPrettyStreamShowsQueueWaitsOnlyWhileFollowing(t *testing.T) {
+	record := controllerwire.LogRecord{RunID: "run-1", Event: "job_admission_queued", JobID: "deploy", LineNo: 7, Line: `{"blocking_reason":"needs 1.0 cores; 0.0 available"}`}
+	var live bytes.Buffer
+	if err := writeLogRecord(&live, record, "pretty", false); err != nil {
+		t.Fatal(err)
+	}
+	if want := "deploy | waiting for admission: needs 1.0 cores; 0.0 available\n"; live.String() != want {
+		t.Fatalf("live wait = %q, want %q", &live, want)
+	}
+	var finished bytes.Buffer
+	if err := (&logStream{historical: true}).write(&finished, record); err != nil || finished.Len() != 0 {
+		t.Fatalf("finished read printed an unanswered wait: %q, %v", &finished, err)
 	}
 }
