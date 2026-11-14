@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
-// receiptFixture is a pipeline directory whose npm and node are recording shell scripts.
 type receiptFixture struct {
 	t                               *testing.T
 	root, dir, bin, npmPackage, log string
@@ -72,8 +71,6 @@ func (f *receiptFixture) writeExecutable(path, body string) {
 	}
 }
 
-// writeNPM installs a fake npm that records each invocation, writes the SDK and npm's tree
-// record on install, and fails after writing when a file named npm-fail exists.
 func (f *receiptFixture) writeNPM(extra string) {
 	f.writeExecutable(filepath.Join(f.npmPackage, "bin", "npm"), fmt.Sprintf(`#!/bin/sh
 echo "$1" >> %q
@@ -108,7 +105,6 @@ func (f *receiptFixture) install() error {
 	return nil
 }
 
-// npmRuns counts npm invocations so far.
 func (f *receiptFixture) npmRuns() int {
 	f.t.Helper()
 	body, err := os.ReadFile(f.log)
@@ -121,7 +117,6 @@ func (f *receiptFixture) npmRuns() int {
 	return strings.Count(string(body), "\n")
 }
 
-// mustInstall installs and reports whether npm ran.
 func (f *receiptFixture) mustInstall() bool {
 	f.t.Helper()
 	before := f.npmRuns()

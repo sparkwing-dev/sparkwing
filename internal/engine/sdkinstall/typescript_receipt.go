@@ -17,22 +17,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-// typeScriptReceipt names the record of the last verified install inside the tree it describes,
-// so removing node_modules removes it too.
+// safety: the receipt lives inside the tree it describes, so removing node_modules removes it too.
 const typeScriptReceipt = ".sparkwing-sdk-receipt"
 
 const typeScriptReceiptFormat = "sparkwing typescript sdk receipt 1"
 
-// typeScriptLifecycleScripts run on every npm install of the root package, so a tree that declares
-// one is never reused.
+// safety: npm runs these root scripts on every install, so a tree that declares one is never reused.
 var typeScriptLifecycleScripts = []string{"preinstall", "install", "postinstall", "prepublish", "preprepare", "prepare", "postprepare", "dependencies"}
 
 var errTypeScriptReuseUnavailable = errors.New("typescript install cannot be reused")
 
-// typeScriptInstallFingerprint digests every input npm reads to decide the installed tree: the
-// manifest, lockfile and npm's own tree record, the installed SDK manifest, package and npm
-// configuration files in every ancestor directory, user, global and builtin npm configuration,
-// npm-relevant environment, the node and npm executables, and local tarball dependencies.
+// safety: a reused tree is only as current as this digest, so it covers every input npm reads to decide the tree:
+// manifest, lockfile, npm's tree record, the installed SDK, package and npm configuration in every ancestor,
+// user, global and builtin npmrc, npm-relevant environment, node and npm, and local tarball dependencies.
 func typeScriptInstallFingerprint(dir, lockfile string, manifest []byte, environment procenv.Env) (string, error) {
 	var scripts struct{ Scripts map[string]json.RawMessage }
 	if err := json.Unmarshal(manifest, &scripts); err != nil {
@@ -146,8 +143,7 @@ func digestFile(digest hash.Hash, path string, required bool) error {
 	return nil
 }
 
-// executableIdentity records the resolved executable's path, size and modification time; npm
-// and node upgrades replace the file.
+// perf: path, size and modification time identify an upgraded node or npm without hashing the executable.
 func executableIdentity(digest hash.Hash, name string) (string, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
@@ -169,9 +165,8 @@ func executableIdentity(digest hash.Hash, name string) (string, error) {
 	return path, nil
 }
 
-// digestLocalTarballs covers local file dependencies npm copies into the tree: their bytes can
-// change without any change to the lockfile path. A copied local directory cannot be digested
-// cheaply, so it disables reuse; linked directories show their changes through the link.
+// safety: npm copies local tarballs into the tree, so their bytes can change under an unchanged lockfile path.
+// A copied local directory cannot be digested cheaply and disables reuse; a linked one shows changes live.
 func digestLocalTarballs(digest hash.Hash, dir, lockfile string) error {
 	body, err := os.ReadFile(filepath.Join(dir, lockfile))
 	if err != nil {
@@ -217,8 +212,7 @@ func digestLocalTarballs(digest hash.Hash, dir, lockfile string) error {
 	return nil
 }
 
-// reuseTypeScriptInstall reports whether the receipt from the last verified install matches the
-// current inputs. Callers hold the lockfile lock.
+// safety: callers hold the lockfile lock, so no preparation rewrites the receipt or the tree while this reads it.
 func reuseTypeScriptInstall(dir, fingerprint string) bool {
 	if fingerprint == "" {
 		return false
@@ -227,8 +221,8 @@ func reuseTypeScriptInstall(dir, fingerprint string) bool {
 	return err == nil && string(recorded) == fingerprint
 }
 
-// discardTypeScriptReceipt runs before any npm write, so an install that fails or is
-// interrupted leaves no receipt to match a partially written tree.
+// safety: this runs before any npm write, so a failed or interrupted install leaves no receipt to match a
+// partially written tree.
 func discardTypeScriptReceipt(dir string) error {
 	err := os.Remove(filepath.Join(dir, "node_modules", typeScriptReceipt))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -237,8 +231,7 @@ func discardTypeScriptReceipt(dir string) error {
 	return err
 }
 
-// recordTypeScriptInstall writes the receipt after the installed SDK is verified. A tree whose
-// inputs cannot be fingerprinted keeps no receipt.
+// safety: callers verify the installed SDK first; a tree whose inputs cannot be fingerprinted keeps no receipt.
 func recordTypeScriptInstall(dir, lockfile string, manifest []byte, environment procenv.Env) error {
 	fingerprint, err := typeScriptInstallFingerprint(dir, lockfile, manifest, environment)
 	if err != nil {
