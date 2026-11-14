@@ -10,7 +10,6 @@ import (
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
@@ -335,10 +334,10 @@ func TestBoundDelegateRevocationRequiresTheAccountOwner(t *testing.T) {
 }
 
 func TestNeedsAdviceUsesTheRunsSDKSpelling(t *testing.T) {
-	for sdk, want := range map[engineid.SDKKind]string{
-		engineid.GoSDK:         `add .Needs() on "slow" to job "after" (a Ref captured by a closure adds no dependency)`,
-		engineid.TypeScriptSDK: `add .needs() on "slow" to job "after"`,
-		"":                     `add .Needs() (Go) or .needs() (TypeScript) on "slow" to job "after"`,
+	for sdk, want := range map[string]string{
+		"go":         `add .Needs() on "slow" to job "after" (a Ref captured by a closure adds no dependency)`,
+		"typescript": `add .needs() on "slow" to job "after"`,
+		"":           `add .Needs() (Go) or .needs() (TypeScript) on "slow" to job "after"`,
 	} {
 		if got := needsAdvice(sdk, "after", "slow"); got != want {
 			t.Errorf("%q: %q, want %q", sdk, got, want)
