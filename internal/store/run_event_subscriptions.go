@@ -123,15 +123,19 @@ func runEventSubscriptionTx(ctx context.Context, tx *storeTx, team Team, id stri
 
 // safety: the store ID lives in settings, which restore copies, so a restored store keeps its event source.
 func runEventSourceTx(ctx context.Context, tx *storeTx, team Team) (string, error) {
-	minted := make([]byte, 16)
-	if _, err := rand.Read(minted); err != nil {
-		return "", err
-	}
-	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING`, metaKeyRunEventSource, []byte(hex.EncodeToString(minted))); err != nil {
-		return "", err
-	}
 	var id []byte
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, metaKeyRunEventSource).Scan(&id); err != nil {
+	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, metaKeyRunEventSource).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		minted := make([]byte, 16)
+		if _, err := rand.Read(minted); err != nil {
+			return "", err
+		}
+		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING`, metaKeyRunEventSource, []byte(hex.EncodeToString(minted))); err != nil {
+			return "", err
+		}
+		err = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, metaKeyRunEventSource).Scan(&id)
+	}
+	if err != nil {
 		return "", err
 	}
 	return runevents.Source(string(id), string(team)), nil
@@ -140,7 +144,6 @@ func runEventSourceTx(ctx context.Context, tx *storeTx, team Team) (string, erro
 // RunEventDeliveryWindow is how long a delivery keeps retrying before it fails.
 const RunEventDeliveryWindow = 24 * time.Hour
 
-// runEventDelivery is one event queued for one subscription.
 type runEventDelivery struct {
 	SubscriptionID string
 	EventID        string
