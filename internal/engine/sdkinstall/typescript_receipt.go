@@ -20,17 +20,21 @@ import (
 // safety: the receipt lives inside the tree it describes, so removing node_modules removes it too.
 const typeScriptReceipt = ".sparkwing-sdk-receipt"
 
-const typeScriptReceiptFormat = "sparkwing typescript sdk receipt 1"
+const typeScriptReceiptFormat = "sparkwing typescript sdk receipt 2"
 
 // safety: npm runs these root scripts on every install, so a tree that declares one is never reused.
 var typeScriptLifecycleScripts = []string{"preinstall", "install", "postinstall", "prepublish", "preprepare", "prepare", "postprepare", "dependencies"}
 
 var errTypeScriptReuseUnavailable = errors.New("typescript install cannot be reused")
 
-// safety: a reused tree is only as current as this digest, so it covers every input npm reads to decide the tree:
-// manifest, lockfile, npm's tree record, the installed SDK, package and npm configuration in every ancestor,
-// user, global and builtin npmrc, npm-relevant environment, node and npm, and local tarball dependencies.
-func typeScriptInstallFingerprint(dir, lockfile string, manifest []byte, environment procenv.Env) (string, error) {
+// safety: these are the inputs npm reads but does not write: manifest, lockfile, package and npm configuration
+// in every ancestor, user, global and builtin npmrc, npm-relevant environment, node and npm, and local tarballs.
+// Install compares them before and after npm, so an edit during npm is never recorded.
+func typeScriptInstallInputs(dir, lockfile string, environment procenv.Env) (string, error) {
+	manifest, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		return "", err
+	}
 	var scripts struct{ Scripts map[string]json.RawMessage }
 	if err := json.Unmarshal(manifest, &scripts); err != nil {
 		return "", err
@@ -42,7 +46,7 @@ func typeScriptInstallFingerprint(dir, lockfile string, manifest []byte, environ
 	}
 	digest := sha256.New()
 	fmt.Fprintf(digest, "%s\x00%s\x00%s\x00", typeScriptReceiptFormat, dir, lockfile)
-	for _, name := range []string{"package.json", lockfile, filepath.Join("node_modules", ".package-lock.json"), filepath.Join("node_modules", "@sparkwing", "sdk", "package.json")} {
+	for _, name := range []string{"package.json", lockfile} {
 		if err := digestFile(digest, filepath.Join(dir, name), true); err != nil {
 			return "", err
 		}
@@ -212,13 +216,61 @@ func digestLocalTarballs(digest hash.Hash, dir, lockfile string) error {
 	return nil
 }
 
+// safety: npm trusts its hidden lockfile only while every package it lists exists and no package folder is newer,
+// and otherwise rereads and repairs the tree; a receipt must not skip that repair.
+func typeScriptInstalledTree(dir string) (string, error) {
+	record := filepath.Join(dir, "node_modules", ".package-lock.json")
+	info, err := os.Stat(record)
+	if err != nil {
+		return "", err
+	}
+	body, err := os.ReadFile(record)
+	if err != nil {
+		return "", err
+	}
+	var hidden struct {
+		Packages map[string]struct {
+			Link bool `json:"link"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal(body, &hidden); err != nil {
+		return "", err
+	}
+	for location, entry := range hidden.Packages {
+		if !strings.HasPrefix(location, "node_modules/") {
+			continue
+		}
+		folder, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(location)))
+		if err != nil {
+			return "", errTypeScriptReuseUnavailable
+		}
+		if !entry.Link && folder.ModTime().After(info.ModTime()) {
+			return "", errTypeScriptReuseUnavailable
+		}
+	}
+	sdk, err := os.ReadFile(filepath.Join(dir, "node_modules", "@sparkwing", "sdk", "package.json"))
+	if err != nil {
+		return "", err
+	}
+	treeSum, sdkSum := sha256.Sum256(body), sha256.Sum256(sdk)
+	return fmt.Sprintf("%x:%x", treeSum, sdkSum), nil
+}
+
+func typeScriptReceiptBody(inputs, tree string) string {
+	return typeScriptReceiptFormat + "\n" + inputs + "\n" + tree
+}
+
 // safety: callers hold the lockfile lock, so no preparation rewrites the receipt or the tree while this reads it.
-func reuseTypeScriptInstall(dir, fingerprint string) bool {
-	if fingerprint == "" {
+func reuseTypeScriptInstall(dir, inputs string) bool {
+	if inputs == "" {
+		return false
+	}
+	tree, err := typeScriptInstalledTree(dir)
+	if err != nil {
 		return false
 	}
 	recorded, err := os.ReadFile(filepath.Join(dir, "node_modules", typeScriptReceipt))
-	return err == nil && string(recorded) == fingerprint
+	return err == nil && string(recorded) == typeScriptReceiptBody(inputs, tree)
 }
 
 // safety: this runs before any npm write, so a failed or interrupted install leaves no receipt to match a
@@ -231,10 +283,18 @@ func discardTypeScriptReceipt(dir string) error {
 	return err
 }
 
-// safety: callers verify the installed SDK first; a tree whose inputs cannot be fingerprinted keeps no receipt.
-func recordTypeScriptInstall(dir, lockfile string, manifest []byte, environment procenv.Env) error {
-	fingerprint, fingerprintErr := typeScriptInstallFingerprint(dir, lockfile, manifest, environment)
-	if fingerprintErr != nil {
+// safety: callers verify the installed SDK first. inputs is the digest taken before npm ran; any input that
+// changed since, or a tree npm itself would not trust, keeps no receipt.
+func recordTypeScriptInstall(dir, lockfile, inputs string, environment procenv.Env) error {
+	if inputs == "" {
+		return discardTypeScriptReceipt(dir)
+	}
+	after, inputsErr := typeScriptInstallInputs(dir, lockfile, environment)
+	if inputsErr != nil || after != inputs {
+		return discardTypeScriptReceipt(dir)
+	}
+	tree, treeErr := typeScriptInstalledTree(dir)
+	if treeErr != nil {
 		return discardTypeScriptReceipt(dir)
 	}
 	path := filepath.Join(dir, "node_modules", typeScriptReceipt)
@@ -242,7 +302,7 @@ func recordTypeScriptInstall(dir, lockfile string, manifest []byte, environment 
 	if err != nil {
 		return err
 	}
-	_, err = staged.WriteString(fingerprint)
+	_, err = staged.WriteString(typeScriptReceiptBody(inputs, tree))
 	err = errors.Join(err, staged.Close())
 	if err == nil {
 		err = os.Rename(staged.Name(), path)

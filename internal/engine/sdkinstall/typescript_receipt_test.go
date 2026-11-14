@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -80,7 +81,7 @@ ci) exit 0 ;;
 install)
   mkdir -p node_modules/@sparkwing/sdk
   printf '{"version":"0.20.0"}' > node_modules/@sparkwing/sdk/package.json
-  printf '{"lockfileVersion":3}' > node_modules/.package-lock.json
+  printf '{"lockfileVersion":3,"packages":{"node_modules/@sparkwing/sdk":{"version":"0.20.0"}}}' > node_modules/.package-lock.json
   if [ -e npm-fail ]; then exit 1; fi
   exit 0 ;;
 esac
@@ -194,6 +195,16 @@ func TestTypeScriptInstallReceiptCoversEveryNPMInput(t *testing.T) {
 		}},
 		{"npm executable", func(f *receiptFixture) { f.writeNPM("# upgraded") }},
 		{"local tarball dependency", func(f *receiptFixture) { f.write(filepath.Join(f.dir, "extra.tgz"), "rebuilt tarball") }},
+		{"package folder newer than npm's tree record", func(f *receiptFixture) {
+			record, err := os.Stat(filepath.Join(f.dir, "node_modules", ".package-lock.json"))
+			if err != nil {
+				f.t.Fatal(err)
+			}
+			later := record.ModTime().Add(time.Nanosecond)
+			if err := os.Chtimes(filepath.Join(f.dir, "node_modules", "@sparkwing", "sdk"), later, later); err != nil {
+				f.t.Fatal(err)
+			}
+		}},
 		{"missing receipt", func(f *receiptFixture) {
 			if err := os.Remove(filepath.Join(f.dir, "node_modules", typeScriptReceipt)); err != nil {
 				f.t.Fatal(err)

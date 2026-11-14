@@ -244,11 +244,11 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 	}
 	// perf: two npm processes cost 1-2 s per preparation and a local run prepares two or three
 	// times; an unchanged verified tree skips both.
-	fingerprint, err := typeScriptInstallFingerprint(dir, pin.Lockfile, manifestBody, environment)
+	inputs, err := typeScriptInstallInputs(dir, pin.Lockfile, environment)
 	if err != nil {
-		fingerprint = ""
+		inputs = ""
 	}
-	reused := reuseTypeScriptInstall(dir, fingerprint)
+	reused := reuseTypeScriptInstall(dir, inputs)
 	if !reused {
 		if err := discardTypeScriptReceipt(dir); err != nil {
 			return nil, err
@@ -285,7 +285,7 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 		return nil, err
 	}
 	if !reused {
-		if err := recordTypeScriptInstall(dir, pin.Lockfile, manifestBody, environment); err != nil {
+		if err := recordTypeScriptInstall(dir, pin.Lockfile, inputs, environment); err != nil {
 			return nil, err
 		}
 	}
