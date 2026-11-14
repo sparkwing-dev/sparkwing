@@ -15,12 +15,14 @@ const sealedRotationRunPage = 200
 
 // SealedRotation counts the envelopes an operator rotation resealed and names those no configured key opened.
 type SealedRotation struct {
-	Secrets         int             `json:"secrets"`
-	GitCredentials  int             `json:"git_credentials"`
-	RunEnvironments int             `json:"run_environments"`
-	Settings        int             `json:"settings"`
-	PreviousKeyOnly int             `json:"previous_key_only"`
-	Unreadable      []SealedRowName `json:"unreadable"`
+	Secrets         int `json:"secrets"`
+	GitCredentials  int `json:"git_credentials"`
+	RunEnvironments int `json:"run_environments"`
+	Settings        int `json:"settings"`
+	// RunEventSubscriptions counts resealed subscription signing secrets.
+	RunEventSubscriptions int             `json:"run_event_subscriptions"`
+	PreviousKeyOnly       int             `json:"previous_key_only"`
+	Unreadable            []SealedRowName `json:"unreadable"`
 }
 
 // SealedRotationCipher reseals bound envelopes and opens them under the current key alone.
@@ -71,7 +73,7 @@ func scopeName(purpose secrets.Purpose, scope string) string {
 	return ""
 }
 
-// RotateSealedValues reseals every tenant's secrets, git credentials and submitted run environments, and local requester inputs, plus
+// RotateSealedValues reseals every tenant's secrets, git credentials, run event signing secrets and submitted run environments, and local requester inputs, plus
 // signing keys, under the cipher's current key. Each step commits on its own and repeats safely.
 // Verify only counts, reporting how many rows still open under the previous key alone.
 func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SealedRotationCipher, verify bool) (SealedRotation, error) {
@@ -108,6 +110,7 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		total.GitCredentials += done.GitCredentials
 		total.RunEnvironments += done.RunEnvironments
 		total.Settings += done.Settings
+		total.RunEventSubscriptions += done.RunEventSubscriptions
 		total.PreviousKeyOnly += done.PreviousKeyOnly
 		total.Unreadable = append(total.Unreadable, done.Unreadable...)
 		return nil
@@ -121,6 +124,9 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 	}
 	for _, team := range teams {
 		if err := step(func(r *sealedRotationTx) error { return r.tenantCredentials(ctx, &Tenant{s: o.s, team: team}) }, team); err != nil {
+			return SealedRotation{}, err
+		}
+		if err := step(func(r *sealedRotationTx) error { return r.runEventSubscriptions(ctx, team) }, team); err != nil {
 			return SealedRotation{}, err
 		}
 		for _, local := range []bool{false, true} {

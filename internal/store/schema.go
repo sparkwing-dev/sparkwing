@@ -256,6 +256,8 @@ var schemaTables = []schemaTable{
 	{Name: "repos", Owner: schemaTenant},
 	{Name: "run_control_requests", Owner: schemaTenant},
 	{Name: "run_effects", Owner: schemaTenant},
+	{Name: "run_event_deliveries", Owner: schemaTenant},
+	{Name: "run_event_subscriptions", Owner: schemaTenant},
 	{Name: "run_rate_usage", Owner: schemaTenant},
 	{Name: "runs", Owner: schemaTenant},
 	{Name: "secrets", Owner: schemaTenant},

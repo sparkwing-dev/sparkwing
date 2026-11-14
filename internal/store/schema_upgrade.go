@@ -70,7 +70,43 @@ var schemaUpgrades = []schemaUpgrade{
 		statements: []string{`DROP TABLE team_build_trust`},
 	},
 	{from: 37, release: "schema 37", digest: "7da3f341c2c5b6cc6fd60afb1a881979dfc5b64e79589a551522c655b5099e64", statements: []string{`ALTER TABLE nodes ADD COLUMN group_wait_started_at BIGINT CHECK(group_wait_started_at IS NULL OR group_wait_started_at>0)`}},
+	{from: 38, release: "schema 38", digest: "d7d89dd6049c6139e01bae0a845983414393d5b7c622a2172c60fa1292e5d7da", statements: schema39RunEventStatements},
 }
+
+var schema39RunEventStatements = []string{`CREATE TABLE run_event_subscriptions (
+    team TEXT NOT NULL REFERENCES teams(name),
+    id TEXT NOT NULL CHECK(id <> ''),
+    url TEXT NOT NULL CHECK(url <> ''),
+    event_types TEXT NOT NULL,
+    statuses TEXT NOT NULL DEFAULT '[]',
+    pipelines TEXT NOT NULL DEFAULT '[]',
+    repositories TEXT NOT NULL DEFAULT '[]',
+    secret TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_principal TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY(team,id)
+)`, `CREATE TABLE run_event_deliveries (
+    team TEXT NOT NULL REFERENCES teams(name),
+    subscription_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    body BLOB NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending','sending','succeeded','failed')),
+    attempts BIGINT NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+    next_at BIGINT NOT NULL,
+    send_until BIGINT,
+    deadline_at BIGINT NOT NULL,
+    last_status BIGINT,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at BIGINT NOT NULL,
+    finished_at BIGINT,
+    PRIMARY KEY(team,subscription_id,event_id),
+    FOREIGN KEY(team,subscription_id) REFERENCES run_event_subscriptions(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+)`, `CREATE INDEX idx_run_event_deliveries_due ON run_event_deliveries(next_at) WHERE state IN ('pending','sending')`, `CREATE INDEX idx_run_event_deliveries_run ON run_event_deliveries(team,run_id)`}
 
 var schema35ActionsStatements = []string{`CREATE TABLE github_actions_approvals (
     team TEXT NOT NULL,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runevents"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -43,6 +44,32 @@ func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team sto
 	git, err := tenant.WriteGitCredential(ctx, a, sealedGit)
 	if err != nil || git.Team != team || git.CreatedBy != p.Capability.Subject.ID || git.ConfirmedAt == nil {
 		return fmt.Errorf("current session git transaction: %+v, %v", git, err)
+	}
+	subID := store.RunEventSubscriptionID(team, "acceptance")
+	sealedSub, err := store.SealRunEventSubscription(cipher, team, store.RunEventSubscription{ID: subID, URL: "https://hooks.example.test/a", Secret: "whsec_acceptance", Filter: runevents.Filter{EventTypes: []string{runevents.EventFinished}, Statuses: []string{"failed"}}})
+	if err != nil {
+		return err
+	}
+	sub, replayed, err := tenant.CreateRunEventSubscription(ctx, a, sealedSub)
+	if err != nil || replayed || sub.CreatedPrincipal != p.Capability.Subject.ID {
+		return fmt.Errorf("current session subscription transaction: %+v, %v, %w", sub, replayed, err)
+	}
+	if _, replayed, err := tenant.CreateRunEventSubscription(ctx, a, sealedSub); err != nil || !replayed {
+		return fmt.Errorf("subscription replay: %v, %w", replayed, err)
+	}
+	subs, err := tenant.RunEventSubscriptions(ctx)
+	if err != nil || len(subs) != 1 || subs[0].Filter.Statuses[0] != "failed" || len(subs[0].Filter.Pipelines) != 0 {
+		return fmt.Errorf("subscription list: %+v, %w", subs, err)
+	}
+	rotated, err := store.SealRunEventSubscription(cipher, team, store.RunEventSubscription{ID: subID, Secret: "whsec_rotated"})
+	if err != nil {
+		return err
+	}
+	if row, err := tenant.RotateRunEventSubscriptionSecret(ctx, a, rotated); err != nil || row.Secret != rotated.Row().Secret {
+		return fmt.Errorf("subscription rotation: %w", err)
+	}
+	if deleted, err := tenant.DeleteRunEventSubscription(ctx, a, subID); err != nil || !deleted {
+		return fmt.Errorf("subscription deletion: %v, %w", deleted, err)
 	}
 	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "gh:1", "build"); err != nil {
 		return err
