@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -160,6 +161,38 @@ func TestUpdateRefreshFillsThePolicyCacheLocalRunsRead(t *testing.T) {
 	cached, err := local.Index(t.Context(), now)
 	if err != nil || cached.Index.Offline() || !cached.Index.Policy().PublishedAt.Equal(policy.PublishedAt) || len(transport.requests) != 0 {
 		t.Fatalf("local run did not read the refreshed policy offline: %+v %v requests=%v", cached, err, transport.requests)
+	}
+	if cached.Fallback || len(cached.Notices) != 0 {
+		t.Fatalf("a readable verified cache still warns after update: %+v", cached.Notices)
+	}
+}
+
+func TestLocalPolicyWarnsOnlyWhenTheCacheCannotBeRead(t *testing.T) {
+	r, _, _, _, now := fixtureResolver(t)
+	if _, err := r.Index(t.Context(), now); err != nil {
+		t.Fatal(err)
+	}
+	config := r.config
+	config.LocalOnly = true
+	local, err := NewResolver(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet, err := local.Index(t.Context(), now)
+	if err != nil || quiet.Fallback || len(quiet.Notices) != 0 {
+		t.Fatalf("readable cache warned: %+v %v", quiet, err)
+	}
+	policyDir := filepath.Join(config.CacheDirectory, "policy")
+	if err := os.Chmod(policyDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(policyDir, 0o700) })
+	if _, err := os.ReadDir(policyDir); err == nil {
+		t.Skip("permissions do not restrict this user")
+	}
+	stale, err := local.Index(t.Context(), now)
+	if err != nil || !stale.Fallback || len(stale.Notices) != 1 || stale.Notices[0].Kind != engineid.NoticeIndexFallback || !strings.Contains(stale.Notices[0].Reason, "permission denied") {
+		t.Fatalf("unreadable cache did not warn with its cause: %+v %v", stale, err)
 	}
 }
 
