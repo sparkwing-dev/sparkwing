@@ -22,8 +22,9 @@ type Subscriptions struct {
 	Subscriptions []Subscription `json:"subscriptions"`
 }
 
-// SubscriptionWrite creates a subscription. Omitted event types mean both
-// run.started and run.finished; other omitted filters match every value.
+// SubscriptionWrite creates a subscription. Omitted event types mean
+// run.finished when statuses are given and both events otherwise; other
+// omitted filters match every value.
 // IdempotencyKey travels only in the header.
 type SubscriptionWrite struct {
 	URL            string   `json:"url"`

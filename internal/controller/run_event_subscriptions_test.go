@@ -128,3 +128,49 @@ func TestControllerSubscriptionsRefuseNonPublicDestinations(t *testing.T) {
 		t.Fatalf("subscription past the cap = %d", code)
 	}
 }
+
+func TestSubscriptionEventTypesDefaultToFinishedWhenStatusesAreGiven(t *testing.T) {
+	f := newCredFixture(t)
+	for _, c := range []struct {
+		body map[string]any
+		want []string
+	}{
+		{map[string]any{"url": "https://hooks.example.com/a", "statuses": []string{"failed"}}, []string{"run.finished"}},
+		{map[string]any{"url": "https://hooks.example.com/a"}, []string{"run.started", "run.finished"}},
+		{map[string]any{"url": "https://hooks.example.com/a", "event_types": []string{"run.started", "run.finished"}, "statuses": []string{"failed"}}, []string{"run.started", "run.finished"}},
+	} {
+		var created controllerwire.SubscriptionSecret
+		if code := f.call("POST", "/api/v1/subscriptions", f.olga.auth, c.body, &created); code != http.StatusOK || strings.Join(created.Subscription.EventTypes, ",") != strings.Join(c.want, ",") {
+			t.Errorf("create %v = %d, event types %v, want %v", c.body, code, created.Subscription.EventTypes, c.want)
+		}
+	}
+}
+
+func TestSubscriptionDescriptionLimitCountsCharacters(t *testing.T) {
+	f := newCredFixture(t)
+	if code := f.call("POST", "/api/v1/subscriptions", f.olga.auth, map[string]any{"url": "https://hooks.example.com/a", "description": strings.Repeat("é", 200)}, nil); code != http.StatusOK {
+		t.Fatalf("200 two-byte characters = %d, want 200", code)
+	}
+	if code := f.call("POST", "/api/v1/subscriptions", f.olga.auth, map[string]any{"url": "https://hooks.example.com/a", "description": strings.Repeat("é", 201)}, nil); code != http.StatusBadRequest {
+		t.Fatalf("201 characters = %d, want 400", code)
+	}
+}
+
+func TestSubscriptionCapNamesTheCommandsThatFreeASlot(t *testing.T) {
+	f := newCredFixture(t)
+	for range 20 {
+		if code := f.call("POST", "/api/v1/subscriptions", f.olga.auth, map[string]any{"url": "https://hooks.example.com/a"}, nil); code != http.StatusOK {
+			t.Fatalf("create = %d", code)
+		}
+	}
+	var refusal struct {
+		Error struct {
+			Code string `json:"code"`
+			Hint string `json:"hint"`
+		} `json:"error"`
+	}
+	if code := f.call("POST", "/api/v1/subscriptions", f.olga.auth, map[string]any{"url": "https://hooks.example.com/a"}, &refusal); code != http.StatusConflict ||
+		!strings.Contains(refusal.Error.Hint, "sparkwing subscriptions list") || !strings.Contains(refusal.Error.Hint, "sparkwing subscriptions delete --subscription") {
+		t.Fatalf("cap refusal = %d %+v", code, refusal)
+	}
+}

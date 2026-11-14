@@ -4,7 +4,8 @@
   `/api/v1/subscriptions` and `sparkwing subscriptions` create, list, show,
   delete and rotate the signing secret of a team subscription. A subscription
   names an HTTPS URL, the `run.started` and `run.finished` events it wants, and
-  optional status, pipeline and repository filters. Sparkwing generates the
+  optional status, pipeline and repository filters. Naming statuses without
+  events selects `run.finished` only. Sparkwing generates the
   `whsec_` signing secret, shows it once and stores it sealed to the team and
   subscription. A controller accepts only HTTPS URLs whose host is a public
   name or address; the local controller also accepts `http` and loopback hosts.

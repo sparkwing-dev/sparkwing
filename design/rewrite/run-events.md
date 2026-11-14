@@ -211,9 +211,10 @@ time, and retries never rematch.
 | `GET /api/v1/subscriptions/{subscription}/deliveries?state=&cursor=` | `TeamAdmin` | `RetrySafe` |
 | `POST /api/v1/subscriptions/{subscription}/deliveries/{event}/redeliver` | `TeamAdmin` | `RetrySafe` |
 
-- Create validates the URL and filters, generates a 32-byte secret, and
-  returns it once as `whsec_<base64>`. It is never readable again; rotating it
-  returns a new one.
+- Create validates the URL and filters. Omitted event types mean
+  `run.finished` when statuses are given and both events otherwise. Create
+  generates a 32-byte secret and returns it once as `whsec_<base64>`. It is
+  never readable again; rotating it returns a new one.
 - Every route is `TeamAdmin`-only, so v1 needs no URL redaction. A URL can
   carry a credential in its path or query, so `RunsRead` members do not see
   subscriptions. A later per-run delivery view for `RunsRead` would show only
