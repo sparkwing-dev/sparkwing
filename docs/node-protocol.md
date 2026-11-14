@@ -122,7 +122,10 @@ A failed pipeline has an `error` with the shared code, message and optional hint
 and details, an empty `args` array and no secret declarations. Other pipelines
 retain their complete descriptions. The host refuses the failed pipeline with
 its sanitized cause before planning. It withholds describe output when any
-pipeline fails because that output may contain unclassified secrets.
+pipeline fails because that output may contain unclassified secrets. The
+refusal and the withheld-output notice name
+`sparkwing pipeline describe --pipeline <name> --show-withheld`, which prints the
+withheld output and errors on the invoking terminal, masked by registered values.
 
 `isolated_home_required` is a fixed refusal for pipelines that must avoid an
 operational store. Go pipelines return or wrap `sparkwing.ErrIsolatedHomeRequired`

@@ -46,7 +46,7 @@ func FuzzSDKDescribeFailureWithholdsDetailsAndNamesClass(f *testing.F) {
 		if !errors.As(err, &failure) || failure.Code != code || failure.Message != want || len(failure.Details) != 0 {
 			t.Fatalf("describe diagnostic = %v; want %q (%s)", err, want, code)
 		}
-		wantHint := ""
+		wantHint := `Run "sparkwing pipeline describe --pipeline build --show-withheld" to print the withheld error on this terminal.`
 		if code == apierr.ProtocolMismatch {
 			wantHint = "Rebuild .sparkwing with the matching SDK."
 		}

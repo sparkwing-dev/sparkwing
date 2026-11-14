@@ -203,6 +203,7 @@ func Registry() []Command {
 		{Path: "sparkwing pipeline describe", Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "secrets"},
+			{Name: "show-withheld"},
 		}},
 		{Path: "sparkwing pipeline hooks", Flags: []Flag{}},
 		{Path: "sparkwing pipeline hooks install", Flags: []Flag{}},

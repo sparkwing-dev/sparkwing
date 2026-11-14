@@ -21,6 +21,7 @@ type DeclarationGate struct {
 	doc      nodewire.DescribeDoc
 	masker   *secrets.Masker
 	complete bool
+	shown    bool
 	defaults []SecretValue
 	// safety: pointer identity is what proves a refusal is the host's own text.
 	unregistered *apierr.Error
@@ -69,9 +70,22 @@ func NewDeclarationGate(doc nodewire.DescribeDoc, masker *secrets.Masker) (*Decl
 
 func (g *DeclarationGate) Complete() bool { return g != nil && g.complete }
 
+// ShowWithheld makes Error mask author errors with the registered values
+// instead of withholding them while discovery is incomplete. Presentation
+// stays withheld. Only a caller that prints to its invoker's terminal, never
+// to a run log or cache, may call it.
+func (g *DeclarationGate) ShowWithheld() { g.shown = true }
+
+// ShowWithheldCommand is the local command that prints withheld planning
+// output and errors for pipeline on the invoker's terminal.
+func ShowWithheldCommand(pipeline string) string {
+	return "sparkwing pipeline describe --pipeline " + pipeline + " --show-withheld"
+}
+
 // IncompleteReason explains, from host-classified codes only, why discovery is
 // incomplete and what makes withheld output visible. It is empty when complete.
-func (g *DeclarationGate) IncompleteReason() string {
+// The masked pipeline names the command that shows the withheld output.
+func (g *DeclarationGate) IncompleteReason(pipeline string) string {
 	if g == nil || g.complete {
 		return ""
 	}
@@ -99,7 +113,7 @@ func (g *DeclarationGate) IncompleteReason() string {
 	if len(codes) == 1 && codes[0] == string(apierr.IsolatedHomeRequired) {
 		return reason + `; to see this output, retry with HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" before the sparkwing command`
 	}
-	return reason + "; this output and " + pronoun + " errors stay hidden until every registered pipeline plans without error"
+	return reason + "; to see this output and " + pronoun + " errors, run `" + ShowWithheldCommand(g.masker.Mask(pipeline)) + "`"
 }
 
 func (g *DeclarationGate) Resolve(name string, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
@@ -245,7 +259,7 @@ func (g *DeclarationGate) Error(err error) error {
 	if g != nil && g.risk != nil && errors.Is(err, g.risk) {
 		return g.risk
 	}
-	if !g.Complete() {
+	if !g.Complete() && (g == nil || !g.shown) {
 		code := apierr.SDKError
 		var canonical *apierr.Error
 		if errors.As(err, &canonical) && slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == canonical.Code }) {

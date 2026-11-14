@@ -69,7 +69,13 @@ to register a mask. Planning output waits until declarations are known.
 Failed discovery withholds output. A healthy selected pipeline can still plan
 when a sibling fails discovery, with planning output withheld. The withheld
 notice names how many pipelines failed and their error codes, never their names,
-and gives the isolated-home retry when that refusal is the only failure. A
+and gives the isolated-home retry when that refusal is the only failure.
+Otherwise the notice and the withheld error name
+`sparkwing pipeline describe --pipeline <name> --show-withheld`. That command
+describes in the CLI process and prints the withheld output and errors on the
+invoking terminal only, masked by the values registered so far. A failed
+pipeline's own secret defaults are unknown, so that command, like running the
+pipeline code yourself, can print them. A
 missing risk allowance is still named with its labels. Private
 declarations drive lookup, flag parsing and routing. Help, display and the
 describe cache use a separate presentation type. Incomplete discovery withholds

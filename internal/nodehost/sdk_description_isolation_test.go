@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -159,7 +161,7 @@ func TestWithheldPlanningOutputExplainsIncompleteDiscovery(t *testing.T) {
 		want string
 	}{
 		{apierr.IsolatedHomeRequired, `1 registered pipeline failed discovery (isolated_home_required), so its secret declarations are unknown; to see this output, retry with HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" before the sparkwing command`},
-		{apierr.PlanFailed, "1 registered pipeline failed discovery (plan_failed), so its secret declarations are unknown; this output and its errors stay hidden until every registered pipeline plans without error"},
+		{apierr.PlanFailed, "1 registered pipeline failed discovery (plan_failed), so its secret declarations are unknown; to see this output and its errors, run `sparkwing pipeline describe --pipeline build --show-withheld`"},
 	} {
 		t.Run(string(tc.code), func(t *testing.T) {
 			p, input, fixture, _ := sdkPlanningFixture(t)
@@ -172,10 +174,12 @@ func TestWithheldPlanningOutputExplainsIncompleteDiscovery(t *testing.T) {
 				proc := process.(*executorProcess)
 				answer := proc.answer
 				proc.answer = func(ctx context.Context, req nodewire.Request) (any, error) {
-					if req.Op == nodewire.OpDescribe {
+					if req.Op == nodewire.OpDescribe || req.Op == nodewire.OpPlan {
 						if err := log(ctx, nodewire.FrameLog{Message: private}); err != nil {
 							return nil, err
 						}
+					}
+					if req.Op == nodewire.OpDescribe {
 						return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
 							{Name: "build", Args: []nodewire.ArgumentDescription{}},
 							{Name: "release", Args: []nodewire.ArgumentDescription{}, Error: &apierr.Error{Code: tc.code, Message: private}},
@@ -185,12 +189,136 @@ func TestWithheldPlanningOutputExplainsIncompleteDiscovery(t *testing.T) {
 				}
 				return process, err
 			}
-			if _, err := p.Prepare(t.Context(), input, fixture.input); err != nil {
+			prepared, err := p.Prepare(t.Context(), input, fixture.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := prepared.Plan(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			want := "sparkwing: output withheld because secret declarations were unavailable (1 records): " + tc.want
-			if !slices.Contains(logs, want) || slices.ContainsFunc(logs, func(log string) bool { return strings.Contains(log, private) }) {
+			explained := 0
+			for _, log := range logs {
+				if log == want {
+					explained++
+				}
+			}
+			if explained != 2 || slices.ContainsFunc(logs, func(log string) bool { return strings.Contains(log, private) }) {
 				t.Fatalf("withheld output was not explained or leaked: %q", logs)
+			}
+		})
+	}
+}
+
+func TestShowWithheldPrintsMaskedDiscoveryFailuresOnlyWhenRequested(t *testing.T) {
+	const (
+		cause        = "missing deploy target"
+		output       = "describe progress"
+		secret       = "healthy-private-default-value"
+		localSecret  = "declared-local-secret-value"
+		revealedHint = "sparkwing pipeline describe --pipeline release --show-withheld"
+	)
+	for _, tc := range []struct {
+		selected string
+		show     bool
+	}{{"release", false}, {"release", true}, {"build", false}, {"build", true}} {
+		t.Run(fmt.Sprintf("%s/show=%t", tc.selected, tc.show), func(t *testing.T) {
+			p, input, _, _ := sdkPlanningFixture(t)
+			p.ShowWithheld = tc.show
+			input.Run.Pipeline = tc.selected
+			defaultValue := secret
+			if err := p.Masker.Register(localSecret); err != nil {
+				t.Fatal(err)
+			}
+			var logs []string
+			p.Log = func(_ context.Context, log nodewire.FrameLog) error { logs = append(logs, log.Message); return nil }
+			start := p.Start
+			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
+				process, err := start(ctx, in, log)
+				proc := process.(*executorProcess)
+				answer := proc.answer
+				proc.answer = func(ctx context.Context, req nodewire.Request) (any, error) {
+					if req.Op != nodewire.OpDescribe {
+						return answer(ctx, req)
+					}
+					if err := log(ctx, nodewire.FrameLog{Message: output + " " + secret}); err != nil {
+						return nil, err
+					}
+					return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+						{Name: "build", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &defaultValue}}},
+						{Name: "release", Args: []nodewire.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.PlanFailed, Message: cause + " near " + secret + " and " + localSecret}},
+					}}, nil
+				}
+				return process, err
+			}
+			_, err := p.Inspect(t.Context(), input)
+			all := strings.Join(logs, "\n")
+			if err != nil {
+				all += "\n" + err.Error()
+				var failure *apierr.Error
+				if errors.As(err, &failure) {
+					all += "\n" + failure.Hint
+				}
+			}
+			if strings.Contains(all, secret) || strings.Contains(all, localSecret) {
+				t.Fatalf("registered secret escaped: %s", all)
+			}
+			if tc.show != strings.Contains(all, cause) || tc.show != strings.Contains(all, output) {
+				t.Fatalf("withheld text shown=%t, want %t: %s", strings.Contains(all, cause), tc.show, all)
+			}
+			if !tc.show && !strings.Contains(all, "sparkwing pipeline describe --pipeline "+tc.selected+" --show-withheld") {
+				t.Fatalf("withheld output does not name the command that shows it: %s", all)
+			}
+			if tc.show && strings.Contains(all, revealedHint) {
+				t.Fatalf("shown output still points at the reveal command: %s", all)
+			}
+			if failed := tc.selected == "release"; failed != (err != nil) {
+				t.Fatalf("selected %s returned %v", tc.selected, err)
+			}
+		})
+	}
+}
+
+func TestShowWithheldPrintsOutputOfAnSDKThatStoppedBeforeDescribing(t *testing.T) {
+	const crash = "SyntaxError: Unexpected token"
+	for _, tc := range []struct {
+		op   nodewire.Op
+		show bool
+	}{{nodewire.OpHello, false}, {nodewire.OpHello, true}, {nodewire.OpDescribe, false}, {nodewire.OpDescribe, true}} {
+		show := tc.show
+		t.Run(fmt.Sprintf("%s/show=%t", tc.op, show), func(t *testing.T) {
+			p, input, _, _ := sdkPlanningFixture(t)
+			p.ShowWithheld = show
+			var logs []string
+			p.Log = func(_ context.Context, log nodewire.FrameLog) error { logs = append(logs, log.Message); return nil }
+			start := p.Start
+			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
+				process, err := start(ctx, in, log)
+				proc := process.(*executorProcess)
+				answer := proc.answer
+				proc.answer = func(ctx context.Context, req nodewire.Request) (any, error) {
+					if req.Op != tc.op {
+						return answer(ctx, req)
+					}
+					if err := log(ctx, nodewire.FrameLog{Level: "error", Message: crash}); err != nil {
+						return nil, err
+					}
+					return nil, executorError(hosterr.SDKExited, "SDK process exited: "+crash)
+				}
+				return process, err
+			}
+			_, err := p.Inspect(t.Context(), input)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != hosterr.SDKExited {
+				t.Fatalf("describe error = %v", err)
+			}
+			all := strings.Join(logs, "\n") + "\n" + failure.Message
+			if show != strings.Contains(all, crash) {
+				t.Fatalf("crash output shown=%t, want %t: %s", strings.Contains(all, crash), show, all)
+			}
+			notice := "the SDK stopped before describing its pipelines; to see this output, run `sparkwing pipeline describe --pipeline build --show-withheld`"
+			if !show && !slices.ContainsFunc(logs, func(log string) bool { return strings.HasSuffix(log, notice) }) {
+				t.Fatalf("withheld notice does not name the command: %q", logs)
 			}
 		})
 	}

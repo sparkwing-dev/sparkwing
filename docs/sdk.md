@@ -487,7 +487,9 @@ Secrets containing `***` are accepted.
 Defaults from unselected pipelines register when long enough.
 Stdout and stderr are masked before line splitting. Describe and generator output
 waits for declarations. Failed discovery withholds that output, including CLI
-help diagnostics and test-host planning output. Generator failures persist a
+help diagnostics and test-host planning output.
+`sparkwing pipeline describe --pipeline <name> --show-withheld` prints it on the
+invoking terminal, masked only by registered values. Generator failures persist a
 fixed error with details withheld. Controller comments and run displays include
 accepted generator classifications. CLI lookup, flag parsing and routing use
 private declarations. Help and the describe cache use a separate presentation
