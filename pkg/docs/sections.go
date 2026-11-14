@@ -153,11 +153,40 @@ func parseHeading(line string) (level int, text string, ok bool) {
 	return i, strings.TrimSpace(line[i:]), true
 }
 
+// nonCurrentPenalty sinks history below every guide match. Changelog sections
+// span a whole release, so they contain nearly any word set and would otherwise
+// outrank the guide that answers the question.
 func nonCurrentPenalty(slug string) int {
-	if strings.HasPrefix(slug, "migrations/") {
+	if slug == ChangelogSlug || strings.HasPrefix(slug, "migrations/") {
 		return 1000
 	}
 	return 0
+}
+
+// questionWords are dropped from a query so "how do I add a secret" searches
+// for "add secret". Every token must match, and these match nearly every long
+// section, often only as substrings ("do" in "docker", "how" in "show").
+var questionWords = map[string]bool{
+	"how": true, "do": true, "does": true, "can": true, "what": true, "which": true,
+	"where": true, "when": true, "why": true, "is": true, "are": true, "the": true,
+	"an": true, "to": true, "of": true, "in": true, "my": true, "for": true, "with": true,
+}
+
+func queryTokens(query string) []string {
+	var kept, content []string
+	for _, t := range strings.Fields(strings.ToLower(strings.TrimSpace(query))) {
+		if len(t) < minToken {
+			continue
+		}
+		kept = append(kept, t)
+		if !questionWords[t] {
+			content = append(content, t)
+		}
+	}
+	if len(content) == 0 {
+		return kept
+	}
+	return content
 }
 
 func wholeWord(hay, tok string) bool {
@@ -214,14 +243,7 @@ const minToken = 2
 // long one -- but only as a tie-break, since a section that explains
 // something is long precisely because it explains it.
 func SearchSections(query string) []Section {
-	tokens := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
-	kept := tokens[:0]
-	for _, t := range tokens {
-		if len(t) >= minToken {
-			kept = append(kept, t)
-		}
-	}
-	tokens = kept
+	tokens := queryTokens(query)
 	if len(tokens) == 0 {
 		return nil
 	}
