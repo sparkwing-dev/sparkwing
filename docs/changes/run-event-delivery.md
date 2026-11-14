@@ -7,9 +7,11 @@
   application/cloudevents+json` and Standard Webhooks headers
   (`webhook-id`, `webhook-timestamp`, `webhook-signature`), signed with the
   subscription's `whsec_` secret. Any non-2xx response or transport error is
-  retried with jittered backoff from 10 seconds up to one hour, honoring
-  `Retry-After` up to one hour, for 24 hours; the delivery is then marked
-  failed. Redirects are not followed. A controller sends only to HTTPS
+  retried with jittered backoff from 10 seconds up to one hour for 24 hours;
+  the delivery is then marked failed. A `Retry-After` can lengthen a wait up
+  to one hour but never shorten it. The `reason` field carries only
+  Sparkwing's own codes (`queue_timeout`, `owner_lost`, `launch_rejected`,
+  `credit_refused`, `plan_failed`), never text a caller supplied. Redirects are not followed. A controller sends only to HTTPS
   destinations whose resolved addresses are all public and connects to the
   address it checked; the local daemon also sends to `http` and loopback.
   Delivery is at least once: receivers deduplicate on `webhook-id`, which is

@@ -44,7 +44,7 @@ func newRunEventDeliverer(operator *store.Operator, cipher Cipher, policy webhoo
 }
 
 // DeliverRunEvents sends due run event deliveries until ctx ends. The local
-// daemon runs it beside its other workers; a controller starts it from Run.
+// daemon runs it beside its other workers; a controller starts it from ServeWith.
 func (s *Server) DeliverRunEvents(ctx context.Context) error {
 	if s.operator == nil || s.secretsCipher == nil {
 		<-ctx.Done()

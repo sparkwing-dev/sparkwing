@@ -119,6 +119,9 @@ func TestRunEventDeliveryFailsAtTheDeadline(t *testing.T) {
 	if err != nil || len(claimed) != 2 {
 		t.Fatalf("claim %+v, %v", claimed, err)
 	}
+	if err := teststore.SeedRunEventDelivery(ctx, f.s, store.DefaultTeam, "sub_a", "run/9", "run", []byte(`{}`), f.at()); err != nil {
+		t.Fatal(err)
+	}
 	f.advance(store.RunEventDeliveryWindow - time.Minute)
 	if ok, err := op.FinishRunEventDelivery(ctx, claimed[0], store.RunEventOutcome{Status: 500, Code: "http_status", Delay: 2 * time.Minute}); err != nil || !ok {
 		t.Fatalf("finish %v, %v", ok, err)
@@ -133,6 +136,9 @@ func TestRunEventDeliveryFailsAtTheDeadline(t *testing.T) {
 	}
 	if r := rows["run/2"]; r.State != "failed" || r.LastError != "timeout" || !r.Finished {
 		t.Fatalf("abandoned lease past deadline %+v", r)
+	}
+	if r := rows["run/9"]; r.State != "failed" || r.Attempts != 0 || r.LastError != "expired" || !r.Finished {
+		t.Fatalf("never-attempted delivery past deadline %+v", r)
 	}
 }
 

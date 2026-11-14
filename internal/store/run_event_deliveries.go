@@ -39,7 +39,8 @@ type RunEventOutcome struct {
 // ClaimRunEventDeliveries moves up to limit due deliveries to sending under a
 // lease and returns them. A due delivery is pending with next_at reached, or
 // sending with an expired lease. Deliveries already past their deadline are
-// marked failed instead.
+// marked failed instead, with last_error `expired` when never attempted or
+// `timeout` when their sender stopped mid-attempt.
 //
 // safety: each row moves with an UPDATE fenced on the state and attempt count
 // just read, so two replicas that read the same row cannot both claim it.
@@ -51,7 +52,7 @@ func (op *Operator) ClaimRunEventDeliveries(ctx context.Context, limit int) ([]R
 	err := op.s.inTx(ctx, func(tx *storeTx) error {
 		out = nil
 		now := tx.now(ctx).UnixNano()
-		if _, err := tx.execContext(ctx, `UPDATE run_event_deliveries SET state='failed',finished_at=?,send_until=NULL,last_error=CASE WHEN state='sending' THEN 'timeout' ELSE last_error END WHERE state IN ('pending','sending') AND next_at<=? AND deadline_at<=? AND (state='pending' OR send_until<=?)`, now, now, now, now); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE run_event_deliveries SET state='failed',finished_at=?,send_until=NULL,last_error=CASE WHEN state='sending' THEN 'timeout' WHEN attempts=0 THEN 'expired' ELSE last_error END WHERE state IN ('pending','sending') AND next_at<=? AND deadline_at<=? AND (state='pending' OR send_until<=?)`, now, now, now, now); err != nil {
 			return err
 		}
 		rows, err := tx.queryContext(ctx, `SELECT d.team,d.subscription_id,d.event_id,d.run_id,d.event_type,d.body,d.attempts,d.state,s.url,s.secret FROM run_event_deliveries d JOIN run_event_subscriptions s ON s.team=d.team AND s.id=d.subscription_id WHERE d.state IN ('pending','sending') AND d.next_at<=? AND (d.state='pending' OR d.send_until<=?) ORDER BY d.next_at,d.team,d.subscription_id,d.event_id LIMIT ?`, now, now, limit)
