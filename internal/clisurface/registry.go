@@ -736,16 +736,16 @@ func Registry() []Command {
 			{Name: "only-on", Argument: "POOL"},
 		}},
 		{Path: "sparkwing subscriptions", Flags: []Flag{}},
-		{Path: "sparkwing subscriptions create", Authority: teamCredential, Rules: []string{"Create a team run event subscription through the team-admin route with an idempotency key. Sparkwing posts each matching run.started and run.finished event to --url as CloudEvents 1.0 JSON signed with Standard Webhooks headers.", "A controller accepts only an https URL whose host is a public name or address; the local controller also accepts http and loopback receivers. Omitted --event selects both events, --status applies only to run.finished, and every other omitted filter matches all values. A team holds at most 20 subscriptions.", "The signing secret is printed once and never shown again; rotate-secret replaces it. JSON emits the subscription and its secret; plain emits the ID, then the secret."}, Flags: []Flag{
+		{Path: "sparkwing subscriptions create", Authority: teamCredential, Rules: []string{"Create a team run event subscription through the team-admin route with an idempotency key. Sparkwing posts each matching run.started and run.finished event to --url as CloudEvents 1.0 JSON signed with Standard Webhooks headers.", "A controller accepts only an https URL whose host is a public name or address; the local controller also accepts http and loopback receivers. Omitted --event selects run.finished when --status is given and both events otherwise; --status applies only to run.finished, and every other omitted filter matches all values. A team holds at most 20 subscriptions.", "The signing secret is printed once and never shown again; rotate-secret replaces it. JSON emits the subscription and its secret; plain emits the ID, then the secret."}, Flags: []Flag{
 			{Name: "url", Argument: "URL", Required: true, Meaning: "Receiver URL; it must not carry a username, password or fragment."},
-			{Name: "event", Argument: "EVENT", Repeatable: true, CommaList: true, Values: []string{"run.started", "run.finished"}, Meaning: "Events to receive; omitted, both."},
+			{Name: "event", Argument: "EVENT", Repeatable: true, CommaList: true, Values: []string{"run.started", "run.finished"}, Meaning: "Events to receive; omitted, run.finished when --status is given and both otherwise."},
 			{Name: "status", Argument: "STATUS", Repeatable: true, CommaList: true, Values: []string{"success", "failed", "cancelled", "dry_run"}, Meaning: "Receive run.finished only for these final statuses; omitted, every status."},
 			{Name: "pipeline", Argument: "NAME", Repeatable: true, CommaList: true, Meaning: "Receive events only for these exact pipeline names; omitted, every pipeline."},
 			{Name: "repo", Argument: "KEY", Repeatable: true, CommaList: true, Meaning: "Receive events only for these repository keys, as run JSON reports them; omitted, every repository."},
 			{Name: "description", Argument: "TEXT", Meaning: "Note shown with the subscription, at most 200 characters."},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing subscriptions delete", Authority: teamCredential, Rules: []string{"Delete a subscription and its pending deliveries through the team-admin route. JSON retains whether it was deleted or already absent; plain emits the ID."}, Flags: []Flag{
+		{Path: "sparkwing subscriptions delete", Authority: teamCredential, Rules: []string{"Delete a subscription and its pending deliveries through the team-admin route. JSON retains whether it was deleted or already absent and exits 0 either way; pretty and plain emit the deleted ID, and report a subscription the team does not hold as not found with a non-zero exit."}, Flags: []Flag{
 			{Name: "subscription", Argument: "ID", Required: true, Meaning: "Subscription ID, as subscriptions list shows it."},
 			{Name: "profile", Argument: "NAME"},
 		}},

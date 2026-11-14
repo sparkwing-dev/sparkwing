@@ -84,7 +84,7 @@ func validSubscriptionID(id string) bool {
 }
 
 func subscriptionSelectorError() error {
-	return &apierr.Error{Code: apierr.BadRequest, Message: "a subscription ID starts with sub_, as subscriptions list shows it"}
+	return &apierr.Error{Code: apierr.BadRequest, Message: "a subscription ID starts with sub_", Hint: "run `sparkwing subscriptions list` to see this team's subscription IDs"}
 }
 
 func subscriptionProtocolError(message string) error {

@@ -4,17 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type subscriptionManager struct {
-	input controllerwire.SubscriptionWrite
-	id    string
+	input   controllerwire.SubscriptionWrite
+	id      string
+	missing bool
 }
 
 var fixtureSubscription = controllerwire.Subscription{ID: "sub_1", URL: "https://hooks.example/a", EventTypes: []string{"run.finished"}, Statuses: []string{"failed"}, Pipelines: []string{}, Repositories: []string{}}
@@ -25,6 +28,9 @@ func (m *subscriptionManager) ListSubscriptions(context.Context) ([]controllerwi
 
 func (m *subscriptionManager) GetSubscription(_ context.Context, id string) (controllerwire.Subscription, error) {
 	m.id = id
+	if m.missing {
+		return controllerwire.Subscription{}, &apierr.Error{Code: apierr.NotFound, Message: "controller GET /api/v1/subscriptions/" + id + ": resource not found"}
+	}
 	return fixtureSubscription, nil
 }
 
@@ -35,7 +41,7 @@ func (m *subscriptionManager) CreateSubscription(_ context.Context, input contro
 
 func (m *subscriptionManager) DeleteSubscription(_ context.Context, id string) (controllerwire.SubscriptionDeletion, error) {
 	m.id = id
-	return controllerwire.SubscriptionDeletion{ID: id, Deleted: true}, nil
+	return controllerwire.SubscriptionDeletion{ID: id, Deleted: !m.missing}, nil
 }
 
 func (m *subscriptionManager) RotateSubscriptionSecret(_ context.Context, id string) (controllerwire.SubscriptionSecret, error) {
@@ -104,5 +110,28 @@ func TestSubscriptionsRotateAndDelete(t *testing.T) {
 	}
 	if out, _ := runSubscriptionCommand(t, m, "delete", "--subscription", "sub_9", "-o", "json"); !strings.Contains(out, `"deleted":true`) || m.id != "sub_9" {
 		t.Fatalf("json delete: %q", out)
+	}
+}
+
+func TestSubscriptionsReportAMissingSubscriptionAndTheNextCommand(t *testing.T) {
+	m := &subscriptionManager{missing: true}
+	for _, args := range [][]string{
+		{"delete", "--subscription", "sub_9", "-o", "pretty"},
+		{"delete", "--subscription", "sub_9", "-o", "plain"},
+		{"show", "--subscription", "sub_9", "-o", "json"},
+	} {
+		inv, err := clisurface.Parse("sparkwing", append([]string{"subscriptions"}, args...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out, errOut bytes.Buffer
+		err = manageSubscriptions(t.Context(), inv, m, &out, &errOut)
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.NotFound || !strings.Contains(failure.Message, "sub_9 was not found") || !strings.Contains(failure.Hint, "sparkwing subscriptions list") || out.Len() != 0 {
+			t.Fatalf("%v: err=%v out=%q", args, err, out.String())
+		}
+	}
+	if out, _ := runSubscriptionCommand(t, m, "delete", "--subscription", "sub_9", "-o", "json"); !strings.Contains(out, `"deleted":false`) {
+		t.Fatalf("json delete of a missing subscription: %q", out)
 	}
 }

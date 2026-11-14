@@ -31,7 +31,7 @@ Subscribe a URL to run events
 
 Create a team run event subscription through the team-admin route with an idempotency key. Sparkwing posts each matching run.started and run.finished event to --url as CloudEvents 1.0 JSON signed with Standard Webhooks headers.
 
-A controller accepts only an https URL whose host is a public name or address; the local controller also accepts http and loopback receivers. Omitted --event selects both events, --status applies only to run.finished, and every other omitted filter matches all values. A team holds at most 20 subscriptions.
+A controller accepts only an https URL whose host is a public name or address; the local controller also accepts http and loopback receivers. Omitted --event selects run.finished when --status is given and both events otherwise; --status applies only to run.finished, and every other omitted filter matches all values. A team holds at most 20 subscriptions.
 
 The signing secret is printed once and never shown again; rotate-secret replaces it. JSON emits the subscription and its secret; plain emits the ID, then the secret.
 
@@ -44,7 +44,7 @@ The signing secret is printed once and never shown again; rotate-secret replaces
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--url URL` | Receiver URL; it must not carry a username, password or fragment. (required) |
-| `--event EVENT` | Events to receive; omitted, both. Values: run.started, run.finished. Repeatable; comma-separated values are accepted. |
+| `--event EVENT` | Events to receive; omitted, run.finished when --status is given and both otherwise. Values: run.started, run.finished. Repeatable; comma-separated values are accepted. |
 | `--status STATUS` | Receive run.finished only for these final statuses; omitted, every status. Values: success, failed, cancelled, dry_run. Repeatable; comma-separated values are accepted. |
 | `--pipeline NAME` | Receive events only for these exact pipeline names; omitted, every pipeline. Repeatable; comma-separated values are accepted. |
 | `--repo KEY` | Receive events only for these repository keys, as run JSON reports them; omitted, every repository. Repeatable; comma-separated values are accepted. |
@@ -55,7 +55,7 @@ The signing secret is printed once and never shown again; rotate-secret replaces
 
 Delete a run event subscription
 
-Delete a subscription and its pending deliveries through the team-admin route. JSON retains whether it was deleted or already absent; plain emits the ID.
+Delete a subscription and its pending deliveries through the team-admin route. JSON retains whether it was deleted or already absent and exits 0 either way; pretty and plain emit the deleted ID, and report a subscription the team does not hold as not found with a non-zero exit.
 
 ### Flags
 

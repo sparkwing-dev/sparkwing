@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func runSubscriptions(ctx context.Context, inv clisurface.Invocation) error {
@@ -68,7 +70,7 @@ func manageSubscriptions(ctx context.Context, inv clisurface.Invocation, manager
 	case "sparkwing subscriptions show":
 		sub, err := manager.GetSubscription(ctx, inv.Value("subscription"))
 		if err != nil {
-			return err
+			return subscriptionLookupError(inv.Value("subscription"), err)
 		}
 		switch format {
 		case "json":
@@ -90,7 +92,7 @@ func manageSubscriptions(ctx context.Context, inv clisurface.Invocation, manager
 	case "sparkwing subscriptions rotate-secret":
 		result, err := manager.RotateSubscriptionSecret(ctx, inv.Value("subscription"))
 		if err != nil {
-			return err
+			return subscriptionLookupError(inv.Value("subscription"), err)
 		}
 		return writeSubscriptionSecret(out, errOut, format, result, false)
 	case "sparkwing subscriptions delete":
@@ -101,10 +103,28 @@ func manageSubscriptions(ctx context.Context, inv clisurface.Invocation, manager
 		if format == "json" {
 			return json.NewEncoder(out).Encode(result)
 		}
+		if !result.Deleted {
+			return subscriptionNotFound(result.ID)
+		}
 		_, err = fmt.Fprintln(out, opsview.DisplayText(result.ID))
 		return err
 	}
 	return &clisurface.UsageError{Path: inv.Command.Path, Message: "unknown subscriptions command"}
+}
+
+func subscriptionLookupError(id string, err error) error {
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
+		return subscriptionNotFound(id)
+	}
+	return err
+}
+
+func subscriptionNotFound(id string) error {
+	return &apierr.Error{
+		Code: apierr.NotFound, Message: fmt.Sprintf("subscription %s was not found in this team", id),
+		Hint: "run `sparkwing subscriptions list` to see this team's subscription IDs",
+	}
 }
 
 func writeSubscription(out io.Writer, sub controllerwire.Subscription) error {

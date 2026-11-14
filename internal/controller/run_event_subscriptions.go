@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -116,13 +117,17 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return invalidEngineBody(err.Error())
 	}
 	filter := runevents.Filter{EventTypes: req.EventTypes, Statuses: req.Statuses, Pipelines: req.Pipelines, Repositories: req.Repositories}
-	if len(filter.EventTypes) == 0 {
+	switch {
+	case len(filter.EventTypes) > 0:
+	case len(filter.Statuses) > 0:
+		filter.EventTypes = []string{runevents.EventFinished}
+	default:
 		filter.EventTypes = []string{runevents.EventStarted, runevents.EventFinished}
 	}
 	if err := filter.Validate(); err != nil {
 		return invalidEngineBody(err.Error())
 	}
-	if len(req.Description) > maxSubscriptionDescription || strings.IndexFunc(req.Description, isControlRune) >= 0 {
+	if utf8.RuneCountInString(req.Description) > maxSubscriptionDescription || strings.IndexFunc(req.Description, isControlRune) >= 0 {
 		return invalidEngineBody(fmt.Sprintf("description is at most %d characters with no control characters", maxSubscriptionDescription))
 	}
 	cipher, ok := s.secretsCipher.(BoundCipher)
@@ -196,7 +201,12 @@ func (s *Server) handleRotateSubscriptionSecret(w http.ResponseWriter, r *http.R
 
 func subscriptionWriteError(err error) error {
 	switch {
-	case errors.Is(err, store.ErrRunEventSubscriptionLimit), errors.Is(err, store.ErrRunEventSubscriptionConflict):
+	case errors.Is(err, store.ErrRunEventSubscriptionLimit):
+		return &apierr.Error{
+			Code: apierr.Conflict, Message: strings.TrimPrefix(err.Error(), "store: "),
+			Hint: "list them with `sparkwing subscriptions list` and remove one with `sparkwing subscriptions delete --subscription <id>`",
+		}
+	case errors.Is(err, store.ErrRunEventSubscriptionConflict):
 		return &apierr.Error{Code: apierr.Conflict, Message: strings.TrimPrefix(err.Error(), "store: ")}
 	default:
 		return credentialWriteError(err)

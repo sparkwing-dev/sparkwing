@@ -47,6 +47,11 @@ func TestRunEventSubscriptionLifecycle(t *testing.T) {
 	if _, _, err := tenant.CreateRunEventSubscription(t.Context(), a, sealedSubscriptionFixture(t, tenant.team, id, "https://hooks.example/b", "whsec_one")); !errors.Is(err, ErrRunEventSubscriptionConflict) {
 		t.Fatalf("reused key with another URL: %v", err)
 	}
+	otherDescription := sealedSubscriptionFixture(t, tenant.team, id, "https://hooks.example/a", "whsec_one")
+	otherDescription.row.Description = "changed"
+	if _, _, err := tenant.CreateRunEventSubscription(t.Context(), a, otherDescription); !errors.Is(err, ErrRunEventSubscriptionConflict) {
+		t.Fatalf("reused key with only another description: %v", err)
+	}
 	listed, err := tenant.RunEventSubscriptions(t.Context())
 	if err != nil || len(listed) != 1 || listed[0].URL != "https://hooks.example/a" || listed[0].Filter.Statuses[0] != "failed" {
 		t.Fatalf("list = %+v, %v", listed, err)
@@ -104,6 +109,12 @@ func TestRunEventSubscriptionsStayInTheirTeam(t *testing.T) {
 	}
 	if _, err := fixtureSecretCipher(t).OpenBound(secrets.PurposeEventSigning, "b", RunEventSecretName(id), "", false, true, mine.Secret); err == nil {
 		t.Fatal("team a's sealed secret opened as team b's")
+	}
+	if _, err := other.RotateRunEventSubscriptionSecret(t.Context(), b, sealedSubscriptionFixture(t, "b", id, "", "whsec_b2")); err != nil {
+		t.Fatalf("team b rotates its own colliding ID: %v", err)
+	}
+	if after, err := tenant.RunEventSubscription(t.Context(), id); err != nil || after.Secret != mine.Secret {
+		t.Fatalf("team b's rotation reached team a: %v", err)
 	}
 	if deleted, err := other.DeleteRunEventSubscription(t.Context(), b, "sub_000000000000000000000009"); err != nil || deleted {
 		t.Fatalf("delete of an unknown ID = %v, %v", deleted, err)
