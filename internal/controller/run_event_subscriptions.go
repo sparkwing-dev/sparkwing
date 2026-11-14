@@ -202,8 +202,10 @@ func (s *Server) handleRotateSubscriptionSecret(w http.ResponseWriter, r *http.R
 func subscriptionWriteError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrRunEventSubscriptionLimit):
-		return &apierr.Error{Code: apierr.Conflict, Message: strings.TrimPrefix(err.Error(), "store: "),
-			Hint: "list them with `sparkwing subscriptions list` and remove one with `sparkwing subscriptions delete --subscription <id>`"}
+		return &apierr.Error{
+			Code: apierr.Conflict, Message: strings.TrimPrefix(err.Error(), "store: "),
+			Hint: "list them with `sparkwing subscriptions list` and remove one with `sparkwing subscriptions delete --subscription <id>`",
+		}
 	case errors.Is(err, store.ErrRunEventSubscriptionConflict):
 		return &apierr.Error{Code: apierr.Conflict, Message: strings.TrimPrefix(err.Error(), "store: ")}
 	default:

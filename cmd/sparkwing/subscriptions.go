@@ -121,8 +121,10 @@ func subscriptionLookupError(id string, err error) error {
 }
 
 func subscriptionNotFound(id string) error {
-	return &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("subscription %s was not found in this team", id),
-		Hint: "run `sparkwing subscriptions list` to see this team's subscription IDs"}
+	return &apierr.Error{
+		Code: apierr.NotFound, Message: fmt.Sprintf("subscription %s was not found in this team", id),
+		Hint: "run `sparkwing subscriptions list` to see this team's subscription IDs",
+	}
 }
 
 func writeSubscription(out io.Writer, sub controllerwire.Subscription) error {

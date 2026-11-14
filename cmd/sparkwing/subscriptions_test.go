@@ -116,7 +116,8 @@ func TestSubscriptionsRotateAndDelete(t *testing.T) {
 func TestSubscriptionsReportAMissingSubscriptionAndTheNextCommand(t *testing.T) {
 	m := &subscriptionManager{missing: true}
 	for _, args := range [][]string{
-		{"delete", "--subscription", "sub_9", "-o", "pretty"}, {"delete", "--subscription", "sub_9", "-o", "plain"},
+		{"delete", "--subscription", "sub_9", "-o", "pretty"},
+		{"delete", "--subscription", "sub_9", "-o", "plain"},
 		{"show", "--subscription", "sub_9", "-o", "json"},
 	} {
 		inv, err := clisurface.Parse("sparkwing", append([]string{"subscriptions"}, args...))
