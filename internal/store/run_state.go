@@ -265,6 +265,9 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 	if err := writeRunEffectsTx(ctx, tx, team, row.ID, row.State, now); err != nil {
 		return runstate.Applied{}, err
 	}
+	if err := writeRunEventDeliveriesTx(ctx, tx, team, row, kind, change.Reason, now); err != nil {
+		return runstate.Applied{}, err
+	}
 	if row.FinishedAt != nil {
 		if _, err := tx.execContext(ctx, `DELETE FROM local_run_secrets WHERE team=? AND run_id=?`, team, row.ID); err != nil {
 			return runstate.Applied{}, err
