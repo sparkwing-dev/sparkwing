@@ -49,7 +49,7 @@ func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, er
 		if ctx.Err() != nil {
 			return IndexResult{}, err
 		}
-		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error(), Hint: "Run `sparkwing update` once online to cache the verified version policy."}
+		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error(), Hint: "Run `sparkwing update` once online to cache the signed version policy."}
 	}
 	return result, nil
 }
