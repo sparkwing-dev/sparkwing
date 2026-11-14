@@ -37,31 +37,25 @@ func Run(run func() int) (code int) {
 		return run()
 	}
 	root := os.Getenv(guardEnv)
+	// #nosec G703 -- the guard directory comes from this process's own environment, set by the test run that created it
 	_, err := os.Stat(filepath.Join(root, "owner"))
-	owned := root == "" || err != nil
-	if owned {
-		root, err = os.MkdirTemp("", "sparkwing-manager-guard-")
+	if root == "" || err != nil {
+		dir, err := os.MkdirTemp("", "sparkwing-manager-guard-")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
 		defer func() {
-			if err := os.RemoveAll(root); err != nil {
+			if err := os.RemoveAll(dir); err != nil {
 				fmt.Fprintln(os.Stderr, "remove user-manager guard:", err)
 				code = 1
 			}
 		}()
-		if err := os.WriteFile(filepath.Join(root, "owner"), []byte("test manager guard\n"), 0o600); err != nil {
+		if err := writeGuard(dir); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		for _, name := range []string{"systemctl", "systemd-run", "launchctl"} {
-			body := "#!/bin/sh\nset -eu\numask 077\nprintf '%s\\n' " + shellWord(name) + " > " + shellWord(filepath.Join(root, "calls")) + "\nexit 97\n"
-			if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o700); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return 1
-			}
-		}
+		root = dir
 		// safety: ambient service ownership is not a fixture input; scope tests set it explicitly.
 		restoreInvocation, err := setenv("INVOCATION_ID", "")
 		if err != nil {
@@ -85,6 +79,7 @@ func Run(run func() int) (code int) {
 		defer restoreEnvironment(&code, restorePath)
 	}
 	code = run()
+	// #nosec G703 -- the guard directory is this run's own or one inherited from the test run that created it
 	calls, err := os.ReadFile(filepath.Join(root, "calls"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		fmt.Fprintln(os.Stderr, "verify user-manager guard:", err)
@@ -95,6 +90,19 @@ func Run(run func() int) (code int) {
 		return 1
 	}
 	return code
+}
+
+func writeGuard(dir string) error {
+	if err := os.WriteFile(filepath.Join(dir, "owner"), []byte("test manager guard\n"), 0o600); err != nil {
+		return err
+	}
+	for _, name := range []string{"systemctl", "systemd-run", "launchctl"} {
+		body := "#!/bin/sh\nset -eu\numask 077\nprintf '%s\\n' " + shellWord(name) + " > " + shellWord(filepath.Join(dir, "calls")) + "\nexit 97\n"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o700); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Scope fakes the systemd-run scope adapter while executing its payload normally.

@@ -212,6 +212,12 @@ func seedRun(t *testing.T, st *store.Store, tn *store.Tenant, id, pipeline strin
 
 func (f *tenancyFixture) do(method, path, auth string, body any) (int, string) {
 	f.t.Helper()
+	w := f.serve(method, path, auth, body)
+	return w.Code, w.Body.String()
+}
+
+func (f *tenancyFixture) serve(method, path, auth string, body any) *httptest.ResponseRecorder {
+	f.t.Helper()
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -240,7 +246,7 @@ func (f *tenancyFixture) do(method, path, auth string, body any) (int, string) {
 	req.Header.Set("Origin", "https://controller.test")
 	w := httptest.NewRecorder()
 	f.srv.Handler().ServeHTTP(w, req)
-	return w.Code, w.Body.String()
+	return w
 }
 
 func tenancyDialects(t *testing.T, run func(t *testing.T, f *tenancyFixture)) {

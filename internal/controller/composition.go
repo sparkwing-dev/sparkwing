@@ -84,7 +84,7 @@ func NewEngineController(st *store.Store, cfg EngineController) *EngineControlle
 	if cfg.Launcher == nil {
 		cfg.Launcher = storeLauncherSync{op}
 	}
-	cfg.authorization = routepolicy.Authorization{Authenticator: capability.NewAuthenticator(op), Bindings: op}
+	cfg.authorization = routepolicy.Authorization{Authenticator: capability.NewAuthenticator(op), Bindings: op, NoteRefusal: newRefusalAudit(op, slog.Default()).note}
 	if cfg.ResolveTenant == nil {
 		cfg.ResolveTenant = storeTenantResolver(st)
 	}
