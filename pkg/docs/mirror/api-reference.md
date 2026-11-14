@@ -152,6 +152,11 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/secrets/{name}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `secrets.read` / `none` / `credential`<br>`unbound_member_or_local` / `team.admin` / `none` / `credential`<br>`awarded_or_delegated_claim` / `secrets.release` / `declaredSecret` / `sensitive` |
 | `DELETE` | `/api/v1/secrets/{name}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/secrets/rotate` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `GET` | `/api/v1/subscriptions` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/subscriptions` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `GET` | `/api/v1/subscriptions/{subscription}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/subscriptions/{subscription}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/subscriptions/{subscription}/rotate-secret` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `PATCH` | `/api/v1/team` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/team` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `PATCH` | `/api/v1/team/members/{account}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |

@@ -122,6 +122,30 @@ func InstallSchema35ActionsForTest(t testing.TB, s *Store) {
 	}
 }
 
+// Schema38NeutralForTest returns the shipped schema 38 text, which lacks the run event tables.
+func Schema38NeutralForTest(t testing.TB) string {
+	t.Helper()
+	i := strings.Index(schemaNeutral, "\n\n-- safety: a subscription secret is sealed")
+	if i < 0 {
+		t.Fatal("schema lacks the run event block")
+	}
+	neutral := schemaNeutral[:i] + "\n"
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(neutral))); got != "d7d89dd6049c6139e01bae0a845983414393d5b7c622a2172c60fa1292e5d7da" {
+		t.Fatalf("schema 38 fixture digest %s", got)
+	}
+	return neutral
+}
+
+// DropRunEventSchemaForTest returns a store to the schema 38 tables.
+func DropRunEventSchemaForTest(t testing.TB, st *Store) {
+	t.Helper()
+	for _, table := range []string{"run_event_deliveries", "run_event_subscriptions"} {
+		if _, err := st.DB().ExecContext(t.Context(), `DROP TABLE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // PrepareSchema36ForTest preserves configured rows in the shipped pre-migration schema.
 func PrepareSchema36ForTest(t testing.TB, st *Store) {
 	t.Helper()
@@ -131,7 +155,7 @@ func PrepareSchema36ForTest(t testing.TB, st *Store) {
 );
 
 `
-	neutral := strings.Replace(strings.Replace(schemaNeutral, "    group_wait_started_at BIGINT CHECK(group_wait_started_at IS NULL OR group_wait_started_at>0),\n", "", 1), "CREATE TABLE audit_events (", trust+"CREATE TABLE audit_events (", 1)
+	neutral := strings.Replace(strings.Replace(Schema38NeutralForTest(t), "    group_wait_started_at BIGINT CHECK(group_wait_started_at IS NULL OR group_wait_started_at>0),\n", "", 1), "CREATE TABLE audit_events (", trust+"CREATE TABLE audit_events (", 1)
 	// safety: the digest proves the fixture is the shipped DDL, including both direct team foreign keys.
 	neutral = strings.Replace(neutral, "-- safety: account audit events precede team creation, so this operator table permits no team.\n"+trust, trust+"-- safety: account audit events precede team creation, so this operator table permits no team.\n", 1)
 	const digest = "afbe14b512e2e182e9f8322685477a29ce5fe337a01faf0003856ca317d23f24"
@@ -139,6 +163,7 @@ func PrepareSchema36ForTest(t testing.TB, st *Store) {
 		t.Fatalf("schema 36 fixture digest %s, want %s", got, digest)
 	}
 
+	DropRunEventSchemaForTest(t, st)
 	for _, statement := range []string{`ALTER TABLE nodes DROP COLUMN group_wait_started_at`, trust, `UPDATE sparkwing_schema_version SET version=36,baseline_digest='afbe14b512e2e182e9f8322685477a29ce5fe337a01faf0003856ca317d23f24'`} {
 		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)

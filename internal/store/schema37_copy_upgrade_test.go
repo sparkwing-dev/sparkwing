@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -15,6 +16,7 @@ func TestSchemaUpgradePreservesACopyOfConfiguredVersion37(t *testing.T) {
 	cipher := drillCipher(t)
 	populateInstall(t, source, cipher)
 	before := fingerprintInstall(t, source, cipher)
+	store.DropRunEventSchemaForTest(t, source)
 	for _, statement := range []string{`ALTER TABLE nodes DROP COLUMN group_wait_started_at`, `UPDATE sparkwing_schema_version SET version=37,baseline_digest='7da3f341c2c5b6cc6fd60afb1a881979dfc5b64e79589a551522c655b5099e64'`} {
 		if _, err := source.DB().ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)

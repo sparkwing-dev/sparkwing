@@ -125,12 +125,14 @@ type OperatorManager interface {
 
 // SealedRotation counts the envelopes a key rotation resealed and names those no configured key opened.
 type SealedRotation struct {
-	Secrets         int             `json:"secrets"`
-	GitCredentials  int             `json:"git_credentials"`
-	RunEnvironments int             `json:"run_environments"`
-	Settings        int             `json:"settings"`
-	PreviousKeyOnly int             `json:"previous_key_only"`
-	Unreadable      []SealedRowName `json:"unreadable"`
+	Secrets         int `json:"secrets"`
+	GitCredentials  int `json:"git_credentials"`
+	RunEnvironments int `json:"run_environments"`
+	Settings        int `json:"settings"`
+	// RunEventSubscriptions counts resealed subscription signing secrets.
+	RunEventSubscriptions int             `json:"run_event_subscriptions"`
+	PreviousKeyOnly       int             `json:"previous_key_only"`
+	Unreadable            []SealedRowName `json:"unreadable"`
 }
 
 // SealedRowName identifies a sealed row a rotation left unchanged.
