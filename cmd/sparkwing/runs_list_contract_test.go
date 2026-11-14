@@ -335,6 +335,8 @@ func TestRunStatusFilterRefusesUnknownStates(t *testing.T) {
 		"runs list --status succes":           states + "; did you mean success?",
 		"runs list --status !faild":           states + "; did you mean !failed?",
 		"runs list --status nope":             states,
+		"runs list --status SUCCESS":          states + "; did you mean success?",
+		"runs list --status !Failed":          states + "; did you mean !failed?",
 		"runs grep --grep x --status faild":   states + "; did you mean failed?",
 		"runs list --status !failed":          "",
 		"runs logs --grep x --status success": "",

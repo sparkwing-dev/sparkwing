@@ -41,7 +41,7 @@ func parseRunQuery(inv clisurface.Invocation, now time.Time) (controllerwire.Run
 	}
 	if status := strings.TrimPrefix(q.Status, "!"); q.Status != "" && !slices.Contains(clisurface.RunStatuses(), status) {
 		message := "--status requires one of " + strings.Join(clisurface.RunStatuses(), ", ") + ", optionally prefixed with ! to exclude it"
-		if closest := sparkwingruntime.SuggestClosest(status, clisurface.RunStatuses()); closest != "" {
+		if closest := sparkwingruntime.SuggestClosest(strings.ToLower(status), clisurface.RunStatuses()); closest != "" {
 			message += "; did you mean " + strings.TrimSuffix(q.Status, status) + closest + "?"
 		}
 		return invalid(message)
