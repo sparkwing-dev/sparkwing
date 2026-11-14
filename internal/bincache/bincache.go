@@ -72,6 +72,16 @@ type compileError struct {
 func (e *compileError) Error() string { return fmt.Sprintf("compile .sparkwing/: %v", e.Err) }
 func (e *compileError) Unwrap() error { return e.Err }
 
+// CompileOutput returns the compiler's output when err is a failed build of the
+// pipeline's own code, as opposed to a cache, toolchain or filesystem failure.
+func CompileOutput(err error) ([]byte, bool) {
+	var failure *compileError
+	if !errors.As(err, &failure) {
+		return nil, false
+	}
+	return failure.Output, true
+}
+
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer

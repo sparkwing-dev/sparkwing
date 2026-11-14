@@ -357,7 +357,7 @@ func scheduleDependencyOK(node ScheduleNode) bool {
 }
 
 func scheduleRunVerdict(nodes []ScheduleNode) (string, string) {
-	var failed, superseded []string
+	var failed, cancelled, superseded []string
 	for _, node := range nodes {
 		if node.Status != "done" || node.Expansion == "expected" {
 			return "", ""
@@ -366,14 +366,23 @@ func scheduleRunVerdict(nodes []ScheduleNode) (string, string) {
 			continue
 		}
 		switch {
-		case node.Expansion == "failed", node.Outcome == "failed", node.Outcome == "cancelled":
+		case node.Expansion == "failed", node.Outcome == "failed":
 			failed = append(failed, node.ID)
+		case node.Outcome == "cancelled":
+			cancelled = append(cancelled, node.ID)
 		case node.Outcome == "superseded":
 			superseded = append(superseded, node.ID)
 		}
 	}
-	if len(failed) != 0 {
-		return "failed", "failed: " + strings.Join(failed, ", ")
+	if len(failed) != 0 || len(cancelled) != 0 {
+		var parts []string
+		if len(failed) != 0 {
+			parts = append(parts, "failed: "+strings.Join(failed, ", "))
+		}
+		if len(cancelled) != 0 {
+			parts = append(parts, "cancelled: "+strings.Join(cancelled, ", "))
+		}
+		return "failed", strings.Join(parts, "; ")
 	}
 	if len(superseded) != 0 {
 		return "cancelled", "superseded: " + strings.Join(superseded, ", ")

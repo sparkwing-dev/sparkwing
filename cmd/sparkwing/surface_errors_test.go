@@ -209,3 +209,22 @@ func TestRunErrorsRenderInTheRunsResolvedOutput(t *testing.T) {
 		t.Fatalf("explicit -o plain resolved to %q, want plain over the environment", got)
 	}
 }
+
+func TestSurfaceMultiLineErrorPrintsRealIndentedLines(t *testing.T) {
+	inv, err := clisurface.Parse("sparkwing", []string{"runs", "list", "-o", "pretty"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := &apierr.Error{Code: apierr.BadRequest, Message: "pipeline \"build\" did not start:\n- DEPLOY_KEY is unavailable\n  Fix: sparkwing secrets set --secret DEPLOY_KEY\x1b[2J", Hint: "set it\nthen retry"}
+	var out bytes.Buffer
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, hosterr.WriteJSON); err != nil {
+		t.Fatal(err)
+	}
+	want := "sparkwing: runs list: pipeline \"build\" did not start:\n" +
+		"  - DEPLOY_KEY is unavailable\n" +
+		`  "  Fix: sparkwing secrets set --secret DEPLOY_KEY\x1b[2J"` + "\n" +
+		"hint: set it\n  then retry\n"
+	if out.String() != want {
+		t.Fatalf("pretty error:\n%s\nwant:\n%s", &out, want)
+	}
+}

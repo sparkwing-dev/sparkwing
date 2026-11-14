@@ -138,6 +138,12 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 	}
 	seen := map[string]bool{query.Cursor: true}
 	progress := admissionProgressFor(inv, reader, query)
+	stream := &logStream{ctx: ctx, run: inv.Value("run")}
+	if runs != nil {
+		stream.runs = runs
+	} else {
+		stream.runs, _ = reader.(runDetailReader)
+	}
 	for {
 		page, err := reader.ReadLogs(ctx, inv.Value("run"), query)
 		if err != nil {
@@ -157,10 +163,18 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 		}
 		liveProgress := !page.Complete || progress != nil && len(progress.waits) > 0
 		for _, record := range page.Records {
+			if progress.announced(record) {
+				stream.admitted = append(stream.admitted, record.JobID)
+			}
 			if liveProgress && progress.observe(record) {
 				continue
 			}
-			if err := writeLogRecord(out, record, runLogOutput(inv), false); err != nil {
+			if runLogOutput(inv) == "pretty" {
+				err = stream.write(out, record)
+			} else {
+				err = writeLogRecord(out, record, runLogOutput(inv), false)
+			}
+			if err != nil {
 				return err
 			}
 		}
@@ -199,6 +213,9 @@ func writeUnloggedFailures(ctx context.Context, inv clisurface.Invocation, runs 
 	if err != nil {
 		return err
 	}
+	if runLogOutput(inv) == "pretty" {
+		return writeFailureBlock(out, withSteps(ctx, runs, detail), job, inv.Value("profile"))
+	}
 	if detail.Failure != "" && job == "" {
 		if runLogOutput(inv) == "json" {
 			err = json.NewEncoder(out).Encode(struct {
@@ -225,7 +242,7 @@ func writeUnloggedFailures(ctx context.Context, inv clisurface.Invocation, runs 
 		if runLogOutput(inv) == "json" {
 			err = json.NewEncoder(out).Encode(controllerwire.LogRecord{RunID: detail.ID, Event: "job_failed_before_start", JobID: failed.ID, Line: failed.Error})
 		} else {
-			_, err = fmt.Fprintf(out, "%s failed before it started, so it has no logs; its error:\n%s\n", opsview.DisplayText(failed.ID), opsview.DisplayText(strings.TrimRight(failed.Error, "\n")))
+			_, err = fmt.Fprintf(out, "%s failed before it started, so it has no logs; its error:\n  %s\n", opsview.DisplayText(failed.ID), opsview.DisplayBlock(failed.Error, "  "))
 		}
 		if err != nil {
 			return err
@@ -244,28 +261,14 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 	if json.Unmarshal([]byte(record.Line), &diagnostic) == nil && diagnostic.LeaseKeeper {
 		return nil
 	}
+	if format == "pretty" && !search {
+		return (&logStream{}).write(out, record)
+	}
 	line := record.Line
 	if record.Event != "" {
 		line = eventDetail(record.Line)
-	} else {
-		var frame nodewire.FrameLog
-		if json.Unmarshal([]byte(line), &frame) == nil {
-			_, timestampError := time.Parse(time.RFC3339Nano, frame.TS)
-			if timestampError == nil || (frame.Message != "" || frame.Event != "") && (frame.Level != "" || frame.Event != "" || frame.Step != "" || len(frame.Attrs) > 0) {
-				line = frame.Message
-				// safety: a blank exec_line is a blank line of command output;
-				// printing the event name there invented text the command never wrote.
-				if line == "" && frame.Event != "exec_line" {
-					line = frame.Event
-				}
-				if detail := eventValue(frame.Attrs); detail != "" {
-					if line != "" {
-						line += ": "
-					}
-					line += detail
-				}
-			}
-		}
+	} else if frame, ok := decodeFrame(line); ok {
+		line = frameLine(frame)
 	}
 	if format == "plain" && !search {
 		if record.Event != "" {
@@ -300,6 +303,32 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 	}
 	_, err := fmt.Fprintf(out, "%s/%s:%d: %s\n", record.RunID, subject, record.LineNo, line)
 	return err
+}
+
+// decodeFrame reads a structured job log line; anything else is raw output.
+func decodeFrame(line string) (nodewire.FrameLog, bool) {
+	var frame nodewire.FrameLog
+	if json.Unmarshal([]byte(line), &frame) != nil {
+		return frame, false
+	}
+	_, timestampError := time.Parse(time.RFC3339Nano, frame.TS)
+	return frame, timestampError == nil || (frame.Message != "" || frame.Event != "") && (frame.Level != "" || frame.Event != "" || frame.Step != "" || len(frame.Attrs) > 0)
+}
+
+func frameLine(frame nodewire.FrameLog) string {
+	line := frame.Message
+	// safety: a blank exec_line is a blank line of command output;
+	// printing the event name there invented text the command never wrote.
+	if line == "" && frame.Event != "exec_line" {
+		line = frame.Event
+	}
+	if detail := eventValue(frame.Attrs); detail != "" {
+		if line != "" {
+			line += ": "
+		}
+		line += detail
+	}
+	return line
 }
 
 func eventText(record controllerwire.LogRecord, detail string) string {

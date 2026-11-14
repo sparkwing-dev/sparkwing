@@ -53,6 +53,15 @@ func (p *admissionProgress) observe(record controllerwire.LogRecord) bool {
 	return false
 }
 
+// announced reports a grant that ends a wait this stream already printed.
+func (p *admissionProgress) announced(record controllerwire.LogRecord) bool {
+	if p == nil || record.Event != runstate.EventAdmissionGranted {
+		return false
+	}
+	wait := p.waits[string(wingwire.NodeHostParticipant(record.RunID, record.JobID))]
+	return wait != nil && wait.printed
+}
+
 func (p *admissionProgress) write(ctx context.Context, out io.Writer, format string, now time.Time) error {
 	if p == nil {
 		return nil

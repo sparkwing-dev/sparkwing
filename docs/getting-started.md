@@ -265,12 +265,26 @@ works. Local CI uses the controller on your machine.
 
 ### Inspect a failed run
 
-The run's final output includes its ID and commands to inspect it:
+On a terminal, each line of a run's output starts with its job, as in
+`test | running tests`. A failed run ends with a block that names each failed
+job, its step and its error, followed by the commands to read the job's log
+and retry the failed jobs:
+
+```text
+test failed in step unit:
+  command failed (exit 1): go test ./...
+  FAIL: TestWidget expected 3 got 4
+deploy was cancelled because test did not succeed
+
+Show the failed job's log:  sparkwing runs logs --run 2 --job test
+Retry the failed jobs:      sparkwing runs retry --failed --run 2
+```
+
+List runs and read one's jobs with:
 
 ```bash
 sparkwing runs list --profile=
 sparkwing runs status --profile= --run RUN_ID
-sparkwing runs logs --profile= --run RUN_ID
 ```
 
 Fix the failing job and run the pipeline again. If a run stays pending, inspect

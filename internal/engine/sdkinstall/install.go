@@ -132,6 +132,10 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 			defer func() { result = errors.Join(result, lease.Release()) }()
 		}
 	}
+	if output, ok := bincache.CompileOutput(err); ok {
+		_, writeErr := io.WriteString(diagnostics, masker.Mask(strings.TrimSuffix(buildDiagnostics.String(), string(output))))
+		return nil, "", errors.Join(compileRefusal(request.PipelineDir, masker.Mask(string(output))), writeErr)
+	}
 	if err := installDiagnostic(diagnostics, masker, buildDiagnostics.Bytes(), err); err != nil {
 		return nil, "", err
 	}
@@ -290,6 +294,23 @@ func installTool(ctx context.Context, dir string, environment procenv.Env, name 
 		return stdout.Bytes(), nil
 	}
 	return append(stdout.Bytes(), stderr.Bytes()...), nil
+}
+
+// compileRefusal reports the compiler's errors as a pipeline code failure, with file
+// paths relative to the repository root so a terminal or editor can open them.
+func compileRefusal(pipelineDir, output string) *apierr.Error {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for i, line := range lines {
+		file, rest, found := strings.Cut(line, ":")
+		if found && pipelineDir != "" && strings.HasSuffix(file, ".go") && !filepath.IsAbs(file) && !strings.ContainsAny(file, " \t") {
+			lines[i] = filepath.ToSlash(filepath.Join(pipelineDir, file)) + ":" + rest
+		}
+	}
+	where := "the pipeline code"
+	if pipelineDir != "" && pipelineDir != "." {
+		where += " in " + filepath.ToSlash(pipelineDir)
+	}
+	return &apierr.Error{Code: apierr.PlanFailed, Message: where + " does not compile:\n" + strings.Join(lines, "\n"), Hint: "Fix the errors above, then run the pipeline again."}
 }
 
 func installDiagnostic(output io.Writer, masker *secrets.Masker, body []byte, toolErr error) error {

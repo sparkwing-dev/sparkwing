@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -71,6 +72,9 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// safety: the run's terminal shows its jobs; preparation timings and an in-process
+	// controller's request logs are process diagnostics that already reach the run log.
+	defer slog.SetLogLoggerLevel(slog.SetLogLoggerLevel(slog.LevelWarn))
 	signals := deps.interrupts
 	if signals == nil {
 		caught := make(chan os.Signal, 2)
@@ -239,7 +243,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if outputErr != nil {
 		outputErr = fmt.Errorf("run %s is %s but its completion record could not be written: %w", response.RunID, completion.Outcome, outputErr)
 	}
-	return errors.Join(runCompletionError(ctx, runtime.controller, response.RunID, completion.Outcome), outputErr)
+	return errors.Join(foregroundRunCompletion(ctx, runtime.controller, response.RunID, completion.Outcome, format, out), outputErr)
 }
 
 func localRunNeedsCLIHost(flags runFlags, publish string) bool {
