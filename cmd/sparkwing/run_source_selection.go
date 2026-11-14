@@ -79,6 +79,12 @@ func selectLocalRunSource(ctx context.Context, home, directory, pipeline string,
 			return localSourceSelection{}, err
 		}
 	}
+	if flags.ref == "" {
+		git.Ref, err = reader.read(ctx, "symbolic-ref", "--quiet", "--short", "HEAD")
+		if err != nil && !gitExitCode(err, 1) {
+			return localSourceSelection{}, err
+		}
+	}
 	revision := selected.Ref
 	if flags.ref == "" && revision != "" {
 		if err := acquireExecution(); err != nil {
