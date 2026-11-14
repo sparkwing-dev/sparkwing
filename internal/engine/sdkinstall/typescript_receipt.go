@@ -233,9 +233,9 @@ func discardTypeScriptReceipt(dir string) error {
 
 // safety: callers verify the installed SDK first; a tree whose inputs cannot be fingerprinted keeps no receipt.
 func recordTypeScriptInstall(dir, lockfile string, manifest []byte, environment procenv.Env) error {
-	fingerprint, err := typeScriptInstallFingerprint(dir, lockfile, manifest, environment)
-	if err != nil {
-		return nil
+	fingerprint, fingerprintErr := typeScriptInstallFingerprint(dir, lockfile, manifest, environment)
+	if fingerprintErr != nil {
+		return discardTypeScriptReceipt(dir)
 	}
 	path := filepath.Join(dir, "node_modules", typeScriptReceipt)
 	staged, err := os.CreateTemp(filepath.Dir(path), typeScriptReceipt+".*")
