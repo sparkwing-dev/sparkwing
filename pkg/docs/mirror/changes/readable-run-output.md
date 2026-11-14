@@ -23,4 +23,6 @@
 - **cli:** A Go compile error in pipeline code reports itself as one
   `sparkwing run` prints `the pipeline code in .sparkwing does not compile:` with the
   compiler's lines and file paths relative to the repository root, instead of
-  `SDK install failed`.
+  `SDK install failed`. A build failure without compiler errors, such as a module
+  download failure, says `failed to build`. In JSON output the error code changes
+  from `internal` to `plan_failed`; the exit status stays 1.
