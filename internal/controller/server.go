@@ -449,6 +449,8 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
 	actionsDone := make(chan struct{})
 	go func() { defer close(actionsDone); s.runActionsDispatcher(ctx) }()
+	deliveryDone := make(chan struct{})
+	go func() { defer close(deliveryDone); _ = s.DeliverRunEvents(ctx) }()
 	inboxDone := make(chan struct{})
 	go func() {
 		defer close(inboxDone)
@@ -458,6 +460,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 		stopWorkers()
 		<-inboxDone
 		<-actionsDone
+		<-deliveryDone
 	}()
 
 	errCh := make(chan error, len(servers))

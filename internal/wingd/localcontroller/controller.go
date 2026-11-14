@@ -40,6 +40,9 @@ type Services struct {
 	Close    func() error
 	Maintain func(context.Context)
 	Complete func(context.Context) error
+	// Deliver sends run event deliveries until its context ends. It runs in
+	// its own worker so a slow receiver never stalls maintenance.
+	Deliver func(context.Context) error
 }
 
 // Config supplies shared service constructors without opening another store.
@@ -166,7 +169,11 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	results := make(chan error, 3)
+	workers := 3
+	if c.services.Deliver != nil {
+		workers++
+	}
+	results := make(chan error, workers)
 	start := func(name string, run func(context.Context) error) {
 		go func() {
 			err := run(ctx)
@@ -182,8 +189,11 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 	start("queue", c.services.Runner)
 	start("activity", func(ctx context.Context) error { return c.State.Watch(ctx, report) })
 	start("maintenance", func(ctx context.Context) error { return c.maintain(ctx) })
+	if c.services.Deliver != nil {
+		start("run event delivery", c.services.Deliver)
+	}
 	var result error
-	for range 3 {
+	for range workers {
 		result = errors.Join(result, <-results)
 		cancel()
 	}
