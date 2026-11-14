@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	osuser "os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -84,7 +85,16 @@ func typeScriptInstallInputs(dir, lockfile string, environment procenv.Env) (str
 	}
 	user := npmEnvironment["npm_config_userconfig"]
 	if user == "" {
-		user = filepath.Join(npmEnvironment["home"], ".npmrc")
+		home := npmEnvironment["home"]
+		if home == "" {
+			// safety: npm falls back to the account's home directory, never a path relative to this process.
+			account, err := osuser.Current()
+			if err != nil || !filepath.IsAbs(account.HomeDir) {
+				return "", errTypeScriptReuseUnavailable
+			}
+			home = account.HomeDir
+		}
+		user = filepath.Join(home, ".npmrc")
 	}
 	prefix := npmEnvironment["npm_config_prefix"]
 	if prefix == "" {

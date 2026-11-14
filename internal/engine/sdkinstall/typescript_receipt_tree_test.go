@@ -94,3 +94,22 @@ func TestTypeScriptInstallDoesNotRecordInputsEditedDuringNPM(t *testing.T) {
 		t.Fatal("the reinstalled tree was not recorded for reuse")
 	}
 }
+
+// Without HOME, npm reads the account's home .npmrc, never one relative to the preparing process.
+func TestTypeScriptInstallWithoutHOMEIgnoresAWorkingDirectoryNPMRC(t *testing.T) {
+	f := newReceiptFixture(t)
+	t.Setenv("HOME", "")
+	if err := os.Unsetenv("HOME"); err != nil {
+		t.Fatal(err)
+	}
+	working := t.TempDir()
+	t.Chdir(working)
+	f.mustInstall()
+	if f.mustInstall() {
+		t.Fatal("unchanged verified tree ran npm again")
+	}
+	f.write(filepath.Join(working, ".npmrc"), "omit=dev\n")
+	if f.mustInstall() {
+		t.Fatal("a .npmrc in the preparing process's working directory invalidated the receipt")
+	}
+}
