@@ -153,9 +153,8 @@ func parseHeading(line string) (level int, text string, ok bool) {
 	return i, strings.TrimSpace(line[i:]), true
 }
 
-// nonCurrentPenalty sinks history below every guide match. Changelog sections
-// span a whole release, so they contain nearly any word set and would otherwise
-// outrank the guide that answers the question.
+// safety: history ranks below every guide match. A changelog section spans a whole
+// release, so it contains nearly any word set and would outrank the answering guide.
 func nonCurrentPenalty(slug string) int {
 	if slug == ChangelogSlug || strings.HasPrefix(slug, "migrations/") {
 		return 1000
@@ -163,9 +162,8 @@ func nonCurrentPenalty(slug string) int {
 	return 0
 }
 
-// questionWords are dropped from a query so "how do I add a secret" searches
-// for "add secret". Every token must match, and these match nearly every long
-// section, often only as substrings ("do" in "docker", "how" in "show").
+// safety: every token must match, and question words match nearly every long section
+// by substring ("do" in "docker"), so "how do I add a secret" searches "add secret".
 var questionWords = map[string]bool{
 	"how": true, "do": true, "does": true, "can": true, "what": true, "which": true,
 	"where": true, "when": true, "why": true, "is": true, "are": true, "the": true,
