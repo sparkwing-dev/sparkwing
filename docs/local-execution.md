@@ -252,7 +252,9 @@ build. A runner roll starts a successor and stops new claims on the old instance
 The old runner keeps its held jobs, uploads and terminal acknowledgements until
 they finish. A healthy drain has no kill deadline. Controller replacement does
 not cancel these runner processes. Existing execution leases still apply during
-an outage.
+an outage. The local runner polls its controller for work every 500 ms, idle or
+not, so a new run starts within half a second of intake. Unlike shared
+controllers, the local controller never advises an idle runner to poll less often.
 
 A systemd-booted Linux host requires a working user manager. Each runner has its
 own systemd user service and cgroup, separate from the controller. A Linux host
