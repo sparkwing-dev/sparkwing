@@ -259,7 +259,7 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 	}
 	failure := &apierr.Error{Code: code, Message: message}
 	if !known {
-		failure.Hint = p.Masker.Mask(fmt.Sprintf("Run %q to print the withheld error on this terminal.", runspec.ShowWithheldCommand(input.Run.Pipeline)))
+		failure.Hint = p.Masker.Mask(fmt.Sprintf("Run this locally, in a checkout of this revision, to print the withheld error: %s", runspec.ShowWithheldCommand(input.Run.Pipeline)))
 	} else if structured != nil {
 		failure = p.Masker.Error(structured)
 		failure.Message = message
