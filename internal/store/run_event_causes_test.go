@@ -40,10 +40,16 @@ func queuedEvents(t *testing.T, s *Store, team string) []string {
 }
 
 func TestCancelDrainQueuesOneFinishedEventWithoutCallerProse(t *testing.T) {
+	for _, reason := range []string{"stop it; token=canary-7731", "customer_acme_hotfix_by_jdoe"} {
+		t.Run(reason, func(t *testing.T) { cancelDrainWithoutCallerReason(t, reason) })
+	}
+}
+
+func cancelDrainWithoutCallerReason(t *testing.T, reason string) {
 	tenant, _, actor := stateFixture(t)
 	seedEventSubscriptions(t, tenant.s)
 	ctx := context.Background()
-	request := runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Actor: actor, Cause: runstate.RunCancel, Reason: "stop it; token=canary-7731"}
+	request := runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Actor: actor, Cause: runstate.RunCancel, Reason: reason}
 	if _, err := tenant.TransitionRun(ctx, request); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +74,7 @@ func TestCancelDrainQueuesOneFinishedEventWithoutCallerProse(t *testing.T) {
 	if len(got) != 1 || !strings.HasPrefix(got[0], "run.finished run/"+strconv.FormatInt(applied.StateSeq, 10)+" ") || !strings.Contains(got[0], `"status":"cancelled"`) {
 		t.Fatalf("queued %v", got)
 	}
-	if strings.Contains(got[0], "canary-7731") || strings.Contains(got[0], "stop it") {
+	if strings.Contains(got[0], reason) || strings.Contains(got[0], "canary-7731") || strings.Contains(got[0], `"reason"`) {
 		t.Fatalf("caller prose reached the event: %s", got[0])
 	}
 	if other := queuedEvents(t, tenant.s, "b"); len(other) != 0 {
@@ -86,7 +92,7 @@ func TestQueueTimeoutQueuesFinishedEventWithoutStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := queuedEvents(t, s, "a")
-	if len(got) != 1 || !strings.HasPrefix(got[0], "run.finished run/1 ") || !strings.Contains(got[0], `"status":"failed"`) || !strings.Contains(got[0], `"started_at":null`) || !strings.Contains(got[0], `"key":"local:5e1f"`) {
+	if len(got) != 1 || !strings.HasPrefix(got[0], "run.finished run/1 ") || !strings.Contains(got[0], `"status":"failed"`) || !strings.Contains(got[0], `"started_at":null`) || !strings.Contains(got[0], `"key":"local:5e1f"`) || !strings.Contains(got[0], `"reason":"queue_timeout"`) {
 		t.Fatalf("queued %v", got)
 	}
 	if strings.Contains(got[0], "private-checkout") {
@@ -105,7 +111,7 @@ func TestOwnerLossQueuesFinishedEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := queuedEvents(t, s, "a")
-	if len(got) != 1 || !strings.HasPrefix(got[0], "run.finished run/1 ") || !strings.Contains(got[0], `"status":"failed"`) {
+	if len(got) != 1 || !strings.HasPrefix(got[0], "run.finished run/1 ") || !strings.Contains(got[0], `"status":"failed"`) || !strings.Contains(got[0], `"reason":"owner_lost"`) {
 		t.Fatalf("queued %v", got)
 	}
 }

@@ -265,7 +265,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 	if err := writeRunEffectsTx(ctx, tx, team, row.ID, row.State, now); err != nil {
 		return runstate.Applied{}, err
 	}
-	if err := writeRunEventDeliveriesTx(ctx, tx, team, row, kind, change.Reason, now); err != nil {
+	if err := writeRunEventDeliveriesTx(ctx, tx, team, row, kind, change, now); err != nil {
 		return runstate.Applied{}, err
 	}
 	if row.FinishedAt != nil {

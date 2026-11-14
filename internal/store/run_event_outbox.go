@@ -3,19 +3,16 @@ package store
 import (
 	"context"
 	"database/sql"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runevents"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-// safety: cancel reasons can be caller-supplied prose, so only code-shaped
-// reasons reach a receiver.
-var runEventReasonCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-
 // safety: runs inside the run transition, so a state change and its deliveries commit or roll back together.
-func writeRunEventDeliveriesTx(ctx context.Context, tx *storeTx, team Team, row RunRow, kind, reason string, now time.Time) error {
+func writeRunEventDeliveriesTx(ctx context.Context, tx *storeTx, team Team, row RunRow, kind string, change runstate.RunTransition, now time.Time) error {
 	var event string
 	switch {
 	case kind == "run_started":
@@ -71,8 +68,8 @@ func writeRunEventDeliveriesTx(ctx context.Context, tx *storeTx, team Team, row 
 		ParentRunID:       parent.String,
 		RetryOf:           retryOf,
 	}
-	if event == runevents.EventFinished && runEventReasonCode.MatchString(reason) {
-		facts.Reason = reason
+	if event == runevents.EventFinished {
+		facts.Reason = runEventReason(change, row.State)
 	}
 	body, err := runevents.Build(event, facts)
 	if err != nil {
@@ -85,4 +82,18 @@ func writeRunEventDeliveriesTx(ctx context.Context, tx *storeTx, team Team, row 
 		}
 	}
 	return nil
+}
+
+// safety: cancel and host reasons carry caller-written text, so a reason comes only from the
+// transition's own cause or the plan failure the store itself records.
+func runEventReason(change runstate.RunTransition, state runstate.RunState) string {
+	switch change.Cause {
+	case runstate.RunQueueTimeout, runstate.RunOwnerLost, runstate.RunLaunchRejected, runCreditRefused:
+		return string(change.Cause)
+	case runstate.RunFinish:
+		if state == runstate.RunFailed && change.Reason == string(apierr.PlanFailed) {
+			return change.Reason
+		}
+	}
+	return ""
 }
