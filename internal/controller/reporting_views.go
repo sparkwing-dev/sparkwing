@@ -15,11 +15,12 @@ func credentialRotationView(row store.CredentialRotation) controllerwire.SecretR
 
 func sealedRotationView(row store.SealedRotation) controllerwire.SealedRotation {
 	out := controllerwire.SealedRotation{
-		Secrets:         row.Secrets,
-		GitCredentials:  row.GitCredentials,
-		RunEnvironments: row.RunEnvironments,
-		Settings:        row.Settings,
-		PreviousKeyOnly: row.PreviousKeyOnly,
+		Secrets:               row.Secrets,
+		GitCredentials:        row.GitCredentials,
+		RunEnvironments:       row.RunEnvironments,
+		Settings:              row.Settings,
+		PreviousKeyOnly:       row.PreviousKeyOnly,
+		RunEventSubscriptions: row.RunEventSubscriptions,
 	}
 	if row.Unreadable != nil {
 		out.Unreadable = make([]controllerwire.SealedRowName, len(row.Unreadable))

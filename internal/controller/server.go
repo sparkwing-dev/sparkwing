@@ -278,6 +278,7 @@ func (s *Server) buildRegisteredRouters() *registeredMux {
 	endpoints = append(endpoints, s.authorityEndpoints()...)
 	endpoints = append(endpoints, s.capabilityEndpoints()...)
 	endpoints = append(endpoints, s.credentialEndpoints()...)
+	endpoints = append(endpoints, s.subscriptionEndpoints()...)
 	endpoints = append(endpoints, s.sizingEndpoints()...)
 	endpoints = append(endpoints, s.creditEndpoints()...)
 	endpoints = append(endpoints, s.queueEndpoints()...)

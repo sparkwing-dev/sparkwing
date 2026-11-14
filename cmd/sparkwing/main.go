@@ -298,6 +298,8 @@ func runSparkwing(args []string) (result error) {
 		return runSchedules(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing pools "):
 		return runPools(context.Background(), inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing subscriptions "):
+		return runSubscriptions(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing overflow "):
 		return runOverflow(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing billing "):

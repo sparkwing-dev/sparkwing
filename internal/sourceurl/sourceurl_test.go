@@ -449,3 +449,27 @@ func TestNormalizeCloneHostRewritesTheSpellingGitConnectsTo(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckPublicHost(t *testing.T) {
+	for _, host := range []string{"hooks.example.com", "8.8.8.8", "[2606:4700:4700::1111]", "HOOKS.example.com."} {
+		if err := CheckPublicHost(host); err != nil {
+			t.Errorf("CheckPublicHost(%q) = %v, want nil", host, err)
+		}
+	}
+	for _, host := range []string{"", "localhost", "api.internal", "metadata.google.internal", "127.0.0.1", "127.1", "0x7f000001", "10.0.0.1", "169.254.169.254", "[::1]", "[::ffff:127.0.0.1]", "100.64.0.1", "svc.cluster.svc", "kubernetes.default"} {
+		if err := CheckPublicHost(host); err == nil {
+			t.Errorf("CheckPublicHost(%q) accepted a non-public host", host)
+		}
+	}
+}
+
+func TestCheckPublicHostIgnoresTheCloneHostPolicy(t *testing.T) {
+	setHostPolicy(func(string) error { return errors.New("clones go only to the forge") })
+	t.Cleanup(func() { setHostPolicy(nil) })
+	if err := CheckPublicHost("hooks.example.com"); err != nil {
+		t.Fatalf("clone policy reached a webhook host: %v", err)
+	}
+	if _, err := ValidateCloneURL("https://hooks.example.com/repo.git"); err == nil {
+		t.Fatal("clone policy no longer applies to clone URLs")
+	}
+}
