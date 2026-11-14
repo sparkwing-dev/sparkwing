@@ -325,6 +325,18 @@ Each OIDC token a run mints is audited as `oidc.minted` in the transaction that
 rechecks the run's authority, naming the run, a digest of its job, the
 audience, and the token's `jti`, subject and expiry, so a leaked token traces to
 its mint. A token whose audit row does not commit is never returned.
+An authenticated request refused because of the run, job, claim, child or team
+it names is audited as `access.refused` in the acting credential's own team. The
+row names the actor, the HTTP method, the registered route template, the refusal
+class (`not_found`, `team` or `binding`), the credential kind (`account`,
+`runner`, `trigger`, `plan`, `node`, `eval`, `service`, `operator` or `local`) and
+how it was presented. It never holds the request path, body, the identifiers the
+request named or another team's identity. Each credential, route and class keeps
+at most one row per hour, so a probe loop cannot flood the table. A missing
+resource in the caller's own team is audited by the same rule, and the response
+to a refused request stays byte-identical to the response for a missing
+resource. Only deployment operators read these rows, through the operator team
+view.
 Restricted claims and sealed execution inputs must never be rendered as details.
 Run creation and retry return display inputs, not the execution seal. Schedule
 declarations, overrides, effective arguments and fire history hide every argument

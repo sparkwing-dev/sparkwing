@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -275,6 +276,17 @@ type auditSourceRelease struct {
 	CapabilityPrefix auditDigest `json:"capability_digest"`
 }
 
+// safety: a refused probe keeps the registered route and closed classes; the
+// request path, body and the identifiers it named never reach the row.
+type auditAccessRefusal struct {
+	Window       int64  `json:"-"`
+	Method       string `json:"method"`
+	Route        string `json:"route"`
+	Refusal      string `json:"refusal"`
+	Credential   string `json:"credential"`
+	Presentation string `json:"presentation"`
+}
+
 // These closed variants are the only audit inputs. Adding a kind requires a closed payload
 // and its projection here; arbitrary attrs and caller prose cannot enter it.
 type auditPayload interface{ isAuditPayload() }
@@ -303,6 +315,7 @@ func (auditSecretRelease) isAuditPayload()        {}
 func (auditSourceRelease) isAuditPayload()        {}
 func (auditOIDCMint) isAuditPayload()             {}
 func (auditDeviceLogin) isAuditPayload()          {}
+func (auditAccessRefusal) isAuditPayload()        {}
 
 func auditOneOf[T ~string](value T, choices ...string) bool {
 	for _, choice := range choices {
@@ -426,6 +439,17 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	case auditDeviceLogin:
 		ev.Kind, ev.SubjectID = "device_login.decided", p.LoginID
 		valid = auditOneOf(p.Decision, "approved", "denied") && p.LoginID != ""
+	case auditAccessRefusal:
+		// perf: one row per actor, route, class and credential kind per window bounds a probe loop.
+		identity, err := json.Marshal([]string{actor, p.Method, p.Route, p.Refusal, p.Credential, strconv.FormatInt(p.Window, 10)})
+		if err != nil {
+			return err
+		}
+		ev.Kind, ev.SubjectID = "access.refused", digestAudit(string(identity)).String()
+		_, routed := capability.LookupRoute(p.Method, p.Route)
+		valid = routed && p.Window > 0 && auditOneOf(p.Refusal, "not_found", "team", "binding") &&
+			auditOneOf(p.Credential, "account", "runner", "service", "operator", "local", string(capability.UnitTrigger), string(capability.UnitPlan), string(capability.UnitNode), string(capability.UnitEval)) &&
+			auditOneOf(p.Presentation, string(capability.CredentialBearer), string(capability.CredentialSession), string(capability.CredentialConsole), string(capability.CredentialPeer))
 	case auditSourceRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, ev.Account, repeat = "git_credential.released", p.CredentialID.String(), p.RunID, p.AccountID, true
 	default:
