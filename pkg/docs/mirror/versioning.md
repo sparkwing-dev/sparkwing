@@ -201,7 +201,7 @@ of every lockfile package outside `node_modules` (workspace members and linked
 sources), and local tarball dependencies. It also records npm's `node_modules/.package-lock.json` and
 the installed SDK manifest. These are not every input npm could read.
 A later preparation skips both npm commands only when these match and the tree
-passes npm's own hidden-lockfile check: every package it lists exists and no
+passes a subset of npm's hidden-lockfile check: every package it lists exists and no
 package folder is newer than it. Reuse still validates the SDK pin. Any
 difference, an unreadable input, a copied local directory dependency or a root
 lifecycle script (`preinstall`, `install`, `postinstall`, `prepublish`,
