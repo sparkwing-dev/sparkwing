@@ -169,8 +169,10 @@ inputs in full and failed modes. The retrier is recorded separately as an actor.
 Every run writes only its own scope. A run under a `manual:` writer scope
 (a CLI, API, dashboard or local run, or a member-armed schedule's fire) reads
 its own scope first, then the same writer's scope on the repository's default
-branch, so the first local run on a new branch restores the memo and
-dependency-cache records that writer's runs of `main` saved. The default branch
+branch, so the first local run on a new branch of a checkout restores the memo
+and dependency-cache records that writer's runs of `main` saved in that checkout.
+Each local checkout, including each `git worktree`, is its own repository, so a
+new worktree still starts cold. The default branch
 comes from the checkout's `origin/HEAD`, or from verified records when intake
 learned it there, and is spelled like the run's own ref (`main` or
 `refs/heads/main`). A run that cannot resolve a default branch reads only its
