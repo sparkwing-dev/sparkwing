@@ -256,9 +256,10 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 		return json.NewEncoder(out).Encode(record)
 	}
 	var diagnostic struct {
-		LeaseKeeper bool `json:"host_lease_keeper"`
+		LeaseKeeper   bool `json:"host_lease_keeper"`
+		RequestTiming bool `json:"host_request_timing"`
 	}
-	if json.Unmarshal([]byte(record.Line), &diagnostic) == nil && diagnostic.LeaseKeeper {
+	if json.Unmarshal([]byte(record.Line), &diagnostic) == nil && (diagnostic.LeaseKeeper || diagnostic.RequestTiming) {
 		return nil
 	}
 	if format == "pretty" && !search {

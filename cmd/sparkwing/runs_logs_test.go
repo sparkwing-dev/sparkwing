@@ -547,3 +547,23 @@ func TestRunsLogsWithoutRunOrGrepNamesBothChoices(t *testing.T) {
 		}
 	}
 }
+
+func TestRunLogsTimingDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
+	record := jobLogRecord("r1", `{"event":"***","host_request_timing":true,"attrs":{"operation":"nodehost.annotation","duration_ms":2000}}`)
+	for _, format := range []string{"plain", "pretty"} {
+		var out bytes.Buffer
+		if err := writeLogRecord(&out, record, format, false); err != nil {
+			t.Fatal(err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("timing diagnostic visible in %s: %s", format, &out)
+		}
+	}
+	var out bytes.Buffer
+	if err := writeLogRecord(&out, record, "json", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "host_request_timing") {
+		t.Fatal("JSON omitted host diagnostic")
+	}
+}

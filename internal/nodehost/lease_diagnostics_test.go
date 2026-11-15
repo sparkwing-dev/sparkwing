@@ -189,27 +189,31 @@ func TestDiagnosticBytesRideRealOutputCut(t *testing.T) {
 }
 
 func TestKeeperDiagnosticStampSurvivesMasking(t *testing.T) {
-	records := &nativeLogRecords{objects: map[string][]byte{}}
-	masker := secrets.NewMasker()
-	masker.Register("lease_keeper")
-	logs := &localLogs{run: "run", masker: masker, principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitTrigger, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
-		records.view.Subject = subject
-		return records, nil
-	}}
-	logs.bind(logs.principal, 0)
-	if err := logs.write(t.Context(), "run", "", nodewire.FrameLog{Level: "debug", Event: "lease_keeper", Attrs: json.RawMessage(`{"sequence":1}`)}); err != nil {
-		t.Fatal(err)
-	}
-	<-logs.finish(t.Context(), "")
-	var body bytes.Buffer
-	if _, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body); err != nil {
-		t.Fatal(err)
-	}
-	var record map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(body.Bytes()), &record); err != nil {
-		t.Fatal(err)
-	}
-	if record["event"] != "***" || record["host_lease_keeper"] != true {
-		t.Fatalf("masking lost diagnostic identity: %s", body.String())
+	for _, event := range []string{"lease_keeper", "request_timing"} {
+		t.Run(event, func(t *testing.T) {
+			records := &nativeLogRecords{objects: map[string][]byte{}}
+			masker := secrets.NewMasker()
+			masker.Register(event)
+			logs := &localLogs{run: "run", masker: masker, principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitTrigger, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+				records.view.Subject = subject
+				return records, nil
+			}}
+			logs.bind(logs.principal, 0)
+			if err := logs.write(t.Context(), "run", "", nodewire.FrameLog{Level: "debug", Event: event, Attrs: json.RawMessage(`{"sequence":1}`)}); err != nil {
+				t.Fatal(err)
+			}
+			<-logs.finish(t.Context(), "")
+			var body bytes.Buffer
+			if _, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body); err != nil {
+				t.Fatal(err)
+			}
+			var record map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(body.Bytes()), &record); err != nil {
+				t.Fatal(err)
+			}
+			if record["event"] != "***" || record["host_"+event] != true {
+				t.Fatalf("masking lost diagnostic identity: %s", body.String())
+			}
+		})
 	}
 }
