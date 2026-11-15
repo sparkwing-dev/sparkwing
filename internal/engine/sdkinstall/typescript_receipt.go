@@ -21,7 +21,7 @@ import (
 // safety: the receipt lives inside the tree it describes, so removing node_modules removes it too.
 const typeScriptReceipt = ".sparkwing-sdk-receipt"
 
-const typeScriptReceiptFormat = "sparkwing typescript sdk receipt 2"
+const typeScriptReceiptFormat = "typescript sdk receipt 2"
 
 // safety: npm runs these root scripts on every install, so a tree that declares one is never reused.
 var typeScriptLifecycleScripts = []string{"preinstall", "install", "postinstall", "prepublish", "preprepare", "prepare", "postprepare", "dependencies"}
