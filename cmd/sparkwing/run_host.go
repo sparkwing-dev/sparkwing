@@ -45,6 +45,8 @@ type localRunRuntime struct {
 	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
 	publish          func(context.Context, string, string) error
 	follow           func(context.Context, string, string, io.Writer, <-chan struct{}) error
+	// safety: nil skips the runner check, as for a standalone controller whose runs the CLI hosts.
+	runner func(context.Context) (*apierr.Error, error)
 }
 
 type localRunDependencies struct {
@@ -167,6 +169,15 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if runtime.ensureController != nil {
 		if err := runtime.ensureController(ctx); err != nil {
 			return err
+		}
+	}
+	if !hostedInCLI && runtime.runner != nil {
+		failure, err := runtime.runner(ctx)
+		if err != nil {
+			return err
+		}
+		if failure != nil {
+			return failure
 		}
 	}
 	if mode := strings.TrimSpace(flags.priority); mode == wingwire.PriorityFront || mode == wingwire.PriorityBack {

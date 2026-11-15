@@ -52,7 +52,7 @@ func serviceFixture(b Binding) Services {
 	return Services{
 		State:  &stateFixture{},
 		HTTP:   localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
-		Runner: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() },
+		Runner: func(ctx context.Context, _ func(error)) error { <-ctx.Done(); return ctx.Err() },
 	}
 }
 
@@ -185,7 +185,7 @@ func TestCompositionCompletesRunsAfterReadinessAndJoinsOnFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 		ready.Store(true)
-		if err := c.Run(t.Context(), func(wingd.LocalActivity) error { return nil }); !errors.Is(err, failure) {
+		if err := c.Run(t.Context(), wingd.LocalReports{Activity: func(wingd.LocalActivity) error { return nil }, Runner: func(error) {}}); !errors.Is(err, failure) {
 			t.Fatalf("completion failure=%v", err)
 		}
 		if err := c.Close(); err != nil {
@@ -223,7 +223,9 @@ func TestCompositionMaintainsStorageAfterReadinessWhileOwningStore(t *testing.T)
 		ready.Store(true)
 		ctx, cancel := context.WithCancel(t.Context())
 		joined := make(chan error, 1)
-		go func() { joined <- c.Run(ctx, func(wingd.LocalActivity) error { return nil }) }()
+		go func() {
+			joined <- c.Run(ctx, wingd.LocalReports{Activity: func(wingd.LocalActivity) error { return nil }, Runner: func(error) {}})
+		}()
 		t.Cleanup(func() {
 			cancel()
 			if err := <-joined; err != nil && !errors.Is(err, context.Canceled) {
@@ -288,7 +290,7 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 		var closeCount atomic.Int32
 		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
 			services := serviceFixture(b)
-			services.Runner = func(ctx context.Context) error {
+			services.Runner = func(ctx context.Context, _ func(error)) error {
 				close(started)
 				<-ctx.Done()
 				<-release
@@ -310,7 +312,9 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 		}
 		result := make(chan error, 1)
 		var reported wingd.LocalActivity
-		go func() { result <- c.Run(t.Context(), func(a wingd.LocalActivity) error { reported = a; return nil }) }()
+		go func() {
+			result <- c.Run(t.Context(), wingd.LocalReports{Activity: func(a wingd.LocalActivity) error { reported = a; return nil }, Runner: func(error) {}})
+		}()
 		synctest.Wait()
 		if err := c.Close(); err == nil || closeCount.Load() != 0 {
 			t.Fatal("store close ran before the queue joined")

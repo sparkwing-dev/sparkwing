@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,7 +22,7 @@ type runtimeControllerFixture struct {
 	FuncRunStore
 	home       string
 	reconcile  func(context.Context) (LocalActivity, error)
-	background func(context.Context, func(LocalActivity) error) error
+	background func(context.Context, LocalReports) error
 	http       func() localhostwire.LocalHTTP
 	closed     atomic.Bool
 	closeErr   error
@@ -34,7 +35,7 @@ func (f *runtimeControllerFixture) Reconcile(ctx context.Context) (LocalActivity
 	return LocalActivity{}, nil
 }
 
-func (f *runtimeControllerFixture) Run(ctx context.Context, report func(LocalActivity) error) error {
+func (f *runtimeControllerFixture) Run(ctx context.Context, report LocalReports) error {
 	if f.background != nil {
 		return f.background(ctx, report)
 	}
@@ -135,7 +136,7 @@ func (runtimeSampler) Sample() (HostStat, error) {
 func TestLocalRuntimeOwnsStoreUntilAllServicesJoin(t *testing.T) {
 	f := &runtimeControllerFixture{}
 	joined := make(chan struct{})
-	f.background = func(ctx context.Context, _ func(LocalActivity) error) error {
+	f.background = func(ctx context.Context, _ LocalReports) error {
 		<-ctx.Done()
 		if f.closed.Load() {
 			return errors.New("store closed before consumer joined")
@@ -164,7 +165,7 @@ func TestLocalRuntimeOwnsStoreUntilAllServicesJoin(t *testing.T) {
 func TestLocalRuntimeFixtureCleanupJoinsConsumers(t *testing.T) {
 	f := &runtimeControllerFixture{}
 	joined := make(chan struct{})
-	f.background = func(ctx context.Context, _ func(LocalActivity) error) error {
+	f.background = func(ctx context.Context, _ LocalReports) error {
 		<-ctx.Done()
 		close(joined)
 		return nil
@@ -277,7 +278,7 @@ func TestLocalRuntimeStartupFailuresReleaseOwnership(t *testing.T) {
 					return listener, nil
 				}
 			case "consumer":
-				f.background = func(context.Context, func(LocalActivity) error) error { return failure }
+				f.background = func(context.Context, LocalReports) error { return failure }
 			}
 			err := r.Run(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"})
 			if !errors.Is(err, failure) {
@@ -453,7 +454,7 @@ func TestLocalRuntimeReadinessDoesNotWaitForConsumerPreparation(t *testing.T) {
 	signal.Stop(interrupt)
 	synctest.Test(t, func(t *testing.T) {
 		preparing := make(chan struct{})
-		f := &runtimeControllerFixture{background: func(ctx context.Context, _ func(LocalActivity) error) error {
+		f := &runtimeControllerFixture{background: func(ctx context.Context, _ LocalReports) error {
 			close(preparing)
 			<-ctx.Done()
 			return nil
@@ -505,7 +506,7 @@ func TestLocalRuntimeDefersConsumersUntilPrivateAPIReady(t *testing.T) {
 				}
 				return localhostwire.LocalHTTP{API: http.NotFoundHandler()}
 			},
-			background: func(ctx context.Context, _ func(LocalActivity) error) error {
+			background: func(ctx context.Context, _ LocalReports) error {
 				close(consumed)
 				<-ctx.Done()
 				return nil
@@ -545,7 +546,7 @@ func TestLocalRuntimeKeepsAPIUntilWorkersJoin(t *testing.T) {
 	f.http = func() localhostwire.LocalHTTP {
 		return localhostwire.LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 	}
-	f.background = func(ctx context.Context, _ func(LocalActivity) error) error {
+	f.background = func(ctx context.Context, _ LocalReports) error {
 		close(entered)
 		<-ctx.Done()
 		held, err := LockHeld(f.home)
@@ -594,5 +595,47 @@ func TestLocalRuntimeKeepsAPIUntilWorkersJoin(t *testing.T) {
 	}
 	if _, err := os.Stat(r.layout.apiSock); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("API socket remains: %v", err)
+	}
+}
+
+func TestLocalRuntimeStatusReportsLocalRunner(t *testing.T) {
+	f := &runtimeControllerFixture{}
+	reported := make(chan LocalReports, 1)
+	f.background = func(ctx context.Context, reports LocalReports) error {
+		reported <- reports
+		<-ctx.Done()
+		return nil
+	}
+	r := newRuntimeFixture(t, f)
+	lifecycle := NewLocalLifecycle(r, nil)
+	status, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"})
+	if err != nil || status.Runner != LocalRunnerStarting || status.RunnerError != nil || status.Stopping {
+		t.Fatalf("start: %+v, %v", status, err)
+	}
+	reports := <-reported
+	check := func(want, message, hint string) {
+		t.Helper()
+		status, err := r.Status(t.Context())
+		if err != nil || status.Runner != want {
+			t.Fatalf("runner state %+v, %v; want %s", status, err, want)
+		}
+		if message == "" {
+			if status.RunnerError != nil {
+				t.Fatalf("running runner kept failure %+v", status.RunnerError)
+			}
+			return
+		}
+		if status.RunnerError == nil || status.RunnerError.Message != message || !strings.Contains(status.RunnerError.Hint, hint) {
+			t.Fatalf("runner failure %+v; want %q with hint %q", status.RunnerError, message, hint)
+		}
+	}
+	reports.Runner(UserManagerUnreachable("the local runner cannot start", "Failed to connect to bus: No such file or directory\n"))
+	check(LocalRunnerUnavailable, "the local runner cannot start: the systemd user manager is unreachable (Failed to connect to bus: No such file or directory)", "loginctl enable-linger")
+	reports.Runner(nil)
+	check(LocalRunnerRunning, "", "")
+	reports.Runner(errors.New("unit start timed out"))
+	check(LocalRunnerUnavailable, "the local runner cannot start: unit start timed out", "d.log")
+	if err := lifecycle.Stop(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }

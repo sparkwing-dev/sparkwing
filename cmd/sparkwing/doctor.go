@@ -31,6 +31,8 @@ import (
 // safety: a stalled controller must leave doctor available as a recovery tool.
 const doctorDefaultTimeout = 10 * time.Second
 
+const doctorRunnerSettle = 5 * time.Second
+
 type doctorFinding struct {
 	Code    string `json:"code"`
 	Unit    string `json:"unit,omitempty"`
@@ -120,6 +122,19 @@ func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (d
 			continue
 		}
 		report.Findings = append(report.Findings, doctorFinding{Code: finding.Code, Unit: finding.Unit, Message: finding.Message, Hint: finding.Hint})
+	}
+	if err == nil {
+		settle, cancel := context.WithTimeout(ctx, doctorRunnerSettle)
+		var failure *apierr.Error
+		failure, err = localRunnerUnavailable(settle, services.lifecycle.Status)
+		// safety: a runner still on its first start is not a finding; its outcome shows on the next doctor run.
+		if err != nil && settle.Err() != nil && ctx.Err() == nil {
+			err = nil
+		}
+		cancel()
+		if failure != nil {
+			report.Findings = append(report.Findings, doctorFinding{Code: "local_runner_unavailable", Message: failure.Message, Hint: failure.Hint})
+		}
 	}
 	err = errors.Join(err, ctx.Err())
 	if err != nil {

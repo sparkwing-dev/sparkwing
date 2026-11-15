@@ -1,7 +1,9 @@
 package wingd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -88,11 +90,16 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 					d.shutdownWithReason("drain")
 				}
 			}()
-			if err != nil {
+			var holds *runnerHoldsWork
+			switch {
+			case errors.As(err, &holds):
+				d.finishDrainAfterRunner(context.WithoutCancel(r.Context()), holds.instance)
+				writeLoginFailure(w, holds.failure(d.layout.home))
+			case err != nil:
 				writeLoginFailure(w, &apierr.Error{Code: hosterr.Internal, Message: err.Error()})
-				return
+			default:
+				writeControllerHTTP(w, wingwire.DrainAck{HoldersRemaining: remaining})
 			}
-			writeControllerHTTP(w, wingwire.DrainAck{HoldersRemaining: remaining})
 		default:
 			http.NotFound(w, r)
 		}

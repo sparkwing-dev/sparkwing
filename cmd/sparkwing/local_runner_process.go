@@ -40,9 +40,10 @@ type localRunnerProcessSupervisor struct {
 	build    string
 	start    func(context.Context, string) error
 	alive    func(localhostwire.LocalRunnerInstance) (bool, error)
+	report   func(error)
 }
 
-func superviseLocalRunnerProcess(ctx context.Context, host crontimer.Host) error {
+func superviseLocalRunnerProcess(ctx context.Context, host crontimer.Host, report func(error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -63,7 +64,7 @@ func superviseLocalRunnerProcess(ctx context.Context, host crontimer.Host) error
 		return err
 	}
 	supervisor := localRunnerProcessSupervisor{
-		registry: registry, version: host.Version, build: build, alive: wingd.LocalRunnerProcessAlive,
+		registry: registry, version: host.Version, build: build, alive: wingd.LocalRunnerProcessAlive, report: report,
 		start: func(ctx context.Context, id string) error { return startLocalRunnerProcess(ctx, host, id) },
 	}
 	return supervisor.run(ctx)
@@ -74,7 +75,15 @@ func (s localRunnerProcessSupervisor) run(ctx context.Context) error {
 	for {
 		// safety: runs hosted by the CLI need no runner, so a runner that cannot start must not stop
 		// the controller; queued jobs wait and the controller log names the cause.
-		if err := s.ensure(ctx); err != nil && ctx.Err() == nil {
+		serving, err := s.ensure(ctx)
+		if ctx.Err() == nil {
+			if serving {
+				s.report(nil)
+			} else {
+				s.report(err)
+			}
+		}
+		if err != nil && ctx.Err() == nil {
 			slog.Error("local runner unavailable; queued jobs wait until it starts", "err", err, "retry_in", delay)
 			delay = min(2*delay, localRunnerMaxRetry)
 		} else {
@@ -89,27 +98,29 @@ func (s localRunnerProcessSupervisor) run(ctx context.Context) error {
 	}
 }
 
-func (s localRunnerProcessSupervisor) ensure(ctx context.Context) error {
+// safety: serving counts an outdated runner still active while its successor fails to start; its jobs still run.
+func (s localRunnerProcessSupervisor) ensure(ctx context.Context) (serving bool, err error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	instance, err := s.registry.Active(ctx)
 	if err == nil {
 		alive, err := s.alive(instance)
 		if err != nil {
-			return fmt.Errorf("inspect local runner %s: %w", instance.ID, err)
+			return false, fmt.Errorf("inspect local runner %s: %w", instance.ID, err)
 		}
 		if alive && instance.Version == s.version && instance.BuildIdentity == s.build {
-			return nil
+			return true, nil
 		}
+		serving = alive
 	} else if !localRunnerNotFound(err) {
-		return err
+		return false, err
 	}
 	id := rand.Text()
 	ctx, cancel := context.WithTimeout(ctx, wingdclient.RequestTimeout)
 	defer cancel()
 	if err := s.start(ctx, id); err != nil {
-		return err
+		return serving, err
 	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -117,24 +128,24 @@ func (s localRunnerProcessSupervisor) ensure(ctx context.Context) error {
 		instance, err := s.registry.Read(ctx, id)
 		if err == nil {
 			if instance.Version != s.version || instance.BuildIdentity != s.build {
-				return errors.New("local runner started with a different version or executable")
+				return serving, errors.New("local runner started with a different version or executable")
 			}
 			alive, err := s.alive(instance)
 			if err != nil {
-				return err
+				return serving, err
 			}
 			if !alive || instance.State == "stopped" || instance.State == "draining" {
-				return errors.New("local runner stopped before activation")
+				return serving, errors.New("local runner stopped before activation")
 			}
 			if instance.State == "active" {
-				return nil
+				return true, nil
 			}
 		} else if !localRunnerNotFound(err) {
-			return err
+			return serving, err
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("local runner %s did not activate: %w", id, ctx.Err())
+			return serving, fmt.Errorf("local runner %s did not activate: %w", id, ctx.Err())
 		case <-ticker.C:
 		}
 	}
