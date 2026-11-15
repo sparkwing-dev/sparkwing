@@ -383,3 +383,25 @@ func TestSchedulingProjectionAllowsStaticGroups(t *testing.T) {
 		t.Fatalf("static groups changed generated membership: %+v", got)
 	}
 }
+
+func TestSchedulingFailedRunReasonSeparatesCancelledJobs(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		nodes  []ScheduleNode
+		reason string
+	}{
+		{"failed and cancelled", []ScheduleNode{
+			{ID: "test", Status: "done", Outcome: "failed"},
+			{ID: "deploy", Status: "done", Outcome: "cancelled"},
+			{ID: "notify", Status: "done", Outcome: "cancelled"},
+		}, "failed: test; cancelled: deploy, notify"},
+		{"only cancelled", []ScheduleNode{{ID: "deploy", Status: "done", Outcome: "cancelled"}}, "cancelled: deploy"},
+		{"only failed", []ScheduleNode{{ID: "test", Status: "done", Outcome: "failed"}}, "failed: test"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := Decide(ScheduleSnapshot{Nodes: test.nodes}); got.Outcome != "failed" || got.Reason != test.reason {
+				t.Fatalf("verdict = %q %q, want failed %q", got.Outcome, got.Reason, test.reason)
+			}
+		})
+	}
+}

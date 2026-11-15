@@ -122,6 +122,8 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			if failure, diagnosticErr := hosterr.LastDiagnostic(stderr.String()); diagnosticErr == nil {
 				switch failure.Code {
+				case apierr.PlanFailed:
+					return SDKCommand{}, masker.Error(failure)
 				case apierr.BadRequest, apierr.InvalidArgs, apierr.Conflict, hosterr.IntegrityFailure:
 					return SDKCommand{}, fmt.Errorf("selected engine SDK installation: %w: %w", masker.Error(failure), err)
 				}

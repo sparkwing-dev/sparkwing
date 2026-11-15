@@ -150,6 +150,8 @@ func TestAdmissionProgressUsesOneHumanStreamAndPreservesJSON(t *testing.T) {
 				if reader.reads != 0 || strings.Count(out.String(), `"event":"job_admission_queued"`) != 3 || !strings.Contains(out.String(), `\"position\":1`) {
 					t.Fatalf("JSON changed: %s reads=%d", &out, reader.reads)
 				}
+			} else if label := map[string]string{"plain": "build/assets: admission:", "pretty": "build/assets | admission:"}[format]; !strings.Contains(out.String(), label) {
+				t.Fatalf("wait line lost its %s label: %s", format, &out)
 			} else if reader.reads != 1 || strings.Count(out.String(), "admission:") != 1 || !strings.Contains(out.String(), "1 running (check 4 cores), 1 queued") || strings.Contains(out.String(), "blocking_reason=") || !strings.Contains(out.String(), "admission granted") && !strings.Contains(out.String(), runstate.EventAdmissionGranted) {
 				t.Fatalf("human stream: %s reads=%d", &out, reader.reads)
 			}
