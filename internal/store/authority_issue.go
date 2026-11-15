@@ -536,7 +536,7 @@ func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Cap
 		// safety: unproven work keeps its own data namespace without repository cache fallbacks.
 		repo = sealed.Request.Git.Repository.Key
 	}
-	var writer string
+	var writerDefault string
 	if c.Unit == capability.UnitNode && row.runSpec != nil {
 		var spec struct {
 			Resolved struct {
@@ -546,9 +546,9 @@ func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Cap
 		if err := json.Unmarshal(row.runSpec, &spec); err != nil {
 			return nil, err
 		}
-		writer = writerDefaultScope(sealed.Provenance, facts.Scope, spec.Resolved.DefaultBranch.Value)
+		writerDefault = writerDefaultScope(sealed.Provenance, facts.Scope, spec.Resolved.DefaultBranch.Value)
 	}
-	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: string(repo), WriteRef: facts.Scope.CapabilityScope(), ReadRefs: readScopes(facts, writer), RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
+	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: string(repo), WriteRef: facts.Scope.CapabilityScope(), ReadRefs: readScopes(facts, writerDefault), RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
 	if c.Unit == capability.UnitNode {
 		scope.Attempt = 0
 	}

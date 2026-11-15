@@ -173,8 +173,8 @@ branch, so the first local run on a new branch of a checkout restores the memo
 and dependency-cache records that writer's runs of `main` saved in that checkout.
 Each local checkout, including each `git worktree`, is its own repository, so a
 new worktree still starts cold. The default branch
-comes from the checkout's `origin/HEAD`, or from verified records when intake
-learned it there, and is spelled like the run's own ref (`main` or
+comes from verified records when intake learned it there, otherwise from the
+checkout's `origin/HEAD`, and is spelled like the run's own ref (`main` or
 `refs/heads/main`). A run that cannot resolve a default branch reads only its
 own scope. Those records stay unverified: the run never writes the default-branch
 scope, and verified, Actions and admin-armed schedule runs get no such fallback. Repository-proven runs also
