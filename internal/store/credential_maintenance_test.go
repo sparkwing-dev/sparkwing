@@ -2,7 +2,6 @@ package store
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -29,7 +28,7 @@ func proveFixtureRun(t *testing.T, tenant *Tenant, run string) runspec.SealedReq
 		t.Fatal(err)
 	}
 	var request runspec.SealedRequest
-	if err := json.Unmarshal(raw, &request); err != nil {
+	if err := decodeRunRequest(tenant.s, tenant.team, run, raw, &request); err != nil {
 		t.Fatal(err)
 	}
 	provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), DeliveryKey: "delivery-" + run, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, request.Provenance.Pipeline())
@@ -40,7 +39,7 @@ func proveFixtureRun(t *testing.T, tenant *Tenant, run string) runspec.SealedReq
 	if request.Hash, err = runspec.CanonicalHash(request); err != nil {
 		t.Fatal(err)
 	}
-	if raw, err = json.Marshal(request); err != nil {
+	if raw, err = encodeRunRequest(tenant.s, tenant.team, run, request); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,request_hash=? WHERE team=? AND id=?`, raw, string(request.Hash), tenant.team, run)
