@@ -359,8 +359,14 @@
         "run_id": {
           "type": "string"
         },
+        "start_at": {
+          "type": "string"
+        },
         "started_at": {
           "format": "date-time",
+          "type": "string"
+        },
+        "stop_at": {
           "type": "string"
         },
         "trigger": {

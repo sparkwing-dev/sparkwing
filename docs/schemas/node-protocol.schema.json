@@ -1071,7 +1071,13 @@
           "minLength": 1,
           "type": "string"
         },
+        "start_at": {
+          "type": "string"
+        },
         "started_at": {
+          "type": "string"
+        },
+        "stop_at": {
           "type": "string"
         },
         "trigger": {
