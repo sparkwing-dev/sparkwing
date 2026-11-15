@@ -191,6 +191,28 @@ workspace selection. Concurrent jobs preserve unchanged SDK packages, and removi
 unchanged and validates the installed SDK against the exact native pin.
 Root lifecycle scripts run on each preparation. Other dependencies are reconciled
 only after npm's frozen-lockfile check passes.
+After a verified installation, preparation writes `node_modules/.sparkwing-sdk-receipt`.
+The receipt covers the inputs npm reads but does not write: `package.json`, the
+lockfile, every `package.json`, lockfile and `.npmrc` in the pipeline directory and
+its ancestors, the user, global and builtin npm configuration (the account's home
+directory when `HOME` is unset), `npm_config_*`, `HOME`, `NODE_ENV`, `NODE_OPTIONS`,
+`NODE_PATH` and `PREFIX`, the resolved `node` and `npm` executables, the manifest
+of every lockfile package outside `node_modules` (workspace members and linked
+sources), and local tarball dependencies. It also records npm's `node_modules/.package-lock.json` and
+the installed SDK manifest. These are not every input npm could read.
+A later preparation skips both npm commands only when these match and the tree
+passes npm's own hidden-lockfile check: every package it lists exists and no
+package folder is newer than it. Reuse still validates the SDK pin. Any
+difference, an unreadable input, a copied local directory dependency or a root
+lifecycle script (`preinstall`, `install`, `postinstall`, `prepublish`,
+`preprepare`, `prepare`, `postprepare` or `dependencies`) runs the npm commands
+above. Preparation removes the receipt before npm writes, compares the inputs taken
+before npm with the inputs after it, and writes a receipt only when they match and
+the SDK verifies, all under the lockfile lock. An interrupted install or an edit
+that lands while npm runs therefore never matches.
+Version-manager shims (asdf, mise, volta) keep the same `node` and `npm` executable
+across version switches, so the receipt does not notice a switch made through them.
+Remove `node_modules/.sparkwing-sdk-receipt`, or `node_modules`, after switching.
 Each installation makes one helper attempt with a ten-minute deadline. Failure
 stops the install, reports the cause, and kills and reaps its helper process tree.
 Verification then compiles Go packages or type-checks TypeScript and runs list,
