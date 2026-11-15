@@ -124,7 +124,7 @@ func validateRestriction(r Restriction, p VersionIndex, minimum bool) error {
 }
 
 // PolicyRefreshHint names the command that caches a verified version policy for local runs.
-const PolicyRefreshHint = "Run `sparkwing update` to cache the verified version policy; controller runners still require one."
+const PolicyRefreshHint = "Run `sparkwing update` to cache the signed version policy."
 
 // Policy returns an independent policy snapshot.
 func (v VerifiedIndex) Policy() VersionIndex {

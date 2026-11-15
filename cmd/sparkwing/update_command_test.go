@@ -315,4 +315,9 @@ func TestCachedVersionPolicyIsReadOnlyAndNamesTheRefreshCommand(t *testing.T) {
 	if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
 		t.Fatalf("reading the policy wrote %v %v", entries, err)
 	}
+	var text bytes.Buffer
+	renderDoctorMachine(&text, doctorReport{VersionPolicy: &status})
+	if line := text.String(); !strings.HasPrefix(line, "version_policy\tmissing\t") || !strings.Contains(line, "Run `sparkwing update`") {
+		t.Fatalf("doctor missing line lacks the repair command: %q", line)
+	}
 }
