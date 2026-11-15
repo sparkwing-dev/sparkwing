@@ -10,6 +10,20 @@ import (
 
 // Display projects accepted classifications without changing the immutable seal.
 func (r RunRow) Display() runspec.Display {
+	if r.argumentsUnavailable {
+		display := r.display()
+		for _, args := range []map[string]string{display.RequestedArgs, display.Args} {
+			for name := range args {
+				args[name] = unavailableArgumentValue
+			}
+		}
+		display.Reproducer = nil
+		return display
+	}
+	return r.display()
+}
+
+func (r RunRow) display() runspec.Display {
 	if r.Spec == nil {
 		return runspec.DisplayRequest(r.Request)
 	}
@@ -21,7 +35,11 @@ func (r RunRow) Display() runspec.Display {
 	return runspec.DisplaySpec(spec)
 }
 
-func (s *Store) refreshRunPresentations(ctx context.Context, runs []*Run) error {
+const unavailableArgumentValue = "(unavailable)"
+
+// safety: isolate lists a run whose sealed arguments cannot be opened with unavailable values;
+// single-run reads keep failing.
+func (s *Store) refreshRunPresentations(ctx context.Context, runs []*Run, isolate bool) error {
 	if len(runs) == 0 {
 		return nil
 	}
@@ -30,6 +48,7 @@ func (s *Store) refreshRunPresentations(ctx context.Context, runs []*Run) error 
 		return err
 	}
 	defer rollbackOrLog(tx)
+	tx.listing = isolate
 	for _, run := range runs {
 		row, err := readRunTx(ctx, tx, run.team, run.ID)
 		if err != nil {
@@ -51,7 +70,7 @@ func (s *Store) refreshTriggerPresentations(ctx context.Context, triggers []*Tri
 	for i, trigger := range triggers {
 		runs[i] = &Run{team: trigger.Team, RunSummary: runstate.RunSummary{ID: trigger.ID}}
 	}
-	if err := s.refreshRunPresentations(ctx, runs); err != nil {
+	if err := s.refreshRunPresentations(ctx, runs, false); err != nil {
 		return err
 	}
 	for i, trigger := range triggers {

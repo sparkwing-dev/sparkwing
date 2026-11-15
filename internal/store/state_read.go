@@ -31,13 +31,19 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	}
 	if len(request) > 0 {
 		if err := decodeRunRequest(tx.store, team, id, request, &v.Request); err != nil {
-			return v, persistedRunError(err)
+			if !tx.listing || !runArgumentsUnreadable(err) {
+				return v, persistedRunError(err)
+			}
+			v.argumentsUnavailable = true
 		}
 	}
 	if len(spec) > 0 && string(spec) != "null" {
 		v.Spec = new(runspec.Spec)
 		if err := decodeRunSpec(tx.store, team, id, spec, v.Spec); err != nil {
-			return v, persistedRunError(err)
+			if !tx.listing || !runArgumentsUnreadable(err) {
+				return v, persistedRunError(err)
+			}
+			v.argumentsUnavailable = true
 		}
 	}
 	for _, item := range []struct {
@@ -50,10 +56,12 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 			}
 		}
 	}
-	v.expansions, err = readAcceptedExpansionsTx(ctx, tx, team, id)
+	var unavailable bool
+	v.expansions, unavailable, err = readAcceptedExpansionsTx(ctx, tx, team, id)
 	if err != nil {
 		return v, err
 	}
+	v.argumentsUnavailable = v.argumentsUnavailable || unavailable
 	v.Lineage, v.Retry = execution.Lineage, execution.Retry
 	v.admission = execution.admissionIdentity
 	v.Plan = plan
@@ -148,10 +156,10 @@ func stateTime(v sql.NullInt64) *time.Time {
 	return &t
 }
 
-func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id string) ([]runstate.AcceptedExpansionRow, error) {
+func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id string) (_ []runstate.AcceptedExpansionRow, unavailable bool, _ error) {
 	rows, err := tx.queryContext(ctx, `SELECT node_id,generation,expansion_body,expansion_digest,expansion_registration FROM nodes WHERE team=? AND run_id=? AND expansion_body IS NOT NULL ORDER BY seq,node_id`, team, id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out []runstate.AcceptedExpansionRow
 	for rows.Next() {
@@ -162,32 +170,37 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 		var registrationRaw []byte
 		if err = rows.Scan(&node, &generation, &body, &digest, &registrationRaw); err != nil {
 			_ = rows.Close()
-			return out, err
+			return out, false, err
 		}
 		ref := runspec.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)}
 		if len(body) > 0 {
 			if len(registrationRaw) == 0 {
 				_ = rows.Close()
-				return out, errors.New("accepted expansion is missing host masking registrations; start a new run instead of resuming")
+				return out, false, errors.New("accepted expansion is missing host masking registrations; start a new run instead of resuming")
 			}
 			bodyHash, err := runspec.CanonicalHash(json.RawMessage(body))
 			if err != nil {
 				_ = rows.Close()
-				return out, err
+				return out, false, err
 			}
 			var registration runspec.SecretRegistration
 			if err := decodeRunDocument(tx.store, team, id, expansionArgumentsScope(node), registrationRaw, &registration, registrationArgumentSlots); err != nil {
-				_ = rows.Close()
-				return out, err
+				if !tx.listing || !runArgumentsUnreadable(err) {
+					_ = rows.Close()
+					return out, false, err
+				}
+				unavailable = true
+				out = append(out, runstate.AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: string(bodyHash)})
+				continue
 			}
 			if registration.Version != 1 {
 				_ = rows.Close()
-				return out, errors.New("accepted expansion was sealed without host masking registrations; start a new run instead of resuming")
+				return out, false, errors.New("accepted expansion was sealed without host masking registrations; start a new run instead of resuming")
 			}
 			projected, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: registration})
 			if err != nil || !reflect.DeepEqual(projected, registration) {
 				_ = rows.Close()
-				return out, errors.New("persisted expansion registration differs from its projection")
+				return out, false, errors.New("persisted expansion registration differs from its projection")
 			}
 			committed, err := runspec.CanonicalHash(struct {
 				Body         json.RawMessage
@@ -195,15 +208,15 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 			}{body, registration})
 			if err != nil || string(committed) != digest {
 				_ = rows.Close()
-				return out, errors.New("persisted expansion registration differs from its accepted digest")
+				return out, false, errors.New("persisted expansion registration differs from its accepted digest")
 			}
 			out = append(out, runstate.AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: string(bodyHash), Registration: registration})
 		}
 	}
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-		return out, err
+		return out, false, err
 	}
-	return out, nil
+	return out, unavailable, nil
 }
 
 func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (RunSnapshot, error) {

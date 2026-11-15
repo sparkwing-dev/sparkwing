@@ -193,14 +193,25 @@ func sealedArgumentsEnvelope(raw []byte) (string, error) {
 	return sealed.Envelope, nil
 }
 
+// safety: the wrapper lets a multi-run reader isolate one run whose sealed values cannot be opened.
+type unreadableRunArguments struct{ err error }
+
+func (e unreadableRunArguments) Error() string { return e.err.Error() }
+func (e unreadableRunArguments) Unwrap() error { return e.err }
+
+func runArgumentsUnreadable(err error) bool {
+	var unreadable unreadableRunArguments
+	return errors.As(err, &unreadable)
+}
+
 func openRunArguments(cipher SessionKeyCipher, team Team, run, scope, envelope string) (argumentValues, error) {
 	var values argumentValues
 	if cipher == nil {
-		return values, authorityError(hosterr.Unavailable, "run argument encryption is unavailable")
+		return values, unreadableRunArguments{authorityError(hosterr.Unavailable, "run argument encryption is unavailable")}
 	}
 	plain, err := cipher.OpenBound(secrets.PurposeRunArguments, string(team), run, scope, false, true, envelope)
 	if errors.Is(err, secrets.ErrKeyRefused) {
-		return values, authorityError(hosterr.Unavailable, err.Error())
+		return values, unreadableRunArguments{authorityError(hosterr.Unavailable, err.Error())}
 	}
 	if err != nil || json.Unmarshal([]byte(plain), &values) != nil {
 		return values, corruptRunArguments()
@@ -209,7 +220,7 @@ func openRunArguments(cipher SessionKeyCipher, team Team, run, scope, envelope s
 }
 
 func corruptRunArguments() error {
-	return authorityError(hosterr.IntegrityFailure, "sealed run arguments are unavailable or corrupt")
+	return unreadableRunArguments{authorityError(hosterr.IntegrityFailure, "sealed run arguments are unavailable or corrupt")}
 }
 
 func encodeRunRequest(s *Store, team Team, run string, request runspec.SealedRequest) ([]byte, error) {

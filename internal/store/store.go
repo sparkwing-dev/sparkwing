@@ -517,7 +517,7 @@ func (s *Store) listRuns(ctx context.Context, query string, args []any, f RunFil
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-	if err := s.refreshRunPresentations(ctx, out); err != nil {
+	if err := s.refreshRunPresentations(ctx, out, true); err != nil {
 		return nil, err
 	}
 	if f.hasBeforeCursor() {
