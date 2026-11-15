@@ -29,12 +29,12 @@ func TestSecretPreflightOptionalAdviceUsesDeclarationLanguage(t *testing.T) {
 			if err := json.Unmarshal(events[0].Payload, &event); err != nil {
 				t.Fatal(err)
 			}
-			want, other := `sw:"NAME,optional"`, `secrets: [{ name: "NAME", optional: true }]`
+			want, other := `sw:"ABSENT,optional"`, `secrets: [{ name: "ABSENT", optional: true }]`
 			if sdk == engineid.TypeScriptSDK {
 				want, other = other, want
 			}
 			for _, message := range []string{refusal.Error(), event.Message} {
-				if !strings.Contains(message, want) || (sdk != "" && strings.Contains(message, other)) || (sdk == "" && !strings.Contains(message, other)) {
+				if strings.Contains(message, "NAME") || !strings.Contains(message, want) || (sdk != "" && strings.Contains(message, other)) || (sdk == "" && !strings.Contains(message, other)) {
 					t.Fatalf("optional-secret syntax for %s: %s", sdk, message)
 				}
 			}

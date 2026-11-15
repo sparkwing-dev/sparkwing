@@ -709,7 +709,7 @@ func Registry() []Command {
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Rules: []string{"This explicit authorized read includes the value. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
+		{Path: "sparkwing secrets get", Rules: []string{"Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}},
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},

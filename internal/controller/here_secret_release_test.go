@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -188,8 +189,30 @@ func TestHereRunReleasesOnlySharedSecretsToItsOwnLiveClaim(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if body := h.refuse(t, "undeclared shared secret", h.award, "UNDECLARED"); !strings.Contains(body, string(hosterr.ReasonSecretUndeclared)) {
+		if body := h.refuse(t, "undeclared shared secret", h.award, "UNDECLARED"); !strings.Contains(body, string(hosterr.ReasonSecretUndeclared)) || !strings.Contains(body, `secret \"UNDECLARED\" is not declared`) {
 			t.Fatalf("undeclared refusal did not name the missing declaration: %s", body)
+		}
+	})
+	t.Run("undeclared refusal is the same whether the secret exists here, in another team or nowhere", func(t *testing.T) {
+		h, err := hereSecretFixture(t, []string{"TOKEN"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		engineSQL(t, h.s.store, `INSERT OR IGNORE INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
+		sealed, err := store.SealSecret(h.s.cipher, "b", store.Secret{Name: "OTHER_TEAM", Value: hereUndeclared, Masked: true, Shared: true, Principal: "admin"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := teststore.SeedSecret(h.s.store, "b", sealed.Row(), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		normalized := func(name string) string {
+			code, body := h.release(h.award, name, h.runID)
+			return strconv.Itoa(code) + " " + strings.ReplaceAll(body, name, "NAME")
+		}
+		own, foreign, missing := normalized("UNDECLARED"), normalized("OTHER_TEAM"), normalized("NEVER_SET")
+		if own != missing || foreign != missing {
+			t.Fatalf("undeclared refusal reveals existence:\nown team: %s\nother team: %s\nnowhere: %s", own, foreign, missing)
 		}
 	})
 	t.Run("submitting member's own credential is not a claim", func(t *testing.T) {

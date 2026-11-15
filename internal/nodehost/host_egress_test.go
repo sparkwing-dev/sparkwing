@@ -210,7 +210,7 @@ func TestPlanningFailureMasksCanonicalPayloads(t *testing.T) {
 	planner := SDKPlanner{Masker: masker}
 	source := &apierr.Error{Code: "failure-private-default", Message: "private-default", Hint: "private-default", Details: map[string]any{"token": "private-default"}}
 	var result *apierr.Error
-	if !errors.As(planner.planningError(t.Context(), nil, source, true, "Build"), &result) {
+	if !errors.As(planner.planningError(t.Context(), nil, source, true, PlanningProcessInput{Entrypoint: "Build"}), &result) {
 		t.Fatal("lost canonical error")
 	}
 	raw, _ := json.Marshal(result)
@@ -295,5 +295,44 @@ func TestPlanningUnknownPipelineWithholdsNamesWhileDiscoveryIsIncomplete(t *test
 	}
 	if strings.Contains(err.Error(), "private-name") || strings.Contains(err.Error(), "unknown-private") {
 		t.Fatalf("incomplete discovery leaked author text: %v", err)
+	}
+}
+
+func TestPlanningUnlistedPipelineSuggestsTheListedName(t *testing.T) {
+	for _, tc := range []struct {
+		invoked, message, hint string
+		listed                 []string
+	}{
+		{
+			invoked: "biuld", listed: []string{"build", "deploy"},
+			message: `no pipeline named "biuld": sparkwing.yaml does not list it and the SDK does not register it`,
+			hint:    "Did you mean \"build\"? Run `sparkwing pipeline list` to see the pipeline names.",
+		},
+		{
+			invoked: "zzz", listed: []string{"build"},
+			message: `no pipeline named "zzz": sparkwing.yaml does not list it and the SDK does not register it`,
+			hint:    "Run `sparkwing pipeline list` to see the pipeline names.",
+		},
+	} {
+		planner, input, fixture, _ := sdkPlanningFixture(t)
+		input.Run.Pipeline, input.Entrypoint, input.Listed = tc.invoked, tc.invoked, tc.listed
+		start := planner.Start
+		planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodewire.FrameLog) error) (ExecutorProcess, error) {
+			process, err := start(ctx, in, log)
+			proc := process.(*executorProcess)
+			answer := proc.answer
+			proc.answer = func(ctx context.Context, request nodewire.Request) (any, error) {
+				if request.Op == nodewire.OpDescribe {
+					return nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{{Name: "Build", Args: []nodewire.ArgumentDescription{}}}}, nil
+				}
+				return answer(ctx, request)
+			}
+			return process, err
+		}
+		_, err := planner.Prepare(t.Context(), input, fixture.input)
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.UnknownPipeline || failure.Message != tc.message || failure.Hint != tc.hint {
+			t.Errorf("%s: planning error = %#v, want message %q hint %q", tc.invoked, failure, tc.message, tc.hint)
+		}
 	}
 }

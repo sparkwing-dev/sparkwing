@@ -9,9 +9,12 @@ import (
 	"syscall"
 )
 
-func VerifyPrivateConfig(_ string, info os.FileInfo) error {
+func VerifyPrivateConfig(path string, info os.FileInfo) error {
 	if info.Mode().Perm()&0o077 != 0 {
-		return errors.New("mode must be 0600")
+		if path == "" {
+			return errors.New("mode must be 0600")
+		}
+		return fmt.Errorf("mode must be 0600; run chmod 600 %s", path)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {

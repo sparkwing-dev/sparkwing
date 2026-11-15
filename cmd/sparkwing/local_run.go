@@ -273,7 +273,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		},
 	}
 	prepared, err := planner.Inspect(ctx, nodehost.PlanningProcessInput{
-		Entry: entry, Entrypoint: identity.Entrypoint,
+		Entry: entry, Entrypoint: identity.Entrypoint, Listed: listedPipelines(selection.project),
 		Environment: seal, Args: map[string]string{}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		Run: nodewire.RunContext{RunID: rand.Text(), Pipeline: pipeline},
 	})

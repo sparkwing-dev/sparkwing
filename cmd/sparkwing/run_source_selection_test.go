@@ -238,3 +238,20 @@ func codeRevisionForTest(sha, head string) string {
 	}
 	return "OLD"
 }
+
+func TestLocalRunOutsideGitSaysToInitializeTheRepository(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(root))
+	failure := errors.New("source git rev-parse failed: exit status 128")
+	if want := root + " is not a git repository; run `git init`, commit the project, then retry this run"; explainOutsideGit(t.Context(), root, failure).Error() != want {
+		t.Fatalf("outside git: %v, want %q", explainOutsideGit(t.Context(), root, failure), want)
+	}
+	repo := initSnapshotRepo(t)
+	if err := explainOutsideGit(t.Context(), repo, failure); !errors.Is(err, failure) {
+		t.Fatalf("inside git: %v, want the original failure", err)
+	}
+	other := errors.New("pipeline release is pinned")
+	if err := explainOutsideGit(t.Context(), root, other); !errors.Is(err, other) {
+		t.Fatalf("unrelated failure rewritten: %v", err)
+	}
+}
