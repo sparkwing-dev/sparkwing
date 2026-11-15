@@ -255,3 +255,34 @@ func TestLocalRunOutsideGitSaysToInitializeTheRepository(t *testing.T) {
 		t.Fatalf("unrelated failure rewritten: %v", err)
 	}
 }
+
+func TestLocalRunRecordsTheCheckedOutBranch(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	runSnapshotGit(t, repo, "symbolic-ref", "HEAD", "refs/heads/trunk")
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: ci\n    entrypoint: CI\n", 0o600)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-qm", "pipeline")
+	runSnapshotGit(t, repo, "tag", "release")
+	directory := filepath.Join(repo, ".sparkwing")
+	refFor := func(flags runFlags) string {
+		t.Helper()
+		selected, err := selectLocalRunSource(t.Context(), t.TempDir(), directory, "ci", flags, os.Environ(), secrets.NewMasker())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := selected.execution.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return selected.git.Ref
+	}
+	if got := refFor(runFlags{}); got != "trunk" {
+		t.Fatalf("working-tree run on trunk recorded ref %q", got)
+	}
+	if got := refFor(runFlags{ref: "release"}); got != "release" {
+		t.Fatalf("--ref release recorded ref %q", got)
+	}
+	runSnapshotGit(t, repo, "checkout", "-q", "--detach")
+	if got := refFor(runFlags{}); got != "" {
+		t.Fatalf("detached run recorded ref %q", got)
+	}
+}

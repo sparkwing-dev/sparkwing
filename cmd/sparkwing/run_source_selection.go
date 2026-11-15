@@ -82,6 +82,14 @@ func selectLocalRunSource(ctx context.Context, home, directory, pipeline string,
 			return localSourceSelection{}, err
 		}
 	}
+	if flags.ref == "" {
+		// safety: a detached HEAD (exit 1) or a directory outside any repository
+		// (exit 128) records no branch; source acquisition reports a missing repository.
+		git.Ref, err = reader.read(ctx, "symbolic-ref", "--quiet", "--short", "HEAD")
+		if err != nil && !gitExitCode(err, 1) && !gitExitCode(err, 128) {
+			return localSourceSelection{}, err
+		}
+	}
 	revision := selected.Ref
 	if flags.ref == "" && revision != "" {
 		if err := acquireExecution(); err != nil {
