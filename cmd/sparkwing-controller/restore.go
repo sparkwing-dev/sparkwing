@@ -93,8 +93,7 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return store.Policies{}, err
 		}
-		run, _ := selected.(store.SessionKeyCipher)
-		return store.Policies{RunEnvironment: run}, nil
+		return store.Policies{RunEnvironment: selected}, nil
 	}))
 	if err != nil {
 		return err

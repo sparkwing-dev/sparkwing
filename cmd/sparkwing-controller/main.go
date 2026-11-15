@@ -864,7 +864,7 @@ func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Sto
 }
 
 // safety: serving and offline maintenance select the same key, or one cannot open the other's run arguments.
-func deploymentCipher(ctx context.Context, st *store.Store, cipher *secrets.Cipher, keyPath string) (controller.Cipher, error) {
+func deploymentCipher(ctx context.Context, st *store.Store, cipher *secrets.Cipher, keyPath string) (controller.BoundCipher, error) {
 	switch {
 	case cipher != nil:
 		// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
