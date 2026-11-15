@@ -36,7 +36,8 @@ type Services struct {
 	Policies store.Policies
 	State    State
 	HTTP     localhostwire.LocalHTTP
-	Runner   func(context.Context) error
+	// Runner supervises the local runner and reports each check to its callback.
+	Runner   func(context.Context, func(error)) error
 	Close    func() error
 	Maintain func(context.Context)
 	Complete func(context.Context) error
@@ -154,11 +155,11 @@ func (c *localController) ownRuns(ctx context.Context) error {
 	}
 }
 
-func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivity) error) error {
+func (c *localController) Run(ctx context.Context, reports wingd.LocalReports) error {
 	c.mu.Lock()
-	if c.closed || c.running || !c.reconciled || report == nil {
+	if c.closed || c.running || !c.reconciled || reports.Activity == nil || reports.Runner == nil {
 		c.mu.Unlock()
-		return errors.New("wingd: local workers require reconciled state and an activity reporter")
+		return errors.New("wingd: local workers require reconciled state and activity and runner reporters")
 	}
 	c.running = true
 	c.mu.Unlock()
@@ -186,8 +187,8 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 			results <- err
 		}()
 	}
-	start("queue", c.services.Runner)
-	start("activity", func(ctx context.Context) error { return c.State.Watch(ctx, report) })
+	start("queue", func(ctx context.Context) error { return c.services.Runner(ctx, reports.Runner) })
+	start("activity", func(ctx context.Context) error { return c.State.Watch(ctx, reports.Activity) })
 	start("maintenance", func(ctx context.Context) error { return c.maintain(ctx) })
 	if c.services.Deliver != nil {
 		start("run event delivery", c.services.Deliver)

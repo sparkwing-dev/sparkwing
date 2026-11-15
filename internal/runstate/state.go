@@ -305,6 +305,11 @@ const (
 	RunCancelled RunState = "cancelled"
 )
 
+// RunStates lists every run state in lifecycle order, for filters and validation.
+func RunStates() []RunState {
+	return []RunState{RunPending, RunRunning, RunSuccess, RunDryRun, RunFailed, RunCancelled}
+}
+
 // RunCause distinguishes replay-safe lifecycle writes from trigger recovery that keeps the same run alive.
 type RunCause string
 

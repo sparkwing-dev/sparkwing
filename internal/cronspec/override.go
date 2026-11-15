@@ -29,7 +29,7 @@ func (input Override) Validate() error {
 	}
 	if input.TZ != nil && *input.TZ != "" && *input.TZ != "local" {
 		if _, err := time.LoadLocation(*input.TZ); err != nil {
-			return errors.New("invalid schedule time zone")
+			return fmt.Errorf("invalid schedule time zone %q; use an IANA name such as America/Denver, or local", *input.TZ)
 		}
 	}
 	if input.Overlap != nil && *input.Overlap != "skip" && *input.Overlap != "queue" {

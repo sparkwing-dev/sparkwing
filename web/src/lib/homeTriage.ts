@@ -47,7 +47,7 @@ export function recentPipelineTriage(
 
   const groups = new Map<string, PipelineTriage>();
   for (const run of runs) {
-    const branch = run.git_branch || "";
+    const branch = (run.git_branch || "").replace(/^refs\/heads\//, "");
     const defaultBranch = branch === "main" || branch === "master";
     if (!defaultBranch && (!includeFeatureBranches || !branch)) continue;
     let repo = repoIdentity(run);

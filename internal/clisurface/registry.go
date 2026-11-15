@@ -58,7 +58,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing daemon status", Flags: []Flag{}},
 		{Path: "sparkwing daemon uninstall", Platforms: []string{"linux", "darwin"}, Rules: []string{"Remove the controller login service; Windows starts the controller on demand."}, Flags: []Flag{}},
-		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller, its dashboard and its local runner. The runner stops claiming work first. If it remains alive at the end of the stop wait, the command exits nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let held work finish, then retry `sparkwing daemon stop`. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again."}, Flags: []Flag{}},
+		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller, its dashboard and its local runner. The runner stops claiming work first. If it still holds jobs at the end of the stop wait, the command exits nonzero and names the runner. The controller keeps accepting that runner's results and exits on its own once the runner does; `sparkwing daemon status` reports `stopping` until then. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard", Flags: []Flag{}},
 		{Path: "sparkwing dashboard logs", Flags: []Flag{
 			{Name: "tail", Argument: "N"},
@@ -203,6 +203,7 @@ func Registry() []Command {
 		{Path: "sparkwing pipeline describe", Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "secrets"},
+			{Name: "show-withheld"},
 		}},
 		{Path: "sparkwing pipeline hooks", Flags: []Flag{}},
 		{Path: "sparkwing pipeline hooks install", Flags: []Flag{}},
@@ -563,7 +564,7 @@ func Registry() []Command {
 		{Path: "sparkwing runs logs", Rules: []string{
 			"Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.",
 			"Every read consumes all available pages. Without --follow, a snapshot with pending final log segments reports logs incomplete and exits 3. --follow waits for new records until final log segments are complete. An interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.",
-			"JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
+			"JSON emits tagged log records. Plain emits log lines. Pretty starts each line with its job, leaves out scheduling events, and ends a failed run with each failed job's step and error and the commands to read its log and retry it. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "job", Argument: "JOB"},
@@ -709,7 +710,7 @@ func Registry() []Command {
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Rules: []string{"This explicit authorized read includes the value. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
+		{Path: "sparkwing secrets get", Rules: []string{"Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}},
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},

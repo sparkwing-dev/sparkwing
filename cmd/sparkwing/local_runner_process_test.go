@@ -67,7 +67,7 @@ func TestLocalRunnerSupervisorReusesOnlyMatchingLiveBuild(t *testing.T) {
 				return localhostwire.LocalRunnerInstance{ID: id, State: "active", Version: "v1", BuildIdentity: "build"}, nil
 			}
 			supervisor.registry = fixture
-			err := supervisor.ensure(t.Context())
+			_, err := supervisor.ensure(t.Context())
 			if change == "unknown" {
 				if !errors.Is(err, os.ErrPermission) || started != "" {
 					t.Fatalf("unknown process triggered replacement: %s %v", started, err)
@@ -88,8 +88,8 @@ func TestLocalRunnerSupervisorDoesNotRetireOldRunnerOnFailedStartup(t *testing.T
 		version:  "v1", build: "build", alive: func(localhostwire.LocalRunnerInstance) (bool, error) { return true, nil },
 		start: func(context.Context, string) error { return failure },
 	}
-	if err := supervisor.ensure(t.Context()); !errors.Is(err, failure) {
-		t.Fatalf("startup failure: %v", err)
+	if serving, err := supervisor.ensure(t.Context()); !errors.Is(err, failure) || !serving {
+		t.Fatalf("startup failure: serving=%t err=%v", serving, err)
 	}
 }
 
@@ -101,7 +101,7 @@ func TestLocalRunnerSupervisorRejectsChangedReadyIdentity(t *testing.T) {
 		version: "v1", build: "build", alive: func(localhostwire.LocalRunnerInstance) (bool, error) { return true, nil },
 		start: func(context.Context, string) error { return nil },
 	}
-	if err := supervisor.ensure(t.Context()); err == nil {
+	if _, err := supervisor.ensure(t.Context()); err == nil {
 		t.Fatal("accepted a different executable")
 	}
 }
@@ -261,7 +261,7 @@ func TestLocalRunnerSupervisorBoundsActivationWithoutKillingProcess(t *testing.T
 			start: func(context.Context, string) error { started++; return nil },
 		}
 		start := time.Now()
-		if err := supervisor.ensure(t.Context()); !errors.Is(err, context.DeadlineExceeded) || started != 1 || time.Since(start) != 45*time.Second {
+		if _, err := supervisor.ensure(t.Context()); !errors.Is(err, context.DeadlineExceeded) || started != 1 || time.Since(start) != 45*time.Second {
 			t.Fatalf("activation deadline: starts=%d elapsed=%s err=%v", started, time.Since(start), err)
 		}
 	})
@@ -270,10 +270,13 @@ func TestLocalRunnerSupervisorBoundsActivationWithoutKillingProcess(t *testing.T
 func TestLocalRunnerSupervisorBacksOffFailedStartupWithoutStoppingController(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		starts := 0
+		var reports []error
+		failure := errors.New("launchd domain unavailable")
 		supervisor := localRunnerProcessSupervisor{
 			registry: runnerDiscoveryFixture{}, version: "v1", build: "build",
-			alive: func(localhostwire.LocalRunnerInstance) (bool, error) { return true, nil },
-			start: func(context.Context, string) error { starts++; return errors.New("launchd domain unavailable") },
+			alive:  func(localhostwire.LocalRunnerInstance) (bool, error) { return true, nil },
+			start:  func(context.Context, string) error { starts++; return failure },
+			report: func(err error) { reports = append(reports, err) },
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 		defer cancel()
@@ -282,6 +285,61 @@ func TestLocalRunnerSupervisorBacksOffFailedStartupWithoutStoppingController(t *
 		}
 		if starts != 7 {
 			t.Fatalf("startup attempts = %d, want 7 (0, 2, 6, 14, 30, 62, 122s)", starts)
+		}
+		if len(reports) != starts {
+			t.Fatalf("reported %d of %d failed starts", len(reports), starts)
+		}
+		for _, report := range reports {
+			if !errors.Is(report, failure) {
+				t.Fatalf("failed start reported %v, want %v", report, failure)
+			}
+		}
+	})
+}
+
+func TestLocalRunnerSupervisorReportsRecoveryAndServingPredecessor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		failure := errors.New("manager unavailable")
+		fails := true
+		var reports []error
+		active := localhostwire.LocalRunnerInstance{}
+		supervisor := localRunnerProcessSupervisor{
+			version: "v1", build: "build",
+			alive: func(localhostwire.LocalRunnerInstance) (bool, error) { return true, nil },
+			start: func(context.Context, string) error {
+				if fails {
+					return failure
+				}
+				return nil
+			},
+			report: func(err error) { reports = append(reports, err) },
+		}
+		supervisor.registry = runnerDiscoveryFixture{active: active, read: func(id string) (localhostwire.LocalRunnerInstance, error) {
+			return localhostwire.LocalRunnerInstance{ID: id, State: "active", Version: "v1", BuildIdentity: "build"}, nil
+		}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- supervisor.run(ctx) }()
+		synctest.Wait()
+		if len(reports) != 1 || !errors.Is(reports[0], failure) {
+			t.Fatalf("first failed start reported %v", reports)
+		}
+		fails = false
+		time.Sleep(localRunnerMaxRetry)
+		synctest.Wait()
+		if len(reports) < 2 || reports[len(reports)-1] != nil {
+			t.Fatalf("recovered start reported %v", reports)
+		}
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+
+		reports = nil
+		fails = true
+		supervisor.registry = runnerDiscoveryFixture{active: localhostwire.LocalRunnerInstance{ID: "old", Version: "v0", BuildIdentity: "old-build"}}
+		if serving, err := supervisor.ensure(t.Context()); !errors.Is(err, failure) || !serving {
+			t.Fatalf("outdated live runner: serving=%t err=%v", serving, err)
 		}
 	})
 }

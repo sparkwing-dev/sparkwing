@@ -43,6 +43,7 @@ Print one pipeline's full metadata
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
 | `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
+| `--show-withheld` | Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs. |
 
 ## `sparkwing pipeline hooks`
 

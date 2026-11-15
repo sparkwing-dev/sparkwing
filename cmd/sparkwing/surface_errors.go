@@ -88,11 +88,11 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 	}
 	message := strings.TrimPrefix(failure.Message, prefix)
 	message = strings.TrimPrefix(message, strings.TrimSpace(path)+": ")
-	if _, err := fmt.Fprintln(w, prefix+opsview.DisplayText(message)); err != nil {
+	if _, err := fmt.Fprintln(w, prefix+opsview.DisplayBlock(message, "  ")); err != nil {
 		return err
 	}
 	if failure.Hint != "" {
-		_, writeErr := fmt.Fprintln(w, "hint: "+opsview.DisplayText(failure.Hint))
+		_, writeErr := fmt.Fprintln(w, "hint: "+opsview.DisplayBlock(failure.Hint, "  "))
 		return writeErr
 	}
 	return nil

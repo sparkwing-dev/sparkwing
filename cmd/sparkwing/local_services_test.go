@@ -217,7 +217,7 @@ func TestProductionLocalSchedulesShareCapturedControllerHome(t *testing.T) {
 func TestProductionLocalQueueBindsRunnerPolicy(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
-	var runner func(context.Context) error
+	var runner func(context.Context, func(error)) error
 	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 		services, err := bindLocalController(ctx, binding)
 		if err == nil {

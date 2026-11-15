@@ -26,6 +26,18 @@ type doctorLifecycleFake struct {
 	deadline time.Time
 	findings []localhostwire.LocalDoctorFinding
 	err      error
+	statuses []wingd.LocalStatus
+}
+
+func (f *doctorLifecycleFake) Status(context.Context) (wingd.LocalStatus, error) {
+	if len(f.statuses) == 0 {
+		return wingd.LocalStatus{}, nil
+	}
+	status := f.statuses[0]
+	if len(f.statuses) > 1 {
+		f.statuses = f.statuses[1:]
+	}
+	return status, nil
 }
 
 func (f *doctorLifecycleFake) Doctor(ctx context.Context, version string) ([]localhostwire.LocalDoctorFinding, error) {

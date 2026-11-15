@@ -1,6 +1,8 @@
 package docs
 
 import (
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -153,11 +155,45 @@ func parseHeading(line string) (level int, text string, ok bool) {
 	return i, strings.TrimSpace(line[i:]), true
 }
 
-func nonCurrentPenalty(slug string) int {
-	if strings.HasPrefix(slug, "migrations/") {
+// safety: history ranks below every guide match. A changelog section spans a whole
+// release, so it contains nearly any word set and would outrank the answering guide.
+// A query naming a version or a breaking change is asking for that history.
+func nonCurrentPenalty(slug string, historyQuery bool) int {
+	if slug == ChangelogSlug && !historyQuery || strings.HasPrefix(slug, "migrations/") {
 		return 1000
 	}
 	return 0
+}
+
+var versionToken = regexp.MustCompile(`^v?\d+\.\d+`)
+
+func asksForHistory(tokens []string) bool {
+	return slices.ContainsFunc(tokens, func(t string) bool { return t == "breaking" || versionToken.MatchString(t) })
+}
+
+// safety: every token must match, and these words match nearly every long section
+// by substring ("do" in "docker"), so "how do I add a secret" searches "add secret".
+var stopWords = map[string]bool{
+	"how": true, "do": true, "does": true, "can": true, "what": true, "which": true,
+	"where": true, "why": true, "is": true, "are": true, "the": true,
+	"an": true, "to": true, "of": true, "in": true, "my": true, "for": true, "with": true,
+}
+
+func queryTokens(query string) []string {
+	var kept, content []string
+	for _, t := range strings.Fields(strings.ToLower(strings.TrimSpace(query))) {
+		if len(t) < minToken {
+			continue
+		}
+		kept = append(kept, t)
+		if !stopWords[t] {
+			content = append(content, t)
+		}
+	}
+	if len(content) == 0 {
+		return kept
+	}
+	return content
 }
 
 func wholeWord(hay, tok string) bool {
@@ -214,17 +250,11 @@ const minToken = 2
 // long one -- but only as a tie-break, since a section that explains
 // something is long precisely because it explains it.
 func SearchSections(query string) []Section {
-	tokens := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
-	kept := tokens[:0]
-	for _, t := range tokens {
-		if len(t) >= minToken {
-			kept = append(kept, t)
-		}
-	}
-	tokens = kept
+	tokens := queryTokens(query)
 	if len(tokens) == 0 {
 		return nil
 	}
+	history := asksForHistory(tokens)
 	type scored struct {
 		Section
 		score int
@@ -267,7 +297,7 @@ func SearchSections(query string) []Section {
 				}
 			}
 			if all {
-				hits = append(hits, scored{Section: s, score: score - nonCurrentPenalty(e.Slug)})
+				hits = append(hits, scored{Section: s, score: score - nonCurrentPenalty(e.Slug, history)})
 			}
 		}
 	}

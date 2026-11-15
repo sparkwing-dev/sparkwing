@@ -188,3 +188,34 @@ func FuzzProductionRouterBindsImplicitSelectors(f *testing.F) {
 		}
 	})
 }
+
+func TestUndeclaredSecretReadNamesTheSecretAndTheDeclaration(t *testing.T) {
+	s, handler := registeredRouter(t)
+	resolver := routeResolver(func(context.Context, string) (string, bool, error) {
+		t.Fatal("undeclared secret reached resolver")
+		return "", false, nil
+	})
+	bearer, revoke, err := s.Admit(routeNode{RunID: "run", NodeID: "job", Secrets: []string{"TOKEN"}, Masker: secrets.NewMasker(), Resolver: resolver})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revoke()
+	foreign, foreignRevoke, err := s.Admit(routeNode{RunID: "other", NodeID: "job", Masker: secrets.NewMasker(), Resolver: resolver})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer foreignRevoke()
+	own := routedRequest(t, handler, http.MethodGet, "/node/v1/secrets/DEPLOY_KEY", bearer, "")
+	other := routedRequest(t, handler, http.MethodGet, "/node/v1/secrets/DEPLOY_KEY", foreign, "")
+	var envelope hosterr.Envelope
+	if err := json.Unmarshal(own.Body.Bytes(), &envelope); err != nil || envelope.Error == nil || own.Code != http.StatusForbidden {
+		t.Fatalf("undeclared read: %d %s", own.Code, own.Body)
+	}
+	want := `secret "DEPLOY_KEY" is not declared by this pipeline; add a Secrets() field tagged sw:"DEPLOY_KEY" (TypeScript: secrets: [{ name: "DEPLOY_KEY" }])`
+	if envelope.Error.Message != want {
+		t.Fatalf("message = %q, want %q", envelope.Error.Message, want)
+	}
+	if other.Code != own.Code || other.Body.String() != own.Body.String() {
+		t.Fatalf("another process got a different refusal: %d %s vs %d %s", other.Code, other.Body, own.Code, own.Body)
+	}
+}

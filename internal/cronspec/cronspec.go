@@ -81,7 +81,7 @@ func Parse(expr string) (*Schedule, error) {
 	if strings.HasPrefix(tokens[0], "@") {
 		expanded, ok := aliases[strings.ToLower(tokens[0])]
 		if !ok {
-			return nil, fmt.Errorf("cronspec: unknown alias %q", tokens[0])
+			return nil, fmt.Errorf("cronspec: unknown alias %q; use @hourly, @daily, @weekly, @monthly, @yearly or five fields", tokens[0])
 		}
 		if len(tokens) != 1 {
 			return nil, fmt.Errorf("cronspec: alias %q stands alone, got %q", tokens[0], src)

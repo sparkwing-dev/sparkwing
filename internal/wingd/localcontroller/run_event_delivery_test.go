@@ -33,7 +33,9 @@ func TestBlockedRunEventDeliveryDoesNotStallMaintenance(t *testing.T) {
 		}
 		ctx, cancel := context.WithCancel(t.Context())
 		joined := make(chan error, 1)
-		go func() { joined <- c.Run(ctx, func(wingd.LocalActivity) error { return nil }) }()
+		go func() {
+			joined <- c.Run(ctx, wingd.LocalReports{Activity: func(wingd.LocalActivity) error { return nil }, Runner: func(error) {}})
+		}()
 		<-delivering
 		time.Sleep(5 * time.Second)
 		synctest.Wait()

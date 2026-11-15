@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -12,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type localSourceSelection struct {
@@ -79,6 +82,14 @@ func selectLocalRunSource(ctx context.Context, home, directory, pipeline string,
 			return localSourceSelection{}, err
 		}
 	}
+	if flags.ref == "" {
+		// safety: a detached HEAD (exit 1) or a directory outside any repository
+		// (exit 128) records no branch; source acquisition reports a missing repository.
+		git.Ref, err = reader.read(ctx, "symbolic-ref", "--quiet", "--short", "HEAD")
+		if err != nil && !gitExitCode(err, 1) && !gitExitCode(err, 128) {
+			return localSourceSelection{}, err
+		}
+	}
 	revision := selected.Ref
 	if flags.ref == "" && revision != "" {
 		if err := acquireExecution(); err != nil {
@@ -103,4 +114,34 @@ func (s localSourceSelection) checkout(ctx context.Context, home string, capture
 		return nil, err
 	}
 	return source.PrepareCheckout(ctx, spec, source.Options{Workspace: filepath.Join(home, "workspaces"), GitAccess: source.GitAccessOwner, Base: procenv.Base{Local: true, Captured: captured, Masker: secrets.NewMasker()}})
+}
+
+// safety: nil without sparkwing.yaml, so planning never calls a name unlisted.
+func listedPipelines(project *projectconfig.Config) []string {
+	if project == nil {
+		return nil
+	}
+	names := make([]string, 0, len(project.Pipelines))
+	for _, pipeline := range project.Pipelines {
+		names = append(names, pipeline.Name)
+	}
+	return names
+}
+
+// safety: source git output is withheld because it can echo credentials, so
+// whether the project sits outside any git repository comes from a separate
+// local read of its directory.
+func explainOutsideGit(ctx context.Context, root string, err error) error {
+	if err == nil || ctx.Err() != nil || !strings.Contains(err.Error(), "source git ") {
+		return err
+	}
+	environment, envErr := procenv.Build(procenv.Git, procenv.Base{Local: true}, procenv.Runtime{})
+	if envErr != nil {
+		return err
+	}
+	reader := triggerCheckout{directory: root, environment: slices.Collect(environment.Values())}
+	if _, readErr := reader.read(ctx, "rev-parse", "--git-dir"); readErr != nil && strings.Contains(readErr.Error(), "not a git repository") {
+		return &apierr.Error{Code: apierr.InvalidArgs, Message: fmt.Sprintf("%s is not a git repository; run `git init`, commit the project, then retry this run", root)}
+	}
+	return err
 }

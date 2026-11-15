@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -14,7 +15,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 type runListOptions struct {
@@ -35,6 +38,13 @@ func parseRunQuery(inv clisurface.Invocation, now time.Time) (controllerwire.Run
 	}
 	if q.Limit < 1 {
 		return invalid("--limit must be positive")
+	}
+	if status := strings.TrimPrefix(q.Status, "!"); q.Status != "" && !slices.Contains(clisurface.RunStatuses(), status) {
+		message := "--status requires one of " + strings.Join(clisurface.RunStatuses(), ", ") + ", optionally prefixed with ! to exclude it"
+		if closest := sparkwingruntime.SuggestClosest(strings.ToLower(status), clisurface.RunStatuses()); closest != "" {
+			message += "; did you mean " + strings.TrimSuffix(q.Status, status) + closest + "?"
+		}
+		return invalid(message)
 	}
 	if inv.Has("since") {
 		d, err := clisurface.ParseLookback(inv.Value("since"))
@@ -139,6 +149,15 @@ func observeRunList(ctx context.Context, inv clisurface.Invocation, reader contr
 	}
 	if err := renderRunList(ctx, reader, out, diagnostics, page, o); err != nil {
 		return err
+	}
+	if len(page.Runs) == 0 && !o.follow && o.query.Pipeline != "" && o.query.Cursor == "" {
+		if _, project, err := projectconfig.Discover("."); err == nil {
+			if note := pipelineFilterNote(project, o.query.Pipeline); note != "" {
+				if _, err := fmt.Fprintln(diagnostics, note); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	if !o.follow {
 		return nil
@@ -299,4 +318,17 @@ func writePageInfo(out, diagnostics io.Writer, next string, truncated bool, form
 		return err
 	}
 	return nil
+}
+
+// safety: runs from other repositories can match any name, so only a close
+// spelling of a sparkwing.yaml name earns a note.
+func pipelineFilterNote(project *projectconfig.Config, name string) string {
+	names := listedPipelines(project)
+	if slices.Contains(names, name) {
+		return ""
+	}
+	if closest := sparkwingruntime.SuggestClosest(name, names); closest != "" {
+		return fmt.Sprintf("no runs of pipeline %q; sparkwing.yaml lists no such pipeline. Did you mean --pipeline %s?", name, closest)
+	}
+	return ""
 }

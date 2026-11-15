@@ -33,6 +33,7 @@ func main(){
  if err:=os.WriteFile(os.Getenv("INSTALL_MARKER"),[]byte(req.SDK),0600);err!=nil { os.Exit(23) }
  if os.Getenv("INSTALL_FAILURE")!="" { fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));fmt.Fprintln(os.Stderr,strings.Repeat("a",(1<<20)-5)+os.Getenv("REGISTRY_NOTE"));os.Exit(24) }
  if os.Getenv("INSTALL_ENVELOPE")!="" { fmt.Fprintln(os.Stderr,"jobs/broken.go:6:9: undefined: missing");fmt.Fprintln(os.Stderr,"{\"error\":{\"code\":\"internal\",\"message\":\"compile .sparkwing/: exit status 1\",\"hint\":\"fix the error above\"}}");os.Exit(1) }
+ if os.Getenv("INSTALL_COMPILE")!="" { fmt.Fprintln(os.Stderr,"{\"error\":{\"code\":\"plan_failed\",\"message\":\"the pipeline code in .sparkwing does not compile:\\n.sparkwing/jobs/broken.go:6:9: undefined: missing\",\"hint\":\"Fix the errors above, then run the pipeline again.\"}}");os.Exit(1) }
  if os.Getenv("INSTALL_REFUSAL")!="" { fmt.Fprintln(os.Stderr,"{\"error\":{\"code\":\"bad_request\",\"message\":\"TypeScript package.json requires a main entry\",\"hint\":\"set main to the pipeline entry file\"}}");os.Exit(1) }
  if reply:=os.Getenv("INSTALL_REPLY");reply!="" { fmt.Print(reply);return }
  dir:=filepath.Join(req.Directory,req.PipelineDir)
@@ -117,6 +118,13 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 			_, err = resolved.InstallSDK(t.Context(), bad)
 			if err == nil || strings.Contains(err.Error(), `{"error"`) || !strings.HasSuffix(err.Error(), "undefined: missing\ncompile .sparkwing/: exit status 1\nhint: fix the error above") {
 				t.Fatalf("installer failure kept its JSON envelope instead of a plain line: %v", err)
+			}
+			bad = request
+			bad.Environment = append(append([]string{}, request.Environment...), "INSTALL_COMPILE=1")
+			_, err = resolved.InstallSDK(t.Context(), bad)
+			var compile *apierr.Error
+			if !errors.As(err, &compile) || compile.Code != apierr.PlanFailed || err.Error() != "the pipeline code in .sparkwing does not compile:\n.sparkwing/jobs/broken.go:6:9: undefined: missing" || compile.Hint == "" {
+				t.Fatalf("pipeline compile failure read as an SDK installation failure: %v", err)
 			}
 			bad = request
 			bad.Environment = append(append([]string{}, request.Environment...), "INSTALL_REFUSAL=1")

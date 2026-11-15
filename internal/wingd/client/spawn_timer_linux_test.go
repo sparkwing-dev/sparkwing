@@ -1,13 +1,16 @@
 package client
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestServiceDaemonLeavesCallerCgroup(t *testing.T) {
@@ -53,6 +56,7 @@ func TestServiceDaemonRefusesUnsafeFallback(t *testing.T) {
 				t.Setenv("PATH", home)
 			case "unavailable-bus":
 				testmanager.Fail(t, "systemd-run")
+				testmanager.Fail(t, "systemctl")
 				t.Setenv("XDG_RUNTIME_DIR", home)
 				t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "missing-bus"))
 			}
@@ -75,5 +79,27 @@ func TestServiceDaemonRefusesUnsafeFallback(t *testing.T) {
 				t.Fatalf("direct daemon ownership changed: %s, %v", after, err)
 			}
 		})
+	}
+}
+
+func TestServiceDaemonNamesAnUnreachableUserManager(t *testing.T) {
+	t.Setenv("INVOCATION_ID", "timer-test")
+	home := shortHome(t)
+	bin := filepath.Join(home, "host")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const refusal = "Failed to connect to bus: No such file or directory"
+	testmanager.FailWith(t, "systemd-run", refusal)
+	testmanager.FailWith(t, "systemctl", refusal)
+	err := spawnDetached(bin, home, "")
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Message != "systemd-run --user --scope: the systemd user manager is unreachable ("+refusal+")" {
+		t.Fatalf("scoped start without a user manager = %v", err)
+	}
+	for _, text := range []string{"INVOCATION_ID", "systemctl --user status", "loginctl enable-linger"} {
+		if !strings.Contains(failure.Hint, text) {
+			t.Fatalf("hint %q lacks %q", failure.Hint, text)
+		}
 	}
 }
