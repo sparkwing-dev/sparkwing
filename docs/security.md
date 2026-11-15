@@ -416,16 +416,33 @@ credential release is audited. See [Git credentials](git-credentials.md).
 ## Secrets at rest
 
 Secrets remain encrypted with authenticated row binding. The kind of row
-(secret, git credential, submitted run environment or controller setting), its
-team, name, pipeline/shared scope and masking policy participate in the binding.
-Moving a ciphertext to a row with different access, or to a row of another kind,
-cannot make it readable there. A value that fails to open is an error, never an
-empty success value.
+(secret, git credential, submitted run environment, run arguments or controller
+setting), its team, name, pipeline/shared scope and masking policy participate
+in the binding. Moving a ciphertext to a row with different access, or to a row
+of another kind, cannot make it readable there. A value that fails to open is an
+error, never an empty success value.
+
+Stored run requests, accepted specs and generator expansion registrations keep
+argument names and secret classifications in plain JSON. Every argument value,
+every declared default and every masking registration value moves into one
+`sealed_arguments` envelope in the same document, bound to the run's team, run
+ID and document kind. A keyed store whose key cannot be used refuses the run
+rather than store the values in plaintext. A PostgreSQL controller started
+without a `secrets-key` credential has no key: it refuses every secret write,
+stores run argument values, including secret defaults, unencrypted, and says so
+in a startup warning. Runs stored before argument sealing keep their plaintext
+values and still read as written. `sparkwing operator secrets rotate` seals them in
+place and reports the count as `plaintext_run_arguments`; `--verify` only
+counts them. Local stores are not rewritten, because the local `secrets.key`
+sits beside `state.db` with the same file permissions. A rewritten row's old
+plaintext can survive in SQLite free pages and WAL frames or PostgreSQL dead
+tuples until the database is vacuumed, and in every backup taken before the
+rewrite. Treat those copies as holding the plaintext arguments.
 
 ### Rotating the secrets key
 
-One key seals every team's secrets, git credentials and submitted run
-environments, and the session signing key. To replace it:
+One key seals every team's secrets, git credentials, run arguments and
+submitted run environments, and the session signing key. To replace it:
 
 1. Generate a new key (`openssl rand -base64 32`).
 2. Put the current key in the `secrets-key.previous` credential and the new key
@@ -436,11 +453,13 @@ environments, and the session signing key. To replace it:
    `operator.tokens`, or `POST /api/v1/operator/secrets/rotate` from a console
    session signed in within the last 10 minutes. It reseals every row under the
    new key, one team at a time, and reports counts, `previous_key_only` (rows
-   that needed the previous key) and any row neither key opens. It is safe to
+   that needed the previous key), `plaintext_run_arguments` (run documents it
+   sealed for the first time) and any row neither key opens. It is safe to
    repeat, including after an interruption.
 4. Run `sparkwing operator secrets rotate --verify` (`?verify=1`). It writes
-   nothing and reports how many rows still open only under the previous key.
-   Run the rotation again until it reports `previous_key_only: 0`.
+   nothing and reports how many rows still open only under the previous key and
+   how many run documents still hold plaintext arguments. Run the rotation again
+   until it reports `previous_key_only: 0` and `plaintext_run_arguments: 0`.
 5. When verification reports zero and nothing unreadable, remove
    `secrets-key.previous` and restart every replica. A row reported unreadable
    was already unreadable under both keys; rewrite or delete it first. Back up

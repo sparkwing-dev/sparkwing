@@ -33,12 +33,15 @@ func runOperatorSecretsCommand(ctx context.Context, inv clisurface.Invocation, o
 	if inv.Bool("verify") {
 		verb = "readable"
 	}
-	fmt.Fprintf(out, "%s: secrets=%d git_credentials=%d run_environments=%d settings=%d run_event_subscriptions=%d previous_key_only=%d\n", verb, result.Secrets, result.GitCredentials, result.RunEnvironments, result.Settings, result.RunEventSubscriptions, result.PreviousKeyOnly)
+	fmt.Fprintf(out, "%s: secrets=%d git_credentials=%d run_environments=%d run_arguments=%d settings=%d run_event_subscriptions=%d previous_key_only=%d plaintext_run_arguments=%d\n", verb, result.Secrets, result.GitCredentials, result.RunEnvironments, result.RunArguments, result.Settings, result.RunEventSubscriptions, result.PreviousKeyOnly, result.PlaintextRunArguments)
 	for _, row := range result.Unreadable {
 		fmt.Fprintf(out, "unreadable: %s team=%s name=%s pipeline=%s\n", opsview.DisplayText(row.Purpose), opsview.DisplayText(row.Team), opsview.DisplayText(row.Name), opsview.DisplayText(row.Pipeline))
 	}
 	if len(result.Unreadable) > 0 || result.PreviousKeyOnly > 0 && inv.Bool("verify") {
 		fmt.Fprintln(out, "keep the previous key mounted")
+	}
+	if result.PlaintextRunArguments > 0 && inv.Bool("verify") {
+		fmt.Fprintln(out, "run the rotation without --verify to seal run arguments stored in plaintext")
 	}
 	return nil
 }

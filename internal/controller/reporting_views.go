@@ -18,6 +18,8 @@ func sealedRotationView(row store.SealedRotation) controllerwire.SealedRotation 
 		Secrets:               row.Secrets,
 		GitCredentials:        row.GitCredentials,
 		RunEnvironments:       row.RunEnvironments,
+		RunArguments:          row.RunArguments,
+		PlaintextRunArguments: row.PlaintextRunArguments,
 		Settings:              row.Settings,
 		PreviousKeyOnly:       row.PreviousKeyOnly,
 		RunEventSubscriptions: row.RunEventSubscriptions,

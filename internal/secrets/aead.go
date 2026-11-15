@@ -44,6 +44,7 @@ const (
 	// #nosec G101 -- This is an AEAD purpose label, not key material.
 	PurposeGitCredential  Purpose = "git-credential"
 	PurposeRunEnvironment Purpose = "run-environment"
+	PurposeRunArguments   Purpose = "run-arguments"
 	PurposeSetting        Purpose = "setting"
 	// #nosec G101 -- This is an AEAD purpose label, not key material.
 	PurposeEventSigning Purpose = "event-signing"
@@ -51,7 +52,7 @@ const (
 
 func (p Purpose) valid() bool {
 	switch p {
-	case PurposeSecret, PurposeGitCredential, PurposeRunEnvironment, PurposeSetting, PurposeEventSigning:
+	case PurposeSecret, PurposeGitCredential, PurposeRunEnvironment, PurposeRunArguments, PurposeSetting, PurposeEventSigning:
 		return true
 	}
 	return false

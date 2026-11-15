@@ -276,7 +276,7 @@ func defaultOptions() []store.Option {
 		panic(err)
 	}
 	return []store.Option{store.WithPolicies(func(*store.Store) (store.Policies, error) {
-		return store.Policies{Intake: IntakePolicy{}, SessionKeys: cipher}, nil
+		return store.Policies{Intake: IntakePolicy{}, SessionKeys: cipher, RunEnvironment: cipher}, nil
 	})}
 }
 

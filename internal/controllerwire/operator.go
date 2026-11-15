@@ -128,7 +128,11 @@ type SealedRotation struct {
 	Secrets         int `json:"secrets"`
 	GitCredentials  int `json:"git_credentials"`
 	RunEnvironments int `json:"run_environments"`
-	Settings        int `json:"settings"`
+	// RunArguments counts resealed run argument envelopes; PlaintextRunArguments counts
+	// run documents stored before argument sealing, which a rotation seals and verify only counts.
+	RunArguments          int `json:"run_arguments"`
+	PlaintextRunArguments int `json:"plaintext_run_arguments"`
+	Settings              int `json:"settings"`
 	// RunEventSubscriptions counts resealed subscription signing secrets.
 	RunEventSubscriptions int             `json:"run_event_subscriptions"`
 	PreviousKeyOnly       int             `json:"previous_key_only"`

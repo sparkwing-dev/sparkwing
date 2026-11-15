@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -84,6 +86,9 @@ func newKeyRotationFixture(t *testing.T, open func(*testing.T, ...store.Option) 
 			t.Fatal(err)
 		}
 		seedRun(t, st, forTeam(t, st, team), "run-"+string(team), "build")
+		if err := teststore.SeedRun(st, ctx, team, store.Run{RunSummary: runstate.RunSummary{ID: "args-" + string(team), Pipeline: "build", Status: "success", CreatedAt: now, Args: map[string]string{"token": "argument-" + string(team)}}}); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO run_event_subscriptions(team,id,url,event_types,secret,created_principal,created_at,updated_at) VALUES ($1,'sub_000000000000000000000001','https://hooks.example','["run.finished"]',$2,'seed',1,1)`,
 			team, seal(t, f.old, secrets.PurposeEventSigning, team, store.RunEventSecretName("sub_000000000000000000000001"), "", "whsec_"+string(team))); err != nil {
 			t.Fatal(err)
@@ -154,6 +159,21 @@ func (f *keyRotationFixture) opensUnder(t *testing.T, c *secrets.Cipher) (secret
 	return secretsOpen, git, env, err == nil
 }
 
+func (f *keyRotationFixture) plaintextArguments(t *testing.T) int {
+	t.Helper()
+	plain := 0
+	for _, team := range f.teams {
+		var request []byte
+		if err := teststore.SQL(t, f.st).QueryRowContext(context.Background(), `SELECT request_json FROM runs WHERE team=$1 AND id=$2`, team, "args-"+string(team)).Scan(&request); err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(request, []byte("argument-"+string(team))) {
+			plain++
+		}
+	}
+	return plain
+}
+
 func (f *keyRotationFixture) subscriptionsOpenUnder(t *testing.T, c *secrets.Cipher) int {
 	t.Helper()
 	open := 0
@@ -184,8 +204,11 @@ func TestOperatorKeyRotationResealsEveryTenantUnderTheCurrentKey(t *testing.T) {
 				t.Fatal("refused rotation resealed rows")
 			}
 			code, body := f.rotate(t, h, f.operator, "verify=1")
-			if code != http.StatusOK || body["previous_key_only"] != float64(9) || body["secrets"] != float64(2) || body["run_event_subscriptions"] != float64(2) {
+			if code != http.StatusOK || body["previous_key_only"] != float64(9) || body["secrets"] != float64(2) || body["run_event_subscriptions"] != float64(2) || body["plaintext_run_arguments"] != float64(2) || body["run_arguments"] != float64(0) {
 				t.Fatalf("verification: %d %v", code, body)
+			}
+			if n := f.plaintextArguments(t); n != 2 {
+				t.Fatalf("verification sealed %d plaintext argument documents", 2-n)
 			}
 			if s, g, e, c := f.opensUnder(t, f.next); s+g+e != 0 || c {
 				t.Fatal("verification resealed rows")
@@ -194,8 +217,11 @@ func TestOperatorKeyRotationResealsEveryTenantUnderTheCurrentKey(t *testing.T) {
 				t.Fatalf("malformed verify query: %d", code)
 			}
 			code, body = f.rotate(t, h, f.operator)
-			if code != http.StatusOK || body["previous_key_only"] != float64(9) || body["secrets"] != float64(2) || body["run_event_subscriptions"] != float64(2) || body["git_credentials"] != float64(2) || body["run_environments"] != float64(2) || body["settings"] != float64(1) {
+			if code != http.StatusOK || body["previous_key_only"] != float64(9) || body["secrets"] != float64(2) || body["run_event_subscriptions"] != float64(2) || body["git_credentials"] != float64(2) || body["run_environments"] != float64(2) || body["settings"] != float64(1) || body["plaintext_run_arguments"] != float64(2) {
 				t.Fatalf("rotation: %d %v", code, body)
+			}
+			if n := f.plaintextArguments(t); n != 0 {
+				t.Fatalf("rotation left %d argument documents in plaintext", n)
 			}
 			unreadable, _ := body["unreadable"].([]any)
 			if len(unreadable) != 1 || unreadable[0].(map[string]any)["name"] != "LOST" || unreadable[0].(map[string]any)["team"] != string(f.teams[1]) {
@@ -214,11 +240,26 @@ func TestOperatorKeyRotationResealsEveryTenantUnderTheCurrentKey(t *testing.T) {
 			if _, err := f.stray.OpenBound(secrets.PurposeSecret, string(f.teams[1]), "LOST", "", false, true, lost); err != nil {
 				t.Fatalf("unreadable row changed: %v", err)
 			}
-			if code, body := f.rotate(t, h, f.operator, "verify=1"); code != http.StatusOK || body["previous_key_only"] != float64(0) {
+			if code, body := f.rotate(t, h, f.operator, "verify=1"); code != http.StatusOK || body["previous_key_only"] != float64(0) || body["plaintext_run_arguments"] != float64(0) || body["run_arguments"] != float64(2) {
 				t.Fatalf("verification after rotation: %d %v", code, body)
 			}
-			if code, body := f.rotate(t, f.server(t, f.next), f.operator); code != http.StatusOK || body["secrets"] != float64(2) || body["previous_key_only"] != float64(0) {
+			if code, body := f.rotate(t, f.server(t, f.next), f.operator); code != http.StatusOK || body["secrets"] != float64(2) || body["previous_key_only"] != float64(0) || body["run_arguments"] != float64(2) {
 				t.Fatalf("repeat rotation under the new key alone: %d %v", code, body)
+			}
+			for _, team := range f.teams {
+				var request []byte
+				if err := teststore.SQL(t, f.st).QueryRowContext(context.Background(), `SELECT request_json FROM runs WHERE team=$1 AND id=$2`, team, "args-"+string(team)).Scan(&request); err != nil {
+					t.Fatal(err)
+				}
+				var stored struct {
+					Envelope string `json:"sealed_arguments"`
+				}
+				if err := json.Unmarshal(request, &stored); err != nil {
+					t.Fatal(err)
+				}
+				if v, err := f.next.OpenBound(secrets.PurposeRunArguments, string(team), "args-"+string(team), "request", false, true, stored.Envelope); err != nil || !strings.Contains(v, "argument-"+string(team)) {
+					t.Fatalf("the current key alone does not open resealed arguments: %v", err)
+				}
 			}
 		})
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, error) {
@@ -28,13 +29,24 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	if err != nil {
 		return v, err
 	}
+	if len(request) > 0 {
+		if err := decodeRunRequest(tx.store, team, id, request, &v.Request); err != nil {
+			return v, persistedRunError(err)
+		}
+	}
+	if len(spec) > 0 && string(spec) != "null" {
+		v.Spec = new(runspec.Spec)
+		if err := decodeRunSpec(tx.store, team, id, spec, v.Spec); err != nil {
+			return v, persistedRunError(err)
+		}
+	}
 	for _, item := range []struct {
 		raw []byte
 		dst any
-	}{{request, &v.Request}, {spec, &v.Spec}, {lineage, &execution}, {actor, &v.StateActor}} {
+	}{{lineage, &execution}, {actor, &v.StateActor}} {
 		if len(item.raw) > 0 {
 			if err := json.Unmarshal(item.raw, item.dst); err != nil {
-				return v, authorityError(hosterr.IntegrityFailure, "invalid persisted run: "+err.Error())
+				return v, persistedRunError(err)
 			}
 		}
 	}
@@ -119,6 +131,15 @@ func scanNode(row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
 	return v, nil
 }
 
+// safety: typed refusals keep their code; anything else reports an undecodable row.
+func persistedRunError(err error) error {
+	var typed *apierr.Error
+	if errors.As(err, &typed) {
+		return err
+	}
+	return authorityError(hosterr.IntegrityFailure, "invalid persisted run: "+err.Error())
+}
+
 func stateTime(v sql.NullInt64) *time.Time {
 	if !v.Valid {
 		return nil
@@ -155,7 +176,7 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 				return out, err
 			}
 			var registration runspec.SecretRegistration
-			if err := json.Unmarshal(registrationRaw, &registration); err != nil {
+			if err := decodeRunDocument(tx.store, team, id, expansionArgumentsScope(node), registrationRaw, &registration, registrationArgumentSlots); err != nil {
 				_ = rows.Close()
 				return out, err
 			}

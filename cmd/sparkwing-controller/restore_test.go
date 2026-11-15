@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -204,5 +207,74 @@ func TestRestorePrepareRefusesALostEpochFileAndNamesTheWayOut(t *testing.T) {
 	defer st.Close()
 	if state, err := st.AsOperator().RestoreStatus(t.Context()); err != nil || state.Pending {
 		t.Fatalf("refused restore held schedules: %+v %v", state, err)
+	}
+}
+
+func TestRestorePrepareCancelsScheduledRunsWithSealedArguments(t *testing.T) {
+	home, creds, epochDir := t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	key := bytes.Repeat([]byte{42}, secrets.KeySize)
+	if err := os.WriteFile(filepath.Join(creds, credSecretsKey), []byte(base64.StdEncoding.EncodeToString(key)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := secrets.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch, err := credentials.LoadOrCreateEpoch(epochDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "state.db")
+	st, err := teststore.Open(t, path, store.WithCredentialEpoch(epoch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "scheduled", Pipeline: "nightly", Status: "running", TriggerSource: "schedule"}}); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := teststore.SQL(t, st).QueryRow(`SELECT request_json FROM runs WHERE id='scheduled'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["request"].(map[string]any)["requested_args"] = map[string]string{"token": ""}
+	if doc["sealed_arguments"], err = cipher.SealBound(secrets.PurposeRunArguments, string(store.DefaultTeam), "scheduled", "request", false, true, `{"maps":[{"token":"restore-secret"}],"strings":[]}`); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err = json.Marshal(doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := teststore.SQL(t, st).Exec(`UPDATE runs SET request_json=$1 WHERE id='scheduled'`, raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if err := runRestore([]string{"prepare", "--credentials-dir", creds, "--credential-epoch-dir", epochDir}, &out, &stderr); err != nil {
+		t.Fatalf("prepare with the serving key: %v", err)
+	}
+	st, err = store.Open(path, store.WithCredentialEpoch(epoch), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{RunEnvironment: cipher}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.ReadRun(t.Context(), "scheduled")
+	if err != nil || row.CancelRequestedAt == nil || row.Request.Request.RequestedArgs["token"] != "restore-secret" {
+		t.Fatalf("restored scheduled run = %s cancel=%v %v, %v", row.State, row.CancelRequestedAt, row.Request.Request.RequestedArgs, err)
 	}
 }

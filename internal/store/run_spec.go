@@ -249,7 +249,14 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err := expansionAuthorityTx(ctx, tx, t.team, request); err != nil {
 			return err
 		}
-		write, err := tx.execContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_registration=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, accepted.hash, accepted.body, accepted.registration, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
+		var registration []byte
+		if accepted.registration != nil {
+			registration, err = encodeExpansionRegistration(t.s, t.team, string(request.Source.RunID), string(request.Source.NodeID), *accepted.registration)
+			if err != nil {
+				return err
+			}
+		}
+		write, err := tx.execContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_registration=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, accepted.hash, accepted.body, registration, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
 		if err != nil {
 			return err
 		}
@@ -377,7 +384,7 @@ func resolveExpansionFailureTx(ctx context.Context, tx *storeTx, target expiredU
 
 func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result AdmissionResult, snapshot admittedSnapshot, p capability.Principal, key, scope, digest string, policy IntakePolicyFacts, now time.Time) error {
 	input := snapshot.request.Request
-	body, err := json.Marshal(snapshot.request)
+	body, err := encodeRunRequest(tx.store, team, result.RunID, snapshot.request)
 	if err != nil {
 		return err
 	}
@@ -433,7 +440,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 	if err := json.Unmarshal(body, &plan); err != nil {
 		return err
 	}
-	raw, err := json.Marshal(spec)
+	raw, err := encodeRunSpec(tx.store, team, id, spec)
 	if err != nil {
 		return err
 	}

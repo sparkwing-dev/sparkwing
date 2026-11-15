@@ -525,7 +525,7 @@ func (t *Tenant) GitHubCommitRuns(ctx context.Context, repo GitHubRepo, sha stri
 		if err := rows.Scan(&run.ID, &run.Pipeline, &body); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(body, &run.Request); err != nil {
+		if err := decodeRunRequest(t.s, t.team, run.ID, body, &run.Request); err != nil {
 			return nil, err
 		}
 		out = append(out, run)

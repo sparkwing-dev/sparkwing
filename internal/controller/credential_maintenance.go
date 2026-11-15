@@ -115,7 +115,7 @@ func (s *Server) handleRotateSealedValues(w http.ResponseWriter, r *http.Request
 		return credentialWriteError(err)
 	}
 	s.logger.Info("sealed values rotated", "verify", verify, "previous_key_only", result.PreviousKeyOnly, "secrets", result.Secrets, "git_credentials", result.GitCredentials,
-		"run_environments", result.RunEnvironments, "settings", result.Settings, "run_event_subscriptions", result.RunEventSubscriptions, "unreadable", len(result.Unreadable))
+		"run_environments", result.RunEnvironments, "run_arguments", result.RunArguments, "plaintext_run_arguments", result.PlaintextRunArguments, "settings", result.Settings, "run_event_subscriptions", result.RunEventSubscriptions, "unreadable", len(result.Unreadable))
 	writeJSON(w, http.StatusOK, sealedRotationView(result))
 	return nil
 }

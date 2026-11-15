@@ -850,24 +850,37 @@ func parseSecretsCipher(cfg deployment.Config) (*secrets.Cipher, error) {
 func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Store,
 	cipher *secrets.Cipher, keyPath string,
 ) error {
+	selected, err := deploymentCipher(ctx, st, cipher, keyPath)
+	if err != nil {
+		return err
+	}
+	if _, keyless := selected.(keylessCipher); keyless {
+		slog.Warn("no " + credSecretsKey + " credential: this PostgreSQL controller refuses every secret write and stores " +
+			"run argument values, including secret defaults, unencrypted; put a base64-encoded 32-byte key in the " +
+			credSecretsKey + " file of its --credentials-dir and restart it to encrypt them")
+	}
+	srv.WithSecretsCipher(selected)
+	return nil
+}
+
+// safety: serving and offline maintenance select the same key, or one cannot open the other's run arguments.
+func deploymentCipher(ctx context.Context, st *store.Store, cipher *secrets.Cipher, keyPath string) (controller.Cipher, error) {
 	switch {
 	case cipher != nil:
 		// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
-		srv.WithSecretsCipher(cipher)
+		return cipher, nil
 	case st.Dialect() == store.DialectSQLite:
 		ring, err := localsecrets.NewStoreKeyring(keyPath, nil,
 			"Restore that key to "+keyPath+", or put it in the "+credSecretsKey+" credential, and start again.")
 		if err != nil {
-			return fmt.Errorf("secrets key %s: %w", keyPath, err)
+			return nil, fmt.Errorf("secrets key %s: %w", keyPath, err)
 		}
 		if err := ring.MissingKey(ctx, st.AsOperator()); err != nil {
-			return err
+			return nil, err
 		}
-		srv.WithSecretsCipher(ring.For(st.AsOperator()))
-	default:
-		srv.WithSecretsCipher(keylessCipher{})
+		return ring.For(st.AsOperator()), nil
 	}
-	return nil
+	return keylessCipher{}, nil
 }
 
 // safety: the generated key sits beside the database on its volume, so a

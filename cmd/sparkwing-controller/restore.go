@@ -10,6 +10,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -78,7 +79,23 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 		dialect, target = store.DialectPostgres, creds.PGURL
 	}
 	ctx := context.Background()
-	st, err := store.OpenRestore(ctx, dialect, target, store.WithCredentialEpoch(epoch))
+	keys, err := deployment.NewKeyPair(credSecretsKey, credSecretsPreviousKey, creds.SecretsKey, creds.SecretsPreviousKey)
+	if err != nil {
+		return err
+	}
+	cipher, err := secretsCipher(keys)
+	if err != nil {
+		return err
+	}
+	// safety: prepare cancels restored scheduled runs, which reads their sealed run arguments.
+	st, err := store.OpenRestore(ctx, dialect, target, store.WithCredentialEpoch(epoch), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+		selected, err := deploymentCipher(ctx, st, cipher, generatedKeyPath(p.StateDB()))
+		if err != nil {
+			return store.Policies{}, err
+		}
+		run, _ := selected.(store.SessionKeyCipher)
+		return store.Policies{RunEnvironment: run}, nil
+	}))
 	if err != nil {
 		return err
 	}
