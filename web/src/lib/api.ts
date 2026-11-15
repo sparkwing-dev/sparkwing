@@ -1337,6 +1337,8 @@ export interface CronTimerState {
   path: string;
   binary: string;
   detail: string;
+  // True when the service manager could not say whether the timer is enabled.
+  activation_unknown: boolean;
 }
 
 export interface CronTick {
