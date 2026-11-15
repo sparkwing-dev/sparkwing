@@ -9,7 +9,7 @@
 - **cli:** A failed run ends with a failure block
   The block names each failed job with its step and error, says which dependency
   stopped a cancelled job, and gives the `runs logs --run N --job JOB` and
-  `runs retry --failed --run N` commands. The `run status: failed` diagnostic no
+  `runs retry --failed --run N` commands. The trailing "run status: failed" diagnostic no
   longer follows it, and the exit status stays 1.
 - **orchestrator:** A failed run's reason lists cancelled jobs separately
   `failed: test; cancelled: deploy` replaces `failed: test, deploy`.
