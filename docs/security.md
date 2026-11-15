@@ -423,10 +423,18 @@ of another kind, cannot make it readable there. A value that fails to open is an
 error, never an empty success value.
 
 Stored run requests, accepted specs and generator expansion registrations keep
-argument names and secret classifications in plain JSON. Every argument value,
-every declared default and every masking registration value moves into one
-`sealed_arguments` envelope in the same document, bound to the run's team, run
-ID and document kind. A keyed store whose key cannot be used refuses the run
+argument names and secret classifications in plain JSON. Pipeline-level argument
+values, pipeline-level declared defaults and every masking registration value
+move into one `sealed_arguments` envelope in the same document, bound to the
+run's team, run ID and document kind. Job-level `WithArgs` declarations are not
+sealed yet: their defaults, including secret defaults, stay in plaintext in the
+stored plan (`runs.plan_json`), each job's node spec (`nodes.spec_json`) and a
+generator's expansion body (`nodes.expansion_body`). The same values are sealed
+where they also appear in the accepted spec and its masking registration, and
+run output masks them. A listing that meets a run whose envelope cannot be
+opened shows that run's argument values as `(unavailable)` and lists the other
+runs; reading that run's status, or anything that needs its values such as a
+retry, fails for that run alone. A keyed store whose key cannot be used refuses the run
 rather than store the values in plaintext. A PostgreSQL controller started
 without a `secrets-key` credential has no key: it refuses every secret write,
 stores run argument values, including secret defaults, unencrypted, and says so

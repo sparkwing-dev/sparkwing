@@ -25,15 +25,24 @@ import (
 )
 
 const (
-	argSupplied  = "canary-supplied-7f3a9c41"
-	argPlain     = "canary-plain-2b8e41d0"
-	argDefault   = "canary-default-c91d5e33"
-	argListA     = "canary-list-a-11d0e4f2"
-	argListB     = "canary-list-b-22e0f5a3"
-	argGenerated = "canary-generated-5a7f6b04"
+	argSupplied            = "canary-supplied-7f3a9c41"
+	argPlain               = "canary-plain-2b8e41d0"
+	argDefault             = "canary-default-c91d5e33"
+	argListA               = "canary-list-a-11d0e4f2"
+	argListB               = "canary-list-b-22e0f5a3"
+	argGenerated           = "canary-generated-5a7f6b04"
+	argJobDefault          = "canary-job-default-64fe1a2b"
+	argGeneratedJobDefault = "canary-generated-job-default-55ad3c4d"
 )
 
 var argumentCanaries = []string{argSupplied, argPlain, argDefault, argListA, argListB, argGenerated}
+
+// safety: job-level WithArgs defaults are not sealed yet. This pins exactly where they remain in
+// plaintext, so sealing plan and node documents turns this test red until the expectation becomes zero.
+var knownPlaintextJobDefaults = map[string][]string{
+	argJobDefault:          {"nodes.spec_json", "runs.plan_json"},
+	argGeneratedJobDefault: {"nodes.expansion_body", "nodes.spec_json"},
+}
 
 func TestRunArgumentValuesNeverReachStoredRows(t *testing.T) {
 	for _, dialect := range []struct {
@@ -49,7 +58,7 @@ func TestRunArgumentValuesNeverReachStoredRows(t *testing.T) {
 
 func checkRunArgumentsAtRest(t *testing.T, s *store.Store) {
 	ctx := t.Context()
-	source := admitArgumentRun(t, s, "acceptance", []nodewire.JobSpec{{ID: "alpha", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{Generate: []string{"children"}}}})
+	source := admitArgumentRun(t, s, "acceptance", []nodewire.JobSpec{{ID: "alpha", Steps: []nodewire.StepSpec{{ID: "body"}}, Closures: nodewire.ClosureSpec{Generate: []string{"children"}}, Arguments: []nodewire.ArgumentDescription{jobArgument()}}})
 	acceptArgumentExpansion(t, s, source)
 	finished := admitArgumentRun(t, s, "retrier", []nodewire.JobSpec{})
 	retry := retryArgumentRun(t, s, finished)
@@ -66,7 +75,7 @@ func checkRunArgumentsAtRest(t *testing.T, s *store.Store) {
 		if row.Spec == nil || !maps.Equal(row.Spec.Resolved.Args, resolvedArguments()) || !maps.Equal(row.Spec.Request.Request.RequestedArgs, row.Request.Request.RequestedArgs) {
 			t.Fatalf("%s spec arguments did not round trip: %+v", plan.RunID, row.Spec)
 		}
-		for _, want := range []string{argSupplied, argDefault, argListA, argListB} {
+		for _, want := range []string{argSupplied, argDefault, argListA, argListB, argJobDefault} {
 			if !slices.Contains(row.Spec.Resolved.SecretRegistration.Values, want) {
 				t.Fatalf("%s registration lost %q", plan.RunID, want)
 			}
@@ -76,12 +85,25 @@ func checkRunArgumentsAtRest(t *testing.T, s *store.Store) {
 		}
 	}
 	snapshot, err := teamOf(t, s, source).ReadSnapshot(ctx, source.RunID)
-	if err != nil || len(snapshot.Expansions) != 1 || !slices.Contains(snapshot.Expansions[0].Registration.Values, argGenerated) {
+	if err != nil || len(snapshot.Expansions) != 1 || !slices.Contains(snapshot.Expansions[0].Registration.Values, argGenerated) || !slices.Contains(snapshot.Expansions[0].Registration.Values, argGeneratedJobDefault) {
 		t.Fatalf("expansion registration did not round trip: %+v, %v", snapshot.Expansions, err)
 	}
 
-	if leaks := storedCanaries(t, s); len(leaks) > 0 {
+	if leaks := storedCanaries(t, s, argumentCanaries); len(leaks) > 0 {
 		t.Fatalf("argument values stored in plaintext:\n%s", strings.Join(leaks, "\n"))
+	}
+	for canary, want := range knownPlaintextJobDefaults {
+		var got []string
+		for _, leak := range storedCanaries(t, s, []string{canary}) {
+			location, _, _ := strings.Cut(leak, ": ")
+			if !slices.Contains(got, location) {
+				got = append(got, location)
+			}
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Fatalf("job-level default %s is stored in plaintext at %v, want exactly %v", canary, got, want)
+		}
 	}
 
 	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET request_json=(SELECT request_json FROM runs WHERE id=?) WHERE id=?`), source.RunID, retry.RunID); err != nil {
@@ -95,7 +117,12 @@ func checkRunArgumentsAtRest(t *testing.T, s *store.Store) {
 }
 
 func resolvedArguments() map[string]string {
-	return map[string]string{"key": argSupplied, "keys": argListA + "," + argListB, "plain": argPlain, "token": argDefault}
+	return map[string]string{"jtok": argJobDefault, "key": argSupplied, "keys": argListA + "," + argListB, "plain": argPlain, "token": argDefault}
+}
+
+func jobArgument() nodewire.ArgumentDescription {
+	value := argJobDefault
+	return nodewire.ArgumentDescription{Name: "jtok", Type: "string", Secret: true, Default: &value, JobID: "alpha"}
 }
 
 func teamOf(t *testing.T, s *store.Store, plan store.PlanAcceptance) *store.Tenant {
@@ -124,10 +151,11 @@ func admitArgumentRun(t *testing.T, s *store.Store, team string, jobs []nodewire
 		{Name: "keys", Type: "[]string", Secret: true, Default: &list},
 		{Name: "plain", Type: "string"},
 		{Name: "token", Type: "string", Secret: true, Default: &value},
+		jobArgument(),
 	}
 	plan.Seal.Resolved.Args = resolvedArguments()
-	plan.Seal.Resolved.SecretArgs = []string{"key", "keys", "token"}
-	plan.Seal.Resolved.SecretRegistration = runspec.SecretRegistration{Defaults: []runspec.SecretValue{{Raw: argDefault}, {Raw: list, List: true}}, ListArgs: []string{"keys"}}
+	plan.Seal.Resolved.SecretArgs = []string{"jtok", "key", "keys", "token"}
+	plan.Seal.Resolved.SecretRegistration = runspec.SecretRegistration{Defaults: []runspec.SecretValue{{Raw: argDefault}, {Raw: list, List: true}, {Raw: argJobDefault}}, ListArgs: []string{"keys"}}
 	if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
 		t.Fatal(err)
 	}
@@ -157,10 +185,10 @@ func acceptArgumentExpansion(t *testing.T, s *store.Store, plan store.PlanAccept
 		t.Fatal(err)
 	}
 	request := store.ExpansionSubmission{
-		Registration: runspec.SecretRegistration{Version: 1, Defaults: []runspec.SecretValue{{Raw: argGenerated}}},
+		Registration: runspec.SecretRegistration{Version: 1, Defaults: []runspec.SecretValue{{Raw: argGenerated}, {Raw: argGeneratedJobDefault}}},
 		Source:       source.Ref, SourceGeneration: source.Generation,
 		Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Capability.Prefix}, CapabilityPrefix: expander.Capability.Prefix},
-		Body:  []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`),
+		Body:  []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}],"arguments":[{"name":"gtok","type":"string","required":false,"default":"` + argGeneratedJobDefault + `","secret":true,"job_id":"child"}]}]}`),
 	}
 	if _, err := tenant.AcceptExpansion(ctx, request); err != nil {
 		t.Fatal(err)
@@ -202,7 +230,7 @@ func retryArgumentRun(t *testing.T, s *store.Store, plan store.PlanAcceptance) s
 }
 
 // safety: every column of every table is read as raw bytes, so a new storage location cannot hide a canary.
-func storedCanaries(t *testing.T, s *store.Store) []string {
+func storedCanaries(t *testing.T, s *store.Store, canaries []string) []string {
 	t.Helper()
 	ctx := t.Context()
 	query := `SELECT name FROM sqlite_master WHERE type='table'`
@@ -217,7 +245,7 @@ func storedCanaries(t *testing.T, s *store.Store) []string {
 		t.Fatalf("scanned only %d tables", len(tables))
 	}
 	var forms [][]byte
-	for _, canary := range argumentCanaries {
+	for _, canary := range canaries {
 		forms = append(forms, []byte(canary), []byte(base64.StdEncoding.EncodeToString([]byte(canary))))
 	}
 	var leaks []string
@@ -306,7 +334,7 @@ func TestRunArgumentsFailClosedUnlessTheStoreIsKeyless(t *testing.T) {
 				in.Request.RequestedArgs = map[string]string{"key": argSupplied}
 				in.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"key"}}
 			})
-			leaks := storedCanaries(t, s)
+			leaks := storedCanaries(t, s, argumentCanaries)
 			if _, keyless := tc.cipher.(store.KeylessCipher); !keyless {
 				var refused *apierr.Error
 				if !errors.As(err, &refused) || refused.Code != hosterr.Unavailable || len(leaks) != 0 {

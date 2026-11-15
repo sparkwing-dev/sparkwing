@@ -1,11 +1,12 @@
 ## Run argument values are sealed in stored runs
 
 **Before:** `runs.request_json`, `runs.spec_json` and
-`nodes.expansion_registration` held argument values, declared defaults and
-masking registration values in plaintext.
+`nodes.expansion_registration` held argument values, pipeline-level declared
+defaults and masking registration values in plaintext.
 
 **After:** those values live in a `sealed_arguments` envelope opened with the
-secrets key. No schema change is involved. Upgrade every controller replica
+secrets key. Job-level `WithArgs` defaults in `runs.plan_json`,
+`nodes.spec_json` and `nodes.expansion_body` are not sealed yet. No schema change is involved. Upgrade every controller replica
 before it serves new runs: a binary without argument sealing reads a sealed run
 with empty argument values and refuses to resume or retry it because its seal
 no longer matches. Do not downgrade a store after it has admitted runs with
