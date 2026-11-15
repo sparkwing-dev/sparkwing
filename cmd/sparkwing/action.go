@@ -173,7 +173,7 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
 	format := inv.Output(color.IsInteractiveStdout())
-	pipelineName, secretsOnly := inv.Value("pipeline"), inv.Bool("secrets")
+	pipelineName, secretsOnly, showWithheld := inv.Value("pipeline"), inv.Bool("secrets"), inv.Bool("show-withheld")
 	if pipelineName == "" {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
 		return errors.New("describe: --pipeline is required")
@@ -197,6 +197,7 @@ func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string
 				break
 			}
 		}
+		entry.planner.ShowWithheld = showWithheld
 		schema, err = entry.presentation(ctx)
 		return err
 	})

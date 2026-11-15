@@ -19,6 +19,9 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput, de
 	if err != nil {
 		return PreparedPlanning{}, false, err
 	}
+	if p.ShowWithheld {
+		gate.ShowWithheld()
+	}
 	var arguments runspec.DeclaredArguments
 	if declarationsOnly {
 		arguments, err = gate.Inspect(input.Entrypoint)

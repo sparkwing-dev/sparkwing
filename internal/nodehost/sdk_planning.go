@@ -66,6 +66,10 @@ type SDKPlanner struct {
 	Masker       *secrets.Masker
 	Masks        *MaskRegistry
 	Log          func(context.Context, nodewire.FrameLog) error
+	// safety: describe output and errors withheld for unknown secret declarations
+	// are masked only by registered values, so only a CLI whose Log is its
+	// invoker's terminal sets ShowWithheld; owners writing run logs never do.
+	ShowWithheld bool
 }
 
 // Prepare describes the selected entry, registers defaults from every pipeline
@@ -96,8 +100,8 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, nil, nil, nil, nil); err != nil {
 		return PreparedPlanning{}, err
 	}
-	declarationsKnown := false
-	logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log}
+	stopped := "the SDK stopped before describing its pipelines; to see this output, run `" + runspec.ShowWithheldCommand(p.Masker.Mask(input.Run.Pipeline)) + "`"
+	logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, show: p.ShowWithheld, withheld: stopped}
 	var raw json.RawMessage
 	var prepared PreparedPlanning
 	err := p.process(ctx, input, &logs, true, func(ctx context.Context, session *executorSession) error {
@@ -107,16 +111,20 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		var err error
 		var complete bool
 		prepared, complete, err = p.describe(raw, input, declarationsOnly)
-		if !complete {
-			logs.explain(prepared.Declarations.IncompleteReason())
+		if !complete && !p.ShowWithheld {
+			logs.explain(prepared.Declarations.IncompleteReason(input.Run.Pipeline))
 			return err
 		}
-		return errors.Join(err, logs.release(ctx))
+		err = errors.Join(err, logs.release(ctx))
+		if !complete {
+			err = errors.Join(err, p.showFailedSiblings(ctx, prepared.Declarations, input.Entrypoint))
+		}
+		return err
 	})
 	if err != nil {
 		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, err, logs.known, input)
 	}
-	declarationsKnown = logs.known
+	declarationsKnown, withheld := logs.known, logs.withheld
 	if prepared.Description.Error != nil {
 		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, prepared.Description.Error, logs.known, input)
 	}
@@ -128,7 +136,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	planning.argumentDeclarations = prepared.Description.Args
 	planning.Validation.Secrets = planningSecrets{prior: planning.Validation.Secrets, masker: p.Masker}
 	prepared.Plan = func(ctx context.Context) (json.RawMessage, error) {
-		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: declarationsKnown}
+		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: declarationsKnown, show: p.ShowWithheld, withheld: withheld}
 		var raw json.RawMessage
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
 			return session.call(ctx, nodewire.Request{Op: nodewire.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
@@ -216,6 +224,21 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 	return errors.Join(err, context.Cause(ctx))
 }
 
+func (p SDKPlanner) showFailedSiblings(ctx context.Context, gate *runspec.DeclarationGate, entrypoint string) error {
+	if gate == nil {
+		return nil
+	}
+	for _, pipeline := range gate.Declarations().Pipelines {
+		if pipeline.Error == nil || pipeline.Name == entrypoint {
+			continue
+		}
+		if err := p.Log(ctx, p.Masker.Log(nodewire.FrameLog{Level: "error", Message: fmt.Sprintf("pipeline %q failed discovery: %s: %s", pipeline.Name, pipeline.Error.Code, pipeline.Error.Message)})); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.DeclarationGate, err error, known bool, input PlanningProcessInput) error {
 	entrypoint := input.Entrypoint
 	if failure, ok := gate.UnregisteredEntrypoint(err); ok {
@@ -249,13 +272,13 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
 	}
 	failure := &apierr.Error{Code: code, Message: message}
-	if known {
-		if structured != nil {
-			failure = p.Masker.Error(structured)
-			failure.Message = message
-		} else {
-			failure = p.Masker.Error(failure)
-		}
+	if !known {
+		failure.Hint = p.Masker.Mask(fmt.Sprintf("Run this locally, in a checkout of this revision, to print the withheld error: %s", runspec.ShowWithheldCommand(input.Run.Pipeline)))
+	} else if structured != nil {
+		failure = p.Masker.Error(structured)
+		failure.Message = message
+	} else {
+		failure = p.Masker.Error(failure)
 	}
 	switch code {
 	case apierr.ProtocolMismatch:
