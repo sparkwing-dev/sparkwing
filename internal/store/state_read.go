@@ -186,8 +186,7 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 			var registration runspec.SecretRegistration
 			if err := decodeRunDocument(tx.store, team, id, expansionArgumentsScope(node), registrationRaw, &registration, registrationArgumentSlots); err != nil {
 				if !tx.listing || !runArgumentsUnreadable(err) {
-					_ = rows.Close()
-					return out, false, err
+					return out, false, errors.Join(err, rows.Close())
 				}
 				unavailable = true
 				out = append(out, runstate.AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: string(bodyHash)})
