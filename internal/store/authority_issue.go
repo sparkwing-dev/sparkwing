@@ -184,7 +184,7 @@ type awardRow struct {
 	team, run, node, holder, prefix, repo, display string
 	generation, attempt, created                   int64
 	expiry, lease, cancel                          sql.NullInt64
-	request, spec                                  []byte
+	request, spec, runSpec                         []byte
 }
 
 func (op *Operator) loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec) (awardRow, error) {
@@ -211,7 +211,7 @@ func (op *Operator) loadAwardRowTx(ctx context.Context, tx *storeTx, spec capabi
 	}
 	var status string
 	var runCancel sql.NullInt64
-	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,repo_display,request_json FROM runs WHERE team = ? AND id = ?", row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.display, &row.request)
+	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,repo_display,request_json,spec_json FROM runs WHERE team = ? AND id = ?", row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.display, &row.request, &row.runSpec)
 	if err != nil {
 		return row, err
 	}
@@ -536,7 +536,19 @@ func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Cap
 		// safety: unproven work keeps its own data namespace without repository cache fallbacks.
 		repo = sealed.Request.Git.Repository.Key
 	}
-	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: string(repo), WriteRef: facts.Scope.CapabilityScope(), ReadRefs: readScopes(facts), RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
+	var writerDefault string
+	if c.Unit == capability.UnitNode && row.runSpec != nil {
+		var spec struct {
+			Resolved struct {
+				DefaultBranch runspec.Optional[string] `json:"default_branch"`
+			} `json:"resolved"`
+		}
+		if err := json.Unmarshal(row.runSpec, &spec); err != nil {
+			return nil, err
+		}
+		writerDefault = writerDefaultScope(sealed.Provenance, facts.Scope, spec.Resolved.DefaultBranch.Value)
+	}
+	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: string(repo), WriteRef: facts.Scope.CapabilityScope(), ReadRefs: readScopes(facts, writerDefault), RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
 	if c.Unit == capability.UnitNode {
 		scope.Attempt = 0
 	}

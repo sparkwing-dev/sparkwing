@@ -267,6 +267,9 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 		return result, nil
 	}
 	refs := []blob.RefScope{a.authority.Ref.Scope}
+	if writer, ok := blob.WriterDefault(a.authority.Ref.Scope, a.capability.Data.ReadRefs); ok {
+		refs = append(refs, writer)
+	}
 	if a.capability.Data.Use == capability.DataRemoteCache {
 		refs = nil
 		for _, ref := range a.capability.Data.ReadRefs {
@@ -285,7 +288,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				return result, err
 			}
 			recordKey := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}, Name: name}
-			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref != a.authority.Ref.Scope})
+			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref.Verified && ref != a.authority.Ref.Scope})
 			if errors.Is(err, errBlobIOPending) {
 				pending = err
 				continue
@@ -356,6 +359,9 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 		source blob.RestoreSource
 	}
 	refs := []fallback{{a.authority.Ref.Scope, blob.RestoreOwnRef}}
+	if writer, ok := blob.WriterDefault(a.authority.Ref.Scope, a.capability.Data.ReadRefs); ok {
+		refs = append(refs, fallback{writer, blob.RestoreWriterDefault})
+	}
 	if a.authority.Ref.PullRequestBase.Set {
 		refs = append(refs, fallback{blob.RefScope{Ref: a.authority.Ref.PullRequestBase.Value, Verified: true}, blob.RestorePRBase})
 	}
@@ -391,7 +397,7 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 			}
 			return result, err
 		}
-		if !hit.Found || (fallback.source != blob.RestoreOwnRef && !hit.Record.RefFacts.Scope.Verified) {
+		if !hit.Found || !depcacheFallbackFacts(fallback.source, fallback.ref, hit.Record.RefFacts) {
 			continue
 		}
 		if pending != nil {
@@ -407,6 +413,18 @@ func (r *blobRecords) lookupDepcache(ctx context.Context, request blob.DepcacheL
 		return result, pending
 	}
 	return result, tx.Commit()
+}
+
+// safety: a fallback keeps only records whose sealed facts match its source: the
+// writer's own default-branch scope, or verified evidence for the PR base and default branch.
+func depcacheFallbackFacts(source blob.RestoreSource, ref blob.RefScope, facts blob.RefFacts) bool {
+	switch source {
+	case blob.RestoreOwnRef:
+		return true
+	case blob.RestoreWriterDefault:
+		return facts.Scope == ref
+	}
+	return facts.Scope.Verified
 }
 
 func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (hit blob.MemoHit, err error) {

@@ -259,6 +259,12 @@ func (c *dataClient) LookupDepcache(ctx context.Context, input blob.DepcacheLook
 	ref := key.Ref
 	switch result.Source {
 	case blob.RestoreOwnRef:
+	case blob.RestoreWriterDefault:
+		// safety: the host sees only its own scope, so it accepts any other ref of that same unverified writer.
+		ref = record.Key.Scope.Ref
+		if key.Ref.Verified || ref.Verified || ref.Writer != key.Ref.Writer || ref.Ref == key.Ref.Ref {
+			return blob.DepcacheHit{}, dataProtocolError("cache lookup selected another writer's scope")
+		}
 	case blob.RestorePRBase:
 		if !authority.Ref.PullRequestBase.Set {
 			return blob.DepcacheHit{}, dataProtocolError("cache lookup selected an unknown PR base")

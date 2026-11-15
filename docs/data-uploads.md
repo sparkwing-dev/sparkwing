@@ -60,13 +60,15 @@ App run wrote. The writer is the submitting principal, the member who armed a
 schedule, an admin-armed default-branch schedule, the parent or demoted run, or `actions`, as
 [caching](caching.md#who-shares-a-cache) lists. Each lookup requires the
 matching read grant. Every run holds grants for its own scope and the verified
-default branch, and a verified pull request also for its base branch. Selecting a plain ref never
+default branch, and a verified pull request also for its base branch. An unverified run also holds a
+read grant for its own writer's scope on the default branch. Selecting a plain ref never
 inherits a manual write's scope.
 
 `POST /api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
 RFC3339 `deadline`. `POST /api/v1/data/depcache/lookup` takes `name`, `key`
-and optional `deadline`. The store applies memo's own-ref/default fallback
-and depcache's own-ref/PR-base/default order. Remote-cache credentials read
+and optional `deadline`. The store applies memo's own-ref/writer-default/default fallback
+and depcache's own-ref/writer-default/PR-base/default order, where writer-default
+is the same writer's default-branch scope and applies only to unverified runs. Remote-cache credentials read
 only verified default-branch entries. Missing or corrupt cache data is a miss.
 An omitted cache deadline retains the caller's context and cancellation. An
 explicit deadline bounds both the lookup and verification of downloaded bytes.
