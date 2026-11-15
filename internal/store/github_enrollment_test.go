@@ -419,8 +419,8 @@ func TestActionsRunnerEnvironmentDecidesFreshness(t *testing.T) {
 		scopes[tc.environment] = ref
 	}
 	fresh, persistent := scopes["github-hosted"], scopes["self-hosted"]
-	if slices.Contains(readScopes(fresh), persistent.Scope.CapabilityScope()) || scopeAcceptsCopy(fresh.Scope, persistent.Scope) {
-		t.Fatalf("a GitHub-hosted job (reads %v) can restore the self-hosted write scope %v", readScopes(fresh), persistent.Scope)
+	if slices.Contains(readScopes(fresh, ""), persistent.Scope.CapabilityScope()) || scopeAcceptsCopy(fresh.Scope, persistent.Scope) {
+		t.Fatalf("a GitHub-hosted job (reads %v) can restore the self-hosted write scope %v", readScopes(fresh, ""), persistent.Scope)
 	}
 	if !scopeAcceptsCopy(persistent.Scope, fresh.Scope) {
 		t.Fatalf("a self-hosted job cannot copy down the fresh scope %v into %v", fresh.Scope, persistent.Scope)

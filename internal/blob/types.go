@@ -324,11 +324,12 @@ type DepcacheKey struct {
 	Key  string
 }
 
-// safety: RestoreSource orders own-ref, PR-base and verified-default cache lookups.
+// safety: RestoreSource orders own-ref, writer-default, PR-base and verified-default cache lookups.
 type RestoreSource string
 
 const (
 	RestoreOwnRef        RestoreSource = "own_ref"
+	RestoreWriterDefault RestoreSource = "writer_default"
 	RestorePRBase        RestoreSource = "pr_base"
 	RestoreDefaultBranch RestoreSource = "default_branch"
 )

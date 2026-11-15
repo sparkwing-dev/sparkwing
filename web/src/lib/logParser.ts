@@ -340,7 +340,7 @@ function summaryLines(rec: LogRecord): string[] {
 
 export function parseLogLines(lines: string[]): ParsedLog {
   lines = lines.filter((line) => {
-    try { return JSON.parse(line)?.host_lease_keeper !== true; } catch { return true; }
+    try { const record = JSON.parse(line); return record?.host_lease_keeper !== true && record?.host_request_timing !== true; } catch { return true; }
   });
   if (looksLikeJSONL(lines)) {
     return parseJSONLLogs(lines);

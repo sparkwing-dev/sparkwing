@@ -179,7 +179,9 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		if c.ref != a.authority.Ref.Scope.CapabilityScope() {
 			verifiedDefault := c.facts.DefaultBranchVerified && c.facts.Scope.Ref == a.authority.Ref.DefaultBranch
 			verifiedBase := c.kind == blob.KindDepcache && a.authority.Ref.PullRequestBase.Set && c.facts.Scope.Ref == a.authority.Ref.PullRequestBase.Value
-			allowed = allowed && c.facts.Scope.Verified && (verifiedDefault || verifiedBase)
+			writer, ok := blob.WriterDefault(a.authority.Ref.Scope, scope.ReadRefs)
+			writerDefault := ok && c.facts.Scope == writer
+			allowed = allowed && (c.facts.Scope.Verified && (verifiedDefault || verifiedBase) || writerDefault)
 		}
 		if c.kind == blob.KindMemo {
 			allowed = allowed && c.pipeline == a.pipeline && a.authority.Attempt.Set && c.source.Attempt.Value.NodeID == a.authority.Attempt.Value.NodeID

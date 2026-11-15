@@ -471,3 +471,8 @@ it("hides host keeper records even when their kind is masked", () => {
  const diagnostic = JSON.stringify({level:"debug",event:"***",host_lease_keeper:true,attrs:{sequence:1}});
  assert.deepEqual(parseLogLines([diagnostic,"42"]),parseLogLines(["42"]));
 });
+
+it("hides masked host request timings from human logs", () => {
+ const diagnostic = JSON.stringify({level:"debug",event:"***",host_request_timing:true,attrs:{duration_ms:2000}});
+ assert.deepEqual(parseLogLines([diagnostic,"42"]),parseLogLines(["42"]));
+});

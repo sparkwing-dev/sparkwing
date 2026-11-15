@@ -320,6 +320,8 @@ type RunContext struct {
 	StartedAt time.Time
 	NoMemo    bool
 	DryRun    bool
+	StartAt   string
+	StopAt    string
 }
 type RunResult struct {
 	Outcome string

@@ -115,7 +115,7 @@ func (sdkOperations) Plan(ctx context.Context, name string, args map[string]stri
 	if !ok {
 		return nil, nodeproto.PlanDoc{}, sdkError(apierr.UnknownPipeline, "pipeline is not registered")
 	}
-	rc := RunContext{RunID: run.RunID, Pipeline: run.Pipeline, StartedAt: run.StartedAt, NoMemo: run.NoMemo, DryRun: run.DryRun}
+	rc := RunContext{RunID: run.RunID, Pipeline: run.Pipeline, StartedAt: run.StartedAt, NoMemo: run.NoMemo, DryRun: run.DryRun, StartAt: run.StartAt, StopAt: run.StopAt}
 	if run.Git != nil {
 		g := run.Git
 		rc.Git = NewGit(WorkDir(), g.SHA, g.Branch, g.DefaultBranch, g.Repo, g.RepoURL)

@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -33,6 +34,7 @@ import (
 type ProcessServices struct {
 	lifetime       context.Context
 	activity       *nativeProcessActivity
+	observeTiming  func(otelutil.OperationTiming)
 	SourceBindings capability.BindingChecker
 	RunID          string
 	Job            nodewire.JobSpec
@@ -52,6 +54,21 @@ type ProcessServices struct {
 
 var helperSequence atomic.Uint64
 
+var processServiceRouteTable = []struct{ method, path string }{
+	{http.MethodPost, "/node/v1/helpers"},
+	{http.MethodPost, "/node/v1/masks"},
+	{http.MethodPost, "/node/v1/annotations"},
+	{http.MethodPost, "/node/v1/summary"},
+	{http.MethodGet, "/node/v1/secrets/{name}"},
+	{http.MethodGet, "/node/v1/jobs/{job}/output"},
+	{http.MethodGet, "/node/v1/pipelines/{name}/latest"},
+	{http.MethodPost, "/node/v1/oidc-token"},
+	{http.MethodPost, "/node/v1/children"},
+	{http.MethodGet, "/node/v1/children/{run}/await"},
+	{http.MethodPost, "/node/v1/cleanups"},
+	{http.MethodDelete, "/node/v1/cleanups/{cleanup}"},
+}
+
 // ProcessEndpointRegistrar is implemented by the common policy router.
 type ProcessEndpointRegistrar interface {
 	Register(controllerwire.Endpoint) error
@@ -63,20 +80,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 	if router == nil || resolve == nil {
 		return errors.New("process services require policy router and live resolver")
 	}
-	for _, route := range []struct{ method, path string }{
-		{http.MethodPost, "/node/v1/helpers"},
-		{http.MethodPost, "/node/v1/masks"},
-		{http.MethodPost, "/node/v1/annotations"},
-		{http.MethodPost, "/node/v1/summary"},
-		{http.MethodGet, "/node/v1/secrets/{name}"},
-		{http.MethodGet, "/node/v1/jobs/{job}/output"},
-		{http.MethodGet, "/node/v1/pipelines/{name}/latest"},
-		{http.MethodPost, "/node/v1/oidc-token"},
-		{http.MethodPost, "/node/v1/children"},
-		{http.MethodGet, "/node/v1/children/{run}/await"},
-		{http.MethodPost, "/node/v1/cleanups"},
-		{http.MethodDelete, "/node/v1/cleanups/{cleanup}"},
-	} {
+	for _, route := range processServiceRouteTable {
 		path := route.path
 		endpoint := controllerwire.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: func(request *http.Request) (capability.RequestEvidence, error) {
 			return serviceEvidence(request, path)
@@ -99,6 +103,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 			if service == nil || service.Masks == nil || service.Masks.masker == nil || service.RunID != auth.Binding.RunID || auth.Binding.Kind != capability.BindingTrigger && service.Job.ID != auth.Binding.NodeID || service.RunID == "" || service.Job.ID == "" {
 				return executorError(hosterr.SpecDrift, "service binding differs from its live process")
 			}
+			request = request.WithContext(withProcessTiming(request.Context(), service))
 			if service.lifetime != nil {
 				ctx, cancel := context.WithCancel(request.Context())
 				stop := context.AfterFunc(service.lifetime, cancel)
@@ -302,7 +307,10 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		}
 		body.Message = limits.Record(s.Masks.mask(body.Message))
 		body.File = s.Masks.mask(body.File)
-		return s.Annotation(ctx, auth, body)
+		writeCtx, timing := otelutil.StartOperation(withProcessTiming(ctx, s), "nodehost.annotation_write")
+		err := s.Annotation(writeCtx, auth, body)
+		timing.Finish(err)
+		return err
 	case "/node/v1/summary":
 		var body nodewire.SummaryRequest
 		if err := decodeService(request, &body); err != nil {

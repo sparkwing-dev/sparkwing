@@ -53,11 +53,20 @@ func testTypeScriptInstallKeepsRunningSDKImportsAvailable(t *testing.T, lockfile
 		}
 	}
 	writeInput(t, dir, ".npmrc", []byte("loglevel=verbose\n"))
+	calls := filepath.Join(root, "npm-calls")
+	npmCalls := func() int {
+		body, err := os.ReadFile(calls)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bytes.Count(body, []byte("\n"))
+	}
 	// bug: pause npm after its destructive cleanup so an already prepared SDK imports in that window.
 	wrapper := fmt.Sprintf(`#!%s
 const fs = require("node:fs");
 const net = require("node:net");
 const {spawnSync} = require("node:child_process");
+fs.appendFileSync(%q, process.argv[2] + "\n");
 function install() {
   fs.mkdirSync("npm-active");
   const result = spawnSync(%q, process.argv.slice(2), {stdio:"inherit"});
@@ -69,7 +78,7 @@ if (["ci", "install"].includes(process.argv[2]) && !process.argv.includes("--dry
   const socket = net.connect(JSON.parse(fs.readFileSync("install-gate", "utf8")), "127.0.0.1");
   socket.once("data", () => { socket.destroy(); install(); });
 } else install();
-`, node, npm)
+`, node, calls, npm)
 	if err := os.WriteFile(filepath.Join(bin, "npm"), []byte(wrapper), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -87,10 +96,19 @@ if (["ci", "install"].includes(process.argv[2]) && !process.argv.includes("--dry
 		}
 		return command, err
 	}
+	if _, err := install(); err != nil {
+		t.Fatal(err)
+	}
+	installed := npmCalls()
 	first, err := install()
 	if err != nil {
 		t.Fatal(err)
 	}
+	if npmCalls() != installed {
+		t.Fatal("unchanged verified tree ran npm again")
+	}
+	// bug: a reused tree was handed out without npm, so the next changed install must still leave its SDK importable.
+	writeInput(t, dir, ".npmrc", []byte("loglevel=verbose\nfund=false\n"))
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -109,9 +127,7 @@ if (["ci", "install"].includes(process.argv[2]) && !process.argv.includes("--dry
 	select {
 	case gate = <-entered:
 	case err = <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
+		t.Fatalf("changed npm configuration reused the previous tree: %v", err)
 	case <-t.Context().Done():
 		t.Fatal(t.Context().Err())
 	}

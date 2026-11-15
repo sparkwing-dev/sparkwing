@@ -671,6 +671,8 @@ type RunContext struct {
     StartedAt time.Time `json:"started_at,omitzero"`
     NoMemo    bool      `json:"no_memo,omitempty"`
     DryRun    bool      `json:"dry_run,omitempty"`
+    StartAt   string    `json:"start_at,omitempty"`
+    StopAt    string    `json:"stop_at,omitempty"`
 }
 ```
 

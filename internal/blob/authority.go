@@ -25,6 +25,22 @@ func (r RefScope) CapabilityScope() string {
 	return "manual:" + r.Writer + ":" + r.Ref
 }
 
+// WriterDefault finds the read scope an unverified run takes after its own: the
+// same writer's scope on the repository's default branch, which its data grant
+// names when the run resolved one. A verified scope has none.
+func WriterDefault(own RefScope, readRefs []string) (RefScope, bool) {
+	if own.Verified {
+		return RefScope{}, false
+	}
+	for _, ref := range readRefs {
+		scope := ParseCapabilityScope(ref)
+		if !scope.Verified && scope.Writer == own.Writer && scope.Ref != own.Ref {
+			return scope, true
+		}
+	}
+	return RefScope{}, false
+}
+
 // ParseCapabilityScope reverses CapabilityScope.
 func ParseCapabilityScope(scope string) RefScope {
 	rest, manual := strings.CutPrefix(scope, "manual:")

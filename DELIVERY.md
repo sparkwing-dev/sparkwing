@@ -29,6 +29,13 @@ sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha
 sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-allow-risk destructive,prod
 ```
 
+Land refuses any other step bound before a job runs, provided the installed engine
+forwards the bounds into the plan's run context. A bound narrows only the job that
+holds it, so the land job would still push a tree whose skipped checks never ran.
+Only `--sw-stop-at verify`, which stops before the push, and `--sw-dry-run`
+accept bounds. An engine that does not forward the bounds leaves them empty, and
+Land then plans a bounded run as unbounded, so pass no other bound.
+
 An unpinned ordinary Land compiles the candidate's definition. For a registry
 change, the operator must also review its `land` entrypoint mapping and arguments:
 the pipeline-source pin selects code, while candidate aliases still apply.

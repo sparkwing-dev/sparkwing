@@ -142,7 +142,8 @@ hint and details for this code and keeps other unclassified output withheld.
 `plan.pipeline` names the SDK registration key, which is the YAML `entrypoint`.
 `args` is an explicit object, including `{}` when empty. `run` requires `run_id`
 and `pipeline`; `run.pipeline` is the invoked YAML pipeline name.
-Optional context includes `git`, `trigger`, `started_at`, `dry_run` and `no_memo`.
+Optional context includes `git`, `trigger`, `started_at`, `dry_run`, `no_memo`,
+`start_at` and `stop_at`. The last two carry the run's step bounds, omitted when unset.
 
 The host selects the argument schema by registration key. For YAML
 `name: deploy-prod, entrypoint: Deploy`, register `Deploy`. Initial planning and
