@@ -166,7 +166,16 @@ uploads, local runs or `publish` wrote, and they never restore what it wrote.
 A child at its parent's exact revision, and every retry, write under the scope
 of the run they inherit from. Retries preserve the sealed writer, code and
 inputs in full and failed modes. The retrier is recorded separately as an actor.
-Every run writes only its own scope. Repository-proven runs also
+Every run writes only its own scope. A run under a `manual:` writer scope
+(a CLI, API, dashboard or local run, or a member-armed schedule's fire) reads
+its own scope first, then the same writer's scope on the repository's default
+branch, so the first local run on a new branch restores the memo and
+dependency-cache records that writer's runs of `main` saved. The default branch
+comes from the checkout's `origin/HEAD`, or from verified records when intake
+learned it there, and is spelled like the run's own ref (`main` or
+`refs/heads/main`). A run that cannot resolve a default branch reads only its
+own scope. Those records stay unverified: the run never writes the default-branch
+scope, and verified, Actions and admin-armed schedule runs get no such fallback. Repository-proven runs also
 read verified records of the proven repository's default branch, which intake learns
 from the verified records already stored, and a verified pull request also
 reads verified records of its base branch. One member's manual run therefore

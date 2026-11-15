@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -350,6 +351,26 @@ func runRefFacts(sealed runspec.SealedRequest, host string) (blob.RefFacts, erro
 	return hostRefFacts(facts, host), err
 }
 
+// safety: an asserted run reads its own writer's default-branch scope, spelled like its own ref,
+// from verified records or else the spec's origin HEAD. The writer could write that scope by
+// claiming the ref, so reading it raises no trust; every other trust class reads none.
+func writerDefaultScope(p runspec.Provenance, own blob.RefScope, resolved string) string {
+	if p.Trust() != runspec.TrustAsserted || own.Verified {
+		return ""
+	}
+	branch := runspec.NormalizedBranch(cmp.Or(p.DefaultBranch(), resolved))
+	if branch == "" {
+		return ""
+	}
+	if strings.HasPrefix(own.Ref, "refs/heads/") {
+		branch = "refs/heads/" + branch
+	}
+	if branch == own.Ref {
+		return ""
+	}
+	return blob.RefScope{Ref: branch, Writer: own.Writer}.CapabilityScope()
+}
+
 // grantHost recovers the host a sealed data grant confines writes to.
 func grantHost(writeRef string) string {
 	return scopeHost(blob.ParseCapabilityScope(writeRef))
@@ -420,12 +441,11 @@ func hostScope(scope blob.RefScope, host string) blob.RefScope {
 	return blob.RefScope{Ref: scope.Ref, Writer: host + "/" + scope.Writer}
 }
 
-// readScopes lists what a run may read: its own scope, then the verified default
-// branch and a pull request's base. Readers still require verified provenance on
-// any record outside the run's own scope.
-func readScopes(facts blob.RefFacts) []string {
+// safety: a run reads its own scope, its writer's default-branch scope, then the verified
+// default branch and a pull request's base; any other record outside its own scope must be verified.
+func readScopes(facts blob.RefFacts, writerDefault string) []string {
 	scopes := []string{facts.Scope.CapabilityScope()}
-	for _, ref := range []string{facts.DefaultBranch, facts.PullRequestBase.Value} {
+	for _, ref := range []string{writerDefault, facts.DefaultBranch, facts.PullRequestBase.Value} {
 		if ref != "" && !slices.Contains(scopes, ref) {
 			scopes = append(scopes, ref)
 		}

@@ -49,7 +49,12 @@ func blobRestoreFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) 
 // safety: planted records exercise persisted provenance independently of the writer's validation.
 func plantBlobRestore(t *testing.T, s *Store, records *blobRecords, intent blob.UploadIntent, kind blob.Kind, ref string, facts blob.RefFacts, manifest bool) blob.RecordKey {
 	t.Helper()
-	key := blob.RecordKey{Team: "a", Kind: kind, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: ref, Verified: true}, Key: fixtureMemoHash}, Name: "modules"}
+	return plantBlobRecordAt(t, s, intent, kind, blob.RefScope{Ref: ref, Verified: true}, facts, manifest)
+}
+
+func plantBlobRecordAt(t *testing.T, s *Store, intent blob.UploadIntent, kind blob.Kind, scope blob.RefScope, facts blob.RefFacts, manifest bool) blob.RecordKey {
+	t.Helper()
+	key := blob.RecordKey{Team: "a", Kind: kind, Scope: blob.Scope{Repo: "gh:1", Ref: scope, Key: fixtureMemoHash}, Name: "modules"}
 	if kind == blob.KindMemo {
 		key.Scope.Pipeline, key.Scope.Job, key.Name = "ci", "job", "output"
 	}
