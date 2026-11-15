@@ -443,6 +443,8 @@ func hostScope(scope blob.RefScope, host string) blob.RefScope {
 
 // safety: a run reads its own scope, its writer's default-branch scope, then the verified
 // default branch and a pull request's base; any other record outside its own scope must be verified.
+// Each entry is a general read grant: declared references and record reads accept the
+// writer-default scope too, not only memo and depcache.
 func readScopes(facts blob.RefFacts, writerDefault string) []string {
 	scopes := []string{facts.Scope.CapabilityScope()}
 	for _, ref := range []string{writerDefault, facts.DefaultBranch, facts.PullRequestBase.Value} {
