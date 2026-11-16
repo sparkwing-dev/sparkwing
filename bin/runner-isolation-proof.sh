@@ -369,8 +369,10 @@ home_hidden() {
     fail "$1: /home is hidden" "list exit '$list', entries '$entries'"
   fi
 }
+# The unit names no Group, so systemd uses the account's primary group, whatever its name.
 mapfile -t PROPS < <(sudo grep -E '^(User|Group|ProtectHome|NoNewPrivileges|PrivateTmp|ProtectSystem|UMask)=' "$(unit_file_of "$SHARED_ACCOUNT")")
-expect "unit sandbox lines found" "${#PROPS[@]}" 7
+expect "unit sandbox lines found" "${#PROPS[@]}" 6
+expect "unit names no Group" "$(printf '%s\n' "${PROPS[@]}" | grep -c '^Group=')" 0
 printf '%s\n' "${PROPS[@]}" >"$EVIDENCE/unit-sandbox-lines.txt"
 sudo -u alice -- /bin/sh -c "$PROBE" sh "${TARGETS[@]}" >"$EVIDENCE/probe-alice.txt"
 expect "control: probe as alice exits 0" "$?" 0
