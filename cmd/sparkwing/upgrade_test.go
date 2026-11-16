@@ -185,8 +185,8 @@ func TestUpgradePlainReportsTargetVersion(t *testing.T) {
 	}
 }
 
-// A TypeScript pipeline type-checks only when it configures tsc; the scaffold has no tsconfig
-// and node strips its types, so describe and plan are its whole verification.
+// A TypeScript pipeline type-checks only when it configures tsc; without a tsconfig, node
+// strips its types, so describe and plan are its whole verification.
 func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

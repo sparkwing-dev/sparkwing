@@ -253,8 +253,10 @@ Each installation makes one helper attempt with a ten-minute deadline. Failure
 stops the install, reports the cause, and kills and reaps its helper process tree.
 Verification then compiles Go packages, type-checks TypeScript with `tsc --noEmit`
 when `.sparkwing/tsconfig.json` exists, and runs list, describe and plan through
-that engine, including hidden pipelines. A scaffolded TypeScript pipeline has no
-`tsconfig.json`; Node strips its types, so describe and plan are its check. It never runs
+that engine, including hidden pipelines. The TypeScript scaffold writes a
+`tsconfig.json` and locks `typescript` as a development dependency, so `tsc` runs from
+the project's own install. A project without `tsconfig.json` skips the type check; Node
+strips its types, so describe and plan are its check. Verification never runs
 job bodies. Install and check environments pass through the shared environment
 builder, and registered proxy credentials are masked in failures.
 
