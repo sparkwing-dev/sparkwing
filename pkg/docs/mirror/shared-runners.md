@@ -45,7 +45,8 @@ your sudo password before it mints the runner credential, then:
 
 It refuses an existing user that is root, is your own account, belongs to
 `sudo`, `wheel`, `admin`, `docker` or `lxd`, or has its home under `/home`,
-`/Users` or `/root`.
+`/Users` or `/root`. It also refuses a new user whose name is already taken by a
+group, rather than changing that group.
 
 The service does not share your machine's local admission, so
 `--max-concurrent` is the only cap on how much it runs. Toolchains installed
@@ -60,7 +61,9 @@ sparkwing runners remove --profile work --service-user sparkwing-runner
 ```
 
 This stops the service, revokes the credential and prints the command that
-deletes the OS user.
+deletes the OS user. The token to revoke comes from a record that only root can
+change, so a job that deletes the runner's own config cannot keep the runner
+alive.
 
 ## What a dedicated user does not isolate
 
