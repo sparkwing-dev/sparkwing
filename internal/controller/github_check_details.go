@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -34,7 +36,10 @@ type githubCheckResult struct {
 
 // safety: labels are positions, never job or step IDs: a stored secret read may occur in an accepted ID and
 // is masked only in text. Steps of superseded attempts are dropped, so a retried job reports its latest attempt.
-func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep) []githubCheckResult {
+// A step's position is its index in the job's declared steps, not its start order, because a step may need one
+// declared after it; a step the plan does not declare follows the declared ones.
+func githubCheckResults(plan []byte, nodes []*store.Node, steps []*store.NodeStep) []githubCheckResult {
+	declared := githubDeclaredSteps(plan)
 	byJob := map[string][]*store.NodeStep{}
 	for _, step := range steps {
 		byJob[step.NodeID] = append(byJob[step.NodeID], step)
@@ -46,23 +51,59 @@ func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep) []githubCh
 			label: job, failed: n.Outcome == string(runstate.NodeFailed), err: n.Error,
 			summary: n.Summary, annotations: n.Annotations,
 		})
-		position := 0
+		index := declared[n.NodeID]
+		type positioned struct {
+			position int
+			step     *store.NodeStep
+		}
+		var latest []positioned
+		undeclared := len(index)
 		for _, step := range byJob[n.NodeID] {
 			if step.Attempt != int64(n.AttemptsConsumed) {
 				continue
 			}
-			position++
+			position, ok := index[step.StepID]
+			if !ok {
+				position = undeclared
+				undeclared++
+			}
+			latest = append(latest, positioned{position, step})
+		}
+		slices.SortStableFunc(latest, func(a, b positioned) int { return a.position - b.position })
+		for _, p := range latest {
 			out = append(out, githubCheckResult{
-				label: fmt.Sprintf("%s, step %d", job, position), failed: step.Status == "failed", err: step.Error,
-				summary: step.Summary, annotations: step.Annotations,
+				label: fmt.Sprintf("%s, step %d", job, p.position+1), failed: p.step.Status == "failed", err: p.step.Error,
+				summary: p.step.Summary, annotations: p.step.Annotations,
 			})
 		}
 	}
 	return out
 }
 
+// githubDeclaredSteps maps each job ID to its step IDs' declared indexes. An unreadable plan yields none, so
+// every step then falls back to its start order.
+func githubDeclaredSteps(plan []byte) map[string]map[string]int {
+	var doc nodewire.PlanDoc
+	if len(plan) == 0 || json.Unmarshal(plan, &doc) != nil {
+		return nil
+	}
+	declared := make(map[string]map[string]int, len(doc.Jobs))
+	for _, job := range doc.Jobs {
+		index := make(map[string]int, len(job.Steps))
+		for i, step := range job.Steps {
+			index[step.ID] = i
+		}
+		declared[job.ID] = index
+	}
+	return declared
+}
+
 func githubCheckDetails(run *store.Run, nodes []*store.Node, steps []*store.NodeStep, conclusion, link string) (*githubapp.CheckRunOutput, []githubapp.CheckRunAnnotation) {
-	results := githubCheckResults(nodes, steps)
+	var plan []byte
+	if run != nil {
+		plan = run.PlanSnapshot
+	}
+	results := githubCheckResults(plan, nodes, steps)
 	failedJobs := 0
 	for _, n := range nodes {
 		if n.Outcome == string(runstate.NodeFailed) {

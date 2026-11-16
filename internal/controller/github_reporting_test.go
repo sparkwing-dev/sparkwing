@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -618,5 +619,46 @@ func TestGitHubAppCheckRunFailedVisibilityLookupRetries(t *testing.T) {
 	}
 	if _, delivered, attempts, _ := f.revision(); delivered != 0 || attempts == 0 {
 		t.Fatalf("report was not left for retry: delivered=%d attempts=%d", delivered, attempts)
+	}
+}
+
+func TestGitHubAppCheckRunNumbersStepsByDeclaredPosition(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.addReportingNode("ship", runstate.NodeFailed, "deploy failed")
+	f.report("ship", "", nil, 1,
+		seededStep{id: "build", attempt: 1, status: "passed", summary: "build summary", annotations: []nodewire.Annotation{{Level: "warn", Message: "build warning", File: "main.go", Line: 2}}},
+		seededStep{id: "deploy", attempt: 1, status: "failed", err: "deploy error"})
+	engineSQL(t, f.server.store, `UPDATE node_steps SET started_at=started_at+1,finished_at=finished_at+1 WHERE team='a' AND run_id='run' AND node_id='ship' AND step_id='deploy'`)
+	f.finish(runstate.RunFailed)
+	// hack: the seeded job spec declares no steps, so the steps join the plan after finish validates it.
+	run, err := f.tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan nodewire.PlanDoc
+	if err := json.Unmarshal(run.Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	plan.Jobs[1].Steps = []nodewire.StepSpec{{ID: "deploy", Needs: []string{"build"}}, {ID: "build"}}
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, f.server.store, `UPDATE runs SET plan_json=? WHERE team='a' AND id='run'`, encoded)
+	f.reconcile()
+	out := f.completedCheck().Output
+	job := "Job 2"
+	for _, want := range []string{"**" + job + ", step 1**: deploy error", "### " + job + ", step 2\n\nbuild summary"} {
+		if !strings.Contains(out.Summary, want) {
+			t.Fatalf("summary lacks %q:\n%s", want, out.Summary)
+		}
+	}
+	var titles []string
+	for _, a := range append(out.Annotations, f.api.annotations[101]...) {
+		titles = append(titles, a.Title)
+	}
+	if !slices.Contains(titles, job+", step 2") || slices.Contains(titles, job+", step 1") {
+		t.Fatalf("build annotation titles=%q, want %s, step 2", titles, job)
 	}
 }
