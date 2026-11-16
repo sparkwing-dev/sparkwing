@@ -155,8 +155,9 @@ pipelines:
 
   # Hostile-job conformance against staging Cloud from two dedicated
   # conformance teams, whose CLI profiles share the teams' names. Every pod,
-  # service, node and API address is discovered from the cluster when it runs;
-  # pass the controller database as --database host:port, which is required.
+  # service, node and API address is discovered from the cluster when it runs.
+  # Pass the controller database as --database host:port and the VPC resolver
+  # as --vpc-resolver; both are required and neither address belongs here.
   - name: cloud-isolation
     entrypoint: CloudIsolation
     args:
@@ -169,4 +170,3 @@ pipelines:
       job-namespace: sparkwing-staging-cloud-jobs
       infra-node-pool: staging-infra
       ingress-namespaces: traefik
-      vpc-resolver: 10.0.0.2

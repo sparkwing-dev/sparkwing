@@ -52,7 +52,7 @@ func TestFixturePlansTheProbeBesideItsSibling(t *testing.T) {
 	for _, j := range doc.Jobs {
 		needs[j.ID] = strings.Join(j.Needs, ",")
 		if j.ID == isolationprobe.ProbeJob && time.Duration(j.TimeoutMS)*time.Millisecond != JobTimeout {
-			t.Errorf("probe timeout = %dms, want %s", j.TimeoutMS, JobTimeout)
+			t.Errorf("probe timeout = %dms, want the %s default", j.TimeoutMS, JobTimeout)
 		}
 	}
 	want := map[string]string{isolationprobe.SiblingJob: "", AllowedJob: "", isolationprobe.ProbeJob: AllowedJob}
@@ -62,6 +62,20 @@ func TestFixturePlansTheProbeBesideItsSibling(t *testing.T) {
 	for id, deps := range want {
 		if got, ok := needs[id]; !ok || got != deps {
 			t.Errorf("%s needs %q, want %q", id, got, deps)
+		}
+	}
+}
+
+// A run that raises the probe job's limit gets that limit, and its anchor may hold until just before
+// it.
+func TestFixtureTakesARaisedTimeLimit(t *testing.T) {
+	doc, err := planFixture(t, map[string]string{"role": "anchor", "hold": "33m", "timeout": "35m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range doc.Jobs {
+		if j.ID == isolationprobe.ProbeJob && time.Duration(j.TimeoutMS)*time.Millisecond != 35*time.Minute {
+			t.Fatalf("probe timeout = %dms, want 35m", j.TimeoutMS)
 		}
 	}
 }
@@ -76,10 +90,14 @@ func TestFixturePlansDiscoverysEmptyArguments(t *testing.T) {
 
 func TestFixtureRefusesArgumentsItCannotHonor(t *testing.T) {
 	for name, args := range map[string]map[string]string{
-		"role":            {"role": "attacker"},
-		"hold":            {"role": "anchor", "hold": "soon"},
-		"hold past limit": {"role": "anchor", "hold": "20m"},
-		"negative hold":   {"role": "anchor", "hold": "-1m"},
+		"role":                   {"role": "attacker"},
+		"hold":                   {"role": "anchor", "hold": "soon"},
+		"hold past limit":        {"role": "anchor", "hold": "20m"},
+		"negative hold":          {"role": "anchor", "hold": "-1m"},
+		"limit past cap":         {"timeout": "61m"},
+		"zero limit":             {"timeout": "0s"},
+		"limit by name":          {"timeout": "soon"},
+		"hold past limit raised": {"role": "anchor", "hold": "30m", "timeout": "25m"},
 	} {
 		if _, err := planFixture(t, args); err == nil {
 			t.Errorf("%s: plan accepted %v", name, args)

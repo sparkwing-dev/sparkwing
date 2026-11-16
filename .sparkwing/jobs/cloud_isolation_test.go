@@ -55,6 +55,9 @@ func TestCloudIsolationArgsRefuseAnythingButAllOfStaging(t *testing.T) {
 		"no ingress":               {func(a *CloudIsolationArgs) { a.IngressNS = "" }, "--ingress-namespaces is required"},
 		"no infra pool":            {func(a *CloudIsolationArgs) { a.InfraNodePool = "" }, "--infra-node-pool is required"},
 		"no endpoint":              {func(a *CloudIsolationArgs) { a.PublicContext = "" }, "--public-api-context is required"},
+		"anchor limit lowered":     {func(a *CloudIsolationArgs) { a.AnchorTimeout = "10m" }, "--anchor-timeout 10m0s must be from 20m0s to 1h0m0s"},
+		"anchor limit past cap":    {func(a *CloudIsolationArgs) { a.AnchorTimeout = "2h" }, "--anchor-timeout 2h0m0s must be from"},
+		"anchor limit by name":     {func(a *CloudIsolationArgs) { a.AnchorTimeout = "longer" }, "--anchor-timeout:"},
 	} {
 		args := isoArgs()
 		c.edit(&args)
@@ -561,6 +564,7 @@ type isoClusterFake struct {
 	plans      map[string]isolationprobe.Plan
 	teardown   bool
 	deny       string
+	limits     []string
 	controller map[string]string
 	whoami     map[string]string
 }
@@ -750,6 +754,7 @@ func (f *isoClusterFake) sparkwing(args []string) (string, int, error) {
 		}
 		f.plans[fx.run] = plan
 		f.triggered = append(f.triggered, fx.run)
+		f.limits = append(f.limits, fx.label+" timeout="+flagValue(args, "--timeout")+" hold="+flagValue(args, "--hold"))
 		return `{"run_id":"` + fx.run + `"}`, 0, nil
 	case args[0] == "runs" && args[1] == "status":
 		f.statusN[run]++
@@ -800,13 +805,18 @@ func newIsoFake(t *testing.T) *isoClusterFake {
 
 func driveFake(t *testing.T, fake *isoClusterFake) (string, error) {
 	t.Helper()
+	return driveFakeWith(t, fake, isoArgs())
+}
+
+func driveFakeWith(t *testing.T, fake *isoClusterFake, args CloudIsolationArgs) (string, error) {
+	t.Helper()
 	root, err := mainModuleRoot()
 	if err != nil {
 		t.Fatal(err)
 	}
 	clock := time.Unix(0, 0)
 	evidence := t.TempDir()
-	d := &isolationDriver{args: isoArgs(), repo: root, tmp: t.TempDir(), evidence: evidence, tools: isolationTools{
+	d := &isolationDriver{args: args, repo: root, tmp: t.TempDir(), evidence: evidence, tools: isolationTools{
 		run:  fake.run,
 		wait: func(context.Context, time.Duration) error { clock = clock.Add(pollInterval); return nil },
 		now:  func() time.Time { return clock },
@@ -910,6 +920,31 @@ func TestConformStopsAtTheFirstRunThatFails(t *testing.T) {
 		if rerr != nil || !strings.Contains(string(report), "A1 was not run") || !strings.Contains(string(report), "the sequence stopped") {
 			t.Errorf("%s: report = %.600s, %v", name, report, rerr)
 		}
+	}
+}
+
+// The anchors keep the fixture's 20-minute limit unless the run raises it, and only the anchors get
+// the raised limit; each anchor holds until two minutes before its limit.
+func TestConformGivesOnlyTheAnchorsTheRaisedLimit(t *testing.T) {
+	fake := newIsoFake(t)
+	if _, err := driveFake(t, fake); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(fake.limits, "; "); got != "B1 timeout=20m0s hold=18m0s; A1 timeout=20m0s hold=18m0s; B2 timeout=20m0s hold=0s" {
+		t.Fatalf("default limits = %s", got)
+	}
+	raised := newIsoFake(t)
+	args := isoArgs()
+	args.AnchorTimeout = "35m"
+	evidence, err := driveFakeWith(t, raised, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(raised.limits, "; "); got != "B1 timeout=35m0s hold=33m0s; A1 timeout=35m0s hold=33m0s; B2 timeout=20m0s hold=0s" {
+		t.Fatalf("raised limits = %s", got)
+	}
+	if report, err := os.ReadFile(filepath.Join(evidence, "REPORT.md")); err != nil || !strings.Contains(string(report), "anchor job limit 35m0s") {
+		t.Fatalf("report does not name the raised limit: %v", err)
 	}
 }
 

@@ -1406,6 +1406,7 @@ dedicated conformance teams and fails on any breach:
 
 ```bash
 sparkwing run cloud-isolation -- --database <staging database host>:5432 \
+  --vpc-resolver <staging VPC resolver address> \
   --evidence ~/evidence/cloud-isolation/$(date +%F)
 ```
 
@@ -1413,8 +1414,9 @@ The pipeline attacks staging only. It refuses a controller URL or namespace
 that is not staging's, and before the first upload it checks that both team
 profiles point at the staging controller and authenticate as their own teams.
 Target discovery fails when the cluster shows no controller pods or services,
-cluster DNS, ingress pods or controller nodes, or when the database endpoint is
-missing.
+cluster DNS, ingress pods or controller nodes, or when the database endpoint or
+the VPC resolver is missing. Both addresses are passed at run time, so neither
+is stored in this repository.
 
 The run uploads the `isolation-probe` fixture as each team, in three phases on
 three fresh nodes. Each phase starts only after the run before it reported every
@@ -1439,7 +1441,13 @@ The probes stay non-destructive:
 - they connect and close;
 - they open kernel files without writing to them;
 - they answer an unexpected connection with anonymous reads and dry runs only;
-- each job is bounded at 20 minutes on Cloud's default two-core class.
+- each job is bounded at 20 minutes on Cloud's default two-core class, unless
+  the run raises the anchors' limit.
+
+The anchors must outlive every later run's probes. An anchor that ends first
+fails the run and names the peer. To give the anchors more time for one run,
+pass `--anchor-timeout`, which takes a Go duration from `20m` to `1h`. The
+report records the limit used.
 
 While the runs are live, the driver records each run's pods, the nodes they used,
 every pod seen on those nodes, their NodeClaims and each raw run status. It

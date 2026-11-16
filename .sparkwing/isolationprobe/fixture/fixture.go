@@ -25,13 +25,17 @@ const Entrypoint = "IsolationProbe"
 // AllowedJob is the fixture job whose output the probe job depends on and may read.
 const AllowedJob = "output-allowed"
 
-// JobTimeout bounds the probe job, an anchor's hold included.
+// JobTimeout is the probe job's default time limit, an anchor's hold included.
 const JobTimeout = 20 * time.Minute
+
+// MaxJobTimeout caps the time limit a run may give its probe job.
+const MaxJobTimeout = time.Hour
 
 // Args are the flags the driver passes to each probe run.
 type Args struct {
-	Role string `flag:"role" desc:"probe, or anchor to keep the listener up after probing" default:"probe"`
-	Hold string `flag:"hold" desc:"How long an anchor keeps its listener up after probing, as a Go duration" default:"0s"`
+	Role    string `flag:"role" desc:"probe, or anchor to keep the listener up after probing" default:"probe"`
+	Hold    string `flag:"hold" desc:"How long an anchor keeps its listener up after probing, as a Go duration" default:"0s"`
+	Timeout string `flag:"timeout" desc:"The probe job's time limit as a Go duration, at most 1h; an anchor's hold must end before it" default:"20m"`
 }
 
 // IsolationProbe is the hostile containment probe as a Cloud pipeline.
@@ -44,29 +48,39 @@ func (IsolationProbe) ShortHelp() string {
 
 // Plan declares the probe job, the job whose output it reads as a control and the sibling whose
 // output it must not read. Discovery plans with empty arguments, which mean a probe that does not
-// hold.
+// hold, limited to JobTimeout.
 func (IsolationProbe) Plan(_ context.Context, plan *sparkwing.Plan, in Args, run sparkwing.RunContext) error {
-	role, holdText := in.Role, in.Hold
+	role, holdText, timeoutText := in.Role, in.Hold, in.Timeout
 	if role == "" {
 		role = isolationprobe.RoleProbe
 	}
 	if holdText == "" {
 		holdText = "0s"
 	}
+	if timeoutText == "" {
+		timeoutText = JobTimeout.String()
+	}
 	hold, err := time.ParseDuration(holdText)
 	if err != nil {
 		return fmt.Errorf("--hold: %w", err)
 	}
+	timeout, err := time.ParseDuration(timeoutText)
+	if err != nil {
+		return fmt.Errorf("--timeout: %w", err)
+	}
 	if role != isolationprobe.RoleProbe && role != isolationprobe.RoleAnchor {
 		return fmt.Errorf("--role %q must be %s or %s", role, isolationprobe.RoleProbe, isolationprobe.RoleAnchor)
 	}
-	if hold < 0 || hold >= JobTimeout {
-		return fmt.Errorf("--hold %s must be at least zero and under the %s job timeout", hold, JobTimeout)
+	if timeout <= 0 || timeout > MaxJobTimeout {
+		return fmt.Errorf("--timeout %s must be above zero and at most %s", timeout, MaxJobTimeout)
+	}
+	if hold < 0 || hold >= timeout {
+		return fmt.Errorf("--hold %s must be at least zero and under the %s job timeout", hold, timeout)
 	}
 	sparkwing.Job(plan, isolationprobe.SiblingJob, &siblingJob{})
 	allowed := sparkwing.Job(plan, AllowedJob, &allowedJob{})
 	probe := &probeJob{Allowed: sparkwing.RefTo[allowedOut](allowed), role: role, hold: hold, runID: run.RunID}
-	sparkwing.Job(plan, isolationprobe.ProbeJob, probe).Needs(allowed).Timeout(JobTimeout)
+	sparkwing.Job(plan, isolationprobe.ProbeJob, probe).Needs(allowed).Timeout(timeout)
 	return nil
 }
 

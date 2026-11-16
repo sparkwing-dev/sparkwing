@@ -23,7 +23,8 @@ import (
 )
 
 // CloudIsolationArgs names the deployment the conformance run attacks. The repository's
-// sparkwing.yaml supplies staging's values; every other target is discovered from the cluster.
+// sparkwing.yaml supplies staging's names, every address is either discovered from the cluster or
+// passed at run time, and AnchorTimeout raises the anchors' job limit for one run.
 type CloudIsolationArgs struct {
 	TeamA         string `flag:"team-a" desc:"CLI profile of the first conformance team; the profile is named for its team"`
 	TeamB         string `flag:"team-b" desc:"CLI profile of the second conformance team; the profile is named for its team"`
@@ -34,8 +35,9 @@ type CloudIsolationArgs struct {
 	InfraNodePool string `flag:"infra-node-pool" desc:"Karpenter NodePool of the controller's nodes"`
 	IngressNS     string `flag:"ingress-namespaces" desc:"Comma-separated namespaces of the ingress proxies in front of the controller"`
 	Database      string `flag:"database" desc:"Controller database endpoint as host:port"`
-	VPCResolver   string `flag:"vpc-resolver" desc:"The VPC's Route 53 Resolver address"`
+	VPCResolver   string `flag:"vpc-resolver" desc:"The VPC's Route 53 Resolver address, passed at run time so it stays out of the repository"`
 	PublicContext string `flag:"public-api-context" desc:"kubeconfig context whose server is the cluster's public API endpoint"`
+	AnchorTimeout string `flag:"anchor-timeout" desc:"Time limit of each anchor's probe job as a Go duration, from 20m to 1h; raise it when an anchor ends before the last run has probed it" default:"20m"`
 	Evidence      string `flag:"evidence" desc:"Directory for the report and captures; a new directory under the system temporary directory when empty"`
 }
 
@@ -61,15 +63,17 @@ func (CloudIsolation) Help() string {
 		"unexpected answer with anonymous reads and dry runs only. While the runs are live the driver records each " +
 		"run's pods, their nodes, every pod on those nodes and the NodeClaims, then writes REPORT.md, every probe " +
 		"result and the captures to the evidence directory. It fails on any breach, any probe that proved nothing, any " +
-		"result the plan owed but never got, and any node shared or fenced to another run. It needs sparkwing, " +
-		"kubectl, git and Go on PATH, two team profiles with Cloud credits, and kubectl read access."
+		"result the plan owed but never got, and any node shared or fenced to another run. An anchor that ends " +
+		"before the last run has probed it fails the run; --anchor-timeout raises the anchors' 20-minute job " +
+		"limit for that run, up to an hour. The database and VPC resolver addresses are passed at run time. It " +
+		"needs sparkwing, kubectl, git and Go on PATH, two team profiles with Cloud credits, and kubectl read access."
 }
 
 // Examples shows how to run the conformance check.
 func (CloudIsolation) Examples() []sparkwing.Example {
 	return []sparkwing.Example{{
 		Comment: "Attack staging from the two conformance teams and keep the evidence",
-		Command: `sparkwing run cloud-isolation -- --database "$STAGING_DATABASE" --evidence ~/evidence/cloud-isolation/$(date +%F)`,
+		Command: `sparkwing run cloud-isolation -- --database "$STAGING_DATABASE" --vpc-resolver "$STAGING_VPC_RESOLVER" --evidence ~/evidence/cloud-isolation/$(date +%F)`,
 	}}
 }
 
@@ -79,11 +83,11 @@ func (CloudIsolation) Plan(_ context.Context, plan *sparkwing.Plan, in CloudIsol
 	return nil
 }
 
-// safety: anchors hold their listeners as long as the probe job's timeout allows and the driver
-// cancels them once the last run has probed them; a peer gone early fails its item. Every command
-// carries its own deadline, and cleanup runs on a fresh bounded context.
+// safety: anchors hold their listeners until just before their job limit and the driver cancels
+// them once the last run has probed them; a peer gone early fails its item. Every command carries
+// its own deadline, and cleanup runs on a fresh bounded context.
 const (
-	anchorHold     = fixture.JobTimeout - 2*time.Minute
+	anchorMargin   = 2 * time.Minute
 	readyTimeout   = 15 * time.Minute
 	probeTimeout   = 25 * time.Minute
 	endTimeout     = 5 * time.Minute
@@ -135,7 +139,26 @@ func (in CloudIsolationArgs) validate() error {
 	if in.VPCResolver != "" && net.ParseIP(in.VPCResolver) == nil {
 		errs = append(errs, fmt.Errorf("--vpc-resolver %q must be an IP address", in.VPCResolver))
 	}
+	if _, err := in.anchorTimeout(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+// safety: the anchors' limit moves only by an explicit per-run flag, from the fixture's default up
+// to its cap, so a longer hostile hold is always a choice made for that run.
+func (in CloudIsolationArgs) anchorTimeout() (time.Duration, error) {
+	if in.AnchorTimeout == "" {
+		return fixture.JobTimeout, nil
+	}
+	d, err := time.ParseDuration(in.AnchorTimeout)
+	if err != nil {
+		return 0, fmt.Errorf("--anchor-timeout: %w", err)
+	}
+	if d < fixture.JobTimeout || d > fixture.MaxJobTimeout {
+		return 0, fmt.Errorf("--anchor-timeout %s must be from %s to %s", d, fixture.JobTimeout, fixture.MaxJobTimeout)
+	}
+	return d, nil
 }
 
 type cloudIsolationJob struct {
@@ -630,12 +653,15 @@ func (d *isolationDriver) trigger(ctx context.Context, template string, r *isola
 			return "", err
 		}
 	}
-	hold := "0s"
+	limit, hold := fixture.JobTimeout, time.Duration(0)
 	if r.Role == isolationprobe.RoleAnchor {
-		hold = anchorHold.String()
+		if limit, err = d.args.anchorTimeout(); err != nil {
+			return "", err
+		}
+		hold = limit - anchorMargin
 	}
 	out, err := d.cmdWithin(ctx, buildTimeout, "", nil, "sparkwing", "pipeline", "trigger", fixture.Pipeline, "-C", checkout, "--profile", r.Team,
-		"--runner", "cloud", "--working-tree", "--detach", "-o", "json", "--", "--role", r.Role, "--hold", hold)
+		"--runner", "cloud", "--working-tree", "--detach", "-o", "json", "--", "--role", r.Role, "--hold", hold.String(), "--timeout", limit.String())
 	if err != nil {
 		return "", err
 	}
@@ -1208,7 +1234,11 @@ func isolationReport(args CloudIsolationArgs, runs []isolationRun, eval isolatio
 		verdict = "FAIL"
 	}
 	fmt.Fprintf(&b, "# Cloud isolation conformance: %s\n\n", verdict)
-	fmt.Fprintf(&b, "Controller %s, job namespace %s, teams %s and %s. Every result is in results.ndjson.\n\n", args.ControllerURL, args.JobNamespace, args.TeamA, args.TeamB)
+	limit := args.AnchorTimeout
+	if d, err := args.anchorTimeout(); err == nil {
+		limit = d.String()
+	}
+	fmt.Fprintf(&b, "Controller %s, job namespace %s, teams %s and %s, anchor job limit %s. Every result is in results.ndjson.\n\n", args.ControllerURL, args.JobNamespace, args.TeamA, args.TeamB, limit)
 	b.WriteString("| Run | Team | Role | Run ID | Status | Probe pod | Node | Pod IP | Node IP |\n|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range runs {
 		pod := probePod(r)
