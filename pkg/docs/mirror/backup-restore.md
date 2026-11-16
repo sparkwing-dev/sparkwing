@@ -335,12 +335,12 @@ Copies remain in backups until those age out:
   until its lifecycle rule expires it. On Sparkwing Cloud the rule is 7 days.
   S3 rounds each expiry up to the next midnight UTC and removes expired
   versions asynchronously, so a deleted object is typically gone within 8 days.
-
-On Sparkwing Cloud, deleted data therefore leaves automated copies in about 7
-days, typically within 8.
 - Manual RDS snapshots never expire. Delete a manual snapshot within the same
   retention period once the change it protected is verified, or record why it
   must outlive that period.
+
+On Sparkwing Cloud, deleted data therefore leaves automated copies in about 7
+days, typically within 8.
 
 Restoring a backup taken before a deletion brings the deleted data back.
 Repeat any deletion that happened after the restore point before reopening the
