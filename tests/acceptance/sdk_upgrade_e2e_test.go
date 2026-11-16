@@ -64,7 +64,6 @@ func TestSDKUpgradeE2E(t *testing.T) {
 	}
 }
 
-// listedSDKs reads the SDK entries of the public signed index, the list `pipeline upgrade` selects from.
 func listedSDKs(t *testing.T) map[string][]string {
 	t.Helper()
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://sparkwing.dev/versions.json", nil)
@@ -181,7 +180,6 @@ func (u *upgradeUser) git(args ...string) { u.t.Helper(); u.tool(u.project, "git
 
 var goSDKRequire = regexp.MustCompile(`(?m)^\s*(?:require\s+)?github\.com/sparkwing-dev/sparkwing/sparkwing\s+(v\S+)`)
 
-// pin reads the exact SDK the scaffold or upgrade wrote, as a v-prefixed semantic version.
 func (u *upgradeUser) pin(language string) string {
 	u.t.Helper()
 	pipeline := filepath.Join(u.project, ".sparkwing")

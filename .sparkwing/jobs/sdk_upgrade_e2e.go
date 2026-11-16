@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ func (SDKUpgradeE2E) ShortHelp() string {
 }
 
 func (SDKUpgradeE2E) Plan(_ context.Context, plan *sparkwing.Plan, in SDKUpgradeE2EArgs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "upgrade-flows", func(ctx context.Context) error {
+	sparkwing.Job(plan, "upgrade-flows", func(ctx context.Context) (result error) {
 		if runtime.GOOS != "linux" {
 			return fmt.Errorf("the SDK upgrade scenarios require Linux")
 		}
@@ -35,7 +36,7 @@ func (SDKUpgradeE2E) Plan(_ context.Context, plan *sparkwing.Plan, in SDKUpgrade
 			if err != nil {
 				return err
 			}
-			defer func() { _ = os.RemoveAll(dir) }()
+			defer func() { result = errors.Join(result, os.RemoveAll(dir)) }()
 			binary = filepath.Join(dir, "sparkwing")
 			if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-o", binary, "./cmd/sparkwing").Dir(sparkwing.WorkDir()).Env("GOWORK", "auto").Run(); err != nil {
 				return fmt.Errorf("build the CLI under test: %w", err)
