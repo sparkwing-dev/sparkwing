@@ -293,8 +293,9 @@ still cannot answer 6 hours after the first failure closes as
 retried the same way, because it is an operator slip rather than a fact about
 the team: a 401 (the `billing-token` credential and the service's
 `BILLING_CHECKOUT_TOKEN` differ), a 404 (`--billing-url` does not name the
-service) or a 421 (the service's `BILLING_DEPLOYMENT` is another deployment).
-The first one logs `alert=checkout_misconfigured` naming the likely cause, once
+service) or a 421 (the service's `BILLING_DEPLOYMENT` is another deployment,
+or its `BILLING_LIVE` another Stripe mode). The first one logs
+`alert=checkout_misconfigured` naming the likely cause and its `retry_limit`, once
 until a call is answered again, and fixing the pairing within 6 hours affects no
 team. Any other refusal is about the request itself, such as an amount outside
 the bounds, another team's Stripe customer (403) or a request Stripe refused

@@ -59,7 +59,8 @@ var errCheckoutUnavailable = errors.New("the checkout service is unavailable")
 
 var errCheckoutMisconfigured = errors.New("the checkout service and this controller are not paired")
 
-// safety: an operator slip in the pairing is retried like an outage, never final for every team's refill or refund.
+// safety: an operator slip in the pairing is retried like an outage, so fixing it within checkoutRetryLimit loses no
+// team's refill or refund.
 var checkoutMisconfigurations = map[int]string{
 	http.StatusUnauthorized:       "the checkout service refused the billing-token credential; it must equal the service's BILLING_CHECKOUT_TOKEN",
 	http.StatusNotFound:           "the checkout service has no such route; --billing-url must name the checkout service",
@@ -218,14 +219,17 @@ func (c *billingCheckout) settled(key string) { delete(c.retries, key) }
 // safety: operator alerting keys on this value; it fires once per misconfiguration, naming the likely cause.
 const checkoutMisconfiguredAlert = "checkout_misconfigured"
 
+const checkoutMisconfiguredMessage = "billing alert: refills and refunds are retried for up to retry_limit; then a refill closes as " +
+	refillCheckoutUnavailable + " and a refund is listed as failed for the operator"
+
 func (s *Server) alertCheckoutMisconfigured(err error) {
 	switch {
 	case err == nil:
 		s.checkout.misconfigured = false
 	case errors.Is(err, errCheckoutMisconfigured) && !s.checkout.misconfigured:
 		s.checkout.misconfigured = true
-		s.logger.Error("billing alert: refills and refunds are retried until the pairing is fixed",
-			"alert", checkoutMisconfiguredAlert, "deployment", s.paymentDeployment, "payment_mode", string(s.deployment.PaymentMode()), "err", err)
+		s.logger.Error(checkoutMisconfiguredMessage, "alert", checkoutMisconfiguredAlert, "retry_limit", checkoutRetryLimit.String(),
+			"deployment", s.paymentDeployment, "payment_mode", string(s.deployment.PaymentMode()), "err", err)
 	}
 }
 

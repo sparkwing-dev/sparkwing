@@ -98,7 +98,7 @@ func TestRefillsAndRefundsMoveMoneyOnlyInTheControllersStripeMode(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			alerts := auditLines(t, &logs, "billing alert: refills and refunds are retried until the pairing is fixed")
+			alerts := auditLines(t, &logs, checkoutMisconfiguredMessage)
 			if tc.paired {
 				if recorded != 1 || len(due) != 0 || len(alerts) != 0 {
 					t.Fatalf("paired: refill recorded %d, refunds due %+v, alerts %v; want the refill recorded and the refund made", recorded, due, alerts)
@@ -108,8 +108,8 @@ func TestRefillsAndRefundsMoveMoneyOnlyInTheControllersStripeMode(t *testing.T) 
 			if recorded != 0 || !standing.Refill.Open || len(due) != 1 || due[0].PaymentIntent != "pi_due" {
 				t.Fatalf("mode mismatch: refill recorded %d, refill %+v, refunds due %+v; want the refill open and the refund queued", recorded, standing.Refill, due)
 			}
-			if len(alerts) != 1 || alerts[0]["alert"] != checkoutMisconfiguredAlert || alerts[0]["payment_mode"] != "test" {
-				t.Fatalf("misconfiguration alerts %v; want one naming payment_mode test", alerts)
+			if len(alerts) != 1 || alerts[0]["alert"] != checkoutMisconfiguredAlert || alerts[0]["payment_mode"] != "test" || alerts[0]["retry_limit"] != "6h0m0s" {
+				t.Fatalf("misconfiguration alerts %v; want one naming payment_mode test and retry_limit 6h0m0s", alerts)
 			}
 		})
 	}
