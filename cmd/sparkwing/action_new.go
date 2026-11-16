@@ -480,9 +480,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	sw.Job(plan, run.Pipeline, &{{STRUCT}}Job{})
 	return nil
@@ -521,7 +521,7 @@ import (
 
 // {{STRUCT}} is a build/test/deploy pipeline.
 //
-//   build -> test -> deploy
+//	build -> test -> deploy
 //
 // See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
 type {{STRUCT}} struct{ sw.Base }
@@ -538,9 +538,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	build := sw.Job(plan, "build", &{{STRUCT}}Build{})
 	test := sw.Job(plan, "test", &{{STRUCT}}Test{}).Needs(build)
@@ -601,7 +601,7 @@ import (
 
 // {{STRUCT}} is a pull-request gate pipeline.
 //
-//   lint, test (in parallel) -> gate
+//	lint, test (in parallel) -> gate
 //
 // gate passes only when both lint and test pass. See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
 type {{STRUCT}} struct{ sw.Base }
@@ -619,9 +619,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 //
 // Prefers gives matching eligible runners a head start without
 // relaxing placement requirements.
@@ -685,7 +685,7 @@ import (
 
 // {{STRUCT}} is a release pipeline.
 //
-//   version-bump -> changelog -> publish
+//	version-bump -> changelog -> publish
 //
 // A linear release flow: compute the next version, regenerate the
 // changelog, then tag and publish. See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
@@ -704,9 +704,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	bump := sw.Job(plan, "version-bump", &{{STRUCT}}VersionBump{})
 	changelog := sw.Job(plan, "changelog", &{{STRUCT}}Changelog{}).Needs(bump)
@@ -767,7 +767,7 @@ import (
 
 // {{STRUCT}} is a scheduled report pipeline.
 //
-//   collect -> { gather-metrics, gather-errors, gather-usage } -> publish-report
+//	collect -> { gather-metrics, gather-errors, gather-usage } -> publish-report
 //
 // A fan-out report: collect seeds three independent gatherers that run
 // in parallel, and publish-report converges them into one summary.
@@ -787,9 +787,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	collect := sw.Job(plan, "collect", &{{STRUCT}}Collect{})
 	metrics := sw.Job(plan, "gather-metrics", &{{STRUCT}}GatherMetrics{}).Needs(collect).Prefers("report")

@@ -116,6 +116,9 @@ func (l *Launcher) validate() error {
 	return l.validateIdleGrace()
 }
 
+// safety: a wide fan-out cannot hold the loop away from renewals and teardown.
+const maxClaimsPerCycle = 8
+
 func (l *Launcher) claimPoll() time.Duration {
 	if l.Poll <= 0 {
 		return 5 * time.Second
@@ -175,7 +178,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 			if err == nil && ctx.Err() == nil && !time.Now().Before(cooldown) {
 				var launched bool
 				var suggestedPoll time.Duration
-				launched, suggestedPoll, err = l.claim(ctx)
+				launched, suggestedPoll, err = l.claimReady(ctx)
 				// safety: an award can fail during placement; only failed claim responses retain the old advice.
 				if err == nil || launched {
 					pollAfter = suggestedPoll
@@ -307,6 +310,20 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	}
 	launched, _, err = l.claim(ctx)
 	return launched, err
+}
+
+// perf: jobs that become ready together launch in one cycle instead of one claim per poll.
+func (l *Launcher) claimReady(ctx context.Context) (launched bool, pollAfter time.Duration, err error) {
+	for range maxClaimsPerCycle {
+		var awarded bool
+		awarded, pollAfter, err = l.claim(ctx)
+		launched = launched || awarded
+		// perf: an award waiting on fresh capacity has already requested it, so the next ready job need not wait a poll.
+		if !awarded || err != nil && err != ErrNoDedicatedNode || pollAfter > 0 || ctx.Err() != nil { //nolint:errorlint // Joined provisioning faults end the cycle.
+			return launched, pollAfter, err
+		}
+	}
+	return launched, pollAfter, err
 }
 
 func (l *Launcher) claim(ctx context.Context) (bool, time.Duration, error) {

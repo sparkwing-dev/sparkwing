@@ -74,6 +74,10 @@ For TypeScript, use `--template typescript`, generate and commit the npm
 lockfile, then inspect and run the pipeline. See the
 [TypeScript quick start](docs/getting-started.md#quick-start).
 
+Moving a GitHub Actions workflow? Start with
+[Migrate from GitHub Actions](docs/migrate-from-github-actions.md) and
+[known limitations](docs/known-limitations.md).
+
 When a team should see the same runs, connect the machine to a
 controller:
 
@@ -156,7 +160,7 @@ For scheduled local work, scaffold `--template scheduled-report`, review and
 commit the files, then run `sparkwing schedules install --profile=`. Installation
 pins the pipeline and arms its declared cadence through the native timer on
 Linux/macOS. Windows installation records schedules but does not fire them
-automatically. The machine must be awake for timer-started work.
+automatically. Windows support is experimental; use WSL2 with systemd. The machine must be awake for timer-started work.
 Inspect it with `sparkwing schedules list --profile=`. See
 [`docs/schedules.md`](./docs/schedules.md).
 
@@ -234,9 +238,11 @@ Existing destination files are rejected. Xwing owns candidate selection and the
 `sparkwing` runtime profile. The hook does not install a host service or replace
 the normal executable.
 
-## Reporting issues
+## Support and reporting issues
 
-Open a public issue for bugs and feature requests at
+For Sparkwing Cloud accounts, billing and runs, email support@sparkwing.dev.
+[Support](docs/support.md) lists what to include and how quickly to expect a
+reply. Open a public issue for bugs and feature requests at
 [github.com/sparkwing-dev/sparkwing/issues](https://github.com/sparkwing-dev/sparkwing/issues).
 Report suspected vulnerabilities privately by following the
 [security policy](./SECURITY.md).

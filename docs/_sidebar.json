@@ -4,7 +4,10 @@
       "label": "Getting Started",
       "slugs": [
         "getting-started",
+        "migrate-from-github-actions",
+        "known-limitations",
         "updates",
+        "support",
         "architecture",
         "machine-config",
         "environment-variables",
@@ -58,6 +61,7 @@
       "label": "Operations",
       "slugs": [
         "observability",
+        "run-events",
         "debugging",
         "diagnosing-admission",
         "security",

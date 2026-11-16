@@ -27,7 +27,7 @@ import (
 
 func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 	const pinnedConfig = "pipelines:\n  - name: deploy\n    entrypoint: deploy\n    source: refs/heads/code\n"
-	for _, kind := range []string{"exact", "exact-detached", "changed", "fetch-identical", "fetch-ahead", "fetch-unreachable", "fetch-behind", "fetch-unknown", "fetch-403", "fetch-422", "fetch-429", "fetch-503", "fetch-network", "fetch-metadata-403", "fetch-retry", "fetch-pinned", "fetch-pinned-source-unreachable", "fetch-pinned-execution-unreachable", "cross-repository"} {
+	for _, kind := range []string{"exact", "exact-detached", "changed", "fetch-identical", "fetch-ahead", "fetch-unreachable", "fetch-behind", "fetch-unknown", "fetch-403", "fetch-422", "fetch-429", "fetch-503", "fetch-network", "fetch-selection-403", "fetch-retry", "fetch-pinned", "fetch-pinned-source-unreachable", "fetch-pinned-execution-unreachable", "cross-repository"} {
 		t.Run(kind, func(t *testing.T) {
 			pinned := strings.HasPrefix(kind, "fetch-pinned")
 			repo, original := sourcetest.Repository(t)
@@ -88,7 +88,9 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 						return nil, errors.New("connection lost")
 					}
 				}
-				if kind == "fetch-metadata-403" && compares > 0 && r.URL.Path == "/installation/repositories" {
+				// safety: one intake answers a repeated GitHub read from its first reply, so the
+				// selection reads after a compare are the ones that can still fail.
+				if kind == "fetch-selection-403" && compares > 0 && !strings.Contains(r.URL.Path, "/compare/") {
 					status = http.StatusForbidden
 				}
 				if status != 0 {

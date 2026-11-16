@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -178,6 +179,8 @@ func (s *EngineController) intakeTarget(r *http.Request) (capability.RequestEvid
 
 func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
 	return func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+		// perf: intake, source credential and placement checks read the same GitHub facts.
+		r = r.WithContext(githubapp.WithRequestMemo(r.Context()))
 		var body controllerwire.CreateRunRequest
 		if err := decodeEngineRequest(r, &body); err != nil {
 			return err

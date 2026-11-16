@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestBuiltinTemplatesRenderLintClean(t *testing.T) {
@@ -646,5 +648,31 @@ func TestPipelineNewUnknownTemplateLeavesCheckoutUntouched(t *testing.T) {
 	_, cfg, err := projectconfig.Discover(repo)
 	if err != nil || cfg == nil || len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "bad" {
 		t.Fatalf("corrected template did not scaffold its pipeline: %+v, %v", cfg, err)
+	}
+}
+
+func TestBuiltinShapesRenderGofmtClean(t *testing.T) {
+	for _, shape := range builtinShapes {
+		rendered := renderBuiltinTemplate("sample-report", "", shape.src)
+		formatted, err := format.Source([]byte(rendered))
+		if err != nil {
+			t.Fatalf("%s: gofmt: %v", shape.Name, err)
+		}
+		if string(formatted) != rendered {
+			t.Errorf("%s is not gofmt-clean; gofmt writes:\n%s", shape.Name, formatted)
+		}
+	}
+}
+
+func TestBuiltinShapesNameOnlyRealRunContextFields(t *testing.T) {
+	field := regexp.MustCompile(`\brun\.([A-Z][A-Za-z]*)`)
+	runContext := reflect.TypeFor[sparkwing.RunContext]()
+	for _, shape := range builtinShapes {
+		rendered := renderBuiltinTemplate("sample", "", shape.src)
+		for _, m := range field.FindAllStringSubmatch(rendered, -1) {
+			if _, ok := runContext.FieldByName(m[1]); !ok {
+				t.Errorf("%s names run.%s, which RunContext does not have", shape.Name, m[1])
+			}
+		}
 	}
 }

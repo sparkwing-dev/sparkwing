@@ -273,6 +273,10 @@ func Registry() []Command {
 		{Path: "sparkwing overflow", Flags: []Flag{}},
 		{Path: "sparkwing billing", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
+		{Path: "sparkwing team delete", Authority: teamCredential, Rules: []string{"Only a team owner deletes a team, and --confirm must repeat the slug of the team the profile's credential belongs to. The profile's token needs team.admin, which sparkwing login tokens never carry; a token created with --allow-team-admin from an administrator token has it, and the dashboard deletes a team without one. The controller refuses the owner's only team; deleting it means deleting the account, which the controller's support contact does on request. Deletion revokes every team token, including this profile's, ends members' sessions in the team, withdraws invitations and cancels active runs at once. Within minutes the controller removes the team's runs, logs, artifacts, cache, secrets, schedules, subscriptions and runners. Credit and payment records stay for accounting, and the slug stays reserved. JSON emits the deletion record; plain emits the slug."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "confirm", Argument: "SLUG", Required: true, Meaning: "The slug of the team to delete, repeated as confirmation"},
+		}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
 		{Path: "sparkwing team settings show", Authority: teamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. The child-run ceiling defaults to 50 descendants per root, excluding retries. high_trust defaults to false; see team settings set. Plain prints the boolean, comma-separated ranking, child-run ceiling and high_trust."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},

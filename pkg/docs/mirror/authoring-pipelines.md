@@ -423,7 +423,10 @@ named by the webhook URL without reading those fields.
 Use a pipeline guard when the policy depends on the branch Sparkwing checks
 out. `when: [git:branch=main]` blocks a run from any other checked-out
 branch before a step starts. The literal name matches the head branch; it does
-not match a pull request's base branch. `git:branch=default` matches the
+not match a pull request's base branch. A local `sparkwing run` records the
+branch you have checked out, so it passes this guard from `main` and is refused
+from any other branch. To keep a deploy off developer machines as well, add
+`where:controller`. `git:branch=default` matches the
 repository's default branch: a GitHub App trigger records it, and any other
 run reads origin's HEAD from its checkout, asking origin when the clone did
 not record it. A run whose default branch cannot be resolved is refused

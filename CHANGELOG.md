@@ -20,6 +20,302 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.73.0] - 2026-11-16
+
+### Added
+
+- **runner:** Trace annotation authorization and controller HTTP phases
+  Slow requests also emit host-stamped JSON run-log diagnostics without a
+  collector. Human log views hide these records. Existing OTEL settings enable
+  runner trace export, one trace per request on long-lived runners; credentials
+  and payloads are excluded.
+
+
+- **logs:** Lease keeper diagnostics place their records on the monotonic clock
+  On Linux every keeper record brackets its process origin on `CLOCK_MONOTONIC`.
+  Expiries and inherited deadlines that carry a monotonic reading also appear as
+  offsets from that origin, and `expires_wall_bound` marks a server expiry that
+  the wall clock can end sooner. A failed renewal records its wire error code,
+  and a cancellation request leaves a `cancel_requested` record before the
+  keeper acts on it.
+
+
+- **logs:** Host-stamped lease keeper diagnostics end each log stream with a per-instance summary
+  Before a stream seals, its queued keeper records drain and one `kind: summary`
+  record per keeper instance reports the last delivered sequence, captured and
+  lost totals, and whether the window lost nothing. The claim ends at the seal. A
+  missing summary means incomplete diagnostics. A retried attempt's stream opens a
+  new window. Renewal, finish authority and retry-tail fencing are unchanged.
+
+
+- **sdk:** Expose step bounds to Plan
+  `RunContext.StartAt` and `RunContext.StopAt` carry the run's `--sw-start-at`
+  and `--sw-stop-at` values when the host forwards them. The protocol run context
+  defines them as the optional `start_at` and `stop_at` fields. A `Plan` can
+  refuse a selection it cannot honor.
+
+
+- **controller:** Sparkwing delivers run events to subscriptions
+  A run start and every terminal run state queue one delivery per matching
+  subscription in the same transaction as the state change. The controller and
+  the local daemon POST each delivery with `Content-Type:
+  application/cloudevents+json` and Standard Webhooks headers
+  (`webhook-id`, `webhook-timestamp`, `webhook-signature`), signed with the
+  subscription's `whsec_` secret. Any non-2xx response or transport error is
+  retried with jittered backoff from 10 seconds up to one hour for 24 hours;
+  the delivery is then marked failed. A `Retry-After` can lengthen a wait up
+  to one hour but never shorten it. The `reason` field carries only
+  Sparkwing's own codes (`queue_timeout`, `owner_lost`, `launch_rejected`,
+  `credit_refused`, `plan_failed`), never text a caller supplied. Redirects are not followed. A controller sends only to HTTPS
+  destinations whose resolved addresses are all public and connects to the
+  address it checked; the local daemon also sends to `http` and loopback.
+  Delivery is at least once: receivers deduplicate on `webhook-id`, which is
+  the event `id`. The local daemon sends deliveries only while it runs: one
+  left pending while it is stopped is sent when it starts again, or marked
+  failed without an attempt once its 24-hour window has closed.
+
+
+- **api:** Team administrators manage run event subscriptions
+  `/api/v1/subscriptions` and `sparkwing subscriptions` create, list, show,
+  delete and rotate the signing secret of a team subscription. A subscription
+  names an HTTPS URL, the `run.started` and `run.finished` events it wants, and
+  optional status, pipeline and repository filters. Naming statuses without
+  events selects `run.finished` only. Sparkwing generates the
+  `whsec_` signing secret, shows it once and stores it sealed to the team and
+  subscription. A controller accepts only HTTPS URLs whose host is a public
+  name or address; the local controller also accepts `http` and loopback hosts.
+  Events are CloudEvents 1.0 JSON with type `dev.sparkwing.run.started.v1` or
+  `dev.sparkwing.run.finished.v1`.
+
+
+- **pipeline:** `sparkwing pipeline describe --show-withheld` prints withheld planning errors
+  A pipeline whose Plan fails, or a TypeScript pipeline that does not load,
+  used to report only `details withheld: secrets not yet known`, with no way to
+  see the cause. The withheld error and the withheld-output notice now name
+  `sparkwing pipeline describe --pipeline <name> --show-withheld`. Run it
+  locally: it prints the real error and the SDK's output to stderr, masked by
+  every secret Sparkwing knows. The failed pipeline's own secret defaults are
+  unknown and print unmasked, so keep it out of CI logs. Default output, run
+  logs and the describe cache stay withheld.
+
+### Changed
+
+- **sdk:** Reserve `request_timing` for host diagnostics
+  SDK events using this kind are retained as `sdk_request_timing` and stay
+  visible in human log output.
+
+
+- **local runs:** A local run starts within half a second of intake after any idle period
+  The local controller no longer advises its idle runner to poll less often. Before,
+  a run submitted after a pause waited up to 6.25 s for the runner's next claim.
+  An idle local runner now sends two empty claims a second over its private socket.
+- **typescript:** Unchanged TypeScript pipelines skip npm during preparation
+  A verified installation records a receipt of the inputs npm reads but does not
+  write. Later preparations whose inputs match, and whose tree passes a subset of npm's
+  hidden-lockfile check, skip `npm ci --dry-run` and `npm install`, saving 1-2 s
+  each time the CLI, trigger or job prepares the pipeline. Root lifecycle scripts
+  still run on every preparation. Version-manager shims hide node and npm switches
+  from the receipt. See [versioning](docs/versioning.md).
+
+
+- **cli:** `runs list`, `runs logs` and `runs grep` refuse an unknown `--status`
+  The error lists the stored run states (pending, running, success, dry_run,
+  failed, cancelled) and suggests the nearest one. An unknown value used to
+  match nothing and exit 0.
+
+
+- Queued landing runs review alongside affected Go tests after policy and fast checks pass. Review failures cancel in-flight tests, and landing still requires every check to pass on the unchanged tree. Each reviewer model call stops after 30 minutes, so a silent reviewer cannot hold the land slot for the combined job's longer deadline.
+
+
+- **cli:** `sparkwing run` and `runs logs` print a quieter, labelled stream on a terminal
+  Each line starts with its job, as in `test | running tests`, and the run ID appears
+  only in the run's start line. Step boundaries read `unit started` and `unit failed
+  after 23ms`. Scheduling events such as `job_ready`, `job_claimed` and
+  `job_admission_granted`, source-preparation timings and the CLI's own `INFO` log lines
+  no longer print there. JSON and plain output keep every record.
+- **cli:** A failed run ends with a failure block
+  The block names each failed job with its step and error, says which dependency
+  stopped a cancelled job, and gives the `runs logs --run N --job JOB` and
+  `runs retry --failed --run N` commands. The trailing "run status: failed" diagnostic no
+  longer follows it, and the exit status stays 1.
+- **orchestrator:** A failed run's reason lists cancelled jobs separately
+  `failed: test; cancelled: deploy` replaces `failed: test, deploy`.
+
+
+- **store (Breaking):** The schema baseline advances to version 39 to store run event subscriptions and deliveries. Schema 38 stores upgrade automatically. Older binaries refuse the upgraded store. See the [migration guide](docs/migrations/v0.73.0.md#upgrade-the-store-in-place-to-schema-baseline-39)
+
+
+- **cache:** A run on a new branch restores its writer's default-branch memo and dependency caches
+  A local, CLI, API or dashboard run reads its own `manual:<writer>:<branch>`
+  scope first, then the same writer's scope on the repository's default branch,
+  so the first local run on a new branch of a checkout starts warm from what
+  that writer's runs of `main` saved there; a new `git worktree` is another
+  repository and still starts cold. The default branch comes from `origin/HEAD`. Writes stay
+  in the branch's own scope, the records read stay unverified, and no run reads
+  another writer's scope. A dependency-cache restore from that scope reports the
+  source `writer_default`; a host older than its controller refuses that source
+  and runs the job cold.
+
+### Fixed
+
+- **cli:** `sparkwing docs search` ranks guides above the changelog
+  Changelog sections now rank below every matching guide or reference section,
+  as migration guides already did, unless the query names a version such as
+  `v0.70.0` or the word "breaking". Common words such as "how", "do" and "what"
+  are dropped from a query that has other words, so "how do I add a secret"
+  searches for "add secret".
+
+
+- **cli:** The CLI no longer warns about the version policy once it is cached
+  `sparkwing pipeline plan`, `pipeline describe` and the CLI side of `sparkwing run`
+  treated a readable cached policy as a fallback, so they printed a warning on every
+  command, and `sparkwing update` could not clear it. They now stay quiet when the
+  policy is cached, and warn only when no policy is cached or the cached policy does
+  not list the running release. `sparkwing run` also prints the warning from its
+  engine, and runs store it on the run; that stops once `sparkwing update` installs
+  an engine release that contains this fix. The hint reads "Run `sparkwing update`
+  to cache the signed version policy.", and the `sparkwing doctor` line for a
+  missing policy names the same command.
+
+
+- **cli + web:** Local runs record the checked-out branch, so Home lists their failures and recoveries
+  A `sparkwing run` from a working tree records its branch, as `--ref`, uploaded
+  and cloud-routed runs already did. Home's "Recently failed pipelines" and
+  "Recently recovered pipelines" now include local runs, `runs list --branch`
+  matches them, the SDK's `Git().Branch` reports the branch, and `git:branch=NAME`
+  guards match the checked-out head as documented. A detached HEAD records no
+  branch. `when: [git:branch=main]` now lets a local run from `main` through, so
+  use `when: [where:controller]` to keep a pipeline such as a deploy off
+  developer machines. Memo and dependency-cache records from local runs now
+  carry the branch in their scope, `manual:<writer>:<branch>`, as the caching
+  guide describes, so the first run on `main` after upgrading starts cold.
+  Home also treats a `refs/heads/main` push
+  or schedule run as a default-branch run.
+
+
+- **cli:** `sparkwing run` refuses a run when no local runner can start
+  It names the cause and the fix instead of queueing the run and waiting with no
+  output. An unreachable systemd user manager reads as such, with
+  `systemctl --user status` and `loginctl enable-linger $USER` as the fix, then
+  `sparkwing daemon stop` from the repaired session so a new controller picks it up.
+  `sparkwing daemon status` prints the runner's state and any failure on a
+  `runner:` line, and `sparkwing doctor` reports a `local_runner_unavailable`
+  finding.
+- **cli:** `sparkwing daemon stop` no longer leaves the controller half-stopped
+  When the local runner still holds jobs at the end of the stop wait, the command
+  names the runner and the controller exits on its own once that runner finishes.
+  A second stop is no longer needed. `sparkwing daemon status` reports `stopping`
+  until then. Commands that need the controller, `runs cancel` included, fail
+  with "the local controller is still stopping" until the held work ends; the stop
+  names the command that kills the runner to abandon that work.
+- **cli:** Commands started from a systemd service without a user manager name the cause
+  With `INVOCATION_ID` set, sparkwing starts the controller in its own user scope.
+  When the user manager is unreachable, the error now says so and how to restore
+  it instead of printing the controller log.
+
+
+- **cli:** Common mistakes now name what went wrong and the command that fixes it
+  A pipeline name that sparkwing.yaml does not list and the SDK does not
+  register reads `no pipeline named "biuld"` with the nearest listed name,
+  instead of telling you to register the typo. A misspelled flag suggests the
+  nearest one, and a mistyped `--dry-run` points at `--sw-dry-run`. `runs logs` with
+  no arguments asks for `--run` or `--grep`. A stray positional names the flag
+  that takes it, such as `--run RUN_ID`. An empty `runs list --pipeline` result
+  suggests a close sparkwing.yaml name. A run outside a git repository says to
+  run `git init`.
+- **secrets:** Refusals name the secret and the fix
+  `secrets get` of a masked secret says only a run that declares it can read
+  the value and that `--variable` stores readable values. A run reading an
+  undeclared secret names it and the `sw` tag to add. The missing-secret
+  preflight shows the exact optional tag instead of `NAME`. A secret another
+  team holds still reads exactly like a missing one.
+- **sdk:** A job reading another job's output without depending on it names both jobs
+  The refusal says to add `.Needs()`, in place of "resource is outside the
+  authorized binding". Reads of jobs outside the caller's run keep the generic
+  refusal.
+- **child runs:** An awaited child that fails names its run ID, the failed job and its error
+  Pipeline-name advice is kept for children that could not plan.
+- **config:** sparkwing.yaml errors give the real reason and line
+  Cron values report the field and range, unknown `@` aliases list the
+  supported ones, and an unknown time zone names the value. YAML syntax errors
+  carry the parser's problem and the line where the document went wrong, and
+  the file is named once. A config file with a broad mode prints the `chmod`
+  that fixes it.
+
+
+- **cli:** Multi-line errors print as real lines instead of one quoted string with `\n`
+  This covers command errors, `runs status` job and step errors, and run errors in
+  `runs logs`. Other control characters stay quoted. `runs status` shows an ordinary
+  job failure as `step NAME failed` instead of `sdk_error`.
+- **cli:** A Go compile error in pipeline code reports itself as one
+  `sparkwing run` prints `the pipeline code in .sparkwing does not compile:` with the
+  compiler's lines and file paths relative to the repository root, instead of
+  `SDK install failed`. A build failure without compiler errors, such as a module
+  download failure, says `failed to build`. In JSON output the error code changes
+  from `internal` to `plan_failed`; the exit status stays 1.
+
+
+- **ci:** Run repository-scanning guards for unrelated Go test changes
+  Affected local and hosted tests run the named source guards even when the
+  changed test belongs to another module. Documentation-only selection stays
+  unchanged.
+
+
+- **schedules:** `schedules list --timer` no longer calls a working timer stale
+  It compared the timer's binary with the controller's own executable, so the
+  result depended on which command started the controller. A timer installed in
+  the last three minutes now reads healthy until its first tick.
+- **schedules:** A timer that fails to install no longer leaves schedules armed
+  Installation sets up the timer before arming, and a rerun enables a timer
+  whose files were written but never enabled. `schedules list` warns when armed
+  schedules have no working timer, and `schedules list --timer` now exits 1 as
+  soon as armed schedules have no installed and enabled timer, even if the last
+  tick is less than three minutes old.
+- **schedules:** `schedules uninstall` no longer leaves a failed timer in the user manager
+  It stops the timer before unlinking its units and clears their failed state.
+
+
+- **cli (Breaking):** New local homes create their own private secrets key on first need
+  Generated and refreshed systemd and launchd units pin the selected key file.
+  The default home's existing config key wins over home-local keys. Explicit
+  key-file selections stay in use. A wrong or missing key names its file or
+  inline source and its repair, including through the local secret-list API.
+  A standalone controller logs that detail and returns a generic error, and
+  a malformed sealed value is never blamed on the key.
+  Redirected homes no longer borrow the shared config key. See the
+  [migration guide](docs/migrations/v0.73.0.md#local-secrets-keys-follow-the-state-home).
+
+### Security
+
+- **controller:** Audit requests refused for another team's resources
+  An authenticated request refused because the run, job, claim, child or team
+  it names is missing or outside the credential's team or binding now writes an
+  `access.refused` audit event in the caller's own team. The event records the
+  actor, method, route template, refusal class and credential kind, never the
+  request path, body or the identifiers it named. Each credential, route and
+  class keeps at most one event per hour, and each team at most 300 per hour;
+  the rest are counted in one `access.refused_suppressed` event. Responses are
+  unchanged: a refused request still answers exactly like a missing resource.
+
+
+- **store:** Seal run argument values at rest
+  Stored run requests, accepted specs and generator expansion registrations
+  kept supplied arguments, pipeline-level declared defaults (including secret
+  defaults) and masking registration values in plaintext JSON. Those values now
+  move into one envelope sealed with the secrets key and bound to the run's
+  team, run ID and document kind; names and secret classifications stay
+  readable. Job-level `WithArgs` defaults are not sealed yet and stay in
+  plaintext in the stored plan, node specs and expansion bodies. A run list
+  shows a run whose envelope cannot be opened with `(unavailable)` argument
+  values instead of failing. A keyed
+  store whose key cannot be used refuses the run instead of storing plaintext. A
+  PostgreSQL controller without a `secrets-key` credential stores run argument
+  values, including secret defaults, unencrypted and warns at startup. Runs
+  stored earlier still read as written. `sparkwing-controller restore prepare`
+  opens sealed arguments with the serving controller's key. `sparkwing operator secrets rotate` seals them
+  in place and reports `plaintext_run_arguments`, and it reseals argument
+  envelopes as `run_arguments`.
+
 ## [v0.72.8] - 2026-11-13
 
 ### Added
