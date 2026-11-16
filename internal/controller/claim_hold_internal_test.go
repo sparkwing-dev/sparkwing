@@ -23,7 +23,8 @@ type claimHoldFixture struct {
 	raw string
 }
 
-// safety: the run's trigger is held elsewhere and its one job is not ready yet, so a queue claim for jobs finds nothing.
+// safety: the run's trigger is held elsewhere and its one job is not ready yet,
+// so a queue claim for jobs finds nothing.
 func newClaimHoldFixture(t *testing.T, wake func(*store.Store) ClaimWake) claimHoldFixture {
 	t.Helper()
 	e, _ := engineRuntimeStore(t)
