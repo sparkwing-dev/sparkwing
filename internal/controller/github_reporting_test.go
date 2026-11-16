@@ -61,9 +61,10 @@ func (f *githubCompletionFixture) addReportingNode(id string, outcome runstate.N
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if err := teststore.SeedNode(f.server.store, f.t.Context(), store.Node{RunID: "run", NodeID: id, Status: "pending", Spec: spec}); err != nil {
+	if err := teststore.SeedNode(f.server.store, f.t.Context(), store.Node{RunID: "run", NodeID: id, Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
+	engineSQL(f.t, f.server.store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id=?`, spec, id)
 	if err := teststore.SeedNodeFinish(f.server.store, f.t.Context(), "a", runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, runstate.NodeResult{Outcome: outcome, MaskedError: text}); err != nil {
 		f.t.Fatal(err)
 	}
@@ -652,16 +653,12 @@ func TestGitHubAppCheckRunNumbersStepsByDeclaredPosition(t *testing.T) {
 	}
 }
 
-// A generated job is absent from plan_json; store.TestListNodesCarriesAcceptedGeneratedDeclaration shows its
-// accepted declaration reaches the reporter as the node's Spec, byte for byte what expansion acceptance writes.
+// A generated job is absent from plan_json; store.TestListDeclaredStepsCarriesAcceptedGeneratedDeclaration shows a
+// real expansion acceptance yields this declared order for it.
 func TestGitHubCheckResultsNumberGeneratedStepsByAcceptedSpec(t *testing.T) {
-	spec, err := json.Marshal(nodewire.JobSpec{ID: "ship", Groups: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "deploy", Needs: []string{"build"}}, {ID: "build"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	nodes := []*store.Node{{NodeID: "generator"}, {NodeID: "ship", AttemptsConsumed: 1, Spec: spec}}
+	nodes := []*store.Node{{NodeID: "generator"}, {NodeID: "ship", AttemptsConsumed: 1}}
 	steps := []*store.NodeStep{{NodeID: "ship", StepID: "build", Attempt: 1, Summary: "build summary"}, {NodeID: "ship", StepID: "deploy", Attempt: 1, Summary: "deploy summary"}}
-	got := githubCheckResults(nodes, steps)
+	got := githubCheckResults(nodes, steps, map[string][]string{"generator": {}, "ship": {"deploy", "build"}})
 	if len(got) != 4 || got[2].label != "Job 2, step 1" || got[2].summary != "deploy summary" || got[3].label != "Job 2, step 2" || got[3].summary != "build summary" {
 		t.Fatalf("generated [deploy needs build, build] run build-first reported %+v; want deploy step 1, build step 2", got)
 	}

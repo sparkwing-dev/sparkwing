@@ -222,6 +222,7 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant
 		check.CompletedAt = &completed
 		var nodes []*store.Node
 		var steps []*store.NodeStep
+		var declared map[string][]string
 		if run != nil {
 			var err error
 			if nodes, err = tenant.ListNodes(ctx, u.runID); err != nil {
@@ -229,6 +230,9 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant
 			}
 			if private {
 				if steps, err = tenant.ListNodeSteps(ctx, u.runID); err != nil {
+					return githubapp.CheckRun{}, nil, err
+				}
+				if declared, err = tenant.ListDeclaredSteps(ctx, u.runID); err != nil {
 					return githubapp.CheckRun{}, nil, err
 				}
 			}
@@ -243,7 +247,7 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant
 		// and annotations go only where GitHub explicitly reports private:true. A public repository, or one whose
 		// visibility GitHub omits or nulls, gets aggregate run state.
 		if private {
-			output, annotations := githubCheckDetails(run, nodes, steps, check.Conclusion, link)
+			output, annotations := githubCheckDetails(run, nodes, steps, declared, check.Conclusion, link)
 			return check, &githubCheckDetailOutput{output: *output, annotations: annotations}, nil
 		}
 	}

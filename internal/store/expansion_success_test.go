@@ -227,15 +227,11 @@ func TestExpansionReplayRechecksLeaseAfterSecretDecryption(t *testing.T) {
 	}
 }
 
-// The reporter numbers a generated job's steps from this Spec, because a generated job is absent from plan_json.
-func TestListNodesCarriesAcceptedGeneratedDeclaration(t *testing.T) {
+// The check reporter numbers a generated job's steps from this read, because a generated job is absent from plan_json.
+func TestListDeclaredStepsCarriesAcceptedGeneratedDeclaration(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
 	request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"deploy","needs":["build"]},{"id":"build"}],"groups":["group"],"deps":["job"]}]}`)
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
-		t.Fatal(err)
-	}
-	nodes, err := tenant.ListNodes(t.Context(), "run")
-	if err != nil {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
@@ -246,27 +242,16 @@ func TestListNodesCarriesAcceptedGeneratedDeclaration(t *testing.T) {
 	if err := json.Unmarshal(run.Plan, &plan); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range nodes {
-		if n.NodeID != "generated" {
-			continue
+	for _, declared := range plan.Jobs {
+		if declared.ID == "generated" {
+			t.Fatal("generated job appears in plan_json, so this test no longer covers the expansion-only declaration")
 		}
-		var job nodewire.JobSpec
-		if err := json.Unmarshal(n.Spec, &job); err != nil {
-			t.Fatalf("generated job spec %q: %v", n.Spec, err)
-		}
-		var ids []string
-		for _, step := range job.Steps {
-			ids = append(ids, step.ID)
-		}
-		if !reflect.DeepEqual(ids, []string{"deploy", "build"}) || !reflect.DeepEqual(job.Steps[0].Needs, []string{"build"}) {
-			t.Fatalf("generated job declares steps %v, want [deploy needs build, build]", job.Steps)
-		}
-		for _, declared := range plan.Jobs {
-			if declared.ID == "generated" {
-				t.Fatal("generated job appears in plan_json, so this test no longer covers the expansion-only declaration")
-			}
-		}
-		return
 	}
-	t.Fatalf("no generated job in %+v", nodes)
+	declared, err := tenant.ListDeclaredSteps(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string][]string{"job": {"step"}, "generated": {"deploy", "build"}}; !reflect.DeepEqual(declared, want) {
+		t.Fatalf("declared steps = %v, want %v", declared, want)
+	}
 }

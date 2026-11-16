@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -38,7 +37,7 @@ type githubCheckResult struct {
 // is masked only in text. Steps of superseded attempts are dropped, so a retried job reports its latest attempt.
 // A step's position is its index in the job's accepted declaration, not its start order, because a step may need
 // one declared after it; a step the declaration does not name follows the declared ones.
-func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep) []githubCheckResult {
+func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep, declared map[string][]string) []githubCheckResult {
 	byJob := map[string][]*store.NodeStep{}
 	for _, step := range steps {
 		byJob[step.NodeID] = append(byJob[step.NodeID], step)
@@ -50,13 +49,17 @@ func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep) []githubCh
 			label: job, failed: n.Outcome == string(runstate.NodeFailed), err: n.Error,
 			summary: n.Summary, annotations: n.Annotations,
 		})
-		index := githubDeclaredSteps(n.Spec)
+		order := declared[n.NodeID]
+		index := make(map[string]int, len(order))
+		for position, id := range order {
+			index[id] = position
+		}
 		type positioned struct {
 			position int
 			step     *store.NodeStep
 		}
 		var latest []positioned
-		undeclared := len(index)
+		undeclared := len(order)
 		for _, step := range byJob[n.NodeID] {
 			if step.Attempt != int64(n.AttemptsConsumed) {
 				continue
@@ -79,21 +82,8 @@ func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep) []githubCh
 	return out
 }
 
-// safety: an unreadable declaration yields no positions, so steps take start order instead of failing the report.
-func githubDeclaredSteps(spec []byte) map[string]int {
-	var job nodewire.JobSpec
-	if len(spec) == 0 || json.Unmarshal(spec, &job) != nil {
-		return nil
-	}
-	index := make(map[string]int, len(job.Steps))
-	for i, step := range job.Steps {
-		index[step.ID] = i
-	}
-	return index
-}
-
-func githubCheckDetails(run *store.Run, nodes []*store.Node, steps []*store.NodeStep, conclusion, link string) (*githubapp.CheckRunOutput, []githubapp.CheckRunAnnotation) {
-	results := githubCheckResults(nodes, steps)
+func githubCheckDetails(run *store.Run, nodes []*store.Node, steps []*store.NodeStep, declared map[string][]string, conclusion, link string) (*githubapp.CheckRunOutput, []githubapp.CheckRunAnnotation) {
+	results := githubCheckResults(nodes, steps, declared)
 	failedJobs := 0
 	for _, n := range nodes {
 		if n.Outcome == string(runstate.NodeFailed) {

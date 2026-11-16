@@ -742,8 +742,6 @@ type Node struct {
 	ProcessWallNanos int64          `json:"process_wall_nanos,omitempty"`
 	SpecHash         string         `json:"spec_hash,omitempty"`
 	Generated        *GeneratedNode `json:"generated,omitempty"`
-	// Spec is the job's accepted declaration, from the plan or from the generator that added the job.
-	Spec json.RawMessage `json:"-"`
 
 	outputRecord []byte
 }
@@ -801,7 +799,7 @@ func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 const nodeSelectColumns = `run_id,node_id,status,outcome,deps_json,error,started_at,finished_at,
  ready_at,claimed_by,lease_expires_at,needs_labels,prefers_labels,requested_cores,requested_memory_bytes,requested_slots,
  offer_started_at,status_detail,last_heartbeat,failure_reason,exit_code,annotations_json,summary,cpu_nanos,max_rss_bytes,process_wall_nanos,
- generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,COALESCE((SELECT c.cpu_class FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id AND a.unit_kind='node' AND a.generation=nodes.generation),0),spec_hash,spec_json,generated_json,output_record`
+ generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,COALESCE((SELECT c.cpu_class FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id AND a.unit_kind='node' AND a.generation=nodes.generation),0),spec_hash,generated_json,output_record`
 
 func scanNodeRow(rs rowScanner, n *Node) error {
 	var deps, labels, prefers, annotations, generated []byte
@@ -812,7 +810,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&ready, &holder, &lease, &labels, &prefers, &n.RequestedCores, &n.RequestedMemoryBytes, &n.RequestedSlots,
 		&offered, &n.StatusDetail, &heartbeat, &n.FailureReason, &exit, &annotations, &n.Summary, &n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
 		&n.ClaimGeneration, &n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executed, &n.AttemptsConsumed,
-		&n.PlacementReason, &hold, &n.CreditCPUClassCores, &n.SpecHash, &n.Spec, &generated, &n.outputRecord)
+		&n.PlacementReason, &hold, &n.CreditCPUClassCores, &n.SpecHash, &generated, &n.outputRecord)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("job", "")
 	}
@@ -867,6 +865,42 @@ type NodeStep struct {
 	// sparkwing.Summary inside this step's body. Overwrite-on-write:
 	// only the last value is kept.
 	Summary string `json:"summary,omitempty"`
+}
+
+// ListDeclaredSteps returns each job's step IDs in the order its accepted declaration lists them, for planned
+// and generated jobs alike. A job whose declaration cannot be read is absent from the map.
+func (t *Tenant) ListDeclaredSteps(ctx context.Context, runID string) (map[string][]string, error) {
+	rows, err := t.s.query(ctx, `SELECT node_id, spec_json FROM nodes WHERE team = ? AND run_id = ?`, string(t.team), runID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]string{}
+	for rows.Next() {
+		var node string
+		var spec []byte
+		if err := rows.Scan(&node, &spec); err != nil {
+			return nil, err
+		}
+		var declared struct {
+			Steps []struct {
+				ID string `json:"id"`
+			} `json:"steps"`
+		}
+		// safety: an unreadable declaration only costs step positions, so it must not fail the caller's report.
+		if json.Unmarshal(spec, &declared) != nil {
+			continue
+		}
+		ids := make([]string, 0, len(declared.Steps))
+		for _, step := range declared.Steps {
+			ids = append(ids, step.ID)
+		}
+		out[node] = ids
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, rows.Close()
 }
 
 // ListNodeSteps returns persisted step observations for a tenant run.
