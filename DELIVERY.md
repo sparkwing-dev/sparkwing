@@ -624,7 +624,9 @@ backlink lists.
 The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
-`.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
+`.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`. A
+change that reaches only `docs/` Markdown runs just the SDK suite's type-check of
+the docs' TypeScript blocks and its generated-reference check.
 A docs, UI or process change runs its own tests (affected packages, frontend
 suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass
@@ -697,7 +699,13 @@ SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk destructive,
 
 The version defaults to a minor bump of the newest tag on origin; pass
 `-- --bump patch` for a patch release or `-- --version vX.Y.Z` to name it
-(pipeline flags follow `--`). The
+(pipeline flags follow `--`). A patch cut whose section carries a `(Breaking)`
+entry is refused before it commits, because VERSIONING.md promises breaking
+changes only in a minor release; cut the minor instead. An SDK `(Breaking)`
+entry (scope `sdk` or `typescript`) must link a migration guide section, in
+`[Unreleased]` and at the cut. Before cutting one, run `sparkwing pipeline
+upgrade` on a pipeline pinned to the previous SDK and confirm it makes the
+change the guide describes. The
 pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
 read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links, docs sidebar) and previews the changelog and guide roll; build, lint and the short
@@ -767,6 +775,21 @@ module proxy can already serve the immutable tag. A skipped follow-up surfaces
 only at the next cut, whose `version-freshness` step refuses with "scaffold
 fallback pin ... is behind latest release"; the fix then is this same command
 and a land before the cut, which is how v0.69.0 found v0.68.7's missing pin.
+
+After hosted publication, check a first user's upgrade path with the published
+CLI. `sdk-upgrade-e2e` scaffolds a Go and a TypeScript pipeline in private
+homes, pins the newest listed SDK older than the scaffold's, runs, runs
+`sparkwing pipeline upgrade`, and runs again, against the published engines,
+the signed index and the public module and npm registries. It needs network
+access and stays off the land path. Without `--binary` it builds the
+checkout's CLI, which still selects published engines, so engine-side fixes
+show only once released. A Go upgrade is a verified no-op while one Go SDK is
+listed. On a shared Linux host it took 35-42 seconds of test time with warm
+caches.
+
+```bash
+SPARKWING_HOME="$(mktemp -d)" sparkwing run sdk-upgrade-e2e -- --binary "$(command -v sparkwing)"
+```
 
 The scaffold fallback refuses pins ahead of the local release tags unless
 the exact tag exists on origin. This also verifies hosted release fixtures

@@ -265,16 +265,16 @@ func TestLintChangelog_Breaking_MissingFile(t *testing.T) {
 	}
 }
 
-func TestLintChangelog_Breaking_Unreleased_NoLinkIsOK(t *testing.T) {
+func TestLintChangelog_Breaking_Unreleased_NonSDKNoLinkIsOK(t *testing.T) {
 	body := `## [Unreleased]
 
 ### Changed
 
-- **sdk (Breaking):** Foo. The migration guide gets generated at release time.
+- **cli (Breaking):** Foo. The migration guide gets generated at release time.
 `
 	issues := LintChangelog(body, fstest.MapFS{})
 	if len(issues) != 0 {
-		t.Fatalf("expected 0 issues (Unreleased breaking-without-link is allowed), got %v", formatAllIssues(issues))
+		t.Fatalf("expected 0 issues (Unreleased non-SDK breaking-without-link is allowed), got %v", formatAllIssues(issues))
 	}
 }
 

@@ -11,8 +11,8 @@ import (
 const fixtureUserManagerMarker = "sparkwing-fixture-unmanaged-runner-only"
 
 func fixtureUseUnmanagedUserManager() {
-	startLocalRunnerProcess = func(ctx context.Context, host crontimer.Host, id string) error {
-		if err := wingd.StartLocalRunnerProcess(ctx, fixtureUnmanagedRunnerHost(host), id); err != nil {
+	startLocalRunnerProcess = func(ctx context.Context, host crontimer.Host, id string, limits wingd.RunnerLimits) error {
+		if err := wingd.StartLocalRunnerProcess(ctx, fixtureUnmanagedRunnerHost(host), id, limits); err != nil {
 			return fmt.Errorf("%s: %w", fixtureUserManagerMarker, err)
 		}
 		return nil

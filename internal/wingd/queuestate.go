@@ -27,6 +27,9 @@ func (d *Daemon) readQueueStateWithEstimator(estimate func(*wingwire.QueueState,
 		d.mu.Lock()
 		qs, snap := d.buildQueueStateLocked()
 		d.mu.Unlock()
+		if qs.Budget != nil {
+			qs.Budget.Enforcement = d.budgetEnforcement(qs.Budget.MachineCores, uint64(qs.Budget.MachineMemoryBytes))
+		}
 		estimate(&qs, snap)
 		return qs, nil
 	})
@@ -172,7 +175,6 @@ func (d *Daemon) buildQueueStateLocked() (wingwire.QueueState, admission.Snapsho
 		MachineCores:       d.machineCores,
 		MemoryBytes:        int64(d.budgetMemory),
 		MachineMemoryBytes: int64(d.machineMemory),
-		Enforce:            d.cfg.Budget.Enforcing(),
 		IgnoreExternal:     d.cfg.Budget.IgnoreExternal,
 		Source:             string(rb.Source),
 		Origin:             rb.Origin,

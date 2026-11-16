@@ -19,44 +19,56 @@ type nativeCapacityController struct {
 	unavailable   *admissionWarning
 }
 
-// safety: one warning per distinct cause shows a CLI upgrade that left the runner behind in the runner's
-// log before a claimed job fails on it, without repeating on every claim poll.
+// safety: one line per distinct cause explains why the runner stopped taking jobs in the runner's log,
+// without repeating on every claim poll; a second line says when it takes jobs again.
 type admissionWarning struct {
 	mu   sync.Mutex
 	last string
 }
 
-func (w *admissionWarning) observe(version string, err error) {
+// safety: a definite cause is a missing or incompatible local controller, under which every claimed
+// job would fail; any other read failure leaves the decision to admission at the host.
+func (w *admissionWarning) observe(version string, err error) bool {
 	var message string
 	if explained := nodehost.RunnerAdmissionUnavailable(version, err); explained != nil {
 		message = explained.Error()
 	}
 	w.mu.Lock()
-	changed := message != w.last
+	previous := w.last
 	w.last = message
 	w.mu.Unlock()
-	if changed && message != "" {
-		slog.Warn("local admission is unavailable; claimed jobs fail until it is fixed", "err", message)
+	switch {
+	case message != "" && message != previous:
+		slog.Warn("runner idle: it takes no jobs until this is fixed; planning continues", "err", message)
+	case message == "" && previous != "" && err == nil:
+		slog.Info("runner takes jobs again: the local controller is reachable")
 	}
+	return message != ""
 }
 
 func (c nativeCapacityController) Claim(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	if slices.Contains(request.Kinds, capability.UnitNode) {
 		state, err := wingdclient.Query(ctx, wingdclient.Options{Home: c.home, Version: c.version})
-		c.unavailable.observe(c.version, err)
-		if err != nil {
-			// safety: a missing daemon must not prevent planning; the awarded host still enforces admission.
-			return c.Controller.Claim(ctx, request)
-		}
-		if !wingdclient.HasJobCapacity(state) {
-			if len(request.Kinds) == 1 {
-				request.FreeSlots = new(int)
-			} else {
-				request.Kinds = slices.DeleteFunc(slices.Clone(request.Kinds), func(kind capability.UnitKind) bool { return kind == capability.UnitNode })
-			}
+		definite := c.unavailable.observe(c.version, err)
+		switch {
+		case definite:
+			request = withoutJobCapacity(request)
+		case err != nil:
+			// safety: an unexplained read failure leaves the claim to admission at the host, which stays authoritative.
+		case !wingdclient.HasJobCapacity(state):
+			request = withoutJobCapacity(request)
 		}
 	}
 	return c.Controller.Claim(ctx, request)
+}
+
+func withoutJobCapacity(request controllerwire.ClaimRequest) controllerwire.ClaimRequest {
+	if len(request.Kinds) == 1 {
+		request.FreeSlots = new(int)
+	} else {
+		request.Kinds = slices.DeleteFunc(slices.Clone(request.Kinds), func(kind capability.UnitKind) bool { return kind == capability.UnitNode })
+	}
+	return request
 }
 
 func nativeCapacityClient(home, version string) func(client.EngineOptions) (controllerwire.Controller, error) {

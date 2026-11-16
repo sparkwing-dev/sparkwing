@@ -52,6 +52,11 @@ func (e SDKEnvironment) cacheDirectory(ctx context.Context, input NodeInput, cac
 	var command *exec.Cmd
 	if cache.Resolver == nodewire.CacheResolverNpm {
 		command, err = pipelineentry.NPMCommand(ctx, env, runtime.GOOS, lookPath, "config", "get", "cache")
+		if err == nil {
+			// bug: npm writes its debug log and update-notifier stamp into the cache root even
+			// when this query fails, so the cache looked populated and was never restored or saved.
+			command.Env = append(command.Env, "npm_config_logs_max=0", "npm_config_update_notifier=false")
+		}
 	} else {
 		var executable string
 		executable, err = lookPath("go")

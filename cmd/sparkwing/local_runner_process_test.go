@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
@@ -342,4 +343,50 @@ func TestLocalRunnerSupervisorReportsRecoveryAndServingPredecessor(t *testing.T)
 			t.Fatalf("outdated live runner: serving=%t err=%v", serving, err)
 		}
 	})
+}
+
+func TestLocalRunnerSupervisorRollsRunnerStartedUnderAnotherBudget(t *testing.T) {
+	want := wingd.RunnerLimits{CPUCores: 1, Nice: 10}
+	for _, tc := range []struct {
+		name     string
+		applied  wingd.RunnerLimits
+		readable bool
+		ours     bool
+		restart  bool
+	}{
+		{"same limits", want, true, false, false},
+		{"older budget", wingd.RunnerLimits{CPUCores: 2, Nice: 10}, true, false, true},
+		{"no limits", wingd.RunnerLimits{}, true, false, true},
+		{"unreadable", wingd.RunnerLimits{}, false, false, false},
+		{"granted less than asked", wingd.RunnerLimits{}, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := localhostwire.LocalRunnerInstance{ID: "old", PID: 41, State: "active", Version: "v1", BuildIdentity: "build"}
+			var started string
+			supervisor := localRunnerProcessSupervisor{
+				version: "v1", build: "build", limits: want, started: map[string]bool{},
+				alive: func(localhostwire.LocalRunnerInstance) (bool, error) { return true, nil },
+				applied: func(instance localhostwire.LocalRunnerInstance) (wingd.RunnerLimits, bool) {
+					if instance.PID != 41 {
+						t.Fatalf("read back limits of %+v", instance)
+					}
+					return tc.applied, tc.readable
+				},
+				start: func(_ context.Context, id string) error { started = id; return nil },
+			}
+			if tc.ours {
+				supervisor.started[old.ID] = true
+			}
+			supervisor.registry = runnerDiscoveryFixture{active: old, read: func(id string) (localhostwire.LocalRunnerInstance, error) {
+				return localhostwire.LocalRunnerInstance{ID: id, State: "active", Version: "v1", BuildIdentity: "build"}, nil
+			}}
+			serving, err := supervisor.ensure(t.Context())
+			if err != nil || !serving || (started != "") != tc.restart {
+				t.Fatalf("serving=%v started=%q err=%v; want restart=%v", serving, started, err, tc.restart)
+			}
+			if tc.restart && !supervisor.started[started] {
+				t.Fatal("the successor was not recorded as started under the current limits")
+			}
+		})
+	}
 }

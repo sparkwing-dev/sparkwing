@@ -1,18 +1,30 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 const typeScriptSDKVersion = "0.72.4"
+
+const typeScriptDocsPointer = "// TypeScript API: `sparkwing docs read --topic sdk` pairs each Go example with its\n" +
+	"// TypeScript form, and `sparkwing docs read --topic sdk-typescript-reference` lists every export.\n"
 
 func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode string) error {
 	name := inv.Value("pipeline")
@@ -82,6 +94,7 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 	if inv.Value("template") == "merge-queue-typescript" {
 		source = renderBuiltinTemplate(name, short, mergeQueueTypeScriptTemplate)
 	}
+	source = typeScriptDocsPointer + source
 	// #nosec G703 -- the pipeline name is validated as kebab-case before scaffolding in the selected project
 	if err := os.WriteFile(file, []byte(source), 0o644); err != nil {
 		return err
@@ -100,4 +113,30 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 		return err
 	}
 	return finishScaffold(dir, file, name, !found, trigger, mode)
+}
+
+// safety: the run installs the SDK with npm ci, which refuses a project without package-lock.json.
+func lockTypeScriptSkeleton(ctx context.Context, sparkwingDir string) error {
+	args := engine.TypeScriptLockfileArgs()
+	rerun := "npm --prefix " + shellSingleQuote(sparkwingDir) + " " + strings.Join(args, " ")
+	masker := secrets.NewMasker()
+	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{})
+	if err != nil {
+		return err
+	}
+	cmd, err := pipelineentry.NPMCommand(ctx, environment, runtime.GOOS, exec.LookPath, args...)
+	if err != nil {
+		return fmt.Errorf("pipeline new: the pipeline files are written, but npm is not on PATH to create package-lock.json; install Node.js 22.18 or later with npm, then run:\n  %s", rerun)
+	}
+	cmd.Dir = sparkwingDir
+	var captured bytes.Buffer
+	cmd.Stdout = &captured
+	cmd.Stderr = &captured
+	stop := startSpinner("resolving dependencies (`npm install --package-lock-only`)")
+	err = cmd.Run()
+	stop()
+	if err != nil {
+		return fmt.Errorf("pipeline new: the pipeline files are written, but creating package-lock.json failed: %w\n%s\nfix the error, then run:\n  %s", err, strings.TrimSpace(masker.Mask(captured.String())), rerun)
+	}
+	return nil
 }

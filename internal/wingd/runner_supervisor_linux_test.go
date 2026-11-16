@@ -35,7 +35,7 @@ func TestLocalRunnerWithoutSystemdSurvivesStartupCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	if err := startLocalRunnerLinux(ctx, host, "instance", filepath.Join(t.TempDir(), "no-systemd")); err != nil {
+	if err := startLocalRunnerLinux(ctx, host, "instance", filepath.Join(t.TempDir(), "no-systemd"), RunnerLimits{}); err != nil {
 		t.Fatal(err)
 	}
 	readFIFO := func(name string) string {

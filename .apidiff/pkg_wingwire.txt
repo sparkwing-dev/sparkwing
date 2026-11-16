@@ -40,6 +40,17 @@ type AdmissionRequest struct {
 
 	Class string
 }
+type BudgetEnforcement struct {
+	Applied bool
+
+	CPUCores float64
+
+	MemoryBytes int64
+
+	Nice int
+
+	Reason string
+}
 type BudgetSource string
 const BudgetSourceConfig BudgetSource = "config"
 const BudgetSourceEnv BudgetSource = "env"
@@ -55,7 +66,7 @@ type BudgetState struct {
 
 	MachineMemoryBytes int64
 
-	Enforce bool
+	Enforcement *BudgetEnforcement
 
 	IgnoreExternal bool
 
