@@ -5,7 +5,7 @@
 | You need | Go to |
 | --- | --- |
 | Help with Sparkwing Cloud: a run stuck on Cloud, billing, credits, your team or account | Email support@sparkwing.dev |
-| To delete your account, a team, or specific runs | Email support@sparkwing.dev from the address on the account. A team owner can delete a team without asking; see [authentication](auth.md). |
+| To delete your account, a team, or specific runs | Email support@sparkwing.dev from the address on the account. A team owner can delete a team without asking; see [deleting a team or account](auth.md#deleting-a-team-or-account). |
 | To report a bug or ask for a feature, Cloud or self-hosted | Open an issue at [github.com/sparkwing-dev/sparkwing/issues](https://github.com/sparkwing-dev/sparkwing/issues) |
 | To report a suspected vulnerability | Follow the [security policy](https://github.com/sparkwing-dev/sparkwing/blob/main/SECURITY.md). Do not open a public issue. |
 
