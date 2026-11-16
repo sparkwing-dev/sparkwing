@@ -166,7 +166,7 @@ func TestCheckCLIVerbs_FailsOnRenamedVerb(t *testing.T) {
 
 func TestCheckCLIVerbs_PassesAndSkipsExemptDocs(t *testing.T) {
 	content := t.TempDir()
-	writeDoc(t, content, "good.md", "```bash\nsparkwing pipeline list\nsparkwing run my-pipeline --sw-dry-run\n```\n")
+	writeDoc(t, content, "good.md", "```bash\nsparkwing pipeline list\nsparkwing run my-pipeline --dry-run\n```\n")
 	writeDoc(t, content, "cli-reference.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing totally-made-up\n```\n")
 	writeDoc(t, content, "cli-cluster.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing also-made-up\n```\n")
 	if !checkCLIVerbs(content) {
@@ -241,7 +241,7 @@ func TestCheckCLIVerbsAcceptsInlineFragments(t *testing.T) {
 		"`sparkwing run`",
 		"`sparkwing secrets set --secret NAME --file <path>`",
 		"`sparkwing runs status --run`",
-		"`sparkwing run --sw-cache-from P`",
+		"`sparkwing run --cache-from P`",
 		"`sparkwing run build -- --author-option value`",
 	}, "\n"))
 	if !checkCLIVerbs(content) {

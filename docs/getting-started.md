@@ -354,7 +354,7 @@ What still wants the network is visible in advance:
 
 - **A `latest` or range pin.** A `sparks:` entry pinned to `latest`, `^v0.24.0`,
   or `~v0.10.3` asks the module proxy for the newest matching tag on every
-  run. Pass `--sw-no-update` to skip resolution and compile against the
+  run. Pass `--no-update` to skip resolution and compile against the
   overlay already on disk, or pin exact tags and pay nothing. Without the
   flag an unreachable proxy fails the run and the error names it. The
   resolution rules are in [sparks.md](sparks.md).
@@ -481,13 +481,13 @@ composition (parallel, sequence, needs, modifiers), use the `Plan`.
 `sparkwing run` executes on this machine and records to its local store,
 logs, and cache. `sparkwing pipeline trigger <pipeline> --profile
 NAME` hands execution to that profile's controller. `sparkwing run` also takes
-`--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
+`--ref <branch|tag|sha>` to compile a git ref instead of the working
 tree (trigger runs the source registered with the controller, or the
 checkout's uncommitted changes with `--working-tree`):
 
 ```bash
 sparkwing run build                                    # run locally with local code
-sparkwing run build --sw-ref main                      # build the main ref locally
+sparkwing run build --ref main                      # build the main ref locally
 sparkwing pipeline trigger build --profile dev         # run on the "dev" cluster
 sparkwing pipeline trigger build --profile dev --working-tree  # uncommitted changes on "dev"
 sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
@@ -539,9 +539,9 @@ Pass `--profile NAME` on each command that should reach a controller. A command
 without it, or with `--profile=`, uses the local controller; no saved setting
 or environment variable selects a connection.
 
-`sparkwing run` stays on this machine unless the invocation passes `--sw-route`.
-Use `--sw-route cloud --profile NAME` to send one run directly to Cloud, or
-`--sw-route burst` to apply the machine `run.routing` overflow preferences.
+`sparkwing run` stays on this machine unless the invocation passes `--route`.
+Use `--route cloud --profile NAME` to send one run directly to Cloud, or
+`--route burst` to apply the machine `run.routing` overflow preferences.
 Without `--profile`, either route uses machine `run.routing.profile`.
 
 ```bash

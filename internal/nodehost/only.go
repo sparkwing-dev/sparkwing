@@ -55,5 +55,5 @@ func unapprovedRisk(doc nodewire.PlanDoc, options runspec.Options, jobSkips map[
 		return nil
 	}
 	slices.Sort(missing)
-	return fmt.Errorf("step %q in job %q requires --sw-allow-risk %s to confirm (or --sw-dry-run to preview)", firstStep, firstJob, strings.Join(missing, ","))
+	return fmt.Errorf("step %q in job %q requires --allow-risk %s to confirm (or --dry-run to preview)", firstStep, firstJob, strings.Join(missing, ","))
 }

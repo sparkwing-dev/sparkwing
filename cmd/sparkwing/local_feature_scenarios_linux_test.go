@@ -257,7 +257,7 @@ func (f *localScenario) submit(pipeline string) string {
 	var receipt struct {
 		RunID string `json:"run_id"`
 	}
-	output := f.invoke("run", pipeline, "--sw-detached", "--sw-no-update", "-o=json")
+	output := f.invoke("run", pipeline, "--detach", "--no-update", "-o=json")
 	if err := json.Unmarshal(output, &receipt); err != nil || receipt.RunID == "" {
 		f.t.Fatalf("run receipt: %s: %v", output, err)
 	}

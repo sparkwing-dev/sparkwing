@@ -12,7 +12,7 @@ the remote base for installation, planning, attempts and evaluation. Step tools
 and cleanup inherit the attempt environment. Submitted values override ambient
 runner values of the same name.
 
-`--sw-allow-unadmitted` selects decision 91's exclusive in-process local
+`--allow-unadmitted` selects decision 91's exclusive in-process local
 controller, rather than the shared machine admission service. The same runtime
 owns the home, store, queue, admission, concurrency and workers. It keeps the
 election lock and startup reconciliation and joins shutdown on command return.
@@ -81,11 +81,11 @@ enrolled, and re-enabling it does not revive them (decision 67).
 - `procenv.Runtime.GateIndex` is an optional string path, projected only from
   a verified local snapshot. The path remains in private snapshot storage,
   never a wire field; remote ambient input cannot bind a hook index. CLI intake
-  copies `--sw-index` (or the hook index) into private environment storage after
+  copies `--index` (or the hook index) into private environment storage after
   Git normalizes it to a self-contained index. Its content hash names the file.
   Each snapshot load checks its location, ownership, permissions and bytes before
   process startup. Retries retain the index and environment identity. Cloud routing
-  refuses `--sw-index` because its path is local. Source inputs remain unchanged.
+  refuses `--index` because its path is local. Source inputs remain unchanged.
 - Network proxy settings are the existing passed-and-masked exception. Register
   credential components for URL and scheme-less proxy forms, including GOPROXY and
   PIP_INDEX_URL. A mask of only the whole string is insufficient when tools print
@@ -152,7 +152,7 @@ teardown remain W8 and deployment acceptance obligations.
 
 Local Go preparation resolves project sparks through the existing resolver before
 source installation and intake. Exact versions need no version lookup. Tracking
-versions fail with the existing `--sw-no-update` hint when resolution fails.
+versions fail with the existing `--no-update` hint when resolution fails.
 That invocation flag skips resolution and keeps the current module pins and
 overlay. The selected engine still installs and verifies the SDK through C3.
 Foreground output uses the sealed output selection. It emits `run_start` after
@@ -425,7 +425,7 @@ pipeline arguments start after `--`. Only run and pipeline trigger take a
 pipeline positional. Output selection is validated before side effects; lists
 are NDJSON and diagnostics use the C2 error object on stderr.
 
-`Flag.AllowEmpty` records an allowed empty scalar. `--sw-cache-from=` clears
+`Flag.AllowEmpty` records an allowed empty scalar. `--cache-from=` clears
 the machine cache profile without losing flag presence.
 
 `__complete --word` accepts an empty value to select root completions. Shell
@@ -447,12 +447,12 @@ Plan previews redact classified arguments and structured planning failures.
 
 - `run` is local. `--publish P` uploads the record/results/logs with local
   provenance; publication failure cannot fail the run.
-  `--sw-cache-from P` or run.cache_from reads only authorized verified-default-
+  `--cache-from P` or run.cache_from reads only authorized verified-default-
   branch memo/artifacts/depcache, never writes, and never fetches pipeline binaries.
 - `pipeline trigger --resume RUN` reattaches that here run with its sealed spec;
   it neither creates another run nor grants other run authority.
-- `--sw-workers` remains a positive local flag; detached execution refuses it.
-  SPARKWING_WORKERS is removed. Pause selection is request data from --sw-pause-*.
+- `--workers` remains a positive local flag; detached execution refuses it.
+  SPARKWING_WORKERS is removed. Pause selection is request data from --pause-*.
 - Schedules is a hard cut; managed units call hidden `__tick`. No crons alias,
   cluster worker, debug rerun, runs bounce/consumer or separate cache service exists.
 - Operator CLI verbs use only deployment-admin operational scopes. Console-only
@@ -949,7 +949,7 @@ The captured snapshot preserves tracked working-tree edits and exclusions.
 
 Cloud routing remains attached and captures the working tree. The CLI refuses
 committed revision flags with pipeline-trigger guidance before connecting, and
-preserves `--sw-run-handle-file` after retaining accepted here authority.
+preserves `--run-handle-file` after retaining accepted here authority.
 Foreground local routing retains its existing lifecycle. Burst source metadata
 reads the invoking and default branches from the original checkout, because an
 inspection clone's detached HEAD and origin HEAD are not those source facts.
@@ -1089,7 +1089,7 @@ format is added.
 
 ## Local profile data construction and publication
 
-The CLI resolves --sw-cache-from against the checkout's canonical remote
+The CLI resolves --cache-from against the checkout's canonical remote
 repository and origin default branch before sealing. It opens a temporary
 verified-default reader through the selected profile and revokes it on host
 cleanup. Background hosts keep the sealed repository identity and read the
@@ -1150,8 +1150,8 @@ change does not remove the original push's default-branch trust.
 
 ## Invocation and detached trace integration
 
-Local binary preparation retains `--sw-no-bincache` and
-`--sw-hash-all-files` in `runspec.Source.NoBincache` and `HashAllFiles`.
+Local binary preparation retains `--no-bincache` and
+`--hash-all-files` in `runspec.Source.NoBincache` and `HashAllFiles`.
 Initial inspection and every retained-source acquisition use the same policy,
 including detached hosting and retries. The source adapter passes both fields
 to the verified selected engine's `SDKInstallRequest`. Uncached Go builds keep
@@ -1184,10 +1184,10 @@ their resulting status in the selected output format. Their progress and
 warnings go to stderr. Pipeline scaffolding emits a JSON pipeline/path receipt,
 a plain pipeline name, or pretty guidance after dependency resolution succeeds.
 
-`--sw-request-id` is retained for detached runs. It becomes optional
+`--request-id` is retained for detached runs. It becomes optional
 `runspec.Request.RequestID` and survives intake, sealing and retry. The detached
 JSON receipt includes `request_id` when supplied. It is trace metadata. Only
-`--sw-idempotency-key` deduplicates submissions by explicit request identity.
+`--idempotency-key` deduplicates submissions by explicit request identity.
 Webhook delivery IDs provide durable replay identity. Equal content with distinct
 keys creates distinct runs; no process-local deduplication window exists.
 
@@ -1225,7 +1225,7 @@ select the configured SDK entrypoint. Scaffolds register that entrypoint.
 The invoked alias belongs in run context
 and presentation. `nodeproto.DescribeDoc.Pipeline` owns metadata selection.
 
-The dispatcher, local execution and help resolve `--sw-ref`, `--sw-pipeline-ref` and a configured
+The dispatcher, local execution and help resolve `--ref`, `--pipeline-ref` and a configured
 source pin through one selection boundary before inspection or building. The
 execution checkout supplies project configuration. Its exact SHA is sealed in
 `Git.SHA`. Local source selection seals the pipeline code SHA in `Source.Ref`.

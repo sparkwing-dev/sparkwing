@@ -72,7 +72,7 @@ type pipelinePlanArgs struct {
 }
 
 func pipelinePlanOptions(inv clisurface.Invocation) pipelinePlanArgs {
-	return pipelinePlanArgs{dryRun: inv.Bool("sw-dry-run"), output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"), passthrough: inv.Args}
+	return pipelinePlanArgs{dryRun: inv.Bool("dry-run"), output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"), passthrough: inv.Args}
 }
 
 func runPipelinePlan(inv clisurface.Invocation) error {
@@ -390,7 +390,7 @@ func checkStepRange(doc nodewire.PlanDoc, startAt, stopAt string) error {
 			}
 		}
 	}
-	for _, bound := range [][2]string{{"--sw-start-at", startAt}, {"--sw-stop-at", stopAt}} {
+	for _, bound := range [][2]string{{"--start-at", startAt}, {"--stop-at", stopAt}} {
 		if bound[1] == "" || known[bound[1]] {
 			continue
 		}

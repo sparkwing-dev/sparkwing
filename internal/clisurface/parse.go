@@ -118,6 +118,11 @@ func Parse(binary string, args []string) (Invocation, error) {
 				return inv, inv.invalid("%s", err)
 			}
 			f, known := flags[name]
+			// safety: commands reuse flag names with different arity (run --route takes a value,
+			// pools allow --route does not), so the command being parsed owns its definition.
+			if i := slices.IndexFunc(inv.Command.Flags, func(own Flag) bool { return own.Name == name }); i >= 0 {
+				f = inv.Command.Flags[i]
+			}
 			// safety: before the command word only global flags and --profile are read, so a
 			// leaf's valued flag (docs --version, runs logs --tail) cannot swallow the next word.
 			if known && groups[inv.Command.Path] && name != "profile" && !slices.ContainsFunc(append(GlobalFlags(), inv.Command.Flags...), func(own Flag) bool { return own.Name == name }) {
@@ -264,15 +269,17 @@ func (i Invocation) flagHint(name string) string {
 	return "; " + i.Command.Path + " takes " + strings.Join(names, ", ") + " (see --help)"
 }
 
-// hack: run's own flags carry the sw- prefix, so the bare spelling other
-// commands use (--dry-run) maps to its sw- form first.
+// hack: run and pipeline plan flags lost their sw- prefix, so an old spelling
+// such as --sw-detached is judged without it and suggests --detach.
 func (i Invocation) closestFlag(name string) string {
 	var names []string
 	for _, f := range append(GlobalFlags(), i.Command.Flags...) {
-		if f.Name == "sw-"+name {
-			return f.Name
-		}
 		names = append(names, f.Name)
+	}
+	if unprefixed, ok := strings.CutPrefix(name, "sw-"); ok {
+		if suggestion := sparkwingruntime.SuggestClosest(unprefixed, names); suggestion != "" {
+			return suggestion
+		}
 	}
 	return sparkwingruntime.SuggestClosest(name, names)
 }
@@ -310,8 +317,8 @@ func flagToken(arg string, shorts map[string]string) (name, value string, explic
 }
 
 func (i *Invocation) validate() error {
-	if !i.Help() && i.Command.Path == "sparkwing run" && i.Has("profile") && i.Value("sw-route") != "cloud" {
-		return i.invalid("--profile requires --sw-route cloud")
+	if !i.Help() && i.Command.Path == "sparkwing run" && i.Has("profile") && i.Value("route") != "cloud" {
+		return i.invalid("--profile requires --route cloud")
 	}
 	definitions := append(GlobalFlags(), i.Command.Flags...)
 	allowed := make(map[string]Flag, len(definitions))

@@ -17,7 +17,7 @@ to a cluster via a profile's controller:
 | Source | Target | Command |
 |--------|--------|---------|
 | Local code | Local machine | `sparkwing run build` |
-| Local working tree at a git ref | Local machine | `sparkwing run build --sw-ref main` |
+| Local working tree at a git ref | Local machine | `sparkwing run build --ref main` |
 | Committed ref at origin | Any cluster | `sparkwing pipeline trigger build --profile dev` |
 | Dirty working tree | Remote runner | `sparkwing pipeline trigger build --profile dev --working-tree` |
 

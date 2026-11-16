@@ -70,10 +70,10 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 		return err
 	}
 	if flags.index != "" {
-		return errors.New("run: --sw-index requires local routing")
+		return errors.New("run: --index requires local routing")
 	}
 	if flags.allowUnadmitted {
-		return errors.New("run: --sw-allow-unadmitted requires local routing")
+		return errors.New("run: --allow-unadmitted requires local routing")
 	}
 	if flags.ref != "" || flags.pipelineRef != "" {
 		return errors.New("run: Cloud overflow captures the working tree; use pipeline trigger to select committed revisions")
@@ -153,7 +153,7 @@ func resolveInvocationRouting(machine userconfig.Config, project *projectconfig.
 	route := resolveRunRouting(machine, project, pipeline)
 	if flags.route == "cloud" || flags.route == "burst" {
 		if restricted := resolveRunRouting(userconfig.Config{}, project, pipeline); restricted.Route != nil {
-			return route, fmt.Errorf("run: repository run.route: local forbids --sw-route %s", flags.route)
+			return route, fmt.Errorf("run: repository run.route: local forbids --route %s", flags.route)
 		}
 		route.Route = new("cloud")
 	} else if flags.route != "" {

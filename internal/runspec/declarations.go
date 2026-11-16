@@ -241,8 +241,8 @@ func (g *DeclarationGate) RefuseRisk(pipeline, step string, labels []string) err
 	}
 	g.risk = &apierr.Error{
 		Code:    apierr.BadRequest,
-		Message: fmt.Sprintf("%s requires --sw-allow-risk %s to confirm (or --sw-dry-run to preview)", subject, strings.Join(masked, ",")),
-		Hint:    "a run narrowed with --sw-only, --sw-start-at or --sw-stop-at needs only the risks of the steps it selects",
+		Message: fmt.Sprintf("%s requires --allow-risk %s to confirm (or --dry-run to preview)", subject, strings.Join(masked, ",")),
+		Hint:    "a run narrowed with --only, --start-at or --stop-at needs only the risks of the steps it selects",
 	}
 	return g.risk
 }

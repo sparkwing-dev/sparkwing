@@ -41,7 +41,7 @@ func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
 		t.Fatalf("unborn scaffold plan: %v: %s", commandErr, output)
 	}
 	captureStdout(t, func() {
-		commandErr = runSparkwing([]string{"run", "hello", "--sw-allow-unadmitted", "--sw-no-update", "-o=plain"})
+		commandErr = runSparkwing([]string{"run", "hello", "--allow-unadmitted", "--no-update", "-o=plain"})
 	})
 	if commandErr == nil || !strings.Contains(commandErr.Error(), "repository has no commits") || !strings.Contains(commandErr.Error(), "git commit --allow-empty") {
 		t.Fatalf("first run needs an actionable initial-commit diagnostic: %v", commandErr)
@@ -56,7 +56,7 @@ func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
 	}
 	runSnapshotGit(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "--no-verify", "-qm", "Initial commit")
 	output = captureStdout(t, func() {
-		commandErr = runSparkwing([]string{"run", "hello", "--sw-allow-unadmitted", "--sw-no-update", "-o=plain"})
+		commandErr = runSparkwing([]string{"run", "hello", "--allow-unadmitted", "--no-update", "-o=plain"})
 	})
 	if commandErr != nil {
 		t.Errorf("same scaffold after initial commit: %v\n%s", commandErr, output)

@@ -125,7 +125,7 @@ exec %q -c user.name=Acceptance -c user.email=acceptance@example.invalid -c comm
 				t.Fatal(err)
 			}
 			environment := append(os.Environ(), "PATH="+tools+":"+os.Getenv("PATH"), "HOME="+home, "SPARKWING_HOME="+filepath.Join(home, "state"), "SPARKWING_CONFIG="+config, "XDG_CONFIG_HOME="+filepath.Join(home, "config"), "SPARKWING_SECRETS_KEY_FILE="+filepath.Join(home, "key"), "GOWORK=off", "GOFLAGS=-buildvcs=false -p=1", "GOMAXPROCS=2")
-			cmd := exec.CommandContext(ctx, cli, "run", "release", "-C", repo, "--sw-no-update", "--sw-allow-risk", "destructive,prod", "-o", "json", "--", "--version", version, "--commit", source)
+			cmd := exec.CommandContext(ctx, cli, "run", "release", "-C", repo, "--no-update", "--allow-risk", "destructive,prod", "-o", "json", "--", "--version", version, "--commit", source)
 			cmd.Env = environment
 			var output bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &output, &output

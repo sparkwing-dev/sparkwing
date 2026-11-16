@@ -30,7 +30,7 @@ func validate(commands []Command) error {
 			}
 			names[f.Name] = true
 			if f.Short != "" {
-				expected := map[string]string{"o": "output", "q": "quiet", "f": "follow", "v": "sw-verbose", "C": "checkout", "h": "help"}
+				expected := map[string]string{"o": "output", "q": "quiet", "f": "follow", "v": "verbose", "C": "checkout", "h": "help"}
 				if expected[f.Short] != f.Name || shorts[f.Short] {
 					return fmt.Errorf("%s: invalid short flag %q", c.Path, f.Short)
 				}

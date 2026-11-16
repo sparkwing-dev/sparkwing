@@ -153,8 +153,8 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 		"git tag --delete -- \"$RELEASE_TAG\"",
 		"-dropreplace=github.com/sparkwing-dev/sparkwing",
 		"pkg/scaffold/version.go",
-		"gate_selection=(--sw-only gate)",
-		"run gate --sw-only race-touched",
+		"gate_selection=(--only gate)",
+		"run gate --only race-touched",
 		"- name: Stage the event change\n        if: matrix.gate == 'gate' || matrix.gate == 'race-touched'",
 		"run pre-release",
 	)
@@ -206,9 +206,9 @@ func TestCanonicalSourceOverrideRetainsItsWholeGateGraph(t *testing.T) {
 			got, err := cmd.Output()
 			want := []string{"run", "gate"}
 			if tc.source == "" && tc.tag == "" {
-				want = append(want, "--sw-only", "gate")
+				want = append(want, "--only", "gate")
 			}
-			want = append(want, "--sw-run-handle-file", filepath.Join(dir, "canonical-run.json"))
+			want = append(want, "--run-handle-file", filepath.Join(dir, "canonical-run.json"))
 			// safety: the hosted broad gate keeps every Go test; an override's older source may not know the flag.
 			if tc.source == "" && tc.tag == "" {
 				want = append(want, "--", "--full")
@@ -332,11 +332,11 @@ func TestCanonicalWorkflowLeavesRoomAroundDeclaredDeadlines(t *testing.T) {
 func TestCanonicalWorkflowPrintsStoredDiagnosticsAfterFailure(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	requireWorkflowText(t, body,
-		`--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`,
+		`--run-handle-file "$RUNNER_TEMP/canonical-run.json"`,
 		"- name: Print failed canonical run diagnostics\n        if: ${{ failure() }}\n        continue-on-error: true\n        timeout-minutes: 2",
 		`bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing" "$RUNNER_TEMP/canonical-run.log"`,
 	)
-	if got := strings.Count(body, `--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 4 {
+	if got := strings.Count(body, `--run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 4 {
 		t.Fatalf("canonical run-handle publication count = %d, want broad gate, race, pre-release and store race part", got)
 	}
 }
@@ -491,7 +491,7 @@ func TestCanonicalStoreRacePartsCoverEveryPartOnce(t *testing.T) {
 			continue
 		}
 		args := run(scripts["Run canonical store race part"], "LANE="+lane)
-		if !slices.Equal(args[:5], []string{"run", "pre-release", "--sw-start-at", "race-store", "--sw-stop-at"}) || args[5] != "race-store" {
+		if !slices.Equal(args[:5], []string{"run", "pre-release", "--start-at", "race-store", "--stop-at"}) || args[5] != "race-store" {
 			t.Fatalf("lane %s args %v, want only the race-store step", lane, args)
 		}
 		parts = append(parts, partOf(args))

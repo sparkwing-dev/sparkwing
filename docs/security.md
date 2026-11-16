@@ -237,7 +237,7 @@ variables and set no run option outside an allow-list of options that only
 place, schedule or present a run (runner selection, priority, admission class,
 claim wait, owner timeout, requires, prefers, no-memo, workers, output, pause
 timeout, submitted-environment allow-list, repository location and profile).
-Any other option, such as `--sw-only`, a dry run, a pause, debug, a risk
+Any other option, such as `--only`, a dry run, a pause, debug, a risk
 acknowledgement, `--cache-from`, a checkout policy or job default overrides,
 and any option added later, keeps the run from counting.
 

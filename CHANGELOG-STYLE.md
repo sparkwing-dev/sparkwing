@@ -206,7 +206,7 @@ takes over: validates `[vX.Y.Z]` doesn't exist yet, renames
 `docs/migrations/_unreleased.md` to `vX.Y.Z.md` with its index row and
 repoints the section's `(Breaking)` links at it, commits all of that as
 one change, pushes branch + tag, GH Actions extracts the section as the
-GitHub Release body. `--sw-dry-run` prints what it would rename, repoint
+GitHub Release body. `--dry-run` prints what it would rename, repoint
 and index without writing anything. The workflow's `release-verify`
 stage judges the same on the tagged source, so a tag pushed by hand is
 held to it too.

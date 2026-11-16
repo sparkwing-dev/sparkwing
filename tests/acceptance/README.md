@@ -25,10 +25,10 @@ runner executable or execute an SDK pipeline body.
 Run through local Sparkwing admission:
 
 ```sh
-sparkwing run feature-e2e --sw-route local
-sparkwing run feature-e2e --sw-route local -- --scenario placement --repeat 3
-sparkwing run feature-e2e --sw-route local -- --scenario retry_failed
-sparkwing run feature-e2e --sw-route local -- --scenario child_cancellation
+sparkwing run feature-e2e --route local
+sparkwing run feature-e2e --route local -- --scenario placement --repeat 3
+sparkwing run feature-e2e --route local -- --scenario retry_failed
+sparkwing run feature-e2e --route local -- --scenario child_cancellation
 ```
 
 The pipeline reserves two cores and builds with `-p 1`. It runs no Cloud jobs

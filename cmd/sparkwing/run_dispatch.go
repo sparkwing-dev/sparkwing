@@ -68,7 +68,7 @@ func validatePriorityFlag(v string) (string, error) {
 	if _, err := strconv.Atoi(s); err == nil {
 		return s, nil
 	}
-	return "", fmt.Errorf("--sw-priority %q: expected an integer, %q, or %q",
+	return "", fmt.Errorf("--priority %q: expected an integer, %q, or %q",
 		v, wingwire.PriorityFront, wingwire.PriorityBack)
 }
 
@@ -81,27 +81,34 @@ func runFlagsFromInvocation(inv clisurface.Invocation) (runFlags, []string) {
 	if err != nil {
 		return runFlags{parseErr: err}, nil
 	}
-	workers, _ := strconv.Atoi(inv.Value("sw-workers"))
+	workers := 0
+	if inv.Has("workers") {
+		n, err := strconv.Atoi(inv.Value("workers"))
+		if err != nil {
+			return runFlags{parseErr: err}, nil
+		}
+		workers = n
+	}
 	var pause *bool
-	if inv.Has("sw-pause-on-failure") {
-		value := inv.Bool("sw-pause-on-failure")
+	if inv.Has("pause-on-failure") {
+		value := inv.Bool("pause-on-failure")
 		pause = &value
 	}
 	return runFlags{
 		invocation: inv,
-		route:      inv.Value("sw-route"), profile: inv.Value("profile"),
-		publish: inv.Value("publish"), cacheFrom: inv.Value("sw-cache-from"),
-		pauseBefore: inv.Flags["sw-pause-before"], pauseAfter: inv.Flags["sw-pause-after"], pauseOnFailure: pause,
-		ref: inv.Value("sw-ref"), pipelineRef: inv.Value("sw-pipeline-ref"),
-		noUpdate: inv.Bool("sw-no-update"), verbose: inv.Bool("sw-verbose"),
-		noBincache: inv.Bool("sw-no-bincache"), hashAllFiles: inv.Bool("sw-hash-all-files"),
-		allowUnadmitted: inv.Bool("sw-allow-unadmitted"), workers: workers,
-		priority: inv.Value("sw-priority"), prioritySet: inv.Has("sw-priority"),
-		startAt: inv.Value("sw-start-at"), stopAt: inv.Value("sw-stop-at"),
-		only: inv.Value("sw-only"), noCache: inv.Bool("sw-no-memo"),
-		dryRun: inv.Bool("sw-dry-run"), allow: inv.Flags["sw-allow-risk"],
-		index: inv.Value("sw-index"), runHandleFile: inv.Value("sw-run-handle-file"),
-		detached: inv.Bool("sw-detached"), idempotencyKey: inv.Value("sw-idempotency-key"), requestID: inv.Value("sw-request-id"),
+		route:      inv.Value("route"), profile: inv.Value("profile"),
+		publish: inv.Value("publish"), cacheFrom: inv.Value("cache-from"),
+		pauseBefore: inv.Flags["pause-before"], pauseAfter: inv.Flags["pause-after"], pauseOnFailure: pause,
+		ref: inv.Value("ref"), pipelineRef: inv.Value("pipeline-ref"),
+		noUpdate: inv.Bool("no-update"), verbose: inv.Bool("verbose"),
+		noBincache: inv.Bool("no-bincache"), hashAllFiles: inv.Bool("hash-all-files"),
+		allowUnadmitted: inv.Bool("allow-unadmitted"), workers: workers,
+		priority: inv.Value("priority"), prioritySet: inv.Has("priority"),
+		startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"),
+		only: inv.Value("only"), noCache: inv.Bool("no-memo"),
+		dryRun: inv.Bool("dry-run"), allow: inv.Flags["allow-risk"],
+		index: inv.Value("index"), runHandleFile: inv.Value("run-handle-file"),
+		detached: inv.Bool("detach"), idempotencyKey: inv.Value("idempotency-key"), requestID: inv.Value("request-id"),
 		agent:        agent,
 		outputFormat: output, outputOrigin: outputOrigin,
 	}, inv.Args
