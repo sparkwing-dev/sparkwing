@@ -36,7 +36,7 @@ func TestRunRelativePrioritySealsControllerQueueRank(t *testing.T) {
 		want int
 	}{{"front", 1}, {"back", -1}} {
 		t.Run(test.mode, func(t *testing.T) {
-			inv, err := clisurface.Parse("sparkwing", []string{"run", "example", "--sw-detached", "--sw-priority", test.mode})
+			inv, err := clisurface.Parse("sparkwing", []string{"run", "example", "--detach", "--priority", test.mode})
 			if err != nil {
 				t.Fatal(err)
 			}

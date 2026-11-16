@@ -61,33 +61,33 @@ sparkwing pipeline trigger build-deploy --profile prod
 ```
 
 Engine flags precede `--`. Pipeline and job arguments follow it. Local `run`
-uses this machine's controller unless Cloud routing is configured. `--profile NAME` requires `--sw-route cloud`. A profile
+uses this machine's controller unless Cloud routing is configured. `--profile NAME` requires `--route cloud`. A profile
 selects the controller for `pipeline trigger`, run observations and management.
 
 | Invocation | Execution and records |
 | --- | --- |
 | `sparkwing run build` | The local runner hosts the run. The CLI follows its logs and outcome. The local controller owns its records. |
-| `sparkwing run build --sw-detached` | The local runner hosts the queued work. The CLI returns after intake. |
+| `sparkwing run build --detach` | The local runner hosts the queued work. The CLI returns after intake. |
 | `sparkwing run build --publish work` | The CLI hosts the run and waits for publication to finish or report a warning. |
-| `sparkwing run build --sw-allow-unadmitted` | The CLI hosts the run with its own exclusive in-process controller. |
-| `sparkwing run build --sw-route cloud --profile prod --sw-detached` | Cloud plans and runs jobs independently of the submitting terminal. |
+| `sparkwing run build --allow-unadmitted` | The CLI hosts the run with its own exclusive in-process controller. |
+| `sparkwing run build --route cloud --profile prod --detach` | Cloud plans and runs jobs independently of the submitting terminal. |
 | `sparkwing pipeline trigger build --profile prod` | The selected controller queues the run for an eligible runner or launcher. |
 | `sparkwing pipeline trigger build --profile prod --runner here --reason repair` | This CLI hosts the controller's named here run. |
 
-`--sw-dry-run` records a completed preview as `dry_run` and exits zero.
+`--dry-run` records a completed preview as `dry_run` and exits zero.
 `runs stats` counts completed previews separately as `dry_run` and excludes them
 from the applied success percentage. A failed or cancelled preview keeps that outcome. Steps run their declared dry-run
 body or their `SafeWithoutDryRun` body. Other step bodies are skipped.
 
-`--sw-workers N` bounds simultaneous local foreground job executions. Jobs waiting
+`--workers N` bounds simultaneous local foreground job executions. Jobs waiting
 for a worker remain available to the scheduler without consuming a local claim.
-`--sw-start-at` keeps a step and its descendants; `--sw-stop-at` keeps a step
+`--start-at` keeps a step and its descendants; `--stop-at` keeps a step
 and its ancestors. Together they select the dependency paths between the bounds,
 not an interval in declaration order. A job containing neither bound runs all
 its steps. A range selecting no steps in a job fails before work starts, even
 if another job has runnable steps. For parallel checks, omit both bounds to run
 the full gate, or use the same step for both bounds to run one check. Use
-`--sw-only` to select jobs and their dependencies.
+`--only` to select jobs and their dependencies.
 
 For an ordinary foreground local run, Ctrl-C requests cancellation and keeps
 observing until the run finishes and its logs drain. A second interrupt detaches
@@ -95,7 +95,7 @@ the CLI. Execution and cleanup remain with the runner. Standalone and
 foreground publication retain their CLI host. Their first interrupt requests
 cancellation while that host drains, and a second stops hosting and observation.
 
-An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
+An explicit empty `--cache-from=` disables `run.cache_from` from the machine
 file. Profile access is checked before intake. Each executing host uses a
 temporary repository reader for verified default-branch records, authorized
 by a member with the editor role or above. The credential follows the profile's
@@ -273,7 +273,7 @@ SSH-only account with no GUI login, the user domain. Windows uses an embedded
 runner loop and does not have this process separation.
 
 A runner that cannot start does not stop the controller. Runs the CLI hosts,
-including `--sw-allow-unadmitted`, keep working. The controller retries with
+including `--allow-unadmitted`, keep working. The controller retries with
 backoff of up to a minute and logs each attempt. While no runner can start,
 `sparkwing run` refuses new runs with the cause and a fix instead of queueing
 them, `sparkwing daemon status` prints the cause on its `runner:` line, and
@@ -294,7 +294,7 @@ service, then waits for the successor to acquire the same home and become ready.
 
 ### Running with no daemon available
 
-`sparkwing run <pipeline> --sw-allow-unadmitted` runs the same controller runtime
+`sparkwing run <pipeline> --allow-unadmitted` runs the same controller runtime
 in process for standalone CI. Give it a private `SPARKWING_HOME`. Its admission
 queue belongs to that process; it does not join another controller's machine
 admission queue. It retains run and job concurrency rules. It cannot detach or
@@ -312,7 +312,7 @@ approval wait and owner liveness have separate meanings. See [limits](limits.md)
 ## Detaching a run so it outlives the terminal
 
 ```bash
-sparkwing run nightly-report --sw-detached -o json
+sparkwing run nightly-report --detach -o json
 sparkwing runs status --run RUN_ID
 sparkwing runs logs --run RUN_ID --follow
 sparkwing runs cancel --run RUN_ID
@@ -324,8 +324,8 @@ its execution cleanup. The controller owns admission and orphan recovery. A
 separate user-managed consumer is not required. A successful submission receipt
 identifies the allocated run. It does not prove that execution has started.
 
-`--sw-idempotency-key` gives repeated detached submissions one durable identity.
-`--sw-request-id` is a tracing field retained through intake and retry. The
+`--idempotency-key` gives repeated detached submissions one durable identity.
+`--request-id` is a tracing field retained through intake and retry. The
 detached JSON receipt includes it as `request_id`. It does not deduplicate work. JSON receipts
 exclude raw arguments, captured environment values, private bearers and seal
 hashes. A log path is reported only when it exists.
@@ -333,7 +333,7 @@ hashes. A log path is reported only when it exists.
 ### Making a retry safe
 
 ```bash
-sparkwing run deploy --sw-detached --sw-idempotency-key deploy-2026-10-15
+sparkwing run deploy --detach --idempotency-key deploy-2026-10-15
 sparkwing runs retry --run RUN_ID --failed
 sparkwing runs retry --run RUN_ID --all-jobs
 ```
@@ -359,7 +359,7 @@ reuses its earlier result while a job it needs runs again.
 ### Publishing a foreground run handle
 
 ```bash
-sparkwing run build --sw-run-handle-file /tmp/build-run.json
+sparkwing run build --run-handle-file /tmp/build-run.json
 ```
 
 The run handle identifies the run for observations and cancellation. It carries
@@ -374,7 +374,7 @@ Intake seals source identity and the exact commit before execution. Acquisition
 uses that identity, rather than looking up a branch head again. Repository
 identity identifies the namespace. It does not grant permission to clone it.
 
-`--sw-ref` selects the local execution revision. `--sw-pipeline-ref` selects the
+`--ref` selects the local execution revision. `--pipeline-ref` selects the
 pipeline's source revision. A declared pipeline source and an explicit pipeline
 ref must agree. Resume and retry use the persisted selection. They do not replace
 it with the caller's working tree or current machine settings.
@@ -596,18 +596,18 @@ those behaviors. See [node protocol](node-protocol.md).
 Route one invocation directly to Cloud without changing machine defaults:
 
 ```bash
-sparkwing run test --sw-route cloud --profile work
-sparkwing run test --sw-route cloud --profile work --sw-detached -o json
+sparkwing run test --route cloud --profile work
+sparkwing run test --route cloud --profile work --detach -o json
 sparkwing runs logs --profile work --run RUN_ID --follow
 sparkwing runs status --profile work --run RUN_ID
 ```
 
-`--sw-route cloud` sends planning and jobs to Cloud through the existing
+`--route cloud` sends planning and jobs to Cloud through the existing
 controller dispatch path. It works without a terminal and starts no local
 execution controller. The CLI still captures and inspects the source locally.
-Without `--sw-detached`, it follows logs and returns the run's exit status.
+Without `--detach`, it follows logs and returns the run's exit status.
 Detached submission returns a receipt with `run_id` and `number` after intake.
-`--sw-run-handle-file PATH` also writes the run identity at intake.
+`--run-handle-file PATH` also writes the run identity at intake.
 Interrupting observation leaves the Cloud run active, as with `pipeline trigger`.
 Use `sparkwing runs cancel --profile work --run RUN_ID` to cancel it.
 
@@ -615,8 +615,8 @@ Explicit Cloud routing never falls back to local compute, including on a
 connection or upload failure. It selects Cloud immediately, without the machine
 `prefer` holds or personal runners. Cloud credits and team admission limits apply.
 The machine's burst `overflow_minutes` allowance applies to overflow, rather than
-these directly selected Cloud jobs. `--profile` requires `--sw-route cloud`.
-Omit it to use machine `run.routing.profile`. `--sw-route local` selects local
+these directly selected Cloud jobs. `--profile` requires `--route cloud`.
+Omit it to use machine `run.routing.profile`. `--route local` selects local
 execution for one invocation. Repository `run.route: local` still forbids Cloud.
 
 Source-file approval, secret scanning, requester secret selection and masking
@@ -725,7 +725,7 @@ team's claim ranking. A run you trigger from this machine ranks it `here`. Runs
 started by a push, pull request, release or schedule never reach it.
 
 Machine-configured burst routing needs a foreground here host and refuses
-`--sw-detached`. Use `--sw-route cloud` for a detached Cloud run.
+`--detach`. Use `--route cloud` for a detached Cloud run.
 
 Registered machines advertise labels and a configured concurrent-job count.
 Required labels select eligible machines. CPU and memory observations are not
@@ -758,8 +758,8 @@ readiness ranking window survives, so other ranked claimants can take the job.
 Ctrl-C cancels the wait. Concurrency slots count once even when a registered runner
 shares this machine with the requesting CLI. Machine admission keeps Cloud run
 identities separate from local records. Cloud overflow captures the working tree.
-Use `pipeline trigger` for explicit committed revisions instead of `--sw-ref` or
-`--sw-pipeline-ref`.
+Use `pipeline trigger` for explicit committed revisions instead of `--ref` or
+`--pipeline-ref`.
 
 An unreachable controller before intake, including connection setup and source upload,
 produces a message and a local run.

@@ -26,7 +26,7 @@ func resolveSparks(ctx context.Context, sparkwingDir string, noUpdate bool) erro
 		if explanation := gotoolchain.ExplainOutput(ctx, err.Error(), nil); explanation != nil {
 			return fmt.Errorf("sparks resolve: %w", explanation)
 		}
-		return fmt.Errorf("sparks resolve: %w (use --sw-no-update to compile against existing go.mod pins)", err)
+		return fmt.Errorf("sparks resolve: %w (use --no-update to compile against existing go.mod pins)", err)
 	}
 	return nil
 }

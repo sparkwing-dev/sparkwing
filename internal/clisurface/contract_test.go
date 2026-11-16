@@ -78,7 +78,7 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 		commands[c.Path] = c
 	}
 	required := map[string][]string{
-		"sparkwing run":              {"publish", "sw-cache-from", "sw-pause-before", "sw-no-memo", "sw-allow-risk"},
+		"sparkwing run":              {"publish", "cache-from", "pause-before", "no-memo", "allow-risk"},
 		"sparkwing pipeline trigger": {"resume", "runner", "profile"},
 		"sparkwing dashboard open":   {"host"},
 		"sparkwing daemon install":   {}, "sparkwing daemon uninstall": {}, "sparkwing __tick": {},
@@ -105,7 +105,7 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 	if !commands["sparkwing pipeline trigger"].PipelineOptionalOnResume {
 		t.Error("resume must not need a new pipeline")
 	}
-	if !slices.ContainsFunc(commands["sparkwing run"].Flags, func(f Flag) bool { return f.Name == "sw-route" }) {
+	if !slices.ContainsFunc(commands["sparkwing run"].Flags, func(f Flag) bool { return f.Name == "route" }) {
 		t.Error("run must offer invocation routing")
 	}
 	if slices.Contains(commands["sparkwing daemon install"].Platforms, "windows") {
@@ -132,12 +132,12 @@ func TestForegroundWorkersContract(t *testing.T) {
 	var workers Flag
 	for _, c := range Registry() {
 		for _, f := range c.Flags {
-			if c.Path == "sparkwing run" && f.Name == "sw-workers" {
+			if c.Path == "sparkwing run" && f.Name == "workers" {
 				workers = f
 			}
 		}
 	}
-	if workers.Argument != "N" || !workers.HasMinimum || workers.Minimum != 1 || !slices.Contains(workers.Conflicts, "sw-detached") {
+	if workers.Argument != "N" || !workers.HasMinimum || workers.Minimum != 1 || !slices.Contains(workers.Conflicts, "detach") {
 		t.Fatalf("invalid workers contract: %+v", workers)
 	}
 }

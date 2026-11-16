@@ -88,7 +88,7 @@ type PreRelease struct {
 }
 
 type PreReleaseArgs struct {
-	RaceStorePart string `flag:"race-store-part" desc:"Run part k of n of the race-store shards, as k/n; the parts together cover every test once. none runs no shard, for hosted CI, whose race-store lanes run every part with --sw-start-at race-store --sw-stop-at race-store. Default: every shard."`
+	RaceStorePart string `flag:"race-store-part" desc:"Run part k of n of the race-store shards, as k/n; the parts together cover every test once. none runs no shard, for hosted CI, whose race-store lanes run every part with --start-at race-store --stop-at race-store. Default: every shard."`
 	PlatformCells bool   `flag:"platform-cells" desc:"Also run the macos and windows cells as dispatched jobs requiring os=darwin and os=windows. Each waits for a matching runner, so trigger the run on a controller with those runners enrolled; a local run cannot place them."`
 }
 

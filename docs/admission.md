@@ -83,7 +83,7 @@ plan.AdmissionClass(sparkwing.AdmissionInteractive)
 ```
 
 Higher-weight classes are considered more frequently, while aging raises older
-work until it overtakes newer arrivals. `Plan.Priority` and `--sw-priority`
+work until it overtakes newer arrivals. `Plan.Priority` and `--priority`
 remain explicit strict ordering overrides and are separate from workload class.
 
 Admission class is resolved into the sealed execution options. Local run and

@@ -49,7 +49,7 @@ var banned = []bannedPattern{
 	},
 	{
 		regexp.MustCompile(`ReservedFlagNames`),
-		"removed; run control flags are sw-* prefixed, so pipelines own the full unprefixed flag namespace (no reserved-name collision)",
+		"removed; pipeline arguments follow --, so pipelines own every flag name (no reserved-name collision)",
 	},
 	{
 		regexp.MustCompile(`\bruns_on\b`),
@@ -57,19 +57,11 @@ var banned = []bannedPattern{
 	},
 	{
 		regexp.MustCompile(`(?:\brun\b|\btrigger\b)[^\n]*\s--from\b`),
-		"the git-ref flag is --sw-ref, not --from",
+		"the git-ref flag is --ref, not --from",
 	},
 	{
 		regexp.MustCompile(`--mode=`),
-		"the run-mode flag is --sw-mode, not --mode",
-	},
-	{
-		regexp.MustCompile(`--workers=`),
-		"the worker-cap flag is --sw-workers, not --workers",
-	},
-	{
-		regexp.MustCompile(`--no-update\b`),
-		"the skip-resolve flag is --sw-no-update, not --no-update",
+		"there is no run-mode flag; standalone CI is --allow-unadmitted",
 	},
 	{
 		regexp.MustCompile(`tokens (?:revoke|lookup|rotate) [^-\s]`),
@@ -116,8 +108,8 @@ var banned = []bannedPattern{
 		"the registry is browsed with `sparkwing examples`; `pipeline templates` is not a verb",
 	},
 	{
-		regexp.MustCompile(`sparkwing run [^\n]*\s--dry-run\b`),
-		"run-control flags are sw-prefixed: the dry-run flag is --sw-dry-run",
+		regexp.MustCompile(`--sw-(?:route|cache-from|pause-before|pause-after|pause-on-failure|ref|pipeline-ref|detached|workers|idempotency-key|request-id|verbose|start-at|stop-at|only|no-memo|priority|no-update|no-bincache|hash-all-files|allow-unadmitted|dry-run|allow-risk|index|run-handle-file)\b`),
+		"run and pipeline plan flags have no sw- prefix: --sw-dry-run is --dry-run and --sw-detached is --detach",
 	},
 	{
 		regexp.MustCompile(`jobs:(?:read|write)`),

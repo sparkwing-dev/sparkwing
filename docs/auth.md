@@ -1241,8 +1241,8 @@ whose repository was proven (an App delivery, an Actions push, a schedule, or
 code the controller fetched from GitHub) as the reader's proven repository, and
 that intake sealed as proof eligible: it set no run option outside an
 allow-list of options that only place, schedule or present a run, so no
-`--sw-only`, `--sw-start-at` or `--sw-stop-at`, no dry run, no debug and no
-`--sw-pause-before`, `--sw-pause-after` or `--sw-pause-on-failure` (a paused
+`--only`, `--start-at` or `--stop-at`, no dry run, no debug and no
+`--pause-before`, `--pause-after` or `--pause-on-failure` (a paused
 job can be attached to and edited), and any option added later also keeps it
 from counting (see [security](security.md)). The run must also have
 sealed no environment variables, because a submitted `GOFLAGS` or similar can

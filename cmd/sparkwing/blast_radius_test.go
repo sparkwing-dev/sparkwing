@@ -64,7 +64,7 @@ func TestEnforceRiskGate_DryRunBypassesEverything(t *testing.T) {
 	for i, findings := range cases {
 		wf := runFlags{dryRun: true}
 		if err := enforceRiskGate("any", findings, wf); err != nil {
-			t.Errorf("case %d: --sw-dry-run should bypass gate: %v", i, err)
+			t.Errorf("case %d: --dry-run should bypass gate: %v", i, err)
 		}
 	}
 }

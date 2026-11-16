@@ -167,7 +167,7 @@ pair `.Memo()` with `Artifacts`.
 ## Both execution modes
 
 Local runs store artifacts in their local blob store. Explicit
-`--sw-cache-from PROFILE` access reads authorized remote records without writing
+`--cache-from PROFILE` access reads authorized remote records without writing
 them. Staging checks blob and manifest
 digests and fails when cached bytes are missing or corrupt. A memo entry, or a
 coalesce leader, without a required artifact manifest, or whose manifest or

@@ -81,7 +81,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 	if err := runtime.close(); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--sw-allow-unadmitted", "--sw-no-update", "-o=json"})
+	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--allow-unadmitted", "--no-update", "-o=json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func main(){
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-qm", "standalone parent and child")
 	t.Chdir(repo)
-	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--sw-allow-unadmitted", "--sw-no-update", "-o=json"})
+	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--allow-unadmitted", "--no-update", "-o=json"})
 	if err != nil {
 		t.Fatal(err)
 	}

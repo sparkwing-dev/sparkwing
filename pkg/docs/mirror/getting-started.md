@@ -346,7 +346,7 @@ What still wants the network is visible in advance:
 
 - **A `latest` or range pin.** A `sparks:` entry pinned to `latest`, `^v0.24.0`,
   or `~v0.10.3` asks the module proxy for the newest matching tag on every
-  run. Pass `--sw-no-update` to skip resolution and compile against the
+  run. Pass `--no-update` to skip resolution and compile against the
   overlay already on disk, or pin exact tags and pay nothing. Without the
   flag an unreachable proxy fails the run and the error names it. The
   resolution rules are in [sparks.md](sparks.md).
@@ -473,13 +473,13 @@ composition (parallel, sequence, needs, modifiers), use the `Plan`.
 `sparkwing run` executes on this machine and records to its local store,
 logs, and cache. `sparkwing pipeline trigger <pipeline> --profile
 NAME` hands execution to that profile's controller. `sparkwing run` also takes
-`--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
+`--ref <branch|tag|sha>` to compile a git ref instead of the working
 tree (trigger runs the source registered with the controller, or the
 checkout's uncommitted changes with `--working-tree`):
 
 ```bash
 sparkwing run build                                    # run locally with local code
-sparkwing run build --sw-ref main                      # build the main ref locally
+sparkwing run build --ref main                      # build the main ref locally
 sparkwing pipeline trigger build --profile dev         # run on the "dev" cluster
 sparkwing pipeline trigger build --profile dev --working-tree  # uncommitted changes on "dev"
 sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
@@ -533,7 +533,7 @@ use that default when the flag is omitted. With no saved default they use the
 local controller. `--profile=` selects local for one command.
 
 `sparkwing run` keeps its separate machine routing preference. A saved default
-profile does not change local execution. Use `--sw-route cloud --profile NAME`
+profile does not change local execution. Use `--route cloud --profile NAME`
 to send one run directly to Cloud. Without `--profile`, that explicit route
 uses machine `run.routing.profile`.
 

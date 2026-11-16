@@ -228,12 +228,12 @@ jobs:
           gate_selection=()
           gate_args=()
           if [ -z "$SOURCE_REF" ] && [ -z "$RELEASE_TAG" ]; then
-            gate_selection=(--sw-only gate)
+            gate_selection=(--only gate)
             if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
               gate_args=(-- --full)
             fi
           fi
-          "$RUNNER_TEMP/sparkwing" run gate "${gate_selection[@]}" --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" "${gate_args[@]}"
+          "$RUNNER_TEMP/sparkwing" run gate "${gate_selection[@]}" --run-handle-file "$RUNNER_TEMP/canonical-run.json" "${gate_args[@]}"
           if [ "$RELEASE_TAG" = v0.37.2 ]; then
             git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
             git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
@@ -242,7 +242,7 @@ jobs:
 
       - name: Run canonical touched-package race
         if: matrix.gate == 'race-touched'
-        run: '"$RUNNER_TEMP/sparkwing" run gate --sw-only race-touched --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"'
+        run: '"$RUNNER_TEMP/sparkwing" run gate --only race-touched --run-handle-file "$RUNNER_TEMP/canonical-run.json"'
 
       - name: Run canonical pre-release
         if: matrix.gate == 'pre-release'
@@ -257,7 +257,7 @@ jobs:
           if [ -z "$SOURCE_REF" ] && [ -z "$RELEASE_TAG" ]; then
             race_store_part=(-- --race-store-part none)
           fi
-          "$RUNNER_TEMP/sparkwing" run pre-release --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" "${race_store_part[@]}"
+          "$RUNNER_TEMP/sparkwing" run pre-release --run-handle-file "$RUNNER_TEMP/canonical-run.json" "${race_store_part[@]}"
           if [ -n "$RELEASE_TAG" ]; then
             if [ "$RELEASE_TAG" = v0.37.2 ]; then
               git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
@@ -278,7 +278,7 @@ jobs:
           target_sha="$(git rev-parse HEAD)"
           part="${LANE#race-store-}"
           part="${part/-of-//}"
-          "$RUNNER_TEMP/sparkwing" run pre-release --sw-start-at race-store --sw-stop-at race-store --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" -- --race-store-part "$part"
+          "$RUNNER_TEMP/sparkwing" run pre-release --start-at race-store --stop-at race-store --run-handle-file "$RUNNER_TEMP/canonical-run.json" -- --race-store-part "$part"
           bash bin/check-hosted-gate-clean.sh "$target_sha"
 
       - name: Save the Go caches

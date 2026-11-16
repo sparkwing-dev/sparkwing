@@ -118,7 +118,7 @@ func TestPipelineHelpFromDescribe(t *testing.T) {
 		"[secret]",
 		"  # ship to dev\n  sparkwing run deploy --env dev",
 		"SPARKWING FLAGS",
-		"--sw-dry-run",
+		"--dry-run",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help is missing %q:\n%s", want, out)

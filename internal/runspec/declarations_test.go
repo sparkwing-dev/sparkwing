@@ -173,7 +173,7 @@ func TestRiskRefusalNamesLabelsWhileDiscoveryIsIncomplete(t *testing.T) {
 		if !errors.As(gate.Error(refusal), &failure) || failure.Code != apierr.BadRequest {
 			t.Fatalf("complete=%v: risk refusal was withheld: %v", complete, gate.Error(refusal))
 		}
-		if !strings.Contains(failure.Message, `pipeline "land" requires --sw-allow-risk prod,remote`) || strings.Contains(failure.Message, "withheld") {
+		if !strings.Contains(failure.Message, `pipeline "land" requires --allow-risk prod,remote`) || strings.Contains(failure.Message, "withheld") {
 			t.Fatalf("complete=%v: refusal does not name labels and flag: %q", complete, failure.Message)
 		}
 		if strings.Contains(failure.Message, `step "push"`) != complete {

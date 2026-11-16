@@ -238,7 +238,7 @@ func TestInvocationRoutingRequiresExplicitCloudAndPreservesMachineApprovals(t *t
 func TestExplicitCloudRouteDetachesAndNeverFallsBack(t *testing.T) {
 	for _, detached := range []bool{false, true} {
 		for _, failure := range []error{nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("offline")}, &burstBeforeIntakeError{&apierr.Error{Code: hosterr.Unavailable, Message: "offline"}}} {
-			flags, _ := parseRunFlagsArgs([]string{"--sw-route=cloud", "--profile=work", fmt.Sprintf("--sw-detached=%t", detached)})
+			flags, _ := parseRunFlagsArgs([]string{"--route=cloud", "--profile=work", fmt.Sprintf("--detach=%t", detached)})
 			called := false
 			err := runRoutedCommand(t.Context(), "gate", flags, nil, userconfig.RunRouting{Route: new("cloud"), Profile: new("work")}, io.Discard, burstRunDependencies{
 				connect: func(context.Context, string) (client.EngineOptions, func(), error) {

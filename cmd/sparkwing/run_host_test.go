@@ -138,7 +138,7 @@ func TestLocalRunSubmitsWithoutClaimingTheRunnerAward(t *testing.T) {
 			var calls []string
 			var out bytes.Buffer
 			deps := localRuntimeFor(t, localTestAward(t), detached, &calls)
-			flags, args := parseRunFlagsArgs([]string{fmt.Sprintf("--sw-detached=%t", detached), "-o=json", "--", "--password", "private-value"})
+			flags, args := parseRunFlagsArgs([]string{fmt.Sprintf("--detach=%t", detached), "-o=json", "--", "--password", "private-value"})
 			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
 			want := []string{"resolve", "prepare", "create", "close"}
 			if detached {
@@ -331,7 +331,7 @@ func TestLocalForegroundLogFailureKeepsCommittedOutcome(t *testing.T) {
 
 func TestLocalRunNoUpdateReachesPreparation(t *testing.T) {
 	var calls []string
-	flags, args := parseRunFlagsArgs([]string{"--sw-no-update", "--", "--password=private-value"})
+	flags, args := parseRunFlagsArgs([]string{"--no-update", "--", "--password=private-value"})
 	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 	resolve := deps.resolve
 	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
@@ -339,7 +339,7 @@ func TestLocalRunNoUpdateReachesPreparation(t *testing.T) {
 		prepare := runtime.prepare
 		runtime.prepare = func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
 			if !flags.noUpdate {
-				t.Fatal("preparation lost --sw-no-update")
+				t.Fatal("preparation lost --no-update")
 			}
 			return prepare(ctx, pipeline, flags)
 		}
@@ -397,7 +397,7 @@ func TestLocalRunRejectsDetachedStandaloneBeforeAnyEffect(t *testing.T) {
 }
 
 func TestLocalRunSelectsStandaloneFromRealParser(t *testing.T) {
-	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--sw-allow-unadmitted"})
+	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--allow-unadmitted"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +436,7 @@ func TestStandaloneControllerContextSurvivesIntake(t *testing.T) {
 		runtime.controller = controller
 		return runtime, err
 	}
-	flags, args := parseRunFlagsArgs([]string{"--sw-allow-unadmitted", "--sw-no-update", "--", "--password", "private-value"})
+	flags, args := parseRunFlagsArgs([]string{"--allow-unadmitted", "--no-update", "--", "--password", "private-value"})
 	if err := runLocalCommand(t.Context(), "ci", flags, args, io.Discard, deps); err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +610,7 @@ func TestParsedLocalOutputSurvivesIntakeAndReceipt(t *testing.T) {
 	for _, option := range [][]string{{"-o", "plain"}, {"--output=plain"}, nil} {
 		t.Run(strings.Join(option, " "), func(t *testing.T) {
 			t.Setenv("SPARKWING_LOG_FORMAT", "plain")
-			flags, args := parseRunFlagsArgs(append(append([]string{"--sw-detached"}, option...), "--", "--password=private-value"))
+			flags, args := parseRunFlagsArgs(append(append([]string{"--detach"}, option...), "--", "--password=private-value"))
 			var calls []string
 			deps := localRuntimeFor(t, localTestAward(t), true, &calls)
 			resolve := deps.resolve
@@ -642,7 +642,7 @@ func TestLocalPreparationRetainsC4PresenceAndMachineDefaults(t *testing.T) {
 	input.machineFile = "/captured/config.yaml"
 	input.machine.Run = &userconfig.RunConfig{CacheFrom: new("ci-cache")}
 	input.settings.Environment = settings.Values{Options: runspec.Options{NoMemo: runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "plain"}}}}
-	flags, args := parseRunFlagsArgs([]string{"--publish", "history", "--sw-start-at", "build/compile", "--sw-stop-at", "test/verify", "--sw-only", "build*", "--sw-no-memo=false", "--sw-workers", "2", "--sw-priority=0", "--sw-pause-before", "build,test", "--sw-pause-on-failure=false", "--", "--password", "private-value"})
+	flags, args := parseRunFlagsArgs([]string{"--publish", "history", "--start-at", "build/compile", "--stop-at", "test/verify", "--only", "build*", "--no-memo=false", "--workers", "2", "--priority=0", "--pause-before", "build,test", "--pause-on-failure=false", "--", "--password", "private-value"})
 	if flags.parseErr != nil {
 		t.Fatal(flags.parseErr)
 	}
@@ -663,7 +663,7 @@ func TestLocalPreparationRetainsC4PresenceAndMachineDefaults(t *testing.T) {
 	if !request.Request.SecretArgs.Set || !reflect.DeepEqual(request.Request.SecretArgs.Value, []string{"password"}) {
 		t.Fatal("lost argument classification")
 	}
-	flags, args = parseRunFlagsArgs([]string{"--sw-cache-from=", "--", "--password", "private-value"})
+	flags, args = parseRunFlagsArgs([]string{"--cache-from=", "--", "--password", "private-value"})
 	request, err = prepareLocalRunRequest(t.Context(), input, flags, args)
 	if err != nil || request.Request.Options.CacheFrom.Value != "" || request.Request.Options.CacheFrom.Origin.Layer != runspec.LayerFlag {
 		t.Fatalf("explicit empty cache profile did not override machine default: %+v %v", request.Request.Options.CacheFrom, err)
@@ -687,7 +687,7 @@ func TestLocalPreparationRiskRefusalPrecedesIntake(t *testing.T) {
 		return runtime, err
 	}
 	err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, []string{"--password", "private-value"}, io.Discard, deps)
-	if err == nil || !strings.Contains(err.Error(), "requires --sw-allow-risk prod") || !reflect.DeepEqual(calls, []string{"resolve", "close"}) {
+	if err == nil || !strings.Contains(err.Error(), "requires --allow-risk prod") || !reflect.DeepEqual(calls, []string{"resolve", "close"}) {
 		t.Fatalf("risk refusal=%v calls=%v", err, calls)
 	}
 	input := localTestPreparation(t, award)
@@ -704,7 +704,7 @@ func TestLocalPreparationRiskRefusalPrecedesIntake(t *testing.T) {
 	broken := append(doc.Pipelines, nodewire.PipelineDescription{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "undiscovered"}})
 	input.declarations = declarationFixture(t, broken)
 	_, err = prepareLocalRunRequest(t.Context(), input, runFlags{}, []string{"--password", "private-value"})
-	if err == nil || !strings.Contains(err.Error(), "requires --sw-allow-risk prod") || strings.Contains(err.Error(), "withheld") {
+	if err == nil || !strings.Contains(err.Error(), "requires --allow-risk prod") || strings.Contains(err.Error(), "withheld") {
 		t.Fatalf("incomplete discovery hid the risk refusal: %v", err)
 	}
 }
@@ -1158,7 +1158,7 @@ func TestLocalPreparationGatesDeclarationErrors(t *testing.T) {
 				// safety: the risk refusal is host text naming only the invoked pipeline and its labels.
 				want := "details withheld"
 				if len(args) == 0 {
-					want = `pipeline "ci" requires --sw-allow-risk prod`
+					want = `pipeline "ci" requires --allow-risk prod`
 				}
 				if err == nil || strings.Contains(err.Error(), private) || (!complete && !strings.Contains(err.Error(), want)) {
 					t.Fatalf("private declaration escaped: %v", err)

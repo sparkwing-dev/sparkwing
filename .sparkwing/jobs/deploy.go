@@ -158,7 +158,7 @@ func (j *deployJob) deployer() (*deployer, func(), error) {
 }
 
 // safety: a dry-run body only prints, so it is marked safe and runs under
-// --sw-dry-run too, which lets its outputs feed the next job's printout.
+// --dry-run too, which lets its outputs feed the next job's printout.
 func deployStep[T any](w *sparkwing.Work, dry bool, id string, fn func(context.Context) (T, error)) *sparkwing.WorkStep {
 	step := sparkwing.Step(w, id, fn)
 	if dry {

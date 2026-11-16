@@ -37,7 +37,7 @@ jobs:
       - run: curl -fsSL https://sparkwing.dev/install.sh | bash
 
       - name: Run sparkwing release pipeline
-        run: sparkwing run release-prod --sw-workers=4
+        run: sparkwing run release-prod --workers=4
 ```
 
 State, cache, and logs stay on the CI runner's disk under `~/.sparkwing`.
@@ -48,16 +48,16 @@ A pipeline job that fails fails the GHA job (exit code propagates).
 
 `sparkwing run` uses the local controller and shared run host. The controller
 owns local state and admission. The host executes the pipeline on this CI
-runner. `--sw-workers=N` selects a positive foreground worker count and cannot
-be combined with `--sw-detached`.
+runner. `--workers=N` selects a positive foreground worker count and cannot
+be combined with `--detach`.
 
-For standalone CI, `--sw-allow-unadmitted` starts an exclusive in-process
+For standalone CI, `--allow-unadmitted` starts an exclusive in-process
 controller. It stays available through the here claim, execution and log
 following, retires its supervised local runner, then shuts down before the command returns. It cannot detach or
 share a home with another running controller.
 
 ```sh
-sparkwing run release-prod --sw-allow-unadmitted --sw-no-update
+sparkwing run release-prod --allow-unadmitted --no-update
 ```
 
 Keep the pipeline module and any resolved sparks overlay in the checkout.
@@ -66,11 +66,11 @@ committing the overlay. The pipeline's SDK pin selects its matching engine.
 
 ### Using the committed sparks overlay
 
-For a project with a `sparks:` block, `--sw-no-update` uses the committed
+For a project with a `sparks:` block, `--no-update` uses the committed
 `.resolved.mod` overlay without refreshing library resolution during the run:
 
 ```sh
-sparkwing run release-prod --sw-no-update --sw-workers=4
+sparkwing run release-prod --no-update --workers=4
 ```
 
 Refresh the overlay before committing a library update:
@@ -123,7 +123,7 @@ branch seeds every new pull request. A run that compiles prints
 `Cache miss: pipeline binary compiled in <duration>`; seeing it on every run
 means the cache is not being restored. To read authorized CI memo results,
 artifacts and dependency caches from a controller, select
-`sparkwing run --sw-cache-from PROFILE`. This option only reads verified
+`sparkwing run --cache-from PROFILE`. This option only reads verified
 default-branch records. It never uploads local results or fetches pipeline
 binaries.
 
@@ -133,7 +133,7 @@ binaries.
 steps:
   - label: "release"
     command: |
-      sparkwing run release-prod --sw-workers=4
+      sparkwing run release-prod --workers=4
 ```
 
 ## GitLab CI
@@ -145,5 +145,5 @@ release:
     - apk add --no-cache curl
     - curl -fsSL https://sparkwing.dev/install.sh | sh
   script:
-    - sparkwing run release-prod --sw-workers=4
+    - sparkwing run release-prod --workers=4
 ```

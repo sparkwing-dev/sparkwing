@@ -144,11 +144,11 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		{"sparkwing run", cmdRun},
 	}
 	allFlags := []string{
-		"--sw-ref",
-		"--sw-start-at", "--sw-stop-at",
-		"--sw-dry-run",
-		"--sw-verbose",
-		"--sw-allow-risk",
+		"--ref",
+		"--start-at", "--stop-at",
+		"--dry-run",
+		"--verbose",
+		"--allow-risk",
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

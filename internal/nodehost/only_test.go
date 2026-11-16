@@ -326,7 +326,7 @@ func TestRiskAllowanceCoversOnlySelectedSteps(t *testing.T) {
 			if (err != nil) != tc.wantRefusal {
 				t.Fatalf("refusal=%v, want %v", err, tc.wantRefusal)
 			}
-			if err != nil && err.Error() != `step "push" in job "land" requires --sw-allow-risk remote to confirm (or --sw-dry-run to preview)` {
+			if err != nil && err.Error() != `step "push" in job "land" requires --allow-risk remote to confirm (or --dry-run to preview)` {
 				t.Fatalf("refusal text %q", err)
 			}
 		})

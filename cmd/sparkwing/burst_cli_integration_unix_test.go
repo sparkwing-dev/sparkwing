@@ -81,7 +81,7 @@ func TestBurstPublicRunFallsBackLocallyWithRequesterSecrets(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	handlePath := filepath.Join(t.TempDir(), "run.json")
-	command := exec.CommandContext(ctx, cli, "run", "burst", "--sw-run-handle-file", handlePath, "-o=json")
+	command := exec.CommandContext(ctx, cli, "run", "burst", "--run-handle-file", handlePath, "-o=json")
 	command.Dir = repo
 	output, err := command.CombinedOutput()
 	if err != nil || !strings.Contains(string(output), "Cloud controller is unreachable; running locally.") || !strings.Contains(string(output), "burst-edited-ok secret=*** encoded=***") || !strings.Contains(string(output), "burst-cache-restored") || !strings.Contains(string(output), "burst-artifact-restored") || bytes.Contains(output, []byte(burstIntakeSecret)) || bytes.Contains(output, []byte("cache restore failed")) || bytes.Contains(output, []byte("cache save failed")) {
@@ -206,12 +206,12 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
         sw.Info(ctx, "burst-profile-cache-restored")
         if err := os.MkdirAll("modules", 0o700); err != nil { return err }`, 1)
 		writeSnapshotFile(t, repo, ".sparkwing/main.go", source, 0o600)
-		args = append(args, "--sw-cache-from", "cloud")
+		args = append(args, "--cache-from", "cloud")
 		wantRuns++
 	}
-	args = append(args, "--sw-run-handle-file", handleFile)
+	args = append(args, "--run-handle-file", handleFile)
 	if detached {
-		args = append(args, "--sw-detached")
+		args = append(args, "--detach")
 	}
 	publishing.Store(true)
 	output := invoke(args...)
@@ -424,7 +424,7 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 		burstPublicHoldMachine(t, ctx, endpoint)
 	}
 	handleFile := filepath.Join(t.TempDir(), "run.json")
-	args := []string{"run", "burst", "--sw-run-handle-file", handleFile, "-o=json"}
+	args := []string{"run", "burst", "--run-handle-file", handleFile, "-o=json"}
 	var output []byte
 	if interrupt {
 		args = append(args, "--", "--block")

@@ -506,7 +506,7 @@ func TestBurstNativePreparationRetainsAdvertisedRunOptions(t *testing.T) {
 		want int
 	}{{"front", 1}, {"back", -1}} {
 		t.Run(tc.mode, func(t *testing.T) {
-			inv, err := clisurface.Parse("sparkwing", []string{"run", "burst", "--sw-no-bincache", "--sw-hash-all-files", "--sw-priority", tc.mode})
+			inv, err := clisurface.Parse("sparkwing", []string{"run", "burst", "--no-bincache", "--hash-all-files", "--priority", tc.mode})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -32,7 +32,7 @@ type RunContext struct {
 	// DryRun carries the same sealed mode as IsDryRun during planning and execution.
 	DryRun bool
 
-	// StartAt and StopAt are the run's --sw-start-at and --sw-stop-at step
+	// StartAt and StopAt are the run's --start-at and --stop-at step
 	// bounds, empty when unset. A Plan reads them to refuse a selection it
 	// cannot honor, such as a push whose required checks the bounds skip.
 	StartAt string

@@ -97,8 +97,8 @@ profiles:
 `)
 	for _, name := range []string{"prod", "lite"} {
 		err := dispatchRunArgs([]string{"deploy", "--profile", name})
-		if err == nil || !strings.Contains(err.Error(), "--sw-route cloud") {
-			t.Errorf("run deploy --profile %s = %v, want a refusal naming --sw-route cloud", name, err)
+		if err == nil || !strings.Contains(err.Error(), "--route cloud") {
+			t.Errorf("run deploy --profile %s = %v, want a refusal naming --route cloud", name, err)
 		}
 	}
 }

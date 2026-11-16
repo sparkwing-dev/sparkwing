@@ -70,10 +70,10 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 		t.Run(tc.ref+"/"+tc.code, func(t *testing.T) {
 			args := []string{"run", "deploy-prod"}
 			if tc.ref != "" {
-				args = append(args, "--sw-ref", tc.ref)
+				args = append(args, "--ref", tc.ref)
 			}
 			if tc.code != "" {
-				args = append(args, "--sw-pipeline-ref", tc.code)
+				args = append(args, "--pipeline-ref", tc.code)
 			}
 			inv, err := clisurface.Parse("sparkwing", args)
 			if err != nil {

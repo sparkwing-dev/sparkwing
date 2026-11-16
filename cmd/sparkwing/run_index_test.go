@@ -54,7 +54,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 	runSnapshotGit(t, repo, "commit", "-qm", "fixture")
 	runSnapshotGit(t, repo, "update-index", "--split-index")
 	t.Chdir(repo)
-	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--sw-index=.git/index"})
+	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--index=.git/index"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestRunIndexRefusesMissingNonregularAndMalformedInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"missing-index", "malformed-index", ".git"} {
-		inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--sw-index", path})
+		inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--index", path})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -172,9 +172,9 @@ func TestParseRunFlags_Index(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"space-separated", []string{"--sw-index", "/tmp/snap.index"}, "/tmp/snap.index"},
-		{"equals-form", []string{"--sw-index=/tmp/snap.index"}, "/tmp/snap.index"},
-		{"missing-value-is-a-usage-error", []string{"--sw-index"}, ""},
+		{"space-separated", []string{"--index", "/tmp/snap.index"}, "/tmp/snap.index"},
+		{"equals-form", []string{"--index=/tmp/snap.index"}, "/tmp/snap.index"},
+		{"missing-value-is-a-usage-error", []string{"--index"}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,7 +183,7 @@ func TestParseRunFlags_Index(t *testing.T) {
 				t.Errorf("index = %q, want %q", wf.index, tc.want)
 			}
 			if tc.want == "" && (wf.parseErr == nil || len(pass) != 0) {
-				t.Errorf("incomplete --sw-index must be a usage error; got passthrough=%v", pass)
+				t.Errorf("incomplete --index must be a usage error; got passthrough=%v", pass)
 			}
 		})
 	}

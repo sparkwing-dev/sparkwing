@@ -111,9 +111,9 @@ func TestCheckSidebar_FailsOnListedButMissingPage(t *testing.T) {
 
 func TestCheckAuxDocs_FailsOnRunControlFlagByItsOldName(t *testing.T) {
 	root := t.TempDir()
-	writeRepoFile(t, root, "README.md", "```\nsparkwing run build --dry-run\n```\n")
+	writeRepoFile(t, root, "README.md", "```\nsparkwing run build --sw-dry-run\n```\n")
 	if checkAuxDocs(root) {
-		t.Fatal("the run-control dry-run flag named without its sw- prefix must fail")
+		t.Fatal("the dry-run flag named with its retired sw- prefix must fail")
 	}
 }
 
@@ -146,7 +146,7 @@ func TestCheckAuxDocs_ParsesRootDocCommandsWithTheShippedGrammar(t *testing.T) {
 
 func TestCheckAuxDocs_AcceptsCommandsTheGrammarTakes(t *testing.T) {
 	root := t.TempDir()
-	writeRepoFile(t, root, "DELIVERY.md", "```bash\nSPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod -- --bump patch\n```\n\n"+
+	writeRepoFile(t, root, "DELIVERY.md", "```bash\nSPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --allow-risk destructive,prod -- --bump patch\n```\n\n"+
 		"Read `sparkwing runs status --run <id> --view timeline --steps`, or `sparkwing run <pipeline> [flags...]`.\n")
 	if !checkAuxDocs(root) {
 		t.Fatal("aux doc refused commands the CLI accepts")

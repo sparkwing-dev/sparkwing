@@ -41,7 +41,7 @@ exit 1
 			t.Fatalf("error %q lacks %q", err, want)
 		}
 	}
-	if strings.Contains(err.Error(), "--sw-no-update") {
+	if strings.Contains(err.Error(), "--no-update") {
 		t.Fatalf("misleading hint: %v", err)
 	}
 }

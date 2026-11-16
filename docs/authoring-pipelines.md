@@ -22,7 +22,7 @@ generated job if your repository uses another remote.
 Submit each clean, committed work branch from its own retained worktree:
 
 ```bash
-sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --brief 'Explain the change and its intended result'
+sparkwing run land --detach --route local --allow-risk destructive,prod -- --brief 'Explain the change and its intended result'
 sparkwing queue list --group plan:global:merge-queue
 sparkwing runs status --run <returned-run-id> --follow -o json
 sparkwing runs cancel --run <returned-run-id>
@@ -595,7 +595,7 @@ validates declarations and graphs when they are submitted.
 
 ### Local runs, schedules and child runs
 
-`sparkwing run <name>` runs TypeScript locally. `--sw-detached` submits a local
+`sparkwing run <name>` runs TypeScript locally. `--detach` submits a local
 run that can continue after the CLI exits. Local schedules use the same
 pipeline entry. Consult [Schedules](schedules.md) for installation, proof and
 pinning behavior. TypeScript's Node-plus-script entry cannot use the standalone

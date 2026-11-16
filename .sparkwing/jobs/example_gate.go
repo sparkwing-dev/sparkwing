@@ -419,7 +419,7 @@ func exampleStart(ctx context.Context, in ExampleInputs, token string, extra ...
 	}
 	args := []string{"-C", sparkwing.WorkDir()}
 	if in.APIProfile == "" {
-		args = append(args, "run", "example-probe", "--sw-detached", "-o", "plain")
+		args = append(args, "run", "example-probe", "--detach", "-o", "plain")
 	} else {
 		args = append(args, "pipeline", "trigger", "example-probe", "--profile", in.APIProfile, "--detach", "-o", "plain")
 	}

@@ -52,7 +52,7 @@ TypeScript provides `files`, `repoFiles`, `ignore`, `tree`, `env`, `parts`, `con
 A checkout without a remote repository identity uses a machine-local `local:`
 key. Local claims reuse memoized results and dependency caches within that
 repository and host scope. Remote-cache and publication profiles cannot read
-these records. `--sw-no-memo` executes the job body instead of reusing a memo.
+these records. `--no-memo` executes the job body instead of reusing a memo.
 
 `MemoTTL` accepts at most 30 days. Missing or corrupt cached bytes produce a miss.
 Lookup refusals fail the job. Publication requires committed success.
@@ -85,7 +85,7 @@ machine. Declare file results with
 ## Opting out per invocation
 
 Return `sparkwing.NoMemo, nil` from a key callback to bypass reuse for that job.
-`sparkwing run <pipeline> --sw-no-memo` bypasses memoization for the invocation.
+`sparkwing run <pipeline> --no-memo` bypasses memoization for the invocation.
 Dependency directory caches remain a separate declaration.
 
 ## Dependency caches
@@ -235,7 +235,7 @@ compiled binary, instead of each building their own.
 **Files Go compiles or embeds always contribute to the key**, including files
 ignored by repository or global Git rules. Sparkwing asks Go for the dependency
 file list and checks it twice for changes. The broader module-tree hash excludes
-ignored files unless `sparkwing run --sw-hash-all-files` is set. That flag also
+ignored files unless `sparkwing run --hash-all-files` is set. That flag also
 hashes ignored files outside the selected build inputs.
 Go file overlays contribute their map and replacement contents, including files
 that exist only in the overlay, plus the module and workspace metadata Go reads. Automatic `default.pgo` profiles and profiles
@@ -257,7 +257,7 @@ Builds also pass `-ldflags "-s -w"`, which drops the symbol table and
 DWARF and takes roughly 30% off the binary and a third off its link
 time. Panic tracebacks and `runtime/debug.ReadBuildInfo` survive. A
 debugger still attaches, without variable names or line numbers, and a
-core dump cannot be symbolised. Pass `sparkwing run --sw-no-bincache` to
+core dump cannot be symbolised. Pass `sparkwing run --no-bincache` to
 run the pipeline from a temporary build with debug symbols when you need
 those.
 
@@ -320,6 +320,6 @@ Save `cache explain` output before changing build inputs, then compare it
 with the next explanation to see which digests changed.
 
 To skip the binary cache entirely for one invocation, pass
-`--sw-no-bincache`; sparkwing builds a temporary binary with debug
+`--no-bincache`; sparkwing builds a temporary binary with debug
 symbols, then runs it with your original environment. The Go toolchain floor
 adjustment applies only while building.

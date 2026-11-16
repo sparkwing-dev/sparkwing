@@ -44,7 +44,7 @@ func TestParseGrammar(t *testing.T) {
 		{"daemon", "events", "--explain"},
 		{"secrets", "set", "--secret", "NAME", "--value", "sensitive", "--file", "f"},
 		{"runs", "list", "--limit", "1", "--limit", "2"},
-		{"pipeline", "trigger", "check", "--detach", "--sw-workers", "2", "--profile", "prod"},
+		{"pipeline", "trigger", "check", "--detach", "--workers", "2", "--profile", "prod"},
 		{"pipeline", "trigger", "--resume", "r1", "--agent", "codex", "--profile", "prod"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestParseGrammar(t *testing.T) {
 		})
 	}
 	for _, args := range [][]string{
-		{"run", "check", "--sw-workers", "1", "--", "--x=1"},
+		{"run", "check", "--workers", "1", "--", "--x=1"},
 		{"run", "check", "--agent", "claude-code:land-agent", "--", "--x=1"},
 		{"pipeline", "trigger", "check", "--agent", "none", "--profile", "prod"},
 		{"__complete", "--kind=verbs", "--word=", "-o", "plain"},
@@ -116,8 +116,8 @@ func TestParseEveryCommandHelp(t *testing.T) {
 }
 
 func TestRunCacheProfileMayExplicitlyDisableMachineDefault(t *testing.T) {
-	inv, err := Parse("sparkwing", []string{"run", "ci", "--sw-cache-from="})
-	if err != nil || !inv.Has("sw-cache-from") || inv.Value("sw-cache-from") != "" {
+	inv, err := Parse("sparkwing", []string{"run", "ci", "--cache-from="})
+	if err != nil || !inv.Has("cache-from") || inv.Value("cache-from") != "" {
 		t.Fatalf("explicit empty cache profile=%+v %v", inv, err)
 	}
 	for _, args := range [][]string{{"run", "ci", "--publish="}} {
@@ -224,9 +224,9 @@ func TestLintRejectsRemovedStaticFlag(t *testing.T) {
 
 func TestRunInvocationCloudRouting(t *testing.T) {
 	for _, args := range [][]string{
-		{"run", "gate", "--sw-route", "cloud", "--profile", "work", "--sw-detached", "--", "--full"},
-		{"--profile", "work", "run", "gate", "--sw-route", "cloud"},
-		{"run", "gate", "--sw-route", "local"},
+		{"run", "gate", "--route", "cloud", "--profile", "work", "--detach", "--", "--full"},
+		{"--profile", "work", "run", "gate", "--route", "cloud"},
+		{"run", "gate", "--route", "local"},
 	} {
 		if _, err := Parse("sparkwing", args); err != nil {
 			t.Fatalf("%v: %v", args, err)
@@ -234,12 +234,12 @@ func TestRunInvocationCloudRouting(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"run", "gate", "--profile", "work"},
-		{"run", "gate", "--profile", "work", "--sw-route", "local"},
-		{"run", "gate", "--sw-route", "other"},
+		{"run", "gate", "--profile", "work", "--route", "local"},
+		{"run", "gate", "--route", "other"},
 		{"run", "gate", "--allow-secret-file", "a.key"},
-		{"run", "gate", "--sw-route", "cloud", "--allow-secret-file", "a.key"},
+		{"run", "gate", "--route", "cloud", "--allow-secret-file", "a.key"},
 		{"pipeline", "trigger", "gate", "--profile", "work", "--working-tree", "--allow-secret-file", "a.key"},
-		{"run", "gate", "--sw-route", "local", "--allow-secret-file", "a.key"},
+		{"run", "gate", "--route", "local", "--allow-secret-file", "a.key"},
 	} {
 		if _, err := Parse("sparkwing", args); err == nil {
 			t.Fatalf("accepted %v", args)
@@ -277,8 +277,11 @@ func TestMisspelledFlagsAndValuesSuggestTheNearestSpelling(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"run", "build", "--dry-run"}, "flag --dry-run is not accepted; did you mean --sw-dry-run? Pipeline arguments follow --"},
-		{[]string{"run", "build", "--sw-dryrun"}, "unknown flag --sw-dryrun; did you mean --sw-dry-run? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-dry-run"}, "unknown flag --sw-dry-run; did you mean --dry-run? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-detached"}, "unknown flag --sw-detached; did you mean --detach? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-allow-risk", "prod"}, "unknown flag --sw-allow-risk; did you mean --allow-risk? Pipeline arguments follow --"},
+		{[]string{"pipeline", "plan", "--pipeline", "build", "--sw-dry-run"}, "unknown flag --sw-dry-run; did you mean --dry-run? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-dryrun"}, "unknown flag --sw-dryrun; did you mean --dry-run? Pipeline arguments follow --"},
 		{[]string{"runs", "list", "--limt", "5"}, "unknown flag --limt; did you mean --limit?"},
 		{[]string{"runs", "status", "run-deadbeef"}, "unexpected positional argument; pass it as --run RUN_ID"},
 		{[]string{"runs", "list", "extra"}, "unexpected positional argument; sparkwing runs list takes flags only (see sparkwing runs list --help)"},

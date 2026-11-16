@@ -154,7 +154,7 @@ func testCloudWorkingTreeDispatch(t *testing.T, direct bool) {
 	}
 	f := cloudDispatchTrigger(t)
 	if direct {
-		flags, args := parseRunFlagsArgs([]string{"--sw-route=cloud", "--profile=cloud", "--sw-detached"})
+		flags, args := parseRunFlagsArgs([]string{"--route=cloud", "--profile=cloud", "--detach"})
 		connection, closeConnection, err := controllerOptions(t.Context(), "cloud")
 		if err != nil {
 			t.Fatal(err)
