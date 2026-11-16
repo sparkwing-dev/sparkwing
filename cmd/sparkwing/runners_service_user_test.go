@@ -171,7 +171,7 @@ func TestRunnersAddServiceUserNeedsASystemServiceManager(t *testing.T) {
 	}
 }
 
-func TestRunnersRemoveServiceUserStopsThroughThePrivilegedStepThenRevokes(t *testing.T) {
+func TestRunnersDeleteServiceUserStopsThroughThePrivilegedStepThenRevokes(t *testing.T) {
 	f := newRunnersFixture(t)
 	p := &fakePrivilege{reply: installedReply("sw-ci"), timeline: &f.timeline}
 	swapServiceUserPrivilege(t, p)
@@ -185,7 +185,7 @@ func TestRunnersRemoveServiceUserStopsThroughThePrivilegedStepThenRevokes(t *tes
 	}
 	f.timeline = nil
 	out := captureStdout(t, func() {
-		if err := f.run([]string{"remove", "--profile", "prod", "--service-user", "sw-ci"}); err != nil {
+		if err := f.run([]string{"delete", "--profile", "prod", "--service-user", "sw-ci"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -197,7 +197,7 @@ func TestRunnersRemoveServiceUserStopsThroughThePrivilegedStepThenRevokes(t *tes
 	}
 }
 
-func TestRunnersRemoveServiceUserRefusesAnotherControllersRunner(t *testing.T) {
+func TestRunnersDeleteServiceUserRefusesAnotherControllersRunner(t *testing.T) {
 	f := newRunnersFixture(t)
 	p := &fakePrivilege{reply: installedReply("sw-ci")}
 	swapServiceUserPrivilege(t, p)
@@ -209,7 +209,7 @@ func TestRunnersRemoveServiceUserRefusesAnotherControllersRunner(t *testing.T) {
 	p.reply = func([]string, []byte) ([]byte, error) {
 		return json.Marshal(serviceUserRemoved{Account: "sw-ci", Runner: "desk", Controller: "https://other.example", TokenPrefix: f.tokens[0].Prefix})
 	}
-	err := f.run([]string{"remove", "--profile", "prod", "--service-user", "sw-ci"})
+	err := f.run([]string{"delete", "--profile", "prod", "--service-user", "sw-ci"})
 	if err == nil || !strings.Contains(err.Error(), "other.example") || f.tokens[0].RevokedAt != nil {
 		t.Fatalf("err = %v tokens = %+v", err, f.tokens)
 	}
