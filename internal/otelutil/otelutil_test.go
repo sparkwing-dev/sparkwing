@@ -277,6 +277,7 @@ func TestInitRefusesMalformedOTLPEndpoint(t *testing.T) {
 		{"generic endpoint on a service", false, "OTEL_EXPORTER_OTLP_ENDPOINT", malformed},
 		{"logs endpoint on a service", false, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", malformed},
 		{"endpoint without a scheme", false, "OTEL_EXPORTER_OTLP_ENDPOINT", "SECRETHOST:4318"},
+		{"endpoint with a port and no host", true, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://:4318/SECRETPATH"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"} {

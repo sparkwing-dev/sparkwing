@@ -218,7 +218,7 @@ func checkOTLPEndpoints(tracesOnly bool) error {
 			continue
 		}
 		u, err := url.Parse(value)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 			return fmt.Errorf("%s is not a valid OTLP endpoint: want an http:// or https:// URL with a host", key)
 		}
 	}
