@@ -67,3 +67,19 @@ func TestControllerNotFoundNamesTheSubjectAndExitsRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestMissingDocsTopicExitsRefused(t *testing.T) {
+	failure := runSparkwing([]string{"docs", "read", "--topic", "no-such-topic", "-o", "json"})
+	if failure == nil {
+		t.Fatal("a missing topic was read")
+	}
+	var out bytes.Buffer
+	writeFailure(&out, failure)
+	var envelope hosterr.Envelope
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil || envelope.Error == nil || envelope.Error.Code != apierr.NotFound {
+		t.Fatalf("missing topic envelope: %s %v", &out, err)
+	}
+	if code := exitCodeFor(failure); code != exitRefused {
+		t.Fatalf("missing topic exited %d, want %d", code, exitRefused)
+	}
+}
