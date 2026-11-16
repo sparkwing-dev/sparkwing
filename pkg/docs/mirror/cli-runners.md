@@ -12,6 +12,8 @@ Manage runners
 
 - `add` -- Register a runner
 - `list` -- List runners and their capacity
+- `pause` -- Stop this machine's runner from claiming new work
+- `resume` -- Let this machine's paused runner claim work again
 - `remove` -- Remove a runner
 
 ### Flags
@@ -70,6 +72,22 @@ Read the same runner details from the local controller or a selected profile. Th
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `-q, --quiet` | Print only runner names. |
 
+## `sparkwing runners pause`
+
+Stop this machine's runner from claiming new work
+
+Pause the runner enrolled on this machine: it finishes held jobs and claims no new work, including planning, while it keeps polling so it stays online. The pause is a file beside the runner credential, local to this machine; runners list on this machine shows the runner paused, while other machines and the console see it idle. It survives a runner restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--config PATH` | Machine config file holding the enrolled runner section, the standard Sparkwing config file by default. |
+
 ## `sparkwing runners remove`
 
 Remove a runner
@@ -88,3 +106,19 @@ Require the enrolled controller, optional runner name and explicit runner creden
 | `--no-service` | Revoke the runner credential without stopping the installed runner service. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--runner RUNNER` | Runner name or selection. |
+
+## `sparkwing runners resume`
+
+Let this machine's paused runner claim work again
+
+Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--config PATH` | Machine config file holding the enrolled runner section, the standard Sparkwing config file by default. |

@@ -444,6 +444,12 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
+		{Path: "sparkwing runners pause", Rules: []string{"Pause the runner enrolled on this machine: it finishes held jobs and claims no new work, including planning, while it keeps polling so it stays online. The pause is a file beside the runner credential, local to this machine; runners list on this machine shows the runner paused, while other machines and the console see it idle. It survives a runner restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
+			{Name: "config", Argument: "PATH"},
+		}},
+		{Path: "sparkwing runners resume", Rules: []string{"Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
+			{Name: "config", Argument: "PATH"},
+		}},
 		{Path: "sparkwing runners remove", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 			{Name: "no-service"},
