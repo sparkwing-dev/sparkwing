@@ -153,7 +153,9 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			PrintHelp(tc.cmd, &buf)
+			full := tc.cmd
+			full.ShowAll = true
+			PrintHelp(full, &buf)
 			out := buf.String()
 			if containsFlagRow(out, "--target") {
 				t.Fatal("run help advertises retired --target")

@@ -23,6 +23,12 @@ func surfaceHelp(surface clisurface.Command) Command {
 		command.Description = "Search command paths and summaries. Lists return bounded pages and a next_cursor when more matches exist. Markdown export includes the full selected command tree."
 		command.Examples = []Example{{"Find status commands", "sparkwing commands --search status"}, {"Export the reference", "sparkwing commands --format markdown --output plain"}}
 	}
+	if intro, ok := commandIntros[surface.Path]; ok {
+		command.Description, command.Details = intro, strings.Join(surface.Rules, "\n\n")
+	}
+	if examples, ok := commandExamples[surface.Path]; ok {
+		command.Examples = examples
+	}
 	if command.Synopsis == "" {
 		command.Synopsis = strings.TrimPrefix(surface.Path, "sparkwing ")
 	}
@@ -34,6 +40,7 @@ func surfaceHelp(surface clisurface.Command) Command {
 	}
 	for _, flag := range append(clisurface.GlobalFlags(), surface.Flags...) {
 		spec := surfaceFlag(surface.Path, flag)
+		spec.Hot = briefFlags[surface.Path+" --"+flag.Name]
 		if flag.Name == "limit" && spec.Desc == flagDescriptions["limit"] {
 			if slices.ContainsFunc(surface.Flags, func(other clisurface.Flag) bool { return other.Name == "cursor" }) {
 				spec.Desc += " Continue with --cursor when more exist."
@@ -662,3 +669,140 @@ var (
 	cmdAnnotationsList  = surfaceCommand("sparkwing runs annotations list")
 	cmdAnnotationsAdd   = surfaceCommand("sparkwing runs annotations add")
 )
+
+var commandSectionOrder = []string{"Local", "Cloud", "Admin and help"}
+
+var commandSectionSummaries = map[string]string{
+	"Local":          "Run and inspect pipelines on this machine",
+	"Cloud":          "Work with a controller you select with --profile",
+	"Admin and help": "Operate a controller, maintain this install and find answers",
+}
+
+var commandSections = map[string]string{
+	"sparkwing run":           "Local",
+	"sparkwing runs":          "Local",
+	"sparkwing pipeline":      "Local",
+	"sparkwing secrets":       "Local",
+	"sparkwing schedules":     "Local",
+	"sparkwing cache":         "Local",
+	"sparkwing dashboard":     "Local",
+	"sparkwing daemon":        "Local",
+	"sparkwing debug":         "Local",
+	"sparkwing repos":         "Local",
+	"sparkwing queue":         "Local",
+	"sparkwing login":         "Cloud",
+	"sparkwing profiles":      "Cloud",
+	"sparkwing runners":       "Cloud",
+	"sparkwing pools":         "Cloud",
+	"sparkwing team":          "Cloud",
+	"sparkwing tokens":        "Cloud",
+	"sparkwing subscriptions": "Cloud",
+	"sparkwing billing":       "Cloud",
+	"sparkwing overflow":      "Cloud",
+	"sparkwing operator":      "Admin and help",
+	"sparkwing update":        "Admin and help",
+	"sparkwing version":       "Admin and help",
+	"sparkwing doctor":        "Admin and help",
+	"sparkwing completion":    "Admin and help",
+	"sparkwing info":          "Admin and help",
+	"sparkwing commands":      "Admin and help",
+	"sparkwing docs":          "Admin and help",
+	"sparkwing examples":      "Admin and help",
+}
+
+// hack: plain --help shows this intro in place of the reference rules, which --help-all adds back as details.
+var commandIntros = map[string]string{
+	"sparkwing run": "Run a pipeline from this repository on this machine. The local runner executes its jobs and the command prints their logs until the run finishes, then exits nonzero if the run failed.\n\n" +
+		"Pass the pipeline's own arguments after --. `sparkwing run <pipeline> --help` lists the arguments a pipeline takes.\n\n" +
+		"Look at past runs with `sparkwing runs list` and `sparkwing runs logs --run ID`. To run on a controller instead of this machine, use `sparkwing pipeline trigger <pipeline> --profile NAME`.\n\n" +
+		"`sparkwing run --help-all` adds Cloud routing, publication, CI use without the shared controller, step windows and every flag.",
+}
+
+var briefFlags = map[string]bool{
+	"sparkwing run --sw-detached": true,
+	"sparkwing run --sw-dry-run":  true,
+	"sparkwing run --sw-only":     true,
+	"sparkwing run --sw-ref":      true,
+	"sparkwing run --sw-verbose":  true,
+	"sparkwing run --output":      true,
+	"sparkwing run --help":        true,
+	"sparkwing run --help-all":    true,
+}
+
+var commandExamples = map[string][]Example{
+	"sparkwing run": {
+		{"Run the hello pipeline on this machine", "sparkwing run hello"},
+		{"Pass arguments to the pipeline after --", "sparkwing run deploy -- --env staging"},
+		{"List the arguments a pipeline takes", "sparkwing run deploy --help"},
+	},
+	"sparkwing runs list": {
+		{"Show recent runs", "sparkwing runs list"},
+		{"Show failed runs of one pipeline", "sparkwing runs list --pipeline build --status failed"},
+	},
+	"sparkwing runs status": {
+		{"Show a run's jobs and outcome", "sparkwing runs status --run RUN_ID"},
+		{"Wait until a run finishes", "sparkwing runs status --run RUN_ID --follow"},
+	},
+	"sparkwing runs logs": {
+		{"Read a run's logs", "sparkwing runs logs --run RUN_ID"},
+		{"Follow one job's log while it runs", "sparkwing runs logs --run RUN_ID --job build --follow"},
+		{"Search the last day's logs", "sparkwing runs logs --grep timeout --since 24h"},
+	},
+	"sparkwing runs cancel": {
+		{"Cancel a run", "sparkwing runs cancel --run RUN_ID"},
+	},
+	"sparkwing runs retry": {
+		{"Retry only the failed jobs of a run", "sparkwing runs retry --run RUN_ID --failed"},
+	},
+	"sparkwing pipeline list": {
+		{"List this repository's pipelines", "sparkwing pipeline list"},
+		{"Find pipelines about deploys", "sparkwing pipeline list --search deploy"},
+	},
+	"sparkwing pipeline describe": {
+		{"Show a pipeline's jobs, arguments and triggers", "sparkwing pipeline describe --pipeline build"},
+	},
+	"sparkwing pipeline new": {
+		{"Add a pipeline to this repository", "sparkwing pipeline new --pipeline lint"},
+	},
+	"sparkwing pipeline trigger": {
+		{"Run a pipeline on a controller", "sparkwing pipeline trigger deploy --profile prod"},
+		{"Return as soon as the controller accepts it", "sparkwing pipeline trigger deploy --profile prod --detach"},
+	},
+	"sparkwing secrets set": {
+		{"Store a secret from a file", "sparkwing secrets set --secret DEPLOY_TOKEN --file token.txt"},
+		{"Store a plain variable", "sparkwing secrets set --secret REGION --value us-east-1 --variable"},
+	},
+	"sparkwing secrets get": {
+		{"Read a variable", "sparkwing secrets get --secret REGION"},
+	},
+	"sparkwing secrets list": {
+		{"List secret names without values", "sparkwing secrets list"},
+	},
+	"sparkwing secrets delete": {
+		{"Delete a secret", "sparkwing secrets delete --secret DEPLOY_TOKEN"},
+	},
+	"sparkwing schedules list": {
+		{"List this repository's schedules", "sparkwing schedules list"},
+	},
+	"sparkwing schedules show": {
+		{"Show a schedule and its next three fires", "sparkwing schedules show --schedule nightly --next 3"},
+	},
+	"sparkwing profiles add": {
+		{"Save a controller connection, reading the token from stdin", "sparkwing profiles add --controller https://ci.example.com --profile prod --token-stdin"},
+	},
+	"sparkwing login": {
+		{"Sign this machine in to a controller through the browser", "sparkwing login --controller https://ci.example.com"},
+	},
+	"sparkwing dashboard open": {
+		{"Print a sign-in link for the local dashboard", "sparkwing dashboard open"},
+	},
+	"sparkwing daemon stop": {
+		{"Stop the local controller, dashboard and runner", "sparkwing daemon stop"},
+	},
+	"sparkwing docs search": {
+		{"Search the documentation", "sparkwing docs search --search secrets"},
+	},
+	"sparkwing cache explain": {
+		{"Show why the next run reuses or rebuilds the pipeline binary", "sparkwing cache explain"},
+	},
+}

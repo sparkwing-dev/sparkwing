@@ -66,6 +66,13 @@ List the schedules armed on this host
 | `--timer` | Report the health of the schedule timer instead of listing schedules, exiting with failure when it is unhealthy. |
 | `--next N` | List the next N fire times across all schedules instead of the schedule table. |
 
+### Examples
+
+```sh
+# List this repository's schedules
+sparkwing schedules list
+```
+
 ## `sparkwing schedules pause`
 
 Pause a schedule
@@ -150,6 +157,13 @@ Show one schedule's full record and its recent fires
 | `--fires N` | Number of recent fires to include in the detail, 10 by default. |
 | `--next N` | Print the next N fire times for each selected schedule instead of its detail. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
+
+### Examples
+
+```sh
+# Show a schedule and its next three fires
+sparkwing schedules show --schedule nightly --next 3
+```
 
 ## `sparkwing schedules uninstall`
 

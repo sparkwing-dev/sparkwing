@@ -38,6 +38,7 @@ type CommandJSON struct {
 	Path        string           `json:"path"`
 	Synopsis    string           `json:"synopsis"`
 	Description string           `json:"description,omitempty"`
+	Details     string           `json:"details,omitempty"`
 	Hidden      bool             `json:"hidden,omitempty"`
 	Subcommands []SubcommandJSON `json:"subcommands,omitempty"`
 	PosArgs     []PosArgJSON     `json:"positional_args,omitempty"`
@@ -48,6 +49,7 @@ type CommandJSON struct {
 type SubcommandJSON struct {
 	Name     string `json:"name"`
 	Synopsis string `json:"synopsis"`
+	Section  string `json:"section,omitempty"`
 }
 
 type PosArgJSON struct {
@@ -80,6 +82,7 @@ func toCommandJSON(c *Command) CommandJSON {
 		Path:        c.Path,
 		Synopsis:    c.Synopsis,
 		Description: c.Description,
+		Details:     c.Details,
 		Hidden:      c.Hidden,
 	}
 
@@ -299,6 +302,9 @@ func writeCommandSection(b *strings.Builder, c CommandJSON, withSubcommands bool
 			b.WriteString(s + "\n\n")
 		}
 		if d := strings.TrimSpace(c.Description); d != "" {
+			b.WriteString(descBlock(d) + "\n\n")
+		}
+		if d := strings.TrimSpace(c.Details); d != "" {
 			b.WriteString(descBlock(d) + "\n\n")
 		}
 		if withSubcommands && len(c.Subcommands) > 0 {

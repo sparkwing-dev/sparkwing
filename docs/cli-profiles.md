@@ -43,6 +43,13 @@ Add a controller connection profile
 | `--force` | Replace an existing object. |
 | `--no-probe` | Skip checking the controller connection. |
 
+### Examples
+
+```sh
+# Save a controller connection, reading the token from stdin
+sparkwing profiles add --controller https://ci.example.com --profile prod --token-stdin
+```
+
 ## `sparkwing profiles list`
 
 Print every registered profile

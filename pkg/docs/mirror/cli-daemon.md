@@ -108,6 +108,13 @@ Stops the local controller, its dashboard and its local runner. The runner stops
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 
+### Examples
+
+```sh
+# Stop the local controller, dashboard and runner
+sparkwing daemon stop
+```
+
 ## `sparkwing daemon uninstall`
 
 Remove the controller login service

@@ -175,7 +175,47 @@ func Parse(binary string, args []string) (Invocation, error) {
 	return inv, nil
 }
 
+// safety: a synonym is only suggested, never run; the first candidate registered under the parent wins.
+var commandSynonyms = map[string][]string{
+	"show":         {"show", "status", "describe", "info", "get"},
+	"view":         {"show", "status", "describe", "info", "get"},
+	"get":          {"show", "status", "describe", "info"},
+	"status":       {"show", "status", "info"},
+	"describe":     {"describe", "show", "info"},
+	"info":         {"info", "show", "describe"},
+	"remove":       {"delete", "remove", "uninstall", "revoke", "disallow"},
+	"rm":           {"delete", "remove", "uninstall", "revoke", "disallow"},
+	"delete":       {"delete", "remove", "uninstall", "revoke", "disallow"},
+	"del":          {"delete", "remove", "uninstall", "revoke", "disallow"},
+	"ls":           {"list"},
+	"add":          {"add", "create", "set", "install"},
+	"new":          {"new", "create", "add", "set"},
+	"create":       {"create", "add", "new", "set"},
+	"pipelines":    {"pipeline"},
+	"teams":        {"team"},
+	"logout":       {"profiles delete", "profiles remove"},
+	"secret":       {"secrets"},
+	"schedule":     {"schedules"},
+	"profile":      {"profiles"},
+	"token":        {"tokens"},
+	"runner":       {"runners"},
+	"pool":         {"pools"},
+	"repo":         {"repos"},
+	"subscription": {"subscriptions"},
+}
+
 func suggestCommand(commands []Command, parent, word, next string) string {
+	visible := func(path string) bool {
+		return slices.ContainsFunc(commands, func(c Command) bool { return c.Path == path && !c.Hidden })
+	}
+	for _, candidate := range commandSynonyms[strings.ToLower(word)] {
+		if path := parent + " " + candidate; visible(path) {
+			if next != "" && visible(path+" "+next) {
+				return path + " " + next
+			}
+			return path
+		}
+	}
 	var names, withNext []string
 	for _, command := range commands {
 		name, child := strings.CutPrefix(command.Path, parent+" ")
