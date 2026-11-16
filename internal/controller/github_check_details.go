@@ -80,8 +80,7 @@ func githubCheckResults(plan []byte, nodes []*store.Node, steps []*store.NodeSte
 	return out
 }
 
-// githubDeclaredSteps maps each job ID to its step IDs' declared indexes. An unreadable plan yields none, so
-// every step then falls back to its start order.
+// safety: an unreadable plan yields no positions, so steps fall back to start order instead of failing the report.
 func githubDeclaredSteps(plan []byte) map[string]map[string]int {
 	var doc nodewire.PlanDoc
 	if len(plan) == 0 || json.Unmarshal(plan, &doc) != nil {
