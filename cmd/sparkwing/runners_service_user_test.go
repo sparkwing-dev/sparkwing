@@ -416,3 +416,42 @@ func TestServiceUserCommandsAreRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestRunnersUninstallServiceStopsTheServiceWhenTheAccountConfigIsGone(t *testing.T) {
+	fx := newInstallFixture(t)
+	if _, err := installServiceUser(t.Context(), "linux", "sw-ci", serviceUserEnrollment{Credential: "swk_000000001_secret", RunnerBinary: "/usr/local/bin/sparkwing-runner", Runner: userconfig.RunnerConfig{Controller: new("https://controller.example"), HolderPrefix: new("desk")}}); err != nil {
+		t.Fatal(err)
+	}
+	fx.exec = nil
+	serviceUserRunAs = func(context.Context, runnerservice.Account, []string, []byte) ([]byte, error) {
+		return nil, errors.New("service account removed its config")
+	}
+	removed, err := uninstallServiceUser(t.Context(), "linux", "sw-ci")
+	if !slices.Contains(fx.exec, "systemctl disable --now sparkwing-runner-sw-ci.service") {
+		t.Fatalf("service was not stopped; commands=%q err=%v", fx.exec, err)
+	}
+	if err != nil || removed.TokenPrefix != "swk_000000001_secret"[:len(removed.TokenPrefix)] || removed.TokenPrefix == "" || removed.Runner != "desk" || removed.Controller != "https://controller.example" {
+		t.Fatalf("removed = %+v err = %v, want the enrollment from the root-owned record", removed, err)
+	}
+}
+
+func TestRunnersUninstallServiceStopsAndNamesTheRecoveryWithoutAnyRecord(t *testing.T) {
+	fx := newInstallFixture(t)
+	if _, err := installServiceUser(t.Context(), "linux", "sw-ci", serviceUserEnrollment{Credential: "swk_000000001_secret", RunnerBinary: "/usr/local/bin/sparkwing-runner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(fx.host.HomeRoot, ".enrollments")); err != nil {
+		t.Fatal(err)
+	}
+	fx.exec = nil
+	serviceUserRunAs = func(context.Context, runnerservice.Account, []string, []byte) ([]byte, error) {
+		return nil, errors.New("service account removed its config")
+	}
+	_, err := uninstallServiceUser(t.Context(), "linux", "sw-ci")
+	if !slices.Contains(fx.exec, "systemctl disable --now sparkwing-runner-sw-ci.service") {
+		t.Fatalf("service was not stopped; commands=%q err=%v", fx.exec, err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "stopped and removed") || !strings.Contains(err.Error(), "tokens revoke") {
+		t.Fatalf("err = %v, want the completed stop and the revoke step", err)
+	}
+}

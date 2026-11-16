@@ -105,10 +105,14 @@ shell and a 0700 home under `/var/lib/sparkwing` (Linux, `useradd --system`) or
 `/private/var/sparkwing` (macOS, `dscl` with a hidden id from 400 to 499). It
 refuses root, the invoking account, members of root-equivalent groups and
 homes under `/home`, `/Users` or `/root`, because `ProtectHome=yes` would hide
-them and they suggest a person's account. `ServicePath` drops PATH entries
+them and they suggest a person's account. It refuses to create an account whose
+name an existing group holds, before any `useradd` or `dscl` write. `ServicePath` drops PATH entries
 under those roots.
 
 The CLI writes the account's config, credential and runner binary in a child
 process running as the account, so root never writes through paths the account
-controls. `system_test.go` covers rendering, command order, refusals and
+controls. Root records the runner name, controller and token prefix in
+`.enrollments/NAME.json`, a root-only directory beside the account homes.
+Removal stops the service before reading anything the account can change and
+takes the token from that record. `system_test.go` covers rendering, command order, refusals and
 foreign units with fake managers; a native proof needs root on each platform.

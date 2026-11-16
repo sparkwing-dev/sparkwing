@@ -209,6 +209,10 @@ func installServiceUser(ctx context.Context, goos, name string, payload serviceU
 	if strings.TrimSpace(payload.Credential) == "" || !filepath.IsAbs(payload.RunnerBinary) {
 		return serviceUserInstalled{}, errors.New("the runner enrollment on stdin needs a credential and an absolute runner_binary")
 	}
+	prefix, err := tokenPrefix(strings.TrimSpace(payload.Credential))
+	if err != nil {
+		return serviceUserInstalled{}, fmt.Errorf("the runner enrollment on stdin: %w", err)
+	}
 	account, created, err := runnerservice.EnsureAccount(ctx, serviceUserAccountHost(goos), name)
 	if err != nil {
 		return serviceUserInstalled{}, err
@@ -229,6 +233,16 @@ func installServiceUser(ctx context.Context, goos, name string, payload serviceU
 	var written accountWritten
 	if err := json.Unmarshal(out, &written); err != nil {
 		return serviceUserInstalled{}, fmt.Errorf("read what %s wrote: %w", name, err)
+	}
+	record := serviceUserRemoved{TokenPrefix: prefix}
+	if payload.Runner.HolderPrefix != nil {
+		record.Runner = *payload.Runner.HolderPrefix
+	}
+	if payload.Runner.Controller != nil {
+		record.Controller = *payload.Runner.Controller
+	}
+	if err := writeEnrollmentRecord(enrollmentRecordPath(goos, name), record); err != nil {
+		return serviceUserInstalled{}, err
 	}
 	path, dropped := runnerservice.ServicePath(payload.Path, filepath.Dir(written.Binary))
 	host := runnerservice.SystemHost{GOOS: goos, Account: account, UnitDir: serviceUserUnitDir(goos), Binary: written.Binary, ConfigPath: written.Config, StateHome: written.StateHome, Path: path, Exec: serviceUserSystemExec}
@@ -268,8 +282,31 @@ func uninstallServiceUser(ctx context.Context, goos, name string) (serviceUserRe
 		return serviceUserRemoved{}, err
 	}
 	if !found {
-		return serviceUserRemoved{}, fmt.Errorf("no OS user named %s exists here", name)
+		account = runnerservice.Account{Name: name}
 	}
+	// safety: jobs run as the account and can delete its config, so the stop
+	// never depends on it, and the token comes from the root-owned record first.
+	state, err := runnerservice.UninstallSystem(ctx, runnerservice.SystemHost{GOOS: goos, Account: account, UnitDir: serviceUserUnitDir(goos), Exec: serviceUserSystemExec})
+	if err != nil {
+		return serviceUserRemoved{}, fmt.Errorf("%w; the runner token of %s is still live", err, name)
+	}
+	removed, recordErr := readEnrollmentRecord(enrollmentRecordPath(goos, name))
+	if recordErr != nil && found {
+		var readErr error
+		removed, readErr = readAccountEnrollment(ctx, goos, account)
+		recordErr = errors.Join(recordErr, readErr)
+		if readErr == nil {
+			recordErr = nil
+		}
+	}
+	removed.Account, removed.Home, removed.Detail = account.Name, account.Home, state.Detail
+	if recordErr != nil {
+		return removed, fmt.Errorf("%s, but nothing names its runner token (%w); find it with sparkwing tokens list --type runner and revoke it with sparkwing tokens revoke", state.Detail, recordErr)
+	}
+	return removed, nil
+}
+
+func readAccountEnrollment(ctx context.Context, goos string, account runnerservice.Account) (serviceUserRemoved, error) {
 	self, _, cleanup, err := serviceUserStage(goos, "")
 	if err != nil {
 		return serviceUserRemoved{}, err
@@ -281,14 +318,61 @@ func uninstallServiceUser(ctx context.Context, goos, name string) (serviceUserRe
 	}
 	var removed serviceUserRemoved
 	if err := json.Unmarshal(out, &removed); err != nil {
-		return serviceUserRemoved{}, fmt.Errorf("read the runner %s holds: %w", name, err)
+		return serviceUserRemoved{}, fmt.Errorf("read the runner %s holds: %w", account.Name, err)
 	}
-	state, err := runnerservice.UninstallSystem(ctx, runnerservice.SystemHost{GOOS: goos, Account: account, UnitDir: serviceUserUnitDir(goos), Exec: serviceUserSystemExec})
+	return removed, nil
+}
+
+// safety: the record sits in a root-only directory beside the account homes, out of reach of the account's jobs.
+func enrollmentRecordPath(goos, name string) string {
+	return filepath.Join(serviceUserAccountHost(goos).HomeRoot, ".enrollments", name+".json")
+}
+
+func writeEnrollmentRecord(path string, record serviceUserRemoved) (err error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(dir, ".record-")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if removeErr := os.Remove(file.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
+		}
+	}()
+	_, err = file.Write(data)
+	if err := errors.Join(err, file.Close()); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
+}
+
+func readEnrollmentRecord(path string) (serviceUserRemoved, error) {
+	info, err := os.Lstat(path)
 	if err != nil {
 		return serviceUserRemoved{}, err
 	}
-	removed.Account, removed.Home, removed.Detail = account.Name, account.Home, state.Detail
-	return removed, nil
+	if !info.Mode().IsRegular() {
+		return serviceUserRemoved{}, fmt.Errorf("%s is not a regular file", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return serviceUserRemoved{}, err
+	}
+	var record serviceUserRemoved
+	if err := json.Unmarshal(data, &record); err != nil || record.TokenPrefix == "" {
+		return serviceUserRemoved{}, fmt.Errorf("%s holds no token prefix", path)
+	}
+	return record, nil
 }
 
 func requireServiceRoot(goos, name, verb string) error {
