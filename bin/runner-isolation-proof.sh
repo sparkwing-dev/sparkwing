@@ -335,7 +335,7 @@ account_checks() {
   uid="$(deadline 30 runtime_uid "$account" >/dev/null && runtime_uid "$account")"
   expect "$runner: runner process uid is the account's" "$uid" "$account_uid"
   check "$runner: runner authenticated to the controller with the credential in the account home" deadline 60 runner_seen "$runner"
-  sudo cp "$unit_file" "$EVIDENCE/$unit"
+  sudo cat "$unit_file" >"$EVIDENCE/$unit"
 }
 
 note "1. shared runner under $SHARED_ACCOUNT (the documented setup)"
