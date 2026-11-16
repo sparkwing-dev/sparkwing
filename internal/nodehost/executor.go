@@ -82,7 +82,7 @@ type ExecutorDependencies struct {
 	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation       nodeproto.ValidationContext
 	PrepareArtifacts func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
-	PrepareCaches    func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
+	PrepareCaches    func(context.Context, NodeInput, nodewire.JobSpec, CacheReporter) (ExecutorFinalizer, error)
 	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
 	Annotate         func(context.Context, NodeInput, nodewire.AnnotationRequest) error
 	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodewire.JobFailure, error)
@@ -283,7 +283,13 @@ func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodewir
 	if err := prepare(h.deps.PrepareArtifacts, len(job.Consumes) > 0 || len(job.Artifacts) > 0); err != nil {
 		return h.failure(err), err
 	}
-	if err := prepare(h.deps.PrepareCaches, len(job.Caches) > 0); err != nil {
+	var prepareCaches func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
+	if h.deps.PrepareCaches != nil {
+		prepareCaches = func(ctx context.Context, current NodeInput, job nodewire.JobSpec) (ExecutorFinalizer, error) {
+			return h.deps.PrepareCaches(ctx, current, job, h.cacheReporter(ctx, current))
+		}
+	}
+	if err := prepare(prepareCaches, len(job.Caches) > 0); err != nil {
 		return h.failure(err), err
 	}
 	return body()

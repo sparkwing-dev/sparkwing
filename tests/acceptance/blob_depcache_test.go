@@ -139,12 +139,17 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	}
 	manifest := manifestHit.Record
 	var warnings []string
-	cache := nodehost.DepcacheRecords{Budget: data.Budget, Warn: func(warning string) { warnings = append(warnings, warning) }, Bind: func(_ context.Context, _ nodehost.NodeInput, k blob.DepcacheKey) (nodehost.JobUpload, error) {
+	report := func(level, message string) {
+		if level == "warn" {
+			warnings = append(warnings, message)
+		}
+	}
+	cache := nodehost.DepcacheRecords{Budget: data.Budget, Bind: func(_ context.Context, _ nodehost.NodeInput, k blob.DepcacheKey) (nodehost.JobUpload, error) {
 		return nodehost.JobUpload{Identity: identity, Authority: authority, Key: blob.RecordKey{Team: identity.Team, Kind: blob.KindDepcache, Scope: blob.Scope{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: attempt.NodeID, Key: k.Key}, Name: k.Name}}, nil
 	}}
 	job := nodewire.JobSpec{ID: attempt.NodeID, Caches: []nodewire.CacheSpec{{Name: "modules", Path: "deps", KeyFiles: []string{"lockfile"}}}}
 	destination := filepath.Join(root, "deps")
-	finish, err := cache.Prepare(ctx, input, job)
+	finish, err := cache.Prepare(ctx, input, job, report)
 	if err != nil || finish == nil {
 		return fmt.Errorf("prepare cold archive: %w", err)
 	}
@@ -226,8 +231,8 @@ func restoreDepcache(ctx context.Context, cache nodehost.DepcacheRecords, input 
 	if err := os.RemoveAll(destination); err != nil {
 		return false, false, err
 	}
-	cache.Warn = func(string) { warned = true }
-	if _, err := cache.Prepare(ctx, input, job); err != nil {
+	report := func(level, _ string) { warned = warned || level == "warn" }
+	if _, err := cache.Prepare(ctx, input, job, report); err != nil {
 		return false, warned, err
 	}
 	_, statErr := os.Stat(filepath.Join(destination, "module"))

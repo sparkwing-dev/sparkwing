@@ -78,7 +78,7 @@ func TestDepcacheLayerUsesExecutionWorkspace(t *testing.T) {
 	input.Entry = acquiredLayerEntry(t, 2)
 	root := input.Entry.CheckoutDirectory()
 	writePublishedFile(t, root, "lockfile", "dependencies-v1", 0o600)
-	finish, err := adapter.Prepare(t.Context(), input, job)
+	finish, err := adapter.Prepare(t.Context(), input, job, nil)
 	if err != nil || finish == nil {
 		t.Fatalf("prepare cache: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestDepcacheLayerUsesExecutionWorkspace(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, "vendor")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := adapter.Prepare(t.Context(), input, job); err != nil {
+	if _, err := adapter.Prepare(t.Context(), input, job, nil); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(root, "vendor/module/file"))
