@@ -254,3 +254,53 @@ func TestLoginAdminRevokesWhatAFailedSaveLeftUnstored(t *testing.T) {
 		t.Fatalf("live member credentials = %d %v, want only the first login's token", liveMembers, err)
 	}
 }
+
+func TestLoginFailsClosedWhenTheOldAdminTokenCannotBeRevoked(t *testing.T) {
+	writeProfilesFixture(t, "profiles: {}\n")
+	f := newDeviceLoginFixtureAs(t, "approve", "owner")
+	captureStdout(t, func() {
+		if err := f.run(t, "login", "--controller", "https://controller.example", "--profile", "work"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	captureStdout(t, func() {
+		if err := f.run(t, "login", "--admin", "--profile", "work"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	profiles, _, err := loadProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := profiles["work"].Controller
+	if err := revokeToken(old.URL, *old.Token); err != nil {
+		t.Fatal(err)
+	}
+	transport, attempts := http.DefaultTransport, 0
+	http.DefaultTransport = profileTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") == "Bearer "+*old.AdminToken {
+			attempts++
+			return nil, errors.New("connection reset")
+		}
+		return transport.RoundTrip(r)
+	})
+	captureStdout(t, func() { err = f.run(t, "login", "--profile", "work") })
+	http.DefaultTransport = transport
+	prefix, _ := tokenPrefix(*old.AdminToken)
+	if attempts == 0 {
+		t.Fatal("the old administration token was never revoked")
+	}
+	if err == nil || !strings.Contains(err.Error(), "still live") || !strings.Contains(err.Error(), "sparkwing tokens revoke --profile work --token "+prefix) {
+		t.Fatalf("login with a live old administration token = %v, want a failure naming the revoke command", err)
+	}
+	if code := f.status(t, *old.AdminToken, http.MethodGet, "/api/v1/subscriptions"); code != http.StatusOK {
+		t.Fatalf("precondition: the unreached administration token answered %d", code)
+	}
+	profiles, _, err = loadProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := profiles["work"].Controller; c.Token == nil || *c.Token == *old.Token || c.AdminToken != nil {
+		t.Fatalf("the new member login was not saved before the failure: %+v", c)
+	}
+}

@@ -1081,7 +1081,10 @@ The CLI saves the administration token as `controller.admin_token` with
 revokes the profile's previous tokens. The profile uses the administration
 token until it expires and then the member token. `sparkwing login`,
 `profiles set` with a new token or controller, and `profiles remove` drop the
-administration token, and the first and last revoke it. Demotion, removal,
+administration token, and the first and last revoke it. When `sparkwing login`
+or `login --admin` saves a new token but cannot confirm that the previous
+administration token was revoked, it exits with an error that names the token
+and the `sparkwing tokens revoke` command that ends it. Demotion, removal,
 signing out of the approving browser session and revocation end it at once,
 as they do every member token.
 

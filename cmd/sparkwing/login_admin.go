@@ -84,8 +84,12 @@ func loginAdmin(inv clisurface.Invocation, console deviceConsole, format string)
 		revokeUnsaved(base, approved.Credential, renewed)
 		return err
 	}
-	if err := revokeProfileToken(previous); err != nil && !credentialEnded(err) {
-		fmt.Fprintf(os.Stderr, "warning: the profile's previous tokens were not revoked; revoke them from the console's Machines page or with sparkwing tokens revoke --profile %s\n", opsview.DisplayText(name))
+	previousMember, previousAdmin := revokeProfileTokens(previous)
+	if previousMember != nil && !credentialEnded(previousMember) {
+		fmt.Fprintf(os.Stderr, "warning: the profile's previous token was not revoked; revoke it from the console's Machines page or with sparkwing tokens revoke --profile %s\n", opsview.DisplayText(name))
+	}
+	if previousAdmin != nil {
+		return fmt.Errorf("login --admin: saved the new tokens in profile %q, but %w", name, previousAdmin)
 	}
 	fmt.Fprintf(os.Stderr, "This profile holds team.admin until %s, in about %d minutes. After that it uses its member token; run sparkwing login --admin again when you need administration.\n",
 		admin.ExpiresAt.Local().Format("15:04 MST"), int(math.Round(time.Until(*admin.ExpiresAt).Minutes())))

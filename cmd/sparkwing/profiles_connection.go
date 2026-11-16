@@ -118,17 +118,28 @@ func sameProfileToken(a, b *string) bool {
 	return *a == *b
 }
 
-// safety: a live administration token is revoked even when the member token already ended, so no admin
-// credential outlives the profile; its error comes first because callers judge the first one.
 func revokeProfileToken(p *namedProfile) error {
-	member := revokeToken(p.ControllerURL(), p.MemberToken())
-	var admin error
-	if raw := p.liveAdminToken(time.Now()); raw != "" {
-		if err := revokeToken(p.ControllerURL(), raw); err != nil && !credentialEnded(err) {
-			admin = err
-		}
+	member, admin := revokeProfileTokens(p)
+	return errors.Join(member, admin)
+}
+
+// safety: each revocation is judged on its own, so an ended member token never hides a live administration
+// token; admin is non-nil only while that token may still be live.
+func revokeProfileTokens(p *namedProfile) (member, admin error) {
+	member = revokeToken(p.ControllerURL(), p.MemberToken())
+	raw := p.liveAdminToken(time.Now())
+	if raw == "" {
+		return member, nil
 	}
-	return errors.Join(admin, member)
+	if err := revokeToken(p.ControllerURL(), raw); err != nil && !credentialEnded(err) {
+		prefix, prefixErr := tokenPrefix(raw)
+		if prefixErr != nil {
+			return member, fmt.Errorf("the previous administration token may still be live because revoking it failed (%w); revoke it from the console's Machines page", err)
+		}
+		admin = fmt.Errorf("the previous administration token %s is still live because revoking it failed (%w); revoke it with sparkwing tokens revoke --profile %s --token %s or from the console's Machines page",
+			prefix, err, p.Name, prefix)
+	}
+	return member, admin
 }
 
 func revokeToken(base, raw string) error {

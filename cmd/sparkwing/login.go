@@ -123,10 +123,14 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 		return err
 	}
 	if replaced != nil && replaced.ControllerURL() == base {
-		err := revokeProfileToken(replaced)
+		member, admin := revokeProfileTokens(replaced)
 		var failure *apierr.Error
-		if err != nil && !(errors.As(err, &failure) && (failure.Code == hosterr.Unauthenticated || failure.Code == apierr.NotFound)) {
+		if member != nil && !(errors.As(member, &failure) && (failure.Code == hosterr.Unauthenticated || failure.Code == apierr.NotFound)) {
 			fmt.Fprintf(os.Stderr, "warning: the profile's previous token was not revoked; revoke it from the console's Machines page or with sparkwing tokens revoke --profile %s\n", opsview.DisplayText(name))
+		}
+		// safety: a live administration token left behind is a failure, not a warning, so scripts cannot miss it.
+		if admin != nil {
+			return fmt.Errorf("login: saved the new token in profile %q, but %w", name, admin)
 		}
 	}
 	return writeProfile(p, format)
