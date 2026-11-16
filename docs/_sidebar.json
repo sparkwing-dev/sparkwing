@@ -63,6 +63,7 @@
         "security",
         "hotfix-runner",
         "threat-model",
+        "shared-runners",
         "credentials",
         "auth",
         "oidc",

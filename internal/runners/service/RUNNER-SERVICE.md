@@ -88,3 +88,27 @@ Component tests use real registration files and fake service managers on both
 platforms. The acceptance component sends the parsed installed argv through
 the unified runner parser. Native login, restart and self-update proofs need
 platform fixtures, final credential enrollment and the shared host composition.
+
+## Dedicated-account services
+
+`InstallSystem` writes a systemd system unit (`sparkwing-runner-NAME.service`
+with `User=`, `ProtectHome=yes`, `NoNewPrivileges=yes`, `PrivateTmp=yes`,
+`ProtectSystem=full` and `UMask=0077`) or a launchd daemon
+(`com.sparkwing.runner.NAME` with `UserName`) for one account. Unit names carry
+the account, so a dedicated-account runner and a login runner can coexist. A
+same-named unit loaded from another file, or a file without the managed marker,
+is refused. The macOS daemon logs under `/Library/Logs`, because launchd opens
+log files as root.
+
+`EnsureAccount` reuses an account or creates one with no password, no login
+shell and a 0700 home under `/var/lib/sparkwing` (Linux, `useradd --system`) or
+`/private/var/sparkwing` (macOS, `dscl` with a hidden id from 400 to 499). It
+refuses root, the invoking account, members of root-equivalent groups and
+homes under `/home`, `/Users` or `/root`, because `ProtectHome=yes` would hide
+them and they suggest a person's account. `ServicePath` drops PATH entries
+under those roots.
+
+The CLI writes the account's config, credential and runner binary in a child
+process running as the account, so root never writes through paths the account
+controls. `system_test.go` covers rendering, command order, refusals and
+foreign units with fake managers; a native proof needs root on each platform.
