@@ -119,17 +119,17 @@ repository root. For history or tags, as with `fetch-depth: 0`, call `plan.Check
 
 Sparkwing Cloud runners ship one Go and one Node version, and nothing else. Your own runners have whatever their
 machines have installed. To pin another version, fetch it into a directory the job caches. This script installs Node
-20 and checks its published SHA-256:
+20, checks its published SHA-256, and stops the job if the download, the check or the extraction fails:
 
 ```bash
 # scripts/setup-node.sh, sourced by a job
 NODE_VERSION=20.19.5
 NODE_SHA256=315046739a513a70e03a4a55a8afda8cf979f30852e576075c340084e3f8ac0f
 if [ ! -x .tools/node/bin/node ]; then
-  curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz"
-  echo "$NODE_SHA256  /tmp/node.tar.xz" | sha256sum -c -
-  mkdir -p .tools/node
-  tar -xJf /tmp/node.tar.xz -C .tools/node --strip-components=1
+  curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" || return 1
+  echo "$NODE_SHA256  /tmp/node.tar.xz" | sha256sum -c - || { rm -f /tmp/node.tar.xz; return 1; }
+  mkdir -p .tools/node || return 1
+  tar -xJf /tmp/node.tar.xz -C .tools/node --strip-components=1 || { rm -rf .tools/node; return 1; }
 fi
 export PATH="$PWD/.tools/node/bin:$PATH"
 ```
