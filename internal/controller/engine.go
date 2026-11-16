@@ -38,7 +38,7 @@ type EngineController struct {
 // sole writer may supply one.
 type ClaimWake interface {
 	NextCommit() <-chan struct{}
-	NextGroupWaitDeadline(context.Context) (time.Duration, bool, error)
+	NextGroupWaitDeadline(context.Context, store.Team) (time.Duration, bool, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.

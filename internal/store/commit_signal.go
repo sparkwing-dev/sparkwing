@@ -39,26 +39,22 @@ func (s *Store) NextCommit() <-chan struct{} {
 }
 
 // NextGroupWaitDeadline reports how long until the earliest concurrency-group
-// queue timeout of a waiting job lapses; ok is false when no job is timing one.
-func (s *Store) NextGroupWaitDeadline(ctx context.Context) (wait time.Duration, ok bool, err error) {
+// queue timeout of a team's waiting job lapses; ok is false when no job is timing one.
+func (s *Store) NextGroupWaitDeadline(ctx context.Context, team Team) (wait time.Duration, ok bool, err error) {
 	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return 0, false, err
 	}
-	defer rollbackOrLog(tx)
-	type waiting struct {
-		team Team
-		ref  runspec.NodeRef
-	}
+	defer func() { err = errors.Join(err, tx.Rollback()) }()
 	// perf: the predicate matches idx_nodes_claim_window, so only ready unclaimed jobs are visited.
-	rows, err := tx.queryContext(ctx, `SELECT team,run_id,node_id FROM nodes WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL AND group_wait_started_at IS NOT NULL`)
+	rows, err := tx.queryContext(ctx, `SELECT run_id,node_id FROM nodes WHERE team=? AND status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL AND group_wait_started_at IS NOT NULL`, team)
 	if err != nil {
 		return 0, false, err
 	}
-	var jobs []waiting
+	var jobs []runspec.NodeRef
 	for rows.Next() {
-		var job waiting
-		if err := rows.Scan(&job.team, &job.ref.RunID, &job.ref.NodeID); err != nil {
+		var job runspec.NodeRef
+		if err := rows.Scan(&job.RunID, &job.NodeID); err != nil {
 			return 0, false, errors.Join(err, rows.Close())
 		}
 		jobs = append(jobs, job)
@@ -68,7 +64,7 @@ func (s *Store) NextGroupWaitDeadline(ctx context.Context) (wait time.Duration, 
 	}
 	var earliest time.Time
 	for _, job := range jobs {
-		row, err := readNodeTx(ctx, tx, job.team, job.ref)
+		row, err := readNodeTx(ctx, tx, team, job)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}

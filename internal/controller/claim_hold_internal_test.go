@@ -71,9 +71,9 @@ type waitingWake struct {
 	waiting chan struct{}
 }
 
-func (w waitingWake) NextGroupWaitDeadline(ctx context.Context) (time.Duration, bool, error) {
+func (w waitingWake) NextGroupWaitDeadline(ctx context.Context, team store.Team) (time.Duration, bool, error) {
 	w.waiting <- struct{}{}
-	return w.ClaimWake.NextGroupWaitDeadline(ctx)
+	return w.ClaimWake.NextGroupWaitDeadline(ctx, team)
 }
 
 // Runs on the real clock because the award checks leases the fixture took on it.
@@ -128,7 +128,7 @@ func (c *countingWake) NextCommit() <-chan struct{} {
 	return c.ClaimWake.NextCommit()
 }
 
-func (c *countingWake) NextGroupWaitDeadline(context.Context) (time.Duration, bool, error) {
+func (c *countingWake) NextGroupWaitDeadline(context.Context, store.Team) (time.Duration, bool, error) {
 	return c.lapse, true, nil
 }
 

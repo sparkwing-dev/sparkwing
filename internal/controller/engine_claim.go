@@ -126,7 +126,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 			break
 		}
 		if !held.IsZero() {
-			again, err := s.awaitClaimable(ctx, committed, held)
+			again, err := s.awaitClaimable(ctx, committed, held, store.Team(principal.Capability.Team))
 			if err != nil {
 				return controllerwire.ClaimResponse{}, err
 			}
@@ -153,14 +153,14 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 
 // perf: reports whether to search again, which only a commit or a lapsing
 // group wait can make worthwhile; false once the hold reaches until or the claimant leaves.
-func (s *EngineController) awaitClaimable(ctx context.Context, committed <-chan struct{}, until time.Time) (bool, error) {
+func (s *EngineController) awaitClaimable(ctx context.Context, committed <-chan struct{}, until time.Time, team store.Team) (bool, error) {
 	wait := time.Until(until)
 	if wait <= 0 {
 		return false, nil
 	}
 	// perf: the search settles a group wait that has run out, so the hold wakes
 	// for it. A deadline already past was seen by the search that just ran.
-	lapse, timed, err := s.ClaimWake.NextGroupWaitDeadline(ctx)
+	lapse, timed, err := s.ClaimWake.NextGroupWaitDeadline(ctx, team)
 	if err != nil {
 		return false, err
 	}
