@@ -499,6 +499,9 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:199",
 		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:207",
 		"0fd3563b46a25d5cb054c096308016e386cac585:internal/secrets/testdata/masking.json:private-key:209",
+		"# Standard Webhooks published test vector (whsec_ key and its unprefixed form), not a credential.",
+		"19a659a69985b7634d969626b1b3fad6fa8cd77e:internal/runevents/webhook/webhook_test.go:generic-api-key:23",
+		"19a659a69985b7634d969626b1b3fad6fa8cd77e:internal/runevents/webhook/webhook_test.go:generic-api-key:26",
 	}, "\n")
 	if ignore != want {
 		t.Fatalf("gitleaks history exceptions are not the exact fingerprint set: %q", ignore)
