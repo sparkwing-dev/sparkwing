@@ -110,10 +110,14 @@ func (j *probeJob) probe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return errors.New("containment breached or unprobed; see the isolation-probe-result lines")
+	return j.verdict(ok)
+}
+
+func (*probeJob) verdict(ok bool) error {
+	if ok {
+		return nil
 	}
-	return nil
+	return errors.New("containment breached, or a probe proved nothing; the probe results above name each one")
 }
 
 // safety: Docker resolves bind sources in the sidecar, so the exchange directory sits beside the
@@ -133,20 +137,34 @@ func dockerSocket(host string) string {
 	return path
 }
 
-// safety: only the host's explicit read-set refusal proves confinement; a missing output, resolver
-// failure or any other panic settles nothing.
+// safety: only a host binding refusal proves confinement; any other failure settles nothing and is
+// reported with its message, which names the refusal and never an output value.
 func sdkOutputProbe(name string, read func()) (r isolationprobe.Result) {
 	r = isolationprobe.Result{Item: "C3", Context: isolationprobe.ContextJob, Probe: name, Expect: isolationprobe.ExpectDenied, Outcome: "read", Verdict: isolationprobe.Breach}
 	defer func() {
 		if failure := recover(); failure != nil {
-			r.Outcome, r.Verdict = "failed without the read-set refusal", isolationprobe.Inconclusive
-			if strings.HasSuffix(fmt.Sprint(failure), ": output is outside the evaluated job read set") {
-				r.Outcome, r.Verdict = "refused outside the job's read set", isolationprobe.Pass
+			message := strings.Join(strings.Fields(fmt.Sprint(failure)), " ")
+			r.Outcome, r.Verdict = "failed without the read-set refusal: "+truncate(message, 200), isolationprobe.Inconclusive
+			for _, refusal := range bindingRefusals {
+				if strings.Contains(message, refusal) {
+					r.Outcome, r.Verdict = "refused: "+refusal, isolationprobe.Pass
+				}
 			}
 		}
 	}()
 	read()
 	return r
+}
+
+// safety: the host refuses an output read either at its store's authority binding or at the
+// evaluated job's read set; both are binding refusals of the same request.
+var bindingRefusals = []string{"output is outside the evaluated job read set", "resource is outside the authorized binding"}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func sdkOutputProbes(ctx context.Context) []isolationprobe.Result {

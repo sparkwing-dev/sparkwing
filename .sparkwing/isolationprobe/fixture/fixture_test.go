@@ -92,9 +92,21 @@ func TestSDKOutputProbePassesOnlyTheReadSetRefusal(t *testing.T) {
 	if refused.Verdict != isolationprobe.Pass {
 		t.Fatalf("read-set refusal = %+v, want pass", refused)
 	}
-	other := sdkOutputProbe("read", func() { panic("controller unavailable") })
-	if other.Verdict != isolationprobe.Inconclusive {
-		t.Fatalf("other failure = %+v, want inconclusive", other)
+	store := sdkOutputProbe("read", func() {
+		panic(`sparkwing: Ref[fixture.siblingOut].Get failed (pipeline="isolation-probe" node="output-sibling"): resource is outside the authorized binding`)
+	})
+	if store.Verdict != isolationprobe.Pass || store.Outcome != "refused: resource is outside the authorized binding" {
+		t.Fatalf("store binding refusal = %+v, want pass", store)
+	}
+	wrapped := sdkOutputProbe("read", func() {
+		panic("sparkwing: Ref[fixture.siblingOut].Get: output is outside the evaluated job read set (reason: binding)")
+	})
+	if wrapped.Verdict != isolationprobe.Pass {
+		t.Fatalf("wrapped read-set refusal = %+v, want pass", wrapped)
+	}
+	other := sdkOutputProbe("read", func() { panic("controller\nunavailable") })
+	if other.Verdict != isolationprobe.Inconclusive || other.Outcome != "failed without the read-set refusal: controller unavailable" {
+		t.Fatalf("other failure = %+v, want inconclusive naming the failure", other)
 	}
 	read := sdkOutputProbe("read", func() {})
 	if read.Verdict != isolationprobe.Breach || strings.Contains(read.Outcome, "isolation-probe") {
@@ -105,6 +117,17 @@ func TestSDKOutputProbePassesOnlyTheReadSetRefusal(t *testing.T) {
 func TestWorkDirSharesTheSocketsScratchVolume(t *testing.T) {
 	if got := workDir("/tmp/docker.sock"); got != "/tmp/isolation-probe" {
 		t.Fatalf("workDir = %q, want beside the socket", got)
+	}
+}
+
+// The run's failure message is printed into the same log the driver parses, so it must not carry
+// a marker the driver would read as a result.
+func TestProbeFailureMessageCarriesNoMarker(t *testing.T) {
+	err := (&probeJob{}).verdict(false)
+	for _, marker := range []string{isolationprobe.ResultMarker, isolationprobe.ReadyMarker, isolationprobe.SummaryMarker} {
+		if strings.Contains(err.Error(), strings.TrimSpace(marker)) {
+			t.Fatalf("failure message %q carries %q", err, marker)
+		}
 	}
 }
 
