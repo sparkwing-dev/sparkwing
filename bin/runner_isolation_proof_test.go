@@ -2,12 +2,17 @@ package main
 
 import (
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
-	"regexp"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -142,46 +147,163 @@ func TestRunnerIsolationProofWorkflowIsManualReadOnlyAndSecretFree(t *testing.T)
 	}
 }
 
-// Backgrounding a shell function makes $! a subshell, so killing that PID left
-// the hosted proof's first controller serving its port. Every command the
-// script backgrounds must therefore start with a program, never a function.
-func TestRunnerIsolationProofBackgroundsNoShellFunction(t *testing.T) {
-	body, err := os.ReadFile("runner-isolation-proof.sh")
+const fakeControllerName = "sparkwing-controller-proof"
+
+func runFakeController(args []string) int {
+	addr := ""
+	for i, arg := range args {
+		if arg == "--addr" && i+1 < len(args) {
+			addr = args[i+1]
+		}
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return 1
+	}
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-stop
+		_ = listener.Close()
+	}()
+	_ = http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	return 0
+}
+
+// safety: evaluates only the script's deadline helper and controller functions, never its guard or privileged body.
+const lifecycleDriver = `set -uo pipefail
+SCRIPT=$1 BIN=$2 PORT=$3 CTL=$4
+EVIDENCE=$CTL CONTROLLER="http://127.0.0.1:$PORT" CONTROLLER_PID=""
+eval "$(sed -n '/^deadline()/,/^}/p' "$SCRIPT")"
+eval "$(sed -n '/^ctl_env()/,/^# Team mode refuses/p' "$SCRIPT")"
+declare -F deadline start_controller stop_controller >/dev/null || { echo "the script defines no controller lifecycle"; exit 3; }
+step() {
+  local name=$1
+  shift
+  if "$@"; then echo "$name=ok"; else echo "$name=fail"; fi
+}
+step start1 start_controller local
+echo "pid1=$CONTROLLER_PID"
+echo "exe1=$(readlink "/proc/$CONTROLLER_PID/exe")"
+step stop1 stop_controller
+echo "health_after_stop=$(curl --silent --output /dev/null --max-time 2 --write-out '%{http_code}' "$CONTROLLER/api/v1/health")"
+echo "listeners_after_stop=$(ss -ltnH "( sport = :$PORT )" | wc -l | tr -d ' ')"
+step start2 start_controller team
+echo "pid2=$CONTROLLER_PID"
+echo "exe2=$(readlink "/proc/$CONTROLLER_PID/exe")"
+step stop2 stop_controller
+`
+
+// The hosted proof once backgrounded its controller through a shell function,
+// so $! named a subshell: stopping it left the controller serving the port and
+// the next start refused. This drives the script's real start and stop against
+// a fake controller and checks the recorded PID, the released port and the
+// restart.
+func TestRunnerIsolationProofControllerLifecycle(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the controller lifecycle reads /proc and ss")
+	}
+	for _, tool := range []string{"bash", "curl", "ss", "sed"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s unavailable: %v", tool, err)
+		}
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(bin, fakeControllerName)
+	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	functionName := regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{`)
-	functions := map[string]bool{}
-	var commands []string
-	var pending strings.Builder
-	for _, line := range strings.Split(string(body), "\n") {
-		if m := functionName.FindStringSubmatch(line); m != nil {
-			functions[m[1]] = true
+	copyExecutable(t, self, fake)
+	t.Cleanup(func() { killProcessesOf(t, fake) })
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	script, err := filepath.Abs("runner-isolation-proof.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "-c", lifecycleDriver, "driver", script, bin, strconv.Itoa(port), dir)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("driver: %v\n%s", err, output)
+	}
+	got := map[string]string{}
+	for _, line := range strings.Split(string(output), "\n") {
+		if key, value, ok := strings.Cut(line, "="); ok && !strings.Contains(key, " ") {
+			got[key] = value
 		}
-		if strings.HasSuffix(strings.TrimRight(line, " \t"), `\`) {
-			pending.WriteString(strings.TrimSuffix(strings.TrimRight(line, " \t"), `\`) + " ")
+	}
+	for _, step := range []string{"start1", "stop1", "start2", "stop2"} {
+		if got[step] != "ok" {
+			t.Errorf("%s = %q, want ok\n%s", step, got[step], output)
+		}
+	}
+	for _, n := range []string{"1", "2"} {
+		if got["exe"+n] != fake {
+			t.Errorf("start %s recorded pid %q running %q, want the controller %s", n, got["pid"+n], got["exe"+n], fake)
+		}
+	}
+	if got["health_after_stop"] != "000" {
+		t.Errorf("health after stop = %q, want no answer (000)", got["health_after_stop"])
+	}
+	if got["listeners_after_stop"] != "0" {
+		t.Errorf("listeners after stop = %q, want 0", got["listeners_after_stop"])
+	}
+	if left := processesOf(fake); len(left) != 0 {
+		t.Errorf("controllers still running after the final stop: %v", left)
+	}
+}
+
+func copyExecutable(t *testing.T, from, to string) {
+	t.Helper()
+	body, err := os.ReadFile(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(to, body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func processesOf(path string) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
 			continue
 		}
-		pending.WriteString(line)
-		commands = append(commands, pending.String())
-		pending.Reset()
-	}
-	backgrounded := 0
-	for _, command := range commands {
-		trimmed := strings.TrimSpace(command)
-		if strings.HasPrefix(trimmed, "#") || !strings.HasSuffix(trimmed, "&") || strings.HasSuffix(trimmed, "&&") {
-			continue
-		}
-		backgrounded++
-		fields := strings.Fields(trimmed)
-		if functions[fields[0]] {
-			t.Errorf("backgrounds shell function %s, so $! is a subshell rather than the program: %s", fields[0], trimmed)
+		if exe, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe")); err == nil && exe == path {
+			pids = append(pids, pid)
 		}
 	}
-	if backgrounded == 0 {
-		t.Fatal("found no backgrounded command; the scan matched nothing")
-	}
-	if !functions["start_controller"] {
-		t.Fatal("found no shell functions; the scan matched nothing")
+	return pids
+}
+
+func killProcessesOf(t *testing.T, path string) {
+	t.Helper()
+	for _, pid := range processesOf(path) {
+		if process, err := os.FindProcess(pid); err == nil {
+			_ = process.Kill()
+			_, _ = process.Wait()
+		}
 	}
 }
