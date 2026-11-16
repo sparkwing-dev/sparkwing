@@ -12,7 +12,7 @@ See [Config reference](config-reference.md).
 
 | Section | Holds |
 | --- | --- |
-| `profiles` | Named controller connections containing `controller.url`, an optional `controller.token`, and `default: true` to select an optional-profile CLI connection. |
+| `profiles` | Named controller connections containing `controller.url`, an optional `controller.token`, the one-hour `controller.admin_token` and `controller.admin_expires_at` that `sparkwing login --admin` saves together, and `default: true` to select an optional-profile CLI connection. |
 | `repos` | Registered checkout paths, `fallback_paths`, `auto_register` and `include_worktrees`. |
 | `admission` | Machine admission `mode`, `budget` and `custom` policy. |
 | `dashboard` | The local dashboard's loopback `address` and `read_only` switch. |

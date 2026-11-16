@@ -30,6 +30,8 @@ type deviceLoginFixture struct {
 	handler       http.Handler
 	session, csrf string
 	console       deviceConsole
+	// refusals records approvals the controller refused; the fixture then denies, as a person reading the refusal would.
+	refusals []int
 }
 
 func (f *deviceLoginFixture) run(t *testing.T, args ...string) error {
@@ -49,6 +51,11 @@ func (f *deviceLoginFixture) run(t *testing.T, args ...string) error {
 
 func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
 	t.Helper()
+	return newDeviceLoginFixtureAs(t, decision, "editor")
+}
+
+func newDeviceLoginFixtureAs(t *testing.T, decision, role string) *deviceLoginFixture {
+	t.Helper()
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
@@ -63,13 +70,11 @@ func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
 	}
 	t.Cleanup(func() { _ = state.Close() })
 	teststore.SeedTeam(t, state, "device-test")
-	for _, query := range []string{
-		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
-		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('device-test','member','editor',1)`,
-	} {
-		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), query); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('device-test','member',?,1)`, role); err != nil {
+		t.Fatal(err)
 	}
 	f := &deviceLoginFixture{state: state, handler: server.Handler()}
 	f.session, f.csrf, _, err = state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "device-test", time.Hour)
@@ -97,7 +102,13 @@ func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
 			return err
 		}
 		if status := f.browser(t, decision, code); status != http.StatusNoContent {
-			t.Errorf("browser %s answered %d", decision, status)
+			if decision != "approve" {
+				t.Errorf("browser %s answered %d", decision, status)
+			}
+			f.refusals = append(f.refusals, status)
+			if status := f.browser(t, "deny", code); status != http.StatusNoContent {
+				t.Errorf("browser deny after a refused approval answered %d", status)
+			}
 		}
 		return nil
 	}}

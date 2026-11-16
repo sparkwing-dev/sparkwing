@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -23,11 +24,27 @@ func (p *namedProfile) ControllerURL() string {
 	return p.Controller.URL
 }
 
+// ControllerToken is the profile's bearer: its administration token while that is live, otherwise its member token.
 func (p *namedProfile) ControllerToken() string {
+	if admin := p.liveAdminToken(time.Now()); admin != "" {
+		return admin
+	}
+	return p.MemberToken()
+}
+
+// MemberToken is the token sparkwing login saved, which outlives any administration step-up.
+func (p *namedProfile) MemberToken() string {
 	if p == nil || p.Controller.Token == nil {
 		return ""
 	}
 	return *p.Controller.Token
+}
+
+func (p *namedProfile) liveAdminToken(now time.Time) string {
+	if p == nil || p.Controller.AdminToken == nil || p.Controller.AdminExpiresAt == nil || !now.Before(*p.Controller.AdminExpiresAt) {
+		return ""
+	}
+	return *p.Controller.AdminToken
 }
 
 func loadProfiles() (map[string]userconfig.Profile, string, error) {

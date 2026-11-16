@@ -47,6 +47,9 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceCommand(inv.Command.Path), os.Stdout, format)
 	}
+	if inv.Bool("admin") {
+		return loginAdmin(inv, console, format)
+	}
 	profiles, path, err := loadProfiles()
 	if err != nil {
 		return err
@@ -130,41 +133,52 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 }
 
 func deviceSignIn(parent context.Context, console deviceConsole, base string, request controllerwire.StartDeviceLoginRequest) (controllerwire.CreatedToken, error) {
+	approved, err := deviceApproval(parent, console, base, func(ctx context.Context, login *client.DeviceLogin) (controllerwire.DeviceLoginStarted, error) {
+		return login.Start(ctx, request)
+	})
+	if err != nil {
+		return controllerwire.CreatedToken{}, err
+	}
+	return *approved.Credential, nil
+}
+
+// deviceApproval shows the code start returns and waits for the browser's decision.
+func deviceApproval(parent context.Context, console deviceConsole, base string, start func(context.Context, *client.DeviceLogin) (controllerwire.DeviceLoginStarted, error)) (controllerwire.DeviceLoginPoll, error) {
 	// safety: a code printed into a log or shared screen lets anyone on the deployment approve it into their team.
 	if !console.interactive {
-		return controllerwire.CreatedToken{}, &apierr.Error{Code: apierr.BadRequest, Message: "browser approval needs stdin and stderr on a terminal; in a script, use runners add --session-stdin or profiles add --token-stdin"}
+		return controllerwire.DeviceLoginPoll{}, &apierr.Error{Code: apierr.BadRequest, Message: "browser approval needs stdin and stderr on a terminal; in a script, use runners add --session-stdin or profiles add --token-stdin"}
 	}
 	// safety: an interrupt withdraws the request, so the code on screen stops working once the command exits.
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	login, err := client.NewDeviceLogin(client.EngineOptions{URL: base})
 	if err != nil {
-		return controllerwire.CreatedToken{}, err
+		return controllerwire.DeviceLoginPoll{}, err
 	}
-	started, err := login.Start(ctx, request)
+	started, err := start(ctx, login)
 	if err != nil {
-		return controllerwire.CreatedToken{}, err
+		return controllerwire.DeviceLoginPoll{}, err
 	}
 	// safety: the page address comes from the URL the user chose, never from the response, so a reply cannot
 	// send the user to approve somewhere else.
 	if !strings.HasPrefix(started.VerificationPath, "/") || strings.HasPrefix(started.VerificationPath, "//") || strings.ContainsAny(started.VerificationPath, "?#\\") {
-		return controllerwire.CreatedToken{}, &apierr.Error{Code: apierr.ProtocolError, Message: "the controller returned an unusable sign-in page path"}
+		return controllerwire.DeviceLoginPoll{}, &apierr.Error{Code: apierr.ProtocolError, Message: "the controller returned an unusable sign-in page path"}
 	}
 	code := started.UserCode
 	if len(code) == 8 {
 		code = code[:4] + "-" + code[4:]
 	}
 	fmt.Fprintf(os.Stderr, "To approve this sign-in, open %s%s in a browser where you are signed in, and enter the code:\n\n    %s\n\nWaiting for approval; the code expires in %d minutes. Press Ctrl-C to cancel.\n", opsview.DisplayText(base), opsview.DisplayText(started.VerificationPath), code, max(started.ExpiresIn/60, 1))
-	token, err := login.Wait(ctx, started, console.sleep)
+	approved, err := login.Wait(ctx, started, console.sleep)
 	if err != nil && ctx.Err() != nil {
 		cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if cancelErr := login.Cancel(cancelCtx, started.DeviceCode); cancelErr != nil {
-			return controllerwire.CreatedToken{}, errors.New("sign-in interrupted; the code stays valid until it expires because withdrawing it failed")
+			return controllerwire.DeviceLoginPoll{}, errors.New("sign-in interrupted; the code stays valid until it expires because withdrawing it failed")
 		}
-		return controllerwire.CreatedToken{}, errors.New("sign-in cancelled; the code no longer works")
+		return controllerwire.DeviceLoginPoll{}, errors.New("sign-in cancelled; the code no longer works")
 	}
-	return token, err
+	return approved, err
 }
 
 func deviceMachineName() string {

@@ -154,6 +154,7 @@ func wireOperations() map[string]wireOperation {
 	}
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", wire.EnrollRunnerRequest{}, wire.CreatedToken{})
 	result["POST /api/v1/auth/device"] = operation("Start a device sign-in and return its codes once", wire.StartDeviceLoginRequest{}, wire.DeviceLoginStarted{})
+	result["POST /api/v1/auth/device/step-up"] = operation("Start an owner's one-hour administration request from a signed-in terminal", wire.StartDeviceLoginRequest{}, wire.DeviceLoginStarted{})
 	result["POST /api/v1/auth/device/token"] = operation("Poll a device sign-in; an approval returns its credential once", wire.DeviceCodeRequest{}, wire.DeviceLoginPoll{})
 	result["POST /api/v1/auth/device/cancel"] = operation("Withdraw a device sign-in", wire.DeviceCodeRequest{}, nil)
 	result["POST /api/v1/auth/device/lookup"] = operation("Show what a pending device sign-in would grant", wire.UserCodeRequest{}, wire.DeviceLoginLookup{})

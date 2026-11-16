@@ -33,23 +33,28 @@ const (
 	// safety: every device route is unauthenticated or takes a short code, and start stores its body.
 	deviceBodyLimit = 16 << 10
 	maxDeviceRepo   = 256
+	// safety: an administration token reads every secret and can invite members, so a leaked copy lasts an hour.
+	adminStepUpLifetime = time.Hour
 )
 
-// safety: these match the console's Create CLI token; team.admin never travels through a device login.
+// safety: these match the console's Create CLI token; team.admin travels only with an owner's own step-up.
 var cliMemberGrants = []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsWrite, capability.RunsControl, capability.ApprovalsWrite}
 
 // safety: Runner reuses the enrollment body, so a device enrollment is validated and issued as POST /api/v1/runners.
+// Account is set only by the step-up route, from the bearer that asked; a public start carrying it is refused.
 type deviceLoginRequest struct {
 	Kind    string                   `json:"kind"`
 	Machine string                   `json:"machine"`
 	Team    string                   `json:"team,omitempty"`
 	Grants  []capability.Grant       `json:"grants,omitempty"`
 	Runner  *runnerEnrollmentRequest `json:"runner,omitempty"`
+	Account string                   `json:"account,omitempty"`
 }
 
 func (s *Server) deviceLoginEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/auth/device", Authentication: capability.AuthPublic, Handle: s.handleStartDeviceLogin},
+		{Method: "POST", Pattern: "/api/v1/auth/device/step-up", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleStartStepUp},
 		{Method: "POST", Pattern: "/api/v1/auth/device/token", Authentication: capability.AuthPublic, Handle: s.handlePollDeviceLogin},
 		{Method: "POST", Pattern: "/api/v1/auth/device/cancel", Authentication: capability.AuthPublic, Handle: s.handleCancelDeviceLogin},
 		{Method: "POST", Pattern: "/api/v1/auth/device/lookup", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleLookupDeviceLogin},
@@ -70,6 +75,38 @@ func (s *Server) handleStartDeviceLogin(w http.ResponseWriter, r *http.Request, 
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
 	}
+	if request.Kind == controllerwire.DeviceLoginAdmin || request.Account != "" {
+		return invalidEngineBody("administration is requested from a signed-in terminal; run sparkwing login --admin")
+	}
+	return s.createDeviceLogin(w, r, request)
+}
+
+// handleStartStepUp starts an administration request from a terminal already signed in as a member. The request
+// records that account and team, so only the same person can approve it.
+func (s *Server) handleStartStepUp(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if err := s.loginLimit.admit(r); err != nil {
+		return err
+	}
+	if err := s.deviceLoginAvailable(); err != nil {
+		return err
+	}
+	p := a.Principal
+	if p.Class != capability.CredentialBearer || p.Capability.Subject.Kind != capability.SubjectAccount {
+		return hosterr.Authorization(hosterr.ReasonBinding, "administration is requested from a terminal signed in with sparkwing login; run sparkwing login --admin there")
+	}
+	r.Body = http.MaxBytesReader(nil, r.Body, deviceBodyLimit)
+	var request deviceLoginRequest
+	if err := decodeEngineRequest(r, &request); err != nil {
+		return err
+	}
+	if request.Kind != controllerwire.DeviceLoginAdmin || request.Account != "" || request.Team != "" && request.Team != a.Target.Team {
+		return invalidEngineBody("a step-up asks for kind admin with a machine name; the team and account come from the signed-in token")
+	}
+	request.Account, request.Team = p.Capability.Subject.ID, a.Target.Team
+	return s.createDeviceLogin(w, r, request)
+}
+
+func (s *Server) createDeviceLogin(w http.ResponseWriter, r *http.Request, request deviceLoginRequest) error {
 	if err := validateDeviceLoginRequest(&request); err != nil {
 		return err
 	}
@@ -123,20 +160,39 @@ func (s *Server) handlePollDeviceLogin(w http.ResponseWriter, r *http.Request, _
 	}
 	noteAuditWrite(r.Context())
 	noteAuditTarget(r.Context(), "device_login", poll.Login.ID)
-	spec, err := deviceLoginSpec(poll.Login)
+	now := time.Now().UTC()
+	spec, err := deviceLoginSpec(poll.Login, now)
 	if err != nil {
 		return err
+	}
+	out := controllerwire.DeviceLoginPoll{Status: controllerwire.DeviceApproved}
+	// safety: a fresh sign-in ends the browser's earlier session and the member token it approved, so an
+	// administration approval also re-issues the terminal's member token under the session that approved it.
+	if spec.AllowTeamAdmin {
+		member := spec
+		member.AllowTeamAdmin, member.ExpiresAt = false, nil
+		member.Grants = slices.DeleteFunc(slices.Clone(spec.Grants), func(grant capability.Grant) bool { return grant == capability.TeamAdmin })
+		issued, err := s.issueRoot(r.Context(), member)
+		if err != nil {
+			return err
+		}
+		out.Member = createdToken(issued)
 	}
 	issued, err := s.issueRoot(r.Context(), spec)
 	if err != nil {
 		return err
 	}
+	out.Credential = createdToken(issued)
+	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+func createdToken(issued credentialResponse) *controllerwire.CreatedToken {
 	credential := &controllerwire.CreatedToken{Principal: issued.Principal, Capability: issued.Capability, Prefix: issued.Prefix, Team: issued.Team, ExpiresAt: issued.ExpiresAt}
 	for _, grant := range issued.Grants {
 		credential.Grants = append(credential.Grants, string(grant))
 	}
-	writeJSON(w, http.StatusOK, controllerwire.DeviceLoginPoll{Status: controllerwire.DeviceApproved, Credential: credential})
-	return nil
+	return credential
 }
 
 func (s *Server) handleCancelDeviceLogin(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
@@ -169,6 +225,7 @@ func (s *Server) handleLookupDeviceLogin(w http.ResponseWriter, r *http.Request,
 	out := controllerwire.DeviceLoginLookup{
 		UserCode: login.UserCode, Kind: request.Kind, Machine: request.Machine, Team: a.Target.Team,
 		CreatedAt: login.CreatedAt, ExpiresAt: login.ExpiresAt,
+		SignInRequired: request.Kind == controllerwire.DeviceLoginAdmin && !recentSignIn(a.Principal.Capability.IssuedAt, time.Now()),
 	}
 	for _, grant := range grants {
 		out.Grants = append(out.Grants, string(grant))
@@ -199,9 +256,13 @@ func (s *Server) handleDecideDeviceLogin(approve bool) func(http.ResponseWriter,
 			if grants, err = deviceLoginGrants(request, a.Principal); err != nil {
 				return err
 			}
+			now := time.Now()
+			if request.Kind == controllerwire.DeviceLoginAdmin && !recentSignIn(a.Principal.Capability.IssuedAt, now) {
+				return hosterr.Authorization(hosterr.ReasonReauthRequired, "approving administration needs a sign-in from the last 10 minutes; sign out, sign in again and enter the code again")
+			}
 			issued, err := deviceLoginSpec(store.DeviceLogin{
 				Request: login.Request, Team: store.Team(a.Target.Team), AccountID: a.Principal.Capability.Subject.ID, Session: a.Principal.Authority, Grants: grants,
-			})
+			}, now.UTC())
 			if err != nil {
 				return err
 			}
@@ -257,7 +318,7 @@ func (s *Server) deviceLoginAvailable() error {
 func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 	switch request.Kind {
 	case controllerwire.DeviceLoginMember:
-		if request.Runner != nil {
+		if request.Runner != nil || request.Account != "" {
 			return invalidEngineBody("a member device login carries no runner")
 		}
 		seen := map[capability.Grant]bool{}
@@ -266,6 +327,10 @@ func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 				return invalidEngineBody("grants must be unique and among runs.read, logs.read, runs.write, runs.control and approvals.write")
 			}
 			seen[grant] = true
+		}
+	case controllerwire.DeviceLoginAdmin:
+		if request.Runner != nil || len(request.Grants) != 0 || request.Account == "" || request.Team == "" {
+			return invalidEngineBody("an administration request carries a machine name only; its grants follow the approver's role")
 		}
 	case controllerwire.DeviceLoginRunner:
 		if request.Runner == nil || len(request.Grants) != 0 {
@@ -305,12 +370,25 @@ func deviceLoginGrants(request deviceLoginRequest, approver capability.Principal
 	if request.Kind == controllerwire.DeviceLoginRunner {
 		return runnerGrants(request.Runner.Grants)
 	}
+	if request.Kind == controllerwire.DeviceLoginAdmin {
+		// safety: a code typed by anyone but the account whose terminal asked could be a phished one.
+		if request.Account != approver.Capability.Subject.ID {
+			return nil, hosterr.Authorization(hosterr.ReasonBinding, "this code asks for another account's administration; deny it")
+		}
+		if !slices.Contains(approver.Capability.Grants, capability.TeamAdmin) {
+			return nil, hosterr.Authorization(hosterr.ReasonMissingGrant, "only team owners can approve administration; deny this request")
+		}
+	}
 	if len(request.Grants) != 0 {
 		return slices.Clone(request.Grants), nil
 	}
-	return slices.DeleteFunc(slices.Clone(cliMemberGrants), func(grant capability.Grant) bool {
+	grants := slices.DeleteFunc(slices.Clone(cliMemberGrants), func(grant capability.Grant) bool {
 		return !slices.Contains(approver.Capability.Grants, grant)
-	}), nil
+	})
+	if request.Kind == controllerwire.DeviceLoginAdmin {
+		grants = append(grants, capability.TeamAdmin)
+	}
+	return grants, nil
 }
 
 func deviceTeamMatches(request deviceLoginRequest, a capability.Authorized) error {
@@ -320,7 +398,7 @@ func deviceTeamMatches(request deviceLoginRequest, a capability.Authorized) erro
 	return nil
 }
 
-func deviceLoginSpec(login store.DeviceLogin) (capability.ProvisionSpec, error) {
+func deviceLoginSpec(login store.DeviceLogin, now time.Time) (capability.ProvisionSpec, error) {
 	var request deviceLoginRequest
 	if err := json.Unmarshal(login.Request, &request); err != nil {
 		return capability.ProvisionSpec{}, err
@@ -328,10 +406,15 @@ func deviceLoginSpec(login store.DeviceLogin) (capability.ProvisionSpec, error) 
 	if request.Kind == controllerwire.DeviceLoginRunner {
 		return runnerEnrollmentSpec(*request.Runner, login.Session, string(login.Team))
 	}
-	return capability.ProvisionSpec{
+	spec := capability.ProvisionSpec{
 		Kind: capability.ProvisionMember, Authority: &login.Session, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: login.AccountID},
 		Team: string(login.Team), Grants: login.Grants, Binding: capability.Binding{Kind: capability.BindingNone},
-	}, nil
+	}
+	if request.Kind == controllerwire.DeviceLoginAdmin {
+		expires := now.Add(adminStepUpLifetime)
+		spec.AllowTeamAdmin, spec.ExpiresAt = true, &expires
+	}
+	return spec, nil
 }
 
 func decodeDeviceCode(r *http.Request) ([32]byte, error) {

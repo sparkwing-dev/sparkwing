@@ -118,8 +118,21 @@ func sameProfileToken(a, b *string) bool {
 	return *a == *b
 }
 
+// revokeProfileToken revokes the profile's member token and the administration token saved beside it while that
+// is still live.
 func revokeProfileToken(p *namedProfile) error {
-	raw := p.ControllerToken()
+	if err := revokeToken(p.ControllerURL(), p.MemberToken()); err != nil {
+		return err
+	}
+	if admin := p.liveAdminToken(time.Now()); admin != "" {
+		if err := revokeToken(p.ControllerURL(), admin); err != nil && !credentialEnded(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func revokeToken(base, raw string) error {
 	if raw == "" {
 		return nil
 	}
@@ -128,7 +141,7 @@ func revokeProfileToken(p *namedProfile) error {
 		return fmt.Errorf("profiles remove: %w; use --keep-token to remove only the connection", err)
 	}
 	ctx := context.Background()
-	c, err := client.NewTokenManager(client.EngineOptions{URL: p.ControllerURL(), Bearer: func(context.Context) (string, error) { return raw, nil }}, false)
+	c, err := client.NewTokenManager(client.EngineOptions{URL: base, Bearer: func(context.Context) (string, error) { return raw, nil }}, false)
 	if err != nil {
 		return err
 	}

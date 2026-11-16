@@ -2,12 +2,14 @@ package userconfig
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
@@ -200,6 +202,32 @@ func TestRejectRemovedAdmissionAdvisor(t *testing.T) {
 	for _, raw := range []string{"admission: {mode: jev}", "admission: {jev: {}}"} {
 		if _, err := Decode("machine.yaml", []byte(raw)); err == nil {
 			t.Fatalf("accepted removed admission policy: %s", raw)
+		}
+	}
+}
+
+func TestProfileAdminTokenStaysPrivateAndPaired(t *testing.T) {
+	cfg, err := Decode("machine.yaml", []byte(`profiles: {prod: {controller: {url: https://example.com, token: member-secret, admin_token: admin-secret, admin_expires_at: 2026-11-16T10:00:00Z}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := cfg.Profiles["prod"].Controller
+	if c.AdminToken == nil || *c.AdminToken != "admin-secret" || c.AdminExpiresAt == nil || !c.AdminExpiresAt.Equal(time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("admin token not decoded: %+v", c)
+	}
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "secret") || !strings.Contains(string(encoded), `"admin_expires_at":"2026-11-16T10:00:00Z"`) {
+		t.Fatalf("JSON = %s, want the expiry without either token", encoded)
+	}
+	for _, raw := range []string{
+		`profiles: {prod: {controller: {url: https://example.com, token: t, admin_token: admin-secret}}}`,
+		`profiles: {prod: {controller: {url: https://example.com, token: t, admin_expires_at: 2026-11-16T10:00:00Z}}}`,
+	} {
+		if _, err := Decode("machine.yaml", []byte(raw)); err == nil || strings.Contains(err.Error(), "admin-secret") {
+			t.Fatalf("unpaired admin token decoded or echoed: %v", err)
 		}
 	}
 }

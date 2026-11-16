@@ -1,5 +1,7 @@
 package userconfig
 
+import "time"
+
 // Config owns the complete machine file so every reader rejects unknown keys.
 // Pointer, map and slice absence is unset; explicit empty values remain set.
 // Null, duplicate keys and additional YAML documents are invalid.
@@ -22,10 +24,13 @@ type Profile struct {
 }
 
 // Connection persists the user's credential in private YAML configuration,
-// never env. JSON omits Token; any other encoder must treat it as a secret.
+// never env. JSON omits Token and AdminToken; any other encoder must treat them as secrets.
+// AdminToken is the one-hour administration token sparkwing login --admin saves beside the member token.
 type Connection struct {
-	URL   string  `yaml:"url" json:"url"`
-	Token *string `yaml:"token,omitempty" json:"-"`
+	URL            string     `yaml:"url" json:"url"`
+	Token          *string    `yaml:"token,omitempty" json:"-"`
+	AdminToken     *string    `yaml:"admin_token,omitempty" json:"-"`
+	AdminExpiresAt *time.Time `yaml:"admin_expires_at,omitempty" json:"admin_expires_at,omitempty"`
 }
 
 // ReposConfig is the only fallback source for resolving a local child checkout.

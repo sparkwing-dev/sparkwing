@@ -1598,6 +1598,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.DeviceRunner'
             - type: "null"
+        sign_in_required:
+          type: boolean
         team:
           type: string
         user_code:
@@ -1621,6 +1623,10 @@ components:
             - type: "null"
         interval:
           type: integer
+        member:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.CreatedToken'
+            - type: "null"
         status:
           type: string
       required:
@@ -8304,6 +8310,41 @@ paths:
             binding: none
             liveness: credential
         retry: safe
+  /api/v1/auth/device/step-up:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.StartDeviceLoginRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DeviceLoginStarted'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Start an owner's one-hour administration request from a signed-in terminal
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/auth/device/step-up
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: never
   /api/v1/auth/device/token:
     post:
       requestBody:
