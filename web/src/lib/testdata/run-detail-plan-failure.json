@@ -95,6 +95,13 @@
       }
     }
   ],
+  "owner_claims": [
+    {
+      "kind": "trigger",
+      "generation": 1,
+      "awarded_at": "2026-10-28T05:01:19Z"
+    }
+  ],
   "started_at": "2026-10-28T05:01:19Z",
   "finished_at": "2026-10-28T05:01:22Z",
   "notices": []

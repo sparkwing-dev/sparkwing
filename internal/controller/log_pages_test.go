@@ -258,6 +258,15 @@ func TestPersistedLogPageSelectionsAndContinuation(t *testing.T) {
 	}
 }
 
+func TestLogHeadDoesNotScanUnselectedTail(t *testing.T) {
+	logs, _, st := committedDashboardLogs(t, []byte("first\nsecond\n{\"ts\":\"invalid timestamp outside head\"}\n"))
+	reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
+	page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Job: "job", NoEvents: true, Head: new(2)})
+	if err != nil || len(page.Records) != 2 || page.Records[1].Line != "second" {
+		t.Fatalf("bounded head inspected the unselected tail: %+v %v", page, err)
+	}
+}
+
 func FuzzLogPageCursorCannotChangeSelection(f *testing.F) {
 	f.Add("foreign", uint8(0))
 	f.Add("other", uint8(3))

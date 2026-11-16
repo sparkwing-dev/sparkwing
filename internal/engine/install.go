@@ -52,11 +52,23 @@ func (r *SDKInstallRequest) UnmarshalJSON(body []byte) error {
 	return nil
 }
 
+// SDKCache describes pipeline executable reuse; bytes exclude dependency-tool traffic.
+type SDKCache struct {
+	Outcome      string `json:"outcome"`
+	BytesFetched *int64 `json:"bytes_fetched,omitempty"`
+}
+
+// Valid restricts public cache diagnostics to fixed outcomes and nonnegative byte counts.
+func (c SDKCache) Valid() bool {
+	return (c.Outcome == "hit" || c.Outcome == "miss" || c.Outcome == "compile") && (c.BytesFetched == nil || *c.BytesFetched >= 0)
+}
+
 // SDKCommand names the locally built Go command or Node/main command without protocol argv.
 type SDKCommand struct {
-	Directory        string   `json:"directory"`
-	Command          []string `json:"command"`
-	CachedExecutable string   `json:"cached_executable,omitempty"`
+	Cache            *SDKCache `json:"cache,omitempty"`
+	Directory        string    `json:"directory"`
+	Command          []string  `json:"command"`
+	CachedExecutable string    `json:"cached_executable,omitempty"`
 	ownedDirectory   string
 }
 
@@ -162,6 +174,9 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 		if !info.Mode().IsRegular() {
 			return SDKCommand{}, errors.New("selected engine returned a nonregular Go executable")
 		}
+	}
+	if result.Cache != nil && !result.Cache.Valid() {
+		result.Cache = nil
 	}
 	result.ownedDirectory = ownedDirectory
 	return result, nil

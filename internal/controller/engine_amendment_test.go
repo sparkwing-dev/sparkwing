@@ -149,7 +149,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 	}
 	engineSQL(t, server.Store, `UPDATE triggers SET generation=generation+1 WHERE id='run'`)
 	events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 10)
-	if err != nil || len(events) != 2 {
+	if err != nil || len(events) != 2 || events[0].Kind != "job_claimed" {
 		t.Fatalf("cancel events: %+v, %v", events, err)
 	}
 	var cancellation runstate.NodeResult
