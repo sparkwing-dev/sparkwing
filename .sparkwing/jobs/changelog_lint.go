@@ -29,7 +29,7 @@ func LintChangelog(body string, migrations fs.FS) []ChangelogIssue {
 	sections := docs.ParseChangelog(body)
 	for _, s := range sections {
 		issues = append(issues, lintSectionHeadingsDedupe(s)...)
-		issues = append(issues, lintSectionBreakingEntries(s, migrations)...)
+		issues = append(issues, lintSectionBreakingEntries(s, migrations, strings.EqualFold(s.Version, "Unreleased"))...)
 	}
 	sortIssues(issues)
 	return issues
@@ -401,6 +401,7 @@ func sectionHasSchemaBreakEntry(s docs.ReleaseSection) bool {
 var (
 	breakingScopeRe = regexp.MustCompile(`(?m)^-\s+\*\*([^*]+?)\s*\(Breaking\)\s*:\*\*`)
 	migrationLinkRe = regexp.MustCompile(`\(docs/migrations/([^)]+)\)`)
+	sdkScopeRe      = regexp.MustCompile(`(?i)(^|[\s+])(sdk|typescript)([\s+]|$)`)
 )
 
 func lintSectionHeadingsDedupe(s docs.ReleaseSection) []ChangelogIssue {
@@ -428,16 +429,28 @@ func lintSectionHeadingsDedupe(s docs.ReleaseSection) []ChangelogIssue {
 
 func normalizeHeadingName(s string) string { return s }
 
-func lintSectionBreakingEntries(s docs.ReleaseSection, migrations fs.FS) []ChangelogIssue {
+// safety: requireSDKGuide holds the unreleased section and the section being cut to
+// VERSIONING.md's SDK promise; released sections keep the guides they shipped with.
+func lintSectionBreakingEntries(s docs.ReleaseSection, migrations fs.FS, requireSDKGuide bool) []ChangelogIssue {
 	var issues []ChangelogIssue
 	isUnreleased := strings.EqualFold(s.Version, "Unreleased")
 	for _, e := range s.Entries {
-		if !breakingScopeRe.MatchString(e.Body) {
+		scope := breakingScopeRe.FindStringSubmatch(e.Body)
+		if scope == nil {
 			continue
 		}
-		// safety: no store, binary or pipeline is carried forward until paid launch,
-		// so a (Breaking) entry may ship without a guide; a link it carries must resolve.
-		for _, m := range migrationLinkRe.FindAllStringSubmatch(e.Body, -1) {
+		links := migrationLinkRe.FindAllStringSubmatch(e.Body, -1)
+		// safety: no store, binary or pipeline is carried forward until paid launch, so
+		// a non-SDK (Breaking) entry may ship without a guide; a link it carries must resolve.
+		if len(links) == 0 && requireSDKGuide && sdkScopeRe.MatchString(scope[1]) {
+			issues = append(issues, ChangelogIssue{
+				Line:     e.TitleLine,
+				Category: "missing-migration-link",
+				Message: fmt.Sprintf("SDK (Breaking) entry in [%s] links no migration section; VERSIONING.md promises a guide for every SDK break, so write one in docs/migrations/%s and link its #anchor",
+					s.Version, unreleasedGuideName),
+			})
+		}
+		for _, m := range links {
 			issues = append(issues, validateMigrationLink(s, e, m[1], migrations, isUnreleased)...)
 		}
 	}

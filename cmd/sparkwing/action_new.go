@@ -20,8 +20,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-
-	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
 func runPipelineNew(inv clisurface.Invocation) error {
@@ -86,7 +84,7 @@ func runPipelineNew(inv clisurface.Invocation) error {
 }
 
 func printExamplesHint() {
-	list, err := templates.List()
+	list, err := exampleCatalog()
 	if err != nil || len(list) == 0 {
 		return
 	}
@@ -352,28 +350,24 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger,
 		fmt.Fprintf(os.Stderr, "init: note: could not update .sparkwing/.gitignore; add %s to an ignore file: %v\n", ignored, err)
 	}
 	tidied := false
-	if !typescript {
+	if typescript {
+		if err := lockTypeScriptSkeleton(context.Background(), sparkwingDir); err != nil {
+			return err
+		}
+	} else {
 		tidied, err = tidySkeleton(context.Background(), sparkwingDir)
 		if err != nil {
 			return err
 		}
 	}
-	setupCommand := ""
-	if typescript {
-		setupCommand = "npm --prefix " + shellSingleQuote(sparkwingDir) + " install --package-lock-only --ignore-scripts --no-audit --no-fund"
-	}
 	if mode == "json" {
 		return json.NewEncoder(os.Stdout).Encode(struct {
-			Pipeline     string `json:"pipeline"`
-			Path         string `json:"path"`
-			SetupCommand string `json:"setup_command,omitempty"`
-		}{name, file, setupCommand})
+			Pipeline string `json:"pipeline"`
+			Path     string `json:"path"`
+		}{name, file})
 	}
 	if mode == "plain" {
 		_, err := fmt.Fprintln(os.Stdout, name)
-		if err == nil && setupCommand != "" {
-			_, err = fmt.Fprintln(os.Stdout, setupCommand)
-		}
 		return err
 	}
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
@@ -404,15 +398,14 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger,
 	if tidied {
 		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim("resolved dependencies (go mod tidy)"))
 	}
+	if typescript {
+		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim("resolved dependencies into .sparkwing/package-lock.json"))
+	}
 	fmt.Println()
 	fmt.Println(color.Bold("TIPS"))
 	tips := []InfoNextStep{
 		{Command: "sparkwing run " + name, Purpose: "run it"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
-	}
-
-	if setupCommand != "" {
-		tips = append([]InfoNextStep{{Command: setupCommand, Purpose: "create package-lock.json before the first run"}}, tips...)
 	}
 
 	if len(triggerEvents(trigger)) == 0 {

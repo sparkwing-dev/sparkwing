@@ -111,7 +111,7 @@ func TestNativeServicesRefusesCacheWithoutStorage(t *testing.T) {
 	})
 	input, _ := nativeArtifactInput(t)
 	input.Storage = StorageBinding{}
-	_, err = services.Config.Executor.PrepareCaches(t.Context(), input, nodewire.JobSpec{ID: "job", Caches: []nodewire.CacheSpec{{Name: "modules", Path: "modules"}}})
+	_, err = services.Config.Executor.PrepareCaches(t.Context(), input, nodewire.JobSpec{ID: "job", Caches: []nodewire.CacheSpec{{Name: "modules", Path: "modules"}}}, nil)
 	if err == nil {
 		t.Fatal("artifact wiring silently skipped a declared dependency cache")
 	}

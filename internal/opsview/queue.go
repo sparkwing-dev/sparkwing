@@ -45,9 +45,9 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 			c.Cores, c.HostCores, c.MemoryBytes, c.HostMemoryBytes)
 	}
 	if qs.Budget != nil {
-		fmt.Fprintf(w, "budget\t%.3f\t%.3f\t%d\t%d\t%t\t%s\t%s\n",
+		fmt.Fprintf(w, "budget\t%.3f\t%.3f\t%d\t%d\t%s\t%s\t%s\n",
 			qs.Budget.Cores, qs.Budget.MachineCores,
-			qs.Budget.MemoryBytes, qs.Budget.MachineMemoryBytes, qs.Budget.Enforce,
+			qs.Budget.MemoryBytes, qs.Budget.MachineMemoryBytes, enforcementState(qs.Budget.Enforcement),
 			orDash(qs.Budget.Source), orDash(qs.Budget.Origin))
 	}
 	if qs.IgnoreExternal {
@@ -471,13 +471,46 @@ func BudgetNote(b *wingwire.BudgetState) string {
 	} else {
 		note += ": no capacity cap"
 	}
-	if b.Enforce {
-		note += "; OS-enforced"
+	if e := b.Enforcement; e != nil {
+		note += "; " + enforcementNote(e)
 	}
 	if src := budgetSourceLabel(b); src != "" {
 		note += " (" + src + ")"
 	}
 	return note
+}
+
+func enforcementNote(e *wingwire.BudgetEnforcement) string {
+	if !e.Applied {
+		reason := e.Reason
+		if reason == "" {
+			reason = "no OS limit observed"
+		}
+		return "not enforced (" + reason + "); admission cap only"
+	}
+	var limits []string
+	if e.CPUCores > 0 {
+		limits = append(limits, fmt.Sprintf("%.1f cores", e.CPUCores))
+	}
+	if e.MemoryBytes > 0 {
+		limits = append(limits, HumanBytes(e.MemoryBytes)+" memory")
+	}
+	note := "OS-enforced: runner jobs capped at " + strings.Join(limits, ", ")
+	if e.Nice > 0 {
+		note += fmt.Sprintf(", nice %d", e.Nice)
+	}
+	return note
+}
+
+func enforcementState(e *wingwire.BudgetEnforcement) string {
+	switch {
+	case e == nil:
+		return "-"
+	case e.Applied:
+		return "enforced"
+	default:
+		return "not-enforced"
+	}
 }
 
 func budgetOrigin(b *wingwire.BudgetState) string {

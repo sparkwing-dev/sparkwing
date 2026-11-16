@@ -223,7 +223,7 @@ export type GenerateFn<T> = (generated: Generated, output: T, ctx: Context) => A
 /** contract: A generator handle names the settlement barrier consumed by dependencies. */
 export interface Generator<T> { readonly id: string; readonly source: Job<T>; }
 /** contract: Generated jobs use the same declaration surface and validator as static jobs. */
-export interface Generated { job<T = unknown>(id: string, body?: Body<T>): Job<T>; approval(id: string, options?: ApprovalOptions): Approval; groupJobs(id: string, ...jobs: readonly Job<unknown>[]): JobGroup; }
+export interface Generated { job<T = unknown>(id: string, body?: Body<T>): Job<T>; approval(id: string, options?: ApprovalOptions): Approval; groupJobs(id: string, ...jobs: readonly Job<unknown>[]): JobGroup; jobFanOut<I, T = unknown>(id: string, items: readonly I[], fn: (item: I, index: number) => readonly [string, Body<T>]): JobGroup; }
 /** contract: Jobs declare execution policy; hosts own placement, validation and persistence. */
 export declare class Job<T = unknown> {
   private constructor();
@@ -271,6 +271,8 @@ export declare class Plan {
   job<T = unknown>(id: string, body?: Body<T>): Job<T>;
   approval(id: string, options?: ApprovalOptions): Approval;
   groupJobs(id: string, ...jobs: readonly Job<unknown>[]): JobGroup;
+  /** contract: One job per item, grouped under id; an empty list gives a group with no members. */
+  jobFanOut<I, T = unknown>(id: string, items: readonly I[], fn: (item: I, index: number) => readonly [string, Body<T>]): JobGroup;
   concurrency(group: ConcurrencyGroup, cost?: number): this;
   priority(value: number): this;
   claimWait(ms: number): this;

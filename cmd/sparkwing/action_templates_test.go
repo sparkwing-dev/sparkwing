@@ -9,15 +9,15 @@ import (
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
-func tmplWithCategory(name, category string) templates.Template {
-	return templates.Template{Manifest: templates.Manifest{
+func tmplWithCategory(name, category string) exampleEntry {
+	return exampleEntry{Language: exampleLanguageGo, Template: templates.Template{Manifest: templates.Manifest{
 		Name:          name,
 		Applicability: templates.Applicability{Category: category},
-	}}
+	}}}
 }
 
 func TestGroupTemplatesByCategory_SortsAlphabeticallyUncategorizedLast(t *testing.T) {
-	in := []templates.Template{
+	in := []exampleEntry{
 		tmplWithCategory("z-build", "build"),
 		tmplWithCategory("loose", ""),
 		tmplWithCategory("deploy-a", "deploy"),
@@ -35,7 +35,7 @@ func TestGroupTemplatesByCategory_SortsAlphabeticallyUncategorizedLast(t *testin
 }
 
 func TestGroupTemplatesByCategory_PreservesOrderWithinBucket(t *testing.T) {
-	in := []templates.Template{
+	in := []exampleEntry{
 		tmplWithCategory("first", "build"),
 		tmplWithCategory("second", "build"),
 		tmplWithCategory("third", "build"),
@@ -55,7 +55,7 @@ func TestGroupTemplatesByCategory_PreservesOrderWithinBucket(t *testing.T) {
 
 func TestRenderTemplateList_PrintsCategoryHeadersAndFooter(t *testing.T) {
 	color.SetEnabled(false)
-	in := []templates.Template{
+	in := []exampleEntry{
 		tmplWithCategory("alpha", "build"),
 		tmplWithCategory("bravo", "deploy"),
 	}
@@ -86,7 +86,7 @@ func TestRenderTemplateList_PrintsCategoryHeadersAndFooter(t *testing.T) {
 
 func TestRenderTemplateList_SingularCountsForOneTemplate(t *testing.T) {
 	color.SetEnabled(false)
-	in := []templates.Template{tmplWithCategory("solo", "build")}
+	in := []exampleEntry{tmplWithCategory("solo", "build")}
 	out := captureStdout(t, func() { renderTemplateList(in) })
 	if !strings.Contains(out, "1 example across 1 category") {
 		t.Errorf("expected singular counts, got:\n%s", out)
@@ -94,7 +94,7 @@ func TestRenderTemplateList_SingularCountsForOneTemplate(t *testing.T) {
 }
 
 func TestGroupTemplatesByCategory_TrimsAndBucketsBlankCategory(t *testing.T) {
-	in := []templates.Template{
+	in := []exampleEntry{
 		tmplWithCategory("padded", "  build  "),
 		tmplWithCategory("blank", "   "),
 	}

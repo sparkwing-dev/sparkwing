@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -51,4 +52,26 @@ func (h *nodeExecutor) stepDiagnostic(ctx context.Context, input NodeInput, repo
 		}
 	}
 	return h.diagnostic(ctx, input, level, event, report.StepID, report.StepID, attrs)
+}
+
+func (h *nodeExecutor) cacheReporter(ctx context.Context, live *NodeInput, jobMasks *MaskRegistry) CacheReporter {
+	mask := h.deps.Masker.Mask
+	if jobMasks != nil {
+		mask = jobMasks.mask
+	}
+	return func(level, message string) {
+		// safety: retries replace *live, and only the current attempt may annotate the job.
+		input := *live
+		message = mask(message)
+		attrs := map[string]any{}
+		if h.deps.Annotate != nil {
+			if err := h.deps.Annotate(ctx, input, nodewire.AnnotationRequest{Annotation: nodewire.Annotation{Level: level, Message: message}}); err != nil {
+				attrs["annotation_error"] = mask(err.Error())
+			}
+		}
+		if err := h.diagnostic(ctx, input, level, "cache", "", message, attrs); err != nil {
+			// safety: a cache line is advisory, so a failed log write is reported, not fatal.
+			slog.Warn(message, "cache_log_error", mask(err.Error()))
+		}
+	}
 }

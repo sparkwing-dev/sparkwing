@@ -9,9 +9,43 @@ The current stable release and its notes are at
 [GitHub releases/latest](https://github.com/sparkwing-dev/sparkwing/releases/latest);
 `sparkwing update --dry-run` reports which release this machine would move to.
 
+## Compatibility and release cadence
+
+The author SDK is the Go package `github.com/sparkwing-dev/sparkwing/sparkwing`
+with its `git`, `docker`, `services`, `inputs` and `cleanup` packages, and the
+TypeScript package `@sparkwing/sdk` as declared in its `index.d.ts`. Changes to
+it are additive only: new functions, types, methods, options and optional
+fields. If a break cannot be avoided, it ships with a migration guide and a
+scripted path in `sparkwing pipeline upgrade` that makes the change for you;
+the release refuses an SDK break whose changelog entry links no guide section.
+`sparkwing/runtime`, `sparkwing/protocol/...` and `sparkwing/testsupport/...`
+are the host's side of the SDK, are not covered, and change with it.
+
+- Sparkwing ships on a weekly train. Each Monday, the minor release
+  (`v0.Y.0`) is cut from `main` if it has unreleased changes. Patch releases
+  (`v0.Y.Z`) ship between trains for fixes.
+- Breaking changes ship only in the Monday minor release. Each one is listed in
+  that release's notes with a `(Breaking)` marker and a migration guide. A patch
+  release never contains a breaking change; the release pipeline refuses to cut
+  a patch whose changelog section has a `(Breaking)` entry.
+- An SDK pin stays runnable. Each new run resolves the newest permitted engine
+  that accepts the pin's SDK, so a later run of an unchanged pin can use a newer
+  engine; a run already accepted keeps its exact engine through retries and
+  resumes. Each engine release is supported for twelve months after
+  publication, so a pin you leave alone keeps resolving a supported engine for
+  at least twelve months after the newest engine that accepts it was published,
+  unless a security problem revokes a release or raises the minimum version.
+- Release notes are the
+  [GitHub releases](https://github.com/sparkwing-dev/sparkwing/releases); watch
+  the repository's releases to be notified. Migration guides are at
+  <https://sparkwing.dev/docs/migration-guide/> and in `sparkwing docs migrations`.
+
+The full policy is in
+[VERSIONING.md](https://github.com/sparkwing-dev/sparkwing/blob/main/VERSIONING.md).
+
 ## Versioning per repo
 
-Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
+Go pipelines pin `github.com/sparkwing-dev/sparkwing/sparkwing` in `.sparkwing/go.mod`.
 TypeScript pipelines pin `@sparkwing/sdk` through their manifest and native
 lockfile. A version range alone cannot identify an exact SDK. Go `vX.Y.Z` and
 TypeScript `X.Y.Z` identify SDK releases. The signed index records each SDK's
