@@ -323,8 +323,8 @@ func flagToken(arg string, shorts map[string]string) (name, value string, explic
 }
 
 func (i *Invocation) validate() error {
-	if !i.Help() && i.Command.Path == "sparkwing run" && i.Has("profile") && i.Value("route") != "cloud" {
-		return i.invalid("--profile requires --route cloud")
+	if route := i.Value("route"); !i.Help() && i.Command.Path == "sparkwing run" && i.Has("profile") && route != "cloud" && route != "burst" {
+		return i.invalid("--profile requires --route cloud or --route burst")
 	}
 	definitions := append(GlobalFlags(), i.Command.Flags...)
 	allowed := make(map[string]Flag, len(definitions))

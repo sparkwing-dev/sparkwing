@@ -389,3 +389,23 @@ func TestRunsLogsGrepPointsAtRunsGrep(t *testing.T) {
 		t.Fatalf("runs grep --run: %v", err)
 	}
 }
+
+func TestParseRunProfileNeedsCloudOrBurstRoute(t *testing.T) {
+	for _, route := range []string{"cloud", "burst"} {
+		got, err := Parse("sparkwing", []string{"run", "build", "--route", route, "--profile", "work"})
+		if err != nil {
+			t.Fatalf("--route %s --profile: %v", route, err)
+		}
+		if got.Value("route") != route || got.Value("profile") != "work" {
+			t.Fatalf("--route %s: unexpected invocation: %#v", route, got)
+		}
+	}
+	for _, args := range [][]string{
+		{"run", "build", "--profile", "work"},
+		{"run", "build", "--route", "local", "--profile", "work"},
+	} {
+		if _, err := Parse("sparkwing", args); err == nil || !strings.Contains(err.Error(), "--profile requires --route cloud or --route burst") {
+			t.Fatalf("%q: err = %v", args, err)
+		}
+	}
+}
