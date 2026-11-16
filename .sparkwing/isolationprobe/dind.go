@@ -137,6 +137,7 @@ func stageImage(executable []byte, tarball, exchange string, plan Plan) string {
 	if err != nil {
 		return "image tarball unwritable"
 	}
+	// #nosec G703 -- tarball is a fixed name inside the probe's own run directory.
 	if err := os.WriteFile(tarball, image, 0o600); err != nil {
 		return "image tarball unwritable"
 	}
