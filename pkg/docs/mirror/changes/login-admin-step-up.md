@@ -6,7 +6,8 @@
   hand. The request is sent with the profile's member token, so
   only the same account can approve it, only an owner can, and only from a
   browser sign-in made in the last 10 minutes. Approval saves a `team.admin` token
-  that expires after one hour beside a re-issued member token. The profile uses it
+  that expires after one hour beside a re-issued member token with the same
+  grants and expiry as the one it replaces. The profile uses it
   until it expires and then falls back to the member token. Ordinary
   `sparkwing login` tokens still never carry `team.admin`.
 

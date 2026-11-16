@@ -253,9 +253,9 @@ function Confirm({
   const adminNote = (
     <>
       Plus <span className="font-mono text-xs">team.admin</span>, to administer
-      the team, for 1 hour. The run and log token lasts 90 days and replaces
-      the terminal&apos;s current one. Both belong to this browser sign-in, so
-      signing out here revokes them.
+      the team, for 1 hour. The terminal&apos;s run and log token is replaced
+      by one with the same grants and expiry. Both belong to this browser
+      sign-in, so signing out here revokes them.
     </>
   );
   const signInNote =

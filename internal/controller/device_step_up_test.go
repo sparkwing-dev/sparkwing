@@ -80,6 +80,9 @@ func TestDeviceStepUpIssuesShortLivedAdminToTheRequestingOwner(t *testing.T) {
 	admin := poll.Credential.Capability
 	engineClaimHTTP(t, s.Handler(), admin, "GET", "/api/v1/subscriptions", "", 200)
 	engineClaimHTTP(t, s.Handler(), poll.Member.Capability, "GET", "/api/v1/subscriptions", "", 403)
+	if live := liveAdmins(t, s); live != 1 {
+		t.Fatalf("live team.admin credentials = %d, want the one just issued", live)
+	}
 
 	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/logout", "", 204)
 	engineClaimHTTP(t, s.Handler(), admin, "GET", "/api/v1/subscriptions", "", 401)
@@ -100,9 +103,8 @@ func TestDeviceStepUpRefusesNonOwners(t *testing.T) {
 			if reason := deviceRefusalReason(t, devicePost(t, s.Handler(), "/api/v1/auth/device/token", `{"device_code":"`+started.DeviceCode+`"}`, 400)); reason != controllerwire.DeviceDenied {
 				t.Fatalf("denied reason %q", reason)
 			}
-			var admins int
-			if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE grants LIKE '%team.admin%'`).Scan(&admins); err != nil || admins != 0 {
-				t.Fatalf("%d team.admin credentials exist after a %s step-up: %v", admins, role, err)
+			if admins := liveAdmins(t, s); admins != 0 {
+				t.Fatalf("%d team.admin credentials exist after a %s step-up", admins, role)
 			}
 		})
 	}
@@ -195,4 +197,44 @@ func deviceRefusalReasonOf(t *testing.T, body []byte) string {
 	}
 	reason, _ := envelope.Error.Details["reason"].(string)
 	return reason
+}
+
+// hack: grants is a BLOB in SQLite, so a LIKE on the raw column never matches; cast it to text.
+func liveAdmins(t *testing.T, s *serverFixture) int {
+	t.Helper()
+	var n int
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM capabilities WHERE CAST(grants AS TEXT) LIKE '%team.admin%' AND revoked_at IS NULL`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestDeviceStepUpKeepsTheStartersGrantsAndExpiry(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "owner")
+	started := startDevice(t, s, `{"kind":"member","machine":"laptop","grants":["runs.read"]}`)
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+started.UserCode+`"}`, 204)
+	starter := pollDevice(t, s, started.DeviceCode, 200).Credential
+	if starter == nil || !slices.Equal(starter.Grants, []string{"runs.read"}) || starter.ExpiresAt == nil {
+		t.Fatalf("read-only starter = %+v", starter)
+	}
+
+	stepUp := startStepUp(t, s, starter.Capability, 201)
+	var lookup controllerwire.DeviceLoginLookup
+	if err := json.Unmarshal(reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/lookup", `{"user_code":"`+stepUp.UserCode+`"}`, 200).Body.Bytes(), &lookup); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(lookup.Grants, []string{"runs.read", "team.admin"}) {
+		t.Fatalf("lookup grants = %v, want the starter's runs.read plus team.admin", lookup.Grants)
+	}
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+stepUp.UserCode+`"}`, 204)
+	poll := pollDevice(t, s, stepUp.DeviceCode, 200)
+	if poll.Member == nil || !slices.Equal(poll.Member.Grants, []string{"runs.read"}) {
+		t.Fatalf("replacement member = %+v, want only runs.read", poll.Member)
+	}
+	if poll.Member.ExpiresAt == nil || poll.Member.ExpiresAt.After(*starter.ExpiresAt) {
+		t.Fatalf("replacement expires %v, after the starter's %v", poll.Member.ExpiresAt, starter.ExpiresAt)
+	}
+	if poll.Credential == nil || !slices.Equal(poll.Credential.Grants, []string{"runs.read", "team.admin"}) {
+		t.Fatalf("admin token = %+v, want runs.read plus team.admin", poll.Credential)
+	}
 }

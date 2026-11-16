@@ -41,14 +41,21 @@ const (
 var cliMemberGrants = []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsWrite, capability.RunsControl, capability.ApprovalsWrite}
 
 // safety: Runner reuses the enrollment body, so a device enrollment is validated and issued as POST /api/v1/runners.
-// Account is set only by the step-up route, from the bearer that asked; a public start carrying it is refused.
+// Account and the Starter fields are set only by the step-up route, from the bearer that asked; a body carrying
+// them is refused. The starter's grants and expiry bound the member token a step-up re-issues.
 type deviceLoginRequest struct {
-	Kind    string                   `json:"kind"`
-	Machine string                   `json:"machine"`
-	Team    string                   `json:"team,omitempty"`
-	Grants  []capability.Grant       `json:"grants,omitempty"`
-	Runner  *runnerEnrollmentRequest `json:"runner,omitempty"`
-	Account string                   `json:"account,omitempty"`
+	Kind             string                   `json:"kind"`
+	Machine          string                   `json:"machine"`
+	Team             string                   `json:"team,omitempty"`
+	Grants           []capability.Grant       `json:"grants,omitempty"`
+	Runner           *runnerEnrollmentRequest `json:"runner,omitempty"`
+	Account          string                   `json:"account,omitempty"`
+	StarterGrants    []capability.Grant       `json:"starter_grants,omitempty"`
+	StarterExpiresAt *time.Time               `json:"starter_expires_at,omitempty"`
+}
+
+func (request deviceLoginRequest) claimsStepUpFacts() bool {
+	return request.Account != "" || len(request.StarterGrants) != 0 || request.StarterExpiresAt != nil
 }
 
 func (s *Server) deviceLoginEndpoints() []controllerwire.Endpoint {
@@ -75,7 +82,7 @@ func (s *Server) handleStartDeviceLogin(w http.ResponseWriter, r *http.Request, 
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
 	}
-	if request.Kind == controllerwire.DeviceLoginAdmin || request.Account != "" {
+	if request.Kind == controllerwire.DeviceLoginAdmin || request.claimsStepUpFacts() {
 		return invalidEngineBody("administration is requested from a signed-in terminal; run sparkwing login --admin")
 	}
 	return s.createDeviceLogin(w, r, request)
@@ -98,10 +105,14 @@ func (s *Server) handleStartStepUp(w http.ResponseWriter, r *http.Request, a cap
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
 	}
-	if request.Kind != controllerwire.DeviceLoginAdmin || request.Account != "" || request.Team != "" && request.Team != a.Target.Team {
+	if request.Kind != controllerwire.DeviceLoginAdmin || request.claimsStepUpFacts() || request.Team != "" && request.Team != a.Target.Team {
 		return invalidEngineBody("a step-up asks for kind admin with a machine name; the team and account come from the signed-in token")
 	}
-	request.Account, request.Team = p.Capability.Subject.ID, a.Target.Team
+	// safety: the re-issued member token keeps the starter's grants and expiry, so stepping up never widens it.
+	starter := slices.DeleteFunc(slices.Clone(cliMemberGrants), func(grant capability.Grant) bool {
+		return !slices.Contains(p.Capability.Grants, grant)
+	})
+	request.Account, request.Team, request.StarterGrants, request.StarterExpiresAt = p.Capability.Subject.ID, a.Target.Team, starter, p.Capability.ExpiresAt
 	return s.createDeviceLogin(w, r, request)
 }
 
@@ -168,8 +179,12 @@ func (s *Server) handlePollDeviceLogin(w http.ResponseWriter, r *http.Request, _
 	// safety: a fresh sign-in ends the browser's earlier session and the member token it approved, so an
 	// administration approval also re-issues the terminal's member token under the session that approved it.
 	if spec.AllowTeamAdmin {
+		var request deviceLoginRequest
+		if err := json.Unmarshal(poll.Login.Request, &request); err != nil {
+			return err
+		}
 		member := spec
-		member.AllowTeamAdmin, member.ExpiresAt = false, nil
+		member.AllowTeamAdmin, member.ExpiresAt = false, request.StarterExpiresAt
 		member.Grants = slices.DeleteFunc(slices.Clone(spec.Grants), func(grant capability.Grant) bool { return grant == capability.TeamAdmin })
 		issued, err := s.issueRoot(r.Context(), member)
 		if err != nil {
@@ -317,7 +332,7 @@ func (s *Server) deviceLoginAvailable() error {
 func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 	switch request.Kind {
 	case controllerwire.DeviceLoginMember:
-		if request.Runner != nil || request.Account != "" {
+		if request.Runner != nil || request.claimsStepUpFacts() {
 			return invalidEngineBody("a member device login carries no runner")
 		}
 		seen := map[capability.Grant]bool{}
@@ -328,11 +343,11 @@ func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 			seen[grant] = true
 		}
 	case controllerwire.DeviceLoginAdmin:
-		if request.Runner != nil || len(request.Grants) != 0 || request.Account == "" || request.Team == "" {
+		if request.Runner != nil || len(request.Grants) != 0 || request.Account == "" || request.Team == "" || len(request.StarterGrants) == 0 {
 			return invalidEngineBody("an administration request carries a machine name only; its grants follow the approver's role")
 		}
 	case controllerwire.DeviceLoginRunner:
-		if request.Runner == nil || len(request.Grants) != 0 {
+		if request.Runner == nil || len(request.Grants) != 0 || request.claimsStepUpFacts() {
 			return invalidEngineBody("a runner device login carries its enrollment in runner and no member grants")
 		}
 		if len(request.Runner.AllowedLabels) != 0 {
@@ -377,17 +392,14 @@ func deviceLoginGrants(request deviceLoginRequest, approver capability.Principal
 		if !slices.Contains(approver.Capability.Grants, capability.TeamAdmin) {
 			return nil, hosterr.Authorization(hosterr.ReasonMissingGrant, "only team owners can approve administration; deny this request")
 		}
+		return append(slices.Clone(request.StarterGrants), capability.TeamAdmin), nil
 	}
 	if len(request.Grants) != 0 {
 		return slices.Clone(request.Grants), nil
 	}
-	grants := slices.DeleteFunc(slices.Clone(cliMemberGrants), func(grant capability.Grant) bool {
+	return slices.DeleteFunc(slices.Clone(cliMemberGrants), func(grant capability.Grant) bool {
 		return !slices.Contains(approver.Capability.Grants, grant)
-	})
-	if request.Kind == controllerwire.DeviceLoginAdmin {
-		grants = append(grants, capability.TeamAdmin)
-	}
-	return grants, nil
+	}), nil
 }
 
 func deviceTeamMatches(request deviceLoginRequest, a capability.Authorized) error {

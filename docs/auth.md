@@ -1070,10 +1070,11 @@ A device code can be phished, so `sparkwing login` never carries
    `sign_in_required` so the page offers to sign in again.
 3. Redemption issues two credentials under the approving session. One is a
    `team.admin` member token that expires one hour after redemption and also
-   holds the approver's run and log grants. The other is a fresh member token
-   with only those run and log grants and the usual 90-day expiry. The second
-   replaces the terminal's member token, because a fresh browser sign-in ends
-   the earlier session and the tokens it approved.
+   holds the grants of the token that started the step-up. The other is a
+   fresh member token with exactly those grants, expiring when the starting
+   token would have. The second replaces the terminal's member token, because
+   a fresh browser sign-in ends the earlier session and the tokens it approved,
+   and a step-up never widens the terminal's ordinary access or lifetime.
 
 The CLI saves the administration token as `controller.admin_token` with
 `controller.admin_expires_at`, beside the re-issued `controller.token`, and
