@@ -258,11 +258,11 @@ sw.Job(plan, "deploy", func(ctx context.Context) error {
     return err
 }).SkipIf(func(ctx context.Context) bool {
     return rc.Git.Branch != "main"
+}).AfterRun(func(ctx context.Context, err error) {
+    sw.Info(ctx, "deploy finished")
 }).OnFailure("report-failure", func(ctx context.Context) error {
     sw.Info(ctx, "deploy failed")
     return nil
-}).AfterRun(func(ctx context.Context, err error) {
-    sw.Info(ctx, "deploy finished")
 })
 ```
 
