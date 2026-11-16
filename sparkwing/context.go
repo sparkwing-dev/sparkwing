@@ -16,10 +16,13 @@ type RunContext struct {
 	// Pipeline is the invoked project name, including any alias.
 	Pipeline string
 
-	// Git is the run's view of the cloned working tree.
+	// Git is the run's view of the cloned working tree and is never nil.
 	// Live methods (IsDirty, FilesetHash, …) shell
 	// out fresh each call; data fields (SHA, Branch, Repo, RepoURL)
-	// are the trigger-time snapshot.
+	// are the trigger-time snapshot. The data fields are empty while
+	// sparkwing discovers pipelines, such as during pipeline describe,
+	// and whenever the host supplies no git facts, so a Plan that branches
+	// on Git.Branch declares its non-branch shape there.
 	Git *Git
 
 	Trigger TriggerInfo
