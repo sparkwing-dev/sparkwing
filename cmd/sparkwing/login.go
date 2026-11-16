@@ -142,7 +142,6 @@ func deviceSignIn(parent context.Context, console deviceConsole, base string, re
 	return *approved.Credential, nil
 }
 
-// deviceApproval shows the code start returns and waits for the browser's decision.
 func deviceApproval(parent context.Context, console deviceConsole, base string, start func(context.Context, *client.DeviceLogin) (controllerwire.DeviceLoginStarted, error)) (controllerwire.DeviceLoginPoll, error) {
 	// safety: a code printed into a log or shared screen lets anyone on the deployment approve it into their team.
 	if !console.interactive {

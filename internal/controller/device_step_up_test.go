@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-// cliMemberToken signs a terminal in the ordinary way and returns its member token.
 func cliMemberToken(t *testing.T, s *serverFixture, raw, csrf string) string {
 	t.Helper()
 	started := startDevice(t, s, `{"kind":"member","machine":"laptop"}`)
@@ -36,7 +35,6 @@ func startStepUp(t *testing.T, s *serverFixture, bearer string, status int) cont
 	return started
 }
 
-// secondAccount adds another account to team a with its own fresh console session.
 func secondAccount(t *testing.T, s *serverFixture, id, role string) (string, string) {
 	t.Helper()
 	engineSQL(t, s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1)`, id, id+"@example.test")

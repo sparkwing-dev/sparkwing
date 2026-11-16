@@ -17,8 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-// loginAdmin steps a signed-in profile up to an hour of team administration. The request travels with the
-// profile's member token, so only the same account can approve it in the browser.
+// safety: the request travels with the profile's member token, so only the same account can approve it.
 func loginAdmin(inv clisurface.Invocation, console deviceConsole, format string) error {
 	if inv.Has("scope") || inv.Bool("force") {
 		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--admin uses the profile's current sign-in; drop --scope and --force"}
@@ -92,7 +91,6 @@ func loginAdmin(inv clisurface.Invocation, console deviceConsole, format string)
 	return writeProfile(p, format)
 }
 
-// revokeUnsaved ends credentials the CLI will not save, and names any it could not end.
 func revokeUnsaved(base string, tokens ...*controllerwire.CreatedToken) {
 	for _, token := range tokens {
 		if token == nil {

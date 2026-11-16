@@ -30,7 +30,7 @@ type deviceLoginFixture struct {
 	handler       http.Handler
 	session, csrf string
 	console       deviceConsole
-	// refusals records approvals the controller refused; the fixture then denies, as a person reading the refusal would.
+	// hack: after a refused approval the fixture denies, as a person reading the refusal would.
 	refusals []int
 }
 

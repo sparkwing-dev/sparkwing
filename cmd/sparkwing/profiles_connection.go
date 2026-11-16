@@ -118,8 +118,7 @@ func sameProfileToken(a, b *string) bool {
 	return *a == *b
 }
 
-// revokeProfileToken revokes the profile's member token and the administration token saved beside it while that
-// is still live.
+// safety: a live administration token is revoked with the member token, so no admin credential outlives the profile.
 func revokeProfileToken(p *namedProfile) error {
 	if err := revokeToken(p.ControllerURL(), p.MemberToken()); err != nil {
 		return err

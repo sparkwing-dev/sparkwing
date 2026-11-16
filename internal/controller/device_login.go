@@ -81,8 +81,7 @@ func (s *Server) handleStartDeviceLogin(w http.ResponseWriter, r *http.Request, 
 	return s.createDeviceLogin(w, r, request)
 }
 
-// handleStartStepUp starts an administration request from a terminal already signed in as a member. The request
-// records that account and team, so only the same person can approve it.
+// safety: the request records the bearer's account and team, so only the same person can approve it.
 func (s *Server) handleStartStepUp(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if err := s.loginLimit.admit(r); err != nil {
 		return err
