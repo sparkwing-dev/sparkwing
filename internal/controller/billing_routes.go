@@ -76,7 +76,7 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 				email = owners[0]
 			}
 		}
-		err := s.checkout.openReservedPage(r.Context(), s.paymentDeployment, &page, email)
+		err := s.checkout.openReservedPage(r.Context(), s.checkoutPairing(), &page, email)
 		if err == nil && !validBillingSessionID(page.ProviderID, s.deployment.PaymentMode()) {
 			err = fmt.Errorf("%w: session id does not match controller payment mode %q", errCheckoutRefused, s.deployment.PaymentMode())
 		}

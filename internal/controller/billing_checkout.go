@@ -63,19 +63,32 @@ var errCheckoutMisconfigured = errors.New("the checkout service and this control
 var checkoutMisconfigurations = map[int]string{
 	http.StatusUnauthorized:       "the checkout service refused the billing-token credential; it must equal the service's BILLING_CHECKOUT_TOKEN",
 	http.StatusNotFound:           "the checkout service has no such route; --billing-url must name the checkout service",
-	http.StatusMisdirectedRequest: "the checkout service serves another deployment; set its BILLING_DEPLOYMENT to this alert's deployment value, which the controller also logs at startup",
+	http.StatusMisdirectedRequest: "the checkout service serves another deployment or Stripe mode; set its BILLING_DEPLOYMENT to this alert's deployment value, which the controller also logs at startup, and its BILLING_LIVE to match this alert's payment_mode",
 }
 
 var errCheckoutRefused = errors.New("the checkout service refused the request")
+
+// safety: the Stripe mode travels both ways, so each side can refuse the other's mode before money moves.
+const checkoutModeHeader = "Sparkwing-Payment-Mode"
+
+// safety: the checkout service moves money only for the deployment and Stripe mode it shares with this controller.
+type checkoutPairing struct {
+	deployment string
+	mode       capability.PaymentMode
+}
+
+func (s *Server) checkoutPairing() checkoutPairing {
+	return checkoutPairing{deployment: s.paymentDeployment, mode: s.deployment.PaymentMode()}
+}
 
 // errRefillNoCard is the checkout service's refusal to charge a refill for a customer with no card in Stripe.
 var errRefillNoCard = errors.New("the customer has no card")
 
 // openReservedPage opens the provider page for a reservation; email, the team owner's address for Stripe's receipts,
 // is sent with a card setup and never stored.
-func (c *billingCheckout) openReservedPage(ctx context.Context, deployment string, page *capability.BillingPage, email string) error {
+func (c *billingCheckout) openReservedPage(ctx context.Context, pairing checkoutPairing, page *capability.BillingPage, email string) error {
 	path := "/internal/checkout"
-	body := map[string]any{"team": page.Team, "key": page.ReservationID, "deployment": deployment, "expires_at": page.ExpiresAt.Unix()}
+	body := map[string]any{"team": page.Team, "key": page.ReservationID, "deployment": pairing.deployment, "expires_at": page.ExpiresAt.Unix()}
 	switch page.Kind {
 	case capability.BillingPageCredits:
 		body["amount_cents"] = page.AmountCents
@@ -91,7 +104,7 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 		Customer  string `json:"customer"`
 		ExpiresAt int64  `json:"expires_at"`
 	}
-	if err := c.post(ctx, path, body, &out); err != nil {
+	if err := c.post(ctx, pairing, path, body, &out); err != nil {
 		return err
 	}
 	if !validBillingPageURL(out.URL, stripeCheckoutHost) {
@@ -119,7 +132,7 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 	return nil
 }
 
-func (c *billingCheckout) post(ctx context.Context, path string, in, out any) error {
+func (c *billingCheckout) post(ctx context.Context, pairing checkoutPairing, path string, in, out any) error {
 	body, err := json.Marshal(in)
 	if err != nil {
 		return err
@@ -130,6 +143,7 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set(checkoutModeHeader, string(pairing.mode))
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errCheckoutUnavailable, err)
@@ -153,6 +167,12 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 			err = errors.Join(errRefillNoCard, err)
 		}
 		return err
+	}
+	// safety: a service that charged in another Stripe mode, or names none, is not believed, so its answer moves no
+	// refill, refund or page forward; it is retried and alerted like any other misconfigured pairing.
+	if mode := resp.Header.Get(checkoutModeHeader); mode != string(pairing.mode) {
+		return fmt.Errorf("%w: %w: the checkout service answered in Stripe mode %q, this controller runs in %q; set its BILLING_LIVE to match --payment-mode",
+			errCheckoutUnavailable, errCheckoutMisconfigured, mode, pairing.mode)
 	}
 	if err := json.Unmarshal(payload, out); err != nil {
 		return fmt.Errorf("%w: decode: %w", errCheckoutRefused, err)
@@ -205,7 +225,7 @@ func (s *Server) alertCheckoutMisconfigured(err error) {
 	case errors.Is(err, errCheckoutMisconfigured) && !s.checkout.misconfigured:
 		s.checkout.misconfigured = true
 		s.logger.Error("billing alert: refills and refunds are retried until the pairing is fixed",
-			"alert", checkoutMisconfiguredAlert, "deployment", s.paymentDeployment, "err", err)
+			"alert", checkoutMisconfiguredAlert, "deployment", s.paymentDeployment, "payment_mode", string(s.deployment.PaymentMode()), "err", err)
 	}
 }
 
@@ -228,10 +248,10 @@ type refillResponse struct {
 	Failure       string `json:"failure,omitempty"`
 }
 
-func (c *billingCheckout) refill(ctx context.Context, deployment string, r store.Refill) (refillResponse, error) {
+func (c *billingCheckout) refill(ctx context.Context, pairing checkoutPairing, r store.Refill) (refillResponse, error) {
 	var out refillResponse
-	err := c.post(ctx, "/internal/refill", refillRequest{
-		Team: string(r.Team), Deployment: deployment, RefillID: r.ID, AmountCents: r.AmountCents, Customer: r.Customer,
+	err := c.post(ctx, pairing, "/internal/refill", refillRequest{
+		Team: string(r.Team), Deployment: pairing.deployment, RefillID: r.ID, AmountCents: r.AmountCents, Customer: r.Customer,
 	}, &out)
 	// A payment Stripe accepted is succeeded or processing, and its signed webhook settles it.
 	if err == nil && (out.PaymentIntent == "" || out.Failure == "" && out.Status != "succeeded" && out.Status != "processing") {
@@ -241,9 +261,9 @@ func (c *billingCheckout) refill(ctx context.Context, deployment string, r store
 }
 
 // portal opens a Stripe customer portal session, where the team views and changes its card; Sparkwing never sees it.
-func (c *billingCheckout) portal(ctx context.Context, deployment, team, customer string) (string, error) {
+func (c *billingCheckout) portal(ctx context.Context, pairing checkoutPairing, team, customer string) (string, error) {
 	var out hostedPageJSON
-	if err := c.post(ctx, "/internal/portal", map[string]any{"team": team, "deployment": deployment, "customer": customer}, &out); err != nil {
+	if err := c.post(ctx, pairing, "/internal/portal", map[string]any{"team": team, "deployment": pairing.deployment, "customer": customer}, &out); err != nil {
 		return "", err
 	}
 	if !validBillingPageURL(out.URL, stripePortalHost) {
@@ -252,13 +272,13 @@ func (c *billingCheckout) portal(ctx context.Context, deployment, team, customer
 	return out.URL, nil
 }
 
-func (c *billingCheckout) refund(ctx context.Context, deployment string, team store.Team, paymentIntent, reason string) (string, string, error) {
+func (c *billingCheckout) refund(ctx context.Context, pairing checkoutPairing, team store.Team, paymentIntent, reason string) (string, string, error) {
 	var out struct {
 		Refund string `json:"refund"`
 		Status string `json:"status"`
 	}
-	err := c.post(ctx, "/internal/refund", map[string]any{
-		"team": string(team), "deployment": deployment, "payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
+	err := c.post(ctx, pairing, "/internal/refund", map[string]any{
+		"team": string(team), "deployment": pairing.deployment, "payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
 	}, &out)
 	if err == nil && (out.Refund == "" || out.Status == "") {
 		err = fmt.Errorf("%w: it named no refund and status", errCheckoutRefused)

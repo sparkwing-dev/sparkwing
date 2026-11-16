@@ -315,7 +315,7 @@ func TestOnlyTheBillingWorkerClearsTheMisconfigurationAlert(t *testing.T) {
 	})
 	worker.checkout.misconfigured = true
 	var out map[string]any
-	if err := worker.checkout.post(t.Context(), "/internal/portal", map[string]any{}, &out); err != nil || !worker.checkout.misconfigured {
+	if err := worker.checkout.post(t.Context(), worker.checkoutPairing(), "/internal/portal", map[string]any{}, &out); err != nil || !worker.checkout.misconfigured {
 		t.Fatalf("an HTTP request changed the worker's alert state: %v", err)
 	}
 	worker.alertCheckoutMisconfigured(errCheckoutRefused)

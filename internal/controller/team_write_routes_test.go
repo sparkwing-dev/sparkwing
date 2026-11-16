@@ -205,7 +205,18 @@ func (f *billingWriterFake) RequestAuthorizedStanding(_ context.Context, a capab
 
 type billingPageTransport func(*http.Request) (*http.Response, error)
 
-func (f billingPageTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+// RoundTrip answers as a checkout service paired with the controller: an answer that names no Stripe mode gets the
+// mode the request carried. Tests of the mode pairing name the answer's mode themselves or use modeCheckout.
+func (f billingPageTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := f(r)
+	if resp != nil && resp.Header.Get(checkoutModeHeader) == "" {
+		if resp.Header == nil {
+			resp.Header = http.Header{}
+		}
+		resp.Header.Set(checkoutModeHeader, r.Header.Get(checkoutModeHeader))
+	}
+	return resp, err
+}
 
 func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 	f := newDeploymentScheduleHTTPFixture(t, deploymenttest.Parse(t, deployment.Inputs{PaymentMode: "test"}, license.FeatureMetering))

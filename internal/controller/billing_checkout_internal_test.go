@@ -27,7 +27,7 @@ func TestHostedPagesOnlyLeaveForStripe(t *testing.T) {
 		"https://checkout.stripe.com:8443/c/pay/cs_1": false,
 	} {
 		page := &capability.BillingPage{Kind: capability.BillingPageCredits, Team: "a", ReservationID: "r", AmountCents: 1000, ExpiresAt: time.Now().Add(time.Hour)}
-		err := serve(`{"id":"cs_1","url":"`+url+`"}`).openReservedPage(t.Context(), "dep", page, "")
+		err := serve(`{"id":"cs_1","url":"`+url+`"}`).openReservedPage(t.Context(), checkoutPairing{deployment: "dep"}, page, "")
 		if (err == nil) != ok || err != nil && !errors.Is(err, errCheckoutRefused) {
 			t.Fatalf("payment page %s: %v", url, err)
 		}
@@ -37,7 +37,7 @@ func TestHostedPagesOnlyLeaveForStripe(t *testing.T) {
 		"https://checkout.stripe.com/c/pay/cs_1": false,
 		"https://billing.stripe.com.evil.test/p": false,
 	} {
-		if _, err := serve(`{"url":"`+url+`"}`).portal(t.Context(), "dep", "a", "cus_1"); (err == nil) != ok {
+		if _, err := serve(`{"url":"`+url+`"}`).portal(t.Context(), checkoutPairing{deployment: "dep"}, "a", "cus_1"); (err == nil) != ok {
 			t.Fatalf("portal page %s: %v", url, err)
 		}
 	}
@@ -54,7 +54,7 @@ func TestAQueuedRefundNamesItsDeployment(t *testing.T) {
 		}
 		return refillReply(http.StatusOK, `{"refund":"re_1","status":"pending"}`), nil
 	})}}
-	if _, _, err := checkout.refund(t.Context(), "dep", "a", "pi_1", "duplicate"); err != nil {
+	if _, _, err := checkout.refund(t.Context(), checkoutPairing{deployment: "dep"}, "a", "pi_1", "duplicate"); err != nil {
 		t.Fatal(err)
 	}
 	if sent["team"] != "a" || sent["deployment"] != "dep" || sent["payment_intent"] != "pi_1" || sent["key"] != "pi_1" || sent["reason"] != "duplicate" {
