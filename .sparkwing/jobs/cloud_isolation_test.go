@@ -825,6 +825,215 @@ func driveFakeWith(t *testing.T, fake *isoClusterFake, args CloudIsolationArgs) 
 	return evidence, d.conform(t.Context())
 }
 
+func driveWrapped(t *testing.T, wrap func(isolationCommand, string) string) (*isoClusterFake, string, error) {
+	t.Helper()
+	root, err := mainModuleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake, clock, evidence := newIsoFake(t), time.Unix(0, 0), t.TempDir()
+	d := &isolationDriver{args: isoArgs(), repo: root, tmp: t.TempDir(), evidence: evidence, tools: isolationTools{
+		run: func(ctx context.Context, c isolationCommand) (string, int, error) {
+			out, code, err := fake.run(ctx, c)
+			return wrap(c, out), code, err
+		},
+		wait: func(context.Context, time.Duration) error { clock = clock.Add(pollInterval); return nil },
+		now:  func() time.Time { return clock },
+		say:  func(context.Context, string) {},
+	}}
+	return fake, evidence, d.conform(t.Context())
+}
+
+func isNodeList(c isolationCommand) bool {
+	return c.Name == "kubectl" && len(c.Args) > 3 && c.Args[3] == "nodes" && flagValue(c.Args, "-l") == ""
+}
+
+func isJobPodList(c isolationCommand) bool {
+	return c.Name == "kubectl" && len(c.Args) > 3 && c.Args[3] == "pods" && flagValue(c.Args, "-n") == isoJobNS
+}
+
+func relabelNodes(out, fence string) string {
+	var nodes kubeList[kubeNode]
+	_ = json.Unmarshal([]byte(out), &nodes)
+	for i := range nodes.Items {
+		nodes.Items[i].Metadata.Labels[usedRunNodeLabel] = fence
+	}
+	return list(nodes.Items)
+}
+
+// The review's repro: each mandatory group must yield something to probe, so a group of objects
+// that yields no target fails discovery.
+func TestStaticTargetsRequireATargetFromEachGroup(t *testing.T) {
+	for _, group := range []string{"controller pods", "controller services", "DNS pods", "DNS services", "ingress pods", "infra nodes"} {
+		t.Run(group, func(t *testing.T) {
+			in := isoInputs()
+			switch group {
+			case "controller pods":
+				in.ControllerPods = []kubePod{{}}
+			case "controller services":
+				in.ControllerServices = []kubeService{{}}
+			case "DNS pods":
+				in.DNSPods = []kubePod{{}}
+			case "DNS services":
+				in.DNSServices = []kubeService{{}}
+			case "ingress pods":
+				in.IngressPods = []kubePod{{}}
+			case "infra nodes":
+				in.InfraNodes = []kubeNode{{}}
+			}
+			if targets, err := staticTargets(in); err == nil {
+				t.Fatalf("accepted %s with no usable target; total=%d", group, len(targets))
+			}
+		})
+	}
+}
+
+// The review's repro: a controller on its node's network cannot be probed as a pod, so the run
+// fails instead of passing without that boundary.
+func TestConformRefusesUntargetableControllerPods(t *testing.T) {
+	_, _, err := driveWrapped(t, func(c isolationCommand, out string) string {
+		if c.Name == "kubectl" && len(c.Args) > 3 && c.Args[3] == "pods" && flagValue(c.Args, "-n") == "sparkwing-staging" {
+			var pods kubeList[kubePod]
+			_ = json.Unmarshal([]byte(out), &pods)
+			for i := range pods.Items {
+				pods.Items[i].Spec.HostNetwork = true
+			}
+			return list(pods.Items)
+		}
+		return out
+	})
+	if err == nil || !strings.Contains(err.Error(), "discovery cannot probe controller namespace pods") {
+		t.Fatalf("conform = %v, want discovery to refuse host-networked controller pods", err)
+	}
+}
+
+// The review's repro: a wrong fence seen once while B1 is live stays a failure after the labels
+// look healthy again.
+func TestConformKeepsAnUnsafeLiveNodeObservation(t *testing.T) {
+	seen := 0
+	_, evidence, err := driveWrapped(t, func(c isolationCommand, out string) string {
+		if isNodeList(c) {
+			if seen++; seen == 1 {
+				return relabelNodes(out, "unrelated-run")
+			}
+		}
+		return out
+	})
+	if seen < 2 {
+		t.Fatal("did not restore node after unsafe live observation")
+	}
+	report, _ := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
+	if err == nil || !strings.Contains(string(report), `observation 1: B1 node node-b1 is fenced to "unrelated-run"`) {
+		t.Fatalf("conform = %v, report = %.300s; want the first observation's wrong fence kept", err, report)
+	}
+}
+
+// The review's repro: an unsafe pod spec seen once stays a failure after a safe replacement.
+func TestConformKeepsAnUnsafeLivePodObservation(t *testing.T) {
+	seen := 0
+	_, _, err := driveWrapped(t, func(c isolationCommand, out string) string {
+		if isJobPodList(c) {
+			if seen++; seen == 1 {
+				var pods kubeList[kubePod]
+				_ = json.Unmarshal([]byte(out), &pods)
+				for i := range pods.Items {
+					bad := true
+					pods.Items[i].Spec.HostUsers = &bad
+				}
+				return list(pods.Items)
+			}
+		}
+		return out
+	})
+	if seen < 2 {
+		t.Fatal("did not restore pod after unsafe live observation")
+	}
+	if err == nil || !strings.Contains(err.Error(), "C3") {
+		t.Fatalf("conform = %v, want C3 from hostUsers=true seen live", err)
+	}
+}
+
+// The review's repro: B1's broken fence stops the sequence before A1 starts.
+func TestConformStopsOnBrokenPlacementBeforeTheNextPhase(t *testing.T) {
+	fake, _, err := driveWrapped(t, func(c isolationCommand, out string) string {
+		if isNodeList(c) {
+			return relabelNodes(out, "unrelated-run")
+		}
+		return out
+	})
+	if err == nil {
+		t.Fatal("invalid placement passed overall")
+	}
+	if len(fake.triggered) > 1 {
+		t.Fatalf("triggered %v despite B1's broken run fence", fake.triggered)
+	}
+}
+
+// The review's repro: B1 ending after A1 probed it stops the sequence before B2 starts.
+func TestConformStopsOnADeadPeerBeforeTheNextPhase(t *testing.T) {
+	triggered := 0
+	fake, _, err := driveWrapped(t, func(c isolationCommand, out string) string {
+		if c.Name == "sparkwing" && len(c.Args) > 1 {
+			if c.Args[0] == "pipeline" && c.Args[1] == "trigger" {
+				triggered++
+			}
+			if c.Args[0] == "runs" && c.Args[1] == "status" && flagValue(c.Args, "--run") == "run-1" && triggered >= 2 {
+				return strings.Replace(out, `"status":"running"`, `"status":"cancelled"`, 1)
+			}
+		}
+		return out
+	})
+	if err == nil {
+		t.Fatal("dead peer passed overall")
+	}
+	if len(fake.triggered) > 2 {
+		t.Fatalf("triggered B2 despite B1 already cancelled after A1; triggered=%v", fake.triggered)
+	}
+}
+
+// The last phase is gated too: an anchor that ended before B2 finished probing fails the run at
+// B2's gate, and the report names the gap.
+func TestConformGatesTheLastPhaseOnItsPeers(t *testing.T) {
+	triggered := 0
+	_, evidence, err := driveWrapped(t, func(c isolationCommand, out string) string {
+		if c.Name == "sparkwing" && len(c.Args) > 1 {
+			if c.Args[0] == "pipeline" && c.Args[1] == "trigger" {
+				triggered++
+			}
+			if c.Args[0] == "runs" && c.Args[1] == "status" && flagValue(c.Args, "--run") == "run-1" && triggered >= 3 {
+				return strings.Replace(out, `"status":"running"`, `"status":"cancelled"`, 1)
+			}
+		}
+		return out
+	})
+	report, _ := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
+	if err == nil || !strings.Contains(string(report), "the sequence stopped: check everything B2 owed before the next phase: peer B1 was not running after B2 probed it") {
+		t.Fatalf("conform = %v, report = %.600s; want B2's gate to stop the sequence on B1", err, report)
+	}
+}
+
+// A capacity request of the run that owns a node may share it, since the launcher places requests
+// only on fresh nodes or their own run's; a request of any other run on the node fails C2.
+func TestConformJudgesCapacityRequestsByTheirRun(t *testing.T) {
+	for run, wantPass := range map[string]bool{"run-1": true, "run-9": false} {
+		_, _, err := driveWrapped(t, func(c isolationCommand, out string) string {
+			if c.Name == "kubectl" && flagValue(c.Args, "--field-selector") == "spec.nodeName=node-b1" {
+				var pods kubeList[kubePod]
+				_ = json.Unmarshal([]byte(out), &pods)
+				p := isoPod("capacity-1", "10.9.20.12", true)
+				p.Metadata.Namespace = isoJobNS
+				p.Metadata.Labels = map[string]string{capacityRequestLabel: "true"}
+				p.Metadata.Annotations = map[string]string{capacityDemandAnnotation: `{"binding":{"Team":"stg-iso-b","RunID":"` + run + `"}}`}
+				return list(append(pods.Items, p))
+			}
+			return out
+		})
+		if (err == nil) != wantPass {
+			t.Errorf("capacity request of %s: conform = %v, want pass=%v", run, err, wantPass)
+		}
+	}
+}
+
 func driveIsolation(t *testing.T, breach bool) (*isoClusterFake, string, error) {
 	t.Helper()
 	fake := newIsoFake(t)
@@ -850,8 +1059,8 @@ func TestConformRunsThreePhasesAndKeepsTheEvidence(t *testing.T) {
 	for _, name := range []string{
 		"preflight.json", "targets.json", "plans/B2.json", "runs/A1-probe.log", "runs/B1-status.json", "runs/B1-status-ready.json",
 		"runs/B1-status-probed.json", "runs/B1-status-end.json", "cluster/phases/B1-ready.json", "cluster/phases/B2-probed.json",
-		"results.ndjson", "evaluation.json", "cluster/pods-B1.json",
-		"cluster/nodes/node-b1.json", "cluster/nodes/node-b1-pods.json", "cluster/nodeclaims.json", "cluster/networkpolicies.json", "SHA256SUMS",
+		"results.ndjson", "evaluation.json", "runs/B1-status.ndjson", "cluster/observations.ndjson",
+		"cluster/nodes.json", "cluster/nodeclaims.json", "cluster/networkpolicies.json", "SHA256SUMS",
 	} {
 		if _, err := os.Stat(filepath.Join(evidence, name)); err != nil {
 			t.Errorf("evidence %s: %v", name, err)
@@ -870,14 +1079,16 @@ func TestProbeRunningNeedsTheLatestObservation(t *testing.T) {
 	l := newPlacementLog()
 	var p runPod
 	p.Metadata.Name, p.JobID, p.Status.Phase = "B1-probe", isolationprobe.ProbeJob, "Running"
-	l.pods["B1"] = map[string]runPod{p.Metadata.Name: p}
-	l.present["B1"] = map[string]bool{p.Metadata.Name: true}
+	l.samples = append(l.samples, placementSample{pods: map[string][]runPod{"B1": {p}}})
 	if !l.probeRunning("B1") {
 		t.Fatal("a running probe pod in the latest observation is not running")
 	}
-	l.present["B1"] = map[string]bool{}
+	l.samples = append(l.samples, placementSample{pods: map[string][]runPod{}})
 	if l.probeRunning("B1") {
 		t.Fatal("a probe pod gone from the latest observation still counts as running")
+	}
+	if len(l.samples[0].pods["B1"]) != 1 {
+		t.Fatal("a later observation replaced an earlier one")
 	}
 }
 

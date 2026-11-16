@@ -145,14 +145,16 @@ type awardBinding struct {
 }
 
 const (
-	awardBindingAnnotation = "sparkwing.dev/award-binding"
-	jobPodLabel            = "sparkwing.dev/job"
-	teamNodeLabel          = "node-restriction.kubernetes.io/sparkwing-team-node"
-	usedTeamNodeLabel      = "node-restriction.kubernetes.io/sparkwing-used-team"
-	usedRunNodeLabel       = "node-restriction.kubernetes.io/sparkwing-used-run"
-	poolNamespaceLabel     = "sparkwing.dev/launcher-namespace"
-	nodePoolLabel          = "karpenter.sh/nodepool"
-	nodeClassLabel         = "karpenter.k8s.aws/ec2nodeclass"
+	awardBindingAnnotation   = "sparkwing.dev/award-binding"
+	jobPodLabel              = "sparkwing.dev/job"
+	teamNodeLabel            = "node-restriction.kubernetes.io/sparkwing-team-node"
+	usedTeamNodeLabel        = "node-restriction.kubernetes.io/sparkwing-used-team"
+	usedRunNodeLabel         = "node-restriction.kubernetes.io/sparkwing-used-run"
+	poolNamespaceLabel       = "sparkwing.dev/launcher-namespace"
+	capacityRequestLabel     = "sparkwing.dev/capacity-request"
+	capacityDemandAnnotation = "sparkwing.dev/capacity-demand"
+	nodePoolLabel            = "karpenter.sh/nodepool"
+	nodeClassLabel           = "karpenter.k8s.aws/ec2nodeclass"
 )
 
 // safety: the launcher labels a team's nodes with this hash of the job namespace and team, and the
@@ -189,11 +191,18 @@ func probePort(p *kubeProbe) int {
 }
 
 // safety: only ports something is known to serve count as listening, so a refusal there is
-// judged as the packet reaching the host; probe ports come from the kubelet's own checks.
-func podTargets(item, what string, pods []kubePod, skipPorts map[int]bool) []isolationprobe.Target {
+// judged as the packet reaching the host; probe ports come from the kubelet's own checks. A running
+// pod on its node's network, or without an address, cannot be probed as a pod, so it is returned
+// for discovery to refuse instead of being skipped.
+func podTargets(item, what string, pods []kubePod, skipPorts map[int]bool) ([]isolationprobe.Target, []string) {
 	var out []isolationprobe.Target
+	var untargetable []string
 	for _, p := range pods {
+		if p.Status.Phase != "Running" {
+			continue
+		}
 		if p.Status.PodIP == "" || p.Spec.HostNetwork {
+			untargetable = append(untargetable, p.Metadata.Name)
 			continue
 		}
 		ports := map[int]bool{}
@@ -219,7 +228,7 @@ func podTargets(item, what string, pods []kubePod, skipPorts map[int]bool) []iso
 			})
 		}
 	}
-	return out
+	return out, untargetable
 }
 
 func sortedPorts(ports map[int]bool) []int {
@@ -328,8 +337,10 @@ type targetInputs struct {
 	VPCResolver        string
 }
 
-// safety: each group is a listener the fence must hide, so discovery that finds none of one fails
-// rather than letting the run pass without probing it.
+// safety: each group is a boundary the fence must hold, so discovery fails unless every group
+// yields something to probe, and a running member it cannot probe fails it too, rather than letting
+// the run pass without that boundary. Cluster DNS answers on port 53 by design; the probe's cluster
+// DNS lookup is that port's positive control, and its other ports must stay blocked.
 func staticTargets(in targetInputs) ([]isolationprobe.Target, error) {
 	var errs []error
 	need := func(ok bool, what string) {
@@ -337,36 +348,50 @@ func staticTargets(in targetInputs) ([]isolationprobe.Target, error) {
 			errs = append(errs, fmt.Errorf("discovery found no %s", what))
 		}
 	}
-	need(len(in.ControllerPods) > 0, "controller namespace pods")
-	need(len(in.ControllerServices) > 0, "controller namespace services")
-	need(len(in.DNSPods) > 0, "cluster DNS pods")
-	need(len(in.DNSServices) > 0, "cluster DNS services")
-	need(len(in.IngressPods) > 0, "ingress pods")
-	need(len(in.InfraNodes) > 0, "controller nodes")
 	need(in.Database != "", "controller database endpoint")
 	need(in.VPCResolver != "", "VPC resolver address")
 	need(in.APIService.Spec.ClusterIP != "", "ClusterIP on the kubernetes Service")
 	need(in.PublicAPI != "", "public kube API endpoint")
 	need(in.Namespace != "", "controller namespace for the kube API grade")
+	group := func(what string, targets []isolationprobe.Target, untargetable []string) []isolationprobe.Target {
+		if len(untargetable) > 0 {
+			errs = append(errs, fmt.Errorf("discovery cannot probe %s %s: each runs on its node's network or has no address", what, strings.Join(untargetable, ", ")))
+		}
+		if len(targets) == 0 {
+			errs = append(errs, fmt.Errorf("discovery found no %s to probe", what))
+		}
+		return targets
+	}
+	t, bad := podTargets("C6", "controller namespace", in.ControllerPods, nil)
+	controllerPods := group("controller namespace pods", t, bad)
+	controllerServices := group("controller namespace services", serviceTargets("C6", "controller namespace", in.ControllerServices), nil)
+	t, bad = podTargets("C6", "cluster DNS", in.DNSPods, map[int]bool{53: true})
+	dnsPods := group("cluster DNS pods", t, bad)
+	dnsServices, dnsAddressed := dnsServiceTargets(in.DNSServices)
+	need(dnsAddressed, "cluster DNS service with a ClusterIP")
+	t, bad = podTargets("C6", "ingress", in.IngressPods, nil)
+	ingressPods := group("ingress pods", t, bad)
+	var infra []isolationprobe.Target
+	var unaddressed []string
+	for _, n := range in.InfraNodes {
+		t := nodeTargets("C6", "controller node "+n.Metadata.Name, n.internalIPs())
+		if len(t) == 0 {
+			unaddressed = append(unaddressed, n.Metadata.Name)
+		}
+		infra = append(infra, t...)
+	}
+	infra = group("controller nodes", infra, unaddressed)
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
 	var out []isolationprobe.Target
 	out = append(out, metadataTargets()...)
-	out = append(out, podTargets("C6", "controller namespace", in.ControllerPods, nil)...)
-	out = append(out, serviceTargets("C6", "controller namespace", in.ControllerServices)...)
-	out = append(out, podTargets("C6", "cluster DNS", in.DNSPods, map[int]bool{53: true})...)
-	for _, s := range in.DNSServices {
-		for _, port := range s.Spec.Ports {
-			if port.Port != 53 && (port.Protocol == "" || port.Protocol == "TCP") {
-				out = append(out, isolationprobe.Target{Item: "C6", Name: "cluster DNS service metrics", Address: net.JoinHostPort(s.Spec.ClusterIP, strconv.Itoa(port.Port)), Expect: isolationprobe.ExpectBlocked, Listening: true})
-			}
-		}
-	}
-	out = append(out, podTargets("C6", "ingress", in.IngressPods, nil)...)
-	for _, n := range in.InfraNodes {
-		out = append(out, nodeTargets("C6", "controller node "+n.Metadata.Name, n.internalIPs())...)
-	}
+	out = append(out, controllerPods...)
+	out = append(out, controllerServices...)
+	out = append(out, dnsPods...)
+	out = append(out, dnsServices...)
+	out = append(out, ingressPods...)
+	out = append(out, infra...)
 	out = append(out,
 		isolationprobe.Target{Item: "C6", Name: "controller database", Address: in.Database, Expect: isolationprobe.ExpectBlocked, Listening: true},
 		isolationprobe.Target{Item: "C6", Name: "VPC resolver", Address: net.JoinHostPort(in.VPCResolver, "53"), Expect: isolationprobe.ExpectBlocked, Listening: true},
@@ -401,6 +426,23 @@ func staticTargets(in targetInputs) ([]isolationprobe.Target, error) {
 		}
 	}
 	return out, nil
+}
+
+func dnsServiceTargets(services []kubeService) ([]isolationprobe.Target, bool) {
+	var out []isolationprobe.Target
+	addressed := false
+	for _, s := range services {
+		if s.Spec.ClusterIP == "" || s.Spec.ClusterIP == "None" {
+			continue
+		}
+		addressed = true
+		for _, port := range s.Spec.Ports {
+			if port.Port != 53 && (port.Protocol == "" || port.Protocol == "TCP") {
+				out = append(out, isolationprobe.Target{Item: "C6", Name: "cluster DNS service metrics", Address: net.JoinHostPort(s.Spec.ClusterIP, strconv.Itoa(port.Port)), Expect: isolationprobe.ExpectBlocked, Listening: true})
+			}
+		}
+	}
+	return out, addressed
 }
 
 func hasJudgedItem(targets []isolationprobe.Target, item string) bool {

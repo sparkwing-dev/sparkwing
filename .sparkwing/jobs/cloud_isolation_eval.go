@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"sparkwing-pipelines/isolationprobe"
 	"sparkwing-pipelines/isolationprobe/fixture"
 	"strings"
@@ -102,22 +101,85 @@ func evaluateIsolation(namespace string, runs []isolationRun, nodes map[string]i
 	if len(teams) != 2 {
 		add("C1", "runs used %d teams, want 2", len(teams))
 	}
-
-	nodeRun := map[string]*isolationRun{}
-	for i := range runs {
-		r := &runs[i]
+	for _, r := range runs {
 		if r.RunID == "" {
 			add("C13", "%s was not run; the sequence stopped before it", r.Label)
 			continue
 		}
-		judgePlacement(namespace, r, nodes, nodeRun, add)
-		for _, f := range probeFindings(*r) {
+		for _, f := range probeFindings(r) {
 			add(f.item, "%s", f.text)
 		}
 		for _, peer := range r.Peers {
 			if !anchorsAlive[peer] {
 				add("C9", "peer %s was not running after %s probed it, so its listener proves nothing", peer, r.Label)
 			}
+		}
+	}
+	placementFindings(namespace, runs, nodes, true, add)
+	return verdict(fails)
+}
+
+func verdict(fails map[string][]string) isolationEvaluation {
+	eval := isolationEvaluation{OK: true}
+	for _, it := range isolationItems {
+		failures := slices.Compact(slices.Sorted(slices.Values(fails[it.id])))
+		v := itemVerdict{Item: it.id, Title: it.title, OK: len(failures) == 0, Failures: failures}
+		eval.OK = eval.OK && v.OK
+		eval.Items = append(eval.Items, v)
+	}
+	return eval
+}
+
+// safety: a node passes only with this staging pool's namespace, the run's own team labels and the
+// used-run fence the launcher computes for this exact run, so a node fenced to any other run, team
+// or pool fails even when each value is unique. A single live observation, judged with complete
+// false, skips what one sample cannot show, such as a node it did not catch.
+func placementFindings(namespace string, runs []isolationRun, nodes map[string]isolationNode, complete bool, add func(string, string, ...any)) {
+	nodeRun := map[string]*isolationRun{}
+	for i := range runs {
+		r := &runs[i]
+		if r.RunID == "" {
+			continue
+		}
+		probe := probePod(*r)
+		if complete && probe == nil {
+			add("C2", "%s has no probe pod in %s", r.Label, namespace)
+		}
+		team, fence := teamNodeValue(namespace, r.Team), runNodeValue(namespace, r.RunID)
+		for _, p := range r.Pods {
+			for _, s := range p.Spec {
+				add("C3", "%s pod %s: %s", r.Label, p.Name, s)
+			}
+			if p.Node == "" {
+				if complete {
+					add("C2", "%s pod %s was never seen on a node", r.Label, p.Name)
+				}
+				continue
+			}
+			if other, ok := nodeRun[p.Node]; ok && other.Label != r.Label {
+				add("C2", "%s and %s share node %s", other.Label, r.Label, p.Node)
+			}
+			nodeRun[p.Node] = r
+			n, ok := nodes[p.Node]
+			switch {
+			case !ok:
+				if complete {
+					add("C13", "%s pod %s ran on node %s, which was never captured", r.Label, p.Name, p.Node)
+				}
+				continue
+			case n.Pool != namespace:
+				add("C2", "%s node %s belongs to pool namespace %q, want %q", r.Label, p.Node, n.Pool, namespace)
+			case n.TeamNode != team || n.UsedTeam != team:
+				add("C2", "%s node %s carries team labels %q/%q, want %q", r.Label, p.Node, n.TeamNode, n.UsedTeam, team)
+			case n.UsedRun != fence:
+				add("C2", "%s node %s is fenced to %q, want this run's %q", r.Label, p.Node, n.UsedRun, fence)
+			}
+			if complete && !n.Claimed {
+				add("C13", "%s node %s has no captured NodeClaim", r.Label, p.Node)
+			}
+		}
+		if complete && probe != nil && len(r.Ready) > 0 {
+			readyFindings(*r, *probe, nodes, add)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(nodeRun)) {
@@ -128,57 +190,9 @@ func evaluateIsolation(namespace string, runs []isolationRun, nodes map[string]i
 			}
 		}
 	}
-
-	eval := isolationEvaluation{OK: true}
-	for _, it := range isolationItems {
-		v := itemVerdict{Item: it.id, Title: it.title, OK: len(fails[it.id]) == 0, Failures: fails[it.id]}
-		sort.Strings(v.Failures)
-		eval.OK = eval.OK && v.OK
-		eval.Items = append(eval.Items, v)
-	}
-	return eval
 }
 
-// safety: a node passes only when it carries this staging pool's namespace, the run's own team
-// labels and the used-run fence the launcher computes for this exact run, so a node fenced to any
-// other run, team or pool fails even when each value is unique.
-func judgePlacement(namespace string, r *isolationRun, nodes map[string]isolationNode, nodeRun map[string]*isolationRun, add func(string, string, ...any)) {
-	probe := probePod(*r)
-	if probe == nil {
-		add("C2", "%s has no probe pod in %s", r.Label, namespace)
-		return
-	}
-	team, fence := teamNodeValue(namespace, r.Team), runNodeValue(namespace, r.RunID)
-	for _, p := range r.Pods {
-		for _, s := range p.Spec {
-			add("C3", "%s pod %s: %s", r.Label, p.Name, s)
-		}
-		if p.Node == "" {
-			add("C2", "%s pod %s was never seen on a node", r.Label, p.Name)
-			continue
-		}
-		if other, ok := nodeRun[p.Node]; ok && other.Label != r.Label {
-			add("C2", "%s and %s share node %s", other.Label, r.Label, p.Node)
-		}
-		nodeRun[p.Node] = r
-		n, ok := nodes[p.Node]
-		switch {
-		case !ok:
-			add("C13", "%s pod %s ran on node %s, which was never captured", r.Label, p.Name, p.Node)
-		case n.Pool != namespace:
-			add("C2", "%s node %s belongs to pool namespace %q, want %q", r.Label, p.Node, n.Pool, namespace)
-		case n.TeamNode != team || n.UsedTeam != team:
-			add("C2", "%s node %s carries team labels %q/%q, want %q", r.Label, p.Node, n.TeamNode, n.UsedTeam, team)
-		case n.UsedRun != fence:
-			add("C2", "%s node %s is fenced to %q, want this run's %q", r.Label, p.Node, n.UsedRun, fence)
-		}
-		if ok && !n.Claimed {
-			add("C13", "%s node %s has no captured NodeClaim", r.Label, p.Node)
-		}
-	}
-	if len(r.Ready) == 0 {
-		return
-	}
+func readyFindings(r isolationRun, probe isolationPod, nodes map[string]isolationNode, add func(string, string, ...any)) {
 	ready := r.Ready[0]
 	if !slices.Contains(ready.PodIPs, probe.PodIP) {
 		add("C11", "%s reported pod addresses %v, but its pod is %s", r.Label, ready.PodIPs, probe.PodIP)

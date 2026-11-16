@@ -362,10 +362,7 @@ func (d *isolationDriver) sequence(ctx context.Context, static []isolationprobe.
 			return err
 		}
 		d.statusAt(ctx, r, "probed")
-		if err := d.peersOutlived(ctx, r); err != nil {
-			return err
-		}
-		if err := d.step(ctx, "check every result "+r.Label+" owed", func() error { return d.checkRun(ctx, r) }); err != nil {
+		if err := d.step(ctx, "check everything "+r.Label+" owed before the next phase", func() error { return d.gate(ctx, r) }); err != nil {
 			return err
 		}
 		if r.Role == isolationprobe.RoleProbe {
@@ -377,9 +374,12 @@ func (d *isolationDriver) sequence(ctx context.Context, static []isolationprobe.
 	return nil
 }
 
-// safety: a peer's listener proves the fence only while the peer is live, so each anchor must still
-// be running with its probe pod up after every run that aimed at it finished probing.
-func (d *isolationDriver) peersOutlived(ctx context.Context, r *isolationRun) error {
+// safety: every phase transition, the last one included, waits on everything the evidence already
+// shows: the run's own results, each peer it aimed at still live, the placement in every
+// observation so far and any evidence that went missing. Any problem ends the sequence before
+// another hostile job starts.
+func (d *isolationDriver) gate(ctx context.Context, r *isolationRun) error {
+	var problems []string
 	for _, label := range r.Peers {
 		i := slices.IndexFunc(d.runs, func(p *isolationRun) bool { return p.Label == label })
 		if i < 0 {
@@ -394,8 +394,32 @@ func (d *isolationDriver) peersOutlived(ctx context.Context, r *isolationRun) er
 			live = live && prior
 		}
 		d.alive[label] = live
+		if !live {
+			problems = append(problems, fmt.Sprintf("peer %s was not running after %s probed it", label, r.Label))
+		}
 	}
-	return nil
+	if err := d.checkRun(ctx, r); err != nil {
+		problems = append(problems, err.Error())
+	}
+	records, nodes := d.records()
+	placementFindings(d.args.JobNamespace, records, nodes, true, func(item, format string, args ...any) {
+		problems = append(problems, item+" "+fmt.Sprintf(format, args...))
+	})
+	history := d.historyFailures()
+	for _, item := range slices.Sorted(maps.Keys(history)) {
+		for _, f := range history[item] {
+			problems = append(problems, item+" "+f)
+		}
+	}
+	problems = append(problems, d.gaps...)
+	switch len(problems) {
+	case 0:
+		return nil
+	case 1:
+		return errors.New(problems[0])
+	default:
+		return fmt.Errorf("%s, and %d more problems", problems[0], len(problems)-1)
+	}
 }
 
 func (d *isolationDriver) plan(r *isolationRun, static []isolationprobe.Target, peers map[string]peerFacts) isolationprobe.Plan {
@@ -683,6 +707,9 @@ func (d *isolationDriver) status(ctx context.Context, r *isolationRun) error {
 	if err := d.save("runs/"+r.Label+"-status.json", []byte(out)); err != nil {
 		return err
 	}
+	if err := d.appendFile("runs/"+r.Label+"-status.ndjson", []byte(out)); err != nil {
+		return err
+	}
 	var last struct {
 		Status string `json:"status"`
 		Team   string `json:"team"`
@@ -720,24 +747,12 @@ func (d *isolationDriver) statusAt(ctx context.Context, r *isolationRun, milesto
 		}
 	}
 	if err == nil {
-		err = d.saveJSON("cluster/phases/"+r.Label+"-"+milestone+".json", d.seen.snapshot())
+		latest := d.seen.latest()
+		err = d.saveJSON("cluster/phases/"+r.Label+"-"+milestone+".json", observationRecord{Sample: len(d.seen.samples), Pods: latest.podDocs, Nodes: latest.nodeDocs, OnNode: latest.nodePods})
 	}
 	if err != nil {
 		d.gaps = append(d.gaps, r.Label+" evidence at "+milestone+" was not kept: "+err.Error())
 	}
-}
-
-type placementSnapshot struct {
-	Pods  map[string][]json.RawMessage `json:"pods"`
-	Nodes []json.RawMessage            `json:"nodes"`
-}
-
-func (l *placementLog) snapshot() placementSnapshot {
-	s := placementSnapshot{Pods: map[string][]json.RawMessage{}, Nodes: sortedDocs(l.nodeDocs)}
-	for label, docs := range l.podDocs {
-		s.Pods[label] = sortedDocs(docs)
-	}
-	return s
 }
 
 func terminal(status string) bool {
@@ -861,54 +876,90 @@ func podsOfRun(jobs []kubeJob, pods []kubePod, runID string) []runPod {
 	return out
 }
 
-// safety: the launcher deletes a run's Jobs when the run ends, so placement is judged from these
-// records of each run's pods, their nodes, every pod on those nodes and the NodeClaims, kept while
-// the runs were live, never from a fetch after teardown.
+// safety: the launcher deletes a run's Jobs when the run ends, and a later observation can look
+// healthy after an unsafe one, so every observation is kept exactly as seen and judged on its own.
+// Nothing recorded is replaced: samples only append, and a Job's run or a node's NodeClaim is kept
+// from the first time it is seen.
 type placementLog struct {
-	pods     map[string]map[string]runPod
-	present  map[string]map[string]bool
-	podDocs  map[string]map[string]json.RawMessage
-	jobRun   map[string]string
+	samples []placementSample
+	jobRun  map[string]string
+	claims  map[string]json.RawMessage
+}
+
+// safety: one sample is one poll's view of each run's pods, the nodes they use and every pod on
+// those nodes, decoded for judging and raw for the evidence.
+type placementSample struct {
+	pods     map[string][]runPod
+	podDocs  map[string][]json.RawMessage
 	nodes    map[string]kubeNode
 	nodeDocs map[string]json.RawMessage
-	onNode   map[string]map[string]json.RawMessage
-	claims   map[string]json.RawMessage
+	onNode   map[string][]kubePod
+	nodePods map[string][]json.RawMessage
 }
 
 func newPlacementLog() *placementLog {
-	return &placementLog{
-		pods: map[string]map[string]runPod{}, present: map[string]map[string]bool{}, podDocs: map[string]map[string]json.RawMessage{}, jobRun: map[string]string{},
-		nodes: map[string]kubeNode{}, nodeDocs: map[string]json.RawMessage{}, onNode: map[string]map[string]json.RawMessage{},
-		claims: map[string]json.RawMessage{},
-	}
+	return &placementLog{jobRun: map[string]string{}, claims: map[string]json.RawMessage{}}
 }
 
+func (l *placementLog) latest() placementSample {
+	if len(l.samples) == 0 {
+		return placementSample{}
+	}
+	return l.samples[len(l.samples)-1]
+}
+
+// safety: a pod counts for a peer's listener only while the latest observation still shows it
+// running, since an earlier record of a deleted pod keeps the phase it had.
 func (l *placementLog) probePod(label string) *runPod {
-	for _, name := range slices.Sorted(maps.Keys(l.pods[label])) {
-		if p := l.pods[label][name]; p.JobID == isolationprobe.ProbeJob {
+	for _, p := range l.latest().pods[label] {
+		if p.JobID == isolationprobe.ProbeJob {
 			return &p
 		}
 	}
 	return nil
 }
 
-// safety: a pod counts as running only if the latest observation still showed it, since the last
-// record of a deleted pod keeps the phase it had.
 func (l *placementLog) probeRunning(label string) bool {
 	p := l.probePod(label)
-	return p != nil && l.present[label][p.Metadata.Name] && p.Status.Phase == "Running"
+	return p != nil && p.Status.Phase == "Running"
 }
 
 func (l *placementLog) usedNodes() []string {
 	used := map[string]bool{}
-	for _, pods := range l.pods {
-		for _, p := range pods {
-			if p.Spec.NodeName != "" {
-				used[p.Spec.NodeName] = true
+	for _, s := range l.samples {
+		for _, pods := range s.pods {
+			for _, p := range pods {
+				if p.Spec.NodeName != "" {
+					used[p.Spec.NodeName] = true
+				}
 			}
 		}
 	}
 	return slices.Sorted(maps.Keys(used))
+}
+
+// safety: a pod on a tested node belongs to a run through its Job's award binding, or for a
+// capacity request through the binding in its demand annotation, which places it only on its own
+// run's nodes.
+func (l *placementLog) nodePod(p kubePod, jobNamespace string) nodePod {
+	np := nodePod{Namespace: p.Metadata.Namespace, Name: p.Metadata.Name}
+	for _, o := range p.Metadata.OwnerReferences {
+		np.DaemonSet = np.DaemonSet || o.Kind == "DaemonSet"
+	}
+	if p.Metadata.Namespace != jobNamespace {
+		return np
+	}
+	if run := l.jobRun[p.Metadata.Labels[jobPodLabel]]; run != "" {
+		np.Run = run
+		return np
+	}
+	var demand struct {
+		Binding awardBinding `json:"binding"`
+	}
+	if p.Metadata.Labels[capacityRequestLabel] == "true" && json.Unmarshal([]byte(p.Metadata.Annotations[capacityDemandAnnotation]), &demand) == nil {
+		np.Run = demand.Binding.RunID
+	}
+	return np
 }
 
 func decodeRawList[T any](raw string) ([]T, []json.RawMessage, error) {
@@ -926,7 +977,7 @@ func decodeRawList[T any](raw string) ([]T, []json.RawMessage, error) {
 }
 
 // safety: list calls never fail for an object that is gone, so an observation after a node or Job
-// is deleted keeps the last record rather than losing it.
+// is deleted simply shows it absent, and the earlier samples still hold it.
 func (d *isolationDriver) observe(ctx context.Context) error {
 	jobsOut, err := d.kubectl(ctx, "get", "jobs", "-n", d.args.JobNamespace, "-o", "json")
 	if err != nil {
@@ -946,7 +997,7 @@ func (d *isolationDriver) observe(ctx context.Context) error {
 	}
 	for _, j := range jobs {
 		var b awardBinding
-		if json.Unmarshal([]byte(j.Metadata.Annotations[awardBindingAnnotation]), &b) == nil && b.RunID != "" {
+		if _, known := d.seen.jobRun[j.Metadata.Name]; !known && json.Unmarshal([]byte(j.Metadata.Annotations[awardBindingAnnotation]), &b) == nil && b.RunID != "" {
 			d.seen.jobRun[j.Metadata.Name] = b.RunID
 		}
 	}
@@ -954,28 +1005,26 @@ func (d *isolationDriver) observe(ctx context.Context) error {
 	for i, p := range pods {
 		doc[p.Metadata.Name] = podDocs[i]
 	}
+	sample := placementSample{pods: map[string][]runPod{}, podDocs: map[string][]json.RawMessage{}}
 	for _, r := range d.runs {
 		if r.RunID == "" {
 			continue
 		}
-		d.seen.present[r.Label] = map[string]bool{}
 		for _, p := range podsOfRun(jobs, pods, r.RunID) {
-			if d.seen.pods[r.Label] == nil {
-				d.seen.pods[r.Label], d.seen.podDocs[r.Label] = map[string]runPod{}, map[string]json.RawMessage{}
-			}
-			d.seen.pods[r.Label][p.Metadata.Name] = p
-			d.seen.podDocs[r.Label][p.Metadata.Name] = doc[p.Metadata.Name]
-			d.seen.present[r.Label][p.Metadata.Name] = true
+			sample.pods[r.Label] = append(sample.pods[r.Label], p)
+			sample.podDocs[r.Label] = append(sample.podDocs[r.Label], doc[p.Metadata.Name])
 		}
 	}
-	used := d.seen.usedNodes()
-	if len(used) == 0 {
-		return nil
+	d.seen.samples = append(d.seen.samples, sample)
+	if used := d.seen.usedNodes(); len(used) > 0 {
+		if err := d.observeNodes(ctx, used, &d.seen.samples[len(d.seen.samples)-1]); err != nil {
+			return err
+		}
 	}
-	return d.observeNodes(ctx, used)
+	return d.appendObservation(d.seen.latest())
 }
 
-func (d *isolationDriver) observeNodes(ctx context.Context, used []string) error {
+func (d *isolationDriver) observeNodes(ctx context.Context, used []string, sample *placementSample) error {
 	nodesOut, err := d.kubectl(ctx, "get", "nodes", "-o", "json")
 	if err != nil {
 		return err
@@ -984,9 +1033,11 @@ func (d *isolationDriver) observeNodes(ctx context.Context, used []string) error
 	if err != nil {
 		return err
 	}
+	sample.nodes, sample.nodeDocs = map[string]kubeNode{}, map[string]json.RawMessage{}
+	sample.onNode, sample.nodePods = map[string][]kubePod{}, map[string][]json.RawMessage{}
 	for i, n := range nodes {
 		if slices.Contains(used, n.Metadata.Name) {
-			d.seen.nodes[n.Metadata.Name], d.seen.nodeDocs[n.Metadata.Name] = n, nodeDocs[i]
+			sample.nodes[n.Metadata.Name], sample.nodeDocs[n.Metadata.Name] = n, nodeDocs[i]
 		}
 	}
 	for _, name := range used {
@@ -998,12 +1049,7 @@ func (d *isolationDriver) observeNodes(ctx context.Context, used []string) error
 		if err != nil {
 			return err
 		}
-		if d.seen.onNode[name] == nil {
-			d.seen.onNode[name] = map[string]json.RawMessage{}
-		}
-		for i, p := range pods {
-			d.seen.onNode[name][p.Metadata.Namespace+"/"+p.Metadata.Name] = docs[i]
-		}
+		sample.onNode[name], sample.nodePods[name] = pods, docs
 	}
 	missing := slices.ContainsFunc(used, func(name string) bool { return d.seen.claims[name] == nil })
 	if !missing {
@@ -1018,11 +1064,41 @@ func (d *isolationDriver) observeNodes(ctx context.Context, used []string) error
 		return err
 	}
 	for i, c := range claims {
-		if slices.Contains(used, c.Status.NodeName) {
+		if slices.Contains(used, c.Status.NodeName) && d.seen.claims[c.Status.NodeName] == nil {
 			d.seen.claims[c.Status.NodeName] = claimDocs[i]
 		}
 	}
 	return nil
+}
+
+type observationRecord struct {
+	Sample int                          `json:"sample"`
+	Pods   map[string][]json.RawMessage `json:"pods"`
+	Nodes  map[string]json.RawMessage   `json:"nodes,omitempty"`
+	OnNode map[string][]json.RawMessage `json:"pods_on_node,omitempty"`
+}
+
+// safety: the evidence file only grows, one line per observation, so no later sample can replace
+// the record of an earlier one.
+func (d *isolationDriver) appendObservation(s placementSample) error {
+	line, err := json.Marshal(observationRecord{Sample: len(d.seen.samples), Pods: s.podDocs, Nodes: s.nodeDocs, OnNode: s.nodePods})
+	if err != nil {
+		return err
+	}
+	return d.appendFile("cluster/observations.ndjson", append(line, '\n'))
+}
+
+func (d *isolationDriver) appendFile(name string, data []byte) error {
+	path := filepath.Join(d.evidence, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	return errors.Join(werr, f.Close())
 }
 
 type kubeNodeClaim struct {
@@ -1080,54 +1156,111 @@ func (d *isolationDriver) finish(ctx context.Context, stopped error) error {
 	return d.judge(ctx, stopped)
 }
 
+func isolationPodOf(p runPod) isolationPod {
+	return isolationPod{
+		Name: p.Metadata.Name, Job: p.JobID, Node: p.Spec.NodeName, PodIP: p.Status.PodIP, HostIP: p.Status.HostIP,
+		Phase: p.Status.Phase, Team: p.Metadata.Labels["sparkwing.dev/team"], Spec: podSpecFindings(p.kubePod),
+	}
+}
+
+func (d *isolationDriver) isolationNodeOf(n kubeNode, pods []kubePod) isolationNode {
+	node := isolationNode{
+		Name: n.Metadata.Name, IPs: n.internalIPs(), TeamNode: n.Metadata.Labels[teamNodeLabel], UsedTeam: n.Metadata.Labels[usedTeamNodeLabel],
+		UsedRun: n.Metadata.Labels[usedRunNodeLabel], Pool: n.Metadata.Labels[poolNamespaceLabel], NodePool: n.Metadata.Labels[nodePoolLabel],
+		NodeClass: n.Metadata.Labels[nodeClassLabel], Claimed: d.seen.claims[n.Metadata.Name] != nil,
+	}
+	for _, p := range pods {
+		node.Pods = append(node.Pods, d.seen.nodePod(p, d.args.JobNamespace))
+	}
+	return node
+}
+
+// safety: one observation is judged alone, with each started run's pods as they were then and only
+// the nodes and occupants that observation caught.
+func (d *isolationDriver) sampleState(s placementSample) ([]isolationRun, map[string]isolationNode) {
+	runs := make([]isolationRun, 0, len(d.runs))
+	for _, r := range d.runs {
+		rec := isolationRun{Label: r.Label, Team: r.Team, RunID: r.RunID}
+		for _, p := range s.pods[r.Label] {
+			rec.Pods = append(rec.Pods, isolationPodOf(p))
+		}
+		runs = append(runs, rec)
+	}
+	nodes := map[string]isolationNode{}
+	for name, n := range s.nodes {
+		nodes[name] = d.isolationNodeOf(n, s.onNode[name])
+	}
+	return runs, nodes
+}
+
+// safety: the whole record judges each run's pods as last seen, each node as last seen and every
+// pod ever seen on a node; the per-sample history judges everything earlier.
 func (d *isolationDriver) records() ([]isolationRun, map[string]isolationNode) {
+	pods := map[string]map[string]runPod{}
+	nodes := map[string]kubeNode{}
+	occupants := map[string]map[string]kubePod{}
+	for _, s := range d.seen.samples {
+		for label, ps := range s.pods {
+			if pods[label] == nil {
+				pods[label] = map[string]runPod{}
+			}
+			for _, p := range ps {
+				pods[label][p.Metadata.Name] = p
+			}
+		}
+		for name, n := range s.nodes {
+			nodes[name] = n
+		}
+		for name, ps := range s.onNode {
+			if occupants[name] == nil {
+				occupants[name] = map[string]kubePod{}
+			}
+			for _, p := range ps {
+				occupants[name][p.Metadata.Namespace+"/"+p.Metadata.Name] = p
+			}
+		}
+	}
 	records := make([]isolationRun, 0, len(d.runs))
 	for _, r := range d.runs {
 		rec := *r
 		rec.Pods = nil
-		for _, name := range slices.Sorted(maps.Keys(d.seen.pods[r.Label])) {
-			p := d.seen.pods[r.Label][name]
-			rec.Pods = append(rec.Pods, isolationPod{
-				Name: p.Metadata.Name, Job: p.JobID, Node: p.Spec.NodeName, PodIP: p.Status.PodIP, HostIP: p.Status.HostIP,
-				Phase: p.Status.Phase, Team: p.Metadata.Labels["sparkwing.dev/team"], Spec: podSpecFindings(p.kubePod),
-			})
+		for _, name := range slices.Sorted(maps.Keys(pods[r.Label])) {
+			rec.Pods = append(rec.Pods, isolationPodOf(pods[r.Label][name]))
 		}
 		records = append(records, rec)
 	}
-	nodes := map[string]isolationNode{}
-	for name, n := range d.seen.nodes {
-		node := isolationNode{
-			Name: name, IPs: n.internalIPs(), TeamNode: n.Metadata.Labels[teamNodeLabel], UsedTeam: n.Metadata.Labels[usedTeamNodeLabel],
-			UsedRun: n.Metadata.Labels[usedRunNodeLabel], Pool: n.Metadata.Labels[poolNamespaceLabel], NodePool: n.Metadata.Labels[nodePoolLabel],
-			NodeClass: n.Metadata.Labels[nodeClassLabel], Claimed: d.seen.claims[name] != nil,
+	judged := map[string]isolationNode{}
+	for name, n := range nodes {
+		var ps []kubePod
+		for _, key := range slices.Sorted(maps.Keys(occupants[name])) {
+			ps = append(ps, occupants[name][key])
 		}
-		for _, key := range slices.Sorted(maps.Keys(d.seen.onNode[name])) {
-			var p kubePod
-			if json.Unmarshal(d.seen.onNode[name][key], &p) != nil {
-				continue
-			}
-			np := nodePod{Namespace: p.Metadata.Namespace, Name: p.Metadata.Name}
-			for _, o := range p.Metadata.OwnerReferences {
-				np.DaemonSet = np.DaemonSet || o.Kind == "DaemonSet"
-			}
-			if p.Metadata.Namespace == d.args.JobNamespace {
-				np.Run = d.seen.jobRun[p.Metadata.Labels[jobPodLabel]]
-			}
-			node.Pods = append(node.Pods, np)
-		}
-		nodes[name] = node
+		judged[name] = d.isolationNodeOf(n, ps)
 	}
-	return records, nodes
+	return records, judged
+}
+
+// safety: every observation is judged as it was seen, so an unsafe fence, pod spec or occupant
+// stays a failure even when a later observation looks healthy.
+func (d *isolationDriver) historyFailures() map[string][]string {
+	fails := map[string][]string{}
+	for i, s := range d.seen.samples {
+		runs, nodes := d.sampleState(s)
+		placementFindings(d.args.JobNamespace, runs, nodes, false, func(item, format string, args ...any) {
+			fails[item] = append(fails[item], fmt.Sprintf("observation %d: ", i+1)+fmt.Sprintf(format, args...))
+		})
+	}
+	return fails
 }
 
 func (d *isolationDriver) judge(ctx context.Context, stopped error) error {
 	records, nodes := d.records()
-	eval := evaluateIsolation(d.args.JobNamespace, records, nodes, d.alive)
+	eval := withFailures(evaluateIsolation(d.args.JobNamespace, records, nodes, d.alive), d.historyFailures())
 	if stopped != nil {
 		d.gaps = append(d.gaps, "the sequence stopped: "+stopped.Error())
 	}
 	if len(d.gaps) > 0 {
-		eval = withGaps(eval, d.gaps)
+		eval = withFailures(eval, map[string][]string{"C13": d.gaps})
 	}
 	var ndjson strings.Builder
 	for _, r := range records {
@@ -1145,15 +1278,6 @@ func (d *isolationDriver) judge(ctx context.Context, stopped error) error {
 	errs := []error{
 		d.saveJSON("runs.json", records), d.saveJSON("evaluation.json", eval), d.saveJSON("cluster/nodes.json", nodes),
 		d.save("results.ndjson", []byte(ndjson.String())), d.save("REPORT.md", []byte(isolationReport(d.args, records, eval, d.gaps))),
-	}
-	for label, docs := range d.seen.podDocs {
-		errs = append(errs, d.saveJSON("cluster/pods-"+label+".json", sortedDocs(docs)))
-	}
-	for name, doc := range d.seen.nodeDocs {
-		errs = append(errs, d.save("cluster/nodes/"+name+".json", doc))
-	}
-	for name, docs := range d.seen.onNode {
-		errs = append(errs, d.saveJSON("cluster/nodes/"+name+"-pods.json", sortedDocs(docs)))
 	}
 	errs = append(errs, d.saveJSON("cluster/nodeclaims.json", sortedDocs(d.seen.claims)))
 	if err := errors.Join(errs...); err != nil {
@@ -1184,17 +1308,17 @@ func sortedDocs(docs map[string]json.RawMessage) []json.RawMessage {
 	return out
 }
 
-// safety: anything the driver could not capture or finish fails the run as a gap, so evidence that
-// went missing never reads as a pass.
-func withGaps(eval isolationEvaluation, gaps []string) isolationEvaluation {
-	for i := range eval.Items {
-		if eval.Items[i].Item == "C13" {
-			eval.Items[i].Failures = append(eval.Items[i].Failures, gaps...)
-			eval.Items[i].OK = false
-		}
+// safety: failures found outside the final record, in earlier observations or in evidence that went
+// missing, join the items they undermine, so neither ever reads as a pass.
+func withFailures(eval isolationEvaluation, extra map[string][]string) isolationEvaluation {
+	fails := map[string][]string{}
+	for _, it := range eval.Items {
+		fails[it.Item] = append(fails[it.Item], it.Failures...)
 	}
-	eval.OK = false
-	return eval
+	for item, f := range extra {
+		fails[itemOf(item)] = append(fails[itemOf(item)], f...)
+	}
+	return verdict(fails)
 }
 
 func (d *isolationDriver) checksums() error {

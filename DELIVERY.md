@@ -1413,15 +1413,23 @@ sparkwing run cloud-isolation -- --database <staging database host>:5432 \
 The pipeline attacks staging only. It refuses a controller URL or namespace
 that is not staging's, and before the first upload it checks that both team
 profiles point at the staging controller and authenticate as their own teams.
-Target discovery fails when the cluster shows no controller pods or services,
-cluster DNS, ingress pods or controller nodes, or when the database endpoint or
-the VPC resolver is missing. Both addresses are passed at run time, so neither
-is stored in this repository.
+Target discovery fails when the controller pods or services, cluster DNS,
+ingress pods or controller nodes yield nothing to probe. It also fails when any
+of their running pods uses its node's network or has no address, and when the
+database endpoint or the VPC resolver is missing. Both addresses are passed at
+run time, so neither is stored in this repository.
 
 The run uploads the `isolation-probe` fixture as each team, in three phases on
-three fresh nodes. Each phase starts only after the run before it reported every
-result its plan owed and none failed. The first failure stops the sequence and
-cancels the runs it started, and the report is still written. The fixture's
+three fresh nodes. Each phase transition, the last one included, passes only
+when all of these hold:
+
+- the run reported every result its plan owed, and none failed;
+- every peer it probed is still running;
+- placement is correct in every observation so far;
+- no evidence has gone missing.
+
+The first failure stops the sequence and cancels the runs it started, and the
+report is still written. The fixture's
 sources live in `.sparkwing/isolationprobe`. Each probe job does the following:
 
 - reaches for instance metadata over IPv4 and IPv6;
@@ -1451,8 +1459,11 @@ report records the limit used.
 
 While the runs are live, the driver records each run's pods, the nodes they used,
 every pod seen on those nodes, their NodeClaims and each raw run status. It
-judges placement from those records, because the launcher deletes a run's Jobs
-when the run ends. Every result the plan owed must be present, from one manifest
+appends every observation to `cluster/observations.ndjson` and never replaces
+one. Each observation is judged on its own, so a wrong fence or an unsafe pod
+seen once stays a failure even if a later observation looks healthy. The
+launcher deletes a run's Jobs when the run ends, so placement comes only from
+these records. Every result the plan owed must be present, from one manifest
 shared by the probe and the driver. `REPORT.md` counts the verdicts by
 checklist item, lists each failure, and lists every check that was not probed.
 `results.ndjson` holds every result.
