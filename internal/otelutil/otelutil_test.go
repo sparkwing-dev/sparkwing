@@ -264,3 +264,49 @@ func TestInitServesMetricsOnlyWhenAsked(t *testing.T) {
 		t.Fatalf("/metrics does not serve the meter's instruments:\n%s", rec.Body.String())
 	}
 }
+
+func TestInitRefusesMalformedOTLPEndpoint(t *testing.T) {
+	const malformed = invalidEndpoint
+	for _, tc := range []struct {
+		name       string
+		tracesOnly bool
+		key, value string
+	}{
+		{"traces endpoint on a runner", true, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", malformed},
+		{"generic endpoint on a runner", true, "OTEL_EXPORTER_OTLP_ENDPOINT", malformed},
+		{"generic endpoint on a service", false, "OTEL_EXPORTER_OTLP_ENDPOINT", malformed},
+		{"logs endpoint on a service", false, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", malformed},
+		{"endpoint without a scheme", false, "OTEL_EXPORTER_OTLP_ENDPOINT", "SECRETHOST:4318"},
+		{"endpoint with a port and no host", true, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://:4318/SECRETPATH"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"} {
+				t.Setenv(key, "")
+			}
+			t.Setenv(tc.key, tc.value)
+			t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer SECRETBEARER")
+			old := slog.Default()
+			tracer, provider, propagator := otel.GetTracerProvider(), otel.GetMeterProvider(), otel.GetTextMapPropagator()
+			t.Cleanup(func() {
+				slog.SetDefault(old)
+				otel.SetTracerProvider(tracer)
+				otel.SetMeterProvider(provider)
+				otel.SetTextMapPropagator(propagator)
+			})
+			telemetry, err := Init(t.Context(), Config{ServiceName: "test", TracesOnly: tc.tracesOnly})
+			if err == nil {
+				_ = telemetry.Shutdown(t.Context())
+				t.Fatal("Init accepted a malformed endpoint")
+			}
+			if !strings.Contains(err.Error(), tc.key) {
+				t.Errorf("error does not name %s: %v", tc.key, err)
+			}
+			if strings.Contains(err.Error(), "SECRET") {
+				t.Errorf("error echoes the endpoint: %v", err)
+			}
+			if otel.GetTracerProvider() != tracer {
+				t.Error("Init installed a tracer provider for a refused endpoint")
+			}
+		})
+	}
+}
