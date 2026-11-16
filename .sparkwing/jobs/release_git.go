@@ -64,6 +64,11 @@ func staleReleaseTag(ctx context.Context, repo, version string) (bool, error) {
 		return false, err
 	}
 	commit = strings.TrimSpace(commit)
+	// safety: tracking refs are only as fresh as the last fetch, and another clone may have published the commit
+	// on a branch this checkout never fetched; refresh every origin head and keep the tag when that fails.
+	if _, err := releaseGit(ctx, repo, "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+		return false, fmt.Errorf("release: local tag %s exists, and origin's branches could not be fetched to prove its commit %s is unpublished, so it is kept: %w", version, short(commit), err)
+	}
 	remotes, err := releaseGit(ctx, repo, "for-each-ref", "--format=%(refname)", "--contains", commit, "refs/remotes/")
 	if err != nil {
 		return false, err

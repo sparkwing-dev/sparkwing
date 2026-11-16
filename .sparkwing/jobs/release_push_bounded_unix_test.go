@@ -188,6 +188,44 @@ func TestReleasePushStaleLocalTag(t *testing.T) {
 			t.Fatal("refusal published a tag")
 		}
 	})
+	t.Run("tag on a commit an unfetched origin branch has is refused", func(t *testing.T) {
+		f := newReleasePushFixture(t)
+		gitRun(t, f.repo, "tag", "-a", "v0.99.0", f.commit, "-m", "old release")
+		// safety: another clone published the commit; this clone has no tracking ref for that branch.
+		gitRun(t, f.origin, "fetch", f.detached, f.commit)
+		gitRun(t, f.origin, "update-ref", "refs/heads/published", f.commit)
+		before := strings.TrimSpace(gitRun(t, f.repo, "rev-parse", "v0.99.0"))
+		err := f.run(t, releasePushHost(t, f.commit))
+		if err == nil || !strings.Contains(err.Error(), "refs/remotes/origin/published") {
+			t.Fatalf("tag on a commit origin publishes on an unfetched branch = %v, want a refusal naming it", err)
+		}
+		if got := strings.TrimSpace(gitRun(t, f.repo, "rev-parse", "v0.99.0")); got != before {
+			t.Fatal("refusal changed the local tag")
+		}
+	})
+	t.Run("unreachable origin refuses the replacement", func(t *testing.T) {
+		f := newReleasePushFixture(t)
+		gitRun(t, f.detached, "commit", "--allow-empty", "--no-verify", "-m", "abandoned attempt")
+		gitRun(t, f.repo, "tag", "-a", "v0.99.0", strings.TrimSpace(gitRun(t, f.detached, "rev-parse", "HEAD")), "-m", "Release v0.99.0")
+		before := strings.TrimSpace(gitRun(t, f.repo, "rev-parse", "v0.99.0"))
+		realGit, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		bin := t.TempDir()
+		writeDeliveryTool(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor arg in \"$@\"; do [ \"$arg\" = fetch ] && { echo 'fetch refused' >&2; exit 1; }; done\nexec '"+realGit+"' \"$@\"\n")
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		err = f.run(t, releasePushHost(t, f.commit))
+		if err == nil || !strings.Contains(err.Error(), "fetch") {
+			t.Fatalf("replacement without a fresh view of origin = %v, want a refusal naming the fetch", err)
+		}
+		if got := strings.TrimSpace(gitRun(t, f.repo, "rev-parse", "v0.99.0")); got != before {
+			t.Fatal("refusal changed the local tag")
+		}
+		if strings.TrimSpace(gitRun(t, f.origin, "tag", "--list")) != "" {
+			t.Fatal("refusal published a tag")
+		}
+	})
 	t.Run("tag on origin is never touched", func(t *testing.T) {
 		f := newReleasePushFixture(t)
 		gitRun(t, f.repo, "tag", "-a", "v0.99.0", f.source, "-m", "Release v0.99.0")
