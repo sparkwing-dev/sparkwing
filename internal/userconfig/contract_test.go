@@ -207,7 +207,7 @@ func TestRejectRemovedAdmissionAdvisor(t *testing.T) {
 func TestRemovedKeysNameTheirReplacement(t *testing.T) {
 	for _, tc := range []struct{ raw, key, want string }{
 		{"profiles:\n  far:\n    controller: {url: https://ci.example.com}\n    default: true\n", "profiles.far.default", "pass --profile NAME on each command"},
-		{"run:\n  routing:\n    route: cloud\n", "run.routing.route", "--sw-route"},
+		{"run:\n  routing:\n    route: cloud\n", "run.routing.route", "--route burst"},
 	} {
 		_, err := Decode("config.yaml", []byte(tc.raw))
 		var field *FieldError

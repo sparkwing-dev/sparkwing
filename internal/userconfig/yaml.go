@@ -90,7 +90,7 @@ func yamlSyntaxError(file string, raw []byte, err error) error {
 // safety: a key a hard cut deleted fails the load and names its replacement, so an old file explains its own fix.
 var removedKeys = map[reflect.Type]map[string]string{
 	reflect.TypeFor[Profile]():    {"default": "pass --profile NAME on each command that should reach that controller"},
-	reflect.TypeFor[RunRouting](): {"route": "a bare sparkwing run stays local, and run.routing applies only to a run that passes --sw-route burst"},
+	reflect.TypeFor[RunRouting](): {"route": "a bare sparkwing run stays local, and run.routing applies only to a run that passes --route burst"},
 }
 
 type yamlVisit struct {

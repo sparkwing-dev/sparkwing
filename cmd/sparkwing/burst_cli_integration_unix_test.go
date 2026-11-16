@@ -188,7 +188,7 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	args := []string{"run", "burst", "--publish", "cloud", "-o=json"}
 	wantRuns := 1
 	if cache {
-		invoke("run", "burst", "--sw-route", "burst", "-o=json")
+		invoke("run", "burst", "--route", "burst", "-o=json")
 		burstVerifyDefaultCache(t, state, repo)
 		select {
 		case <-published:

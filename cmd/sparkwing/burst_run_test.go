@@ -289,17 +289,17 @@ func TestBareRunStaysLocalAndBurstNeedsAnExplicitRoute(t *testing.T) {
 	}
 	burst, err := resolveInvocationRouting(machine, nil, "gate", runFlags{route: "burst"})
 	if err != nil || burst.Route == nil || *burst.Route != "cloud" || *burst.Profile != "far" || len(burst.Prefer) != 2 {
-		t.Fatalf("--sw-route burst did not apply machine routing: %+v %v", burst, err)
+		t.Fatalf("--route burst did not apply machine routing: %+v %v", burst, err)
 	}
 	if err := runRoutedCommand(t.Context(), "gate", runFlags{route: "burst"}, nil, burst, io.Discard, deps); err != nil || calls["cloud"] != 1 {
 		t.Fatalf("burst run: %v %v", calls, err)
 	}
 	if err := validateLocalRunFlags(runFlags{route: "burst"}); err != nil {
-		t.Fatalf("--sw-route burst refused: %v", err)
+		t.Fatalf("--route burst refused: %v", err)
 	}
 	restricted := &projectconfig.Config{Defaults: &projectconfig.Defaults{Run: &projectconfig.RunRestrictions{Route: new("local")}}}
 	if _, err := resolveInvocationRouting(machine, restricted, "gate", runFlags{route: "burst"}); err == nil {
-		t.Fatal("--sw-route burst bypassed repository local restriction")
+		t.Fatal("--route burst bypassed repository local restriction")
 	}
 }
 

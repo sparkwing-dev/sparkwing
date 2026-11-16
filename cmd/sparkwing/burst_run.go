@@ -40,7 +40,7 @@ func resolveRunRouting(machine userconfig.Config, project *projectconfig.Config,
 	var route userconfig.RunRouting
 	if machine.Run != nil && machine.Run.Routing != nil {
 		route = *machine.Run.Routing
-		// safety: machine routing never picks the route; only --sw-route cloud or burst leaves this machine.
+		// safety: machine routing never picks the route; only --route cloud or burst leaves this machine.
 		route.Route = nil
 	}
 	restrict := func(r *projectconfig.RunRestrictions) {
