@@ -31,35 +31,87 @@ Stripe mode: the controller with `--payment-mode`, the service with
 `BILLING_LIVE`. Every checkout-service call carries the controller's mode in
 the `Sparkwing-Payment-Mode` header, and every answer carries the service's.
 The service refuses a call in the other mode before it calls Stripe, and the
-controller refuses an answer in the other mode. Either refusal retries the
-call and logs one `alert=checkout_misconfigured` naming `payment_mode`, so a
-half-finished cutover opens no page and charges no refill or refund. Switch
-the two services together, as one change.
+controller refuses an answer in the other mode. Either refusal logs one
+`alert=checkout_misconfigured` naming `payment_mode`. A payment page fails at
+once and the owner can try again. A refill or refund is retried with backoff
+for up to six hours; after that the refill closes as `checkout_unavailable`
+and the refund is listed as failed for the operator, so finish the cutover
+well inside that window.
 
-1. Stop new test work and let awarded work finish or cancel it. Let test refills
-   reach a final provider result before stopping the test controller.
-2. Prepare the live configuration of both services:
-   - Controller: `--payment-mode live`, the live `stripe-api-key`, and the
-     `stripe-webhook-secret` of the live webhook endpoint.
-   - Checkout service: `BILLING_LIVE=true` and a live restricted key
-     (`rk_live_`) allowed only Checkout Sessions, SetupIntents,
-     PaymentIntents, Refunds, Customers and the customer portal.
-     `BILLING_DEPLOYMENT` keeps the deployment id the controller logs at startup.
-3. Rotate the credentials listed in
-   [Rotate before the first live payment](#rotate-before-the-first-live-payment).
-4. Roll out both changes together. Startup refuses unsettled test awards,
-   reservations and open refills with "drain metered work before switching to
-   live; see the cutover runbook". If refused, restart both services in test
-   mode and finish draining.
-5. Verify before announcing live payments:
+The controller's switch to live is one-way. The first start with
+`--payment-mode live` that passes the drain check commits it, and every later
+start in test mode is refused. Every cutover step before that start can be
+undone by returning the checkout service to test mode.
+
+### Before the cutover
+
+1. Run a controller and checkout service that both send the
+   `Sparkwing-Payment-Mode` header, still in test mode. Deploy the checkout
+   service first, then the controller. A newer controller refuses an older
+   service's answer, which names no mode, after that service may already have
+   called Stripe.
+2. Confirm the checkout service's deployment path accepts `BILLING_LIVE=true`.
+   Change any deploy preflight that pins test mode now. Otherwise the
+   controller can go live while the service cannot follow, and every payment
+   page, refill and refund fails until it does.
+3. In the live Stripe account:
+   - Create the webhook endpoint for `https://<controller host>/webhooks/stripe`
+     with these events: `checkout.session.completed`,
+     `checkout.session.async_payment_succeeded`,
+     `checkout.session.async_payment_failed`, `checkout.session.expired`,
+     `setup_intent.succeeded`, `payment_intent.succeeded`,
+     `payment_intent.payment_failed`, `payment_intent.requires_action`,
+     `refund.created`, `refund.updated`, `refund.failed`,
+     `radar.early_fraud_warning.created`, `radar.early_fraud_warning.updated`,
+     `charge.dispute.created` and `charge.dispute.closed`.
+   - Create the checkout service's restricted key (`rk_live_`) with Write on
+     Checkout Sessions, Customers, PaymentIntents, Refunds and Customer portal,
+     and Read on PaymentMethods. Refills list a customer's payment methods when
+     the customer has no default card.
+   - Create the controller's `stripe-api-key` as a restricted key (`rk_live_`)
+     with Read on PaymentIntents and Charges, which settlement reads.
+   - Save the customer portal configuration with payment method updates on.
+4. Prove those permissions in test mode. Create `rk_test_` keys with the same
+   permissions, run both services on them, and complete Add funds, a card
+   setup, a refill on that saved card and a refund. A missing permission
+   makes Stripe refuse the call, and the controller closes the refill as
+   refused.
+5. Rotate the credentials listed under
+   [Credentials to rotate](#credentials-to-rotate). Keep the Stripe test key
+   and the test webhook secret until step 5 of the cutover; a refused live
+   start needs them to run the controller in test mode again.
+
+### Cutover
+
+1. Stop new test work and let awarded work finish or cancel it. Let test
+   refills reach a final provider result.
+2. Switch the checkout service to live: `BILLING_LIVE=true` and its live
+   restricted key. The test controller's calls are now refused and retried,
+   so no page opens and nothing is charged. To back out, return the service
+   to test mode.
+3. Restart the controller with `--payment-mode live`, its live
+   `stripe-api-key` and the live endpoint's `stripe-webhook-secret`. If
+   startup refuses with "drain metered work before switching to live; see the
+   cutover runbook", nothing is committed: return the checkout service to test
+   mode, restart the controller in test mode, finish draining and start again
+   at step 1. A live start that succeeds commits the switch, and test mode
+   cannot return.
+4. Verify:
    - The checkout service's `sparkwing-cloud listening` line shows `"live":true`.
    - The controller logs no `alert=checkout_misconfigured`.
    - Add funds opens a Stripe page whose session id starts with `cs_live_`.
    - A $10 live payment reaches the balance through the live webhook. Keep it
      as live credit, or refund it in the Stripe dashboard: the controller takes
      the credits back when the live `refund.created` event arrives.
-   If a check fails, return both services to test mode together.
-6. Add live funds, save a live card, and enable live refills if needed.
+
+   If a check fails, stay in live mode and stop payment activity: restart the
+   controller in live mode without `--billing-url`. It then opens no payment
+   pages and sends no refills or refunds, and it still settles webhooks for
+   payments already made. Fix the configuration, restart with `--billing-url`
+   and verify again.
+5. Revoke the Stripe test key and the test webhook secret.
+6. Announce live payments. Owners add live funds, save a live card and turn
+   automatic refill on again if they use it.
 
 The switch commits before requests or background workers start. It restarts
 storage accounting at the cutover instant, so time spent in test mode cannot
@@ -69,20 +121,20 @@ Operator free grants require an explicit idempotency key. A mistaken free grant
 can be corrected with a negative reversal naming its reference. Corrections
 cannot take back more than that grant, and cannot reverse paid credits.
 
-### Rotate before the first live payment
+### Credentials to rotate
 
-Replace each credential that existed before the cutover, and revoke the old
-value, before the first live payment:
+Replace each credential, and revoke the old value, before announcing live
+payments:
 
 - CLI profile tokens, including user tokens (`swu_`).
 - Controller, operator and API tokens, and the bootstrap admin token.
 - The checkout bearer: the controller's `billing-token` credential and the
   service's `BILLING_CHECKOUT_TOKEN`, rotated together.
-- The Stripe test key and test webhook secret, replaced by the live restricted
-  key and the live endpoint's signing secret in step 2.
 - OAuth client secrets and the GitHub App webhook secret, if either was ever
   exposed.
 - Cloud provider and CI credentials.
+- The Stripe test key and test webhook secret, revoked in step 5 of the
+  cutover once the controller runs live.
 
 ## Standing
 

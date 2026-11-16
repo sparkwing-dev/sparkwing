@@ -7,6 +7,8 @@
   refunds are all covered. A refused answer is retried and logs one
   `alert=checkout_misconfigured`, which now names `payment_mode`, so a refill
   or refund never completes across modes. The checkout service must send the
-  header, so deploy both services together. The cutover runbook in
-  `docs/billing.md` switches both services in one step, verifies the switch and
-  lists the credentials to rotate before the first live payment.
+  header: deploy the checkout service first, then the controller, both in
+  test mode. The cutover runbook in `docs/billing.md` lists the prerequisites,
+  including each restricted key's Stripe permissions, switches the checkout
+  service before the one-way controller start, verifies the switch, recovers
+  a failed check in live mode, and lists the credentials to rotate.
