@@ -184,9 +184,11 @@ command delegates to the engine package, which owns Go builds and npm installati
 TypeScript preparation serializes `npm install --no-save --no-audit --no-fund`
 on the selected `package-lock.json` or `npm-shrinkwrap.json`. Before installation,
 `npm ci --dry-run --ignore-scripts` checks that dependencies match that lockfile
-without deleting installed packages or running lifecycle scripts. npm reuses its
-installed tree and applies project, user and global configuration, including
-workspace selection. Concurrent jobs preserve unchanged SDK packages, and removing
+without deleting installed packages or running lifecycle scripts. The dry run
+also rewrites npm's hidden lockfile, `node_modules/.package-lock.json`, without
+changing any package, so preparation deletes that file before installing. npm
+then reads the installed tree, replaces an SDK whose pin moved, and applies
+project, user and global configuration, including workspace selection. Concurrent jobs preserve unchanged SDK packages, and removing
 `node_modules` causes a fresh install. Preparation leaves the manifest and lockfile
 unchanged and validates the installed SDK against the exact native pin.
 Root lifecycle scripts run on each preparation. Other dependencies are reconciled
@@ -215,8 +217,10 @@ across version switches, so the receipt does not notice a switch made through th
 Remove `node_modules/.sparkwing-sdk-receipt`, or `node_modules`, after switching.
 Each installation makes one helper attempt with a ten-minute deadline. Failure
 stops the install, reports the cause, and kills and reaps its helper process tree.
-Verification then compiles Go packages or type-checks TypeScript and runs list,
-describe and plan through that engine, including hidden pipelines. It never runs
+Verification then compiles Go packages, type-checks TypeScript with `tsc --noEmit`
+when `.sparkwing/tsconfig.json` exists, and runs list, describe and plan through
+that engine, including hidden pipelines. A scaffolded TypeScript pipeline has no
+`tsconfig.json`; Node strips its types, so describe and plan are its check. It never runs
 job bodies. Install and check environments pass through the shared environment
 builder, and registered proxy credentials are masked in failures.
 

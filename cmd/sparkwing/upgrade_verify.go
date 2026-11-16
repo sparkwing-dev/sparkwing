@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -138,6 +139,13 @@ func (v *upgradeVerifier) compileGo(ctx context.Context, dir string, env procenv
 }
 
 func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procenv.Env) error {
+	// safety: without a tsconfig, tsc prints its help and exits 1, which would read as a code
+	// failure; node strips the types of such a pipeline, so describe and plan verify it instead.
+	if _, err := os.Stat(filepath.Join(dir, "tsconfig.json")); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
 	command := []string{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}
 	if _, err := v.exec(ctx, dir, env, command[0], command[1:]...); err != nil {
 		return fmt.Errorf("%w: upgrade: %s: %w", engine.ErrPipelineIncompatible, strings.Join(command, " "), err)

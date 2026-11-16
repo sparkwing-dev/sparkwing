@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -261,6 +262,12 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 		// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
 		body, err := installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")
 		if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+			return nil, err
+		}
+		// bug: the dry run rewrites npm's hidden lockfile to the new lockfile without changing any
+		// package folder, and npm install trusts that record, so a moved pin kept the old SDK. Without
+		// the record npm reads the installed tree itself.
+		if err := os.Remove(filepath.Join(dir, "node_modules", ".package-lock.json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
 		body, err = installTool(ctx, dir, environment, "npm", "install", "--no-save", "--no-audit", "--no-fund")
