@@ -3,8 +3,10 @@
 package acceptance_test
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -27,18 +29,17 @@ func TestSDKUpgradeE2E(t *testing.T) {
 	if !filepath.IsAbs(cli) {
 		t.Fatal("SPARKWING_UPGRADE_E2E_BINARY must be absolute")
 	}
-	listed := listedSDKs(t)
+	client := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+	listed, err := fetchListedSDKs(t.Context(), client, "https://sparkwing.dev/versions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, language := range []string{"go", "typescript"} {
 		t.Run(language, func(t *testing.T) {
 			u := newUpgradeUser(t, cli)
 			u.sparkwing("scaffold", "pipeline", "new", "-C", u.project, "--pipeline", "hello", "--template", map[string]string{"go": "minimal", "typescript": "typescript"}[language])
 			scaffolded := u.pin(language)
-			older := scaffolded
-			for _, version := range listed[language] {
-				if semver.Compare(version, older) < 0 && (older == scaffolded || semver.Compare(version, older) > 0) {
-					older = version
-				}
-			}
+			older := newestOlderSDK(listed[language], scaffolded)
 			if older == scaffolded {
 				t.Logf("no listed %s SDK is older than the scaffold's %s; upgrade runs as a verified no-op", language, scaffolded)
 			}
@@ -64,31 +65,42 @@ func TestSDKUpgradeE2E(t *testing.T) {
 	}
 }
 
-func listedSDKs(t *testing.T) map[string][]string {
-	t.Helper()
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://sparkwing.dev/versions.json", nil)
-	if err != nil {
-		t.Fatal(err)
+func newestOlderSDK(listed []string, scaffolded string) string {
+	older := scaffolded
+	for _, version := range listed {
+		if semver.Compare(version, scaffolded) < 0 && (older == scaffolded || semver.Compare(version, older) > 0) {
+			older = version
+		}
 	}
-	response, err := http.DefaultClient.Do(request)
+	return older
+}
+
+func fetchListedSDKs(ctx context.Context, client *http.Client, url string) (map[string][]string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		t.Fatalf("read the published SDK list: %v", err)
+		return nil, err
+	}
+	// safety: a kept-alive connection leaves transport goroutines that fail the package leak check.
+	defer client.CloseIdleConnections()
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("read the published SDK list: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("read the published SDK list: %s", response.Status)
+	}
 	var index struct {
 		SDKs []struct{ Language, Version string } `json:"sdks"`
 	}
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("read the published SDK list: %s", response.Status)
-	}
 	if err := json.NewDecoder(response.Body).Decode(&index); err != nil {
-		t.Fatalf("decode the published SDK list: %v", err)
+		return nil, fmt.Errorf("decode the published SDK list: %w", err)
 	}
 	listed := map[string][]string{}
 	for _, sdk := range index.SDKs {
 		listed[sdk.Language] = append(listed[sdk.Language], "v"+strings.TrimPrefix(sdk.Version, "v"))
 	}
-	return listed
+	return listed, nil
 }
 
 type upgradeUser struct {
@@ -119,7 +131,7 @@ func newUpgradeUser(t *testing.T, cli string) *upgradeUser {
 	private := map[string]string{"HOME": "home", "SPARKWING_HOME": "sparkwing", "XDG_CONFIG_HOME": "config", "XDG_DATA_HOME": "data", "XDG_STATE_HOME": "state", "XDG_CACHE_HOME": "cache", "XDG_RUNTIME_DIR": "run"}
 	for _, setting := range os.Environ() {
 		name, _, _ := strings.Cut(setting, "=")
-		if _, ok := private[name]; ok || strings.HasPrefix(name, "SPARKWING_") || name == "DBUS_SESSION_BUS_ADDRESS" || name == "GOWORK" || name == "GOFLAGS" {
+		if _, ok := private[name]; ok || strings.HasPrefix(name, "SPARKWING_") || name == "DBUS_SESSION_BUS_ADDRESS" || name == "GOWORK" || name == "GOFLAGS" || name == "PATH" {
 			continue
 		}
 		u.env = append(u.env, setting)
@@ -135,7 +147,20 @@ func newUpgradeUser(t *testing.T, cli string) *upgradeUser {
 	if err := os.WriteFile(key, secretKey(t), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	u.env = append(u.env, "SPARKWING_SECRETS_KEY_FILE="+key, "DBUS_SESSION_BUS_ADDRESS=unix:path="+filepath.Join(root, "no-bus"),
+	// safety: the package guard fails any real manager command, so the CLI's manager probes
+	// meet private fakes that answer as a machine whose session bus is unreachable.
+	managers := filepath.Join(root, "managers")
+	if err := os.Mkdir(managers, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"systemctl", "systemd-run", "launchctl"} {
+		fake := "#!/bin/sh\necho 'Failed to connect to bus: No such file or directory' >&2\nexit 1\n"
+		if err := os.WriteFile(filepath.Join(managers, name), []byte(fake), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u.env = append(u.env, "PATH="+managers+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"SPARKWING_SECRETS_KEY_FILE="+key, "DBUS_SESSION_BUS_ADDRESS=unix:path="+filepath.Join(root, "no-bus"),
 		"GOMODCACHE="+caches["GOMODCACHE"], "GOCACHE="+caches["GOCACHE"], "npm_config_cache="+filepath.Join(home, ".npm"))
 	if err := os.Mkdir(u.project, 0o700); err != nil {
 		t.Fatal(err)
