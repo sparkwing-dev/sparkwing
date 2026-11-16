@@ -101,6 +101,7 @@ type Store struct {
 	csrfKey            []byte
 	csrfCipher         SessionKeyCipher
 	githubCheckMu      sync.Mutex
+	commits            commitSignal
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
