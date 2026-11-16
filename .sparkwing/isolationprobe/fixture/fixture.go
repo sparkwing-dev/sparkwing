@@ -210,9 +210,14 @@ func SDKKeys() []isolationprobe.Key {
 	return []isolationprobe.Key{key(ProbeSDKAllowed), key(ProbeSDKSibling), key(ProbeSDKLastRun)}
 }
 
-// safety: the host refuses an output read either at its store's authority binding or at the
-// evaluated job's read set; both are binding refusals of the same request.
-var bindingRefusals = []string{"output is outside the evaluated job read set", "resource is outside the authorized binding"}
+// safety: the host refuses an output read at its store's authority binding, at the evaluated job's
+// read set, or by naming the dependency the reader lacks. All are binding refusals of the same
+// request, and the SDK writes none of these texts itself, so each match is the host's answer.
+var bindingRefusals = []struct{ text, outcome string }{
+	{"output is outside the evaluated job read set", "refused: output is outside the evaluated job read set"},
+	{"resource is outside the authorized binding", "refused: resource is outside the authorized binding"},
+	{"so it cannot read its output", "refused: the job does not depend on the producer"},
+}
 
 // safety: only a host binding refusal proves confinement. Any other failure settles nothing, and the
 // outcome names the refusal it matched or a fixed category, never the failure's own text.
@@ -223,8 +228,8 @@ func sdkOutputProbe(name string, read func()) (r isolationprobe.Result) {
 			message := fmt.Sprint(failure)
 			r.Outcome, r.Verdict = "failed without a binding refusal", isolationprobe.Inconclusive
 			for _, refusal := range bindingRefusals {
-				if strings.Contains(message, refusal) {
-					r.Outcome, r.Verdict = "refused: "+refusal, isolationprobe.Pass
+				if strings.Contains(message, refusal.text) {
+					r.Outcome, r.Verdict = refusal.outcome, isolationprobe.Pass
 				}
 			}
 		}

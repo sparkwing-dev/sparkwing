@@ -124,6 +124,13 @@ func TestSDKOutputProbePassesOnlyTheReadSetRefusal(t *testing.T) {
 	if wrapped.Verdict != isolationprobe.Pass {
 		t.Fatalf("wrapped read-set refusal = %+v, want pass", wrapped)
 	}
+	dependency := sdkOutputProbe("read", func() {
+		panic(`sparkwing: Ref[fixture.siblingOut].Get: job "probe" does not depend on job "output-sibling", so it cannot read its output; ` +
+			`add .Needs() on "output-sibling" to job "probe" (a Ref captured by a closure adds no dependency)`)
+	})
+	if dependency.Verdict != isolationprobe.Pass || strings.Contains(dependency.Outcome, `"`) || strings.Contains(dependency.Outcome, "output-sibling") {
+		t.Fatalf("dependency refusal = %+v, want a pass that names no job", dependency)
+	}
 	other := sdkOutputProbe("read", func() { panic("controller unavailable: VALUE_FROM_THE_HOST") })
 	if other.Verdict != isolationprobe.Inconclusive || other.Outcome != "failed without a binding refusal" {
 		t.Fatalf("other failure = %+v, want inconclusive with a fixed category", other)
