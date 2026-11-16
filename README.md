@@ -234,9 +234,11 @@ Existing destination files are rejected. Xwing owns candidate selection and the
 `sparkwing` runtime profile. The hook does not install a host service or replace
 the normal executable.
 
-## Reporting issues
+## Support and reporting issues
 
-Open a public issue for bugs and feature requests at
+For Sparkwing Cloud accounts, billing and runs, email support@sparkwing.dev.
+[Support](docs/support.md) lists what to include and how quickly to expect a
+reply. Open a public issue for bugs and feature requests at
 [github.com/sparkwing-dev/sparkwing/issues](https://github.com/sparkwing-dev/sparkwing/issues).
 Report suspected vulnerabilities privately by following the
 [security policy](./SECURITY.md).
