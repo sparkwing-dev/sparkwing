@@ -43,12 +43,12 @@ func starts(t *testing.T, counter string) int {
 	return strings.Count(string(raw), "x")
 }
 
-// hack: publishing the fixture as the key's bincache entry stands in for a
+// hack: publishing the fixture under the build's key stands in for a
 // compile, which the cache test does not need.
 func materializeFixture(t *testing.T, sparkwingDir, fixture string) string {
 	t.Helper()
 	testshell.UsePath(t, "go", "git", "sh", "sed")
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
+	key, _, err := pipelineBinaryKey(context.Background(), sparkwingDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func materializeFixture(t *testing.T, sparkwingDir, fixture string) string {
 func TestDescribeCacheReadsTheProtocolDocumentOnceAndInvalidatesOnSourceChange(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	sparkwingDir := filepath.Join(t.TempDir(), ".sparkwing")
-	writeRepoFile(t, filepath.Join(sparkwingDir, "go.mod"), "module fixture\n\ngo 1.26\n")
+	writeRepoFile(t, filepath.Join(sparkwingDir, "go.mod"), "module fixture\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n")
 	writeRepoFile(t, filepath.Join(sparkwingDir, "main.go"), "package main\n")
 	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
 	protocolFixture(t, fixture, counter, `[{"name":"build","args":[{"name":"env","type":"string","required":false}]}]`)
@@ -124,7 +124,7 @@ func TestDescribeCacheIgnoresDocumentsOfAnotherShape(t *testing.T) {
 func TestDescribeSeparatesExecutionGrammarFromPublicMetadata(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	sparkwingDir := filepath.Join(t.TempDir(), ".sparkwing")
-	writeRepoFile(t, filepath.Join(sparkwingDir, "go.mod"), "module fixture\n\ngo 1.26\n")
+	writeRepoFile(t, filepath.Join(sparkwingDir, "go.mod"), "module fixture\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n")
 	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
 	protocolFixture(t, fixture, counter, `[{"name":"deploy","args":[{"name":"token","type":"string","required":false,"secret":true,"default":"deploy"},{"name":"other","type":"string","required":false,"secret":true,"default":"bool"},{"name":"enabled","type":"bool","required":false}]}]`)
 	gate, err := describeEntry(t.Context(), sparkwingDir, pipelineentry.Binary(fixture))

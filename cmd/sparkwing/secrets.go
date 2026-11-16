@@ -84,6 +84,13 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 		if err != nil {
 			return err
 		}
+		if value == "" && !inv.Has("value") {
+			source := "stdin"
+			if inv.Has("file") {
+				source = "--file"
+			}
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "the secret value from " + source + " is empty; pipe the value on stdin, pass --file PATH, or pass --value '' to store an empty value"}
+		}
 		input = controllerwire.SecretWrite{Name: selector.Name, Repo: selector.Repo, Pipeline: selector.Pipeline, Value: value, Masked: !inv.Bool("variable"), Shared: inv.Bool("shared") || local && selector.Pipeline == "", OnlyOn: inv.Value("only-on"), IdempotencyKey: rand.Text()}
 	}
 	ctx, cancel := context.WithTimeout(ctx, secretOperationTimeout(inv))

@@ -127,7 +127,7 @@ func TestSubscriptionsReportAMissingSubscriptionAndTheNextCommand(t *testing.T) 
 		var out, errOut bytes.Buffer
 		err = manageSubscriptions(t.Context(), inv, m, &out, &errOut)
 		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.NotFound || !strings.Contains(failure.Message, "sub_9 was not found") || !strings.Contains(failure.Hint, "sparkwing subscriptions list") || out.Len() != 0 {
+		if !errors.As(err, &failure) || failure.Code != apierr.NotFound || !strings.Contains(failure.Message, `subscription "sub_9" not found`) || !strings.Contains(failure.Hint, "sparkwing subscriptions list") || out.Len() != 0 {
 			t.Fatalf("%v: err=%v out=%q", args, err, out.String())
 		}
 	}

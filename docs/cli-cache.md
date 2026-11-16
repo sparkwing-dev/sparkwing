@@ -10,7 +10,7 @@ Inspect or trim the compiled pipeline binary cache
 
 ### Subcommands
 
-- `explain` -- Show a pipeline's cache key and the inputs behind it
+- `explain` -- Show this repository's pipeline binary cache key and its inputs
 - `info` -- Print cache dir, size, ceilings, and recent entries
 - `prune` -- Prune oldest cached binaries down to the ceilings
 - `warm` -- Prepare the local pipeline cache and dependencies
@@ -26,7 +26,9 @@ Inspect or trim the compiled pipeline binary cache
 
 ## `sparkwing cache explain`
 
-Show a pipeline's cache key and the inputs behind it
+Show this repository's pipeline binary cache key and its inputs
+
+Explain the .sparkwing directory found from the working directory or -C DIR. Every pipeline in a repository shares one binary, so the command takes no pipeline name.
 
 ### Flags
 

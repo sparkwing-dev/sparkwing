@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
@@ -12,6 +13,7 @@ import (
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -46,7 +48,7 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 			}
 		case errors.As(err, &field), errors.Is(err, configguard.ErrOutsideSandboxHome), errors.Is(err, secrets.ErrKeyRefused):
 			failure.Code = apierr.BadRequest
-		case errors.Is(err, docs.ErrNotFound):
+		case isNotFound(err):
 			failure.Code = apierr.NotFound
 		case errors.Is(err, context.Canceled):
 			failure.Code = hosterr.Cancelled
@@ -59,7 +61,11 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 			inv.Command.Path = usage.Path
 		}
 	}
-	if err.Error() != failure.Message && failure.Code != apierr.BadRequest {
+	var request *client.RequestError
+	switch {
+	case failure.Code == apierr.NotFound && errors.As(err, &request):
+		failure = notFoundRefusal(inv, failure)
+	case err.Error() != failure.Message && failure.Code != apierr.BadRequest:
 		contextual := *failure
 		contextual.Message = err.Error()
 		failure = &contextual
@@ -73,9 +79,8 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 		if profile == "" {
 			profile = "NAME"
 		}
-		quoted := "'" + strings.ReplaceAll(profile, "'", "'\\''") + "'"
 		guided := *failure
-		guided.Hint = "Sign in again to the dashboard and create a replacement token, then run `sparkwing profiles set --profile " + quoted + " --token-stdin` and paste it on stdin"
+		guided.Hint = "Sign in again to the dashboard and create a replacement token, then run `sparkwing profiles set --profile " + shellSingleQuote(profile) + " --token-stdin` and paste it on stdin"
 		failure = &guided
 	}
 	if invocationOutput(inv) == "json" {
@@ -96,6 +101,50 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 		return writeErr
 	}
 	return nil
+}
+
+// safety: rendering and the exit code classify not-found the same way, so a not_found body always exits 4.
+func isNotFound(err error) bool {
+	var failure *apierr.Error
+	return errors.As(err, &failure) && failure.Code == apierr.NotFound || errors.Is(err, docs.ErrNotFound)
+}
+
+// safety: the controller route never reaches the user; the subject they typed and its list command do.
+func notFoundRefusal(inv clisurface.Invocation, failure *apierr.Error) *apierr.Error {
+	words := strings.Fields(inv.Command.Path)
+	group := ""
+	if len(words) > 1 {
+		group = words[1]
+	}
+	noun, id := "", ""
+	for _, candidate := range []string{strings.TrimSuffix(group, "s"), "run"} {
+		if value := inv.Value(candidate); value != "" {
+			noun, id = candidate, value
+			break
+		}
+	}
+	refusal := *failure
+	if id != "" {
+		refusal.Message = fmt.Sprintf("%s %q not found", noun, id)
+		if job := inv.Value("job"); noun == "run" && job != "" {
+			refusal.Message = fmt.Sprintf("run %q or its job %q not found", id, job)
+		}
+	}
+	if noun == "run" {
+		group = "runs"
+	}
+	list := "sparkwing " + group + " list"
+	if refusal.Hint == "" && registered(list) {
+		if profile := inv.Value("profile"); profile != "" {
+			list += " --profile " + shellSingleQuote(profile)
+		}
+		refusal.Hint = "list " + group + " with `" + list + "`"
+	}
+	return &refusal
+}
+
+func registered(path string) bool {
+	return slices.ContainsFunc(clisurface.Registry(), func(command clisurface.Command) bool { return command.Path == path })
 }
 
 // hack: run picks its profile from machine routing, not --profile, so the dead-token hint reads it here.

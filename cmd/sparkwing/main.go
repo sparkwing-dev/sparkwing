@@ -140,6 +140,9 @@ func exitCodeFor(err error) int {
 		}
 		return commandError.code
 	}
+	if isNotFound(err) {
+		return exitRefused
+	}
 	return 1
 }
 

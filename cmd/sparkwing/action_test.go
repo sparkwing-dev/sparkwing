@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -131,5 +132,26 @@ func TestPipelineDescribe_FarTypoNoSuggestion(t *testing.T) {
 	suggestion := sparkwingruntime.SuggestClosest("totallyunrelated", candidates)
 	if suggestion != "" {
 		t.Errorf("far typo should not suggest, got %q", suggestion)
+	}
+}
+
+func TestPipelineTableSaysWhenDescriptionsWaitForABuild(t *testing.T) {
+	undescribed := []Pipeline{{PipelinePresentation: runspec.PipelinePresentation{Name: "hello"}}}
+	described := []Pipeline{{PipelinePresentation: runspec.PipelinePresentation{Name: "hello", Short: "Say hello"}}}
+	for _, tc := range []struct {
+		list     []Pipeline
+		built    bool
+		want     string
+		withHint bool
+	}{
+		{undescribed, false, "hello", true},
+		{undescribed, true, "hello", false},
+		{described, false, "Say hello", false},
+	} {
+		var out bytes.Buffer
+		printPipelineTable(&out, tc.list, func() bool { return tc.built })
+		if !strings.Contains(out.String(), tc.want) || strings.Contains(out.String(), "sparkwing cache warm") != tc.withHint {
+			t.Errorf("built=%v %+v: %q", tc.built, tc.list, out.String())
+		}
 	}
 }
