@@ -500,7 +500,8 @@ membership or repository permission. See [scheduling](scheduling.md),
 new work, planning included. Jobs it already holds run to completion and report
 normally. The runner keeps polling with no free slots, so it stays online.
 `sparkwing runners resume` lets it claim again on its next poll, without a
-restart. The pause survives a runner restart.
+restart. The pause survives a runner restart. For a runner enrolled with
+`runners add --service-user`, pass the same `--service-user` to both commands.
 
 The pause is local to the machine: a `paused` file beside the runner credential
 in `runner.credentials_dir`. `sparkwing runners list` on this machine shows the

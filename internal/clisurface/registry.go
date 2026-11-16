@@ -8,6 +8,9 @@ func Registry() []Command {
 		{Path: "sparkwing __runner-account-write", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners install-service: write the runner enrollment JSON on stdin into this account's config and copy the runner into ~/.local/bin."}, Flags: []Flag{
 			{Name: "runner-binary", Argument: "PATH", Required: true, Meaning: "Staged sparkwing-runner to copy into this account's ~/.local/bin."},
 		}},
+		{Path: "sparkwing __runner-account-pause", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners pause and resume --service-user: set or clear the pause beside the runner credential named in this account's config, and report the runner, paused and whether the state changed."}, Flags: []Flag{
+			{Name: "resume", Meaning: "Clear the pause instead of setting it."},
+		}},
 		{Path: "sparkwing __runner-account-read", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners uninstall-service: report the runner name, controller and token prefix from this account's config."}},
 		{Path: "sparkwing __complete", Hidden: true, Flags: []Flag{
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
@@ -460,11 +463,13 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
-		{Path: "sparkwing runners pause", Rules: []string{"Pause the runner enrolled on this machine: it finishes held jobs and claims no new work, including planning, while it keeps polling so it stays online. The pause is a file beside the runner credential, local to this machine; runners list on this machine shows the runner paused, while other machines and the console see it idle. It survives a runner restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners pause", Rules: []string{"Pause the runner enrolled on this machine: it finishes held jobs and claims no new work, including planning, while it keeps polling so it stays online. The pause is a file beside the runner credential, local to this machine; runners list on this machine shows the runner paused, while other machines and the console see it idle. It survives a runner restart. With --service-user, pause the runner enrolled with runners add --service-user: sudo runs the step as that OS user against the config in its home. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
+			{Name: "service-user", Argument: "USER", Conflicts: []string{"config"}, Meaning: "Pause the runner enrolled with runners add --service-user, through sudo as that OS user."},
 		}},
-		{Path: "sparkwing runners resume", Rules: []string{"Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners resume", Rules: []string{"Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. With --service-user, resume the runner enrolled with runners add --service-user through sudo, as runners pause does. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
+			{Name: "service-user", Argument: "USER", Conflicts: []string{"config"}, Meaning: "Resume the runner enrolled with runners add --service-user, through sudo as that OS user."},
 		}},
 		{Path: "sparkwing runners delete", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. With --service-user, stop the system service through sudo, then check the controller and runner name it reports before revoking, and print how to delete the OS user. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
