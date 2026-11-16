@@ -10,8 +10,6 @@ import (
 	yaml "go.yaml.in/yaml/v3"
 )
 
-// releaseTagResolveScript returns the shell the release workflow runs to
-// resolve a pushed tag to the commit it publishes.
 func releaseTagResolveScript(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("../..")
