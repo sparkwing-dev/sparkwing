@@ -21,13 +21,25 @@ export interface DeviceRunner {
 
 export interface DeviceRequest {
   user_code: string;
-  kind: "member" | "runner";
+  kind: "member" | "runner" | "admin";
   machine: string;
   team: string;
   grants: string[];
   runner?: DeviceRunner;
   created_at: string;
   expires_at: string;
+  // An administration request this sign-in is too old to approve.
+  sign_in_required: boolean;
+}
+
+// Administration rides on a CLI token's run and log grants, so the page lists
+// those and names team.admin separately, with its one-hour lifetime.
+export const adminGrant = "team.admin";
+
+export function listedGrants(request: DeviceRequest): string[] {
+  return request.kind === "admin"
+    ? request.grants.filter((grant) => grant !== adminGrant)
+    : request.grants;
 }
 
 // Keeps the letters a person typed, in capitals, whatever else they typed
@@ -67,6 +79,8 @@ const grantTexts: Record<string, string> = {
   "nodes.claim": "Run jobs",
   "triggers.claim": "Plan runs",
   "claims.launch": "Launch Cloud jobs for a reserved pool",
+  "team.admin":
+    "Administer the team: secrets, members, settings, billing and deletion",
 };
 
 // A grant the console does not know yet is shown by its name, so a newer
@@ -162,7 +176,8 @@ export async function lookupDeviceRequest(
   }
   return {
     user_code: body.user_code ?? letters,
-    kind: body.kind === "runner" ? "runner" : "member",
+    kind:
+      body.kind === "runner" || body.kind === "admin" ? body.kind : "member",
     machine: body.machine ?? "",
     team: body.team ?? "",
     grants: body.grants ?? [],
@@ -176,6 +191,7 @@ export async function lookupDeviceRequest(
       : undefined,
     created_at: body.created_at ?? "",
     expires_at: body.expires_at ?? "",
+    sign_in_required: body.sign_in_required === true,
   };
 }
 

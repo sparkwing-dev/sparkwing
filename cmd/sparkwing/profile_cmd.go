@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 
@@ -12,13 +13,18 @@ import (
 )
 
 type profileIndex struct {
-	Name       string `json:"name"`
-	Controller string `json:"controller"`
-	Token      string `json:"token"`
+	Name           string     `json:"name"`
+	Controller     string     `json:"controller"`
+	Token          string     `json:"token"`
+	AdminExpiresAt *time.Time `json:"admin_expires_at,omitempty"`
 }
 
 func profileRecord(p *namedProfile) profileIndex {
-	return profileIndex{Name: p.Name, Controller: p.ControllerURL(), Token: redactToken(p.ControllerToken())}
+	record := profileIndex{Name: p.Name, Controller: p.ControllerURL(), Token: redactToken(p.MemberToken())}
+	if p.liveAdminToken(time.Now()) != "" {
+		record.AdminExpiresAt = p.Controller.AdminExpiresAt
+	}
+	return record
 }
 
 func writeProfile(p *namedProfile, format string) error {
@@ -30,7 +36,11 @@ func writeProfile(p *namedProfile, format string) error {
 		_, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(record.Name))
 		return err
 	}
-	_, err := fmt.Fprintf(os.Stdout, "name:       %s\ncontroller: %s\ntoken:      %s\n", opsview.DisplayText(record.Name), opsview.DisplayText(record.Controller), opsview.DisplayText(record.Token))
+	admin := "none"
+	if record.AdminExpiresAt != nil {
+		admin = "team.admin until " + record.AdminExpiresAt.Local().Format(time.RFC3339)
+	}
+	_, err := fmt.Fprintf(os.Stdout, "name:       %s\ncontroller: %s\ntoken:      %s\nadmin:      %s\n", opsview.DisplayText(record.Name), opsview.DisplayText(record.Controller), opsview.DisplayText(record.Token), admin)
 	return err
 }
 

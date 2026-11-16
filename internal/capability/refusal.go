@@ -29,7 +29,7 @@ func RequiredAuthority(reason apierr.Reason, alternatives ...[]Grant) *apierr.Er
 	if len(requirements) == 1 {
 		switch Grant(requirements[0]) {
 		case TeamAdmin:
-			message += "; ask a team owner for a credential with team.admin"
+			message += "; owners run sparkwing login --admin for an hour of administration, and other members ask a team owner"
 		case OIDCMint:
 			message += "; use an awarded or delegated job credential with oidc.mint"
 		case DataRead:

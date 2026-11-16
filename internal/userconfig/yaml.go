@@ -2,6 +2,7 @@ package userconfig
 
 import (
 	"bytes"
+	"encoding"
 	"errors"
 	"fmt"
 	"io"
@@ -119,8 +120,10 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 	if n.Tag == "!!null" {
 		return bad("explicit null is not allowed")
 	}
-	switch t.Kind() {
-	case reflect.Struct, reflect.Map:
+	// safety: a struct that reads itself from text, such as time.Time, is one scalar, not a mapping of fields.
+	scalar := reflect.PointerTo(t).Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
+	switch {
+	case !scalar && (t.Kind() == reflect.Struct || t.Kind() == reflect.Map):
 		if n.Kind != yaml.MappingNode {
 			return bad("expected a mapping")
 		}
@@ -179,7 +182,7 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 				return err
 			}
 		}
-	case reflect.Slice:
+	case t.Kind() == reflect.Slice:
 		if n.Kind != yaml.SequenceNode {
 			return bad("expected a sequence")
 		}

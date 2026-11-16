@@ -591,11 +591,12 @@ receives `401`. Clients branch on `error.code` and use `details.reason` for the
 specific refusal. Every boundary uses the same envelope:
 
 ```json
-{"error":{"code":"forbidden","message":"operation requires team.admin; ask a team owner for a credential with team.admin","details":{"reason":"missing_grant"}}}
+{"error":{"code":"forbidden","message":"operation requires team.admin; owners run sparkwing login --admin for an hour of administration, and other members ask a team owner","details":{"reason":"missing_grant"}}}
 ```
 
 Grant refusals name the required grants. Secret writes require `team.admin`,
-which the owner role holds. OIDC minting requires `oidc.mint` on an awarded
+which the owner role holds; an owner gets it from the CLI for an hour with
+`sparkwing login --admin`. OIDC minting requires `oidc.mint` on an awarded
 or delegated job credential. A team token cannot substitute for that job
 credential. These messages describe the operation's policy and include no
 resource identifiers. Foreign-team resources retain the same response as
@@ -1063,7 +1064,8 @@ as issuing a member root does; a session opened from a token cannot approve.
 They allow 10 code entries per account per minute, and an unknown, expired or
 decided code is refused the same way. A member token carries the requested
 grants, or the approver's `runs.read`, `logs.read`, `runs.write`, `runs.control`
-and `approvals.write` where the role holds them; it never carries `team.admin`.
+and `approvals.write` where the role holds them; it never carries `team.admin`
+(see [Administration step-up](#administration-step-up)).
 It is the same token the console's Create CLI token issues: its parent is the
 approving session, it expires after 90 days, and logging that session out ends
 it. Browser approval enrolls personal runners only, because a code can be
@@ -1086,6 +1088,48 @@ writes `token.minted`.
 
 Only approve a request you started yourself in the last few minutes. A code
 someone sends you asks you to sign their machine in as you.
+
+### Administration step-up
+
+A device code can be phished, so `sparkwing login` never carries
+`team.admin`. Team owners get administration from the CLI with
+`sparkwing login --admin`, which steps up a profile that is already signed in:
+
+1. The CLI sends `POST /api/v1/auth/device/step-up` with `kind` `admin` and the
+   machine name, authenticated by the profile's member token. The controller
+   records that token's account and team in the request and returns the same
+   codes as a device sign-in. The public `POST /api/v1/auth/device` refuses kind
+   `admin`, and a direct browser session cannot start a step-up.
+2. The approval page shows the request with a red warning that names what
+   `team.admin` can do. Lookup and approval refuse a session of another
+   account, so a code someone sends you cannot be approved by you or anyone
+   else. Lookup and approval also refuse an account whose role lacks
+   `team.admin`, which only owners hold. Approval needs a browser sign-in from
+   the last 10 minutes and otherwise answers `reauth_required`; lookup reports
+   `sign_in_required` so the page offers to sign in again.
+3. Redemption issues two credentials under the approving session. One is a
+   `team.admin` member token that expires one hour after redemption and also
+   holds the grants of the token that started the step-up. The other is a
+   fresh member token with exactly those grants, expiring when the starting
+   token would have. The second replaces the terminal's member token, because
+   a fresh browser sign-in ends the earlier session and the tokens it approved,
+   and a step-up never widens the terminal's ordinary access or lifetime.
+
+The CLI saves the administration token as `controller.admin_token` with
+`controller.admin_expires_at`, beside the re-issued `controller.token`, and
+revokes the profile's previous tokens. The profile uses the administration
+token until it expires and then the member token. `sparkwing login`,
+`profiles add --force`, `profiles set` with a new token or controller, and
+`profiles delete` drop the administration token and revoke it at the
+controller that issued it, even when the command points the profile at a
+different controller. When one of them cannot confirm that revocation, it
+exits with an error that names the token and that controller, and either the
+`sparkwing tokens revoke` command that ends it or, when the profile no longer
+names that controller, its console's Machines page. `profiles delete` then
+keeps the profile; the others have already saved their change. `profiles
+delete --keep-token` leaves both tokens live. Demotion, removal,
+signing out of the approving browser session and revocation end it at once,
+as they do every member token.
 
 ### Linked sign-ins
 

@@ -415,6 +415,12 @@
       "baselines": {}
     },
     {
+      "route": "/api/v1/auth/device/step-up",
+      "kind": "api",
+      "exempt": "Needs a live member token and writes a device sign-in row that lives 10 minutes and shares the sign-in limit, so a scheduled probe would fill the store and spend that budget. In-process tests verify the account binding, validation and refusals. Latency and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/auth/device/token",
       "kind": "api",
       "exempt": "Needs a live device code, and a poll consumes an approval once, so the corpus has no reusable fixture. In-process tests verify pending, slow_down, redemption and refusals. Latency and response bytes remain unmeasured.",

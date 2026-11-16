@@ -247,6 +247,7 @@ var routes = []RoutePolicy{
 	externalRoute("GET", "/api/v1/data/objects/{key...}", authSignedObject, OwnerTeam, RetrySafe),
 	externalRoute("PUT", "/api/v1/log-segments/{key...}", authSignedObject, OwnerRun, RetryExactBody),
 	externalRoute("POST", "/api/v1/auth/device", AuthPublic, OwnerNone, RetryNever),
+	route("POST", "/api/v1/auth/device/step-up", OwnerTeam, RetryNever, member(RunsRead)),
 	externalRoute("POST", "/api/v1/auth/device/token", AuthPublic, OwnerNone, RetryNever),
 	externalRoute("POST", "/api/v1/auth/device/cancel", AuthPublic, OwnerNone, RetrySafe),
 	route("POST", "/api/v1/auth/device/lookup", OwnerTeam, RetrySafe, AccessRule{CredentialAccount, []Grant{RunsRead}, BindNone, LiveCredential}),
