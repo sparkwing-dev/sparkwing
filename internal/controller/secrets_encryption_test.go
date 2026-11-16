@@ -501,7 +501,10 @@ func TestSecrets_ListPreservesLocalKeyDiagnostic(t *testing.T) {
 }
 
 func TestSecrets_ListMasksControllerKeyFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secrets.key")
+	// safety: the server log bounds each value, so a relative key path keeps the
+	// operator detail inside that bound however long TMPDIR is.
+	t.Chdir(t.TempDir())
+	const path = "controller-volume.key"
 	if err := os.WriteFile(path, bytes.Repeat([]byte{1}, secrets.KeySize), 0o600); err != nil {
 		t.Fatal(err)
 	}
