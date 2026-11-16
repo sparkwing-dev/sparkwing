@@ -472,9 +472,11 @@ func TestGitHubAppCheckRunNamesNoJobOrStep(t *testing.T) {
 	f := newGitHubCompletion(t)
 	f.api.private = true
 	f.addReportingNode("ship-production", runstate.NodeFailed, "failed using ***")
-	f.report("ship-production", "ran using ***", []nodewire.Annotation{{Level: "error", Message: "job finding", File: "***.go", Line: 3}}, 1,
-		seededStep{id: "deploy-production", attempt: 1, status: "failed", err: "failed using ***", summary: "step ran using ***",
-			annotations: []nodewire.Annotation{{Level: "info", Message: "failed using ***", File: "***.go", Line: 12}, {Level: "warn", File: "cmd/main.go", Line: 1}}})
+	step := seededStep{
+		id: "deploy-production", attempt: 1, status: "failed", err: "failed using ***", summary: "step ran using ***",
+		annotations: []nodewire.Annotation{{Level: "info", Message: "failed using ***", File: "***.go", Line: 12}, {Level: "warn", File: "cmd/main.go", Line: 1}},
+	}
+	f.report("ship-production", "ran using ***", []nodewire.Annotation{{Level: "error", Message: "job finding", File: "***.go", Line: 3}}, 1, step)
 	f.finish(runstate.RunFailed)
 	f.reconcile()
 	encoded, err := json.Marshal(f.api.checks)
