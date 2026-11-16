@@ -230,8 +230,11 @@ func TestInstallSystemWritesASandboxedUnitForTheAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(string(body), "Group=") {
+		t.Fatalf("unit names a group; an existing account's primary group may differ from its name:\n%s", body)
+	}
 	for _, line := range []string{
-		"User=sw-ci", "Group=sw-ci",
+		"User=sw-ci",
 		"ExecStart=:/var/lib/sparkwing/sw-ci/.local/bin/sparkwing-runner start --config /var/lib/sparkwing/sw-ci/.config/sparkwing/config.yaml",
 		"Environment=HOME=/var/lib/sparkwing/sw-ci", "Environment=SPARKWING_HOME=/var/lib/sparkwing/sw-ci/.sparkwing",
 		"WorkingDirectory=/var/lib/sparkwing/sw-ci/.sparkwing",
@@ -268,9 +271,11 @@ func TestInstallSystemWritesADaemonForTheAccountOnDarwin(t *testing.T) {
 	if err != nil || state.Path != path {
 		t.Fatalf("state = %+v err=%v", state, err)
 	}
+	if strings.Contains(string(body), "GroupName") {
+		t.Fatalf("plist names a group; an existing account's primary group may differ from its name:\n%s", body)
+	}
 	for _, fragment := range []string{
 		"<key>UserName</key>\n  <string>sw-ci</string>",
-		"<key>GroupName</key>\n  <string>sw-ci</string>",
 		"<key>Label</key>\n  <string>com.sparkwing.runner.sw-ci</string>",
 		"<key>HOME</key>\n    <string>/var/lib/sparkwing/sw-ci</string>",
 		"<key>StandardOutPath</key>\n  <string>/Library/Logs/sparkwing-runner-sw-ci.log</string>",

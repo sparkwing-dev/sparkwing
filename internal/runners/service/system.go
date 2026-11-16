@@ -195,7 +195,8 @@ func systemUnit(h SystemHost) string {
 	b.WriteString("After=network-online.target\n")
 	b.WriteString("Wants=network-online.target\n\n")
 	b.WriteString("[Service]\nType=simple\n")
-	fmt.Fprintf(&b, "User=%s\nGroup=%s\n", h.Account.Name, h.Account.Name)
+	// safety: no Group line, so systemd uses the account's primary group, which an existing account may name differently.
+	fmt.Fprintf(&b, "User=%s\n", h.Account.Name)
 	fmt.Fprintf(&b, "WorkingDirectory=%s\n", unitfile.SystemdWord(h.StateHome))
 	fmt.Fprintf(&b, "ExecStart=%s\n", unitfile.Command([]string{h.Binary, "start", "--config", h.ConfigPath}))
 	fmt.Fprintf(&b, "Environment=%s\n", unitfile.Assignment("HOME", h.Account.Home))
@@ -221,8 +222,8 @@ func daemonPlist(h SystemHost) string {
 	fmt.Fprintf(&b, "<!-- %s -->\n", marker)
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
 	fmt.Fprintf(&b, "  <key>Label</key>\n  <string>%s</string>\n\n", unitfile.XMLText(SystemLabel(h.Account.Name)))
-	fmt.Fprintf(&b, "  <key>UserName</key>\n  <string>%s</string>\n", unitfile.XMLText(h.Account.Name))
-	fmt.Fprintf(&b, "  <key>GroupName</key>\n  <string>%s</string>\n\n", unitfile.XMLText(h.Account.Name))
+	// safety: no GroupName, so launchd uses the account's primary group, which an existing account may name differently.
+	fmt.Fprintf(&b, "  <key>UserName</key>\n  <string>%s</string>\n\n", unitfile.XMLText(h.Account.Name))
 	b.WriteString("  <key>ProgramArguments</key>\n  <array>\n")
 	for _, arg := range []string{h.Binary, "start", "--config", h.ConfigPath} {
 		fmt.Fprintf(&b, "    <string>%s</string>\n", unitfile.XMLText(arg))
