@@ -134,7 +134,7 @@ func runFakeNPM() int {
 		return 70
 	}
 	if config.ExitCode != 0 {
-		fmt.Fprintln(os.Stderr, "npm error network request failed")
+		fmt.Fprintln(os.Stderr, "npm error network request failed via proxy", os.Getenv("HTTPS_PROXY"))
 		return config.ExitCode
 	}
 	lock := `{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"` + typeScriptSDKVersion + `"}},"node_modules/@sparkwing/sdk":{"version":"` + typeScriptSDKVersion + `"}}}` + "\n"

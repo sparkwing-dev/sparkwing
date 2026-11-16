@@ -83,7 +83,10 @@ func TestTypeScriptScaffoldWritesLockfile(t *testing.T) {
 func TestTypeScriptScaffoldFailsWithTheNPMCommand(t *testing.T) {
 	for name, setPath := range map[string]func(*testing.T){
 		"npm missing": func(t *testing.T) { t.Setenv("PATH", t.TempDir()) },
-		"npm fails":   func(t *testing.T) { fakeNPM(t, 1) },
+		"npm fails": func(t *testing.T) {
+			t.Setenv("HTTPS_PROXY", "http://ci:proxy-pass-7f3a9c@proxy.internal:3128")
+			fakeNPM(t, 1)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := t.TempDir()
@@ -100,6 +103,9 @@ func TestTypeScriptScaffoldFailsWithTheNPMCommand(t *testing.T) {
 			}
 			if name == "npm fails" && !strings.Contains(commandErr.Error(), "network request failed") {
 				t.Fatalf("error = %v, want npm's output", commandErr)
+			}
+			if strings.Contains(commandErr.Error(), "proxy-pass-7f3a9c") {
+				t.Fatalf("error = %v, exposes the proxy credential", commandErr)
 			}
 			if _, err := os.Stat(filepath.Join(dir, "jobs", "hello.ts")); err != nil {
 				t.Fatalf("scaffold files were not kept: %v", err)

@@ -119,7 +119,8 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 func lockTypeScriptSkeleton(ctx context.Context, sparkwingDir string) error {
 	args := engine.TypeScriptLockfileArgs()
 	rerun := "npm --prefix " + shellSingleQuote(sparkwingDir) + " " + strings.Join(args, " ")
-	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, procenv.Runtime{})
+	masker := secrets.NewMasker()
+	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{})
 	if err != nil {
 		return err
 	}
@@ -135,7 +136,7 @@ func lockTypeScriptSkeleton(ctx context.Context, sparkwingDir string) error {
 	err = cmd.Run()
 	stop()
 	if err != nil {
-		return fmt.Errorf("pipeline new: the pipeline files are written, but creating package-lock.json failed: %w\n%s\nfix the error, then run:\n  %s", err, strings.TrimSpace(captured.String()), rerun)
+		return fmt.Errorf("pipeline new: the pipeline files are written, but creating package-lock.json failed: %w\n%s\nfix the error, then run:\n  %s", err, strings.TrimSpace(masker.Mask(captured.String())), rerun)
 	}
 	return nil
 }
