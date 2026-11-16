@@ -14,12 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// perf: the active runner lookup reads the store, and runner claim polls query the queue state twice a
-// second, so the lookup is reused while that runner lives; its limits are read from the kernel every query.
-const enforcementReadInterval = 5 * time.Second
-
-// safety: status reads the active runner's limits back from the kernel on every query, so a refused,
-// absent or removed limit never shows as enforced.
+// safety: status looks up the active runner and reads its limits back from the kernel on every query,
+// so a refused, absent or removed limit, or an uncapped successor, never shows as enforced.
 func (d *Daemon) budgetEnforcement(machineCores float64, machineMemory uint64) *wingwire.BudgetEnforcement {
 	if !d.cfg.Budget.Enforcing() {
 		return nil
@@ -27,7 +23,7 @@ func (d *Daemon) budgetEnforcement(machineCores float64, machineMemory uint64) *
 	if runtime.GOOS != "linux" {
 		return &wingwire.BudgetEnforcement{Reason: unenforcedPlatformReason(runtime.GOOS)}
 	}
-	pid, reason := d.enforcedRunnerPID()
+	runner, reason := d.activeRunner()
 	if reason != "" {
 		return &wingwire.BudgetEnforcement{Reason: reason}
 	}
@@ -35,27 +31,9 @@ func (d *Daemon) budgetEnforcement(machineCores float64, machineMemory uint64) *
 	if sensor == nil {
 		sensor = newContainerSensor(d.cfg.ContainerRoot)
 	}
-	cores, memory := sensor.processLimits(pid)
-	nice, _ := processNice(sensor.root, pid)
+	cores, memory := sensor.processLimits(runner.PID)
+	nice, _ := processNice(sensor.root, runner.PID)
 	return runnerEnforcement(d.cfg.Budget, machineCores, machineMemory, cores, memory, nice)
-}
-
-func (d *Daemon) enforcedRunnerPID() (int, string) {
-	now := d.now()
-	d.enforcementMu.Lock()
-	defer d.enforcementMu.Unlock()
-	if d.enforcedRunner != nil && now.Sub(d.enforcedRunnerAt) < enforcementReadInterval {
-		if alive, err := LocalRunnerProcessAlive(*d.enforcedRunner); err == nil && alive {
-			return d.enforcedRunner.PID, ""
-		}
-	}
-	d.enforcedRunner = nil
-	instance, reason := d.activeRunner()
-	if reason != "" {
-		return 0, reason
-	}
-	d.enforcedRunner, d.enforcedRunnerAt = &instance, now
-	return instance.PID, ""
 }
 
 func unenforcedPlatformReason(goos string) string {

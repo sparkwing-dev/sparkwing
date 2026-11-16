@@ -118,10 +118,6 @@ type Daemon struct {
 	container *containerSensor
 
 	cgroup *cgroupLimiter
-
-	enforcementMu    sync.Mutex
-	enforcedRunner   *localhostwire.LocalRunnerInstance
-	enforcedRunnerAt time.Time
 }
 
 type delivery struct {
