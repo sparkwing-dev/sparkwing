@@ -118,6 +118,11 @@ func Parse(binary string, args []string) (Invocation, error) {
 				return inv, inv.invalid("%s", err)
 			}
 			f, known := flags[name]
+			// safety: commands reuse flag names with different arity (run --route takes a value,
+			// pools allow --route does not), so the command being parsed owns its definition.
+			if i := slices.IndexFunc(inv.Command.Flags, func(own Flag) bool { return own.Name == name }); i >= 0 {
+				f = inv.Command.Flags[i]
+			}
 			// safety: before the command word only global flags and --profile are read, so a
 			// leaf's valued flag (docs --version, runs logs --tail) cannot swallow the next word.
 			if known && groups[inv.Command.Path] && name != "profile" && !slices.ContainsFunc(append(GlobalFlags(), inv.Command.Flags...), func(own Flag) bool { return own.Name == name }) {

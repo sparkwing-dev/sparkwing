@@ -303,3 +303,14 @@ func TestRunStatusesMatchStoredRunStates(t *testing.T) {
 		t.Fatalf("RunStatuses() = %v, want %v", RunStatuses(), want)
 	}
 }
+
+func TestSameNamedFlagsKeepTheirOwnCommandsArity(t *testing.T) {
+	inv, err := Parse("sparkwing", []string{"pools", "allow", "--pool", "prod", "--repo", "acme/api", "--route", "-o", "json"})
+	if err != nil || !inv.Bool("route") || inv.Value("output") != "json" {
+		t.Fatalf("pools allow --route: %v %+v", err, inv.Flags)
+	}
+	inv, err = Parse("sparkwing", []string{"run", "build", "--route", "local", "-o", "json"})
+	if err != nil || inv.Value("route") != "local" || inv.Value("output") != "json" {
+		t.Fatalf("run --route: %v %+v", err, inv.Flags)
+	}
+}
