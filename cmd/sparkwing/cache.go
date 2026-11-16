@@ -234,6 +234,23 @@ type cacheExplainPart struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// safety: readers of the binary cache must key it in the install environment the build used, or they never find it.
+func pipelineBinaryKey(ctx context.Context, dir string) (string, []bincache.KeyPart, error) {
+	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, procenv.Runtime{})
+	if err != nil {
+		return "", nil, err
+	}
+	pin, err := engine.ReadPin(dir, engineid.GoSDK)
+	if err != nil {
+		return "", nil, err
+	}
+	environment, err = sdkinstall.GoEnvironment(ctx, dir, pin, environment)
+	if err != nil {
+		return "", nil, err
+	}
+	return bincache.ExplainCacheKey(dir, slices.Collect(environment.Values())) //nolint:contextcheck // ExplainCacheKey has no context parameter.
+}
+
 func runCacheExplain(inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
@@ -256,19 +273,7 @@ func runCacheExplain(inv clisurface.Invocation) error {
 		})
 	}
 
-	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, procenv.Runtime{})
-	if err != nil {
-		return fmt.Errorf("cache explain: %w", err)
-	}
-	pin, err := engine.ReadPin(dir, engineid.GoSDK)
-	if err != nil {
-		return fmt.Errorf("cache explain: %w", err)
-	}
-	environment, err = sdkinstall.GoEnvironment(context.Background(), dir, pin, environment)
-	if err != nil {
-		return fmt.Errorf("cache explain: %w", err)
-	}
-	key, parts, err := bincache.ExplainCacheKey(dir, slices.Collect(environment.Values()))
+	key, parts, err := pipelineBinaryKey(context.Background(), dir)
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)
 	}

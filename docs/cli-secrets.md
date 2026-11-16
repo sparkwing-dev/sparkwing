@@ -104,7 +104,7 @@ Store (or replace) a secret value
 
 Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.
 
-If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.
+If neither --value nor --file is supplied, read the value from stdin. Preserve trailing newlines. Empty stdin or an empty --file is refused; --value '' stores an empty value. --variable stores an unmasked value.
 
 A pipeline secret belongs to one GitHub repository and one pipeline: --repo and --pipeline go together, and only runs whose code Sparkwing fetched from that repository through the team's GitHub App, or whose repository a GitHub Actions job proved, read it; uploaded, local and --runner here runs read only --shared secrets. --repo takes owner/name or a gh:<id> key. --shared stores a team-wide secret every pipeline of every repository in the team reads.
 

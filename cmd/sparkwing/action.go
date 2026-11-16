@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -75,7 +79,7 @@ func runPipelineList(inv clisurface.Invocation) error {
 		}
 		return nil
 	default:
-		printPipelineTable(pipelines)
+		printPipelineTable(os.Stdout, pipelines, pipelinesBuilt)
 		return nil
 	}
 }
@@ -326,9 +330,10 @@ func summarizeTriggerList(t pipelines.Triggers) []string {
 	return out
 }
 
-func printPipelineTable(pipelineList []Pipeline) {
+// perf: built is asked only when no pipeline has a description; a listing never compiles.
+func printPipelineTable(w io.Writer, pipelineList []Pipeline, built func() bool) {
 	if len(pipelineList) == 0 {
-		fmt.Println("(no pipelines)")
+		fmt.Fprintln(w, "(no pipelines)")
 		return
 	}
 	const widthCap = 30
@@ -344,8 +349,35 @@ func printPipelineTable(pipelineList []Pipeline) {
 		if short == "" {
 			short = a.Help
 		}
-		fmt.Printf("  %-*s  %s\n", nameWidth, opsview.DisplayText(a.Name), opsview.DisplayText(short))
+		fmt.Fprintf(w, "  %-*s  %s\n", nameWidth, opsview.DisplayText(a.Name), opsview.DisplayText(short))
 	}
+	if !slices.ContainsFunc(pipelineList, func(a Pipeline) bool { return a.Short != "" || a.Help != "" }) && !built() {
+		fmt.Fprintln(w, "\nDescriptions appear once the pipelines are built; run `sparkwing cache warm` to build them now.")
+	}
+}
+
+func pipelinesBuilt() bool {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return true
+	}
+	dir, ok := walkUpForSparkwing(cwd)
+	if !ok {
+		return true
+	}
+	if ts, err := pipelineentry.IsTypeScript(dir); err != nil || ts {
+		return true
+	}
+	key, _, err := pipelineBinaryKey(context.Background(), dir)
+	if err != nil {
+		return true
+	}
+	cached, err := bincache.PipelineEntry(key)
+	if err != nil {
+		return true
+	}
+	lease, found, err := cached.Acquire(context.Background())
+	return err != nil || found && lease.Release() == nil
 }
 
 func printPipelineDetail(a *Pipeline) {

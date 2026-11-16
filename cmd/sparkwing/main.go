@@ -140,6 +140,10 @@ func exitCodeFor(err error) int {
 		}
 		return commandError.code
 	}
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
+		return exitRefused
+	}
 	return 1
 }
 

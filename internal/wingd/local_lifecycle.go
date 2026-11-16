@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 var errLocalStoreIncompatible = errors.New("wingd: incompatible local store")
@@ -104,7 +105,11 @@ func (l *localLifecycle) EnsureStarted(ctx context.Context, opts LocalStartOptio
 
 func (l *localLifecycle) reuse(ctx context.Context, opts LocalStartOptions, status LocalStatus) (LocalStatus, error) {
 	if opts.Standalone {
-		return LocalStatus{}, errors.New("wingd: standalone cannot open a store owned by a running controller")
+		return LocalStatus{}, &apierr.Error{
+			Code:    apierr.Conflict,
+			Message: "the local controller is running and owns this SPARKWING_HOME, so an unadmitted run cannot open its store",
+			Hint:    "Stop the controller with `sparkwing daemon stop`, or set SPARKWING_HOME to a private directory for this run.",
+		}
 	}
 	status, err := l.Status(ctx)
 	if err == nil && !status.Running {

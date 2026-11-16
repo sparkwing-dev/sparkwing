@@ -494,7 +494,7 @@ var commandSynopses = map[string]string{
 	"sparkwing __complete":                          "Print completion candidates for the shell scripts",
 	"sparkwing __tick":                              "Evaluate every armed schedule once (the OS timer's entry point)",
 	"sparkwing cache":                               "Inspect or trim the compiled pipeline binary cache",
-	"sparkwing cache explain":                       "Show a pipeline's cache key and the inputs behind it",
+	"sparkwing cache explain":                       "Show this repository's pipeline binary cache key and its inputs",
 	"sparkwing cache info":                          "Print cache dir, size, ceilings, and recent entries",
 	"sparkwing cache prune":                         "Prune oldest cached binaries down to the ceilings",
 	"sparkwing cache warm":                          "Prepare the local pipeline cache and dependencies",
