@@ -5,6 +5,7 @@
       "slugs": [
         "getting-started",
         "updates",
+        "support",
         "architecture",
         "machine-config",
         "environment-variables",
