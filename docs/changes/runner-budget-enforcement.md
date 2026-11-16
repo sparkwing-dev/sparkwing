@@ -11,3 +11,4 @@
   another budget. Queue JSON replaces `budget.enforce` with a `budget.enforcement`
   object (`applied`, `cpu_cores`, `memory_bytes`, `nice`, `reason`), and the plain
   `budget` row prints `enforced`, `not-enforced` or `-` in place of `true`/`false`.
+  See the [migration guide](docs/migrations/_unreleased.md#queue-budget-reports-applied-enforcement).
