@@ -248,6 +248,16 @@ JSON emits matching records and a page record with next_cursor and truncated. Qu
 | `-q, --quiet` | Print each matching run ID once instead of the matching lines. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 
+### Examples
+
+```sh
+# Search the last day's logs
+sparkwing runs grep --grep timeout --since 24h
+
+# Search one run's logs
+sparkwing runs grep --run RUN_ID --grep timeout
+```
+
 ## `sparkwing runs list`
 
 List recent pipeline runs
@@ -342,9 +352,6 @@ sparkwing runs logs --run RUN_ID
 
 # Follow one job's log while it runs
 sparkwing runs logs --run RUN_ID --job build --follow
-
-# Search the last day's logs
-sparkwing runs logs --grep timeout --since 24h
 ```
 
 ## `sparkwing runs prune`

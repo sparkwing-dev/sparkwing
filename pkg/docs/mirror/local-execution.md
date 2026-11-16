@@ -506,7 +506,7 @@ The pause is local to the machine: a `paused` file beside the runner credential
 in `runner.credentials_dir`. `sparkwing runners list` on this machine shows the
 runner as `paused`. Other machines and the console see it as idle with no
 claims. To stop the runner entirely, stop its service or run
-`sparkwing runners remove`.
+`sparkwing runners delete`.
 
 ## Environment and secrets
 

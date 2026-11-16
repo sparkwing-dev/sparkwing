@@ -748,7 +748,10 @@ var commandExamples = map[string][]Example{
 	"sparkwing runs logs": {
 		{"Read a run's logs", "sparkwing runs logs --run RUN_ID"},
 		{"Follow one job's log while it runs", "sparkwing runs logs --run RUN_ID --job build --follow"},
-		{"Search the last day's logs", "sparkwing runs logs --grep timeout --since 24h"},
+	},
+	"sparkwing runs grep": {
+		{"Search the last day's logs", "sparkwing runs grep --grep timeout --since 24h"},
+		{"Search one run's logs", "sparkwing runs grep --run RUN_ID --grep timeout"},
 	},
 	"sparkwing runs cancel": {
 		{"Cancel a run", "sparkwing runs cancel --run RUN_ID"},
