@@ -40,7 +40,11 @@ type completionGitHub struct {
 	repository int64
 	name       string
 	private    bool
-	existing   int64
+	repoStatus int
+	// hack: runs under the fake's lock after each accepted check run write, so a test can change GitHub between writes.
+	afterWrite     func(*completionGitHub)
+	privateAtWrite []bool
+	existing       int64
 	// hack: GitHub appends annotations across writes, so the fake keeps them per check run.
 	annotations   map[int64][]githubapp.CheckRunAnnotation
 	batches       []int
@@ -76,6 +80,10 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			payload = `{"token":"private","expires_at":"2100-01-01T00:00:00Z"}`
 		}
 	case r.URL.Path == "/repositories/42":
+		if g.repoStatus != 0 {
+			status, payload = g.repoStatus, `{"message":"Server Error"}`
+			break
+		}
 		payload = fmt.Sprintf(`{"id":%d,"full_name":%q,"private":%t}`, g.repository, g.name, g.private)
 	case strings.Contains(r.URL.Path, "/commits/") && strings.HasSuffix(r.URL.Path, "/check-runs"):
 		payload = `{"check_runs":[]}`
@@ -115,6 +123,10 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			}
 			g.annotations[g.existing] = append(g.annotations[g.existing], check.Output.Annotations...)
 			g.batches = append(g.batches, len(check.Output.Annotations))
+		}
+		g.privateAtWrite = append(g.privateAtWrite, g.private)
+		if g.afterWrite != nil {
+			g.afterWrite(g)
 		}
 		payload = fmt.Sprintf(`{"id":%d}`, g.existing)
 	default:

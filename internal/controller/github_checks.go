@@ -117,12 +117,17 @@ func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdat
 	return githubCheckRepository{token: tok.Token, owner: name.Owner, name: name.Name, private: repo.Private}, nil
 }
 
+type githubCheckDetailOutput struct {
+	output      githubapp.CheckRunOutput
+	annotations []githubapp.CheckRunAnnotation
+}
+
 func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run, recorded int64) (int64, error) {
 	repo, err := r.repository(ctx, u)
 	if err != nil {
 		return 0, err
 	}
-	check, annotations, err := r.checkRun(ctx, tenant, u, run, repo.private)
+	check, details, err := r.checkRun(ctx, tenant, u, run, repo.private)
 	if err != nil {
 		return 0, err
 	}
@@ -134,16 +139,32 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.T
 	}
 	// safety: GitHub appends each write's annotations, so a redelivery sends only those the check run lacks.
 	sent := 0
-	if id != 0 && len(annotations) > 0 {
+	if details != nil && id != 0 && len(details.annotations) > 0 {
 		if sent, err = r.client.CheckRunAnnotationCount(ctx, repo.token, repo.owner, repo.name, id); err != nil {
 			return 0, err
 		}
-		sent = min(sent, len(annotations))
+		sent = min(sent, len(details.annotations))
 	}
-	for first := true; first || sent < len(annotations); first = false {
-		batch := annotations[sent:min(sent+githubapp.MaxCheckRunAnnotations, len(annotations))]
-		if check.Output != nil {
-			check.Output.Annotations = batch
+	aggregate := check.Output
+	for {
+		var batch []githubapp.CheckRunAnnotation
+		// safety: a repository can turn public between writes, so every write that carries details rereads its
+		// visibility first; a public answer sends the aggregate output instead and an unreadable one sends nothing.
+		if details != nil {
+			private, err := r.stillPrivate(ctx, repo, u.repository)
+			if err != nil {
+				return 0, err
+			}
+			if !private {
+				details = nil
+			}
+		}
+		check.Output = aggregate
+		if details != nil {
+			batch = details.annotations[sent:min(sent+githubapp.MaxCheckRunAnnotations, len(details.annotations))]
+			out := details.output
+			out.Annotations = batch
+			check.Output = &out
 		}
 		if id == 0 {
 			id, err = r.client.CreateCheckRun(ctx, repo.token, repo.owner, repo.name, check)
@@ -154,6 +175,9 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.T
 			return 0, err
 		}
 		sent += len(batch)
+		if details == nil || sent >= len(details.annotations) {
+			break
+		}
 	}
 	if recorded != 0 {
 		return 0, nil
@@ -161,7 +185,18 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.T
 	return id, nil
 }
 
-func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run, private bool) (githubapp.CheckRun, []githubapp.CheckRunAnnotation, error) {
+func (r *githubCheckReporter) stillPrivate(ctx context.Context, repo githubCheckRepository, id int64) (bool, error) {
+	current, err := r.client.RepositoryByID(ctx, repo.token, id)
+	if err != nil {
+		return false, err
+	}
+	if current.ID != id {
+		return false, fmt.Errorf("GitHub repository identity does not match the sealed run")
+	}
+	return current.Private, nil
+}
+
+func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run, private bool) (githubapp.CheckRun, *githubCheckDetailOutput, error) {
 	link := githubRunTargetURL(r.dashboardURL, u.runID)
 	check := githubapp.CheckRun{
 		Name: "sparkwing/" + u.pipeline, HeadSHA: u.sha, DetailsURL: link, ExternalID: u.runID,
@@ -197,16 +232,17 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant
 				}
 			}
 		}
-		// safety: GitHub shows check output to everyone who can read the repository, so job names, masked errors,
-		// summaries and annotations go only to private repositories; a public one gets aggregate run state.
-		if private {
-			var annotations []githubapp.CheckRunAnnotation
-			check.Output, annotations = githubCheckDetails(run, nodes, steps, check.Conclusion, link)
-			return check, annotations, nil
-		}
+		// safety: the text is always set, so an aggregate write replaces text an earlier private write left behind.
 		check.Output = &githubapp.CheckRunOutput{
 			Title:   githubCheckTitle(check.Conclusion),
 			Summary: githubCheckSummary(run, nodes, check.Conclusion, link),
+			Text:    githubCheckLinkLine("Job results stay on the run page.", link),
+		}
+		// safety: GitHub shows check output to everyone who can read the repository, so masked errors, summaries
+		// and annotations go only to private repositories; a public one gets aggregate run state.
+		if private {
+			output, annotations := githubCheckDetails(run, nodes, steps, check.Conclusion, link)
+			return check, &githubCheckDetailOutput{output: *output, annotations: annotations}, nil
 		}
 	}
 	return check, nil, nil

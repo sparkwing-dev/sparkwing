@@ -237,7 +237,7 @@ func TestGitHubAppCheckRunOnPublicRepositoryKeepsRunDetailsInConsole(t *testing.
 			t.Fatalf("public repository check exposes %q: %+v", private, out)
 		}
 	}
-	if out.Text != "" || len(out.Annotations) != 0 || len(f.api.annotations[101]) != 0 {
+	if len(out.Annotations) != 0 || len(f.api.annotations[101]) != 0 {
 		t.Fatalf("public repository check carries details: %+v", out)
 	}
 	for _, want := range []string{"Failed", "2 failed", "https://dash.example.test/runs?run=run"} {
@@ -264,17 +264,17 @@ func TestGitHubAppCheckRunCarriesDetailsOnPrivateRepositories(t *testing.T) {
 	if out.Title != "Failed: 2 of 3 jobs failed" {
 		t.Fatalf("title=%q", out.Title)
 	}
-	for _, want := range []string{"https://dash.example.test/runs?run=run", "unit-tests", "go test: *** FAIL TestParse", "### compile", "Binary size **12 MB**.", "### unit-tests / vet", "vet found 1 issue"} {
+	for _, want := range []string{"https://dash.example.test/runs?run=run", "**Job 3**: go test: *** FAIL TestParse", "### Job 2\n\nBinary size **12 MB**.", "**Job 3, step 1**: vet: *** shadows err", "### Job 3, step 1\n\nvet found 1 issue"} {
 		if !strings.Contains(out.Summary, want) {
 			t.Fatalf("summary lacks %q:\n%s", want, out.Summary)
 		}
 	}
-	for _, want := range []string{"1 job failed", "go test: *** FAIL TestParse\nexpected 3, got 4", "vet: *** shadows err"} {
+	for _, want := range []string{"### Run\n\n```\n1 job failed", "### Job 3\n\n```\ngo test: *** FAIL TestParse\nexpected 3, got 4", "### Job 3, step 1\n\n```\nvet: *** shadows err"} {
 		if !strings.Contains(out.Text, want) {
 			t.Fatalf("text lacks %q:\n%s", want, out.Text)
 		}
 	}
-	if strings.Contains(out.Summary+out.Text, "stale attempt") {
+	if strings.Contains(out.Summary+out.Text, "stale attempt") || strings.Contains(out.Summary+out.Text, "unit-tests") || strings.Contains(out.Summary+out.Text, "compile") {
 		t.Fatalf("check carries a superseded attempt's results:\n%s\n%s", out.Summary, out.Text)
 	}
 }
@@ -407,7 +407,7 @@ func TestGitHubAppCheckRunSendsPathAnnotationsInBatches(t *testing.T) {
 		}
 	}
 	for _, check := range f.api.checks {
-		if check.Status != "completed" || check.Conclusion != "failure" || check.Output.Title == "" || !strings.Contains(check.Output.Summary, "lint") {
+		if check.Status != "completed" || check.Conclusion != "failure" || check.Output.Title == "" || !strings.Contains(check.Output.Summary, "**Job 2**: lint failed") {
 			t.Fatalf("annotation write lost the completed check: %+v", check)
 		}
 	}
@@ -462,6 +462,127 @@ func TestGitHubAppCheckRunAnnotationsAreNotDuplicatedOnRedelivery(t *testing.T) 
 			desired, delivered, _, _ := f.revision()
 			if delivered != desired {
 				t.Fatalf("revisions=%d/%d", delivered, desired)
+			}
+		})
+	}
+}
+
+// safety: a stored secret read may occur in an accepted job or step ID and is masked only in text, so no ID may reach GitHub.
+func TestGitHubAppCheckRunNamesNoJobOrStep(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.addReportingNode("ship-production", runstate.NodeFailed, "failed using ***")
+	f.report("ship-production", "ran using ***", []nodewire.Annotation{{Level: "error", Message: "job finding", File: "***.go", Line: 3}}, 1,
+		seededStep{id: "deploy-production", attempt: 1, status: "failed", err: "failed using ***", summary: "step ran using ***",
+			annotations: []nodewire.Annotation{{Level: "info", Message: "failed using ***", File: "***.go", Line: 12}, {Level: "warn", File: "cmd/main.go", Line: 1}}})
+	f.finish(runstate.RunFailed)
+	f.reconcile()
+	encoded, err := json.Marshal(f.api.checks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "production") {
+		t.Fatalf("a job or step ID reached GitHub: %s", encoded)
+	}
+	out := f.completedCheck().Output
+	for _, want := range []string{"### Job 2\n", "### Job 2, step 1\n", "**Job 2, step 1**: failed using ***"} {
+		if !strings.Contains(out.Summary, want) {
+			t.Fatalf("summary lacks positional label %q:\n%s", want, out.Summary)
+		}
+	}
+	for _, a := range f.api.annotations[101] {
+		if a.Title != "Job 2" && a.Title != "Job 2, step 1" || a.Message == "" {
+			t.Fatalf("annotation=%+v", a)
+		}
+	}
+}
+
+func TestGitHubAppCheckRunStopsDetailsWhenRepositoryTurnsPublic(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.addReportingNode("private-job", runstate.NodeFailed, "private-error")
+	f.report("private-job", "private-summary", pathAnnotations(120, "private"), 1)
+	f.api.afterWrite = func(g *completionGitHub) { g.private = false }
+	f.finish(runstate.RunFailed)
+	f.reconcile()
+	if len(f.api.checks) < 2 {
+		t.Fatalf("the check run was not rewritten after the repository turned public: %d writes", len(f.api.checks))
+	}
+	for i, check := range f.api.checks {
+		if f.api.privateAtWrite[i] {
+			continue
+		}
+		if out := check.Output; len(out.Annotations) != 0 || strings.Contains(out.Summary+out.Text, "private-") {
+			t.Fatalf("write %d to a public repository carried details: %+v", i, out)
+		}
+	}
+	if desired, delivered, _, _ := f.revision(); delivered != desired {
+		t.Fatalf("revisions=%d/%d", delivered, desired)
+	}
+}
+
+func TestGitHubAppCheckRunVisibilityRecheckFailureStopsDetails(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.addReportingNode("private-job", runstate.NodeFailed, "private-error")
+	f.report("private-job", "private-summary", pathAnnotations(120, "private"), 1)
+	f.api.afterWrite = func(g *completionGitHub) { g.repoStatus = 500 }
+	f.finish(runstate.RunFailed)
+	f.reconcile()
+	if len(f.api.checks) != 1 || len(f.api.annotations[101]) != 50 {
+		t.Fatalf("writes continued after visibility became unknown: writes=%d annotations=%d", len(f.api.checks), len(f.api.annotations[101]))
+	}
+	if _, delivered, _, _ := f.revision(); delivered != 0 {
+		t.Fatal("a partly written check run was acknowledged")
+	}
+}
+
+func TestGitHubAppCheckRunPublicRetryOverwritesPrivateDetails(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.addReportingNode("private-job", runstate.NodeFailed, "private-error")
+	f.report("private-job", "private-summary", pathAnnotations(120, "private"), 1)
+	f.finish(runstate.RunFailed)
+	f.api.failWrite = 2
+	f.reconcile()
+	if len(f.api.annotations[101]) != 50 || !strings.Contains(f.completedCheck().Output.Text, "private-error") {
+		t.Fatalf("setup: annotations=%d", len(f.api.annotations[101]))
+	}
+	f.api.private = false
+	f.now = f.now.Add(time.Hour)
+	f.reconcile()
+	out := f.completedCheck().Output
+	if len(out.Annotations) != 0 || strings.Contains(out.Title+out.Summary+out.Text, "private-") {
+		t.Fatalf("public retry carried details: %+v", out)
+	}
+	if out.Text == "" {
+		t.Fatal("public retry left the earlier private text in place")
+	}
+	// safety: GitHub has no API that removes a check run's annotations; the docs state that sent ones remain.
+	if got := len(f.api.annotations[101]); got != 50 {
+		t.Fatalf("annotations=%d", got)
+	}
+	if desired, delivered, _, _ := f.revision(); delivered != desired {
+		t.Fatalf("revisions=%d/%d", delivered, desired)
+	}
+}
+
+func TestGitHubAppCheckRunUnknownVisibilityNeverSendsDetails(t *testing.T) {
+	for name, status := range map[string]int{"missing": 0, "unavailable": 500} {
+		t.Run(name, func(t *testing.T) {
+			f := newGitHubCompletion(t)
+			f.api.repoStatus = status
+			f.addReportingNode("private-job", runstate.NodeFailed, "private-error")
+			f.report("private-job", "private-summary", pathAnnotations(1, "private"), 1)
+			f.finish(runstate.RunFailed)
+			f.reconcile()
+			for _, check := range f.api.checks {
+				if out := check.Output; len(out.Annotations) != 0 || strings.Contains(out.Summary+out.Text, "private-") {
+					t.Fatalf("unknown visibility carried details: %+v", out)
+				}
+			}
+			if status != 0 && len(f.api.checks) != 0 {
+				t.Fatalf("a failed visibility read still wrote %d checks", len(f.api.checks))
 			}
 		})
 	}

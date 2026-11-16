@@ -32,24 +32,28 @@ type githubCheckResult struct {
 	annotations []nodewire.Annotation
 }
 
-// safety: steps of superseded attempts are dropped, so a retried job reports only its latest attempt.
+// safety: labels are positions, never job or step IDs: a stored secret read may occur in an accepted ID and
+// is masked only in text. Steps of superseded attempts are dropped, so a retried job reports its latest attempt.
 func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep) []githubCheckResult {
 	byJob := map[string][]*store.NodeStep{}
 	for _, step := range steps {
 		byJob[step.NodeID] = append(byJob[step.NodeID], step)
 	}
 	var out []githubCheckResult
-	for _, n := range nodes {
+	for i, n := range nodes {
+		job := fmt.Sprintf("Job %d", i+1)
 		out = append(out, githubCheckResult{
-			label: n.NodeID, failed: n.Outcome == string(runstate.NodeFailed), err: n.Error,
+			label: job, failed: n.Outcome == string(runstate.NodeFailed), err: n.Error,
 			summary: n.Summary, annotations: n.Annotations,
 		})
+		position := 0
 		for _, step := range byJob[n.NodeID] {
 			if step.Attempt != int64(n.AttemptsConsumed) {
 				continue
 			}
+			position++
 			out = append(out, githubCheckResult{
-				label: n.NodeID + " / " + step.StepID, failed: step.Status == "failed", err: step.Error,
+				label: fmt.Sprintf("%s, step %d", job, position), failed: step.Status == "failed", err: step.Error,
 				summary: step.Summary, annotations: step.Annotations,
 			})
 		}
