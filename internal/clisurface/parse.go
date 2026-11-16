@@ -189,6 +189,9 @@ func suggestCommand(commands []Command, parent, word, next string) string {
 	}
 	slices.Sort(names)
 	slices.Sort(withNext)
+	if verb, ok := verbSynonyms[word]; ok && slices.Contains(names, verb) {
+		return parent + " " + verb
+	}
 	if suggestion := sparkwingruntime.SuggestClosest(word, withNext); suggestion != "" {
 		return parent + " " + suggestion
 	}

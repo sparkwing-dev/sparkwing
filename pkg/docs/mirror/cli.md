@@ -30,7 +30,7 @@ Interactive debug sessions and compiler/install diagnostic streams retain their
 terminal behavior.
 
 Repository registration uses `repos add --checkout PATH` and
-`repos remove --checkout PATH`. Their JSON receipts include the action,
+`repos delete --checkout PATH`. Their JSON receipts include the action,
 absolute path and affected count. `version hold` and
 `pipeline sparks lint|update` also honor the selected output format.
 

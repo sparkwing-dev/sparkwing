@@ -12,7 +12,7 @@ Manage runners
 
 - `add` -- Register a runner
 - `list` -- List runners and their capacity
-- `remove` -- Remove a runner
+- `delete` -- Remove a runner
 
 ### Flags
 
@@ -53,24 +53,7 @@ Without --session-stdin a personal runner can be approved in the browser: the co
 | `--launcher` | Enroll only claims.launch for a shared reserved pool and skip the persistent runner service. |
 | `--team TEAM` | With browser approval, accept an approval only from this team. |
 
-## `sparkwing runners list`
-
-List runners and their capacity
-
-Read the same runner details from the local controller or a selected profile. The local controller lists this machine as one local runner named after its host, with the runner.labels the daemon read at start and a last_seen of the read time. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
-| `-q, --quiet` | Print only runner names. |
-
-## `sparkwing runners remove`
+## `sparkwing runners delete`
 
 Remove a runner
 
@@ -88,3 +71,20 @@ Require the enrolled controller, optional runner name and explicit runner creden
 | `--no-service` | Revoke the runner credential without stopping the installed runner service. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--runner RUNNER` | Runner name or selection. |
+
+## `sparkwing runners list`
+
+List runners and their capacity
+
+Read the same runner details from the local controller or a selected profile. The local controller lists this machine as one local runner named after its host, with the runner.labels the daemon read at start and a last_seen of the read time. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `-q, --quiet` | Print only runner names. |

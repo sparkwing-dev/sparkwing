@@ -231,7 +231,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 		t.Errorf("service calls = %v, want %v", *f.calls, wantCalls)
 	}
 	for _, want := range []string{
-		minted.Prefix, "wrote the runner section of " + f.config, "runners remove --profile prod",
+		minted.Prefix, "wrote the runner section of " + f.config, "runners delete --profile prod",
 		"docs read --topic threat-model",
 	} {
 		if !strings.Contains(out, want) {
@@ -336,7 +336,7 @@ func TestRunnersRemoveStopsTheServiceThenRevokesTheToken(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := f.run([]string{"remove", "--profile", "prod", "--config", f.config}); err != nil {
-			t.Fatalf("runners remove: %v", err)
+			t.Fatalf("runners delete: %v", err)
 		}
 	})
 
@@ -345,7 +345,7 @@ func TestRunnersRemoveStopsTheServiceThenRevokesTheToken(t *testing.T) {
 		t.Fatalf("listed %d runner tokens, want 1", len(tokens))
 	}
 	if tokens[0].RevokedAt == nil {
-		t.Error("runners remove left the token live")
+		t.Error("runners delete left the token live")
 	}
 	if !slices.Contains(*f.calls, "systemctl --user disable --now sparkwing-runner.service") {
 		t.Errorf("service calls = %v, want the unit disabled", *f.calls)
@@ -359,7 +359,7 @@ func TestRunnersRemoveWithoutAConfigSaysSo(t *testing.T) {
 	f := newRunnersFixture(t)
 	err := f.run([]string{"remove", "--profile", "prod", "--config", f.config})
 	if err == nil || !strings.Contains(err.Error(), f.config) {
-		t.Fatalf("runners remove with no config = %v, want an error naming the path", err)
+		t.Fatalf("runners delete with no config = %v, want an error naming the path", err)
 	}
 }
 
@@ -547,7 +547,7 @@ func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 
 	err := f.run([]string{"remove", "--profile", "prod", "--config", f.config})
 	if err == nil {
-		t.Fatal("runners remove revoked a member token inferred from principal text")
+		t.Fatal("runners delete revoked a member token inferred from principal text")
 	}
 	for _, want := range []string{"member", "deploy-bot", "not a runner token"} {
 		if !strings.Contains(err.Error(), want) {

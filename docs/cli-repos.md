@@ -14,7 +14,7 @@ The machine's fleet of sparkwing repos and their SDK pins
 - `info` -- Inspect repository versions, worktrees, and pipelines
 - `list` -- List the machine's fleet of sparkwing repos
 - `prune` -- Remove checkouts whose pipeline directory is gone
-- `remove` -- Remove a registered checkout
+- `delete` -- Remove a registered checkout
 - `update` -- Update repository SDK versions and compare pipeline plans
 
 ### Flags
@@ -31,6 +31,21 @@ The machine's fleet of sparkwing repos and their SDK pins
 Register a checkout
 
 --checkout is required; it must be a local path.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+
+## `sparkwing repos delete`
+
+Remove a registered checkout
+
+--checkout is required; registry basename fallback is refused.
 
 ### Flags
 
@@ -76,21 +91,6 @@ Inventory includes each checkout SDK kind (go or typescript) and its native SDK 
 ## `sparkwing repos prune`
 
 Remove checkouts whose pipeline directory is gone
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-
-## `sparkwing repos remove`
-
-Remove a registered checkout
-
---checkout is required; registry basename fallback is refused.
 
 ### Flags
 

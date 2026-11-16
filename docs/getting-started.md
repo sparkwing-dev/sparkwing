@@ -523,7 +523,7 @@ relocate the machine config.
 
 The profile name comes from the controller host unless `--profile` names it.
 An existing profile is replaced only with `--force`. Removing a profile with
-`sparkwing profiles remove --profile NAME` revokes its token first.
+`sparkwing profiles delete --profile NAME` revokes its token first.
 `--keep-token` removes only the saved connection. Project configuration cannot
 supply connection profiles or credentials.
 
@@ -539,7 +539,7 @@ uses machine `run.routing.profile`.
 
 ```bash
 sparkwing profiles show --profile prod        # saved connection, with token redacted
-sparkwing profiles remove --profile prod      # revoke and remove
+sparkwing profiles delete --profile prod      # revoke and remove
 ```
 
 Removal first verifies that the saved credential is a member credential and

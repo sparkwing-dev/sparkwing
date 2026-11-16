@@ -337,7 +337,7 @@ func runSparkwing(args []string) (result error) {
 		return runSparksList(inv)
 	case "sparkwing pipeline sparks add":
 		return runSparksAdd(inv)
-	case "sparkwing pipeline sparks remove":
+	case "sparkwing pipeline sparks delete":
 		return runSparksRemove(inv)
 	case "sparkwing pipeline sparks catalog":
 		return runSparksCatalog(inv)
@@ -357,7 +357,7 @@ func runSparkwing(args []string) (result error) {
 		return runReposList(inv)
 	case "sparkwing repos add":
 		return runXrepoAdd(inv)
-	case "sparkwing repos remove":
+	case "sparkwing repos delete":
 		return runXrepoRemove(inv)
 	case "sparkwing repos prune":
 		return runXrepoPrune(inv)
@@ -369,7 +369,7 @@ func runSparkwing(args []string) (result error) {
 		return runLogin(inv)
 	case "sparkwing runners add":
 		return runRunnersAdd(inv)
-	case "sparkwing runners remove":
+	case "sparkwing runners delete":
 		return runRunnersRemove(inv)
 	case "sparkwing completion":
 		return runCompletion(inv)

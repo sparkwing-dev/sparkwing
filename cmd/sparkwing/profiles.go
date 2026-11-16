@@ -23,7 +23,7 @@ func runProfiles(inv clisurface.Invocation) error {
 	switch inv.Command.Path {
 	case "sparkwing profiles add":
 		return addProfile(inv, format)
-	case "sparkwing profiles remove":
+	case "sparkwing profiles delete":
 		return removeProfile(inv, format)
 	case "sparkwing profiles list":
 		return listProfiles(format)

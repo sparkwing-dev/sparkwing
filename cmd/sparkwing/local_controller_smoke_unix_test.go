@@ -29,7 +29,7 @@ var localSmokeSkipped = map[string]string{
 	"sparkwing tokens revoke":        "a local controller issues no member tokens",
 	"sparkwing tokens rotate":        "a local controller issues no member tokens",
 	"sparkwing runners add":          "enrolls a machine with a remote controller",
-	"sparkwing runners remove":       "needs an enrolled runner",
+	"sparkwing runners delete":       "needs an enrolled runner",
 	"sparkwing pools allow":          "needs a registered runner and repository",
 	"sparkwing pools disallow":       "needs a registered runner and repository",
 	"sparkwing queue priority":       "needs queued work",

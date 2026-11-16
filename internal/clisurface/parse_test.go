@@ -300,3 +300,22 @@ func TestRunStatusesMatchStoredRunStates(t *testing.T) {
 		t.Fatalf("RunStatuses() = %v, want %v", RunStatuses(), want)
 	}
 }
+
+func TestRemoveSuggestsDeleteWithoutRunningIt(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		group string
+	}{
+		{[]string{"profiles", "remove", "--profile", "prod"}, "sparkwing profiles"},
+		{[]string{"repos", "remove"}, "sparkwing repos"},
+		{[]string{"runners", "remove", "--profile", "prod"}, "sparkwing runners"},
+		{[]string{"pipeline", "sparks", "remove", "--spark", "lib"}, "sparkwing pipeline sparks"},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		want := "unknown command; did you mean " + tc.group + " delete? Run " + tc.group + " --help"
+		var usage *UsageError
+		if !errors.As(err, &usage) || usage.Message != want {
+			t.Errorf("%v: error %v, want %q", tc.args, err, want)
+		}
+	}
+}

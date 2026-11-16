@@ -250,7 +250,7 @@ func Registry() []Command {
 		{Path: "sparkwing pipeline sparks list", Flags: []Flag{
 			{Name: "no-resolve"},
 		}},
-		{Path: "sparkwing pipeline sparks remove", Flags: []Flag{
+		{Path: "sparkwing pipeline sparks delete", Flags: []Flag{
 			{Name: "spark", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing pipeline sparks update", Flags: []Flag{}},
@@ -343,7 +343,7 @@ func Registry() []Command {
 			{Name: "no-probe"},
 		}},
 		{Path: "sparkwing profiles list", Flags: []Flag{}},
-		{Path: "sparkwing profiles remove", Flags: []Flag{
+		{Path: "sparkwing profiles delete", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "keep-token"},
 		}},
@@ -374,7 +374,7 @@ func Registry() []Command {
 			{Name: "pipelines"},
 		}},
 		{Path: "sparkwing repos prune", Flags: []Flag{}},
-		{Path: "sparkwing repos remove", Rules: []string{"--checkout is required; registry basename fallback is refused."}, Flags: []Flag{}},
+		{Path: "sparkwing repos delete", Rules: []string{"--checkout is required; registry basename fallback is refused."}, Flags: []Flag{}},
 		{Path: "sparkwing repos update", Rules: []string{"Apply by default; --dry-run previews. --all-repos requires --yes for bulk changes."}, Flags: []Flag{
 			{Name: "version", Argument: "TAG"},
 			{Name: "verify"},
@@ -444,7 +444,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
-		{Path: "sparkwing runners remove", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners delete", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
