@@ -119,9 +119,9 @@ type Daemon struct {
 
 	cgroup *cgroupLimiter
 
-	enforcementMu sync.Mutex
-	enforcement   *wingwire.BudgetEnforcement
-	enforcementAt time.Time
+	enforcementMu    sync.Mutex
+	enforcedRunner   *localhostwire.LocalRunnerInstance
+	enforcedRunnerAt time.Time
 }
 
 type delivery struct {

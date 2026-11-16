@@ -9,44 +9,53 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// perf: the active runner lookup reads the store, and runner claim polls query the
-// queue state twice a second.
+// perf: the active runner lookup reads the store, and runner claim polls query the queue state twice a
+// second, so the lookup is reused while that runner lives; its limits are read from the kernel every query.
 const enforcementReadInterval = 5 * time.Second
 
-// safety: status reads the active runner's limits back from the kernel, so a refused or absent
-// limit never shows as enforced.
+// safety: status reads the active runner's limits back from the kernel on every query, so a refused,
+// absent or removed limit never shows as enforced.
 func (d *Daemon) budgetEnforcement(machineCores float64, machineMemory uint64) *wingwire.BudgetEnforcement {
 	if !d.cfg.Budget.Enforcing() {
 		return nil
 	}
+	if runtime.GOOS != "linux" {
+		return &wingwire.BudgetEnforcement{Reason: unenforcedPlatformReason(runtime.GOOS)}
+	}
+	pid, reason := d.enforcedRunnerPID()
+	if reason != "" {
+		return &wingwire.BudgetEnforcement{Reason: reason}
+	}
+	sensor := d.container
+	if sensor == nil {
+		sensor = newContainerSensor(d.cfg.ContainerRoot)
+	}
+	cores, memory := sensor.processLimits(pid)
+	nice, _ := processNice(sensor.root, pid)
+	return runnerEnforcement(d.cfg.Budget, machineCores, machineMemory, cores, memory, nice)
+}
+
+func (d *Daemon) enforcedRunnerPID() (int, string) {
 	now := d.now()
 	d.enforcementMu.Lock()
 	defer d.enforcementMu.Unlock()
-	if d.enforcement != nil && now.Sub(d.enforcementAt) < enforcementReadInterval {
-		out := *d.enforcement
-		return &out
-	}
-	var out *wingwire.BudgetEnforcement
-	if runtime.GOOS != "linux" {
-		out = &wingwire.BudgetEnforcement{Reason: unenforcedPlatformReason(runtime.GOOS)}
-	} else if pid, reason := d.activeRunnerPID(); reason != "" {
-		out = &wingwire.BudgetEnforcement{Reason: reason}
-	} else {
-		sensor := d.container
-		if sensor == nil {
-			sensor = newContainerSensor(d.cfg.ContainerRoot)
+	if d.enforcedRunner != nil && now.Sub(d.enforcedRunnerAt) < enforcementReadInterval {
+		if alive, err := LocalRunnerProcessAlive(*d.enforcedRunner); err == nil && alive {
+			return d.enforcedRunner.PID, ""
 		}
-		cores, memory := sensor.processLimits(pid)
-		nice, _ := processNice(sensor.root, pid)
-		out = runnerEnforcement(d.cfg.Budget, machineCores, machineMemory, cores, memory, nice)
 	}
-	d.enforcement, d.enforcementAt = out, now
-	copied := *out
-	return &copied
+	d.enforcedRunner = nil
+	instance, reason := d.activeRunner()
+	if reason != "" {
+		return 0, reason
+	}
+	d.enforcedRunner, d.enforcedRunnerAt = &instance, now
+	return instance.PID, ""
 }
 
 func unenforcedPlatformReason(goos string) string {
@@ -56,26 +65,25 @@ func unenforcedPlatformReason(goos string) string {
 	return "this platform has no OS limit for the local runner"
 }
 
-func (d *Daemon) activeRunnerPID() (int, string) {
+func (d *Daemon) activeRunner() (localhostwire.LocalRunnerInstance, string) {
 	registry, ok := d.cfg.Runs.(LocalRunnerStore)
 	if !ok {
-		return 0, "no local controller hosts a runner here"
+		return localhostwire.LocalRunnerInstance{}, "no local controller hosts a runner here"
 	}
 	subject, err := CurrentLocalSubject()
 	if err != nil {
-		return 0, "the local runner's owner is unknown: " + err.Error()
+		return localhostwire.LocalRunnerInstance{}, "the local runner's owner is unknown: " + err.Error()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	instance, err := registry.ActiveLocalRunner(ctx, subject)
 	if err != nil {
-		return 0, "no local runner is running yet"
+		return localhostwire.LocalRunnerInstance{}, "no local runner is running yet"
 	}
-	alive, err := LocalRunnerProcessAlive(instance)
-	if err != nil || !alive {
-		return 0, "no local runner is running yet"
+	if alive, err := LocalRunnerProcessAlive(instance); err != nil || !alive {
+		return localhostwire.LocalRunnerInstance{}, "no local runner is running yet"
 	}
-	return instance.PID, ""
+	return instance, ""
 }
 
 // safety: memory counts only when the budget names it, as the runner unit sets MemoryMax only then.
