@@ -92,7 +92,7 @@ func checkMigrationGuide(ctx context.Context, repoDir, version string) error {
 		sparkwing.Info(ctx, "[%s] carries no (Breaking) entry, so the tag owes no migration guide", version)
 		return nil
 	}
-	if issues := lintSectionBreakingEntries(sec, migrationsFS(repoDir)); len(issues) > 0 {
+	if issues := lintSectionBreakingEntries(sec, migrationsFS(repoDir), false); len(issues) > 0 {
 		var b strings.Builder
 		for _, i := range issues {
 			b.WriteString(i.Format())
