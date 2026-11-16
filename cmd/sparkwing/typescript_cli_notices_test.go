@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -43,25 +42,6 @@ func TestTypeScriptLintReportsUnsupported(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no pipeline named") {
 		t.Fatalf("unknown pipeline error = %v", err)
 	}
-}
-
-// hack: a recording npm keeps scaffold tests off the network; its lockfile resolves the scaffold's SDK pin.
-func fakeNPM(t *testing.T, exitCode int) string {
-	t.Helper()
-	bin := t.TempDir()
-	calls := filepath.Join(t.TempDir(), "calls")
-	script := "#!/bin/sh\nprintf '%s|%s\\n' \"$(pwd -P)\" \"$*\" >> " + shellSingleQuote(calls) + "\n"
-	if exitCode != 0 {
-		script += "echo 'npm error network request failed' >&2\nexit " + strconv.Itoa(exitCode) + "\n"
-	} else {
-		lock := `{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"` + typeScriptSDKVersion + `"}},"node_modules/@sparkwing/sdk":{"version":"` + typeScriptSDKVersion + `"}}}`
-		script += "printf '%s\\n' " + shellSingleQuote(lock) + " > package-lock.json\n"
-	}
-	if err := os.WriteFile(filepath.Join(bin, "npm"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
-	return calls
 }
 
 func TestTypeScriptScaffoldWritesLockfile(t *testing.T) {
