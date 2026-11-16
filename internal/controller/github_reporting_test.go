@@ -569,23 +569,54 @@ func TestGitHubAppCheckRunPublicRetryOverwritesPrivateDetails(t *testing.T) {
 	}
 }
 
-func TestGitHubAppCheckRunUnknownVisibilityNeverSendsDetails(t *testing.T) {
-	for name, status := range map[string]int{"missing": 0, "unavailable": 500} {
-		t.Run(name, func(t *testing.T) {
-			f := newGitHubCompletion(t)
-			f.api.repoStatus = status
-			f.addReportingNode("private-job", runstate.NodeFailed, "private-error")
-			f.report("private-job", "private-summary", pathAnnotations(1, "private"), 1)
-			f.finish(runstate.RunFailed)
-			f.reconcile()
-			for _, check := range f.api.checks {
-				if out := check.Output; len(out.Annotations) != 0 || strings.Contains(out.Summary+out.Text, "private-") {
-					t.Fatalf("unknown visibility carried details: %+v", out)
+func TestGitHubAppCheckRunUnknownVisibilityIsPublic(t *testing.T) {
+	reads := map[int]string{1: "initial lookup", 2: "recheck before the first write", 3: "recheck after the first batch"}
+	for at, read := range reads {
+		for name, field := range map[string]string{"omitted": "", "null": `,"private":null`} {
+			t.Run(read+"/"+name, func(t *testing.T) {
+				f := newGitHubCompletion(t)
+				f.api.private = true
+				f.api.unknownFrom, f.api.unknownField = at, field
+				f.addReportingNode("private-job", runstate.NodeFailed, "private-error")
+				f.report("private-job", "private-summary", pathAnnotations(120, "private"), 1)
+				f.finish(runstate.RunFailed)
+				f.reconcile()
+				aggregate := 0
+				for i, check := range f.api.checks {
+					if !f.api.unknownAtWrite[i] {
+						continue
+					}
+					aggregate++
+					if out := check.Output; len(out.Annotations) != 0 || strings.Contains(out.Title+out.Summary+out.Text, "private-") {
+						t.Fatalf("write %d after visibility became unknown carried details: %+v", i, out)
+					}
 				}
-			}
-			if status != 0 && len(f.api.checks) != 0 {
-				t.Fatalf("a failed visibility read still wrote %d checks", len(f.api.checks))
-			}
-		})
+				if aggregate == 0 {
+					t.Fatalf("no aggregate write followed unknown visibility: writes=%d", len(f.api.checks))
+				}
+				if at == 3 && len(f.api.annotations[101]) != 50 {
+					t.Fatalf("annotations=%d, want only the batch sent while private", len(f.api.annotations[101]))
+				}
+				if desired, delivered, _, _ := f.revision(); delivered != desired {
+					t.Fatalf("revisions=%d/%d", delivered, desired)
+				}
+			})
+		}
+	}
+}
+
+func TestGitHubAppCheckRunFailedVisibilityLookupRetries(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.api.repoStatus = 500
+	f.addReportingNode("private-job", runstate.NodeFailed, "private-error")
+	f.report("private-job", "private-summary", pathAnnotations(1, "private"), 1)
+	f.finish(runstate.RunFailed)
+	f.reconcile()
+	if len(f.api.checks) != 0 {
+		t.Fatalf("a failed visibility lookup wrote %d checks", len(f.api.checks))
+	}
+	if _, delivered, attempts, _ := f.revision(); delivered != 0 || attempts == 0 {
+		t.Fatalf("report was not left for retry: delivered=%d attempts=%d", delivered, attempts)
 	}
 }

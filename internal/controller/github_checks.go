@@ -149,7 +149,8 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.T
 	for {
 		var batch []githubapp.CheckRunAnnotation
 		// safety: a repository can turn public between writes, so every write that carries details rereads its
-		// visibility first; a public answer sends the aggregate output instead and an unreadable one sends nothing.
+		// visibility first. Anything but an explicit private:true, including a missing or null field, is public and
+		// gets the aggregate output; a failed lookup returns the error so the report retries under the same rule.
 		if details != nil {
 			private, err := r.stillPrivate(ctx, repo, u.repository)
 			if err != nil {
@@ -239,7 +240,8 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant
 			Text:    githubCheckLinkLine("Job results stay on the run page.", link),
 		}
 		// safety: GitHub shows check output to everyone who can read the repository, so masked errors, summaries
-		// and annotations go only to private repositories; a public one gets aggregate run state.
+		// and annotations go only where GitHub explicitly reports private:true. A public repository, or one whose
+		// visibility GitHub omits or nulls, gets aggregate run state.
 		if private {
 			output, annotations := githubCheckDetails(run, nodes, steps, check.Conclusion, link)
 			return check, &githubCheckDetailOutput{output: *output, annotations: annotations}, nil

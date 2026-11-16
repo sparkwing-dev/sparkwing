@@ -41,6 +41,11 @@ type completionGitHub struct {
 	name       string
 	private    bool
 	repoStatus int
+	// hack: from this 1-based repository read on, the fake omits private and appends unknownField instead.
+	unknownFrom    int
+	unknownField   string
+	repoReads      int
+	unknownAtWrite []bool
 	// hack: runs under the fake's lock after each accepted check run write, so a test can change GitHub between writes.
 	afterWrite     func(*completionGitHub)
 	privateAtWrite []bool
@@ -84,6 +89,11 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			status, payload = g.repoStatus, `{"message":"Server Error"}`
 			break
 		}
+		g.repoReads++
+		if g.unknownFrom > 0 && g.repoReads >= g.unknownFrom {
+			payload = fmt.Sprintf(`{"id":%d,"full_name":%q%s}`, g.repository, g.name, g.unknownField)
+			break
+		}
 		payload = fmt.Sprintf(`{"id":%d,"full_name":%q,"private":%t}`, g.repository, g.name, g.private)
 	case strings.Contains(r.URL.Path, "/commits/") && strings.HasSuffix(r.URL.Path, "/check-runs"):
 		payload = `{"check_runs":[]}`
@@ -125,6 +135,7 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			g.batches = append(g.batches, len(check.Output.Annotations))
 		}
 		g.privateAtWrite = append(g.privateAtWrite, g.private)
+		g.unknownAtWrite = append(g.unknownAtWrite, g.unknownFrom > 0 && g.repoReads >= g.unknownFrom)
 		if g.afterWrite != nil {
 			g.afterWrite(g)
 		}
