@@ -644,6 +644,8 @@ type isoClusterFake struct {
 	cancelled  map[string]bool
 	breach     map[string]bool
 	omit       map[string]bool
+	garble     map[string]bool
+	logExit    map[string]int
 	statusN    map[string]int
 	commands   []string
 	plans      map[string]isolationprobe.Plan
@@ -846,27 +848,39 @@ func (f *isoClusterFake) sparkwing(args []string) (string, int, error) {
 		return `{"run_id":"` + fx.run + `"}`, 0, nil
 	case args[0] == "runs" && args[1] == "status":
 		f.statusN[run]++
-		fx := fixtureFor(run)
-		status := "running"
-		switch {
-		case f.cancelled[run]:
-			status = "cancelled"
-		case fx.label == "B2" && f.statusN[run] > 1:
-			status = "success"
-		}
+		status := f.statusOf(run)
 		code := 3
 		if terminal(status) {
 			code = 0
 		}
-		return `{"id":"` + run + `","team":"` + fx.team + `","status":"` + status + `"}`, code, nil
+		return `{"id":"` + run + `","team":"` + fixtureFor(run).team + `","status":"` + status + `"}`, code, nil
 	case args[0] == "runs" && args[1] == "logs":
-		return f.log(fixtureFor(run)), 0, nil
+		fx := fixtureFor(run)
+		if code, ok := f.logExit[fx.label]; ok {
+			return "", code, nil
+		}
+		// safety: the real runs logs prints the records it has and exits 3 while the run is live.
+		code := 3
+		if terminal(f.statusOf(run)) {
+			code = 0
+		}
+		return f.log(fx), code, nil
 	case args[0] == "runs" && args[1] == "cancel":
 		f.cancelled[run] = true
 		return "{}", 0, nil
 	}
 	f.t.Errorf("unexpected sparkwing %v", args)
 	return "", 1, nil
+}
+
+func (f *isoClusterFake) statusOf(run string) string {
+	switch {
+	case f.cancelled[run]:
+		return "cancelled"
+	case fixtureFor(run).label == "B2" && f.statusN[run] > 1:
+		return "success"
+	}
+	return "running"
 }
 
 func (f *isoClusterFake) log(fx isoRunFixture) string {
@@ -880,6 +894,9 @@ func (f *isoClusterFake) log(fx isoRunFixture) string {
 	}
 	var b strings.Builder
 	b.WriteString("probe | " + isolationprobe.FormatLine(isolationprobe.ReadyMarker, ready) + "\n")
+	if f.garble[fx.label] {
+		b.WriteString("probe | " + isolationprobe.ResultMarker + "{not json\n")
+	}
 	for _, r := range results {
 		b.WriteString("probe | " + isolationprobe.FormatLine(isolationprobe.ResultMarker, r) + "\n")
 	}
@@ -1232,6 +1249,36 @@ func TestConformRunsThreePhasesAndKeepsTheEvidence(t *testing.T) {
 	for _, c := range fake.commands {
 		if strings.HasPrefix(c, "kubectl ") && !strings.HasPrefix(c, "kubectl --context staging-read get ") && !strings.HasPrefix(c, "kubectl config view") {
 			t.Errorf("kubectl call outside read-only gets: %s", c)
+		}
+	}
+}
+
+// runs logs exits 3 with the records it has while a run is live, so the anchor's markers are read
+// during its hold. Any other nonzero exit or a marker that does not parse stops the wait at once
+// instead of polling until the budget runs out.
+func TestConformReadsTheLogsOfALiveRun(t *testing.T) {
+	fake := newIsoFake(t)
+	if _, err := driveFake(t, fake); err != nil || strings.Join(fake.triggered, ",") != "run-1,run-2,run-3" {
+		t.Fatalf("conform = %v, triggered %v; want every phase run from live logs", err, fake.triggered)
+	}
+	for name, c := range map[string]struct {
+		edit func(*isoClusterFake)
+		want string
+	}{
+		"a refused read":   {func(f *isoClusterFake) { f.logExit = map[string]int{"B1": 4} }, "exited 4"},
+		"a garbled marker": {func(f *isoClusterFake) { f.garble = map[string]bool{"B1": true} }, strings.TrimSpace(isolationprobe.ResultMarker)},
+	} {
+		fake := newIsoFake(t)
+		c.edit(fake)
+		evidence, err := driveFake(t, fake)
+		report, rerr := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
+		stop := "the sequence stopped: wait for B1 to announce its listener: "
+		if err == nil || rerr != nil || !strings.Contains(string(report), stop) || strings.Contains(string(report), " within ") || len(fake.triggered) != 1 {
+			t.Errorf("%s: conform = %v, triggered %v, report = %.900s, %v; want an immediate stop", name, err, fake.triggered, report, rerr)
+			continue
+		}
+		if line := string(report)[strings.Index(string(report), stop):]; !strings.Contains(line[:strings.IndexByte(line+"\n", '\n')], c.want) {
+			t.Errorf("%s: stop reason %.300q does not name %q", name, line, c.want)
 		}
 	}
 }

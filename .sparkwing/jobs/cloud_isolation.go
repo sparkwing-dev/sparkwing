@@ -781,26 +781,24 @@ func terminal(status string) bool {
 	return status == "success" || status == "failed" || status == "cancelled" || status == "dry_run"
 }
 
-var errNoLogs = errors.New("run logs unavailable")
-
+// safety: runs logs prints every record it has and exits 3 while the run is live or its final
+// segments are pending, so exit 3 output is parsed like a complete read and a result it lacks
+// counts as missing. Any other nonzero exit, and any marker that does not parse, is an error, so
+// a refused read or a garbled result line ends the wait instead of polling out the budget.
 func (d *isolationDriver) logs(ctx context.Context, r *isolationRun) (isolationprobe.Log, string, error) {
-	out, err := d.sw(ctx, "runs", "logs", "--run", r.RunID, "--profile", r.Team, "--job", isolationprobe.ProbeJob, "--no-events", "-o", "plain")
+	args := []string{"runs", "logs", "--run", r.RunID, "--profile", r.Team, "--job", isolationprobe.ProbeJob, "--no-events", "-o", "plain"}
+	out, code, err := d.run(ctx, commandTimeout, isolationCommand{Name: "sparkwing", Args: args})
 	if err != nil {
-		return isolationprobe.Log{}, out, fmt.Errorf("%w: %w", errNoLogs, err)
+		return isolationprobe.Log{}, out, err
+	}
+	if code != 0 && code != logsIncompleteExit {
+		return isolationprobe.Log{}, out, fmt.Errorf("runs logs for %s exited %d", r.RunID, code)
 	}
 	log, err := isolationprobe.ParseLog(out)
 	return log, out, err
 }
 
-// safety: logs that have not arrived yet are waited for, but a log that arrived and does not
-// parse ends the wait, because a garbled result line must not be skipped.
-func (d *isolationDriver) readLog(ctx context.Context, r *isolationRun) (isolationprobe.Log, bool, error) {
-	log, _, err := d.logs(ctx, r)
-	if errors.Is(err, errNoLogs) {
-		return log, false, nil
-	}
-	return log, err == nil, err
-}
+const logsIncompleteExit = 3
 
 func (d *isolationDriver) poll(ctx context.Context, r *isolationRun, budget time.Duration, what string, check func() (bool, error)) error {
 	deadline := d.tools.now().Add(budget)
@@ -832,8 +830,8 @@ func (d *isolationDriver) poll(ctx context.Context, r *isolationRun, budget time
 func (d *isolationDriver) awaitReady(ctx context.Context, r *isolationRun) (peerFacts, error) {
 	var facts peerFacts
 	err := d.poll(ctx, r, readyTimeout, "announce its listener", func() (bool, error) {
-		log, ok, err := d.readLog(ctx, r)
-		if err != nil || !ok || len(log.Ready) == 0 {
+		log, _, err := d.logs(ctx, r)
+		if err != nil || len(log.Ready) == 0 {
 			return false, err
 		}
 		if p := d.seen.probePod(r.Label); p != nil && p.Status.PodIP != "" && p.Status.HostIP != "" {
@@ -847,8 +845,8 @@ func (d *isolationDriver) awaitReady(ctx context.Context, r *isolationRun) (peer
 
 func (d *isolationDriver) awaitSummary(ctx context.Context, r *isolationRun) error {
 	return d.poll(ctx, r, probeTimeout, "report its results", func() (bool, error) {
-		log, ok, err := d.readLog(ctx, r)
-		return ok && len(log.Summaries) > 0, err
+		log, _, err := d.logs(ctx, r)
+		return err == nil && len(log.Summaries) > 0, err
 	})
 }
 
