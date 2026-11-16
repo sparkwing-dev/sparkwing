@@ -2943,10 +2943,14 @@ file. Other syntax and workflow checks remain active.
   never runs on a workstation. Dispatch the manual
   `.github/workflows/runner-isolation-proof.yaml` (`gh workflow run
   runner-isolation-proof.yaml --ref main`) after changing the account, unit,
-  enrollment, pause or removal paths. It runs `bin/runner-isolation-proof.sh`
-  on a discarded GitHub-hosted VM; the script refuses anywhere else. The
-  controller is built with a per-run license key so `admin session` works
-  without secrets. A personal service-user runner claims a real job that
+  enrollment, pause or deletion paths. It runs `bin/runner-isolation-proof.sh`
+  on a discarded GitHub-hosted VM. Before any write the script requires
+  GitHub's root-owned runner-image record and the Actions `Runner.Worker` among
+  its ancestors, which no environment variable supplies. A self-hosted runner
+  built from GitHub's image would still pass, so never point the workflow at
+  self-hosted labels, and never run the script by hand. `--preflight` runs only
+  that check and writes nothing. The controller is built with a per-run license
+  key so `admin session` works without secrets. A personal service-user runner claims a real job that
   reports its uid and what it could read, because shared runners take only
   repository-proven work. The run prints PASS or FAIL per check and uploads
   `runner-isolation-evidence-<run>-<attempt>`.

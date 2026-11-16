@@ -5,23 +5,78 @@
 # shellcheck disable=SC2024,SC2317,SC2016
 #
 # Live isolation proof for `sparkwing runners add --service-user`, run only by
-# .github/workflows/runner-isolation-proof.yaml on a disposable GitHub-hosted VM.
-# It creates OS users, system services and sudoers entries and never undoes the
-# sudoers or fixture changes, because the VM is discarded after the job. It
-# refuses to run anywhere else.
+# .github/workflows/runner-isolation-proof.yaml on a GitHub-hosted VM that is
+# discarded after the job. It creates OS users, system services and sudoers
+# entries and never undoes the sudoers or fixture changes.
 #
 # Usage: bin/runner-isolation-proof.sh EVIDENCE_DIR
+#        bin/runner-isolation-proof.sh --preflight [FACTS_ROOT]
 #
-# Every check prints "PASS name" or "FAIL name (why)"; the last line is
-# "RESULT: PASS" or "RESULT: FAIL (n failed checks)". A setup step that fails
-# stops the proof with "RESULT: FAIL (setup: ...)". Exit 0 only on PASS.
+# Before any write it requires two host facts that no environment variable
+# supplies: GitHub's root-owned runner-image record, and the Actions
+# Runner.Worker process among its own ancestors. GITHUB_ACTIONS and
+# RUNNER_ENVIRONMENT are checked first as a filter only; they prove nothing.
+# A self-hosted runner built from GitHub's runner image would pass, so the
+# workflow pins a GitHub-hosted label. --preflight runs only these checks,
+# reading the facts under FACTS_ROOT (default /), writes nothing, and exits 0
+# when the proof would run or 2 when it refuses.
+#
+# Every check prints "PASS name", "FAIL name (why)" or "INFO note"; the last
+# line is "RESULT: PASS" or "RESULT: FAIL (n failed checks)". A setup step
+# that fails stops the proof with "RESULT: FAIL (setup: ...)". Exit 0 only on
+# PASS.
 set -uo pipefail
 
-if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hosted || "${SPARKWING_ISOLATION_PROOF_VM:-}" != disposable ]]; then
-  echo "runner-isolation-proof: refusing: this creates OS users and system services and runs only on a disposable GitHub-hosted runner" >&2
+IMAGE_RECORD=/imagegeneration/imagedata.json
+
+# hosted_vm ROOT: prints each fact and succeeds only when every one holds.
+hosted_vm() {
+  local root=$1 ok=0 pid comm parent found="" record="$1$IMAGE_RECORD"
+  if [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted ]]; then
+    echo "filter: GITHUB_ACTIONS=true and RUNNER_ENVIRONMENT=github-hosted"
+  else
+    echo "refused: GITHUB_ACTIONS is not true or RUNNER_ENVIRONMENT is not github-hosted"
+    ok=1
+  fi
+  if [[ -f "$record" && ! -L "$record" && "$(stat -c %u "$record" 2>/dev/null)" == 0 && ! -w "$record" ]]; then
+    echo "fact: $IMAGE_RECORD is a root-owned file this user cannot write"
+  else
+    echo "refused: no root-owned $IMAGE_RECORD, the record GitHub's hosted runner images carry"
+    ok=1
+  fi
+  pid=$$
+  while [[ -n "$pid" && "$pid" != 0 && "$pid" != 1 ]]; do
+    comm="$(cat "$root/proc/$pid/comm" 2>/dev/null)"
+    if [[ "$comm" == Runner.Worker ]]; then
+      found=$pid
+      break
+    fi
+    parent="$(awk '/^PPid:/{print $2}' "$root/proc/$pid/status" 2>/dev/null)"
+    pid=$parent
+  done
+  if [[ -n "$found" ]]; then
+    echo "fact: ancestor process $found is the Actions Runner.Worker"
+  else
+    echo "refused: no Runner.Worker process among this script's ancestors"
+    ok=1
+  fi
+  return "$ok"
+}
+
+refuse() {
+  echo "runner-isolation-proof: refusing: this creates OS users, sudoers entries and system services, and runs only on a discarded GitHub-hosted VM" >&2
   echo "RESULT: REFUSED"
   exit 2
+}
+
+if [[ "${1:-}" == --preflight ]]; then
+  if hosted_vm "${2:-}"; then
+    echo "RESULT: WOULD RUN"
+    exit 0
+  fi
+  refuse
 fi
+hosted_vm "" || refuse
 if [[ $# -ne 1 || -z "$1" ]]; then
   echo "usage: $0 EVIDENCE_DIR" >&2
   exit 2
@@ -45,6 +100,7 @@ CONTROLLER_PID=""
 mkdir -p "$EVIDENCE" "$WORK"
 SUMMARY="$EVIDENCE/checks.txt"
 : >"$SUMMARY"
+hosted_vm "" >"$EVIDENCE/hosted-vm-facts.txt"
 
 note() { echo "== $*"; }
 record() { echo "$1" | tee -a "$SUMMARY"; }
@@ -94,7 +150,15 @@ deadline() {
 }
 
 api() { curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $TEAM_TOKEN" "$@"; }
-api_status() { curl --silent --output /dev/null --max-time 10 --write-out '%{http_code}' -H "Authorization: Bearer $1" "$CONTROLLER$2"; }
+# api_status BEARER PATH: prints the HTTP status, or curl-exit-N when no HTTP exchange completed.
+api_status() {
+  local code
+  code="$(curl --silent --output /dev/null --max-time 10 --write-out '%{http_code}' -H "Authorization: Bearer $1" "$CONTROLLER$2")" || {
+    echo "curl-exit-$?"
+    return
+  }
+  echo "$code"
+}
 
 ALICE_PATH=""
 as_alice() { sudo -u alice -- env -i -C / HOME=/home/alice USER=alice LOGNAME=alice PATH="$ALICE_PATH" "$@"; }
@@ -145,6 +209,11 @@ mask "$BOOTSTRAP"
 ctl_env() { env HOME="$CTL/home" SPARKWING_HOME="$CTL/state" "$@"; }
 controller_up() { curl --fail --silent --max-time 2 "$CONTROLLER/api/v1/health" >/dev/null; }
 start_controller() {
+  # safety: health from a listener already on the port would not be this controller's.
+  if controller_up; then
+    echo "port $PORT already answers health before start" >&2
+    return 1
+  fi
   ctl_env "$BIN/sparkwing-controller-proof" --addr "127.0.0.1:$PORT" --credentials-dir "$CTL/credentials" --deployment "$1" >>"$EVIDENCE/controller.log" 2>&1 &
   CONTROLLER_PID=$!
   deadline 30 controller_up
@@ -259,32 +328,50 @@ note "1a. probes with the installed unit's own identity and sandbox lines"
 # shellcheck disable=SC2016 # expanded by the probe's own shell
 PROBE='for target in "$@"; do test -r "$target"; echo "readable_$(basename "$target")=$?"; done
 ls /home/alice >/dev/null 2>&1; echo "list_alice_home=$?"
+ls -A /home >/dev/null 2>&1; echo "list_home=$?"
 echo "entries_in_home=$(ls -A /home 2>/dev/null | wc -l | tr -d " ")"
 test -e /tmp/alice-shared-tmp-marker; echo "sees_host_tmp=$?"
 echo "probe_uid=$(id -u)"'
 TARGETS=(/home/alice/.ssh/id_ed25519 /home/alice/.aws/credentials /home/alice/notes.txt)
 value() { sed -n "s/^$1=//p" "$2" | head -n1; }
+# refused NAME VALUE: passes only for a recorded nonzero exit status, never for a missing line.
+refused() { if [[ "$2" =~ ^[1-9][0-9]*$ ]]; then pass "$1 (exit $2)"; else fail "$1" "got '$2', want a nonzero exit status"; fi; }
+# home_hidden NAME FILE: /home must be unlistable, or listable and empty; a missing measurement fails.
+home_hidden() {
+  local list entries
+  list="$(value list_home "$2")"
+  entries="$(value entries_in_home "$2")"
+  if [[ "$list" =~ ^[1-9][0-9]*$ ]]; then
+    pass "$1: /home cannot be listed (exit $list)"
+  elif [[ "$list" == 0 && "$entries" == 0 ]]; then
+    pass "$1: /home lists empty"
+  else
+    fail "$1: /home is hidden" "list exit '$list', entries '$entries'"
+  fi
+}
 mapfile -t PROPS < <(sudo grep -E '^(User|Group|ProtectHome|NoNewPrivileges|PrivateTmp|ProtectSystem|UMask)=' "$(unit_file_of "$SHARED_ACCOUNT")")
 expect "unit sandbox lines found" "${#PROPS[@]}" 7
 printf '%s\n' "${PROPS[@]}" >"$EVIDENCE/unit-sandbox-lines.txt"
 sudo -u alice -- /bin/sh -c "$PROBE" sh "${TARGETS[@]}" >"$EVIDENCE/probe-alice.txt"
 expect "control: probe as alice exits 0" "$?" 0
 for f in id_ed25519 credentials notes.txt; do expect "control: alice reads her $f" "$(value "readable_$f" "$EVIDENCE/probe-alice.txt")" 0; done
+expect "control: alice lists her home" "$(value list_alice_home "$EVIDENCE/probe-alice.txt")" 0
+expect "control: alice sees the host /tmp marker" "$(value sees_host_tmp "$EVIDENCE/probe-alice.txt")" 0
 ARGS=()
 for prop in "${PROPS[@]}"; do ARGS+=(-p "$prop"); done
 sudo systemd-run --quiet --wait --pipe --collect "${ARGS[@]}" /bin/sh -c "$PROBE" sh "${TARGETS[@]}" >"$EVIDENCE/probe-unit.txt"
 expect "unit probe exits 0" "$?" 0
-for f in id_ed25519 credentials notes.txt; do expect_not "unit probe cannot read alice's $f" "$(value "readable_$f" "$EVIDENCE/probe-unit.txt")" 0; done
-expect_not "unit probe cannot list alice's home" "$(value list_alice_home "$EVIDENCE/probe-unit.txt")" 0
-expect "unit probe sees no homes" "$(value entries_in_home "$EVIDENCE/probe-unit.txt")" 0
-expect_not "unit probe cannot see the host /tmp" "$(value sees_host_tmp "$EVIDENCE/probe-unit.txt")" 0
+for f in id_ed25519 credentials notes.txt; do refused "unit probe cannot read alice's $f" "$(value "readable_$f" "$EVIDENCE/probe-unit.txt")"; done
+refused "unit probe cannot list alice's home" "$(value list_alice_home "$EVIDENCE/probe-unit.txt")"
+home_hidden "unit probe" "$EVIDENCE/probe-unit.txt"
+refused "unit probe cannot see the host /tmp marker" "$(value sees_host_tmp "$EVIDENCE/probe-unit.txt")"
 expect "unit probe runs as the account" "$(value probe_uid "$EVIDENCE/probe-unit.txt")" "$(id -u "$SHARED_ACCOUNT")"
 ARGS=()
 for prop in "${PROPS[@]}"; do case "$prop" in ProtectHome=*) ;; *) ARGS+=(-p "$prop") ;; esac; done
 sudo systemd-run --quiet --wait --pipe --collect "${ARGS[@]}" /bin/sh -c "$PROBE" sh "${TARGETS[@]}" >"$EVIDENCE/probe-uid-only.txt"
 expect "uid-only probe exits 0" "$?" 0
-expect_not "uid alone keeps out the 0600 ssh key" "$(value readable_id_ed25519 "$EVIDENCE/probe-uid-only.txt")" 0
-expect_not "uid alone keeps out the 0600 aws credentials" "$(value readable_credentials "$EVIDENCE/probe-uid-only.txt")" 0
+refused "uid alone keeps out the 0600 ssh key" "$(value readable_id_ed25519 "$EVIDENCE/probe-uid-only.txt")"
+refused "uid alone keeps out the 0600 aws credentials" "$(value readable_credentials "$EVIDENCE/probe-uid-only.txt")"
 expect "uid alone still reads a world-readable home file, which ProtectHome hides" "$(value readable_notes.txt "$EVIDENCE/probe-uid-only.txt")" 0
 
 note "2. personal runner under $JOB_ACCOUNT, which claims a real job"
@@ -346,47 +433,93 @@ expect "job: effective uid is the service account's" "$(jq -r .euid "$OUT")" "$J
 expect "job: user name" "$(jq -r .user "$OUT")" "$JOB_ACCOUNT"
 expect "job: HOME is the account home" "$(jq -r .home "$OUT")" "$HOME_ROOT/$JOB_ACCOUNT"
 expect "job: NoNewPrivs is set" "$(jq -r .no_new_privs "$OUT")" 1
-for target in /home/alice/.ssh/id_ed25519 /home/alice/.aws/credentials /home/alice/notes.txt /home/runner /root /tmp/alice-shared-tmp-marker; do
-  expect_not "job: cannot read $target" "$(jq -r --arg t "$target" '.read[$t]' "$OUT")" allowed
+outcome_of() { jq -r --arg t "$1" '.read[$t] // "missing"' "$OUT"; }
+# hidden NAME OUTCOME: "denied" or "absent" is a measured denial or mount hiding; "allowed", an error or a missing probe fails.
+hidden() { case "$2" in denied | absent) pass "$1 ($2)" ;; *) fail "$1" "outcome '$2'" ;; esac; }
+expect "job: every target was probed" "$(jq -r '.read | keys | length' "$OUT")" 6
+for target in /home/alice/.ssh/id_ed25519 /home/alice/.aws/credentials /home/alice/notes.txt /home/runner; do
+  hidden "job: cannot open $target" "$(outcome_of "$target")"
 done
-expect "job: sees no entries under /home" "$(jq -r .home_entries "$OUT")" 0
-expect "job: wrote its own /tmp marker" "$(jq -r .tmp_marker "$OUT")" written
+expect "job: cannot list /root (a non-root uid is refused there without ProtectHome too, so this is not attributed to the sandbox)" "$(outcome_of /root)" denied
+expect "job: the host /tmp marker is absent from its /tmp (PrivateTmp; alice's control saw it)" "$(outcome_of /tmp/alice-shared-tmp-marker)" absent
+case "$(jq -r '.home_list // "missing"' "$OUT")" in
+  denied) pass "job: /home cannot be listed (denied)" ;;
+  empty) pass "job: /home lists empty" ;;
+  *) fail "job: /home is hidden" "home_list '$(jq -r '.home_list // "missing"' "$OUT")'" ;;
+esac
+expect "job: wrote its own /tmp marker" "$(jq -r '.tmp_marker // "missing"' "$OUT")" allowed
 check "job: its /tmp marker is not in the host /tmp (PrivateTmp)" sudo test ! -e /tmp/sparkwing-isolation-job-marker
-expect_not "job: sudo -n true is refused" "$(jq -r .sudo_exit "$OUT")" 0
+if jq -e '.sudo_ran == true and .sudo_launch_err == "" and (.sudo_exit | type) == "number" and .sudo_exit != 0' "$OUT" >/dev/null; then
+  pass "job: sudo -n true ran and was refused (exit $(jq -r .sudo_exit "$OUT"))"
+else
+  fail "job: sudo -n true ran and was refused" "$(jq -c '{sudo_ran, sudo_exit, sudo_launch_err}' "$OUT")"
+fi
+if jq -e '.sudo_stderr | ascii_downcase | contains("no new privileges")' "$OUT" >/dev/null; then
+  pass "job: sudo named the no-new-privileges flag as the reason"
+else
+  info "job: sudo's refusal did not name the no-new-privileges flag: $(jq -c .sudo_stderr "$OUT")"
+fi
 
 note "3. pause and resume"
 as_account "$JOB_ACCOUNT" sparkwing runners pause -o json >"$EVIDENCE/pause.json" 2>"$EVIDENCE/pause.err"
 expect "pause as the account exits 0" "$?" 0
-check "pause reports paused and changed" jq -e '.paused == true and .changed == true' "$EVIDENCE/pause.json"
+check "pause names $JOB_RUNNER and reports paused and changed" jq -e --arg r "$JOB_RUNNER" '.runner == $r and .paused == true and .changed == true' "$EVIDENCE/pause.json"
 RUN2="$(submit paused)"
 setup test -n "$RUN2"
-SEEN_BEFORE="$(runner_last_seen "$JOB_RUNNER")"
-sleep 60
-expect "paused runner leaves a new run pending for 60s" "$(run_status "$RUN2")" pending
-SEEN_AFTER="$(runner_last_seen "$JOB_RUNNER")"
-expect_not "paused runner keeps polling the controller" "$SEEN_AFTER" "$SEEN_BEFORE"
-expect "paused service stays active" "$(systemctl show "$(unit_of "$JOB_ACCOUNT")" -p ActiveState --value)" active
+SAMPLES="$EVIDENCE/pause-samples.tsv"
+printf 'elapsed\tstatus\tattempts\tjobs\tlast_seen\n' >"$SAMPLES"
+UNHELD=0
+SEEN_FIRST=""
+SEEN_PREV=""
+SEEN_BAD=0
+for _ in $(seq 1 12); do
+  sleep 5
+  row="$(api "$CONTROLLER/api/v1/runs/$RUN2" | jq -r '[.status, ((.attempts // []) | length), ((.jobs // []) | length)] | @tsv')" || row=""
+  seen="$(runner_last_seen "$JOB_RUNNER")"
+  printf '%s\t%s\t%s\n' "$SECONDS" "${row:-unreadable}" "$seen" >>"$SAMPLES"
+  [[ "$row" == "pending"$'\t'"0"$'\t'"0" ]] || UNHELD=$((UNHELD + 1))
+  ms="$(date -d "$seen" +%s%3N 2>/dev/null)" || ms=""
+  if [[ -z "$seen" || "$seen" == null || -z "$ms" ]] || { [[ -n "$SEEN_PREV" ]] && ((ms < SEEN_PREV)); }; then
+    SEEN_BAD=$((SEEN_BAD + 1))
+  else
+    SEEN_FIRST="${SEEN_FIRST:-$ms}"
+    SEEN_PREV=$ms
+  fi
+done
+expect "paused runner neither planned nor attempted the new run in 12 samples, 5s apart" "$UNHELD" 0
+if ((SEEN_BAD == 0)) && [[ -n "$SEEN_FIRST" ]] && ((SEEN_PREV > SEEN_FIRST)); then
+  pass "paused runner kept polling: last_seen valid in every sample and advanced $(((SEEN_PREV - SEEN_FIRST) / 1000))s"
+else
+  fail "paused runner kept polling" "$SEEN_BAD unreadable or decreasing last_seen samples; see pause-samples.tsv"
+fi
 as_account "$JOB_ACCOUNT" sparkwing runners resume -o json >"$EVIDENCE/resume.json" 2>"$EVIDENCE/resume.err"
 expect "resume as the account exits 0" "$?" 0
 deadline 600 run_finished "$RUN2"
 expect "resumed runner runs the waiting job" "$(run_status "$RUN2")" success
+api "$CONTROLLER/api/v1/runs/$RUN2" >"$EVIDENCE/run-2.json"
+check "resumed run has exactly one job attempt, executed by $JOB_RUNNER" jq -e --arg name "$JOB_RUNNER" '[.attempts[] | select(.job_id == "probe-isolation")] | length == 1 and .[0].outcome == "success" and .[0].executor_name == $name' "$EVIDENCE/run-2.json"
 api "$CONTROLLER/api/v1/runs/$RUN2/jobs/probe-isolation/output" | jq .output >"$EVIDENCE/job-output-2.json"
 expect "resumed job also ran as the service account" "$(jq -r .uid "$EVIDENCE/job-output-2.json")" "$JOB_UID"
 
-note "4. removal, credential revocation and account deletion"
+note "4. runners delete, credential revocation and account deletion"
 for pair in "$SHARED_RUNNER:$SHARED_ACCOUNT" "$JOB_RUNNER:$JOB_ACCOUNT"; do
   runner=${pair%%:*}
   account=${pair#*:}
   unit="$(unit_of "$account")"
   uid="$(id -u "$account")"
   sudo journalctl -u "$unit" --no-pager >"$EVIDENCE/journal-$account.txt" 2>&1
-  credential="$(sudo find "$HOME_ROOT/$account" -name agent-token -exec cat {} \;)"
+  mapfile -t credential_files < <(sudo find "$HOME_ROOT/$account" -name agent-token -type f)
+  expect "$runner: exactly one runner credential file" "${#credential_files[@]}" 1
+  credential="$(sudo cat "${credential_files[0]:-/nonexistent}" 2>/dev/null)"
   mask "$credential"
-  expect_not "$runner: its credential authenticates before removal" "$(api_status "$credential" /api/v1/runners)" 401
-  as_alice sparkwing runners remove --profile work --service-user "$account" -o json >"$EVIDENCE/remove-$runner.json" 2>"$EVIDENCE/remove-$runner.err"
-  expect "$runner: runners remove --service-user exits 0" "$?" 0
-  check "$runner: remove reports the token revoked" jq -e '.token.revoked == true' "$EVIDENCE/remove-$runner.json"
-  expect "$runner: its credential is refused after removal" "$(api_status "$credential" /api/v1/runners)" 401
+  check "$runner: runner credential is nonempty" test -n "$credential"
+  # A machine credential is authenticated but lacks runs.read on this route, so 403 is the positive control.
+  expect "$runner: its credential authenticates before deletion (403, authenticated without runs.read)" "$(api_status "$credential" /api/v1/runners)" 403
+  as_alice sparkwing runners delete --profile work --service-user "$account" -o json >"$EVIDENCE/delete-$runner.json" 2>"$EVIDENCE/delete-$runner.err"
+  expect "$runner: runners delete --service-user exits 0" "$?" 0
+  check "$runner: delete reports the token revoked" jq -e '.token.revoked == true' "$EVIDENCE/delete-$runner.json"
+  expect "$runner: its credential is unauthenticated after deletion" "$(api_status "$credential" /api/v1/runners)" 401
+  expect "$runner: control: the team credential still authenticates after the deletion" "$(api_status "$TEAM_TOKEN" /api/v1/runners)" 200
   check "$runner: unit file removed" test ! -e "$(unit_file_of "$account")"
   expect "$runner: unit no longer loaded" "$(systemctl show "$unit" -p LoadState --value)" not-found
   check "$runner: no process runs as the account" sh -c "! pgrep -u $uid >/dev/null"
@@ -395,7 +528,7 @@ for pair in "$SHARED_RUNNER:$SHARED_ACCOUNT" "$JOB_RUNNER:$JOB_ACCOUNT"; do
   check "$runner: account group deleted" sh -c "! getent group $account >/dev/null"
   check "$runner: account home deleted" sudo test ! -e "$HOME_ROOT/$account"
   if sudo test -e "$HOME_ROOT/.enrollments/$account.json"; then
-    info "$runner: root-only enrollment record remains at $HOME_ROOT/.enrollments/$account.json after remove and userdel"
+    info "$runner: root-only enrollment record remains at $HOME_ROOT/.enrollments/$account.json after delete and userdel"
   else
     info "$runner: enrollment record removed"
   fi

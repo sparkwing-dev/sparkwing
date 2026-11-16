@@ -3,8 +3,10 @@ name: Runner isolation proof
 # Manual only. Proves that a runner enrolled with `runners add --service-user`
 # runs as its own OS user and that its claimed jobs cannot read another user's
 # home. The VM is discarded afterwards, which is what lets the proof create
-# users, system services and sudoers entries; bin/runner-isolation-proof.sh
-# refuses to run anywhere else.
+# users, system services and sudoers entries. bin/runner-isolation-proof.sh
+# refuses unless it finds GitHub's hosted runner-image record and the Actions
+# Runner.Worker among its ancestors; a self-hosted runner built from that image
+# would pass, so keep runs-on on a GitHub-hosted label.
 on:
   workflow_dispatch:
 
@@ -24,7 +26,6 @@ jobs:
       contents: read
     env:
       GOWORK: "auto"
-      SPARKWING_ISOLATION_PROOF_VM: disposable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

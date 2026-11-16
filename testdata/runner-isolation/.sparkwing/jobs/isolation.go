@@ -4,8 +4,10 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/user"
@@ -15,24 +17,36 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Probe is the job's output. Read maps each target path to "allowed" or the
-// error that refused it.
+// Outcomes a probe reports. Anything else is "error: <text>", a failed
+// measurement rather than evidence of isolation.
+const (
+	Allowed = "allowed"
+	Denied  = "denied"
+	Absent  = "absent"
+)
+
+// Probe is the job's output. Read maps each target path to an outcome.
+// HomeList is "empty", "entries:N", Denied, Absent or an error. Sudo fields
+// separate a sudo that never launched (SudoLaunchErr) from one that ran and
+// exited SudoExit.
 type Probe struct {
-	UID         int               `json:"uid"`
-	EUID        int               `json:"euid"`
-	GID         int               `json:"gid"`
-	User        string            `json:"user"`
-	Home        string            `json:"home"`
-	NoNewPrivs  string            `json:"no_new_privs"`
-	Read        map[string]string `json:"read"`
-	HomeEntries int               `json:"home_entries"`
-	HomeListErr string            `json:"home_list_err"`
-	TmpMarker   string            `json:"tmp_marker"`
-	SudoExit    int               `json:"sudo_exit"`
+	UID           int               `json:"uid"`
+	EUID          int               `json:"euid"`
+	GID           int               `json:"gid"`
+	User          string            `json:"user"`
+	Home          string            `json:"home"`
+	NoNewPrivs    string            `json:"no_new_privs"`
+	Read          map[string]string `json:"read"`
+	HomeList      string            `json:"home_list"`
+	TmpMarker     string            `json:"tmp_marker"`
+	SudoRan       bool              `json:"sudo_ran"`
+	SudoExit      int               `json:"sudo_exit"`
+	SudoLaunchErr string            `json:"sudo_launch_err"`
+	SudoStderr    string            `json:"sudo_stderr"`
 }
 
-// The proof workflow plants these before it submits the run.
-var targets = []string{
+// Targets the proof workflow plants or that exist on every hosted VM.
+var Targets = []string{
 	"/home/alice/.ssh/id_ed25519",
 	"/home/alice/.aws/credentials",
 	"/home/alice/notes.txt",
@@ -51,68 +65,95 @@ type isolationProbe struct {
 
 func (j *isolationProbe) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(work, "probe", func(ctx context.Context) (Probe, error) {
-		p := Probe{UID: os.Getuid(), EUID: os.Geteuid(), GID: os.Getgid(), Home: os.Getenv("HOME"), Read: map[string]string{}, SudoExit: -1}
+		p := Probe{UID: os.Getuid(), EUID: os.Geteuid(), GID: os.Getgid(), Home: os.Getenv("HOME"), Read: map[string]string{}}
 		if u, err := user.Current(); err == nil {
 			p.User = u.Username
 		}
 		p.NoNewPrivs = statusField("NoNewPrivs")
-		for _, target := range targets {
+		for _, target := range Targets {
 			p.Read[target] = readable(target)
 		}
-		entries, err := os.ReadDir("/home")
-		p.HomeEntries = len(entries)
-		if err != nil {
-			p.HomeListErr = err.Error()
-		}
-		if err := os.WriteFile(TmpMarkerPath, []byte(strconv.Itoa(p.UID)+"\n"), 0o600); err != nil {
-			p.TmpMarker = err.Error()
-		} else {
-			p.TmpMarker = "written"
-		}
-		// safety: -n never prompts; with NoNewPrivileges the setuid bit cannot raise the job.
-		err = exec.CommandContext(ctx, "sudo", "-n", "true").Run()
-		var exit *exec.ExitError
-		switch {
-		case err == nil:
-			p.SudoExit = 0
-		case errors.As(err, &exit):
-			p.SudoExit = exit.ExitCode()
-		}
+		p.HomeList = listing("/home")
+		p.TmpMarker = outcome(os.WriteFile(TmpMarkerPath, []byte(strconv.Itoa(p.UID)+"\n"), 0o600))
+		p.SudoRan, p.SudoExit, p.SudoLaunchErr, p.SudoStderr = trySudo(ctx)
 		sparkwing.Info(ctx, "runner-isolation-probe uid=%d user=%s", p.UID, p.User)
 		return p, nil
 	}), nil
 }
 
+// trySudo runs sudo -n true and reports whether it ran, its exit code, a launch
+// error, and the start of its stderr, which names the refusal reason.
+func trySudo(ctx context.Context) (ran bool, exit int, launchErr, stderr string) {
+	var errOut bytes.Buffer
+	cmd := exec.CommandContext(ctx, "sudo", "-n", "true")
+	cmd.Stderr = &errOut
+	err := cmd.Run()
+	if len(errOut.Bytes()) > 300 {
+		errOut.Truncate(300)
+	}
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return true, 0, "", errOut.String()
+	case errors.As(err, &exitErr):
+		return true, exitErr.ExitCode(), "", errOut.String()
+	default:
+		return false, -1, err.Error(), errOut.String()
+	}
+}
+
+// Outcome classifies err as Allowed, Denied, Absent or a failed measurement.
+func outcome(err error) string {
+	switch {
+	case err == nil:
+		return Allowed
+	case errors.Is(err, fs.ErrPermission):
+		return Denied
+	case errors.Is(err, fs.ErrNotExist):
+		return Absent
+	default:
+		return "error: " + err.Error()
+	}
+}
+
 func readable(path string) string {
 	info, err := os.Stat(path)
 	if err != nil {
-		return err.Error()
+		return outcome(err)
 	}
 	if info.IsDir() {
-		if _, err := os.ReadDir(path); err != nil {
-			return err.Error()
-		}
-		return "allowed"
+		_, err = os.ReadDir(path)
+		return outcome(err)
 	}
 	f, err := os.Open(path)
-	if err != nil {
-		return err.Error()
+	if err == nil {
+		_ = f.Close()
 	}
-	_ = f.Close()
-	return "allowed"
+	return outcome(err)
+}
+
+func listing(path string) string {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return outcome(err)
+	}
+	if len(entries) == 0 {
+		return "empty"
+	}
+	return "entries:" + strconv.Itoa(len(entries))
 }
 
 func statusField(name string) string {
 	body, err := os.ReadFile("/proc/self/status")
 	if err != nil {
-		return err.Error()
+		return "error: " + err.Error()
 	}
 	for _, line := range strings.Split(string(body), "\n") {
 		if value, ok := strings.CutPrefix(line, name+":"); ok {
 			return strings.TrimSpace(value)
 		}
 	}
-	return "absent"
+	return Absent
 }
 
 type isolation struct{ sparkwing.Base }

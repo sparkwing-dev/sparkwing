@@ -14,22 +14,51 @@ import (
 
 // The proof creates OS users and system services, so it must refuse every
 // host that is not a discarded GitHub-hosted VM before it writes anything.
+// Full runs are exercised only where an Actions variable is missing, since
+// this suite itself runs on hosted VMs; the cases with every variable set use
+// --preflight, which checks the same facts and never writes.
 func TestRunnerIsolationProofRefusesOutsideDisposableRunner(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skipf("bash unavailable: %v", err)
 	}
-	cases := map[string][]string{
-		"no Actions":   {},
-		"self-hosted":  {"GITHUB_ACTIONS=true", "RUNNER_ENVIRONMENT=self-hosted", "SPARKWING_ISOLATION_PROOF_VM=disposable"},
-		"not declared": {"GITHUB_ACTIONS=true", "RUNNER_ENVIRONMENT=github-hosted"},
-		"wrong marker": {"GITHUB_ACTIONS=true", "RUNNER_ENVIRONMENT=github-hosted", "SPARKWING_ISOLATION_PROOF_VM=yes"},
+	hosted := []string{"GITHUB_ACTIONS=true", "RUNNER_ENVIRONMENT=github-hosted"}
+	ownedRecord := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ownedRecord, "imagegeneration"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for name, env := range cases {
-		t.Run(name, func(t *testing.T) {
+	if err := os.WriteFile(filepath.Join(ownedRecord, "imagegeneration", "imagedata.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	type refusal struct {
+		name    string
+		env     []string
+		args    []string
+		refuses []string
+	}
+	cases := []refusal{
+		{name: "run without Actions", args: []string{"EVIDENCE"}, refuses: []string{"GITHUB_ACTIONS"}},
+		{name: "run on a self-hosted runner", env: []string{"GITHUB_ACTIONS=true", "RUNNER_ENVIRONMENT=self-hosted"}, args: []string{"EVIDENCE"}, refuses: []string{"RUNNER_ENVIRONMENT"}},
+		{name: "every variable set, no host facts", env: hosted, args: []string{"--preflight", t.TempDir()}, refuses: []string{"imagedata.json", "Runner.Worker"}},
+		{name: "every variable set, image record not root-owned", env: hosted, args: []string{"--preflight", ownedRecord}, refuses: []string{"imagedata.json", "Runner.Worker"}},
+	}
+	if _, err := os.Stat("/imagegeneration/imagedata.json"); errors.Is(err, os.ErrNotExist) {
+		cases = append(cases, refusal{name: "every variable set on this host", env: hosted, args: []string{"--preflight"}, refuses: []string{"imagedata.json", "Runner.Worker"}})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if os.Getuid() == 0 && tc.name == "every variable set, image record not root-owned" {
+				t.Skip("as root the planted record is root-owned")
+			}
 			dir := t.TempDir()
-			evidence := filepath.Join(dir, "evidence")
-			cmd := exec.Command("bash", "runner-isolation-proof.sh", evidence)
-			cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "RUNNER_TEMP=" + dir}, env...)
+			args := []string{"runner-isolation-proof.sh"}
+			for _, arg := range tc.args {
+				if arg == "EVIDENCE" {
+					arg = filepath.Join(dir, "evidence")
+				}
+				args = append(args, arg)
+			}
+			cmd := exec.Command("bash", args...)
+			cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "RUNNER_TEMP=" + dir}, tc.env...)
 			output, err := cmd.CombinedOutput()
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) || exit.ExitCode() != 2 {
@@ -37,6 +66,11 @@ func TestRunnerIsolationProofRefusesOutsideDisposableRunner(t *testing.T) {
 			}
 			if !strings.Contains(string(output), "RESULT: REFUSED") {
 				t.Fatalf("refusal not reported:\n%s", output)
+			}
+			for _, reason := range tc.refuses {
+				if !strings.Contains(string(output), "refused: ") || !strings.Contains(string(output), reason) {
+					t.Fatalf("refusal does not name %s:\n%s", reason, output)
+				}
 			}
 			entries, err := os.ReadDir(dir)
 			if err != nil {
@@ -62,7 +96,6 @@ func TestRunnerIsolationProofWorkflowIsManualReadOnlyAndSecretFree(t *testing.T)
 		Permissions map[string]string `yaml:"permissions"`
 		Jobs        map[string]struct {
 			Permissions map[string]string `yaml:"permissions"`
-			Env         map[string]string `yaml:"env"`
 			RunsOn      string            `yaml:"runs-on"`
 			Steps       []struct {
 				Uses string            `yaml:"uses"`
@@ -92,11 +125,8 @@ func TestRunnerIsolationProofWorkflowIsManualReadOnlyAndSecretFree(t *testing.T)
 		if len(job.Permissions) != 1 || job.Permissions["contents"] != "read" {
 			t.Fatalf("%s permissions = %v, want %v", name, job.Permissions, readOnly)
 		}
-		if !strings.HasPrefix(job.RunsOn, "ubuntu-") {
+		if !strings.HasPrefix(job.RunsOn, "ubuntu-") || strings.Contains(job.RunsOn, "self-hosted") {
 			t.Fatalf("%s runs on %q; the proof needs a disposable GitHub-hosted Ubuntu VM", name, job.RunsOn)
-		}
-		if job.Env["SPARKWING_ISOLATION_PROOF_VM"] != "disposable" {
-			t.Fatalf("%s does not declare the disposable VM the script requires", name)
 		}
 		runs := false
 		for _, step := range job.Steps {
