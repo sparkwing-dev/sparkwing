@@ -244,23 +244,40 @@ func TestContextServerHostReadsTheRedactedKubeconfig(t *testing.T) {
 
 func isoJob(name, run, job, team string) kubeJob {
 	var j kubeJob
-	j.Metadata.Name = name
+	j.Metadata.Name, j.Metadata.UID = name, "uid-"+name
 	binding, _ := json.Marshal(awardBinding{Kind: "work", Team: team, RunID: run, NodeID: job})
 	j.Metadata.Annotations = map[string]string{awardBindingAnnotation: string(binding)}
 	return j
 }
 
+func controlledBy(kind, uid string) []kubeOwner {
+	controller := true
+	return []kubeOwner{{Kind: kind, UID: uid, Controller: &controller}}
+}
+
+// A pod belongs to a run only through its controller reference to one of the run's Jobs, with its
+// Job label agreeing; the label alone, or an owner reference to another object, is not enough.
 func TestPodsOfRunFollowsTheAwardBinding(t *testing.T) {
 	jobs := []kubeJob{isoJob("sw-1", "run-1", "probe", "stg-iso-a"), isoJob("sw-2", "run-1", "output-sibling", "stg-iso-a"), isoJob("sw-3", "run-2", "probe", "stg-iso-b")}
 	var pods []kubePod
-	for i, job := range []string{"sw-1", "sw-2", "sw-3", "sw-unrelated"} {
+	for i, c := range []struct{ label, owner string }{
+		{"sw-1", "uid-sw-1"},
+		{"sw-2", "uid-sw-2"},
+		{"sw-3", "uid-sw-3"},
+		{"sw-unrelated", "uid-sw-unrelated"},
+		{"sw-1", ""},
+		{"sw-1", "uid-sw-3"},
+	} {
 		p := isoPod(fmt.Sprintf("pod-%d", i), fmt.Sprintf("10.9.0.%d", i), true)
-		p.Metadata.Labels = map[string]string{jobPodLabel: job}
+		p.Metadata.Labels = map[string]string{jobPodLabel: c.label}
+		if c.owner != "" {
+			p.Metadata.OwnerReferences = controlledBy("Job", c.owner)
+		}
 		pods = append(pods, p)
 	}
 	got := podsOfRun(jobs, pods, "run-1")
-	if len(got) != 2 || got[0].JobID != "probe" || got[1].JobID != "output-sibling" {
-		t.Fatalf("run-1 pods = %+v", got)
+	if len(got) != 2 || got[0].Metadata.Name != "pod-0" || got[0].JobID != "probe" || got[1].JobID != "output-sibling" {
+		t.Fatalf("run-1 pods = %+v, want only the two pods each run-1 Job controls", got)
 	}
 }
 
@@ -616,6 +633,7 @@ func (f *isoClusterFake) jobPods(fx isoRunFixture) []kubePod {
 		p := launcherPod()
 		p.Metadata.Name, p.Metadata.Namespace = fx.label+"-"+job, isoJobNS
 		p.Metadata.Labels = map[string]string{jobPodLabel: "sw-" + fx.run + "-" + job}
+		p.Metadata.OwnerReferences = controlledBy("Job", "uid-sw-"+fx.run+"-"+job)
 		p.Spec.NodeName, p.Status.HostIP, p.Status.Phase = fx.node, fx.hostIP, "Running"
 		if job == isolationprobe.ProbeJob {
 			p.Status.PodIP = fx.podIP
@@ -694,12 +712,14 @@ func (f *isoClusterFake) kubectl(args []string) (string, int, error) {
 			pods = append(pods, f.jobPods(fx)...)
 			ds := isoPod("aws-node-"+fx.label, fx.hostIP, true)
 			ds.Metadata.Namespace = "kube-system"
-			ds.Metadata.OwnerReferences = append(ds.Metadata.OwnerReferences, struct {
-				Kind string `json:"kind"`
-			}{"DaemonSet"})
+			ds.Metadata.OwnerReferences = controlledBy("DaemonSet", "uid-ds-aws-node")
 			pods = append(pods, ds)
 		}
 		return list(pods), 0, nil
+	case kind == "daemonsets":
+		var ds kubeDaemonSet
+		ds.Metadata.Name, ds.Metadata.Namespace, ds.Metadata.UID = "aws-node", "kube-system", "uid-ds-aws-node"
+		return list([]kubeDaemonSet{ds}), 0, nil
 	case kind == "networkpolicies" || kind == "validatingadmissionpolicybindings":
 		return `{"items":[]}`, 0, nil
 	}
@@ -1012,25 +1032,99 @@ func TestConformGatesTheLastPhaseOnItsPeers(t *testing.T) {
 	}
 }
 
-// A capacity request of the run that owns a node may share it, since the launcher places requests
-// only on fresh nodes or their own run's; a request of any other run on the node fails C2.
-func TestConformJudgesCapacityRequestsByTheirRun(t *testing.T) {
-	for run, wantPass := range map[string]bool{"run-1": true, "run-9": false} {
-		_, _, err := driveWrapped(t, func(c isolationCommand, out string) string {
-			if c.Name == "kubectl" && flagValue(c.Args, "--field-selector") == "spec.nodeName=node-b1" {
-				var pods kubeList[kubePod]
-				_ = json.Unmarshal([]byte(out), &pods)
-				p := isoPod("capacity-1", "10.9.20.12", true)
-				p.Metadata.Namespace = isoJobNS
-				p.Metadata.Labels = map[string]string{capacityRequestLabel: "true"}
-				p.Metadata.Annotations = map[string]string{capacityDemandAnnotation: `{"binding":{"Team":"stg-iso-b","RunID":"` + run + `"}}`}
-				return list(append(pods.Items, p))
+func addToNode(out string, p kubePod, raw func(map[string]any)) string {
+	data, _ := json.Marshal(p)
+	var doc map[string]any
+	_ = json.Unmarshal(data, &doc)
+	if raw != nil {
+		raw(doc)
+	}
+	data, _ = json.Marshal(doc)
+	var result map[string]any
+	_ = json.Unmarshal([]byte(out), &result)
+	items, _ := result["items"].([]any)
+	result["items"] = append(items, json.RawMessage(data))
+	data, _ = json.Marshal(result)
+	return string(data)
+}
+
+// The review's forgery repro: a foreign workload on B1's node fails C2 whatever capacity metadata
+// it carries. The conformance run cannot authenticate a capacity placeholder, so none is exempt, not
+// even one claiming the owning run.
+func TestConformRefusesAnyCapacityPlaceholderOnATestedNode(t *testing.T) {
+	for _, mode := range []string{"plain-foreign", "foreign-run", "forged-owner-run", "forged-owner-run-foreign-team", "forged-owner-run-unsafe-spec", "forged-run-other-namespace"} {
+		t.Run(mode, func(t *testing.T) {
+			_, evidence, err := driveWrapped(t, func(c isolationCommand, out string) string {
+				if c.Name != "kubectl" || flagValue(c.Args, "--field-selector") != "spec.nodeName=node-b1" {
+					return out
+				}
+				p := isoPod("foreign-workload", "10.9.20.12", true)
+				p.Metadata.Namespace, p.Metadata.Labels, p.Metadata.Annotations = isoJobNS, map[string]string{}, map[string]string{}
+				if mode != "plain-foreign" {
+					run, team := "run-1", "stg-iso-b"
+					if mode == "foreign-run" {
+						run = "run-9"
+					}
+					if mode == "forged-owner-run-foreign-team" {
+						team = "attacker-team"
+					}
+					p.Metadata.Labels["sparkwing.dev/capacity-request"] = "true"
+					p.Metadata.Annotations["sparkwing.dev/capacity-demand"] = `{"binding":{"Team":"` + team + `","RunID":"` + run + `"}}`
+				}
+				if mode == "forged-run-other-namespace" {
+					p.Metadata.Namespace = "foreign-namespace"
+				}
+				if mode == "forged-owner-run-unsafe-spec" {
+					p.Spec.HostNetwork, p.Spec.HostPID = true, true
+				}
+				return addToNode(out, p, func(doc map[string]any) {
+					spec, _ := doc["spec"].(map[string]any)
+					spec["containers"] = []any{map[string]any{"name": "foreign-workload", "image": "attacker.example/foreign:fixture", "command": []string{"/bin/sh", "-c", "echo foreign; sleep 999"}}}
+				})
+			})
+			report, _ := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
+			if err == nil || !strings.Contains(string(report), "also held pod") {
+				t.Fatalf("conform = %v, report = %.300s; want C2 for the foreign workload", err, report)
 			}
-			return out
 		})
-		if (err == nil) != wantPass {
-			t.Errorf("capacity request of %s: conform = %v, want pass=%v", run, err, wantPass)
-		}
+	}
+}
+
+// Claimed ownership is not ownership: a pod naming one of the run's Jobs by label, or claiming a
+// DaemonSet that the cluster does not list, is a foreign occupant.
+func TestConformRefusesOccupantsWithClaimedOwners(t *testing.T) {
+	for name, forge := range map[string]func(*kubePod){
+		"Job label without the Job": func(p *kubePod) {
+			p.Metadata.Namespace = isoJobNS
+			p.Metadata.Labels = map[string]string{jobPodLabel: "sw-run-1-probe"}
+		},
+		"Job label and a made-up owner": func(p *kubePod) {
+			p.Metadata.Namespace = isoJobNS
+			p.Metadata.Labels = map[string]string{jobPodLabel: "sw-run-1-probe"}
+			p.Metadata.OwnerReferences = controlledBy("Job", "uid-made-up")
+		},
+		"a DaemonSet the cluster does not list": func(p *kubePod) {
+			p.Metadata.Namespace = "kube-system"
+			p.Metadata.OwnerReferences = controlledBy("DaemonSet", "uid-ds-made-up")
+		},
+		"a listed DaemonSet in another namespace": func(p *kubePod) {
+			p.Metadata.Namespace = isoJobNS
+			p.Metadata.OwnerReferences = controlledBy("DaemonSet", "uid-ds-aws-node")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := driveWrapped(t, func(c isolationCommand, out string) string {
+				if c.Name != "kubectl" || flagValue(c.Args, "--field-selector") != "spec.nodeName=node-b1" {
+					return out
+				}
+				p := isoPod("claimed-occupant", "10.9.20.13", true)
+				forge(&p)
+				return addToNode(out, p, nil)
+			})
+			if err == nil || !strings.Contains(err.Error(), "C2") {
+				t.Fatalf("conform = %v, want C2 for an occupant whose owner is only claimed", err)
+			}
+		})
 	}
 }
 
@@ -1161,7 +1255,7 @@ func TestConformGivesOnlyTheAnchorsTheRaisedLimit(t *testing.T) {
 
 // A read the driver needs to record placement fails during discovery, before any run starts.
 func TestConformChecksPlacementReadsBeforeAnyRun(t *testing.T) {
-	for _, denied := range []string{"get nodeclaims", "--field-selector"} {
+	for _, denied := range []string{"get nodeclaims", "--field-selector", "get daemonsets"} {
 		fake := newIsoFake(t)
 		fake.deny = denied
 		if _, err := driveFake(t, fake); err == nil || len(fake.triggered) != 0 {

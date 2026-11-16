@@ -21,11 +21,27 @@ type kubeList[T any] struct {
 type kubeMeta struct {
 	Name            string            `json:"name"`
 	Namespace       string            `json:"namespace"`
+	UID             string            `json:"uid"`
 	Labels          map[string]string `json:"labels"`
 	Annotations     map[string]string `json:"annotations"`
-	OwnerReferences []struct {
-		Kind string `json:"kind"`
-	} `json:"ownerReferences"`
+	OwnerReferences []kubeOwner       `json:"ownerReferences"`
+}
+
+type kubeOwner struct {
+	Kind       string `json:"kind"`
+	UID        string `json:"uid"`
+	Controller *bool  `json:"controller"`
+}
+
+// safety: the controller reference names the object, by the UID the API server assigned it, that
+// manages the pod, which is the one tie a pod's creator cannot pick by naming a label.
+func (m kubeMeta) controller() (kubeOwner, bool) {
+	for _, o := range m.OwnerReferences {
+		if o.Controller != nil && *o.Controller && o.UID != "" {
+			return o, true
+		}
+	}
+	return kubeOwner{}, false
 }
 
 type kubeProbe struct {
@@ -145,16 +161,14 @@ type awardBinding struct {
 }
 
 const (
-	awardBindingAnnotation   = "sparkwing.dev/award-binding"
-	jobPodLabel              = "sparkwing.dev/job"
-	teamNodeLabel            = "node-restriction.kubernetes.io/sparkwing-team-node"
-	usedTeamNodeLabel        = "node-restriction.kubernetes.io/sparkwing-used-team"
-	usedRunNodeLabel         = "node-restriction.kubernetes.io/sparkwing-used-run"
-	poolNamespaceLabel       = "sparkwing.dev/launcher-namespace"
-	capacityRequestLabel     = "sparkwing.dev/capacity-request"
-	capacityDemandAnnotation = "sparkwing.dev/capacity-demand"
-	nodePoolLabel            = "karpenter.sh/nodepool"
-	nodeClassLabel           = "karpenter.k8s.aws/ec2nodeclass"
+	awardBindingAnnotation = "sparkwing.dev/award-binding"
+	jobPodLabel            = "sparkwing.dev/job"
+	teamNodeLabel          = "node-restriction.kubernetes.io/sparkwing-team-node"
+	usedTeamNodeLabel      = "node-restriction.kubernetes.io/sparkwing-used-team"
+	usedRunNodeLabel       = "node-restriction.kubernetes.io/sparkwing-used-run"
+	poolNamespaceLabel     = "sparkwing.dev/launcher-namespace"
+	nodePoolLabel          = "karpenter.sh/nodepool"
+	nodeClassLabel         = "karpenter.k8s.aws/ec2nodeclass"
 )
 
 // safety: the launcher labels a team's nodes with this hash of the job namespace and team, and the

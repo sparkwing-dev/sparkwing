@@ -563,6 +563,7 @@ func (d *isolationDriver) discover(ctx context.Context) ([]isolationprobe.Target
 		load(&endpoints, "get", "endpointslices", "-n", "default", "-l", "kubernetes.io/service-name=kubernetes"),
 		load(&infra, "get", "nodes", "-l", "karpenter.sh/nodepool="+d.args.InfraNodePool),
 		load(&kubeList[json.RawMessage]{}, "get", "nodeclaims"),
+		load(&kubeList[json.RawMessage]{}, "get", "daemonsets", "-A"),
 	}
 	for _, ns := range strings.Split(d.args.IngressNS, ",") {
 		if ns = strings.TrimSpace(ns); ns == "" {
@@ -857,20 +858,24 @@ type runPod struct {
 	JobID string
 }
 
-// safety: the launcher's award binding ties each Kubernetes Job to one run and job, and pods name
-// their Job by label, so a pod counts for a run only through both.
+// safety: the launcher's award binding ties each Kubernetes Job to one run and job, and a pod
+// counts for a run only when its controller reference is that Job's UID and its Job label agrees, so
+// a label naming the Job is never enough.
 func podsOfRun(jobs []kubeJob, pods []kubePod, runID string) []runPod {
-	jobID := map[string]string{}
+	type runJob struct{ nodeID, uid string }
+	byName := map[string]runJob{}
 	for _, j := range jobs {
 		var b awardBinding
-		if json.Unmarshal([]byte(j.Metadata.Annotations[awardBindingAnnotation]), &b) == nil && b.RunID == runID {
-			jobID[j.Metadata.Name] = b.NodeID
+		if json.Unmarshal([]byte(j.Metadata.Annotations[awardBindingAnnotation]), &b) == nil && b.RunID == runID && j.Metadata.UID != "" {
+			byName[j.Metadata.Name] = runJob{nodeID: b.NodeID, uid: j.Metadata.UID}
 		}
 	}
 	var out []runPod
 	for _, p := range pods {
-		if id, ok := jobID[p.Metadata.Labels[jobPodLabel]]; ok {
-			out = append(out, runPod{kubePod: p, JobID: id})
+		j, named := byName[p.Metadata.Labels[jobPodLabel]]
+		owner, owned := p.Metadata.controller()
+		if named && owned && owner.Kind == "Job" && owner.UID == j.uid {
+			out = append(out, runPod{kubePod: p, JobID: j.nodeID})
 		}
 	}
 	return out
@@ -878,12 +883,13 @@ func podsOfRun(jobs []kubeJob, pods []kubePod, runID string) []runPod {
 
 // safety: the launcher deletes a run's Jobs when the run ends, and a later observation can look
 // healthy after an unsafe one, so every observation is kept exactly as seen and judged on its own.
-// Nothing recorded is replaced: samples only append, and a Job's run or a node's NodeClaim is kept
-// from the first time it is seen.
+// Nothing recorded is replaced: samples only append, and a Job's run, a DaemonSet's namespace or a
+// node's NodeClaim is kept, by UID or node, from the first time it is seen.
 type placementLog struct {
-	samples []placementSample
-	jobRun  map[string]string
-	claims  map[string]json.RawMessage
+	samples    []placementSample
+	jobRun     map[string]string
+	daemonSets map[string]string
+	claims     map[string]json.RawMessage
 }
 
 // safety: one sample is one poll's view of each run's pods, the nodes they use and every pod on
@@ -898,7 +904,7 @@ type placementSample struct {
 }
 
 func newPlacementLog() *placementLog {
-	return &placementLog{jobRun: map[string]string{}, claims: map[string]json.RawMessage{}}
+	return &placementLog{jobRun: map[string]string{}, daemonSets: map[string]string{}, claims: map[string]json.RawMessage{}}
 }
 
 func (l *placementLog) latest() placementSample {
@@ -938,26 +944,20 @@ func (l *placementLog) usedNodes() []string {
 	return slices.Sorted(maps.Keys(used))
 }
 
-// safety: a pod on a tested node belongs to a run through its Job's award binding, or for a
-// capacity request through the binding in its demand annotation, which places it only on its own
-// run's nodes.
+// safety: an occupant counts as a DaemonSet's only when its controller is a DaemonSet the cluster
+// lists in the pod's namespace, and as a run's only when its controller is one of that run's Jobs,
+// both by UID. Labels, annotations and claimed owner kinds never suffice, so a capacity placeholder,
+// which the conformance run cannot authenticate, fails like any other occupant.
 func (l *placementLog) nodePod(p kubePod, jobNamespace string) nodePod {
 	np := nodePod{Namespace: p.Metadata.Namespace, Name: p.Metadata.Name}
-	for _, o := range p.Metadata.OwnerReferences {
-		np.DaemonSet = np.DaemonSet || o.Kind == "DaemonSet"
-	}
-	if p.Metadata.Namespace != jobNamespace {
-		return np
-	}
-	if run := l.jobRun[p.Metadata.Labels[jobPodLabel]]; run != "" {
-		np.Run = run
-		return np
-	}
-	var demand struct {
-		Binding awardBinding `json:"binding"`
-	}
-	if p.Metadata.Labels[capacityRequestLabel] == "true" && json.Unmarshal([]byte(p.Metadata.Annotations[capacityDemandAnnotation]), &demand) == nil {
-		np.Run = demand.Binding.RunID
+	owner, owned := p.Metadata.controller()
+	switch {
+	case !owned:
+	case owner.Kind == "DaemonSet":
+		ns, known := l.daemonSets[owner.UID]
+		np.DaemonSet = known && ns == p.Metadata.Namespace
+	case owner.Kind == "Job" && p.Metadata.Namespace == jobNamespace:
+		np.Run = l.jobRun[owner.UID]
 	}
 	return np
 }
@@ -997,8 +997,8 @@ func (d *isolationDriver) observe(ctx context.Context) error {
 	}
 	for _, j := range jobs {
 		var b awardBinding
-		if _, known := d.seen.jobRun[j.Metadata.Name]; !known && json.Unmarshal([]byte(j.Metadata.Annotations[awardBindingAnnotation]), &b) == nil && b.RunID != "" {
-			d.seen.jobRun[j.Metadata.Name] = b.RunID
+		if _, known := d.seen.jobRun[j.Metadata.UID]; !known && j.Metadata.UID != "" && json.Unmarshal([]byte(j.Metadata.Annotations[awardBindingAnnotation]), &b) == nil && b.RunID != "" {
+			d.seen.jobRun[j.Metadata.UID] = b.RunID
 		}
 	}
 	doc := map[string]json.RawMessage{}
@@ -1032,6 +1032,19 @@ func (d *isolationDriver) observeNodes(ctx context.Context, used []string, sampl
 	nodes, nodeDocs, err := decodeRawList[kubeNode](nodesOut)
 	if err != nil {
 		return err
+	}
+	dsOut, err := d.kubectl(ctx, "get", "daemonsets", "-A", "-o", "json")
+	if err != nil {
+		return err
+	}
+	daemonSets, err := decodeList[kubeDaemonSet](dsOut)
+	if err != nil {
+		return err
+	}
+	for _, ds := range daemonSets {
+		if _, known := d.seen.daemonSets[ds.Metadata.UID]; !known && ds.Metadata.UID != "" {
+			d.seen.daemonSets[ds.Metadata.UID] = ds.Metadata.Namespace
+		}
 	}
 	sample.nodes, sample.nodeDocs = map[string]kubeNode{}, map[string]json.RawMessage{}
 	sample.onNode, sample.nodePods = map[string][]kubePod{}, map[string][]json.RawMessage{}
@@ -1099,6 +1112,10 @@ func (d *isolationDriver) appendFile(name string, data []byte) error {
 	}
 	_, werr := f.Write(data)
 	return errors.Join(werr, f.Close())
+}
+
+type kubeDaemonSet struct {
+	Metadata kubeMeta `json:"metadata"`
 }
 
 type kubeNodeClaim struct {

@@ -1463,7 +1463,16 @@ appends every observation to `cluster/observations.ndjson` and never replaces
 one. Each observation is judged on its own, so a wrong fence or an unsafe pod
 seen once stays a failure even if a later observation looks healthy. The
 launcher deletes a run's Jobs when the run ends, so placement comes only from
-these records. Every result the plan owed must be present, from one manifest
+these records.
+
+Conformance needs tested nodes without capacity placeholders. Only two kinds of
+pod may share a tested node. One is a pod whose controller is a DaemonSet the
+cluster lists. The other is a pod whose controller is one of the run's own Jobs.
+Both are matched by UID. A label, an annotation or a claimed owner kind never
+counts. A capacity placeholder fails the run even when it belongs to the run
+that owns the node, because the conformance run cannot prove who created it.
+The launcher creates placeholders only while a job waits for a node. If a
+report names one, rerun once the run's nodes are free of them. Every result the plan owed must be present, from one manifest
 shared by the probe and the driver. `REPORT.md` counts the verdicts by
 checklist item, lists each failure, and lists every check that was not probed.
 `results.ndjson` holds every result.
