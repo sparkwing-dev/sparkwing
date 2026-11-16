@@ -633,7 +633,7 @@ func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 func TestPipelineNewMergeQueueTypeScriptPointsAtTheTypeScriptDocs(t *testing.T) {
 	repo := t.TempDir()
 	t.Chdir(repo)
-	t.Setenv("PATH", t.TempDir())
+	fakeNPM(t, 0)
 	var commandErr error
 	captureStdout(t, func() {
 		commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "land", "--template", "merge-queue-typescript", "-o", "json"})
