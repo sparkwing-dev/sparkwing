@@ -869,12 +869,12 @@ type NodeStep struct {
 
 // ListDeclaredSteps returns each job's step IDs in the order its accepted declaration lists them, for planned
 // and generated jobs alike. A job whose declaration cannot be read is absent from the map.
-func (t *Tenant) ListDeclaredSteps(ctx context.Context, runID string) (map[string][]string, error) {
+func (t *Tenant) ListDeclaredSteps(ctx context.Context, runID string) (_ map[string][]string, err error) {
 	rows, err := t.s.query(ctx, `SELECT node_id, spec_json FROM nodes WHERE team = ? AND run_id = ?`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	out := map[string][]string{}
 	for rows.Next() {
 		var node string
@@ -900,7 +900,7 @@ func (t *Tenant) ListDeclaredSteps(ctx context.Context, runID string) (map[strin
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return out, rows.Close()
+	return out, nil
 }
 
 // ListNodeSteps returns persisted step observations for a tenant run.
