@@ -184,6 +184,9 @@ func runRunnersInstallService(inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, format)
 	}
+	if err := requireServiceRoot(runnerServiceGOOS, inv.Value("service-user"), "install-service"); err != nil {
+		return err
+	}
 	var payload serviceUserEnrollment
 	if err := json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&payload); err != nil {
 		return fmt.Errorf("read the runner enrollment from stdin (sparkwing runners add --service-user writes it): %w", err)
@@ -440,9 +443,9 @@ func runnerEnrollmentWarnings(enrollment runnerEnrollment) []string {
 				}
 			}
 			if len(found) > 0 {
-				who := "your OS account"
+				who := "your own OS account"
 				if user := os.Getenv("USER"); user != "" {
-					who += " " + user
+					who += " (" + user + ")"
 				}
 				warnings = append(warnings, fmt.Sprintf("this shared runner runs any pushed branch of its repositories as %s, and that code can read %s. Run it under a dedicated OS user instead: add --service-user sparkwing-runner (sparkwing docs read --topic shared-runners)", who, strings.Join(found, ", ")))
 			}
