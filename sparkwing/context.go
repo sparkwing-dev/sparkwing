@@ -43,7 +43,12 @@ type RunContext struct {
 //
 // Trigger-supplied arguments resolve into the pipeline's registered Inputs.
 type TriggerInfo struct {
-	Source string // "manual", "push", "schedule", "webhook"
+	// Source names how the run arrived: "local" (sparkwing run on this
+	// machine), "trigger" (sparkwing pipeline trigger, or a run routed to
+	// a controller), "github_app" (a push or pull request the GitHub App
+	// delivered), "schedule" (a cron entry) or "child" (another run's
+	// RunPipeline). Gate on the branch with Git.Branch, not on Source.
+	Source string
 	User   string // invoker identity, when known
 
 	// PullRequest is non-nil when the run was started by a GitHub

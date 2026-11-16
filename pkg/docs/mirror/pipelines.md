@@ -118,7 +118,9 @@ pipelines:
 read your `sparkwing.yaml`, so it dispatches the pipelines a team
 subscribed to the repository through the [GitHub App](github-app.md). To require a checked-out branch before any step runs,
 add `guards: {when: [git:branch=main]}` with its literal name. For pull
-requests this compares the head branch, not the base branch.
+requests this compares the head branch, not the base branch. A local run
+compares the branch you have checked out, so a `sparkwing run` from `main`
+passes; add `where:controller` to keep the pipeline off developer machines.
 `git:branch=default` matches the repository's default branch, which a
 GitHub App trigger records and any other run reads from its checkout; a run
 that cannot resolve it is refused. Branch guards do not express path
