@@ -2,14 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestTypeScriptLintReportsUnsupported(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("PATH", t.TempDir())
+	fakeNPM(t, 0)
 	var err error
 	captureStdout(t, func() {
 		err = runSparkwing([]string{"pipeline", "new", "--pipeline", "hello", "--template", "typescript", "-o", "json"})
@@ -43,31 +45,85 @@ func TestTypeScriptLintReportsUnsupported(t *testing.T) {
 	}
 }
 
-func TestTypeScriptScaffoldPrintsLockfileSetup(t *testing.T) {
-	repo := t.TempDir()
-	t.Chdir(repo)
-	t.Setenv("PATH", t.TempDir())
-	want := "npm --prefix " + shellSingleQuote(filepath.Join(repo, ".sparkwing")) + " install --package-lock-only --ignore-scripts --no-audit --no-fund"
+// hack: a recording npm keeps scaffold tests off the network; its lockfile resolves the scaffold's SDK pin.
+func fakeNPM(t *testing.T, exitCode int) string {
+	t.Helper()
+	bin := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	script := "#!/bin/sh\nprintf '%s|%s\\n' \"$(pwd -P)\" \"$*\" >> " + shellSingleQuote(calls) + "\n"
+	if exitCode != 0 {
+		script += "echo 'npm error network request failed' >&2\nexit " + strconv.Itoa(exitCode) + "\n"
+	} else {
+		lock := `{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"` + typeScriptSDKVersion + `"}},"node_modules/@sparkwing/sdk":{"version":"` + typeScriptSDKVersion + `"}}}`
+		script += "printf '%s\\n' " + shellSingleQuote(lock) + " > package-lock.json\n"
+	}
+	if err := os.WriteFile(filepath.Join(bin, "npm"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	return calls
+}
+
+func TestTypeScriptScaffoldWritesLockfile(t *testing.T) {
 	for _, format := range []string{"plain", "json", "pretty"} {
-		var commandErr error
-		output := captureStdout(t, func() {
-			commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "hello-" + format, "--template", "typescript", "-o", format})
-		})
-		if commandErr != nil {
-			t.Fatal(commandErr)
-		}
-		if format == "json" {
-			var report struct {
-				SetupCommand string `json:"setup_command"`
+		t.Run(format, func(t *testing.T) {
+			repo := t.TempDir()
+			t.Chdir(repo)
+			calls := fakeNPM(t, 0)
+			var commandErr error
+			output := captureStdout(t, func() {
+				commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "hello", "--template", "typescript", "-o", format})
+			})
+			if commandErr != nil {
+				t.Fatal(commandErr)
 			}
-			if err := json.Unmarshal([]byte(output), &report); err != nil {
+			dir := filepath.Join(repo, ".sparkwing")
+			physical, err := filepath.EvalSymlinks(dir)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if report.SetupCommand != want {
-				t.Fatalf("setup command = %q, want %q", report.SetupCommand, want)
+			recorded, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatalf("scaffold never ran npm: %v", err)
 			}
-		} else if !strings.Contains(output, want) {
-			t.Fatalf("output = %q, want command %q", output, want)
-		}
+			want := physical + "|install --package-lock-only --ignore-scripts --no-audit --no-fund\n"
+			if string(recorded) != want {
+				t.Fatalf("npm calls = %q, want %q", recorded, want)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "package-lock.json")); err != nil {
+				t.Fatalf("lockfile: %v", err)
+			}
+			if strings.Contains(output, "package-lock-only") || strings.Contains(output, "setup_command") {
+				t.Fatalf("scaffold still asks for a manual npm step: %q", output)
+			}
+		})
+	}
+}
+
+func TestTypeScriptScaffoldFailsWithTheNPMCommand(t *testing.T) {
+	for name, setPath := range map[string]func(*testing.T){
+		"npm missing": func(t *testing.T) { t.Setenv("PATH", t.TempDir()) },
+		"npm fails":   func(t *testing.T) { fakeNPM(t, 1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := t.TempDir()
+			t.Chdir(repo)
+			setPath(t)
+			var commandErr error
+			captureStdout(t, func() {
+				commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "hello", "--template", "typescript", "-o", "json"})
+			})
+			dir := filepath.Join(repo, ".sparkwing")
+			command := "npm --prefix " + shellSingleQuote(dir) + " install --package-lock-only --ignore-scripts --no-audit --no-fund"
+			if commandErr == nil || !strings.Contains(commandErr.Error(), command) {
+				t.Fatalf("error = %v, want it to name %q", commandErr, command)
+			}
+			if name == "npm fails" && !strings.Contains(commandErr.Error(), "network request failed") {
+				t.Fatalf("error = %v, want npm's output", commandErr)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "jobs", "hello.ts")); err != nil {
+				t.Fatalf("scaffold files were not kept: %v", err)
+			}
+		})
 	}
 }

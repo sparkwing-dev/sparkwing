@@ -70,8 +70,8 @@ sparkwing run hello
 sparkwing dashboard open    # one-time browser sign-in link
 ```
 
-For TypeScript, use `--template typescript`, generate and commit the npm
-lockfile, then inspect and run the pipeline. See the
+For TypeScript, use `--template typescript`; it writes the npm lockfile, so
+you can run the pipeline straight away and commit `.sparkwing/` with it. See the
 [TypeScript quick start](docs/getting-started.md#quick-start).
 
 When a team should see the same runs, connect the machine to a

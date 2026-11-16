@@ -292,10 +292,16 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk engineid
 		if err := os.WriteFile(filepath.Join(dir, "package.json"), body, 0o600); err != nil {
 			return err
 		}
-		return r.nativeCommand(ctx, dir, engineid.Pin{SDK: engineid.TypeScriptSDK, Version: version}, "npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund")
+		return r.nativeCommand(ctx, dir, engineid.Pin{SDK: engineid.TypeScriptSDK, Version: version}, "npm", TypeScriptLockfileArgs()...)
 	default:
 		return invalid("unknown SDK kind", "Select go or typescript.")
 	}
+}
+
+// TypeScriptLockfileArgs are the npm arguments that write package-lock.json for
+// a TypeScript project without installing node_modules or running package scripts.
+func TypeScriptLockfileArgs() []string {
+	return []string{"install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"}
 }
 
 func (r *Resolver) nativeCommand(ctx context.Context, dir string, pin engineid.Pin, name string, args ...string) error {
