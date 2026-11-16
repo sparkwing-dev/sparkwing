@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -138,5 +139,49 @@ func TestRunnerIsolationProofWorkflowIsManualReadOnlyAndSecretFree(t *testing.T)
 		if !runs {
 			t.Fatalf("%s never runs bin/runner-isolation-proof.sh", name)
 		}
+	}
+}
+
+// Backgrounding a shell function makes $! a subshell, so killing that PID left
+// the hosted proof's first controller serving its port. Every command the
+// script backgrounds must therefore start with a program, never a function.
+func TestRunnerIsolationProofBackgroundsNoShellFunction(t *testing.T) {
+	body, err := os.ReadFile("runner-isolation-proof.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	functionName := regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{`)
+	functions := map[string]bool{}
+	var commands []string
+	var pending strings.Builder
+	for _, line := range strings.Split(string(body), "\n") {
+		if m := functionName.FindStringSubmatch(line); m != nil {
+			functions[m[1]] = true
+		}
+		if strings.HasSuffix(strings.TrimRight(line, " \t"), `\`) {
+			pending.WriteString(strings.TrimSuffix(strings.TrimRight(line, " \t"), `\`) + " ")
+			continue
+		}
+		pending.WriteString(line)
+		commands = append(commands, pending.String())
+		pending.Reset()
+	}
+	backgrounded := 0
+	for _, command := range commands {
+		trimmed := strings.TrimSpace(command)
+		if strings.HasPrefix(trimmed, "#") || !strings.HasSuffix(trimmed, "&") || strings.HasSuffix(trimmed, "&&") {
+			continue
+		}
+		backgrounded++
+		fields := strings.Fields(trimmed)
+		if functions[fields[0]] {
+			t.Errorf("backgrounds shell function %s, so $! is a subshell rather than the program: %s", fields[0], trimmed)
+		}
+	}
+	if backgrounded == 0 {
+		t.Fatal("found no backgrounded command; the scan matched nothing")
+	}
+	if !functions["start_controller"] {
+		t.Fatal("found no shell functions; the scan matched nothing")
 	}
 }

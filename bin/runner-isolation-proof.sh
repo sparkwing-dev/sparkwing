@@ -208,18 +208,38 @@ mask "$BOOTSTRAP"
 (umask 077 && printf '%s' "$BOOTSTRAP" >"$CTL/credentials/bootstrap-admin-token" && openssl rand 32 >"$CTL/credentials/secrets-key")
 ctl_env() { env HOME="$CTL/home" SPARKWING_HOME="$CTL/state" "$@"; }
 controller_up() { curl --fail --silent --max-time 2 "$CONTROLLER/api/v1/health" >/dev/null; }
+port_listeners() { ss -ltnpH "( sport = :$PORT )" 2>/dev/null; }
+port_free() { ! controller_up && [[ -z "$(port_listeners)" ]]; }
+# controller_serving: health answers, and the listener on the port belongs to CONTROLLER_PID.
+controller_serving() { controller_up && [[ "$(port_listeners)" == *"pid=$CONTROLLER_PID,"* ]]; }
+# controller_exited: the process is gone or a zombie awaiting wait.
+controller_exited() {
+  local state
+  state="$(awk '{print $3}' "/proc/$CONTROLLER_PID/stat" 2>/dev/null)"
+  [[ -z "$state" || "$state" == Z ]]
+}
 start_controller() {
   # safety: health from a listener already on the port would not be this controller's.
-  if controller_up; then
-    echo "port $PORT already answers health before start" >&2
+  if ! port_free; then
+    echo "port $PORT is already in use before start" >&2
     return 1
   fi
-  ctl_env "$BIN/sparkwing-controller-proof" --addr "127.0.0.1:$PORT" --credentials-dir "$CTL/credentials" --deployment "$1" >>"$EVIDENCE/controller.log" 2>&1 &
+  # safety: env execs the controller in the background child, so $! is the controller itself.
+  # Backgrounding a shell function makes $! a subshell, and killing it leaves the controller running.
+  env HOME="$CTL/home" SPARKWING_HOME="$CTL/state" "$BIN/sparkwing-controller-proof" \
+    --addr "127.0.0.1:$PORT" --credentials-dir "$CTL/credentials" --deployment "$1" >>"$EVIDENCE/controller.log" 2>&1 &
   CONTROLLER_PID=$!
-  deadline 30 controller_up
+  deadline 30 controller_serving || return 1
+  if [[ "$(readlink "/proc/$CONTROLLER_PID/exe")" != "$BIN/sparkwing-controller-proof" ]]; then
+    echo "pid $CONTROLLER_PID is not the controller binary" >&2
+    return 1
+  fi
 }
 stop_controller() {
-  kill "$CONTROLLER_PID" && deadline 30 sh -c "! kill -0 $CONTROLLER_PID 2>/dev/null"
+  kill "$CONTROLLER_PID" || return 1
+  deadline 30 controller_exited || return 1
+  wait "$CONTROLLER_PID" 2>/dev/null
+  deadline 30 port_free
 }
 # Team mode refuses the deployment bearer, so the team is created in local mode first, as bin/k8s-e2e.sh does.
 setup start_controller local
