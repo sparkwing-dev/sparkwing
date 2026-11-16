@@ -15,6 +15,9 @@ var errKeyless = fmt.Errorf("this controller keeps its state in PostgreSQL and h
 // each secret write is refused with the reason rather than stored.
 type keylessCipher struct{}
 
+// Keyless tells the store to keep run argument values in plaintext rather than refuse every run that carries one.
+func (keylessCipher) Keyless() {}
+
 func (keylessCipher) Seal(string) (string, error) { return "", errKeyless }
 func (keylessCipher) Open(string) (string, error) { return "", errKeyless }
 func (keylessCipher) SealBound(secrets.Purpose, string, string, string, bool, bool, string) (string, error) {

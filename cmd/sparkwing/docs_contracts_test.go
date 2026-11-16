@@ -88,7 +88,9 @@ var userNamedEnvReads = map[string]string{
 
 // safety: a computed read hides the names it produces, so each one is listed
 // here and the page check covers them like any other read.
-var constructedEnvReads = map[string][]string{}
+var constructedEnvReads = map[string][]string{
+	"internal/otelutil/otelutil.go: key": {"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"},
+}
 
 var envPageRow = regexp.MustCompile("(?m)^\\| `([A-Z][A-Z0-9_]*)` \\|")
 
@@ -598,6 +600,10 @@ func moduleFiles(root string) ([]string, error) {
 files:
 	for path := range tracked {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		// safety: an example program documents its own settings in its README, not on the product's reference page.
+		if strings.HasPrefix(path, "examples/") {
 			continue
 		}
 		for dir := filepath.Dir(path); dir != "."; dir = filepath.Dir(dir) {

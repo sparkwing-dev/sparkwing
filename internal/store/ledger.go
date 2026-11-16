@@ -117,6 +117,7 @@ func (l *ledgerTx) exec(ctx context.Context, q string, args ...any) (sql.Result,
 	if l.checkCursor() != nil {
 		return nil, l.err
 	}
+	l.wrote = true
 	return l.tx.ExecContext(ctx, rewritePh(l.dialect, q), args...)
 }
 

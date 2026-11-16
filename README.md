@@ -70,9 +70,13 @@ sparkwing run hello
 sparkwing dashboard open    # one-time browser sign-in link
 ```
 
-For TypeScript, use `--template typescript`, generate and commit the npm
-lockfile, then inspect and run the pipeline. See the
+For TypeScript, use `--template typescript`; it writes the npm lockfile, so
+you can run the pipeline straight away and commit `.sparkwing/` with it. See the
 [TypeScript quick start](docs/getting-started.md#quick-start).
+
+Moving a GitHub Actions workflow? Start with
+[Migrate from GitHub Actions](docs/migrate-from-github-actions.md) and
+[known limitations](docs/known-limitations.md).
 
 When a team should see the same runs, connect the machine to a
 controller:
@@ -156,7 +160,7 @@ For scheduled local work, scaffold `--template scheduled-report`, review and
 commit the files, then run `sparkwing schedules install --profile=`. Installation
 pins the pipeline and arms its declared cadence through the native timer on
 Linux/macOS. Windows installation records schedules but does not fire them
-automatically. The machine must be awake for timer-started work.
+automatically. Windows support is experimental; use WSL2 with systemd. The machine must be awake for timer-started work.
 Inspect it with `sparkwing schedules list --profile=`. See
 [`docs/schedules.md`](./docs/schedules.md).
 
@@ -199,20 +203,23 @@ routes. External clients use the HTTP contract described by the spec.
 
 Sparkwing follows semantic versioning, but with explicit scope: only
 some packages and surfaces carry stability promises. The short version
-is that `pkg/...`, the top-level `sparkwing/` SDK package, CLI flags,
-wire formats, and YAML configs are covered; everything under
-`internal/...` is implementation detail and may change at any time.
+is that `pkg/...`, the Go and TypeScript author SDK, CLI flags, wire
+formats, and YAML configs are covered; everything under `internal/...`
+is implementation detail and may change at any time. The author SDK
+takes additive changes only. Releases ship on a weekly train, and
+breaking changes ship only in its Monday minor release, never in a patch.
 
 See [VERSIONING.md](./VERSIONING.md) for the full policy, the
-deprecation procedure, and the pre-1.0 caveat. User-visible changes
-land in [CHANGELOG.md](./CHANGELOG.md); CI enforces that covered
-surfaces ship with matching entries.
+removal procedure, the release cadence and the pre-1.0 caveat.
+User-visible changes land in [CHANGELOG.md](./CHANGELOG.md); CI
+enforces that covered surfaces ship with matching entries.
 
 ## Dependencies
 
 - `github.com/fsnotify/fsnotify` lets registry tests observe staging-file creation because filesystem events avoid timing-based polling.
 - `k8s.io/utils` supplies fake clocks for chaos tests because advancing time makes settling and process-guard assertions deterministic.
 - `golang.org/x/sync` joins concurrent controller and runner image publication and cancels sibling registry work on failure (build tooling).
+- `github.com/go-logr/logr` supplies the discard logger that silences OpenTelemetry's internal logging, because its default writes unfiltered output to stderr.
 
 Managed pre-push hooks provide `SPARKWING_GATE_PUSH_REFS` to their local
 pipelines. It contains Git's ref updates, so checks can distinguish a branch
@@ -233,9 +240,11 @@ Existing destination files are rejected. Xwing owns candidate selection and the
 `sparkwing` runtime profile. The hook does not install a host service or replace
 the normal executable.
 
-## Reporting issues
+## Support and reporting issues
 
-Open a public issue for bugs and feature requests at
+For Sparkwing Cloud accounts, billing and runs, email support@sparkwing.dev.
+[Support](docs/support.md) lists what to include and how quickly to expect a
+reply. Open a public issue for bugs and feature requests at
 [github.com/sparkwing-dev/sparkwing/issues](https://github.com/sparkwing-dev/sparkwing/issues).
 Report suspected vulnerabilities privately by following the
 [security policy](./SECURITY.md).

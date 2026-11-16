@@ -232,15 +232,15 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 			text.WriteString("JOB\tSTATUS\tOUTCOME\tATTEMPT\tGENERATION\tDETAIL\tSTARTED_AT\tFINISHED_AT\tDURATION\n")
 		}
 		for _, job := range detail.Jobs {
-			fmt.Fprintf(&text, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\n", opsview.DisplayText(job.ID), opsview.DisplayText(job.Status), opsview.DisplayText(job.Outcome), job.Attempt, job.Generation, opsview.DisplayText(job.StatusDetail), displayTime(job.StartedAt), displayTime(job.FinishedAt), displayDuration(job.StartedAt, job.FinishedAt))
+			fmt.Fprintf(&text, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\n", opsview.DisplayText(job.ID), opsview.DisplayText(job.Status), opsview.DisplayText(job.Outcome), job.Attempt, job.Generation, opsview.DisplayText(jobDetailText(detail, job)), displayTime(job.StartedAt), displayTime(job.FinishedAt), displayDuration(job.StartedAt, job.FinishedAt))
 		}
 	}
 	for _, step := range detail.Steps {
-		fmt.Fprintf(&text, "%s/%s\t%s\t%s\tattempt=%d\t%s\n", opsview.DisplayText(step.JobID), opsview.DisplayText(step.ID), opsview.DisplayText(step.Status), opsview.DisplayText(step.Outcome), step.Attempt, opsview.DisplayText(step.Reason))
+		fmt.Fprintf(&text, "%s/%s\t%s\t%s\tattempt=%d\t%s\n", opsview.DisplayText(step.JobID), opsview.DisplayText(step.ID), opsview.DisplayText(step.Status), opsview.DisplayText(step.Outcome), step.Attempt, opsview.DisplayLines(step.Reason, failureLineBytes)[0])
 	}
 	for _, job := range detail.Jobs {
 		if job.Error != "" {
-			fmt.Fprintf(&text, "%s error:\n%s\n", opsview.DisplayText(job.ID), opsview.DisplayText(strings.TrimRight(job.Error, "\n")))
+			fmt.Fprintf(&text, "%s error:\n  %s\n", opsview.DisplayText(job.ID), opsview.DisplayBlock(job.Error, "  "))
 		}
 	}
 	writeRunError(&text, detail)
@@ -252,7 +252,7 @@ func writeRunError(text *strings.Builder, detail controllerwire.RunDetail) {
 	if detail.Failure == "" {
 		return
 	}
-	fmt.Fprintf(text, "run error:\n%s\n", opsview.DisplayText(strings.TrimRight(detail.Failure, "\n")))
+	fmt.Fprintf(text, "run error:\n  %s\n", opsview.DisplayBlock(detail.Failure, "  "))
 	if hint := planFailureHint(detail); hint != "" {
 		fmt.Fprintf(text, "hint: %s\n", opsview.DisplayText(hint))
 	}
@@ -263,6 +263,17 @@ func planFailureHint(detail controllerwire.RunDetail) string {
 		return ""
 	}
 	return fmt.Sprintf("the pipeline failed to plan, so no job ran; fix the error above, check it from the repository with `sparkwing pipeline plan --pipeline %s`, and trigger the run again", detail.Inputs.Pipeline)
+}
+
+// safety: the wire reason sdk_error means only that the job's own code returned an error.
+func jobDetailText(detail controllerwire.RunDetail, job controllerwire.JobDetail) string {
+	if job.StatusDetail != string(apierr.SDKError) {
+		return job.StatusDetail
+	}
+	if step := failedStep(detail, job); step != "" {
+		return "step " + step + " failed"
+	}
+	return "failed"
 }
 
 // jobFailureText prefers the job's recorded error, the only account of a failure reported before any attempt started.

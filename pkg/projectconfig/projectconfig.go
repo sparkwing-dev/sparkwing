@@ -53,6 +53,12 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	cfg, err := Parse(raw)
+	var field *userconfig.FieldError
+	if errors.As(err, &field) {
+		located := *field
+		located.File = path
+		return nil, &located
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

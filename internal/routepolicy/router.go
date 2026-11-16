@@ -227,10 +227,16 @@ func (router *Router) authorize(ctx context.Context, endpoint controllerwire.End
 	if route.Owner == capability.OwnerTeam && presentation.Evidence.Target.Team == "" {
 		presentation.Evidence.Target.Team = authenticated.Principal.Capability.Team
 	}
+	refuse := func(err error) error {
+		if class, ok := refusalClass(err); ok && router.authorization.NoteRefusal != nil {
+			router.authorization.NoteRefusal(ctx, Refusal{Principal: authenticated.Principal, Method: endpoint.Method, Pattern: endpoint.Pattern, Class: class})
+		}
+		return err
+	}
 	if endpoint.ResolveTarget != nil {
 		presentation.Evidence.Target, err = endpoint.ResolveTarget(ctx, authenticated.Principal, presentation.Evidence.Target)
 		if err != nil {
-			return capability.Authorized{}, err
+			return capability.Authorized{}, refuse(err)
 		}
 	}
 	if decodeErr != nil {
@@ -245,7 +251,32 @@ func (router *Router) authorize(ctx context.Context, endpoint controllerwire.End
 	if err != nil && presentation.Evidence.Target.Data != nil && router.authorization.DataError != nil {
 		err = router.authorization.DataError(err)
 	}
-	return authorized, err
+	if err != nil {
+		return authorized, refuse(err)
+	}
+	return authorized, nil
+}
+
+// safety: a missing grant or audience refuses the credential, not the resource it
+// names, so only these refusals count as probing for resources.
+func refusalClass(err error) (RefusalClass, bool) {
+	var failure *apierr.Error
+	if !errors.As(err, &failure) {
+		return "", false
+	}
+	switch failure.Code {
+	case apierr.NotFound:
+		return RefusalNotFound, true
+	case hosterr.Forbidden:
+		// safety: a reason relayed over the private host transport arrives as a plain string.
+		switch apierr.Reason(fmt.Sprint(failure.Details["reason"])) {
+		case hosterr.ReasonTeam, hosterr.ReasonNoTeam:
+			return RefusalTeam, true
+		case hosterr.ReasonBinding:
+			return RefusalBinding, true
+		}
+	}
+	return "", false
 }
 
 func (router *Router) presentation(r *http.Request) (capability.Presentation, error) {

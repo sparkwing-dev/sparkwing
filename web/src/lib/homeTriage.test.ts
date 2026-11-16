@@ -38,6 +38,15 @@ describe("Home latest failed pipelines", () => {
     assert.deepEqual(latestFailedPipelines(rows, true).map((r) => r.latest.id), ["feature-red", "other-red"]);
   });
 
+  it("treats a full refs/heads ref as its branch", () => {
+    const rows = [
+      run("push-red", "owner/app", "refs/heads/main", "failed", 1),
+      run("feature-red", "owner/app", "refs/heads/feature/demo", "failed", 2),
+    ];
+    assert.deepEqual(latestFailedPipelines(rows, false).map((r) => r.latest.id), ["push-red"]);
+    assert.deepEqual(latestFailedPipelines(rows, true).map((r) => [r.latest.id, r.branch]), [["feature-red", "feature/demo"], ["push-red", ""]]);
+  });
+
   it("does not merge equal short repo names across different owners", () => {
     const rows = [
       run("a", "alice/app", "main", "failed", 1),

@@ -36,6 +36,7 @@ type Keeper struct {
 	WaitCancellation func(context.Context) *CancelError
 	// ExecutionEnded stops execution surfaces outside the SDK tree. It runs once and must return promptly.
 	ExecutionEnded func()
+	wall           func() time.Time
 }
 
 // CancelError distinguishes a requested cancellation from lost authority.
@@ -79,6 +80,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		defer close(cancelDone)
 		if k.WaitCancellation != nil {
 			if requested := k.WaitCancellation(unit); requested != nil {
+				trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, captureNote{cancelSource: "wait"})
 				cancel(requested)
 			}
 		}
@@ -90,12 +92,22 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		defer close(watchDone)
 		watch(hard, func(err error) { hardCancel(err); cancel(err) }, renewed, expires, trace)
 	}(expires)
+	wall := k.wall
+	if wall == nil {
+		wall = time.Now
+	}
 	go func() {
 		defer close(done)
 		defer cancel(context.Canceled)
 		every := k.Interval
+		var serverWall time.Time
+		expired := func() bool {
+			// safety: the server's decoded wall expiry still binds, because after a host suspend the
+			// wall clock passes it while the monotonic expiry has not advanced.
+			return !time.Now().Before(expires) || !serverWall.IsZero() && !wall().Before(serverWall)
+		}
 		for unit.Err() == nil {
-			if !time.Now().Before(expires) {
+			if expired() {
 				hardCancel(ErrSilent)
 				cancel(ErrSilent)
 				return
@@ -103,26 +115,36 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			sent := time.Now()
 			renewal := trace.emit("renewal_start", sent, time.Time{}, "", 0)
 			beat, err := k.Renew(unit)
-			outcome := "success"
+			outcome, code := "success", ""
 			if err != nil {
-				outcome = "error"
+				outcome, code = "error", renewalErrorCode(err)
 			}
-			trace.emit("renewal_finish", time.Time{}, time.Time{}, outcome, 0)
+			trace.capture("renewal_finish", time.Time{}, time.Time{}, outcome, 0, captureNote{errorCode: code})
 			if unit.Err() != nil {
 				return
 			}
-			if !time.Now().Before(expires) {
+			if expired() {
 				hardCancel(ErrSilent)
 				cancel(ErrSilent)
 				return
 			}
 			if err == nil {
-				expires = sent.Add(k.Lease)
-				if !beat.ExpiresAt.IsZero() && beat.ExpiresAt.Before(expires) {
-					expires = beat.ExpiresAt
+				expires, serverWall = sent.Add(k.Lease), time.Time{}
+				if !beat.ExpiresAt.IsZero() {
+					// safety: the watcher and diagnostics hold the server expiry on the monotonic clock,
+					// and serverWall keeps its wall bound, so the loop stops at whichever comes first.
+					now := time.Now()
+					if server := now.Add(beat.ExpiresAt.Sub(now)); server.Before(expires) {
+						expires, serverWall = server, beat.ExpiresAt.Round(0)
+					}
 				}
-				trace.emit("expiry_selected", time.Time{}, expires, "", 0)
-				if !expires.After(time.Now()) {
+				trace.capture("expiry_selected", time.Time{}, expires, "", 0, captureNote{wallBound: !serverWall.IsZero()})
+				if beat.CancelRequested {
+					// safety: recording before the watcher handoff keeps its reset from contending
+					// with this record, and the record still precedes the cancellation it reports.
+					trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, captureNote{cancelSource: "renewal"})
+				}
+				if expired() {
 					hardCancel(ErrSilent)
 					cancel(ErrSilent)
 					return
@@ -173,6 +195,15 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		<-cancelDone
 		<-executionDone
 	}
+}
+
+func renewalErrorCode(err error) string {
+	// safety: only the wire code is recorded, because an error message can carry run or user text.
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure != nil && failure.Code != "" {
+		return string(failure.Code)
+	}
+	return "unclassified"
 }
 
 func retryAfter(err error) time.Duration {

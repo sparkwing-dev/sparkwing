@@ -5,6 +5,10 @@ func Registry() []Command {
 	return []Command{
 		{Path: "sparkwing", Flags: []Flag{}},
 		{Path: "sparkwing __sdk-install", Hidden: true, Rules: []string{"Read engine.SDKInstallRequest from stdin, inherit the filtered install environment, write one engine.SDKCommand to stdout."}},
+		{Path: "sparkwing __runner-account-write", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners install-service: write the runner enrollment JSON on stdin into this account's config and copy the runner into ~/.local/bin."}, Flags: []Flag{
+			{Name: "runner-binary", Argument: "PATH", Required: true, Meaning: "Staged sparkwing-runner to copy into this account's ~/.local/bin."},
+		}},
+		{Path: "sparkwing __runner-account-read", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners uninstall-service: report the runner name, controller and token prefix from this account's config."}},
 		{Path: "sparkwing __complete", Hidden: true, Flags: []Flag{
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
 			{Name: "word", Argument: "VALUE", Meaning: "Command words to complete; empty selects the root."},
@@ -58,7 +62,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing daemon status", Flags: []Flag{}},
 		{Path: "sparkwing daemon uninstall", Platforms: []string{"linux", "darwin"}, Rules: []string{"Remove the controller login service; Windows starts the controller on demand."}, Flags: []Flag{}},
-		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller, its dashboard and its local runner. The runner stops claiming work first. If it remains alive at the end of the stop wait, the command exits nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let held work finish, then retry `sparkwing daemon stop`. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again."}, Flags: []Flag{}},
+		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller, its dashboard and its local runner. The runner stops claiming work first. If it still holds jobs at the end of the stop wait, the command exits nonzero and names the runner. The controller keeps accepting that runner's results and exits on its own once the runner does; `sparkwing daemon status` reports `stopping` until then. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard", Flags: []Flag{}},
 		{Path: "sparkwing dashboard logs", Flags: []Flag{
 			{Name: "tail", Argument: "N"},
@@ -126,6 +130,7 @@ func Registry() []Command {
 			{Name: "body", Requires: []string{"example"}},
 			{Name: "category", Argument: "CATEGORY"},
 			{Name: "cloud", Argument: "CLOUD"},
+			{Name: "language", Argument: "LANGUAGE"},
 		}},
 		{Path: "sparkwing info", Flags: []Flag{
 			{Name: "for-agent"},
@@ -171,7 +176,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing operator secrets", Authority: deploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator secrets rotate", Authority: deploymentAdmin, Rules: []string{"Reseal every team's secrets, git credentials and submitted run environments, and the session signing key, under the controller's current key. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.", "Repeats safely. JSON retains the counts, previous_key_only and each unreadable row's purpose, team and name; values never appear.", "--verify writes nothing and counts the rows that still open only under the previous key; retire the previous key when it reports zero and nothing unreadable."}, Flags: []Flag{
+		{Path: "sparkwing operator secrets rotate", Authority: deploymentAdmin, Rules: []string{"Reseal every team's secrets, git credentials, run arguments and submitted run environments, and the session signing key, under the controller's current key. Run arguments stored before argument sealing are sealed for the first time. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.", "Repeats safely. JSON retains the counts, previous_key_only, plaintext_run_arguments and each unreadable row's purpose, team and name; values never appear.", "--verify writes nothing and counts the rows that still open only under the previous key and the run documents still holding plaintext arguments; retire the previous key when previous_key_only is zero and nothing is unreadable."}, Flags: []Flag{
 			{Name: "verify"},
 			{Name: "profile", Argument: "NAME"},
 		}},
@@ -203,6 +208,7 @@ func Registry() []Command {
 		{Path: "sparkwing pipeline describe", Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "secrets"},
+			{Name: "show-withheld"},
 		}},
 		{Path: "sparkwing pipeline hooks", Flags: []Flag{}},
 		{Path: "sparkwing pipeline hooks install", Flags: []Flag{}},
@@ -272,6 +278,10 @@ func Registry() []Command {
 		{Path: "sparkwing overflow", Flags: []Flag{}},
 		{Path: "sparkwing billing", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
+		{Path: "sparkwing team delete", Authority: teamCredential, Rules: []string{"Only a team owner deletes a team, and --confirm must repeat the slug of the team the profile's credential belongs to. The profile's token needs team.admin, which sparkwing login tokens never carry; a token created with --allow-team-admin from an administrator token has it, and the dashboard deletes a team without one. The controller refuses the owner's only team; deleting it means deleting the account, which the controller's support contact does on request. Deletion revokes every team token, including this profile's, ends members' sessions in the team, withdraws invitations and cancels active runs at once. Within minutes the controller removes the team's runs, logs, artifacts, cache, secrets, schedules, subscriptions and runners. Credit and payment records stay for accounting, and the slug stays reserved. JSON emits the deletion record; plain emits the slug."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "confirm", Argument: "SLUG", Required: true, Meaning: "The slug of the team to delete, repeated as confirmation"},
+		}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
 		{Path: "sparkwing team settings show", Authority: teamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. The child-run ceiling defaults to 50 descendants per root, excluding retries. high_trust defaults to false; see team settings set. Plain prints the boolean, comma-separated ranking, child-run ceiling and high_trust."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
@@ -422,7 +432,7 @@ func Registry() []Command {
 			{Name: "sw-run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Without --session-stdin a personal runner can be approved in the browser: the command needs stdin and stderr on a terminal, prints a code and the controller's /device page, and a signed-in account types the code there, checks the runner name, team and grants, and approves; the runner is enrolled under that account's authority and the command prints the team before writing config. --team makes the controller refuse an approver from another team. Shared runners, reserved pools, --trust, --platform and --launcher always need --session-stdin. Browser approval rejects allowed_labels. Set runner labels through --session-stdin enrollment: a team administrator sets them on shared runners, and a member may set them on a personal runner, where they route only that member's own manual runs. For headless setup, pipe sparkwing-controller admin session from the controller pod, run by an existing team administrator, to --session-stdin. Shared runner registration requires team administration. --personal registers capacity for only your runs. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Turning it off ends personal machines that members without administration enrolled, and turning it back on does not revive them. The session and its CSRF proof stay in memory. After fetching the session CSRF proof, the CLI attempts logout on enrollment success or failure. Use a dedicated session because logout ends it for every client. A token minted by sparkwing login ends when its approving browser session signs out, so supplying that same session invalidates the CLI token when logout succeeds. Copy the enrollment cookie from a separate private browser window. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a launcher holding a pool with a reserved secret takes only verified default-branch work, including unmodified admin-armed default-branch schedules. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns and is required for shared runners; a runner scoped by it takes only repository-proven work, so it is a trusted host whose jobs can produce a pass that sw.FromProvenRunAtCommit counts. On a developer's machine the trust boundary is the OS account the runner service runs as: any process running as that user can read the runner's credential and report a pass directly, and shares its HOME, Go configuration and build cache, Sparkwing home and PATH, so enroll a workstation this way only for people the team would let bypass the required gate check, or run the service under a dedicated OS user with its own HOME and SPARKWING_HOME. Such a runner also runs any pushed branch of its repositories as that user. Omit it for personal runners: they claim only their owner's asserted work and never repository-proven runs. A runner serving several repositories lets a job from one act as the runner and claim another repository's jobs in the team, with their secrets; scope --repos to one repository, or to repositories that trust each other, to isolate them. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Without --session-stdin a personal runner can be approved in the browser: the command needs stdin and stderr on a terminal, prints a code and the controller's /device page, and a signed-in account types the code there, checks the runner name, team and grants, and approves; the runner is enrolled under that account's authority and the command prints the team before writing config. --team makes the controller refuse an approver from another team. Shared runners, reserved pools, --trust, --platform and --launcher always need --session-stdin. Browser approval rejects allowed_labels. Set runner labels through --session-stdin enrollment: a team administrator sets them on shared runners, and a member may set them on a personal runner, where they route only that member's own manual runs. For headless setup, pipe sparkwing-controller admin session from the controller pod, run by an existing team administrator, to --session-stdin. Shared runner registration requires team administration. --personal registers capacity for only your runs. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Turning it off ends personal machines that members without administration enrolled, and turning it back on does not revive them. The session and its CSRF proof stay in memory. After fetching the session CSRF proof, the CLI attempts logout on enrollment success or failure. Use a dedicated session because logout ends it for every client. A token minted by sparkwing login ends when its approving browser session signs out, so supplying that same session invalidates the CLI token when logout succeeds. Copy the enrollment cookie from a separate private browser window. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a launcher holding a pool with a reserved secret takes only verified default-branch work, including unmodified admin-armed default-branch schedules. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns and is required for shared runners; a runner scoped by it takes only repository-proven work, so it is a trusted host whose jobs can produce a pass that sw.FromProvenRunAtCommit counts. On a developer's machine the trust boundary is the OS account the runner service runs as: any process running as that user can read the runner's credential and report a pass directly, and shares its HOME, Go configuration and build cache, Sparkwing home and PATH, so enroll a workstation this way only for people the team would let bypass the required gate check, or enroll it with --service-user so the service runs under a dedicated OS user with its own HOME and SPARKWING_HOME. Such a runner also runs any pushed branch of its repositories as that user. A shared runner enrolled into an account whose home holds SSH keys, cloud credentials or browser profiles prints a warning naming them, and --repos patterns spanning several repositories print a warning that those repositories can claim each other's jobs and secrets. --service-user asks for sudo before minting, creates the OS user when it is absent (no password, no login shell, home under /var/lib/sparkwing on Linux or /private/var/sparkwing on macOS), writes the runner section and credential into that user's own config, and installs a systemd system service or launchd daemon running as it. It refuses root, your own account, members of root-equivalent groups, accounts whose home sits under /home, /Users or /root, and a new name an existing group already holds. Its runner does not share this machine's local admission, so --max-concurrent is the only cap on its load. Omit it for personal runners: they claim only their owner's asserted work and never repository-proven runs. A runner serving several repositories lets a job from one act as the runner and claim another repository's jobs in the team, with their secrets; scope --repos to one repository, or to repositories that trust each other, to isolate them. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an independent account session from stdin without saving it. After fetching its CSRF proof, attempt logout on enrollment success or failure. Copy its cookie from a separate private browser window so logout does not invalidate your CLI login token."},
@@ -438,16 +448,30 @@ func Registry() []Command {
 			{Name: "platform", Argument: "PLATFORM", Values: []string{"kubernetes"}, Meaning: "Record a shared Kubernetes runner at admin enrollment; a runner in a pod stops at its first poll without it."},
 			{Name: "launcher", Meaning: "Enroll only claims.launch for a shared reserved pool and skip the persistent runner service."},
 			{Name: "team", Argument: "TEAM", Meaning: "With browser approval, accept an approval only from this team."},
+			{Name: "service-user", Argument: "USER", Conflicts: []string{"config", "no-service", "launcher", "platform"}, Meaning: "Run the runner under this dedicated, unprivileged OS user instead of your own account, so its jobs cannot read your home. Creates the user when absent and installs a system service running as it; asks for sudo before minting the credential."},
+		}},
+		{Path: "sparkwing runners install-service", Platforms: []string{"linux", "darwin"}, Rules: []string{"The privileged step of sparkwing runners add --service-user, which runs it through sudo with the enrollment as JSON on stdin. Requires root. Creates or reuses the OS user named by --service-user, writes the runner section and credential as that user into its own home, copies sparkwing-runner into its ~/.local/bin, records the runner name, controller and token prefix in a root-only directory beside the account homes, and installs a systemd system service (User=, ProtectHome=yes, NoNewPrivileges=yes, PrivateTmp=yes) or a launchd daemon (UserName) running as it. The service PATH leaves out entries under /home, /Users and /root. JSON reports the account, config path, service file and left-out PATH entries."}, Flags: []Flag{
+			{Name: "service-user", Argument: "USER", Required: true, Meaning: "Dedicated OS user the runner service runs as."},
+		}},
+		{Path: "sparkwing runners uninstall-service", Platforms: []string{"linux", "darwin"}, Rules: []string{"The privileged step of sparkwing runners remove --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix."}, Flags: []Flag{
+			{Name: "service-user", Argument: "USER", Required: true, Meaning: "Dedicated OS user the runner service runs as."},
 		}},
 		{Path: "sparkwing runners list", Authority: teamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. The local controller lists this machine as one local runner named after its host, with the runner.labels the daemon read at start and a last_seen of the read time. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
-		{Path: "sparkwing runners remove", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners pause", Rules: []string{"Pause the runner enrolled on this machine: it finishes held jobs and claims no new work, including planning, while it keeps polling so it stays online. The pause is a file beside the runner credential, local to this machine; runners list on this machine shows the runner paused, while other machines and the console see it idle. It survives a runner restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
+			{Name: "config", Argument: "PATH"},
+		}},
+		{Path: "sparkwing runners resume", Rules: []string{"Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
+			{Name: "config", Argument: "PATH"},
+		}},
+		{Path: "sparkwing runners remove", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. With --service-user, stop the system service through sudo, then check the controller and runner name it reports before revoking, and print how to delete the OS user. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "runner", Argument: "RUNNER"},
+			{Name: "service-user", Argument: "USER", Conflicts: []string{"config", "no-service"}, Meaning: "Remove the runner enrolled with runners add --service-user: stop its system service through sudo, then revoke its token."},
 		}},
 		{Path: "sparkwing runs", Flags: []Flag{}},
 		{Path: "sparkwing runs annotations", Flags: []Flag{}},
@@ -563,7 +587,7 @@ func Registry() []Command {
 		{Path: "sparkwing runs logs", Rules: []string{
 			"Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.",
 			"Every read consumes all available pages. Without --follow, a snapshot with pending final log segments reports logs incomplete and exits 3. --follow waits for new records until final log segments are complete. An interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.",
-			"JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
+			"JSON emits tagged log records. Plain emits log lines. Pretty starts each line with its job, leaves out scheduling events, and ends a failed run with each failed job's step and error and the commands to read its log and retry it. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "job", Argument: "JOB"},
@@ -709,7 +733,7 @@ func Registry() []Command {
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Rules: []string{"This explicit authorized read includes the value. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
+		{Path: "sparkwing secrets get", Rules: []string{"Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}},
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
@@ -734,6 +758,31 @@ func Registry() []Command {
 			{Name: "shared", Conflicts: []string{"pipeline", "repo"}},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "only-on", Argument: "POOL"},
+		}},
+		{Path: "sparkwing subscriptions", Flags: []Flag{}},
+		{Path: "sparkwing subscriptions create", Authority: teamCredential, Rules: []string{"Create a team run event subscription through the team-admin route with an idempotency key. Sparkwing posts each matching run.started and run.finished event to --url as CloudEvents 1.0 JSON signed with Standard Webhooks headers.", "A controller accepts only an https URL whose host is a public name or address; the local controller also accepts http and loopback receivers. Omitted --event selects run.finished when --status is given and both events otherwise; --status applies only to run.finished, and every other omitted filter matches all values. A team holds at most 20 subscriptions.", "The signing secret is printed once and never shown again; rotate-secret replaces it. JSON emits the subscription and its secret; plain emits the ID, then the secret."}, Flags: []Flag{
+			{Name: "url", Argument: "URL", Required: true, Meaning: "Receiver URL; it must not carry a username, password or fragment."},
+			{Name: "event", Argument: "EVENT", Repeatable: true, CommaList: true, Values: []string{"run.started", "run.finished"}, Meaning: "Events to receive; omitted, run.finished when --status is given and both otherwise."},
+			{Name: "status", Argument: "STATUS", Repeatable: true, CommaList: true, Values: []string{"success", "failed", "cancelled", "dry_run"}, Meaning: "Receive run.finished only for these final statuses; omitted, every status."},
+			{Name: "pipeline", Argument: "NAME", Repeatable: true, CommaList: true, Meaning: "Receive events only for these exact pipeline names; omitted, every pipeline."},
+			{Name: "repo", Argument: "KEY", Repeatable: true, CommaList: true, Meaning: "Receive events only for these repository keys, as run JSON reports them; omitted, every repository."},
+			{Name: "description", Argument: "TEXT", Meaning: "Note shown with the subscription, at most 200 characters."},
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing subscriptions delete", Authority: teamCredential, Rules: []string{"Delete a subscription and its pending deliveries through the team-admin route. JSON retains whether it was deleted or already absent and exits 0 either way; pretty and plain emit the deleted ID, and report a subscription the team does not hold as not found with a non-zero exit."}, Flags: []Flag{
+			{Name: "subscription", Argument: "ID", Required: true, Meaning: "Subscription ID, as subscriptions list shows it."},
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing subscriptions list", Authority: teamCredential, Rules: []string{"List the team's run event subscriptions without their secrets; only team administrators may read them, because a URL can carry a credential. JSON emits one record per subscription; plain emits IDs."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing subscriptions rotate-secret", Authority: teamCredential, Rules: []string{"Replace a subscription's signing secret and print the new one once. Signing switches at once; deliveries the receiver rejects meanwhile are retried for 24 hours. JSON emits the subscription and its secret; plain emits the secret."}, Flags: []Flag{
+			{Name: "subscription", Argument: "ID", Required: true, Meaning: "Subscription ID, as subscriptions list shows it."},
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing subscriptions show", Authority: teamCredential, Rules: []string{"Show one subscription without its secret. JSON emits the subscription; plain emits its URL."}, Flags: []Flag{
+			{Name: "subscription", Argument: "ID", Required: true, Meaning: "Subscription ID, as subscriptions list shows it."},
+			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing tokens", Flags: []Flag{}},
 		{Path: "sparkwing tokens create", Authority: teamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. A token minted with a profile token is delegated from it: it gets at most the minting token's scopes, including team.admin, and never outlives it."}, Flags: []Flag{

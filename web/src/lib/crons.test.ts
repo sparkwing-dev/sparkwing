@@ -66,6 +66,7 @@ function health(over: Partial<CronHealth> = {}): CronHealth {
       path: "/home/me/.config/systemd/user/sparkwing-crons.timer",
       binary: "/home/me/.local/bin/sparkwing",
       detail: "timer enabled; last tick 12s ago",
+      activation_unknown: false,
     },
     last_tick: {
       at: "2026-09-08T23:59:00Z",

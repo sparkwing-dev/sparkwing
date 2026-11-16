@@ -117,7 +117,7 @@ func (s *ProcessServices) read(request *http.Request, auth capability.Authorized
 func (s *ProcessServices) secret(request *http.Request, auth capability.Authorized) (any, error) {
 	name := request.PathValue("name")
 	if !executorContains(s.Secrets, name) {
-		return nil, &apierr.Error{Code: hosterr.Forbidden, Message: "secret is not declared", Details: map[string]any{"reason": hosterr.ReasonSecretUndeclared}}
+		return nil, hosterr.UndeclaredSecret(name)
 	}
 	if s.Secret == nil {
 		return nil, serviceUnavailable()

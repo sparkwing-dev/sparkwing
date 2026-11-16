@@ -340,6 +340,9 @@ type RunContext struct {
 	NoMemo bool
 
 	DryRun bool
+
+	StartAt string
+	StopAt  string
 }
 func Runner(ctx context.Context) *RunnerInfo
 type RunnerInfo struct {

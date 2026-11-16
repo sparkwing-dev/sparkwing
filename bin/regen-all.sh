@@ -12,6 +12,7 @@ bash bin/gen-config-docs.sh
 go -C "$ROOT" generate ./internal/doccheck
 go -C "$ROOT" generate ./internal/store
 bash bin/gen-sdk-docs.sh
+bash bin/gen-ts-sdk-docs.sh
 bash bin/gen-api-docs.sh
 bash bin/regen-api-snapshot.sh
 go test ./pkg/wingwire -run TestWireShapes -update >/dev/null

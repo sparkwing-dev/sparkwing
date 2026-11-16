@@ -103,6 +103,11 @@ func (f *identityFixture) advance(d time.Duration) { f.clock.Add(int64(d)) }
 
 func (f *identityFixture) call(method, path, auth string, body, out any) int {
 	f.t.Helper()
+	return f.callKeyed(method, path, auth, rand.Text(), body, out)
+}
+
+func (f *identityFixture) callKeyed(method, path, auth, key string, body, out any) int {
+	f.t.Helper()
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -121,7 +126,7 @@ func (f *identityFixture) call(method, path, auth string, body, out any) int {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("Idempotency-Key", rand.Text())
+	req.Header.Set("Idempotency-Key", key)
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}

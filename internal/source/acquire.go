@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Acquire installs the acquired checkout with its verified selected engine.
@@ -100,6 +101,10 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	})
 	if err != nil {
 		options.recordTiming(ctx, "sdk_install", started, false, false, command.Cache)
+		var refusal *apierr.Error
+		if errors.As(err, &refusal) && refusal.Code == apierr.PlanFailed {
+			return entry, err
+		}
 		return entry, fmt.Errorf("install source entry: %w", err)
 	}
 	entry.releaseSDK = command.Close

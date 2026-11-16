@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -44,6 +45,8 @@ type localRunRuntime struct {
 	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
 	publish          func(context.Context, string, string) error
 	follow           func(context.Context, string, string, io.Writer, <-chan struct{}) error
+	// safety: nil skips the runner check, as for a standalone controller whose runs the CLI hosts.
+	runner func(context.Context) (*apierr.Error, error)
 }
 
 type localRunDependencies struct {
@@ -71,6 +74,9 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// safety: the run's terminal shows its jobs; preparation timings and an in-process
+	// controller's request logs are process diagnostics that already reach the run log.
+	defer slog.SetLogLoggerLevel(slog.SetLogLoggerLevel(slog.LevelWarn))
 	signals := deps.interrupts
 	if signals == nil {
 		caught := make(chan os.Signal, 2)
@@ -165,6 +171,15 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 			return err
 		}
 	}
+	if !hostedInCLI && runtime.runner != nil {
+		failure, err := runtime.runner(ctx)
+		if err != nil {
+			return err
+		}
+		if failure != nil {
+			return failure
+		}
+	}
 	if mode := strings.TrimSpace(flags.priority); mode == wingwire.PriorityFront || mode == wingwire.PriorityBack {
 		queue, ok := runtime.controller.(controllerwire.QueueManager)
 		if !ok {
@@ -239,7 +254,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if outputErr != nil {
 		outputErr = fmt.Errorf("run %s is %s but its completion record could not be written: %w", response.RunID, completion.Outcome, outputErr)
 	}
-	return errors.Join(runCompletionError(ctx, runtime.controller, response.RunID, completion.Outcome), outputErr)
+	return errors.Join(foregroundRunCompletion(ctx, runtime.controller, response.RunID, completion.Outcome, format, out), outputErr)
 }
 
 func localRunNeedsCLIHost(flags runFlags, publish string) bool {

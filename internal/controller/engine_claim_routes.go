@@ -70,6 +70,13 @@ func decodeClaimRequest(r *http.Request) (controllerwire.ClaimRequest, error) {
 		}
 		body.MaxConcurrent = value
 	}
+	if raw := r.Header.Get(controllerwire.ClaimWaitHeader); raw != "" {
+		ms, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || ms < 0 {
+			return body, invalidEngineBody("claim wait header must be a nonnegative whole number of milliseconds")
+		}
+		body.Wait = time.Duration(min(ms, controllerwire.MaxClaimWait.Milliseconds())) * time.Millisecond
+	}
 	if run := r.PathValue("run"); run != "" {
 		kind, job := capability.UnitTrigger, r.PathValue("job")
 		if job != "" {
@@ -105,6 +112,9 @@ func (s *Server) claimHandler(engine *EngineController) func(http.ResponseWriter
 				limiter.Penalize(key, time.Now())
 			}
 			s.writeClaimPollAdvice(w)
+			if response.Held {
+				w.Header().Set(controllerwire.ClaimHeldHeader, "1")
+			}
 		}
 		if err != nil {
 			return engineLookupError(err)

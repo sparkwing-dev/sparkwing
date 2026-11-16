@@ -884,10 +884,13 @@ type RunContext struct {
     // Pipeline is the invoked project name, including any alias.
     Pipeline string
 
-    // Git is the run's view of the cloned working tree.
+    // Git is the run's view of the cloned working tree and is never nil.
     // Live methods (IsDirty, FilesetHash, …) shell
     // out fresh each call; data fields (SHA, Branch, Repo, RepoURL)
-    // are the trigger-time snapshot.
+    // are the trigger-time snapshot. The data fields are empty while
+    // sparkwing discovers pipelines, such as during pipeline describe,
+    // and whenever the host supplies no git facts, so a Plan that branches
+    // on Git.Branch declares its non-branch shape there.
     Git *Git
 
     Trigger TriggerInfo
@@ -899,6 +902,12 @@ type RunContext struct {
 
     // DryRun carries the same sealed mode as IsDryRun during planning and execution.
     DryRun bool
+
+    // StartAt and StopAt are the run's --sw-start-at and --sw-stop-at step
+    // bounds, empty when unset. A Plan reads them to refuse a selection it
+    // cannot honor, such as a push whose required checks the bounds skip.
+    StartAt string
+    StopAt  string
 }
 ```
 
@@ -1030,7 +1039,12 @@ TriggerInfo describes the trigger that started the run.
 
 ```
 type TriggerInfo struct {
-    Source string // "manual", "push", "schedule", "webhook"
+    // Source names how the run arrived: "local" (sparkwing run on this
+    // machine), "trigger" (sparkwing pipeline trigger, or a run routed to
+    // a controller), "github_app" (a push or pull request the GitHub App
+    // delivered), "schedule" (a cron entry) or "child" (another run's
+    // RunPipeline). Gate on the branch with Git.Branch, not on Source.
+    Source string
     User   string // invoker identity, when known
 
     // PullRequest is non-nil when the run was started by a GitHub

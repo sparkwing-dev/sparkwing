@@ -91,7 +91,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 	}
 	detail := controllerwire.RunDetail{
 		Reason: facts.Reason, ID: run.ID, Number: run.Number, Team: string(run.Team), Status: string(run.State), StateSeq: run.StateSeq,
-		Inputs: runspec.DisplayRequest(run.Request), Jobs: make([]controllerwire.JobDetail, 0, len(facts.Snapshot.Nodes)),
+		Inputs: run.Display(), Jobs: make([]controllerwire.JobDetail, 0, len(facts.Snapshot.Nodes)),
 		OwnerClaims: append([]runstate.OwnerClaimTime(nil), facts.OwnerClaims...),
 		Logs:        append([]blob.LogSubject{}, facts.Logs...),
 		Notices:     append([]engineid.Notice{}, facts.Notices...), StartedAt: run.StartedAt,

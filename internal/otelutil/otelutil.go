@@ -6,10 +6,12 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/go-logr/logr"
 	promclient "github.com/prometheus/client_golang/prometheus"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -35,6 +37,9 @@ import (
 type Config struct {
 	ServiceName string
 
+	// TracesOnly leaves process logging and metrics untouched.
+	TracesOnly bool
+
 	Version string
 
 	// Prometheus installs a meter provider whose instruments Telemetry.PromHandler
@@ -54,13 +59,16 @@ type Telemetry struct {
 	// Config.Prometheus was set.
 	PromHandler http.Handler
 
-	shutdowns []func(context.Context) error
+	shutdowns    []func(context.Context) error
+	redactErrors bool
 }
 
 func (t *Telemetry) Shutdown(ctx context.Context) error {
 	for _, fn := range t.shutdowns {
 		if err := fn(ctx); err != nil {
-			log.Printf("warning: otel shutdown error: %v", err)
+			if !t.redactErrors {
+				log.Printf("warning: otel shutdown error: %v", err)
+			}
 		}
 	}
 	return nil
@@ -71,19 +79,29 @@ func meter(name string) metric.Meter {
 }
 
 func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
-	t := &Telemetry{}
+	if err := checkOTLPEndpoints(cfg.TracesOnly); err != nil {
+		return nil, err
+	}
+	t := &Telemetry{redactErrors: cfg.TracesOnly}
+	if cfg.TracesOnly {
+		// safety: OTel's internal logger prints raw endpoint values, including userinfo, path and query.
+		otel.SetLogger(logr.Discard())
+		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) { fmt.Fprintln(os.Stderr, "warning: trace export failed; check OTEL exporter settings") }))
+	}
 	wrap := cfg.WrapLogHandler
 	if wrap == nil {
 		wrap = func(h slog.Handler) slog.Handler { return h }
 	}
-	if cfg.Log != (logutil.Options{}) {
-		h, err := cfg.Log.Handler(os.Stderr)
-		if err != nil {
-			return nil, err
+	if !cfg.TracesOnly {
+		if cfg.Log != (logutil.Options{}) {
+			h, err := cfg.Log.Handler(os.Stderr)
+			if err != nil {
+				return nil, err
+			}
+			slog.SetDefault(slog.New(wrap(h)))
+		} else if cfg.WrapLogHandler != nil {
+			slog.SetDefault(slog.New(wrap(configuredHandler())))
 		}
-		slog.SetDefault(slog.New(wrap(h)))
-	} else if cfg.WrapLogHandler != nil {
-		slog.SetDefault(slog.New(wrap(configuredHandler())))
 	}
 
 	serviceName := cfg.ServiceName
@@ -103,7 +121,7 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		res = resource.Default()
 	}
 
-	if cfg.Prometheus {
+	if cfg.Prometheus && !cfg.TracesOnly {
 		registry := promclient.NewRegistry()
 		promExporter, err := prometheus.New(prometheus.WithRegisterer(registry))
 		if err != nil {
@@ -124,7 +142,11 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		traceExporter, err := otlptracehttp.New(traceCtx)
 		traceCancel()
 		if err != nil {
-			log.Printf("warning: otel OTLP trace exporter failed: %v", err)
+			if cfg.TracesOnly {
+				fmt.Fprintln(os.Stderr, "warning: trace exporter setup failed; check OTEL exporter settings")
+			} else {
+				log.Printf("warning: otel OTLP trace exporter failed: %v", err)
+			}
 		} else {
 			tp := sdktrace.NewTracerProvider(
 				sdktrace.WithResource(res),
@@ -135,6 +157,11 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 			t.shutdowns = append(t.shutdowns, tp.Shutdown)
 			log.Printf("otel: traces enabled (OTLP)")
 		}
+	}
+
+	if cfg.TracesOnly {
+		otel.SetTextMapPropagator(propagation.TraceContext{})
+		return t, nil
 	}
 
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != "" {
@@ -175,6 +202,27 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	))
 
 	return t, nil
+}
+
+// safety: the exporters replace an unparseable endpoint with localhost:4318
+// and still send OTEL_EXPORTER_OTLP_HEADERS there. The error names the
+// variable only, because the value can carry credentials.
+func checkOTLPEndpoints(tracesOnly bool) error {
+	keys := []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"}
+	if !tracesOnly {
+		keys = append(keys, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+	}
+	for _, key := range keys {
+		value := os.Getenv(key)
+		if value == "" {
+			continue
+		}
+		u, err := url.Parse(value)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			return fmt.Errorf("%s is not a valid OTLP endpoint: want an http:// or https:// URL with a host", key)
+		}
+	}
+	return nil
 }
 
 // Go's built-in slog handler writes through log.Default, and slog.SetDefault

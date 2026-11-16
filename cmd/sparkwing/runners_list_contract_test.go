@@ -33,7 +33,7 @@ func TestRunnerListingKeepsDetailsAndOutputModes(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			if err := listRunners(t.Context(), inv, reader, &out); err != nil {
+			if err := listRunners(t.Context(), inv, reader, &out, ""); err != nil {
 				t.Fatal(err)
 			}
 			switch {
@@ -70,12 +70,12 @@ func TestRunnerListingEmptyAndFailureAreUnambiguous(t *testing.T) {
 		}
 		var out bytes.Buffer
 		empty := runnerReaderFake(func() (controllerwire.Runners, error) { return controllerwire.Runners{}, nil })
-		if err := listRunners(t.Context(), inv, empty, &out); err != nil || out.Len() != 0 {
+		if err := listRunners(t.Context(), inv, empty, &out, ""); err != nil || out.Len() != 0 {
 			t.Fatalf("empty: %s %v", &out, err)
 		}
 		failure := errors.New("controller unavailable")
 		failed := runnerReaderFake(func() (controllerwire.Runners, error) { return controllerwire.Runners{}, failure })
-		if err := listRunners(t.Context(), inv, failed, &out); !errors.Is(err, failure) || out.Len() != 0 {
+		if err := listRunners(t.Context(), inv, failed, &out, ""); !errors.Is(err, failure) || out.Len() != 0 {
 			t.Fatalf("failure: %s %v", &out, err)
 		}
 	}

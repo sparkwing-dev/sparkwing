@@ -157,8 +157,10 @@ export default function Home() {
                     className="block rounded-lg border border-red-500/30 bg-[var(--surface)] px-3 py-2 hover:bg-[var(--surface-raised)]"
                   >
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <span className="min-w-0 flex-1 truncate font-mono text-sm text-violet-300" title={`${repo}/${pipeline}`}>
-                        {repo.replace(/^github\.com\//, "")} / {pipeline}{branch ? ` · ${branch}` : ""}
+                      <span className="flex min-w-0 flex-1 basis-full font-mono text-sm text-violet-300 sm:basis-0" title={`${repo}/${pipeline}${branch ? ` · ${branch}` : ""}`}>
+                        <span className="min-w-0 truncate">{repo.replace(/^github\.com\//, "")}</span>
+                        <span className="shrink-0 whitespace-pre"> / {pipeline}</span>
+                        {branch && <span className="min-w-0 truncate whitespace-pre"> · {branch}</span>}
                       </span>
                       <Sparkline runs={history.slice(0, 30)} />
                       <span className="text-[11px] font-mono text-[var(--muted)]">
@@ -191,8 +193,10 @@ export default function Home() {
                     className="block rounded-lg border border-green-500/30 bg-[var(--surface)] px-3 py-2 hover:bg-[var(--surface-raised)]"
                   >
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <span className="min-w-0 flex-1 truncate font-mono text-sm text-violet-300" title={`${repo}/${pipeline}`}>
-                        {repo.replace(/^github\.com\//, "")} / {pipeline}{branch ? ` · ${branch}` : ""}
+                      <span className="flex min-w-0 flex-1 basis-full font-mono text-sm text-violet-300 sm:basis-0" title={`${repo}/${pipeline}${branch ? ` · ${branch}` : ""}`}>
+                        <span className="min-w-0 truncate">{repo.replace(/^github\.com\//, "")}</span>
+                        <span className="shrink-0 whitespace-pre"> / {pipeline}</span>
+                        {branch && <span className="min-w-0 truncate whitespace-pre"> · {branch}</span>}
                       </span>
                       <Sparkline runs={history.slice(0, 30)} />
                       <span className="text-[11px] font-mono text-green-400">passed</span>
@@ -342,7 +346,7 @@ function LastDeployCard({ run }: { run: Run | null }) {
           Last deploy
         </div>
         <div className="flex items-center gap-2 mt-0.5">
-          <span className="font-mono text-sm text-violet-300 truncate">
+          <span className="max-w-full shrink-0 truncate font-mono text-sm text-violet-300">
             {run.pipeline}
           </span>
           {run.git_branch && (
@@ -361,7 +365,7 @@ function LastDeployCard({ run }: { run: Run | null }) {
       </span>
       <Tooltip content={fmtFullDate(ts)}>
         <span className="text-[11px] font-mono text-[var(--muted)] shrink-0 cursor-default">
-          {fmtDateTime(ts)} · {fmtAgo(ts)}
+          <span className="hidden sm:inline">{fmtDateTime(ts)} · </span>{fmtAgo(ts)}
         </span>
       </Tooltip>
     </Link>

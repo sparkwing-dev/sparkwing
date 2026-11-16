@@ -82,69 +82,126 @@ func (r *githubCheckReporter) deliver(ctx context.Context, u githubCheckUpdate) 
 	})
 }
 
-func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdate) (string, string, string, error) {
+type githubCheckRepository struct {
+	token, owner, name string
+	private            bool
+}
+
+func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdate) (githubCheckRepository, error) {
 	in, err := r.operator.GitHubAppInstallationTeam(ctx, u.installation)
 	if err != nil {
-		return "", "", "", err
+		return githubCheckRepository{}, err
 	}
 	if in.Team != u.team || in.Suspended {
-		return "", "", "", fmt.Errorf("GitHub installation is not active for the run's team")
+		return githubCheckRepository{}, fmt.Errorf("GitHub installation is not active for the run's team")
 	}
 	tok, err := r.client.InstallationTokenByIDs(ctx, u.installation, []int64{u.repository}, map[string]string{"checks": "write"})
 	if err != nil {
-		return "", "", "", err
+		return githubCheckRepository{}, err
 	}
 	repo, err := r.client.RepositoryByID(ctx, tok.Token, u.repository)
 	if err != nil {
-		return "", "", "", err
+		return githubCheckRepository{}, err
 	}
 	name, valid := store.ParseGitHubRepo(repo.FullName)
 	if repo.ID != u.repository || !valid {
-		return "", "", "", fmt.Errorf("GitHub repository identity does not match the sealed run")
+		return githubCheckRepository{}, fmt.Errorf("GitHub repository identity does not match the sealed run")
 	}
 	in, err = r.operator.GitHubAppInstallationTeam(ctx, u.installation)
 	if err != nil {
-		return "", "", "", err
+		return githubCheckRepository{}, err
 	}
 	if in.Team != u.team || in.Suspended {
-		return "", "", "", fmt.Errorf("GitHub installation is not active for the run's team")
+		return githubCheckRepository{}, fmt.Errorf("GitHub installation is not active for the run's team")
 	}
-	return tok.Token, name.Owner, name.Name, nil
+	return githubCheckRepository{token: tok.Token, owner: name.Owner, name: name.Name, private: repo.Private}, nil
 }
 
-func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run, id int64) (int64, error) {
-	token, owner, repo, err := r.repository(ctx, u)
+type githubCheckDetailOutput struct {
+	output      githubapp.CheckRunOutput
+	annotations []githubapp.CheckRunAnnotation
+}
+
+func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run, recorded int64) (int64, error) {
+	repo, err := r.repository(ctx, u)
 	if err != nil {
 		return 0, err
 	}
-	check, err := r.checkRun(ctx, tenant, u, run)
+	check, details, err := r.checkRun(ctx, tenant, u, run, repo.private)
 	if err != nil {
 		return 0, err
 	}
+	id := recorded
 	if id == 0 {
-		id, err = r.client.FindCheckRun(ctx, token, owner, repo, u.sha, check.Name, u.runID)
-		if err != nil {
+		if id, err = r.client.FindCheckRun(ctx, repo.token, repo.owner, repo.name, u.sha, check.Name, u.runID); err != nil {
 			return 0, err
+		}
+	}
+	// safety: GitHub appends each write's annotations, so a redelivery sends only those the check run lacks.
+	sent := 0
+	if details != nil && id != 0 && len(details.annotations) > 0 {
+		if sent, err = r.client.CheckRunAnnotationCount(ctx, repo.token, repo.owner, repo.name, id); err != nil {
+			return 0, err
+		}
+		sent = min(sent, len(details.annotations))
+	}
+	aggregate := check.Output
+	for {
+		var batch []githubapp.CheckRunAnnotation
+		// safety: a repository can turn public between writes, so every write that carries details rereads its
+		// visibility first. Anything but an explicit private:true, including a missing or null field, is public and
+		// gets the aggregate output; a failed lookup returns the error so the report retries under the same rule.
+		if details != nil {
+			private, err := r.stillPrivate(ctx, repo, u.repository)
+			if err != nil {
+				return 0, err
+			}
+			if !private {
+				details = nil
+			}
+		}
+		check.Output = aggregate
+		if details != nil {
+			batch = details.annotations[sent:min(sent+githubapp.MaxCheckRunAnnotations, len(details.annotations))]
+			out := details.output
+			out.Annotations = batch
+			check.Output = &out
 		}
 		if id == 0 {
-			id, err = r.client.CreateCheckRun(ctx, token, owner, repo, check)
+			id, err = r.client.CreateCheckRun(ctx, repo.token, repo.owner, repo.name, check)
 		} else {
-			err = r.client.UpdateCheckRun(ctx, token, owner, repo, id, check)
+			err = r.client.UpdateCheckRun(ctx, repo.token, repo.owner, repo.name, id, check)
 		}
 		if err != nil {
 			return 0, err
 		}
-		return id, nil
+		sent += len(batch)
+		if details == nil || sent >= len(details.annotations) {
+			break
+		}
 	}
-	return 0, r.client.UpdateCheckRun(ctx, token, owner, repo, id, check)
+	if recorded != 0 {
+		return 0, nil
+	}
+	return id, nil
 }
 
-func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run) (githubapp.CheckRun, error) {
+func (r *githubCheckReporter) stillPrivate(ctx context.Context, repo githubCheckRepository, id int64) (bool, error) {
+	current, err := r.client.RepositoryByID(ctx, repo.token, id)
+	if err != nil {
+		return false, err
+	}
+	if current.ID != id {
+		return false, fmt.Errorf("GitHub repository identity does not match the sealed run")
+	}
+	return current.Private, nil
+}
+
+func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run, private bool) (githubapp.CheckRun, *githubCheckDetailOutput, error) {
 	link := githubRunTargetURL(r.dashboardURL, u.runID)
 	check := githubapp.CheckRun{
 		Name: "sparkwing/" + u.pipeline, HeadSHA: u.sha, DetailsURL: link, ExternalID: u.runID,
 	}
-	var err error
 	switch u.phase() {
 	case githubCheckQueued:
 		check.Status = "queued"
@@ -164,17 +221,37 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant
 		}
 		check.CompletedAt = &completed
 		var nodes []*store.Node
+		var steps []*store.NodeStep
+		var declared map[string][]string
 		if run != nil {
+			var err error
 			if nodes, err = tenant.ListNodes(ctx, u.runID); err != nil {
-				return githubapp.CheckRun{}, err
+				return githubapp.CheckRun{}, nil, err
+			}
+			if private {
+				if steps, err = tenant.ListNodeSteps(ctx, u.runID); err != nil {
+					return githubapp.CheckRun{}, nil, err
+				}
+				if declared, err = tenant.ListDeclaredSteps(ctx, u.runID); err != nil {
+					return githubapp.CheckRun{}, nil, err
+				}
 			}
 		}
+		// safety: the text is always set, so an aggregate write replaces text an earlier private write left behind.
 		check.Output = &githubapp.CheckRunOutput{
 			Title:   githubCheckTitle(check.Conclusion),
 			Summary: githubCheckSummary(run, nodes, check.Conclusion, link),
+			Text:    githubCheckLinkLine("Job results stay on the run page.", link),
+		}
+		// safety: GitHub shows check output to everyone who can read the repository, so masked errors, summaries
+		// and annotations go only where GitHub explicitly reports private:true. A public repository, or one whose
+		// visibility GitHub omits or nulls, gets aggregate run state.
+		if private {
+			output, annotations := githubCheckDetails(run, nodes, steps, declared, check.Conclusion, link)
+			return check, &githubCheckDetailOutput{output: *output, annotations: annotations}, nil
 		}
 	}
-	return check, nil
+	return check, nil, nil
 }
 
 func githubCheckTitle(conclusion string) string {
@@ -199,7 +276,7 @@ func githubCheckLinkLine(text, link string) string {
 	return text + " [Open the run in Sparkwing](" + link + ")."
 }
 
-// safety: GitHub sees only aggregate run state; details stay on the authenticated run page.
+// safety: names no job and carries no run text, so a public repository's check shows only aggregate state.
 func githubCheckSummary(run *store.Run, nodes []*store.Node, conclusion, link string) string {
 	var summary strings.Builder
 	summary.WriteString("**" + githubCheckTitle(conclusion) + "**")

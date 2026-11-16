@@ -423,8 +423,10 @@ func TestUninstallRemovesManagedFilesAndRepeatsCleanly(t *testing.T) {
 			wantCalls: []string{
 				"systemctl --user show -p FragmentPath --value sparkwing-crons.timer",
 				"systemctl --user show -p FragmentPath --value sparkwing-crons.service",
-				"systemctl --user disable --now sparkwing-crons.timer sparkwing-crons.service",
+				"systemctl --user stop sparkwing-crons.timer sparkwing-crons.service",
+				"systemctl --user disable sparkwing-crons.timer sparkwing-crons.service",
 				"systemctl --user daemon-reload",
+				"systemctl --user reset-failed sparkwing-crons.timer sparkwing-crons.service",
 			},
 		},
 		{
@@ -618,7 +620,7 @@ func TestLinuxUninstallLeavesAStrangersUnitAlone(t *testing.T) {
 		t.Fatalf("uninstall: %v", err)
 	}
 	for _, c := range exec.calls {
-		if strings.Contains(c, "disable") {
+		if strings.Contains(c, "disable") || strings.Contains(c, " stop ") || strings.Contains(c, "reset-failed") {
 			t.Fatalf("uninstall disabled a unit it does not own: %v", exec.calls)
 		}
 	}
@@ -717,7 +719,7 @@ func TestUninstallRefusesForeignCompanionRegistration(t *testing.T) {
 		t.Fatal("uninstall accepted a foreign companion")
 	}
 	for _, call := range e.calls {
-		if strings.Contains(call, "disable") {
+		if strings.Contains(call, "disable") || strings.Contains(call, " stop ") || strings.Contains(call, "reset-failed") {
 			t.Fatalf("stopped a foreign companion: %v", e.calls)
 		}
 	}

@@ -105,6 +105,8 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `GIT_SSH` | git |
 | `GIT_SSH_COMMAND` | git |
 | `SSH_AUTH_SOCK` | OpenSSH agent |
+| `SUDO_UID` | sudo; `runners install-service` refuses to reuse the invoking account, see [shared runners](shared-runners.md) |
+| `SUDO_USER` | sudo; read with `SUDO_UID` |
 | `GOBIN` | Go toolchain |
 | `GOMODCACHE` | Go toolchain |
 | `GOPATH` | Go toolchain |

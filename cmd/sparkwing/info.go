@@ -253,8 +253,8 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"            scheduled-report (5, fan-out) | merge-queue (1, serial landing)\n" +
 	"    TypeScript: --template typescript creates a minimal TypeScript pipeline.\n" +
 	"    --template merge-queue-typescript creates the serial landing pipeline.\n" +
-	"    Requires Node 22.18+ and npm on PATH. Create and commit the npm lockfile\n" +
-	"    with the printed setup command before describe, plan or run.\n" +
+	"    Requires Node 22.18+ and npm on PATH. The scaffold writes the npm lockfile;\n" +
+	"    commit it with the pipeline.\n" +
 	"    Local foreground, detached CLI runs and schedules use the same pipeline.\n" +
 	"    See the authoring guide for TypeScript proof and pinning constraints.\n" +
 	"    TypeScript lint is unsupported; its zero exit does not validate source.\n" +
@@ -267,6 +267,10 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"  answer it, plus any worked pipeline that already does it\n" +
 	"- `sparkwing docs read --guide authoring` -- the DAG model, the idioms the linter\n" +
 	"  enforces for Go, TypeScript differences, triggers and config, in one call\n" +
+	"- `sparkwing docs read --topic sdk` -- every SDK feature with Go and TypeScript side by\n" +
+	"  side; `sparkwing docs read --topic sdk-typescript-reference` lists every TypeScript export\n" +
+	"- `sparkwing examples --language typescript` (or `go`) -- complete working pipelines;\n" +
+	"  `sparkwing examples --example <name> --body` prints one in full\n" +
 	"- Go: `sparkwing pipeline lint` then `sparkwing run <n>`. TypeScript: describe,\n" +
 	"  plan and run; use your TypeScript checker for source validation.\n"
 

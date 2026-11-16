@@ -702,7 +702,7 @@ func (h *host) runContext(name string) nodewire.RunContext {
 	if r.Pipeline != "" {
 		name = r.Pipeline
 	}
-	out := nodewire.RunContext{RunID: r.RunID, Pipeline: name, StartedAt: r.StartedAt, NoMemo: r.NoMemo, DryRun: r.DryRun}
+	out := nodewire.RunContext{RunID: r.RunID, Pipeline: name, StartedAt: r.StartedAt, NoMemo: r.NoMemo, DryRun: r.DryRun, StartAt: r.StartAt, StopAt: r.StopAt}
 	if g := r.Git; g != nil {
 		out.Git = &nodewire.Git{SHA: g.SHA, Branch: g.Branch, DefaultBranch: g.DefaultBranch, Repo: g.Repo, RepoURL: g.RepoURL}
 	}

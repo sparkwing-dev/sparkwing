@@ -81,3 +81,28 @@ func TestNativeChildAwaitReportsPlanningFailureBeforeReadingOutput(t *testing.T)
 		t.Fatalf("successful child lost output failure: error=%v output reads=%d", err, outputReads)
 	}
 }
+
+func TestChildFailureNamesTheFailedJobAndTheRunToInspect(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		child controllerwire.RunDetail
+		want  string
+	}{
+		{
+			child: controllerwire.RunDetail{ID: "run-child", Status: "failed", FinishedAt: &now, Inputs: runspec.Display{Pipeline: "child"}, Jobs: []controllerwire.JobDetail{
+				{ID: "setup", Status: "done", Outcome: "success"},
+				{ID: "greet", Status: "done", Outcome: "failed", Error: "child asked to fail"},
+			}},
+			want: "child run run-child of pipeline \"child\" ended failed: job \"greet\" failed: child asked to fail. Inspect it with `sparkwing runs status --run run-child`.",
+		},
+		{
+			child: controllerwire.RunDetail{ID: "run-child", Status: "cancelled", FinishedAt: &now, Inputs: runspec.Display{Pipeline: "child"}},
+			want:  "child run run-child of pipeline \"child\" ended cancelled. Inspect it with `sparkwing runs status --run run-child`.",
+		},
+	} {
+		got := childFailure(tc.child)
+		if got.Code != apierr.SDKError || got.Message != tc.want || strings.Contains(got.Message, "Check the pipeline name") {
+			t.Errorf("childFailure = %+v, want %q", got, tc.want)
+		}
+	}
+}

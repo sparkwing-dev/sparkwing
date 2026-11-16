@@ -509,6 +509,7 @@ func (t *Tenant) lockGitHubCheck(ctx context.Context, runID string) (func(), err
 }
 
 // GitHubCommitRuns reads sealed App requests by numeric repository identity and exact commit.
+// It never opens sealed argument values, so their requested values may be empty.
 func (t *Tenant) GitHubCommitRuns(ctx context.Context, repo GitHubRepo, sha string) (_ []RunRow, err error) {
 	if repo.ID <= 0 {
 		return nil, nil

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -230,7 +229,7 @@ func TestRunLogsShowsTheErrorOfAJobThatFailedBeforeStarting(t *testing.T) {
 		want []string
 		not  string
 	}{
-		{[]string{"-o", "plain"}, []string{"ran\n", "build failed before it started", strconv.Quote(compiler)}, "step failed"},
+		{[]string{"-o", "plain"}, []string{"ran\n", "build failed before it started", "its error:\n  install source entry: # pipeline\n  ./pipeline.go:91:26"}, "step failed"},
 		{[]string{"--job", "test", "-o", "plain"}, []string{"ran\n"}, "before it started"},
 		{[]string{"-o", "json"}, []string{`"event":"job_failed_before_start"`, `"job_id":"build"`, "cannot use *** as int value"}, "step failed"},
 	} {
@@ -261,8 +260,9 @@ func TestRunLogsShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"-o", "plain"}, []string{"run error:\n" + strconv.Quote(compiler), "sparkwing pipeline plan --pipeline hello"}},
-		{[]string{"--events-only", "-o", "plain"}, []string{strconv.Quote(compiler)}},
+		{[]string{"-o", "plain"}, []string{"run error:\n  install source entry: # pipeline\n  jobs/broken.go:6:9: undefined: qaDeliberateUndefined\n", "sparkwing pipeline plan --pipeline hello"}},
+		{[]string{"--events-only", "-o", "plain"}, []string{"  jobs/broken.go:6:9: undefined: qaDeliberateUndefined\n"}},
+		{[]string{"-o", "pretty"}, []string{"run failed:\n  install source entry: # pipeline\n  jobs/broken.go:6:9: undefined: qaDeliberateUndefined\n", "sparkwing pipeline plan --pipeline hello"}},
 		{[]string{"-o", "json"}, []string{`"event":"run_error"`, "undefined: qaDeliberateUndefined", `"hint":"the pipeline failed to plan`, "sparkwing pipeline plan --pipeline hello"}},
 	} {
 		var out bytes.Buffer
@@ -290,7 +290,7 @@ func TestRunLogsRendersEventPayloadsAsText(t *testing.T) {
 		want []string
 	}{
 		{[]string{"-o", "plain"}, []string{"run failed: plan_failed\n", "job build started\n", "job build retrying: attempt=2 reason=exit 1\n"}},
-		{[]string{"-o", "pretty"}, []string{"r1/run_failed:1: plan_failed\n", "r1/build job_started:2\n", "r1/build job_retrying:3: attempt=2 reason=exit 1\n"}},
+		{[]string{"-o", "pretty"}, []string{"run | failed: plan_failed\n", "build | retrying: attempt=2 reason=exit 1\n"}},
 		{[]string{"-o", "json"}, []string{`"line":"{\"reason\":\"plan_failed\"}"`}},
 	} {
 		var out bytes.Buffer
@@ -331,7 +331,11 @@ func TestRunLogsRendersPersistedRunnerAndRetryPayloads(t *testing.T) {
 				}
 				return
 			}
-			for _, want := range []string{"raw-token=***\n", "run: cancelled_steps=other error=command failed (exit 1) outcome=failed\n", "attempt=2 reason=sdk_error error=command failed (exit 1)\n"} {
+			wants := []string{"raw-token=***\n", "run: cancelled_steps=other error=command failed (exit 1) outcome=failed\n", "attempt=2 reason=sdk_error error=command failed (exit 1)\n"}
+			if format == "pretty" {
+				wants = []string{"build#2 | raw-token=***\n", "build#2 | run failed\n", "greet | retrying: attempt=2 reason=sdk_error error=command failed (exit 1)\n"}
+			}
+			for _, want := range wants {
 				if !strings.Contains(out.String(), want) {
 					t.Errorf("missing %q in:\n%s", want, &out)
 				}
@@ -378,8 +382,10 @@ func TestRunLogsRendersWarningsWithoutTimestampsAndKeepsAttributes(t *testing.T)
 					}
 				} else {
 					want := tc.want + "\n"
-					if format != "plain" || search {
+					if search {
 						want = "r1/build#2:3: " + want
+					} else if format == "pretty" {
+						want = "build#2 | " + want
 					}
 					if out.String() != want {
 						t.Errorf("%s search=%v: got %q, want %q", format, search, &out, want)
@@ -520,5 +526,44 @@ func TestRunLogsHidesMaskedKeeperDiagnostic(t *testing.T) {
 		if out.Len() != 0 {
 			t.Fatalf("masked diagnostic leaked into %s: %s", format, out.String())
 		}
+	}
+}
+
+func TestRunsLogsWithoutRunOrGrepNamesBothChoices(t *testing.T) {
+	for args, want := range map[string]string{
+		"runs logs":                           "pass --run <id> to read a run's logs, or --grep <pattern> to search across runs; sparkwing runs list shows run IDs",
+		"runs logs --grep x --max-matches -1": "--max-matches must be nonnegative",
+		"runs grep --grep x --max-matches -1": "--max-matches must be nonnegative",
+	} {
+		inv, err := clisurface.Parse("sparkwing", strings.Fields(args))
+		if err == nil && inv.Command.Path == "sparkwing runs grep" {
+			_, err = parseLogSearch(inv, time.Now())
+		} else if err == nil {
+			_, err = parseRunLogs(inv)
+		}
+		var usage *clisurface.UsageError
+		if !errors.As(err, &usage) || usage.Message != want {
+			t.Errorf("%s: error %v, want %q", args, err, want)
+		}
+	}
+}
+
+func TestRunLogsTimingDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
+	record := jobLogRecord("r1", `{"event":"***","host_request_timing":true,"attrs":{"operation":"nodehost.annotation","duration_ms":2000}}`)
+	for _, format := range []string{"plain", "pretty"} {
+		var out bytes.Buffer
+		if err := writeLogRecord(&out, record, format, false); err != nil {
+			t.Fatal(err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("timing diagnostic visible in %s: %s", format, &out)
+		}
+	}
+	var out bytes.Buffer
+	if err := writeLogRecord(&out, record, "json", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "host_request_timing") {
+		t.Fatal("JSON omitted host diagnostic")
 	}
 }

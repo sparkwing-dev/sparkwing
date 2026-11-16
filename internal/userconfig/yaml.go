@@ -42,7 +42,7 @@ func DecodeYAML(file string, raw []byte, out any) (*yaml.Node, error) {
 		if errors.Is(err, io.EOF) {
 			return &doc, nil
 		}
-		return nil, yamlSyntaxError(file, err)
+		return nil, yamlSyntaxError(file, raw, err)
 	}
 	var extra yaml.Node
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
@@ -60,15 +60,31 @@ func DecodeYAML(file string, raw []byte, out any) (*yaml.Node, error) {
 	return &doc, nil
 }
 
-func yamlSyntaxError(file string, err error) error {
-	line := 1
-	if match := regexp.MustCompile(`line (\d+)`).FindStringSubmatch(err.Error()); len(match) == 2 {
-		parsed, err := strconv.Atoi(match[1])
-		if err == nil {
+// safety: a yaml.v3 syntax problem is fixed parser text that never quotes the document.
+var yamlSyntaxPattern = regexp.MustCompile(`^yaml: (?:line (\d+): )?(.+)$`)
+
+// perf: each probe reparses a prefix, so the search for a syntax error's line stops here.
+const maxSyntaxProbeLines = 500
+
+func yamlSyntaxError(file string, raw []byte, err error) error {
+	line, problem := 1, "invalid YAML syntax"
+	if match := yamlSyntaxPattern.FindStringSubmatch(err.Error()); match != nil {
+		if parsed, err := strconv.Atoi(match[1]); err == nil {
 			line = parsed
 		}
+		problem = "invalid YAML syntax: " + match[2]
 	}
-	return &FieldError{File: file, Key: "$", Line: line, Problem: "invalid YAML syntax"}
+	// hack: yaml.v3 reports the line where an enclosing block began, so a
+	// mis-indented key deep in a pipeline reads as line 1. The first line from
+	// there whose prefix stops parsing is where the document went wrong.
+	lines := bytes.SplitAfter(raw, []byte("\n"))
+	for n := line; n <= len(lines) && n <= maxSyntaxProbeLines; n++ {
+		if yaml.Unmarshal(bytes.Join(lines[:n], nil), &yaml.Node{}) != nil {
+			line = n
+			break
+		}
+	}
+	return &FieldError{File: file, Key: "$", Line: line, Problem: problem}
 }
 
 type yamlVisit struct {

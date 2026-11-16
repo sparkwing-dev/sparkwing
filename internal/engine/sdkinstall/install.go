@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -143,6 +145,10 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 			defer func() { result = errors.Join(result, lease.Release()) }()
 		}
 	}
+	if output, ok := bincache.CompileOutput(err); ok {
+		_, writeErr := io.WriteString(diagnostics, masker.Mask(strings.TrimSuffix(buildDiagnostics.String(), string(output))))
+		return nil, "", nil, errors.Join(compileRefusal(request.PipelineDir, masker.Mask(string(output))), writeErr)
+	}
 	if err := installDiagnostic(diagnostics, masker, buildDiagnostics.Bytes(), err); err != nil {
 		return nil, "", nil, err
 	}
@@ -228,7 +234,8 @@ func selectionInputs(dir string, environment procenv.Env) ([]string, string) {
 
 func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (_ []string, result error) {
 	// bug: npm ci removes packages beneath running SDK processes. Serialize npm's
-	// incremental installs so npm owns reuse without replacing an unchanged tree.
+	// incremental installs and receipt reads and writes so no preparation replaces or
+	// trusts a tree another preparation is still writing.
 	lock, err := os.Open(filepath.Join(dir, pin.Lockfile))
 	if err != nil {
 		return nil, err
@@ -242,27 +249,45 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 	}
 
 	var manifest struct{ Main string }
-	body, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	manifestBody, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(body, &manifest); err != nil {
+	if err := json.Unmarshal(manifestBody, &manifest); err != nil {
 		return nil, err
 	}
 	if manifest.Main == "" {
 		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "TypeScript package.json requires a main entry", Hint: `Set "main": "index.ts" in ` + filepath.Join(dir, "package.json") + " (use the existing pipeline entry file), then retry"}
 	}
-	// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
-	body, err = installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")
-	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
-		return nil, err
+	// perf: two npm processes cost 1-2 s per preparation and a local run prepares two or three
+	// times; an unchanged verified tree skips both.
+	inputs, err := typeScriptInstallInputs(dir, pin.Lockfile, environment)
+	if err != nil {
+		inputs = ""
 	}
-	body, err = installTool(ctx, dir, environment, "npm", "install", "--no-save", "--no-audit", "--no-fund")
-	if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
-		return nil, err
+	reused := reuseTypeScriptInstall(dir, inputs)
+	if !reused {
+		if err := discardTypeScriptReceipt(dir); err != nil {
+			return nil, err
+		}
+		// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
+		body, err := installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")
+		if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+			return nil, err
+		}
+		// bug: the dry run rewrites npm's hidden lockfile to the new lockfile without changing any
+		// package folder, and npm install trusts that record, so a moved pin kept the old SDK. Without
+		// the record npm reads the installed tree itself.
+		if err := os.Remove(filepath.Join(dir, "node_modules", ".package-lock.json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		body, err = installTool(ctx, dir, environment, "npm", "install", "--no-save", "--no-audit", "--no-fund")
+		if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+			return nil, err
+		}
 	}
 	installedManifest := filepath.Join(dir, "node_modules", "@sparkwing", "sdk", "package.json")
-	body, err = os.ReadFile(installedManifest)
+	body, err := os.ReadFile(installedManifest)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +304,15 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 		return nil, fmt.Errorf("TypeScript installation requires Node.js on PATH: %w", err)
 	}
 	node, err = filepath.Abs(node)
-	return []string{node, main}, err
+	if err != nil {
+		return nil, err
+	}
+	if !reused {
+		if err := recordTypeScriptInstall(dir, pin.Lockfile, inputs, environment); err != nil {
+			return nil, err
+		}
+	}
+	return []string{node, main}, nil
 }
 
 func installTool(ctx context.Context, dir string, environment procenv.Env, name string, args ...string) ([]byte, error) {
@@ -301,6 +334,32 @@ func installTool(ctx context.Context, dir string, environment procenv.Env, name 
 		return stdout.Bytes(), nil
 	}
 	return append(stdout.Bytes(), stderr.Bytes()...), nil
+}
+
+// safety: only a compiler diagnostic names a source position; module fetch and go.sum failures do not.
+var compilerPosition = regexp.MustCompile(`^[^\s:]+\.go:\d+(:\d+)?: `)
+
+// safety: compiler paths become repository-relative so a terminal or editor can open them.
+func compileRefusal(pipelineDir, output string) *apierr.Error {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	compiled := false
+	for i, line := range lines {
+		if !compilerPosition.MatchString(line) {
+			continue
+		}
+		compiled = true
+		if file, rest, _ := strings.Cut(line, ":"); pipelineDir != "" && !filepath.IsAbs(file) {
+			lines[i] = filepath.ToSlash(filepath.Join(pipelineDir, file)) + ":" + rest
+		}
+	}
+	where := "the pipeline code"
+	if pipelineDir != "" && pipelineDir != "." {
+		where += " in " + filepath.ToSlash(pipelineDir)
+	}
+	if !compiled {
+		return &apierr.Error{Code: apierr.PlanFailed, Message: where + " failed to build:\n" + strings.Join(lines, "\n"), Hint: "Fix the problem the output above describes, then run the pipeline again."}
+	}
+	return &apierr.Error{Code: apierr.PlanFailed, Message: where + " does not compile:\n" + strings.Join(lines, "\n"), Hint: "Fix the errors above, then run the pipeline again."}
 }
 
 func installDiagnostic(output io.Writer, masker *secrets.Masker, body []byte, toolErr error) error {

@@ -77,6 +77,8 @@ type ClaimRequest struct {
 	JobID              string                `json:"job_id,omitempty"`
 	// Kubernetes reports that the runner runs in a Kubernetes pod.
 	Kubernetes bool `json:"kubernetes,omitempty"`
+	// Wait is how long an empty claim may wait for work; it travels as [ClaimWaitHeader].
+	Wait time.Duration `json:"-"`
 }
 
 // ClaimedUnit carries the one-time private execution award over authenticated transport.
@@ -108,7 +110,9 @@ type ClaimedUnit struct {
 type ClaimResponse struct {
 	// PollAfter carries transport advice locally; it is not part of the JSON envelope.
 	PollAfter time.Duration `json:"-"`
-	Claim     *ClaimedUnit  `json:"claim,omitempty"`
+	// Held reports an empty answer that already waited for work; it travels as [ClaimHeldHeader].
+	Held  bool         `json:"-"`
+	Claim *ClaimedUnit `json:"claim,omitempty"`
 }
 
 // LauncherCapacityObservation reports demand without an execution placement.

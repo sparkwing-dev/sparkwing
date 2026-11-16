@@ -18,6 +18,7 @@ const buildTrustSchema35 = `CREATE TABLE team_build_trust (
 
 func addSchema35BuildTrust(t *testing.T, st *store.Store) {
 	t.Helper()
+	store.DropRunEventSchemaForTest(t, st)
 	if _, err := st.DB().Exec(`ALTER TABLE nodes DROP COLUMN group_wait_started_at`); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +104,7 @@ func schema30Store(t *testing.T, target *storetest.Target) {
 	t.Helper()
 	st := target.Open(t)
 	dropActionsSchema(t, st)
+	store.DropRunEventSchemaForTest(t, st)
 	for _, statement := range []string{
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
 		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('kept','TOKEN','sealed-configuration','fixture',1,1)`,
@@ -491,6 +493,7 @@ func TestSchemaUpgradeAddsGroupWaitClockToVersion37(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store.DropRunEventSchemaForTest(t, f.s)
 	for _, statement := range []string{`ALTER TABLE nodes DROP COLUMN group_wait_started_at`, `UPDATE sparkwing_schema_version SET version=37,baseline_digest='7da3f341c2c5b6cc6fd60afb1a881979dfc5b64e79589a551522c655b5099e64'`} {
 		if _, err := f.s.DB().ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
@@ -512,4 +515,55 @@ func TestSchemaUpgradeAddsGroupWaitClockToVersion37(t *testing.T) {
 	if err := f.s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM nodes WHERE group_wait_started_at IS NOT NULL`).Scan(&clocks); err != nil || clocks != 0 {
 		t.Fatalf("upgrade invented wait clocks: count=%d err=%v", clocks, err)
 	}
+}
+
+func TestSchemaUpgradeAddsRunEventTablesToVersion38(t *testing.T) {
+	target := storetest.New(t)
+	f := newStoreRecoveryFixtureAt(t, false, target)
+	store.DropRunEventSchemaForTest(t, f.s)
+	if _, err := f.s.DB().ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET version=38,baseline_digest='d7d89dd6049c6139e01bae0a845983414393d5b7c622a2172c60fa1292e5d7da'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.s = target.Open(t, store.WithPolicies(sealStorePolicies))
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, f.s), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+	team, run := string(f.tenant.Team()), string(f.ref.RunID)
+	for _, statement := range []string{
+		`INSERT INTO run_event_subscriptions(team,id,url,event_types,secret,created_principal,created_at,updated_at) VALUES ('` + team + `','sub_a','https://hooks.example/a','["run.finished"]','sealed','admin',1,1)`,
+		`INSERT INTO run_event_subscriptions(team,id,url,event_types,secret,created_principal,created_at,updated_at) VALUES ('` + team + `','sub_b','https://hooks.example/b','["run.finished"]','sealed','admin',1,1)`,
+		`INSERT INTO run_event_deliveries(team,subscription_id,event_id,run_id,event_type,body,state,next_at,deadline_at,created_at) VALUES ('` + team + `','sub_a','` + run + `/2','` + run + `','dev.sparkwing.run.finished.v1',X'7b7d','pending',1,2,1)`,
+		`INSERT INTO run_event_deliveries(team,subscription_id,event_id,run_id,event_type,body,state,next_at,deadline_at,created_at) VALUES ('` + team + `','sub_b','` + run + `/2','` + run + `','dev.sparkwing.run.finished.v1',X'7b7d','pending',1,2,1)`,
+	} {
+		if _, err := f.s.DB().ExecContext(t.Context(), blobLiteral(f.s, statement)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.s.DB().ExecContext(t.Context(), blobLiteral(f.s, `INSERT INTO run_event_deliveries(team,subscription_id,event_id,run_id,event_type,body,state,next_at,deadline_at,created_at) VALUES ('`+team+`','sub_a','x/1','`+run+`','t',X'7b7d','lost',1,2,1)`)); err == nil {
+		t.Fatal("delivery accepted an unknown state")
+	}
+	count := func() int {
+		var n int
+		if err := f.s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM run_event_deliveries`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := f.s.DB().ExecContext(t.Context(), `DELETE FROM run_event_subscriptions WHERE id='sub_a'`); err != nil || count() != 1 {
+		t.Fatalf("subscription delete left %d deliveries, err=%v", count(), err)
+	}
+	if _, err := f.s.DB().ExecContext(t.Context(), `DELETE FROM runs WHERE id='`+run+`'`); err != nil || count() != 0 {
+		t.Fatalf("run delete left %d deliveries, err=%v", count(), err)
+	}
+}
+
+func blobLiteral(st *store.Store, statement string) string {
+	if st.Dialect() == store.DialectPostgres {
+		return strings.ReplaceAll(statement, "X'7b7d'", "decode('7b7d','hex')")
+	}
+	return statement
 }

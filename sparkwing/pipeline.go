@@ -104,6 +104,11 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		panic(fmt.Sprintf("%s(%q): invalid Inputs schema on %s: %v", callerLabel, name, t, err))
 	}
 	invoke := func(ctx context.Context, args map[string]string, rc RunContext, discovery bool) (*Plan, error) {
+		if rc.Git == nil {
+			// safety: discovery and hosts without git facts still hand Plan a Git, so
+			// reading run.Git.Branch there sees "" instead of panicking.
+			rc.Git = NewGit(WorkDir(), "", "", "", "", "")
+		}
 		var in T
 		if t != nil && t.Kind() == reflect.Struct {
 			if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), args); err != nil {

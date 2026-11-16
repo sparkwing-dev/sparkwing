@@ -23,7 +23,7 @@ type expansionAcceptance struct {
 	hash          string
 	bodyHash      string
 	body, failure []byte
-	registration  []byte
+	registration  *runspec.SecretRegistration
 	plan          nodewire.PlanDoc
 }
 
@@ -79,10 +79,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 			return result, authorityError(apierr.PlanInvalid, err.Error())
 		}
 	}
-	result.registration, err = json.Marshal(registration)
-	if err != nil {
-		return result, err
-	}
+	result.registration = &registration
 	var plan nodewire.PlanDoc
 	if err := decodeScheduleDeclaration(snapshot.Run.Plan, &plan); err != nil {
 		return result, err
@@ -198,11 +195,7 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 			snapshot.Nodes[i].Expansion, snapshot.Nodes[i].ExpansionDigest = runstate.ExpansionAccepted, accepted.hash
 		}
 	}
-	var registration runspec.SecretRegistration
-	if err := json.Unmarshal(accepted.registration, &registration); err != nil {
-		return nil, err
-	}
-	snapshot.Expansions = append(snapshot.Expansions, runstate.AcceptedExpansionRow{Source: request.Source, SourceGeneration: int64(request.SourceGeneration), Body: accepted.body, BodyHash: accepted.bodyHash, Registration: registration})
+	snapshot.Expansions = append(snapshot.Expansions, runstate.AcceptedExpansionRow{Source: request.Source, SourceGeneration: int64(request.SourceGeneration), Body: accepted.body, BodyHash: accepted.bodyHash, Registration: *accepted.registration})
 	if _, err := snapshot.Scheduling(); err != nil {
 		return nil, err
 	}

@@ -245,7 +245,7 @@ these file names, mounted whole.
 | File | Holds | Without it |
 |---|---|---|
 | `pg-url` | PostgreSQL connection string for the state store | `--store=postgres` refuses to start |
-| `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-at-rest) |
+| `secrets-key` | Key stored secrets and run argument values are sealed under, 32 raw bytes or their base64 | SQLite generates `secrets.key` beside the store; PostgreSQL refuses every secret write and stores run argument values, including secret defaults, unencrypted. See [Security](security.md#secrets-at-rest) |
 | `credential-epoch` | Live bearer and session epoch, when kept beside `secrets-key` | created on startup; preserve the latest value through a restore |
 | `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
 | `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |

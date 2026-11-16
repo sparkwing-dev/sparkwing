@@ -45,11 +45,8 @@ func (r cleanupRegistryAdapter) RegisterLocalRunner(ctx context.Context, subject
 }
 
 func TestControllerStopRetryAfterRunnerCredentialCleanup(t *testing.T) {
-	for _, revoke := range []bool{false, true} {
-		name := "credential-live"
-		if revoke {
-			name = "credential-revoked"
-		}
+	for _, name := range []string{"credential-live", "credential-revoked", "no-retry"} {
+		revoke, retry := name == "credential-revoked", name != "no-retry"
 		t.Run(name, func(t *testing.T) {
 			s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
@@ -106,11 +103,11 @@ func TestControllerStopRetryAfterRunnerCredentialCleanup(t *testing.T) {
 			first := httptest.NewRecorder()
 			started := time.Now()
 			handler.ServeHTTP(first, firstRequest.WithContext(firstCtx))
-			if first.Code != http.StatusInternalServerError {
+			if first.Code != http.StatusServiceUnavailable {
 				t.Fatalf("first stop=%d %s", first.Code, first.Body)
 			}
-			if !strings.Contains(first.Body.String(), "deadline exceeded") {
-				t.Fatalf("first stop did not reach retirement timeout: %s", first.Body)
+			if body := first.Body.String(); !strings.Contains(body, "is still finishing held work; the local controller stops on its own once that runner exits") || !strings.Contains(body, "sparkwing daemon status") {
+				t.Fatalf("first stop did not explain the background stop: %s", body)
 			}
 			t.Logf("retirement timeout returned in %s: %s", time.Since(started), first.Body)
 			state, err := op.ReadLocalRunner(t.Context(), subject, instance.ID)
@@ -158,6 +155,16 @@ func TestControllerStopRetryAfterRunnerCredentialCleanup(t *testing.T) {
 				t.Fatalf("fixture process remains: alive=%v err=%v", alive, err)
 			}
 			t.Logf("first stop persisted draining, runner cleanup complete, PID %d absent, revoke=%v", instance.PID, revoke)
+			if !retry {
+				wait, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+				defer cancel()
+				select {
+				case <-d.quit:
+				case <-wait.Done():
+					t.Fatal("controller stayed open after its held runner exited without another stop")
+				}
+				return
+			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, controllerHTTPRequest(t, http.MethodPost, "drain?runner=retire", "", true))
 			t.Logf("stop after joined exit: status=%d body=%s", response.Code, response.Body)

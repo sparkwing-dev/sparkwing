@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -52,8 +53,11 @@ func commandState(h Host, path, body string) State {
 	if len(args) > 0 {
 		state.Arguments = slices.Clone(args[1:])
 	}
-	state.Stale = staleAgainst(h, state.Binary) || state.Home != h.SparkwingHome
+	state.Stale = state.Home != h.SparkwingHome
 	state.Version = unitfile.Version(body)
+	if info, err := os.Stat(path); err == nil {
+		state.WrittenAt = info.ModTime()
+	}
 	return state
 }
 

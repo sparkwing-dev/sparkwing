@@ -138,6 +138,12 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (localc
 	return bindLocalControllerWithClock(ctx, b, nil)
 }
 
+// perf: idle claim advice sheds fleet polling load, which one machine's runner on a private socket
+// does not produce. Advised, the runner waited up to 6.25 s after a pause before starting a new run.
+func newLocalServer(b localcontroller.Binding) *controller.Server {
+	return controller.New(b.Store, nil).WithEngineController(b.Controller).WithIdleClaimPoll(0)
+}
+
 func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding, now func() time.Time) (_ localcontroller.Services, err error) {
 	keyring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Home: b.Home, Create: true})
 	if err != nil {
@@ -153,6 +159,9 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 		return localcontroller.Services{}, err
 	}
 	b.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: engines}
+	// perf: the daemon is its store's only writer, so an idle runner's claim waits for the
+	// commit that makes work claimable instead of polling for it twice a second.
+	b.Controller.ClaimWake = b.Store
 	engines, err = engine.NewResolver(engine.Config{BuildVersion: installedVersion(), CacheDirectory: filepath.Join(b.Home, "engines"), LocalOnly: true})
 	if err != nil {
 		return localcontroller.Services{}, err
@@ -183,7 +192,7 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 		return localcontroller.Services{}, err
 	}
 
-	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithSecretsCipher(cipher).WithDataObjects(objects).
+	server := newLocalServer(b).WithSecretsCipher(cipher).WithDataObjects(objects).
 		WithDashboard(controller.Dashboard{Local: true, Version: installedVersion(), Paths: paths.PathsAt(b.Home), Bundle: web.VerifiedBundle()})
 	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(b.Home, "environments"))
 	if err != nil {
@@ -222,8 +231,9 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 		State:    state, HTTP: server.HTTP(), Close: objects.Close,
 		Maintain: server.MaintainStorage,
 		Complete: server.ReconcileRunEffects,
-		Runner: func(ctx context.Context) error {
-			return superviseLocalRunnerProcess(ctx, timerHost)
+		Deliver:  server.DeliverRunEvents,
+		Runner: func(ctx context.Context, report func(error)) error {
+			return superviseLocalRunnerProcess(ctx, timerHost, report)
 		},
 	}, nil
 }

@@ -17,6 +17,8 @@ type RunRow struct {
 	Team       Team
 	expansions []runstate.AcceptedExpansionRow
 	admission  admissionIdentity
+	// safety: set only by listing reads, so a run that cannot open its arguments never reaches a value consumer.
+	argumentsUnavailable bool
 }
 
 // RunSnapshot contains one consistent read, including accepted expansions in insertion order.

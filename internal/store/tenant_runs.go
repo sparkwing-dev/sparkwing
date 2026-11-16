@@ -21,7 +21,7 @@ SELECT `+runColumns+`
 	if err != nil {
 		return nil, err
 	}
-	if err := t.s.refreshRunPresentations(ctx, []*Run{run}); err != nil {
+	if err := t.s.refreshRunPresentations(ctx, []*Run{run}, false); err != nil {
 		return nil, err
 	}
 	return run, nil

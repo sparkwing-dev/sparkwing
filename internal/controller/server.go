@@ -278,6 +278,7 @@ func (s *Server) buildRegisteredRouters() *registeredMux {
 	endpoints = append(endpoints, s.authorityEndpoints()...)
 	endpoints = append(endpoints, s.capabilityEndpoints()...)
 	endpoints = append(endpoints, s.credentialEndpoints()...)
+	endpoints = append(endpoints, s.subscriptionEndpoints()...)
 	endpoints = append(endpoints, s.sizingEndpoints()...)
 	endpoints = append(endpoints, s.creditEndpoints()...)
 	endpoints = append(endpoints, s.queueEndpoints()...)
@@ -449,6 +450,13 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
 	actionsDone := make(chan struct{})
 	go func() { defer close(actionsDone); s.runActionsDispatcher(ctx) }()
+	deliveryDone := make(chan struct{})
+	go func() {
+		defer close(deliveryDone)
+		if err := s.DeliverRunEvents(ctx); err != nil {
+			s.logger.Error("run event delivery stopped", "err", err)
+		}
+	}()
 	inboxDone := make(chan struct{})
 	go func() {
 		defer close(inboxDone)
@@ -458,6 +466,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 		stopWorkers()
 		<-inboxDone
 		<-actionsDone
+		<-deliveryDone
 	}()
 
 	errCh := make(chan error, len(servers))

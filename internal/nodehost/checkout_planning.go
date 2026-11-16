@@ -114,7 +114,7 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	}
 	resolved := runspec.Resolved{Engine: input.Entry.Engine.Identity, Env: request.Env, Entrypoint: entrypoint, Settings: runspec.ExecutionSettings{Options: request.Options}}
 	resolveDefaultBranch(&resolved, request.Git, input.Entry.DefaultBranch)
-	process := PlanningProcessInput{Debug: request.Options.Debug.Value, Entry: input.Entry, Entrypoint: entrypoint, Runner: input.Runner, Args: args, SecretArgs: request.SecretArgs.Value, Environment: request.Env, Run: executorRunContext(runspec.Spec{Request: input.Request, Resolved: resolved})}
+	process := PlanningProcessInput{Debug: request.Options.Debug.Value, Entry: input.Entry, Entrypoint: entrypoint, Listed: checkoutListedPipelines(input.Project), Runner: input.Runner, Args: args, SecretArgs: request.SecretArgs.Value, Environment: request.Env, Run: executorRunContext(runspec.Spec{Request: input.Request, Resolved: resolved})}
 	prepared, err := p.Prepare(ctx, process, input.Planning)
 	if err != nil {
 		return out, err
@@ -209,4 +209,21 @@ func checkoutGuardVerdict(guards projectconfig.Guards, request runspec.Request, 
 		}
 	}
 	return verdict
+}
+
+// safety: nil when the checkout has no readable sparkwing.yaml, so planning
+// never calls a name unlisted on a project it could not read.
+func checkoutListedPipelines(project []byte) []string {
+	if len(project) == 0 {
+		return nil
+	}
+	cfg, err := projectconfig.Parse(project)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.Pipelines))
+	for _, pipeline := range cfg.Pipelines {
+		names = append(names, pipeline.Name)
+	}
+	return names
 }

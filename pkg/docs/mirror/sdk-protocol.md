@@ -671,6 +671,8 @@ type RunContext struct {
     StartedAt time.Time `json:"started_at,omitzero"`
     NoMemo    bool      `json:"no_memo,omitempty"`
     DryRun    bool      `json:"dry_run,omitempty"`
+    StartAt   string    `json:"start_at,omitempty"`
+    StopAt    string    `json:"stop_at,omitempty"`
 }
 ```
 
@@ -796,7 +798,7 @@ type SummaryRequest struct {
 
 ### type Trigger
 
-Trigger describes what started the run: Source is manual, push, schedule or webhook.
+Trigger describes what started the run: Source is local, trigger, github_app, schedule or child.
 
 ```
 type Trigger struct {

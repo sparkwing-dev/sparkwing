@@ -1,9 +1,11 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -295,9 +297,32 @@ func TestHostScopedRetryTreatsAnUncopyableSourceAsAMiss(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,ref_scope=? WHERE prefix='target-owner'", raw, host.CapabilityScope())
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
 	got, err := tenant.ReconcileNode(t.Context(), request)
 	if err != nil || got.Kind != runstate.Dispatch || got.Node.OutputRecord != nil {
 		t.Fatalf("host-scoped retry of an uncopyable result = %+v, %v; want the job to run", got, err)
+	}
+	warned := false
+	for line := range bytes.Lines(logs.Bytes()) {
+		var record map[string]any
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatal(err)
+		}
+		if record["msg"] != "retry cannot reuse source outputs; record scope is not readable in the retry scope" {
+			continue
+		}
+		warned = true
+		for key, value := range record {
+			if value == "job" {
+				t.Fatalf("reuse miss logs the job ID under %q, which may hold a secret value: %s", key, line)
+			}
+		}
+	}
+	if !warned {
+		t.Fatalf("reuse miss logged no warning:\n%s", logs.String())
 	}
 }
 

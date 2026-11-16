@@ -118,7 +118,8 @@ sparkwing.Job(plan, "test", &Test{}).Cores(6)              // runs go test -p 6
 ```
 
 ```ts
-plan.job("test", test).cores(6);
+plan.job("preconditions", async (ctx) => { await ctx.exec(["git", "fetch"]).run(); }).cores(0.25); // mostly git and network waits
+plan.job("test", async (ctx) => { await ctx.exec(["npm", "test"]).run(); }).cores(6);
 ```
 
 A small request lets a job that mostly waits start beside running work. A

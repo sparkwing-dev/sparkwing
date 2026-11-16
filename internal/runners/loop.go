@@ -509,6 +509,11 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			done := make(chan claimOutcome, 1)
 			pending = done
 			request.FreeSlots = &freeSlots
+			// safety: only an idle runner waits, because a held request keeps the kinds it
+			// was sent with, and a slot freed meanwhile would sit behind it.
+			if len(active) == 0 && l.Config.RunID == "" {
+				request.Wait = l.lifecycleWait(controllerwire.MaxClaimWait, idleSince, true)
+			}
 			go func() {
 				response, err := l.Controller.Claim(claims, request)
 				done <- claimOutcome{response: response, err: err, kinds: request.Kinds, workSlot: workSlot, ownerSlot: ownerSlot}
@@ -559,7 +564,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				noteFatalClaim(outcome.err)
 				return nil, fmt.Errorf("claim runner work: %w", outcome.err)
 			}
-			if outcome.response.Claim == nil {
+			if outcome.response.Claim == nil && !outcome.response.Held {
 				pollAt = time.Now().Add(l.Config.PollInterval)
 				backoffUntil = time.Now().Add(min(outcome.response.PollAfter, controllerwire.MaxHonoredIdleClaimPoll))
 			}

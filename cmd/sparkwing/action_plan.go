@@ -213,7 +213,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 			return err
 		}},
 		input: nodehost.PlanningProcessInput{
-			Entry: entry, Entrypoint: selection.identity.Entrypoint, Environment: environment,
+			Entry: entry, Entrypoint: selection.identity.Entrypoint, Listed: listedPipelines(selection.project), Environment: environment,
 			Run: nodewire.RunContext{RunID: "inspection", Pipeline: pipeline}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		},
 	}

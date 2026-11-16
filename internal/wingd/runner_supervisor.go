@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -14,10 +15,12 @@ import (
 	"strings"
 	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // LocalRunnerServiceName identifies one runner instance in one state home.
@@ -42,7 +45,7 @@ func RemoveLocalRunnerStartupEnvironment(home, id string) error {
 
 // StartLocalRunnerProcess starts an independently supervised runner. Cancellation
 // bounds startup only; a launched runner drains through its own control protocol.
-func StartLocalRunnerProcess(ctx context.Context, host crontimer.Host, id string) (result error) {
+func StartLocalRunnerProcess(ctx context.Context, host crontimer.Host, id string, limits RunnerLimits) (result error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -64,7 +67,7 @@ func StartLocalRunnerProcess(ctx context.Context, host crontimer.Host, id string
 	}()
 	switch host.GOOS {
 	case "linux":
-		return startLocalRunnerLinux(ctx, host, id, "/run/systemd/system")
+		return startLocalRunnerLinux(ctx, host, id, "/run/systemd/system", limits)
 	case "darwin":
 		return startLocalRunnerDarwin(ctx, host, id)
 	case "windows":
@@ -125,9 +128,48 @@ func runnerManagerOutput(ctx context.Context, host crontimer.Host, name string, 
 		output = string(body)
 	}
 	if err != nil {
-		return "", fmt.Errorf("wingd: runner manager %s: %w: %s", name, err, strings.TrimSpace(output))
+		return "", &runnerManagerError{command: strings.Join(append([]string{name}, args...), " "), err: err, output: strings.TrimSpace(output)}
 	}
 	return output, nil
+}
+
+type runnerManagerError struct {
+	command, output string
+	err             error
+}
+
+func (e *runnerManagerError) Error() string {
+	return fmt.Sprintf("%s: %v: %s", e.command, e.err, e.output)
+}
+
+func (e *runnerManagerError) Unwrap() error { return e.err }
+
+// UserManagerHint tells a user how to restore the systemd user manager that local runners and scoped controllers need.
+const UserManagerHint = "Check it with `systemctl --user status` from your login session. " +
+	"In an SSH or service session, run `loginctl enable-linger $USER` once, then start a new session."
+
+// UserManagerUnreachable explains that what cannot start because this process cannot reach the systemd user
+// manager. detail is the service manager's own message.
+func UserManagerUnreachable(what, detail string) *apierr.Error {
+	return &apierr.Error{
+		Code:    hosterr.Unavailable,
+		Message: fmt.Sprintf("%s: the systemd user manager is unreachable (%s)", what, strings.TrimSpace(detail)),
+		Hint:    UserManagerHint,
+	}
+}
+
+// safety: the controller keeps the environment it started with, so fixing the manager does not reach it; only a
+// controller started from the repaired session can.
+const controllerRestartHint = " Then run `sparkwing daemon stop` from that session, so the next sparkwing command starts a controller that can reach it."
+
+func userManagerUnreachable(what string, err error) error {
+	var manager *runnerManagerError
+	if !errors.As(err, &manager) || manager.output == "" {
+		return err
+	}
+	failure := UserManagerUnreachable(what, manager.output)
+	failure.Hint += controllerRestartHint
+	return failure
 }
 
 // WaitLocalRunnerShutdown verifies that supervised Linux runners have exited after
@@ -183,7 +225,7 @@ func runnerHostStat(host crontimer.Host, path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }
 
-func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPath string) error {
+func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPath string, limits RunnerLimits) error {
 	info, err := runnerHostStat(host, bootPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return startUnmanagedLocalRunner(ctx, host, id)
@@ -195,7 +237,7 @@ func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPat
 		return errors.New("wingd: systemd boot marker is not a directory")
 	}
 	if err := runnerManagerCommand(ctx, host, "systemctl", "--user", "show-environment"); err != nil {
-		return err
+		return userManagerUnreachable("the local runner cannot start", err)
 	}
 	dir, err := localRunnerDirectory(host, id)
 	if err != nil {
@@ -223,13 +265,24 @@ func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPat
 		"--property=KillMode=mixed",
 		"--property=EnvironmentFile=" + environmentPath,
 		"--property=StandardOutput=append:" + log, "--property=StandardError=append:" + log,
-		"--", host.Binary,
 	}
+	command := []string{"--", host.Binary}
 	// safety: systemd expands dollar signs in argv independently of the environment-file parser.
 	for _, arg := range localRunnerArguments(host, id)[1:] {
-		args = append(args, strings.ReplaceAll(arg, "$", "$$"))
+		command = append(command, strings.ReplaceAll(arg, "$", "$$"))
 	}
-	return runnerManagerCommand(ctx, host, "systemd-run", args...)
+	limited := limits.systemdArguments()
+	if len(limited) == 0 {
+		return runnerManagerCommand(ctx, host, "systemd-run", slices.Concat(args, command)...)
+	}
+	err = runnerManagerCommand(ctx, host, "systemd-run", slices.Concat(args, limited, command)...)
+	if err == nil {
+		return nil
+	}
+	// safety: a manager that refuses a resource property must not cost the user their runner;
+	// queue status reads the runner's limits back and reports the budget as not enforced.
+	slog.Warn("local runner started without the budget's OS limits", "err", err)
+	return runnerManagerCommand(ctx, host, "systemd-run", slices.Concat(args, command)...)
 }
 
 func startLocalRunnerDarwin(ctx context.Context, host crontimer.Host, id string) error {

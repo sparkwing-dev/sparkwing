@@ -131,13 +131,10 @@ func Parse(binary string, args []string) (Invocation, error) {
 				if _, command := paths[inv.Command.Path+" "+name]; command {
 					return inv, inv.invalid("unknown flag --%s; use the %s command", name, strings.TrimSpace(strings.TrimPrefix(inv.Command.Path, binary)+" "+name))
 				}
-				if inv.Command.PipelineArgsAfterSeparator {
-					return inv, inv.invalid("unknown flag --%s; pipeline arguments follow --", name)
-				}
 				if groups[inv.Command.Path] {
 					return inv, inv.invalid("unknown flag --%s; a command's flags follow the command", name)
 				}
-				return inv, inv.invalid("unknown flag --%s%s", name, inv.flagHint())
+				return inv, inv.invalid("unknown flag --%s%s", name, inv.flagHint(name))
 			}
 			if f.Argument != "" && !explicit {
 				if n+1 >= len(args) || args[n+1] == "--" || strings.HasPrefix(args[n+1], "--") {
@@ -166,7 +163,7 @@ func Parse(binary string, args []string) (Invocation, error) {
 				}
 				return inv, inv.invalid("unknown command; run %s --help for commands", inv.Command.Path)
 			}
-			return inv, inv.invalid("unexpected positional argument; use a kind-named flag")
+			return inv, inv.invalid("%s", inv.positionalHint())
 		}
 	}
 	if separator && !inv.Command.PipelineArgsAfterSeparator {
@@ -203,9 +200,19 @@ func suggestCommand(commands []Command, parent, word, next string) string {
 
 // safety: only a command that forwards pipeline arguments points at --; any
 // other names its own flags, so the hint never sends a user to a separator.
-func (i Invocation) flagHint() string {
+func (i Invocation) flagHint(name string) string {
+	suggestion := ""
+	if closest := i.closestFlag(name); closest != "" {
+		suggestion = "; did you mean --" + closest + "?"
+	}
 	if i.Command.PipelineArgsAfterSeparator {
+		if suggestion != "" {
+			return suggestion + " Pipeline arguments follow --"
+		}
 		return "; pipeline arguments follow --"
+	}
+	if suggestion != "" {
+		return suggestion
 	}
 	var names []string
 	for _, f := range i.Command.Flags {
@@ -215,6 +222,33 @@ func (i Invocation) flagHint() string {
 		return "; see " + i.Command.Path + " --help"
 	}
 	return "; " + i.Command.Path + " takes " + strings.Join(names, ", ") + " (see --help)"
+}
+
+// hack: run's own flags carry the sw- prefix, so the bare spelling other
+// commands use (--dry-run) maps to its sw- form first.
+func (i Invocation) closestFlag(name string) string {
+	var names []string
+	for _, f := range append(GlobalFlags(), i.Command.Flags...) {
+		if f.Name == "sw-"+name {
+			return f.Name
+		}
+		names = append(names, f.Name)
+	}
+	return sparkwingruntime.SuggestClosest(name, names)
+}
+
+// safety: the word is never echoed, because a misplaced value can be a secret.
+func (i Invocation) positionalHint() string {
+	var required []Flag
+	for _, f := range i.Command.Flags {
+		if f.Required && f.Argument != "" {
+			required = append(required, f)
+		}
+	}
+	if len(required) == 1 {
+		return fmt.Sprintf("unexpected positional argument; pass it as --%s %s", required[0].Name, required[0].Argument)
+	}
+	return fmt.Sprintf("unexpected positional argument; %s takes flags only (see %s --help)", i.Command.Path, i.Command.Path)
 }
 
 func flagToken(arg string, shorts map[string]string) (name, value string, explicit bool, err error) {
@@ -253,7 +287,7 @@ func (i *Invocation) validate() error {
 	for _, name := range names {
 		f, ok := allowed[name]
 		if !ok {
-			return i.invalid("flag --%s is not accepted%s", name, i.flagHint())
+			return i.invalid("flag --%s is not accepted%s", name, i.flagHint(name))
 		}
 		if !f.Repeatable && len(i.Flags[name]) > 1 {
 			return i.invalid("--%s may be supplied only once", name)
@@ -328,6 +362,9 @@ func validateFlag(f Flag, value string) error {
 		return fmt.Errorf("requires %s", f.Argument)
 	}
 	if len(f.Values) > 0 && !slices.Contains(f.Values, value) {
+		if closest := sparkwingruntime.SuggestClosest(value, f.Values); closest != "" {
+			return fmt.Errorf("requires one of %s; did you mean %s?", strings.Join(f.Values, ", "), closest)
+		}
 		return fmt.Errorf("requires one of %s", strings.Join(f.Values, ", "))
 	}
 	if f.Argument == "N" || f.Argument == "BYTES" || f.HasMinimum {

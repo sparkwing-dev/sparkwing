@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const maxCancelledRunTombstones = 4096
@@ -69,6 +70,9 @@ type Daemon struct {
 	runnerWake         runnerWake
 	runnerChanges      runnerGate
 	retiringRunner     *localhostwire.LocalRunnerInstance
+	finishingDrain     bool
+	runnerState        string
+	runnerErr          *apierr.Error
 	shuttingDown       bool
 	localActivity      LocalActivity
 	dashboardConns     int

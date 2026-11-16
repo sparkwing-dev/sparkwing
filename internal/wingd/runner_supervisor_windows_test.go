@@ -104,7 +104,7 @@ func TestWindowsRunnerControllerProbe(t *testing.T) {
 	}
 	host.Env[runnerProbeRole] = "runner"
 	ctx, cancel := context.WithCancel(t.Context())
-	err = StartLocalRunnerProcess(ctx, host, "instance")
+	err = StartLocalRunnerProcess(ctx, host, "instance", RunnerLimits{})
 	cancel()
 	result := "started"
 	if err != nil {

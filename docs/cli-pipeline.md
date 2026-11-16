@@ -43,6 +43,7 @@ Print one pipeline's full metadata
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
 | `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
+| `--show-withheld` | Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs. |
 
 ## `sparkwing pipeline hooks`
 
@@ -146,7 +147,7 @@ Scaffold a new Go or TypeScript pipeline
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
-| `--template SHAPE` | Go shape to scaffold, minimal by default; merge-queue creates a serial landing pipeline. typescript and merge-queue-typescript create TypeScript pipelines and print the npm lockfile setup command. |
+| `--template SHAPE` | Go shape to scaffold, minimal by default; merge-queue creates a serial landing pipeline. typescript and merge-queue-typescript create TypeScript pipelines and write .sparkwing/package-lock.json with npm, which must be on PATH. |
 | `--on EVENT` | Trigger events to declare, comma separated, replacing the shape's default trigger; manual declares no trigger. |
 | `--hidden` | Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given. |
 | `--short TEXT` | One-line description to write into the generated pipeline source instead of a placeholder. |

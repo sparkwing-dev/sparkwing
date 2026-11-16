@@ -49,7 +49,7 @@ func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, er
 		if ctx.Err() != nil {
 			return IndexResult{}, err
 		}
-		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error(), Hint: "Run `sparkwing update` once online to cache the verified version policy."}
+		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error(), Hint: "Run `sparkwing update` once online to cache the signed version policy."}
 	}
 	return result, nil
 }
@@ -182,7 +182,7 @@ func (r *Resolver) localIndex(now time.Time) IndexResult {
 		}
 		return IndexResult{Index: VerifiedIndex{offline: true}, Notices: []engineid.Notice{notice}}
 	}
-	result := indexResult(r.index, errors.Join(fmt.Errorf("local-only execution uses cached policy without a network refresh"), err))
+	result := indexResult(r.index, err)
 	for i := range result.Notices {
 		result.Notices[i].Hint = PolicyRefreshHint
 	}

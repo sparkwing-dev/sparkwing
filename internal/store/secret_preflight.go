@@ -78,12 +78,17 @@ func (e *secretPreflightError) detail() string {
 				"\n  Fix: %s", p.Name, e.Pipeline, e.Repo, scoped)
 		}
 	}
-	b.WriteString("\nIf the run can do without a secret, declare it optional (replace NAME with its name):")
+	goTags, tsEntries := make([]string, len(e.problems)), make([]string, len(e.problems))
+	for i, p := range e.problems {
+		goTags[i] = fmt.Sprintf(`sw:"%s,optional"`, p.Name)
+		tsEntries[i] = fmt.Sprintf(`{ name: "%s", optional: true }`, p.Name)
+	}
+	b.WriteString("\nIf the run can do without a secret, declare it optional:")
 	if e.sdk != "typescript" {
-		b.WriteString("\n" + `  Go: tag its field in Secrets() with sw:"NAME,optional".`)
+		b.WriteString("\n  Go: tag its field in Secrets() with " + strings.Join(goTags, " or ") + ".")
 	}
 	if e.sdk != "go" {
-		b.WriteString("\n" + `  TypeScript: secrets: [{ name: "NAME", optional: true }].`)
+		b.WriteString("\n  TypeScript: secrets: [" + strings.Join(tsEntries, ", ") + "].")
 	}
 	return b.String()
 }

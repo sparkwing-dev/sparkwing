@@ -105,10 +105,14 @@ func (s *server) Admit(node routeNode) (string, func(), error) {
 func (s *server) Close() error { return s.authorities.Close() }
 func (s *server) URL() string  { return "http://127.0.0.1" }
 
-func start(t testing.TB) *server {
+func start(t testing.TB, configure ...func(*ProcessAuthorityDependencies)) *server {
 	t.Helper()
 	parent := &routeParent{snapshots: map[[sha256.Size]byte]capability.AuthenticationSnapshot{}}
-	authorities, err := NewProcessAuthorities(ProcessAuthorityDependencies{Parent: parent, Bindings: routeRelations{}})
+	deps := ProcessAuthorityDependencies{Parent: parent, Bindings: routeRelations{}}
+	for _, apply := range configure {
+		apply(&deps)
+	}
+	authorities, err := NewProcessAuthorities(deps)
 	if err != nil {
 		t.Fatal(err)
 	}

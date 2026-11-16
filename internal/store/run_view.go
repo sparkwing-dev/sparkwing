@@ -213,6 +213,7 @@ func (t *Tenant) ListRunViews(ctx context.Context, after, through int64, limit i
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
+	tx.listing = true
 	rows, err := tx.queryContext(ctx, `SELECT id FROM runs WHERE team=? AND number>? AND number<=? ORDER BY number DESC LIMIT ?`, t.team, after, through, limit)
 	if err != nil {
 		return nil, err

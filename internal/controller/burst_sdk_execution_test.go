@@ -246,7 +246,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 				if err := os.RemoveAll(directory); err != nil {
 					return err
 				}
-				if _, err := caches.Prepare(ctx, current, job); err != nil {
+				if _, err := caches.Prepare(ctx, current, job, nil); err != nil {
 					return err
 				}
 				body, err = os.ReadFile(filepath.Join(directory, "dependency"))

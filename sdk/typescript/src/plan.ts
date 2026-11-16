@@ -621,6 +621,15 @@ export class Plan implements API.Plan {
     this.#groups.add(id);
     return new JobGroup(id, members);
   }
+  jobFanOut<I, T = unknown>(id: string, items: readonly I[], fn: (item: I, index: number) => readonly [string, API.Body<T>]): JobGroup {
+    this.assertMutable();
+    if (this.#groups.has(id)) throw new Error(`duplicate job group ${id}`);
+    const jobs = items.map((item, index) => {
+      const [jobID, body] = fn(item, index);
+      return this.job(jobID, body);
+    });
+    return this.groupJobs(id, ...jobs);
+  }
   concurrency(group: API.ConcurrencyGroup, cost?: number): this {
     this.assertMutable();
     addConcurrency(this.settings, group, cost);

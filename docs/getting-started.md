@@ -25,6 +25,10 @@ then [Sparkwing Cloud](#sparkwing-cloud) when you want a team to see the
 same runs. [Self-hosted runners](self-hosting.md#add-workstation-capacity)
 adds capacity from your own machines to Cloud.
 
+Coming from GitHub Actions? [Migrate from GitHub Actions](migrate-from-github-actions.md)
+maps each workflow feature to its Sparkwing equivalent, and
+[known limitations](known-limitations.md) lists what has none yet.
+
 ## Install
 
 Building Sparkwing requires Go 1.26.0 or later. Pipeline modules that use only
@@ -120,6 +124,9 @@ both admin / inspection (`sparkwing dashboard open`,
 
 ### Windows
 
+Windows support is experimental. Use WSL2 with systemd enabled and the Linux
+installer above; see [known limitations](known-limitations.md#windows-is-experimental).
+
 Prebuilt Windows binaries are published to GitHub Releases:
 `sparkwing-windows-amd64.exe` and `sparkwing-windows-arm64.exe`. They
 embed the dashboard bundle, so `sparkwing dashboard open` works locally
@@ -214,7 +221,6 @@ For a TypeScript project, scaffold a minimal pipeline with:
 
 ```bash
 sparkwing pipeline new --pipeline hello --template typescript
-npm --prefix .sparkwing install --package-lock-only --ignore-scripts --no-audit --no-fund
 git add .sparkwing
 git commit -m "Add TypeScript pipeline"
 sparkwing pipeline list
@@ -224,12 +230,14 @@ sparkwing run hello
 ```
 
 This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin,
-`index.ts`, `jobs/hello.ts` and `sparkwing.yaml`. It uses the same `--on`,
+`index.ts`, `jobs/hello.ts`, `sparkwing.yaml` and `package-lock.json`. It uses the same `--on`,
 `--hidden` and `--short` flags as the Go shapes. Repeat the command with another
-pipeline name to add a pipeline to the TypeScript entry. Sparkwing installs
+pipeline name to add a pipeline to the TypeScript entry. The scaffold runs
+`npm install --package-lock-only` to write the lockfile, and Sparkwing installs
 the SDK dependencies when the pipeline runs. Commit `.sparkwing/package-lock.json` because
 the installer validates dependencies with `npm ci`. Node.js 22.18 or later and npm must be on
-PATH. `pipeline plan` explains the resolved jobs and steps without running them.
+PATH; without npm, or when npm fails, `pipeline new` keeps the files, exits
+non-zero and prints the npm command to run. `pipeline plan` explains the resolved jobs and steps without running them.
 `pipeline lint` analyzes Go source only. Its successful exit does not validate
 TypeScript source. See [TypeScript authoring](authoring-pipelines.md#typescript-authoring)
 for jobs, steps, outputs, runtime conditions and other authoring topics.
@@ -265,12 +273,26 @@ works. Local CI uses the controller on your machine.
 
 ### Inspect a failed run
 
-The run's final output includes its ID and commands to inspect it:
+On a terminal, each line of a run's output starts with its job, as in
+`test | running tests`. A failed run ends with a block that names each failed
+job, its step and its error, followed by the commands to read the job's log
+and retry the failed jobs:
+
+```text
+test failed in step unit:
+  command failed (exit 1): go test ./...
+  FAIL: TestWidget expected 3 got 4
+deploy was cancelled because test did not succeed
+
+Show the failed job's log:  sparkwing runs logs --run 2 --job test
+Retry the failed jobs:      sparkwing runs retry --failed --run 2
+```
+
+List runs and read one's jobs with:
 
 ```bash
 sparkwing runs list --profile=
 sparkwing runs status --profile= --run RUN_ID
-sparkwing runs logs --profile= --run RUN_ID
 ```
 
 Fix the failing job and run the pipeline again. If a run stays pending, inspect

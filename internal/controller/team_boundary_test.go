@@ -212,6 +212,12 @@ func seedRun(t *testing.T, st *store.Store, tn *store.Tenant, id, pipeline strin
 
 func (f *tenancyFixture) do(method, path, auth string, body any) (int, string) {
 	f.t.Helper()
+	w := f.serve(method, path, auth, body)
+	return w.Code, w.Body.String()
+}
+
+func (f *tenancyFixture) serve(method, path, auth string, body any) *httptest.ResponseRecorder {
+	f.t.Helper()
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -240,7 +246,7 @@ func (f *tenancyFixture) do(method, path, auth string, body any) (int, string) {
 	req.Header.Set("Origin", "https://controller.test")
 	w := httptest.NewRecorder()
 	f.srv.Handler().ServeHTTP(w, req)
-	return w.Code, w.Body.String()
+	return w
 }
 
 func tenancyDialects(t *testing.T, run func(t *testing.T, f *tenancyFixture)) {
@@ -599,8 +605,17 @@ func TestTeamBoundary_SecretsStayWithTheirTeam(t *testing.T) {
 				t.Errorf("team A %s's list carries the secret's value: %s", member.name, body)
 			}
 		}
-		if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil); code != http.StatusForbidden || strings.Contains(body, "team-a-secret-value") {
+		if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil); code != http.StatusForbidden || strings.Contains(body, "team-a-secret-value") || !strings.Contains(body, `secret \"DEPLOY_KEY\" is masked`) || !strings.Contains(body, "`sparkwing secrets set --secret DEPLOY_KEY --variable`") {
 			t.Errorf("team A owner session read its secret back = %d: %s", code, body)
+		}
+		missingCode, missingBody := f.do("GET", "/api/v1/secrets/NEVER_SET", f.ownerB, nil)
+		for _, other := range []struct{ name, auth string }{{"team B owner", f.ownerB}, {"team B token", f.everyScopeB}} {
+			for _, name := range []string{"DEPLOY_KEY", "REGION", "NEVER_SET"} {
+				code, body := f.do("GET", "/api/v1/secrets/"+name, other.auth, nil)
+				if code != missingCode || strings.ReplaceAll(body, name, "NEVER_SET") != missingBody {
+					t.Errorf("GET /secrets/%s as %s = %d %q, want the missing-secret response %d %q", name, other.name, code, body, missingCode, missingBody)
+				}
+			}
 		}
 		for _, other := range []struct{ name, auth string }{{"team B owner", f.ownerB}, {"team B token", f.everyScopeB}} {
 			if code, body := f.do("GET", "/api/v1/secrets", other.auth, nil); code != http.StatusOK || strings.Contains(body, "DEPLOY_KEY") || strings.Contains(body, "REGION") {

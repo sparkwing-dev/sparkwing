@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func runnerSupervisorHost(t *testing.T) crontimer.Host {
@@ -55,9 +56,17 @@ func TestLocalRunnerSystemdManagerFailureNeverDetaches(t *testing.T) {
 				}
 				return "", nil
 			}
-			err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir())
-			if err == nil || !strings.Contains(err.Error(), "failed manager") {
-				t.Fatalf("startup = %v; want manager failure", err)
+			err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir(), RunnerLimits{})
+			message := "failed manager"
+			if failing == "systemctl" {
+				message = "the local runner cannot start: the systemd user manager is unreachable (manager unavailable)"
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "systemctl --user status") || !strings.Contains(failure.Hint, "loginctl enable-linger") || !strings.Contains(failure.Hint, "run `sparkwing daemon stop` from that session") {
+					t.Fatalf("unreachable manager gave no fix: %#v", err)
+				}
+			}
+			if err == nil || !strings.Contains(err.Error(), message) {
+				t.Fatalf("startup = %v; want %q", err, message)
 			}
 			want := []string{"systemctl"}
 			if failing == "systemd-run" {
@@ -83,7 +92,7 @@ func TestLocalRunnerSystemdKeepsLiteralArgvAndIndependentLifetime(t *testing.T) 
 		}
 		return "", nil
 	}
-	if err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir()); err != nil {
+	if err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir(), RunnerLimits{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, arg := range []string{"--working-directory=" + host.SparkwingHome, "--user", "--service-type=exec", "--property=Restart=no", "--property=TimeoutStopSec=infinity", "--property=KillMode=mixed"} {
@@ -127,10 +136,10 @@ func TestLocalRunnerSystemdInspectionFailureDoesNotLaunch(t *testing.T) {
 	if err := os.WriteFile(marker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := startLocalRunnerLinux(t.Context(), host, "instance", marker); err == nil {
+	if err := startLocalRunnerLinux(t.Context(), host, "instance", marker, RunnerLimits{}); err == nil {
 		t.Fatal("non-directory boot marker accepted")
 	}
-	if err := startLocalRunnerLinux(t.Context(), host, "instance", filepath.Join(marker, "child")); err == nil {
+	if err := startLocalRunnerLinux(t.Context(), host, "instance", filepath.Join(marker, "child"), RunnerLimits{}); err == nil {
 		t.Fatal("failed boot inspection accepted")
 	}
 }
@@ -142,7 +151,7 @@ func TestLocalRunnerSystemdEnvironmentFileKeepsQuotedValuesPrivate(t *testing.T)
 	host := runnerSupervisorHost(t)
 	host.Env["CAPTURED"] = " leading space\ncarriage\r tab\t slash\\ quotes\"' dollar$ percent% backtick` trailing "
 	host.Exec = func(context.Context, string, ...string) (string, error) { return "", nil }
-	if err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir()); err != nil {
+	if err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir(), RunnerLimits{}); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(host.SparkwingHome, "runners", LocalRunnerServiceName(host.SparkwingHome, "instance"), "runner.env")
@@ -171,7 +180,7 @@ func TestLocalRunnerLaunchdCapturesArgvAndDoesNotResurrectInstance(t *testing.T)
 		launch = append([]string{name}, args...)
 		return "", nil
 	}
-	if err := StartLocalRunnerProcess(t.Context(), host, "instance"); err != nil {
+	if err := StartLocalRunnerProcess(t.Context(), host, "instance", RunnerLimits{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(launch) != 4 || !slices.Equal(launch[:3], []string{"launchctl", "bootstrap", "gui/501"}) {
@@ -234,7 +243,7 @@ func TestLocalRunnerLaunchdFallsBackToUserDomainWithoutGUILogin(t *testing.T) {
 		}
 		return "", nil
 	}
-	if err := StartLocalRunnerProcess(t.Context(), host, "instance"); err != nil {
+	if err := StartLocalRunnerProcess(t.Context(), host, "instance", RunnerLimits{}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(domains, []string{"gui/501", "user/501"}) {

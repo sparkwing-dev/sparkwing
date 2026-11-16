@@ -16,6 +16,56 @@ gives its repair command, such as `sparkwing secrets set --secret BAR --file <pa
 The run finishes as failed before any jobs start, and its status keeps the repair advice.
 Run the command against the same local controller, then start the pipeline again.
 
+## Declaring and reading a secret
+
+A Go pipeline declares secrets with a `Secrets()` struct; a TypeScript pipeline
+lists them in `definePipeline`. A job reads a value inside its callback, never
+while planning:
+
+```go
+type Ship struct{ sparkwing.Base }
+
+type ShipSecrets struct {
+    Token string `sw:"DEPLOY_TOKEN,required"`
+}
+
+func (Ship) Secrets() any { return &ShipSecrets{} }
+
+func (Ship) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+    sparkwing.Job(plan, "deploy", func(ctx context.Context) error {
+        token, err := sparkwing.Secret(ctx, "DEPLOY_TOKEN")
+        if err != nil {
+            return err
+        }
+        _, err = sparkwing.Exec(ctx, "./scripts/deploy.sh").Env("DEPLOY_TOKEN", token).Run()
+        return err
+    })
+    return nil
+}
+```
+
+```ts
+import { definePipeline } from "@sparkwing/sdk";
+
+definePipeline({
+  name: "Ship",
+  secrets: [{ name: "DEPLOY_TOKEN" }],
+  plan(plan) {
+    plan.job("deploy", async (ctx) => {
+      const token = await ctx.secret("DEPLOY_TOKEN");
+      if (token === undefined) throw new Error("DEPLOY_TOKEN is not set");
+      await ctx.exec(["./scripts/deploy.sh"]).env("DEPLOY_TOKEN", token).run();
+    });
+  },
+});
+```
+
+Set the value with `sparkwing secrets set --secret DEPLOY_TOKEN --file <path>`
+before the first run. A Go field tagged `,optional` or a TypeScript entry with
+`optional: true` may be unset; the read then returns `sparkwing.ErrSecretMissing`
+in Go and `undefined` in TypeScript. Reading a name the pipeline did not declare
+fails. See [Secrets and masking](sdk.md#secrets-and-masking) for masking.
+
 ## Which runs read which secrets
 
 Pipeline secrets match GitHub repository secrets: one repository's pipeline

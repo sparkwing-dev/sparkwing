@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"reflect"
 
@@ -15,12 +16,18 @@ const sealedRotationRunPage = 200
 
 // SealedRotation counts the envelopes an operator rotation resealed and names those no configured key opened.
 type SealedRotation struct {
-	Secrets         int             `json:"secrets"`
-	GitCredentials  int             `json:"git_credentials"`
-	RunEnvironments int             `json:"run_environments"`
-	Settings        int             `json:"settings"`
-	PreviousKeyOnly int             `json:"previous_key_only"`
-	Unreadable      []SealedRowName `json:"unreadable"`
+	Secrets         int `json:"secrets"`
+	GitCredentials  int `json:"git_credentials"`
+	RunEnvironments int `json:"run_environments"`
+	// RunArguments counts resealed run argument envelopes; PlaintextRunArguments counts
+	// documents written before argument sealing, which rotation seals and verify only counts.
+	RunArguments          int `json:"run_arguments"`
+	PlaintextRunArguments int `json:"plaintext_run_arguments"`
+	Settings              int `json:"settings"`
+	// RunEventSubscriptions counts resealed subscription signing secrets.
+	RunEventSubscriptions int             `json:"run_event_subscriptions"`
+	PreviousKeyOnly       int             `json:"previous_key_only"`
+	Unreadable            []SealedRowName `json:"unreadable"`
 }
 
 // SealedRotationCipher reseals bound envelopes and opens them under the current key alone.
@@ -71,7 +78,7 @@ func scopeName(purpose secrets.Purpose, scope string) string {
 	return ""
 }
 
-// RotateSealedValues reseals every tenant's secrets, git credentials and submitted run environments, and local requester inputs, plus
+// RotateSealedValues reseals every tenant's secrets, git credentials, run event signing secrets, run arguments and submitted run environments, and local requester inputs, plus
 // signing keys, under the cipher's current key. Each step commits on its own and repeats safely.
 // Verify only counts, reporting how many rows still open under the previous key alone.
 func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SealedRotationCipher, verify bool) (SealedRotation, error) {
@@ -107,7 +114,10 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		total.Secrets += done.Secrets
 		total.GitCredentials += done.GitCredentials
 		total.RunEnvironments += done.RunEnvironments
+		total.RunArguments += done.RunArguments
+		total.PlaintextRunArguments += done.PlaintextRunArguments
 		total.Settings += done.Settings
+		total.RunEventSubscriptions += done.RunEventSubscriptions
 		total.PreviousKeyOnly += done.PreviousKeyOnly
 		total.Unreadable = append(total.Unreadable, done.Unreadable...)
 		return nil
@@ -122,6 +132,17 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 	for _, team := range teams {
 		if err := step(func(r *sealedRotationTx) error { return r.tenantCredentials(ctx, &Tenant{s: o.s, team: team}) }, team); err != nil {
 			return SealedRotation{}, err
+		}
+		if err := step(func(r *sealedRotationTx) error { return r.runEventSubscriptions(ctx, team) }, team); err != nil {
+			return SealedRotation{}, err
+		}
+		for after, more := "", true; more; {
+			if err := step(func(r *sealedRotationTx) (err error) {
+				after, more, err = r.runArguments(ctx, team, after)
+				return err
+			}); err != nil {
+				return SealedRotation{}, err
+			}
 		}
 		for _, local := range []bool{false, true} {
 			for after, more := "", true; more; {
@@ -304,4 +325,129 @@ func (r *sealedRotationTx) settingKey(ctx context.Context, key string) error {
 	}
 	_, err = r.tx.execContext(ctx, `UPDATE settings SET value=? WHERE key=? AND sealed=1`, []byte(value), key)
 	return err
+}
+
+// safety: a page also seals documents stored before argument sealing, so rotation retires their plaintext.
+func (r *sealedRotationTx) runArguments(ctx context.Context, team Team, after string) (string, bool, error) {
+	rows, err := r.tx.queryContext(ctx, `SELECT id,request_json,spec_json FROM runs WHERE team=? AND id>? ORDER BY id LIMIT ?`+r.tx.forUpdate(), team, after, sealedRotationRunPage)
+	if err != nil {
+		return after, false, err
+	}
+	type document struct {
+		run           string
+		request, spec []byte
+	}
+	var page []document
+	for rows.Next() {
+		var d document
+		if err := rows.Scan(&d.run, &d.request, &d.spec); err != nil {
+			return after, false, errors.Join(err, rows.Close())
+		}
+		page = append(page, d)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return after, false, err
+	}
+	for _, d := range page {
+		for _, column := range []struct {
+			name string
+			raw  []byte
+			next func() ([]byte, error)
+		}{
+			{"request_json", d.request, func() ([]byte, error) {
+				return rotateRunDocument(r, team, d.run, requestArgumentsScope, d.request, requestArgumentSlots)
+			}},
+			{"spec_json", d.spec, func() ([]byte, error) {
+				return rotateRunDocument(r, team, d.run, specArgumentsScope, d.spec, specArgumentSlots)
+			}},
+		} {
+			value, err := column.next()
+			if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
+				continue
+			}
+			if err != nil {
+				return after, false, err
+			}
+			if _, err := r.tx.execContext(ctx, `UPDATE runs SET `+column.name+`=? WHERE team=? AND id=?`, value, team, d.run); err != nil {
+				return after, false, err
+			}
+		}
+		if err := r.expansionArguments(ctx, team, d.run); err != nil {
+			return after, false, err
+		}
+	}
+	if len(page) == 0 {
+		return after, false, nil
+	}
+	return page[len(page)-1].run, len(page) == sealedRotationRunPage, nil
+}
+
+func (r *sealedRotationTx) expansionArguments(ctx context.Context, team Team, run string) error {
+	rows, err := r.tx.queryContext(ctx, `SELECT node_id,expansion_registration FROM nodes WHERE team=? AND run_id=? AND expansion_registration IS NOT NULL ORDER BY node_id`+r.tx.forUpdate(), team, run)
+	if err != nil {
+		return err
+	}
+	type registration struct {
+		node string
+		raw  []byte
+	}
+	var found []registration
+	for rows.Next() {
+		var e registration
+		if err := rows.Scan(&e.node, &e.raw); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		found = append(found, e)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, e := range found {
+		value, err := rotateRunDocument(r, team, run, expansionArgumentsScope(e.node), e.raw, registrationArgumentSlots)
+		if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := r.tx.execContext(ctx, `UPDATE nodes SET expansion_registration=? WHERE team=? AND run_id=? AND node_id=?`, value, team, run, e.node); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// safety: a nil replacement leaves raw as stored, which verify relies on.
+func rotateRunDocument[T any](r *sealedRotationTx, team Team, run, scope string, raw []byte, slots func(*T) argumentSlots) ([]byte, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	envelope, err := sealedArgumentsEnvelope(raw)
+	if err != nil {
+		return nil, err
+	}
+	if envelope != "" {
+		value, err := r.reseal(secrets.PurposeRunArguments, team, run, scope, false, true, envelope)
+		if err != nil {
+			return nil, err
+		}
+		r.out.RunArguments++
+		if r.verify {
+			return nil, nil
+		}
+		return replaceSealedArguments(raw, value)
+	}
+	var doc T
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	stored, sealed, err := encodeRunDocument(r.cipher, team, run, scope, doc, slots)
+	if err != nil || !sealed {
+		return nil, err
+	}
+	r.out.PlaintextRunArguments++
+	if r.verify {
+		return nil, nil
+	}
+	return stored, nil
 }

@@ -862,9 +862,36 @@
               "omitempty": false
             },
             {
-              "name": "enforce",
-              "kind": "bool",
-              "omitempty": true
+              "name": "enforcement",
+              "kind": "*struct",
+              "omitempty": true,
+              "fields": [
+                {
+                  "name": "applied",
+                  "kind": "bool",
+                  "omitempty": false
+                },
+                {
+                  "name": "cpu_cores",
+                  "kind": "float64",
+                  "omitempty": true
+                },
+                {
+                  "name": "memory_bytes",
+                  "kind": "int64",
+                  "omitempty": true
+                },
+                {
+                  "name": "nice",
+                  "kind": "int",
+                  "omitempty": true
+                },
+                {
+                  "name": "reason",
+                  "kind": "string",
+                  "omitempty": true
+                }
+              ]
             },
             {
               "name": "ignore_external",

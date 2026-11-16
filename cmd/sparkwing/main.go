@@ -162,6 +162,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if helpRequested {
 		return runSelectedHelp(dir, pipelineName, flags)
 	}
+	defer func() { resultErr = explainOutsideGit(context.Background(), filepath.Dir(dir), resultErr) }()
 	home, err := wingd.HomeDir("")
 	if err != nil {
 		return err
@@ -270,6 +271,18 @@ func runSparkwing(args []string) (result error) {
 	if inv.Command.Path == "sparkwing __sdk-install" {
 		return runSDKInstall(inv)
 	}
+	// safety: these run as root or as a runner account, so they skip the
+	// version notices and stamps that would write into that account's home.
+	switch inv.Command.Path {
+	case "sparkwing runners install-service":
+		return runRunnersInstallService(inv)
+	case "sparkwing runners uninstall-service":
+		return runRunnersUninstallService(inv)
+	case "sparkwing __runner-account-write":
+		return runRunnerAccountWrite(inv)
+	case "sparkwing __runner-account-read":
+		return runRunnerAccountRead(inv)
+	}
 	cleanupStaleUpdate()
 	previousArgs, previousDirectory := toolchainReplayArgs, toolchainReplayDirectory
 	toolchainReplayArgs = append([]string(nil), args...)
@@ -298,6 +311,8 @@ func runSparkwing(args []string) (result error) {
 		return runSchedules(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing pools "):
 		return runPools(context.Background(), inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing subscriptions "):
+		return runSubscriptions(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing overflow "):
 		return runOverflow(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing billing "):
@@ -316,6 +331,8 @@ func runSparkwing(args []string) (result error) {
 		return runReviewCommand(context.Background(), inv, os.Stdout, resolveRunReview)
 	}
 	switch inv.Command.Path {
+	case "sparkwing team delete":
+		return runTeamDelete(context.Background(), inv)
 	case "sparkwing team settings show", "sparkwing team settings set":
 		return runTeamSettings(context.Background(), inv)
 	case "sparkwing run":
@@ -368,6 +385,10 @@ func runSparkwing(args []string) (result error) {
 		return runRunnersAdd(inv)
 	case "sparkwing runners remove":
 		return runRunnersRemove(inv)
+	case "sparkwing runners pause":
+		return runRunnersPause(inv)
+	case "sparkwing runners resume":
+		return runRunnersResume(inv)
 	case "sparkwing completion":
 		return runCompletion(inv)
 	case "sparkwing runs logs", "sparkwing runs grep":

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -35,6 +36,28 @@ func runCompletionError(ctx context.Context, reader interface {
 		}
 	}
 	return statusExitCode(status)
+}
+
+// safety: the failure block states the outcome, so no diagnostic repeats it.
+func foregroundRunCompletion(ctx context.Context, reader interface {
+	ReadRun(context.Context, string) (controllerwire.RunDetail, error)
+}, run, status, format string, out io.Writer,
+) error {
+	failure := statusExitCode(status)
+	if failure == nil || format == "json" {
+		return runCompletionError(ctx, reader, run, status)
+	}
+	detail, err := reader.ReadRun(ctx, run)
+	if err != nil || detail.ID != run {
+		return failure
+	}
+	if refusal := configurationRefusal(detail); refusal != nil {
+		return exitError(1, refusal)
+	}
+	if err := writeFailureBlock(out, withSteps(ctx, reader, detail), "", ""); err != nil {
+		return errors.Join(failure, err)
+	}
+	return &cliError{code: 1, err: failure, reported: true}
 }
 
 func triggeredRunOutcome(ctx context.Context, reader controllerwire.RunReader, runID string, out io.Writer) (string, error) {

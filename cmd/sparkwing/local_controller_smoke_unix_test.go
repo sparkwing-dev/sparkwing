@@ -23,25 +23,29 @@ import (
 
 // safety: every leaf in these groups is driven below or named in localSmokeSkipped,
 // so a new command cannot ship without meeting a real controller.
-var localSmokeGroups = []string{"secrets", "tokens", "runners", "pools", "queue", "schedules", "runs"}
+var localSmokeGroups = []string{"secrets", "tokens", "runners", "pools", "subscriptions", "queue", "schedules", "runs"}
 
 var localSmokeSkipped = map[string]string{
-	"sparkwing tokens revoke":        "a local controller issues no member tokens",
-	"sparkwing tokens rotate":        "a local controller issues no member tokens",
-	"sparkwing runners add":          "enrolls a machine with a remote controller",
-	"sparkwing runners remove":       "needs an enrolled runner",
-	"sparkwing pools allow":          "needs a registered runner and repository",
-	"sparkwing pools disallow":       "needs a registered runner and repository",
-	"sparkwing queue priority":       "needs queued work",
-	"sparkwing schedules install":    "writes the user's timer configuration",
-	"sparkwing schedules uninstall":  "writes the user's timer configuration",
-	"sparkwing schedules set":        "needs a repository checkout with schedules",
-	"sparkwing schedules resume":     "the same route and authority as pause",
-	"sparkwing runs grep":            "reads logs of finished runs; covered by its own tests",
-	"sparkwing runs prune":           "deletes runs; covered by its own tests",
-	"sparkwing runs retry":           "needs a failed run",
-	"sparkwing runs annotations add": "needs a running job's credential",
-	"sparkwing runs approvals deny":  "the same route and authority as approve",
+	"sparkwing tokens revoke":             "a local controller issues no member tokens",
+	"sparkwing tokens rotate":             "a local controller issues no member tokens",
+	"sparkwing runners add":               "enrolls a machine with a remote controller",
+	"sparkwing runners remove":            "needs an enrolled runner",
+	"sparkwing runners pause":             "needs an enrolled runner",
+	"sparkwing runners resume":            "needs an enrolled runner",
+	"sparkwing runners install-service":   "needs root to create an OS user and a system service",
+	"sparkwing runners uninstall-service": "needs root to stop a system service",
+	"sparkwing pools allow":               "needs a registered runner and repository",
+	"sparkwing pools disallow":            "needs a registered runner and repository",
+	"sparkwing queue priority":            "needs queued work",
+	"sparkwing schedules install":         "writes the user's timer configuration",
+	"sparkwing schedules uninstall":       "writes the user's timer configuration",
+	"sparkwing schedules set":             "needs a repository checkout with schedules",
+	"sparkwing schedules resume":          "the same route and authority as pause",
+	"sparkwing runs grep":                 "reads logs of finished runs; covered by its own tests",
+	"sparkwing runs prune":                "deletes runs; covered by its own tests",
+	"sparkwing runs retry":                "needs a failed run",
+	"sparkwing runs annotations add":      "needs a running job's credential",
+	"sparkwing runs approvals deny":       "the same route and authority as approve",
 }
 
 // safety: a step with a want code must fail with exactly that code, which proves the
@@ -63,6 +67,11 @@ var localSmokeSteps = []localSmokeStep{
 	{args: []string{"tokens", "create"}, want: "capability_unsupported"},
 	{args: []string{"runners", "list"}},
 	{args: []string{"pools", "list"}},
+	{args: []string{"subscriptions", "create", "--url", "http://127.0.0.1:9/hook", "--event", "run.finished", "--status", "failed"}},
+	{args: []string{"subscriptions", "list"}},
+	{args: []string{"subscriptions", "show", "--subscription", "sub_000000000000000000000000"}, want: "not_found"},
+	{args: []string{"subscriptions", "rotate-secret", "--subscription", "sub_000000000000000000000000"}, want: "not_found"},
+	{args: []string{"subscriptions", "delete", "--subscription", "sub_000000000000000000000000"}},
 	{args: []string{"queue", "list"}},
 	{args: []string{"schedules", "list"}},
 	{args: []string{"schedules", "show", "--schedule", "missing"}, want: "not_found"},

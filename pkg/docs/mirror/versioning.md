@@ -9,9 +9,43 @@ The current stable release and its notes are at
 [GitHub releases/latest](https://github.com/sparkwing-dev/sparkwing/releases/latest);
 `sparkwing update --dry-run` reports which release this machine would move to.
 
+## Compatibility and release cadence
+
+The author SDK is the Go package `github.com/sparkwing-dev/sparkwing/sparkwing`
+with its `git`, `docker`, `services`, `inputs` and `cleanup` packages, and the
+TypeScript package `@sparkwing/sdk` as declared in its `index.d.ts`. Changes to
+it are additive only: new functions, types, methods, options and optional
+fields. If a break cannot be avoided, it ships with a migration guide and a
+scripted path in `sparkwing pipeline upgrade` that makes the change for you;
+the release refuses an SDK break whose changelog entry links no guide section.
+`sparkwing/runtime`, `sparkwing/protocol/...` and `sparkwing/testsupport/...`
+are the host's side of the SDK, are not covered, and change with it.
+
+- Sparkwing ships on a weekly train. Each Monday, the minor release
+  (`v0.Y.0`) is cut from `main` if it has unreleased changes. Patch releases
+  (`v0.Y.Z`) ship between trains for fixes.
+- Breaking changes ship only in the Monday minor release. Each one is listed in
+  that release's notes with a `(Breaking)` marker and a migration guide. A patch
+  release never contains a breaking change; the release pipeline refuses to cut
+  a patch whose changelog section has a `(Breaking)` entry.
+- An SDK pin stays runnable. Each new run resolves the newest permitted engine
+  that accepts the pin's SDK, so a later run of an unchanged pin can use a newer
+  engine; a run already accepted keeps its exact engine through retries and
+  resumes. Each engine release is supported for twelve months after
+  publication, so a pin you leave alone keeps resolving a supported engine for
+  at least twelve months after the newest engine that accepts it was published,
+  unless a security problem revokes a release or raises the minimum version.
+- Release notes are the
+  [GitHub releases](https://github.com/sparkwing-dev/sparkwing/releases); watch
+  the repository's releases to be notified. Migration guides are at
+  <https://sparkwing.dev/docs/migration-guide/> and in `sparkwing docs migrations`.
+
+The full policy is in
+[VERSIONING.md](https://github.com/sparkwing-dev/sparkwing/blob/main/VERSIONING.md).
+
 ## Versioning per repo
 
-Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
+Go pipelines pin `github.com/sparkwing-dev/sparkwing/sparkwing` in `.sparkwing/go.mod`.
 TypeScript pipelines pin `@sparkwing/sdk` through their manifest and native
 lockfile. A version range alone cannot identify an exact SDK. Go `vX.Y.Z` and
 TypeScript `X.Y.Z` identify SDK releases. The signed index records each SDK's
@@ -184,17 +218,43 @@ command delegates to the engine package, which owns Go builds and npm installati
 TypeScript preparation serializes `npm install --no-save --no-audit --no-fund`
 on the selected `package-lock.json` or `npm-shrinkwrap.json`. Before installation,
 `npm ci --dry-run --ignore-scripts` checks that dependencies match that lockfile
-without deleting installed packages or running lifecycle scripts. npm reuses its
-installed tree and applies project, user and global configuration, including
-workspace selection. Concurrent jobs preserve unchanged SDK packages, and removing
+without deleting installed packages or running lifecycle scripts. The dry run
+also rewrites npm's hidden lockfile, `node_modules/.package-lock.json`, without
+changing any package, so preparation deletes that file before installing. npm
+then reads the installed tree, replaces an SDK whose pin moved, and applies
+project, user and global configuration, including workspace selection. Concurrent jobs preserve unchanged SDK packages, and removing
 `node_modules` causes a fresh install. Preparation leaves the manifest and lockfile
 unchanged and validates the installed SDK against the exact native pin.
 Root lifecycle scripts run on each preparation. Other dependencies are reconciled
 only after npm's frozen-lockfile check passes.
+After a verified installation, preparation writes `node_modules/.sparkwing-sdk-receipt`.
+The receipt covers the inputs npm reads but does not write: `package.json`, the
+lockfile, every `package.json`, lockfile and `.npmrc` in the pipeline directory and
+its ancestors, the user, global and builtin npm configuration (the account's home
+directory when `HOME` is unset), `npm_config_*`, `HOME`, `NODE_ENV`, `NODE_OPTIONS`,
+`NODE_PATH` and `PREFIX`, the resolved `node` and `npm` executables, the manifest
+of every lockfile package outside `node_modules` (workspace members and linked
+sources), and local tarball dependencies. It also records npm's `node_modules/.package-lock.json` and
+the installed SDK manifest. These are not every input npm could read.
+A later preparation skips both npm commands only when these match and the tree
+passes a subset of npm's hidden-lockfile check: every package it lists exists and no
+package folder is newer than it. Reuse still validates the SDK pin. Any
+difference, an unreadable input, a copied local directory dependency or a root
+lifecycle script (`preinstall`, `install`, `postinstall`, `prepublish`,
+`preprepare`, `prepare`, `postprepare` or `dependencies`) runs the npm commands
+above. Preparation removes the receipt before npm writes, compares the inputs taken
+before npm with the inputs after it, and writes a receipt only when they match and
+the SDK verifies, all under the lockfile lock. An interrupted install or an edit
+that lands while npm runs therefore never matches.
+Version-manager shims (asdf, mise, volta) keep the same `node` and `npm` executable
+across version switches, so the receipt does not notice a switch made through them.
+Remove `node_modules/.sparkwing-sdk-receipt`, or `node_modules`, after switching.
 Each installation makes one helper attempt with a ten-minute deadline. Failure
 stops the install, reports the cause, and kills and reaps its helper process tree.
-Verification then compiles Go packages or type-checks TypeScript and runs list,
-describe and plan through that engine, including hidden pipelines. It never runs
+Verification then compiles Go packages, type-checks TypeScript with `tsc --noEmit`
+when `.sparkwing/tsconfig.json` exists, and runs list, describe and plan through
+that engine, including hidden pipelines. A scaffolded TypeScript pipeline has no
+`tsconfig.json`; Node strips its types, so describe and plan are its check. It never runs
 job bodies. Install and check environments pass through the shared environment
 builder, and registered proxy credentials are masked in failures.
 

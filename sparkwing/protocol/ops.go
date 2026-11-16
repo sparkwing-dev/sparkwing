@@ -9,8 +9,8 @@ type Git struct {
 	RepoURL       string `json:"repo_url,omitempty"`
 }
 
-// Trigger describes what started the run: Source is manual, push, schedule
-// or webhook.
+// Trigger describes what started the run: Source is local, trigger,
+// github_app, schedule or child.
 type Trigger struct {
 	Source      string       `json:"source"`
 	User        string       `json:"user,omitempty"`
