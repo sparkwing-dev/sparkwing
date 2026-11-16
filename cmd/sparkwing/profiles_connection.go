@@ -118,17 +118,17 @@ func sameProfileToken(a, b *string) bool {
 	return *a == *b
 }
 
-// safety: a live administration token is revoked with the member token, so no admin credential outlives the profile.
+// safety: a live administration token is revoked even when the member token already ended, so no admin
+// credential outlives the profile; its error comes first because callers judge the first one.
 func revokeProfileToken(p *namedProfile) error {
-	if err := revokeToken(p.ControllerURL(), p.MemberToken()); err != nil {
-		return err
-	}
-	if admin := p.liveAdminToken(time.Now()); admin != "" {
-		if err := revokeToken(p.ControllerURL(), admin); err != nil && !credentialEnded(err) {
-			return err
+	member := revokeToken(p.ControllerURL(), p.MemberToken())
+	var admin error
+	if raw := p.liveAdminToken(time.Now()); raw != "" {
+		if err := revokeToken(p.ControllerURL(), raw); err != nil && !credentialEnded(err) {
+			admin = err
 		}
 	}
-	return nil
+	return errors.Join(admin, member)
 }
 
 func revokeToken(base, raw string) error {

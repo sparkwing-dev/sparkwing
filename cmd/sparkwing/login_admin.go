@@ -81,6 +81,7 @@ func loginAdmin(inv clisurface.Invocation, console deviceConsole, format string)
 		return nil
 	})
 	if err != nil {
+		revokeUnsaved(base, approved.Credential, renewed)
 		return err
 	}
 	if err := revokeProfileToken(previous); err != nil && !credentialEnded(err) {

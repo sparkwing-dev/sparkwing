@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func (f *deviceLoginFixture) status(t *testing.T, bearer, method, path string) int {
@@ -33,6 +35,16 @@ func (f *deviceLoginFixture) revoked(t *testing.T, token string) bool {
 		t.Fatal(err)
 	}
 	return revoked
+}
+
+// hack: grants is a BLOB in SQLite, so a LIKE on the raw column never matches; cast it to text.
+func (f *deviceLoginFixture) liveAdmins(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE CAST(grants AS TEXT) LIKE '%team.admin%' AND revoked_at IS NULL`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 func TestLoginAdminSavesAnHourOfAdministrationBesideTheMemberToken(t *testing.T) {
@@ -84,6 +96,9 @@ func TestLoginAdminSavesAnHourOfAdministrationBesideTheMemberToken(t *testing.T)
 	}
 	if !f.revoked(t, first) {
 		t.Fatal("the replaced member token is still live")
+	}
+	if live := f.liveAdmins(t); live != 1 {
+		t.Fatalf("live team.admin credentials = %d, want the one just issued", live)
 	}
 	if strings.Contains(out, *c.AdminToken) || strings.Contains(out, *c.Token) || !strings.Contains(out, `"admin_expires_at"`) {
 		t.Fatalf("login --admin output = %s", out)
@@ -163,8 +178,79 @@ func TestLoginAdminSavesNothingForAnEditor(t *testing.T) {
 	if c := profiles["work"].Controller; c.AdminToken != nil || c.AdminExpiresAt != nil || *c.Token != member {
 		t.Fatalf("editor step-up changed the profile: %+v", c)
 	}
-	var admins int
-	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE grants LIKE '%team.admin%'`).Scan(&admins); err != nil || admins != 0 {
-		t.Fatalf("%d team.admin credentials after an editor step-up: %v", admins, err)
+	if admins := f.liveAdmins(t); admins != 0 {
+		t.Fatalf("%d team.admin credentials after an editor step-up", admins)
+	}
+}
+
+func TestLoginRevokesTheAdminTokenEvenWhenTheMemberTokenAlreadyEnded(t *testing.T) {
+	writeProfilesFixture(t, "profiles: {}\n")
+	f := newDeviceLoginFixtureAs(t, "approve", "owner")
+	captureStdout(t, func() {
+		if err := f.run(t, "login", "--controller", "https://controller.example", "--profile", "work"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	captureStdout(t, func() {
+		if err := f.run(t, "login", "--admin", "--profile", "work"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	profiles, _, err := loadProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := profiles["work"].Controller
+	if err := revokeToken(previous.URL, *previous.Token); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.status(t, *previous.AdminToken, http.MethodGet, "/api/v1/subscriptions"); code != http.StatusOK {
+		t.Fatalf("precondition: administration token answered %d", code)
+	}
+	captureStdout(t, func() {
+		if err := f.run(t, "login", "--profile", "work"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if code := f.status(t, *previous.AdminToken, http.MethodGet, "/api/v1/subscriptions"); code != http.StatusUnauthorized {
+		t.Fatalf("the replaced administration token answered %d after a normal login, want 401", code)
+	}
+}
+
+func TestLoginAdminRevokesWhatAFailedSaveLeftUnstored(t *testing.T) {
+	writeProfilesFixture(t, "profiles: {}\n")
+	f := newDeviceLoginFixtureAs(t, "approve", "owner")
+	captureStdout(t, func() {
+		if err := f.run(t, "login", "--controller", "https://controller.example", "--profile", "work"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	original, changed := f.console.sleep, false
+	f.console.sleep = func(ctx context.Context, d time.Duration) error {
+		if err := original(ctx, d); err != nil || changed {
+			return err
+		}
+		changed = true
+		profiles, path, err := loadProfiles()
+		if err != nil {
+			return err
+		}
+		return userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
+			p := profiles["work"]
+			token := "changed-in-another-terminal"
+			p.Controller.Token = &token
+			profiles["work"] = p
+			return nil
+		})
+	}
+	if err := f.run(t, "login", "--admin", "--profile", "work"); err == nil || !strings.Contains(err.Error(), "changed while waiting") {
+		t.Fatalf("login --admin over a changed profile: %v", err)
+	}
+	if live := f.liveAdmins(t); live != 0 {
+		t.Fatalf("a failed save left %d live administration token(s)", live)
+	}
+	var liveMembers int
+	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE subject_id='member' AND revoked_at IS NULL`).Scan(&liveMembers); err != nil || liveMembers != 1 {
+		t.Fatalf("live member credentials = %d %v, want only the first login's token", liveMembers, err)
 	}
 }
