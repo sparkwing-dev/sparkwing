@@ -46,9 +46,10 @@ func TestSDKUpgradeE2E(t *testing.T) {
 			u.setPin(language, older)
 			u.git("add", "-A")
 			u.git("-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-q", "-m", "pin "+older)
-			u.sparkwing("run at "+older, "run", "hello", "-C", u.project, "--sw-allow-unadmitted", "-o", "plain")
+			u.run("run at "+older, "")
 			var report struct {
 				Before, After     struct{ Version string }
+				Engine            struct{ Version string }
 				Applied, Verified bool
 			}
 			if err := json.Unmarshal(u.sparkwing("upgrade", "pipeline", "upgrade", "-C", u.project, "-o", "json"), &report); err != nil {
@@ -60,7 +61,7 @@ func TestSDKUpgradeE2E(t *testing.T) {
 			if got := u.pin(language); got != "v"+strings.TrimPrefix(report.After.Version, "v") {
 				t.Fatalf("upgrade reported %s but the repository pins %s", report.After.Version, got)
 			}
-			u.sparkwing("run after upgrade to "+report.After.Version, "run", "hello", "-C", u.project, "--sw-allow-unadmitted", "-o", "plain")
+			u.run("run after upgrade to "+report.After.Version, report.Engine.Version)
 		})
 	}
 }
@@ -190,6 +191,30 @@ func (u *upgradeUser) sparkwing(step string, args ...string) []byte {
 	}
 	u.t.Logf("%s: ok", step)
 	return output
+}
+
+const runFlagNamesEngine = "v0.74.0"
+
+// safety: this CLI refuses a renamed run flag for an engine that predates it and names
+// pipeline upgrade, so that refusal is the old pin's expected answer; once the upgraded engine
+// is at least runFlagNamesEngine, the run must succeed. An empty engine accepts either outcome.
+func (u *upgradeUser) run(step, engine string) {
+	u.t.Helper()
+	command := exec.CommandContext(u.t.Context(), u.cli, "run", "hello", "-C", u.project, "--allow-unadmitted", "-o", "plain")
+	command.Env = u.env
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	output, err := command.Output()
+	if err == nil {
+		u.t.Logf("%s: ok", step)
+		return
+	}
+	refused := strings.Contains(stderr.String(), "predates --allow-unadmitted") && strings.Contains(stderr.String(), "sparkwing pipeline upgrade")
+	if refused && (engine == "" || semver.Compare(engine, runFlagNamesEngine) < 0) {
+		u.t.Logf("%s: refused by an engine before %s, naming pipeline upgrade", step, runFlagNamesEngine)
+		return
+	}
+	u.t.Fatalf("%s: sparkwing run hello: %v\nstdout: %s\nstderr: %s", step, err, output, stderr.String())
 }
 
 func (u *upgradeUser) tool(dir, name string, args ...string) {

@@ -60,7 +60,6 @@ func addProfile(inv clisurface.Invocation, format string) error {
 			profiles = make(map[string]userconfig.Profile)
 		}
 		replaced = &namedProfile{Name: name, Profile: previous}
-		p.Default = previous.Default
 		profiles[name] = p.Profile
 		return nil
 	})
@@ -99,14 +98,14 @@ func removeProfile(inv clisurface.Invocation, format string) error {
 	p := &namedProfile{Name: name, Profile: connection}
 	if !inv.Bool("keep-token") {
 		if err := revokeProfileToken(p); err != nil {
-			return fmt.Errorf("profiles remove: %w; use --keep-token to remove only the connection", err)
+			return fmt.Errorf("profiles delete: %w; use --keep-token to remove only the connection", err)
 		}
 	}
 	profiles = nil
 	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
 		current, found := profiles[name]
 		if !found || current.Controller.URL != connection.Controller.URL || !sameProfileToken(current.Controller.Token, connection.Controller.Token) {
-			return fmt.Errorf("profiles remove: profile %q changed; reload it before removing it", name)
+			return fmt.Errorf("profiles delete: profile %q changed; reload it before removing it", name)
 		}
 		delete(profiles, name)
 		return nil

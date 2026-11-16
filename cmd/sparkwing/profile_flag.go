@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
@@ -65,7 +64,7 @@ func profileNames(profiles map[string]userconfig.Profile) []string {
 	return names
 }
 
-// safety: internal local clients never apply the CLI's configured default.
+// safety: only the invocation's --profile names a controller; an empty name is the local controller.
 func resolveProfileFlag(name string) (*namedProfile, error) {
 	if name == "" {
 		return nil, nil
@@ -93,40 +92,4 @@ func displayConfigPath(path string) string {
 		}
 	}
 	return path
-}
-
-func applyConfiguredProfile(inv *clisurface.Invocation) error {
-	if inv.Command.Path == "sparkwing run" {
-		return nil
-	}
-	// safety: login --controller names its own profile from the host; a saved default must not capture it.
-	if inv.Has("profile") || inv.Bool("all-repos") || strings.HasPrefix(inv.Command.Path, "sparkwing profiles ") || inv.Command.Path == "sparkwing login" && inv.Has("controller") {
-		return nil
-	}
-	eligible := false
-	for _, flag := range inv.Command.Flags {
-		if flag.Name == "profile" && !flag.Required {
-			eligible = true
-		}
-	}
-	if !eligible {
-		return nil
-	}
-	profiles, _, err := loadProfiles()
-	if err != nil {
-		return err
-	}
-	selected := ""
-	for _, name := range profileNames(profiles) {
-		if profiles[name].Default {
-			if selected != "" {
-				return fmt.Errorf("multiple default profiles; select one with sparkwing profiles set --profile NAME --default")
-			}
-			selected = name
-		}
-	}
-	if selected != "" {
-		inv.Flags["profile"] = []string{selected}
-	}
-	return nil
 }

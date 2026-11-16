@@ -22,7 +22,7 @@ generated job if your repository uses another remote.
 Submit each clean, committed work branch from its own retained worktree:
 
 ```bash
-sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --brief 'Explain the change and its intended result'
+sparkwing run land --detach --route local --allow-risk destructive,prod -- --brief 'Explain the change and its intended result'
 sparkwing queue list --group plan:global:merge-queue
 sparkwing runs status --run <returned-run-id> --follow -o json
 sparkwing runs cancel --run <returned-run-id>
@@ -504,6 +504,9 @@ TypeScript uses the same catalog, controller and job graph as Go. Start with
 must be on PATH. Commit the exact SDK pin and native npm lockfile in
 `.sparkwing/`. Sparkwing installs dependencies with `npm ci` and runs the
 TypeScript entry through Node, rather than compiling a standalone executable.
+Node only strips types, so run `npm exec -- tsc` in `.sparkwing/` to type-check
+the project against the scaffold's `tsconfig.json`. `sparkwing pipeline upgrade`
+runs the same check before it applies a new SDK pin.
 
 ### Registration and dependencies
 
@@ -615,7 +618,7 @@ validates declarations and graphs when they are submitted.
 
 ### Local runs, schedules and child runs
 
-`sparkwing run <name>` runs TypeScript locally. `--sw-detached` submits a local
+`sparkwing run <name>` runs TypeScript locally. `--detach` submits a local
 run that can continue after the CLI exits. Local schedules use the same
 pipeline entry. Consult [Schedules](schedules.md) for installation, proof and
 pinning behavior. TypeScript's Node-plus-script entry cannot use the standalone

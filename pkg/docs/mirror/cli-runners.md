@@ -16,7 +16,7 @@ Manage runners
 - `list` -- List runners and their capacity
 - `pause` -- Stop this machine's runner from claiming new work
 - `resume` -- Let this machine's paused runner claim work again
-- `remove` -- Remove a runner
+- `delete` -- Remove a runner
 
 ### Flags
 
@@ -50,13 +50,33 @@ Without --session-stdin a personal runner can be approved in the browser: the co
 | `--config PATH` | Machine config file to write the runner section into, the standard Sparkwing config file by default. |
 | `--force` | Replace an existing object. |
 | `--no-service` | Write the runner config and credential without installing or starting the runner service. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 | `--reserved-for POOL` | Reserved pools this shared runner holds, which lets a --launcher runner take work and secrets restricted to those pools; a persistent runner holding a pool that a reserved secret names takes no work, and it requires team administration. Repeatable; comma-separated values are accepted. |
 | `--trust CLASS` | Which runs this shared runner takes within its --repos scope, which already admits only repository-proven work: verified-default takes only verified default-branch work (signed pushes to the default branch and unmodified fires of admin-armed default-branch schedules), and any takes every proven run; a runner holding a pool with a reserved secret, or a verified-default runner with any pool, takes nothing unless enrolled with --launcher, and unset such a launcher takes only verified default-branch work. Values: verified-default, any. |
 | `--platform PLATFORM` | Record a shared Kubernetes runner at admin enrollment; a runner in a pod stops at its first poll without it. Values: kubernetes. |
 | `--launcher` | Enroll only claims.launch for a shared reserved pool and skip the persistent runner service. |
 | `--team TEAM` | With browser approval, accept an approval only from this team. |
 | `--service-user USER` | Run the runner under this dedicated, unprivileged OS user instead of your own account, so its jobs cannot read your home. Creates the user when absent and installs a system service running as it; asks for sudo before minting the credential. |
+
+## `sparkwing runners delete`
+
+Remove a runner
+
+Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. With --service-user, stop the system service through sudo, then check the controller and runner name it reports before revoking, and print how to delete the OS user. JSON retains confirmed revocation. Plain emits the runner name.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--config PATH` | Machine config file holding the runner section to remove, the standard Sparkwing config file by default. |
+| `--no-service` | Revoke the runner credential without stopping the installed runner service. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+| `--runner RUNNER` | Runner name or selection. |
+| `--service-user USER` | Remove the runner enrolled with runners add --service-user: stop its system service through sudo, then revoke its token. |
 
 ## `sparkwing runners install-service`
 
@@ -88,7 +108,7 @@ Read the same runner details from the local controller or a selected profile. Th
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 | `-q, --quiet` | Print only runner names. |
 
 ## `sparkwing runners pause`
@@ -106,26 +126,6 @@ Pause the runner enrolled on this machine: it finishes held jobs and claims no n
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--config PATH` | Machine config file holding the enrolled runner section, the standard Sparkwing config file by default. |
-
-## `sparkwing runners remove`
-
-Remove a runner
-
-Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. With --service-user, stop the system service through sudo, then check the controller and runner name it reports before revoking, and print how to delete the OS user. JSON retains confirmed revocation. Plain emits the runner name.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--config PATH` | Machine config file holding the runner section to remove, the standard Sparkwing config file by default. |
-| `--no-service` | Revoke the runner credential without stopping the installed runner service. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
-| `--runner RUNNER` | Runner name or selection. |
-| `--service-user USER` | Remove the runner enrolled with runners add --service-user: stop its system service through sudo, then revoke its token. |
 
 ## `sparkwing runners resume`
 
@@ -147,7 +147,7 @@ Resume the runner enrolled on this machine after runners pause; it claims work a
 
 Remove a dedicated-user runner service (root)
 
-The privileged step of sparkwing runners remove --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix.
+The privileged step of sparkwing runners delete --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix.
 
 ### Flags
 

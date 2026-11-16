@@ -74,7 +74,7 @@ func TestNativeLocalPreparationResolvesTrackingSparksBeforeInstallation(t *testi
 		t.Fatal(err)
 	}
 	_, err = prepareNativeLocalRun(t.Context(), home, dir, "ci", gitcontrol.Env(os.Environ()), snapshots, runFlags{})
-	if err == nil || !strings.Contains(err.Error(), "--sw-no-update") || !strings.Contains(err.Error(), "example.com/dependency@latest") {
+	if err == nil || !strings.Contains(err.Error(), "--no-update") || !strings.Contains(err.Error(), "example.com/dependency@latest") {
 		t.Fatalf("tracking resolution did not precede source installation: %v", err)
 	}
 }

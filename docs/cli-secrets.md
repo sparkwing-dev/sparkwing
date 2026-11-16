@@ -42,7 +42,14 @@ Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and
 | `--secret NAME` | Secret name. (required) |
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# Delete a secret
+sparkwing secrets delete --secret DEPLOY_TOKEN
+```
 
 ## `sparkwing secrets get`
 
@@ -61,7 +68,14 @@ Read a value stored with --variable. A masked secret is readable only by a pipel
 | `--secret NAME` | Secret name. (required) |
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# Read a variable
+sparkwing secrets get --secret REGION
+```
 
 ## `sparkwing secrets list`
 
@@ -80,7 +94,14 @@ List metadata without values, including each pipeline row's repository and pipel
 | `--search PATTERN` | Text to match against record names and summaries; log text is not searched. |
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# List secret names without values
+sparkwing secrets list
+```
 
 ## `sparkwing secrets rotate`
 
@@ -96,7 +117,7 @@ Retain rotated counts and skipped row names/pipelines. The previous key is still
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing secrets set`
 
@@ -104,7 +125,7 @@ Store (or replace) a secret value
 
 Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.
 
-If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.
+If neither --value nor --file is supplied, read the value from stdin. Preserve trailing newlines. Empty stdin or an empty --file is refused; --value '' stores an empty value. --variable stores an unmasked value.
 
 A pipeline secret belongs to one GitHub repository and one pipeline: --repo and --pipeline go together, and only runs whose code Sparkwing fetched from that repository through the team's GitHub App, or whose repository a GitHub Actions job proved, read it; uploaded, local and --runner here runs read only --shared secrets. --repo takes owner/name or a gh:<id> key. --shared stores a team-wide secret every pipeline of every repository in the team reads.
 
@@ -125,5 +146,15 @@ Local unscoped writes are shared with local pipelines. Controller writes preserv
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
 | `--shared` | Store a team-wide secret that every pipeline of every repository in the team reads, including uploaded, local and --runner here runs. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 | `--only-on POOL` | Release the secret only to jobs placed on this reserved runner pool, never to here machines; omitted when replacing a secret, its existing pool restriction is kept. |
+
+### Examples
+
+```sh
+# Store a secret from a file
+sparkwing secrets set --secret DEPLOY_TOKEN --file token.txt
+
+# Store a plain variable
+sparkwing secrets set --secret REGION --value us-east-1 --variable
+```

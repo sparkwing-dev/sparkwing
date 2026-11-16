@@ -10,7 +10,7 @@ import (
 
 // RunRouting selects ownership and overflow without granting controller authority.
 type RunRouting struct {
-	Route           *string           `yaml:"route,omitempty" json:"route,omitempty"`
+	Route           *string           `yaml:"-" json:"route,omitempty"`
 	Profile         *string           `yaml:"profile,omitempty" json:"profile,omitempty"`
 	Prefer          []RoutePreference `yaml:"prefer,omitempty" json:"prefer,omitempty"`
 	OverflowMinutes *int64            `yaml:"overflow_minutes,omitempty" json:"overflow_minutes,omitempty"`
@@ -28,9 +28,6 @@ type RoutePreference struct {
 func ValidateRunRouting(key string, r *RunRouting) error {
 	if r == nil {
 		return nil
-	}
-	if r.Route != nil && *r.Route != "local" && *r.Route != "cloud" {
-		return Invalid(key+".route", "must be local or cloud")
 	}
 	if r.Profile != nil && strings.TrimSpace(*r.Profile) == "" {
 		return Invalid(key+".profile", "must name a user-configured profile")

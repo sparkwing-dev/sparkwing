@@ -229,8 +229,9 @@ sparkwing pipeline plan --pipeline hello
 sparkwing run hello
 ```
 
-This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin,
-`index.ts`, `jobs/hello.ts`, `sparkwing.yaml` and `package-lock.json`. It uses the same `--on`,
+This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin and a
+`typescript` development dependency, `tsconfig.json`, `index.ts`, `jobs/hello.ts`,
+`sparkwing.yaml` and `package-lock.json`. An existing `tsconfig.json` is kept. It uses the same `--on`,
 `--hidden` and `--short` flags as the Go shapes. Repeat the command with another
 pipeline name to add a pipeline to the TypeScript entry. The scaffold runs
 `npm install --package-lock-only` to write the lockfile, and Sparkwing installs
@@ -354,7 +355,7 @@ What still wants the network is visible in advance:
 
 - **A `latest` or range pin.** A `sparks:` entry pinned to `latest`, `^v0.24.0`,
   or `~v0.10.3` asks the module proxy for the newest matching tag on every
-  run. Pass `--sw-no-update` to skip resolution and compile against the
+  run. Pass `--no-update` to skip resolution and compile against the
   overlay already on disk, or pin exact tags and pay nothing. Without the
   flag an unreachable proxy fails the run and the error names it. The
   resolution rules are in [sparks.md](sparks.md).
@@ -481,13 +482,13 @@ composition (parallel, sequence, needs, modifiers), use the `Plan`.
 `sparkwing run` executes on this machine and records to its local store,
 logs, and cache. `sparkwing pipeline trigger <pipeline> --profile
 NAME` hands execution to that profile's controller. `sparkwing run` also takes
-`--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
+`--ref <branch|tag|sha>` to compile a git ref instead of the working
 tree (trigger runs the source registered with the controller, or the
 checkout's uncommitted changes with `--working-tree`):
 
 ```bash
 sparkwing run build                                    # run locally with local code
-sparkwing run build --sw-ref main                      # build the main ref locally
+sparkwing run build --ref main                      # build the main ref locally
 sparkwing pipeline trigger build --profile dev         # run on the "dev" cluster
 sparkwing pipeline trigger build --profile dev --working-tree  # uncommitted changes on "dev"
 sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
@@ -531,23 +532,22 @@ relocate the machine config.
 
 The profile name comes from the controller host unless `--profile` names it.
 An existing profile is replaced only with `--force`. Removing a profile with
-`sparkwing profiles remove --profile NAME` revokes its token first.
+`sparkwing profiles delete --profile NAME` revokes its token first.
 `--keep-token` removes only the saved connection. Project configuration cannot
 supply connection profiles or credentials.
 
-Use `--profile NAME` to select a connection, or save one with
-`sparkwing profiles set --profile prod --default`. Optional-profile commands
-use that default when the flag is omitted. With no saved default they use the
-local controller. `--profile=` selects local for one command.
+Pass `--profile NAME` on each command that should reach a controller. A command
+without it, or with `--profile=`, uses the local controller; no saved setting
+or environment variable selects a connection.
 
-`sparkwing run` keeps its separate machine routing preference. A saved default
-profile does not change local execution. Use `--sw-route cloud --profile NAME`
-to send one run directly to Cloud. Without `--profile`, that explicit route
-uses machine `run.routing.profile`.
+`sparkwing run` stays on this machine unless the invocation passes `--route`.
+Use `--route cloud --profile NAME` to send one run directly to Cloud, or
+`--route burst` to apply the machine `run.routing` overflow preferences.
+Without `--profile`, either route uses machine `run.routing.profile`.
 
 ```bash
 sparkwing profiles show --profile prod        # saved connection, with token redacted
-sparkwing profiles remove --profile prod      # revoke and remove
+sparkwing profiles delete --profile prod      # revoke and remove
 ```
 
 Removal first verifies that the saved credential is a member credential and

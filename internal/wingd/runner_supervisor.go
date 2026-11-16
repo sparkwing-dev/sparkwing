@@ -189,7 +189,8 @@ func WaitLocalRunnerShutdown(ctx context.Context, host crontimer.Host) error {
 	for {
 		output, err := runnerManagerOutput(ctx, host, "systemctl", "--user", "list-units", "--all", "--type=service", "--output=json", "--no-pager", prefix+"*.service")
 		if err != nil {
-			return fmt.Errorf("local runner shutdown is incomplete; could not verify supervised units %s; retry sparkwing daemon stop: %w", strings.Join(pending, ", "), err)
+			return userManagerUnreachable("could not confirm the local runner stopped",
+				fmt.Errorf("local runner shutdown is incomplete; could not verify supervised units %s; retry sparkwing daemon stop: %w", strings.Join(pending, ", "), err))
 		}
 		var units []struct {
 			Unit string `json:"unit"`

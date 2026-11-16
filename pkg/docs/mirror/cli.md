@@ -30,7 +30,7 @@ Interactive debug sessions and compiler/install diagnostic streams retain their
 terminal behavior.
 
 Repository registration uses `repos add --checkout PATH` and
-`repos remove --checkout PATH`. Their JSON receipts include the action,
+`repos delete --checkout PATH`. Their JSON receipts include the action,
 absolute path and affected count. `version hold` and
 `pipeline sparks lint|update` also honor the selected output format.
 
@@ -88,17 +88,17 @@ Unknown engine flags fail before execution setup. Local `run` accepts no
 connection profile. Use `pipeline trigger --profile NAME` to submit to a remote
 controller. The pipeline name selects the deployment shape.
 
-For local execution, `--sw-no-bincache` compiles a fresh Go pipeline executable with debug information.
-`--sw-hash-all-files` also hashes Git-ignored files outside Go's selected build
+For local execution, `--no-bincache` compiles a fresh Go pipeline executable with debug information.
+`--hash-all-files` also hashes Git-ignored files outside Go's selected build
 inputs, including local replacement modules. Compiled and embedded inputs are
 always hashed regardless of Git ignore rules. Both options apply to initial
 inspection and retained execution, including detached runs and retries.
 
-Local `--sw-priority front|back` resolves once against the controller's current
+Local `--priority front|back` resolves once against the controller's current
 machine queue before submission. The sealed request retains the numeric rank.
 
 The CLI resolves the configured pipeline name and SDK entrypoint separately.
-The invoked alias remains visible to author code. `--sw-allow-risk` authorizes
+The invoked alias remains visible to author code. `--allow-risk` authorizes
 declared risk labels. The accepted request retains those permissions, including
 through retry. Raw secret arguments never enter previews or public receipts.
 
@@ -167,7 +167,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `run` | Run a pipeline locally: `sparkwing run <pipeline>` |
 | `schedules` | Arm and manage local or controller schedules |
 | `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / prune, plus `approvals` and `annotations` |
-| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / remove / prune |
+| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / delete / prune |
 | `queue` | `list` reads admission or a selected concurrency group. `priority` changes a queued run's rank. See [Queue views](diagnosing-admission.md#queue-views). |
 | `cache` | The compiled pipeline binary cache and the docs cache: info / prune / explain / warm |
 | `daemon` | The local controller: status / events / restart / stop |
@@ -203,10 +203,9 @@ indexed in [cli-reference.md](cli-reference.md):
 - **Root flags.** `-C DIR`, `--profile NAME` and `-o FORMAT` may go before
   the verb, as in `sparkwing -C ~/code/other runs list`. It selects a local checkout before project discovery.
 - **Profile addressing.** `--profile NAME` picks a private controller
-  connection. Commands with an optional profile use the saved default when
-  omitted, then the local controller when no default is selected. Set it with
-  `profiles set --profile NAME --default`; `--profile=` selects local for one
-  command. Environment and project config cannot choose a default connection.
+  connection for that one command. Without it, or with `--profile=`, every
+  command uses the local controller. No saved setting, environment variable or
+  project config chooses a connection.
   `sparkwing run` executes locally and takes no `--profile`.
   `sparkwing pipeline trigger <pipeline> --profile NAME` submits remote work.
 - **Required flags.** Marked `[required]` in `--help`; missing ones fail

@@ -130,7 +130,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 			timing.Phase("http.response_body_complete")
 			if !mayRetry || attempt >= retries || !retry || ctx.Err() != nil {
 				if err != nil {
-					return fmt.Errorf("controller %s %s: %w", req.Method, req.URL.Path, err)
+					return &RequestError{Method: req.Method, Path: req.URL.Path, Err: err}
 				}
 				return nil
 			}
@@ -140,7 +140,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 			}
 			wait = max(wait, advised)
 			if waitErr := waitFor(ctx, wait); waitErr != nil {
-				return fmt.Errorf("controller %s %s: %w", req.Method, req.URL.Path, errors.Join(err, waitErr))
+				return &RequestError{Method: req.Method, Path: req.URL.Path, Err: errors.Join(err, waitErr)}
 			}
 		}
 		next, err := rewind(req)
@@ -150,6 +150,19 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		req = next
 	}
 }
+
+// RequestError is a controller reply that failed one request. Its text names
+// the route for logs; a CLI renders Err and the subject the user typed instead.
+type RequestError struct {
+	Method, Path string
+	Err          error
+}
+
+func (e *RequestError) Error() string {
+	return fmt.Sprintf("controller %s %s: %v", e.Method, e.Path, e.Err)
+}
+
+func (e *RequestError) Unwrap() error { return e.Err }
 
 // safety: scheduling snapshots repeat plan declarations and accepted expansions, so
 // allow ample space beyond the 4 MiB plan while bounding a faulty peer.

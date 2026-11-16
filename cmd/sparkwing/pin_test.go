@@ -64,7 +64,7 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// With --sw-ref the pin comes from the revision that executes, not from the
+// With --ref the pin comes from the revision that executes, not from the
 // checkout the command was typed in.
 func TestRun_SwRefReadsThePinAtTheExecutedRevision(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -87,9 +87,9 @@ func TestRun_SwRefReadsThePinAtTheExecutedRevision(t *testing.T) {
 	gitIn(t, root, "commit", "-q", "-am", "unpinned")
 	gitIn(t, root, "tag", "unpinned")
 
-	err = dispatchRunArgs([]string{"release", "--sw-ref", "pinned"})
+	err = dispatchRunArgs([]string{"release", "--ref", "pinned"})
 	if err == nil || !strings.Contains(err.Error(), "pinned to a controller profile") {
-		t.Fatalf("--sw-ref to a pinned revision from an unpinned checkout = %v, want the pin refusal", err)
+		t.Fatalf("--ref to a pinned revision from an unpinned checkout = %v, want the pin refusal", err)
 	}
 	dir := filepath.Join(root, ".sparkwing")
 	if err := os.WriteFile(filepath.Join(dir, "sparkwing.yaml"), []byte(pinnedProject), 0o644); err != nil {

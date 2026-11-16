@@ -1120,14 +1120,14 @@ The CLI saves the administration token as `controller.admin_token` with
 revokes the profile's previous tokens. The profile uses the administration
 token until it expires and then the member token. `sparkwing login`,
 `profiles add --force`, `profiles set` with a new token or controller, and
-`profiles remove` drop the administration token and revoke it at the
+`profiles delete` drop the administration token and revoke it at the
 controller that issued it, even when the command points the profile at a
 different controller. When one of them cannot confirm that revocation, it
 exits with an error that names the token and that controller, and either the
 `sparkwing tokens revoke` command that ends it or, when the profile no longer
-names that controller, its console's Machines page. `profiles remove` then
+names that controller, its console's Machines page. `profiles delete` then
 keeps the profile; the others have already saved their change. `profiles
-remove --keep-token` leaves both tokens live. Demotion, removal,
+delete --keep-token` leaves both tokens live. Demotion, removal,
 signing out of the approving browser session and revocation end it at once,
 as they do every member token.
 
@@ -1324,8 +1324,8 @@ whose repository was proven (an App delivery, an Actions push, a schedule, or
 code the controller fetched from GitHub) as the reader's proven repository, and
 that intake sealed as proof eligible: it set no run option outside an
 allow-list of options that only place, schedule or present a run, so no
-`--sw-only`, `--sw-start-at` or `--sw-stop-at`, no dry run, no debug and no
-`--sw-pause-before`, `--sw-pause-after` or `--sw-pause-on-failure` (a paused
+`--only`, `--start-at` or `--stop-at`, no dry run, no debug and no
+`--pause-before`, `--pause-after` or `--pause-on-failure` (a paused
 job can be attached to and edited), and any option added later also keeps it
 from counting (see [security](security.md)). The run must also have
 sealed no environment variables, because a submitted `GOFLAGS` or similar can

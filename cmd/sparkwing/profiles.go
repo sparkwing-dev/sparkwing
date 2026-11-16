@@ -23,7 +23,7 @@ func runProfiles(inv clisurface.Invocation) error {
 	switch inv.Command.Path {
 	case "sparkwing profiles add":
 		return addProfile(inv, format)
-	case "sparkwing profiles remove":
+	case "sparkwing profiles delete":
 		return removeProfile(inv, format)
 	case "sparkwing profiles list":
 		return listProfiles(format)
@@ -83,15 +83,6 @@ func setProfile(inv clisurface.Invocation, format string) error {
 		// safety: an administration token belongs to the sign-in it stepped up from, never to a replacement.
 		if inv.Has("controller") || inv.Bool("token-stdin") {
 			p.Controller.AdminToken, p.Controller.AdminExpiresAt = nil, nil
-		}
-		if inv.Has("default") {
-			p.Default = inv.Bool("default")
-			if p.Default {
-				for other, connection := range profiles {
-					connection.Default = false
-					profiles[other] = connection
-				}
-			}
 		}
 		profiles[name], updated = p, p
 		return nil

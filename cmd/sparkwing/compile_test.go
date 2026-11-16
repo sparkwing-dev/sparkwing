@@ -245,7 +245,7 @@ func TestResolveSparks_ProxyDown_FailsLoudly(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected resolve failure when proxy is down")
 	}
-	if !strings.Contains(err.Error(), "--sw-no-update") {
+	if !strings.Contains(err.Error(), "--no-update") {
 		t.Fatalf("error should hint at --no-update, got: %v", err)
 	}
 }

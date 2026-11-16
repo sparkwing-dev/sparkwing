@@ -175,7 +175,7 @@ func TestProfilesRemoveRevokesOnlyMemberCredential(t *testing.T) {
 				return 500, ""
 			})
 			var result error
-			out := captureStdout(t, func() { result = runProfilesArgs([]string{"remove", "--profile", "prod"}) })
+			out := captureStdout(t, func() { result = runProfilesArgs([]string{"delete", "--profile", "prod"}) })
 			if (result == nil) != tc.wantRemoved {
 				t.Fatalf("removal = %v", result)
 			}
@@ -206,7 +206,7 @@ func TestProfilesRemoveKeepTokenMakesNoRequest(t *testing.T) {
 	})
 	profileHTTPFixture(t, func(*http.Request) (int, string) { t.Fatal("keep-token contacted controller"); return 500, "" })
 	captureStdout(t, func() {
-		if err := runProfilesArgs([]string{"remove", "--profile", "prod", "--keep-token"}); err != nil {
+		if err := runProfilesArgs([]string{"delete", "--profile", "prod", "--keep-token"}); err != nil {
 			t.Fatal(err)
 		}
 	})

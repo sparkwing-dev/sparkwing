@@ -40,6 +40,7 @@ var nonPackageReaders = []struct {
 }{
 	{".github/", []string{".sparkwing/jobs"}},
 	{".github/workflows/release.yaml", []string{"cmd/sparkwing"}},
+	{".github/workflows/runner-isolation-proof.yaml", []string{"bin"}},
 	{"bin/", []string{".sparkwing/jobs"}},
 	{"docs/", []string{"internal/doccheck", "cmd/sparkwing"}},
 	{"docs/migrations/", []string{"internal/store"}},

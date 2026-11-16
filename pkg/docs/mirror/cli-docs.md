@@ -100,3 +100,10 @@ Find the section that answers a question
 | `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
 | `--body` | Include document bodies in search results. |
 | `--topics` | Return matching topic pages instead of individual section hits. |
+
+### Examples
+
+```sh
+# Search the documentation
+sparkwing docs search --search secrets
+```

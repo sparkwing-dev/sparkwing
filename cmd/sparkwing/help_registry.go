@@ -23,6 +23,12 @@ func surfaceHelp(surface clisurface.Command) Command {
 		command.Description = "Search command paths and summaries. Lists return bounded pages and a next_cursor when more matches exist. Markdown export includes the full selected command tree."
 		command.Examples = []Example{{"Find status commands", "sparkwing commands --search status"}, {"Export the reference", "sparkwing commands --format markdown --output plain"}}
 	}
+	if intro, ok := commandIntros[surface.Path]; ok {
+		command.Description, command.Details = intro, strings.Join(surface.Rules, "\n\n")
+	}
+	if examples, ok := commandExamples[surface.Path]; ok {
+		command.Examples = examples
+	}
 	if command.Synopsis == "" {
 		command.Synopsis = strings.TrimPrefix(surface.Path, "sparkwing ")
 	}
@@ -34,6 +40,7 @@ func surfaceHelp(surface clisurface.Command) Command {
 	}
 	for _, flag := range append(clisurface.GlobalFlags(), surface.Flags...) {
 		spec := surfaceFlag(surface.Path, flag)
+		spec.Hot = briefFlags[surface.Path+" --"+flag.Name]
 		if flag.Name == "limit" && spec.Desc == flagDescriptions["limit"] {
 			if slices.ContainsFunc(surface.Flags, func(other clisurface.Flag) bool { return other.Name == "cursor" }) {
 				spec.Desc += " Continue with --cursor when more exist."
@@ -198,8 +205,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing login --scope":                                  "Grants to ask for; defaults to every run and log grant your role holds.",
 	"sparkwing login --force":                                  "Point an existing profile at a different controller.",
 	"sparkwing profiles add --profile":                         "Name for this saved connection; defaults to the controller host.",
-	"sparkwing profiles set --default":                         "Use this profile when an optional --profile is omitted. --default=false restores local selection if this is the default.",
-	"sparkwing pipeline plan --sw-dry-run":                     "Preview dry-run bodies as would_dry_run, safe steps as would_run, and steps without either as would_skip. SkipIf remains evaluated at run time.",
+	"sparkwing pipeline plan --dry-run":                        "Preview dry-run bodies as would_dry_run, safe steps as would_run, and steps without either as would_skip. SkipIf remains evaluated at run time.",
 	"sparkwing pipeline plan --start-at":                       "Preview the run as if it started at this step, marking steps that are neither this step nor downstream of it as skipped.",
 	"sparkwing pipeline plan --stop-at":                        "Preview the run as if it stopped after this step, marking steps that are neither this step nor upstream of it as skipped.",
 	"sparkwing pipeline sparks add --source":                   "Go module path of the spark library to add to the project's spark list.",
@@ -207,7 +213,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing pipeline sparks add --version":                  "Version of the library to declare, latest by default.",
 	"sparkwing pipeline sparks catalog --library":              "Full Go module path of the library whose blocks to list, sparks-core by default, at the version the project declares or latest.",
 	"sparkwing pipeline sparks list --no-resolve":              "Show declared versions only, skipping the module lookup that resolves each to a concrete version.",
-	"sparkwing pipeline sparks remove --spark":                 "Name or source module path of the library to remove from the project's spark list.",
+	"sparkwing pipeline sparks delete --spark":                 "Name or source module path of the library to remove from the project's spark list.",
 	"sparkwing pipeline trigger --detach":                      "Return once the controller accepts the run instead of following its logs to the end; refused with --runner here.",
 	"sparkwing pipeline trigger --pipeline-ref":                "Git revision to load the pipeline definitions from when it differs from the revision being run; it must match any source pin in the repository's configuration.",
 	"sparkwing pipeline trigger --reason":                      "Text the run records to explain why it ran in this CLI; required with --runner here and refused with any other runner.",
@@ -239,8 +245,8 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing runners list --quiet":                           "Print only runner names.",
 	"sparkwing runners pause --config":                         "Machine config file holding the enrolled runner section, the standard Sparkwing config file by default.",
 	"sparkwing runners resume --config":                        "Machine config file holding the enrolled runner section, the standard Sparkwing config file by default.",
-	"sparkwing runners remove --config":                        "Machine config file holding the runner section to remove, the standard Sparkwing config file by default.",
-	"sparkwing runners remove --no-service":                    "Revoke the runner credential without stopping the installed runner service.",
+	"sparkwing runners delete --config":                        "Machine config file holding the runner section to remove, the standard Sparkwing config file by default.",
+	"sparkwing runners delete --no-service":                    "Revoke the runner credential without stopping the installed runner service.",
 	"sparkwing runs annotations add --message":                 "Text of the info-level annotation to attach to the job, or to the step named by --step.",
 	"sparkwing runs annotations list --steps":                  "Also list annotations recorded on the run's steps, not only those on its jobs; --step implies this.",
 	"sparkwing runs approvals approve --comment":               "Comment recorded with the approval.",
@@ -252,7 +258,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing runs grep --max-matches":                        "Most matching lines returned from each job or owner log, 5 by default; zero removes the cap.",
 	"sparkwing runs grep --quiet":                              "Print each matching run ID once instead of the matching lines.",
 	"sparkwing runs grep --sha":                                "Search only runs whose commit SHA starts with this prefix, ignoring case; prefix with ! to exclude.",
-	"sparkwing runs grep --since":                              "Search only runs that started within this lookback, such as 24h, 7d or 2w; 0 sets no bound, and the later of --since and --started-after wins.",
+	"sparkwing runs grep --since":                              "Search only runs that started within this lookback, such as 24h, 7d or 2w; 0 sets no bound, and the later of --since and --started-after wins. With --run, search only lines within it.",
 	"sparkwing runs grep --started-after":                      "Search only runs that started at or after this time: today, yesterday, a lookback such as 7d, YYYY-MM-DD, YYYY-MM-DD HH:MM:SS or RFC 3339, in local time.",
 	"sparkwing runs grep --started-before":                     "Search only runs that started at or before this time, in the same formats as --started-after.",
 	"sparkwing runs grep --status":                             "Search only runs whose status matches exactly; prefix with ! to exclude a status.",
@@ -273,18 +279,11 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing runs list --style":                              "Characters used to draw the recent-status sparkline in pretty --by-pipeline output, ascii by default.",
 	"sparkwing runs list --wait":                               "Poll every 2 seconds until at least one matching run exists, exiting 3 if --wait-timeout passes first.",
 	"sparkwing runs list --wait-timeout":                       "How long --wait polls before giving up, as a Go duration such as 30s or 5m, 2m by default; ignored without --wait.",
-	"sparkwing runs logs --branch":                             "When searching with --grep and no --run, search only runs on this exact branch name; a ! prefix excludes a branch.",
 	"sparkwing runs logs --events-only":                        "Print only lifecycle events, leaving out log output.",
 	"sparkwing runs logs --head":                               "Print only the first N lines of each job or owner log; cannot be combined with --tail.",
 	"sparkwing runs logs --lines":                              "Print only lines A through B, inclusive and counted from 1, of each job or owner log.",
-	"sparkwing runs logs --max-matches":                        "When searching with --grep and no --run, the most matching lines returned from each log, 5 by default; zero removes the cap.",
 	"sparkwing runs logs --no-events":                          "Print only log output, leaving out lifecycle events.",
-	"sparkwing runs logs --quiet":                              "When searching with --grep and no --run, print each matching run ID once instead of the matching lines.",
-	"sparkwing runs logs --sha":                                "When searching with --grep and no --run, search only runs whose commit SHA starts with this prefix, ignoring case.",
-	"sparkwing runs logs --since":                              "With --run, print only lines and events within this lookback, such as 10m or 2d, keeping lines without a timestamp; with --grep and no --run, search only runs that started within it.",
-	"sparkwing runs logs --started-after":                      "When searching with --grep and no --run, search only runs that started at or after this time: today, yesterday, a lookback such as 7d, YYYY-MM-DD or RFC 3339.",
-	"sparkwing runs logs --started-before":                     "When searching with --grep and no --run, search only runs that started at or before this time, in the same formats as --started-after.",
-	"sparkwing runs logs --status":                             "When searching with --grep and no --run, search only runs whose status matches exactly; prefix with ! to exclude a status.",
+	"sparkwing runs logs --since":                              "Print only lines and events within this lookback, such as 10m or 2d, keeping lines without a timestamp.",
 	"sparkwing runs logs --tail":                               "Print only the last N lines of each job or owner log; by default every line is printed.",
 	"sparkwing runs logs --tree":                               "Also include logs from the runs this run started, and from the runs those started.",
 	"sparkwing runs prune --older-than":                        "Delete every finished run that started longer ago than this, such as 72h, 30d or 4w; cannot be combined with --run.",
@@ -394,72 +393,72 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-runner warm --repos":                            "Repository patterns such as github.com/acme/* whose sealed source remote this runner will run, including uploaded working trees that record a matching remote; work from any other repository is refused, and an empty list refuses everything.",
 	"sparkwing-runner warm --submit-env-allow":                 "Requester-submitted environment variable names, exact or ending in _*, that jobs from other machines may receive; others are dropped, none pass by default, and variables this host sets keep the host's value.",
 	"sparkwing-runner warm --team":                             "Team whose GitHub Actions registration --github-actions exchanges against; required with --github-actions and ignored without it.",
+	"sparkwing run --cache-from":                               "Read authorized cache entries from the named controller profile; empty disables the machine default.",
+	"sparkwing run --no-memo":                                  "Execute jobs without reusing memoized results.",
+	"sparkwing run --allow-risk":                               "Authorize the listed pipeline risks. A run narrowed with --only, --start-at or --stop-at needs only the risks of the steps it selects.",
+	"sparkwing run --ref":                                      "Build the pipeline and run against this Git ref.",
+	"sparkwing run --pipeline-ref":                             "Load the pipeline from this Git ref.",
+	"sparkwing run --pause-before":                             "Pause before the selected job.",
+	"sparkwing run --pause-after":                              "Pause after the selected job.",
+	"sparkwing run --pause-on-failure":                         "Keep failed jobs paused for inspection.",
+	"sparkwing run --detach":                                   "Submit work to the local controller and return before it finishes.",
+	"sparkwing run --idempotency-key":                          "Deduplicate detached submissions using this key.",
+	"sparkwing run --request-id":                               "Request identifier for a detached submission.",
+	"sparkwing run --verbose":                                  "Include detailed run output.",
+	"sparkwing run --start-at":                                 "Start execution at the selected step.",
+	"sparkwing run --stop-at":                                  "Stop execution after the selected step.",
+	"sparkwing run --only":                                     "Select jobs matching this pattern.",
+	"sparkwing run --priority":                                 "Scheduling priority for this run.",
+	"sparkwing run --no-update":                                "Skip automatic updates for this invocation.",
+	"sparkwing run --no-bincache":                              "Build without reusing the local pipeline binary cache.",
+	"sparkwing run --hash-all-files":                           "Include all files when computing the local binary cache key.",
+	"sparkwing run --allow-unadmitted":                         "Use an exclusive in-process local controller for CI admission.",
+	"sparkwing run --dry-run":                                  "Preview using declared dry-run bodies and steps marked safe.",
+	"sparkwing run --index":                                    "Capture a Git index for local staged-content checks.",
+	"sparkwing run --run-handle-file":                          "Write the submitted run handle to this file once at intake; it names the run and does not track its status.",
 }
 
 // #nosec G101 -- This is public CLI help text, not a credential value.
 const tokenFlagDescription = "Token identifier or prefix."
 
 var flagDescriptions = map[string]string{
-	"profile":             "Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local.",
-	"repo":                "Repository identity as owner/name. Naming a repository grants no access.",
-	"checkout":            "Path to a local checkout.",
-	"run":                 "Run ID or per-team run number.",
-	"search":              "Text to match against record names and summaries; log text is not searched.",
-	"grep":                "Show only log lines matching this text.",
-	"limit":               "Maximum number of records to print, at least one.",
-	"follow":              "Keep streaming until the observed work finishes.",
-	"all":                 "Include entries that are hidden by default.",
-	"dry-run":             "Show what would change without changing anything.",
-	"yes":                 "Confirm a destructive change without prompting.",
-	"force":               "Replace an existing object.",
-	"pipeline":            "Pipeline name.",
-	"job":                 "Job within the selected run.",
-	"step":                "Step within the selected job.",
-	"schedule":            "Schedule name.",
-	"secret":              "Secret name.",
-	"variable":            "Store an unmasked variable instead of a secret.",
-	"runner":              "Runner name or selection.",
-	"pool":                "Runner pool name.",
-	"token":               tokenFlagDescription,
-	"format":              "Artifact format; markdown exports the full command reference.",
-	"split-dir":           "Directory for one generated Markdown page per command family.",
-	"path":                "Path to select.",
-	"cursor":              "Continue from next_cursor using the same filters.",
-	"shell":               "Shell for completion output.",
-	"section":             "First line of the documentation section.",
-	"topic":               "Documentation topic.",
-	"body":                "Include document bodies in search results.",
-	"full":                "Read the full documentation topic.",
-	"publish":             "Copy this local run's results to the named controller profile.",
-	"agent":               "Coding agent starting this run, such as claude-code:land-agent; none records no agent. Display-only.",
-	"sw-cache-from":       "Read authorized cache entries from the named controller profile; empty disables the machine default.",
-	"sw-no-memo":          "Execute jobs without reusing memoized results.",
-	"sw-allow-risk":       "Authorize the listed pipeline risks. A run narrowed with --sw-only, --sw-start-at or --sw-stop-at needs only the risks of the steps it selects.",
-	"sw-ref":              "Build the pipeline and run against this Git ref.",
-	"sw-pipeline-ref":     "Load the pipeline from this Git ref.",
-	"sw-pause-before":     "Pause before the selected job.",
-	"sw-pause-after":      "Pause after the selected job.",
-	"sw-pause-on-failure": "Keep failed jobs paused for inspection.",
-	"sw-detached":         "Submit work to the local controller and return before it finishes.",
-	"sw-idempotency-key":  "Deduplicate detached submissions using this key.",
-	"sw-request-id":       "Request identifier for a detached submission.",
-	"sw-verbose":          "Include detailed run output.",
-	"sw-start-at":         "Start execution at the selected step.",
-	"sw-stop-at":          "Stop execution after the selected step.",
-	"sw-only":             "Select jobs matching this pattern.",
-	"sw-priority":         "Scheduling priority for this run.",
-	"sw-no-update":        "Skip automatic updates for this invocation.",
-	"sw-no-bincache":      "Build without reusing the local pipeline binary cache.",
-	"sw-hash-all-files":   "Include all files when computing the local binary cache key.",
-	"sw-allow-unadmitted": "Use an exclusive in-process local controller for CI admission.",
-	"sw-dry-run":          "Preview using declared dry-run bodies and steps marked safe.",
-	"sw-index":            "Capture a Git index for local staged-content checks.",
-	"sw-run-handle-file":  "Write the submitted run handle to this file once at intake; it names the run and does not track its status.",
-	"controller":          "Controller URL for this connection profile.",
-	"token-stdin":         "Read the controller credential from standard input.",
-	"scope":               "Credential scope.",
-	"no-probe":            "Skip checking the controller connection.",
-	"keep-token":          "Remove only the local connection, without revoking its token at the controller.",
+	"profile":     "Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller.",
+	"repo":        "Repository identity as owner/name. Naming a repository grants no access.",
+	"checkout":    "Path to a local checkout.",
+	"run":         "Run ID or per-team run number.",
+	"search":      "Text to match against record names and summaries; log text is not searched.",
+	"grep":        "Show only log lines matching this text.",
+	"limit":       "Maximum number of records to print, at least one.",
+	"follow":      "Keep streaming until the observed work finishes.",
+	"all":         "Include entries that are hidden by default.",
+	"dry-run":     "Show what would change without changing anything.",
+	"yes":         "Confirm a destructive change without prompting.",
+	"force":       "Replace an existing object.",
+	"pipeline":    "Pipeline name.",
+	"job":         "Job within the selected run.",
+	"step":        "Step within the selected job.",
+	"schedule":    "Schedule name.",
+	"secret":      "Secret name.",
+	"variable":    "Store an unmasked variable instead of a secret.",
+	"runner":      "Runner name or selection.",
+	"pool":        "Runner pool name.",
+	"token":       tokenFlagDescription,
+	"format":      "Artifact format; markdown exports the full command reference.",
+	"split-dir":   "Directory for one generated Markdown page per command family.",
+	"path":        "Path to select.",
+	"cursor":      "Continue from next_cursor using the same filters.",
+	"shell":       "Shell for completion output.",
+	"section":     "First line of the documentation section.",
+	"topic":       "Documentation topic.",
+	"body":        "Include document bodies in search results.",
+	"full":        "Read the full documentation topic.",
+	"publish":     "Copy this local run's results to the named controller profile.",
+	"agent":       "Coding agent starting this run, such as claude-code:land-agent; none records no agent. Display-only.",
+	"controller":  "Controller URL for this connection profile.",
+	"token-stdin": "Read the controller credential from standard input.",
+	"scope":       "Credential scope.",
+	"no-probe":    "Skip checking the controller connection.",
+	"keep-token":  "Remove only the local connection, without revoking its token at the controller.",
 }
 
 // #nosec G101 -- This is public CLI help text, not a credential value.
@@ -499,7 +498,7 @@ var commandSynopses = map[string]string{
 	"sparkwing __runner-account-read":               "Read a dedicated runner account's enrollment (runs as that account)",
 	"sparkwing __tick":                              "Evaluate every armed schedule once (the OS timer's entry point)",
 	"sparkwing cache":                               "Inspect or trim the compiled pipeline binary cache",
-	"sparkwing cache explain":                       "Show a pipeline's cache key and the inputs behind it",
+	"sparkwing cache explain":                       "Show this repository's pipeline binary cache key and its inputs",
 	"sparkwing cache info":                          "Print cache dir, size, ceilings, and recent entries",
 	"sparkwing cache prune":                         "Prune oldest cached binaries down to the ceilings",
 	"sparkwing cache warm":                          "Prepare the local pipeline cache and dependencies",
@@ -562,7 +561,7 @@ var commandSynopses = map[string]string{
 	"sparkwing pipeline sparks inflate":             "Copy a spark library's source into this repo so you can edit it",
 	"sparkwing pipeline sparks lint":                "Validate a spark.json library manifest",
 	"sparkwing pipeline sparks list":                "Show declared sparks libraries and their resolved versions",
-	"sparkwing pipeline sparks remove":              "Remove a library from the sparks: block",
+	"sparkwing pipeline sparks delete":              "Remove a library from the sparks: block",
 	"sparkwing pipeline sparks update":              "Re-resolve every declared library",
 	"sparkwing pipeline trigger":                    "Submit a pipeline run to a controller",
 	"sparkwing overflow":                            "Manage your Cloud overflow allowance",
@@ -584,8 +583,8 @@ var commandSynopses = map[string]string{
 	"sparkwing profiles":                            "Manage controller connection profiles",
 	"sparkwing profiles add":                        "Add a controller connection profile",
 	"sparkwing profiles list":                       "Print every registered profile",
-	"sparkwing profiles remove":                     "Remove a controller connection profile",
-	"sparkwing profiles set":                        "Update a connection or select the default profile",
+	"sparkwing profiles delete":                     "Remove a controller connection profile",
+	"sparkwing profiles set":                        "Update a profile's controller URL or token",
 	"sparkwing profiles show":                       "Print one controller connection profile",
 	"sparkwing queue":                               "Inspect queued work and scheduling priority",
 	"sparkwing queue list":                          "List running and queued work with expected start and finish",
@@ -595,7 +594,7 @@ var commandSynopses = map[string]string{
 	"sparkwing repos info":                          "Inspect repository versions, worktrees, and pipelines",
 	"sparkwing repos list":                          "List the machine's fleet of sparkwing repos",
 	"sparkwing repos prune":                         "Remove checkouts whose pipeline directory is gone",
-	"sparkwing repos remove":                        "Remove a registered checkout",
+	"sparkwing repos delete":                        "Remove a registered checkout",
 	"sparkwing repos update":                        "Update repository SDK versions and compare pipeline plans",
 	"sparkwing run":                                 "Invoke a pipeline",
 	"sparkwing runners":                             "Manage runners",
@@ -603,7 +602,7 @@ var commandSynopses = map[string]string{
 	"sparkwing runners list":                        "List runners and their capacity",
 	"sparkwing runners pause":                       "Stop this machine's runner from claiming new work",
 	"sparkwing runners resume":                      "Let this machine's paused runner claim work again",
-	"sparkwing runners remove":                      "Remove a runner",
+	"sparkwing runners delete":                      "Remove a runner",
 	"sparkwing runners install-service":             "Install a runner service under a dedicated OS user (root)",
 	"sparkwing runners uninstall-service":           "Remove a dedicated-user runner service (root)",
 	"sparkwing runs":                                "Inspect and control pipeline runs",
@@ -672,3 +671,143 @@ var (
 	cmdAnnotationsList  = surfaceCommand("sparkwing runs annotations list")
 	cmdAnnotationsAdd   = surfaceCommand("sparkwing runs annotations add")
 )
+
+var commandSectionOrder = []string{"Local", "Cloud", "Admin and help"}
+
+var commandSectionSummaries = map[string]string{
+	"Local":          "Run and inspect pipelines on this machine",
+	"Cloud":          "Work with a controller you select with --profile",
+	"Admin and help": "Operate a controller, maintain this install and find answers",
+}
+
+var commandSections = map[string]string{
+	"sparkwing run":           "Local",
+	"sparkwing runs":          "Local",
+	"sparkwing pipeline":      "Local",
+	"sparkwing secrets":       "Local",
+	"sparkwing schedules":     "Local",
+	"sparkwing cache":         "Local",
+	"sparkwing dashboard":     "Local",
+	"sparkwing daemon":        "Local",
+	"sparkwing debug":         "Local",
+	"sparkwing repos":         "Local",
+	"sparkwing queue":         "Local",
+	"sparkwing login":         "Cloud",
+	"sparkwing profiles":      "Cloud",
+	"sparkwing runners":       "Cloud",
+	"sparkwing pools":         "Cloud",
+	"sparkwing team":          "Cloud",
+	"sparkwing tokens":        "Cloud",
+	"sparkwing subscriptions": "Cloud",
+	"sparkwing billing":       "Cloud",
+	"sparkwing overflow":      "Cloud",
+	"sparkwing operator":      "Admin and help",
+	"sparkwing update":        "Admin and help",
+	"sparkwing version":       "Admin and help",
+	"sparkwing doctor":        "Admin and help",
+	"sparkwing completion":    "Admin and help",
+	"sparkwing info":          "Admin and help",
+	"sparkwing commands":      "Admin and help",
+	"sparkwing docs":          "Admin and help",
+	"sparkwing examples":      "Admin and help",
+}
+
+// hack: plain --help shows this intro in place of the reference rules, which --help-all adds back as details.
+var commandIntros = map[string]string{
+	"sparkwing run": "Run a pipeline from this repository on this machine. The local runner executes its jobs and the command prints their logs until the run finishes, then exits nonzero if the run failed.\n\n" +
+		"Pass the pipeline's own arguments after --. `sparkwing run <pipeline> --help` lists the arguments a pipeline takes.\n\n" +
+		"Look at past runs with `sparkwing runs list` and `sparkwing runs logs --run ID`. To run on a controller instead of this machine, use `sparkwing pipeline trigger <pipeline> --profile NAME`.\n\n" +
+		"`sparkwing run --help-all` adds Cloud routing, publication, CI use without the shared controller, step windows and every flag.",
+}
+
+var briefFlags = map[string]bool{
+	"sparkwing run --detach":   true,
+	"sparkwing run --dry-run":  true,
+	"sparkwing run --only":     true,
+	"sparkwing run --ref":      true,
+	"sparkwing run --verbose":  true,
+	"sparkwing run --output":   true,
+	"sparkwing run --help":     true,
+	"sparkwing run --help-all": true,
+}
+
+var commandExamples = map[string][]Example{
+	"sparkwing run": {
+		{"Run the hello pipeline on this machine", "sparkwing run hello"},
+		{"Pass arguments to the pipeline after --", "sparkwing run deploy -- --env staging"},
+		{"List the arguments a pipeline takes", "sparkwing run deploy --help"},
+	},
+	"sparkwing runs list": {
+		{"Show recent runs", "sparkwing runs list"},
+		{"Show failed runs of one pipeline", "sparkwing runs list --pipeline build --status failed"},
+	},
+	"sparkwing runs status": {
+		{"Show a run's jobs and outcome", "sparkwing runs status --run RUN_ID"},
+		{"Wait until a run finishes", "sparkwing runs status --run RUN_ID --follow"},
+	},
+	"sparkwing runs logs": {
+		{"Read a run's logs", "sparkwing runs logs --run RUN_ID"},
+		{"Follow one job's log while it runs", "sparkwing runs logs --run RUN_ID --job build --follow"},
+	},
+	"sparkwing runs grep": {
+		{"Search the last day's logs", "sparkwing runs grep --grep timeout --since 24h"},
+		{"Search one run's logs", "sparkwing runs grep --run RUN_ID --grep timeout"},
+	},
+	"sparkwing runs cancel": {
+		{"Cancel a run", "sparkwing runs cancel --run RUN_ID"},
+	},
+	"sparkwing runs retry": {
+		{"Retry only the failed jobs of a run", "sparkwing runs retry --run RUN_ID --failed"},
+	},
+	"sparkwing pipeline list": {
+		{"List this repository's pipelines", "sparkwing pipeline list"},
+		{"Find pipelines about deploys", "sparkwing pipeline list --search deploy"},
+	},
+	"sparkwing pipeline describe": {
+		{"Show a pipeline's jobs, arguments and triggers", "sparkwing pipeline describe --pipeline build"},
+	},
+	"sparkwing pipeline new": {
+		{"Add a pipeline to this repository", "sparkwing pipeline new --pipeline lint"},
+	},
+	"sparkwing pipeline trigger": {
+		{"Run a pipeline on a controller", "sparkwing pipeline trigger deploy --profile prod"},
+		{"Return as soon as the controller accepts it", "sparkwing pipeline trigger deploy --profile prod --detach"},
+	},
+	"sparkwing secrets set": {
+		{"Store a secret from a file", "sparkwing secrets set --secret DEPLOY_TOKEN --file token.txt"},
+		{"Store a plain variable", "sparkwing secrets set --secret REGION --value us-east-1 --variable"},
+	},
+	"sparkwing secrets get": {
+		{"Read a variable", "sparkwing secrets get --secret REGION"},
+	},
+	"sparkwing secrets list": {
+		{"List secret names without values", "sparkwing secrets list"},
+	},
+	"sparkwing secrets delete": {
+		{"Delete a secret", "sparkwing secrets delete --secret DEPLOY_TOKEN"},
+	},
+	"sparkwing schedules list": {
+		{"List this repository's schedules", "sparkwing schedules list"},
+	},
+	"sparkwing schedules show": {
+		{"Show a schedule and its next three fires", "sparkwing schedules show --schedule nightly --next 3"},
+	},
+	"sparkwing profiles add": {
+		{"Save a controller connection, reading the token from stdin", "sparkwing profiles add --controller https://ci.example.com --profile prod --token-stdin"},
+	},
+	"sparkwing login": {
+		{"Sign this machine in to a controller through the browser", "sparkwing login --controller https://ci.example.com"},
+	},
+	"sparkwing dashboard open": {
+		{"Print a sign-in link for the local dashboard", "sparkwing dashboard open"},
+	},
+	"sparkwing daemon stop": {
+		{"Stop the local controller, dashboard and runner", "sparkwing daemon stop"},
+	},
+	"sparkwing docs search": {
+		{"Search the documentation", "sparkwing docs search --search secrets"},
+	},
+	"sparkwing cache explain": {
+		{"Show why the next run reuses or rebuilds the pipeline binary", "sparkwing cache explain"},
+	},
+}

@@ -33,3 +33,10 @@ JSON and plain output match profiles show; the token is never printed.
 | `--scope GRANT` | Grants to ask for; defaults to every run and log grant your role holds. Values: runs.read, logs.read, runs.write, runs.control, approvals.write. Repeatable; comma-separated values are accepted. |
 | `--force` | Point an existing profile at a different controller. |
 | `--admin` | Step a signed-in profile up to one hour of team administration; only a team owner can approve it |
+
+### Examples
+
+```sh
+# Sign this machine in to a controller through the browser
+sparkwing login --controller https://ci.example.com
+```

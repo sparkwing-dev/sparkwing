@@ -33,7 +33,7 @@ func (Land) ShortHelp() string {
 
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
-		"For ordinary Land, fetch origin/main and pass --sw-pipeline-ref <fetched-main-SHA> so the candidate does not define its own gate. " +
+		"For ordinary Land, fetch origin/main and pass --pipeline-ref <fetched-main-SHA> so the candidate does not define its own gate. " +
 		"All lands share one serial run slot. Extract bin/queue-land.sh from freshly fetched origin/main and run that copy against the candidate with --brief 'Short intent' (see DELIVERY.md). The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, then run policy and fast pre-push checks against the merged checkout. After both pass and release their reservations, run review alongside the shared affected short and critical Go tests in one fail-fast job. A review or test failure cancels its sibling and refuses the land. Push only the unchanged commit whose policy, fast checks, review and tests passed. The queued push proves fast-forward ancestry, atomically leases the planned main SHA, and refuses already-at-target results. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
@@ -46,15 +46,15 @@ func (Land) Help() string {
 		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure, repeats the fast push checks including qatrust vet and the contract checks, and runs affected tests once over the files " +
 		"that differ between the gated tree and the merged tree, then pushes the merge; the review is not run again. It merges at most 3 times; a conflict fails " +
 		"and names the merge to run by hand. The push step carries the destructive and prod risks, " +
-		"so a real landing needs --sw-allow-risk destructive,prod. The land job's output is the landing record: branch, the commit and tree pushed, " +
+		"so a real landing needs --allow-risk destructive,prod. The land job's output is the landing record: branch, the commit and tree pushed, " +
 		"the tree the gate and review judged, base, merges, the run that gated it, and the review record's path and result."
 }
 
 func (Land) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Preview with freshly fetched main's pipeline", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-dry-run"},
-		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-stop-at verify --sw-allow-risk destructive,prod"},
-		{Comment: "Land the branch with main's pipeline", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-allow-risk destructive,prod"},
+		{Comment: "Preview with freshly fetched main's pipeline", Command: "sparkwing run land --pipeline-ref <fetched-main-SHA> --dry-run"},
+		{Comment: "Gate and review without pushing", Command: "sparkwing run land --pipeline-ref <fetched-main-SHA> --stop-at verify --allow-risk destructive,prod"},
+		{Comment: "Land the branch with main's pipeline", Command: "sparkwing run land --pipeline-ref <fetched-main-SHA> --allow-risk destructive,prod"},
 	}
 }
 

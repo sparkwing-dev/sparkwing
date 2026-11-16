@@ -33,7 +33,7 @@ func captureLocalRunEnvironment(ctx context.Context, home, checkout, index strin
 		return runspec.EnvSnapshot{}, err
 	}
 	if !info.Mode().IsRegular() {
-		return runspec.EnvSnapshot{}, errors.New("run: --sw-index requires a regular Git index file")
+		return runspec.EnvSnapshot{}, errors.New("run: --index requires a regular Git index file")
 	}
 	body, err := os.ReadFile(index)
 	if err != nil {

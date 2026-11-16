@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,30 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-const typeScriptSDKVersion = "0.72.4"
+const typeScriptSDKVersion = "0.74.0"
+
+// safety: `pipeline upgrade` type-checks with the project's own tsc, so the scaffold locks
+// the compiler beside the SDK rather than relying on whatever tsc is on PATH.
+const typeScriptCompilerVersion = "5.9.3"
+
+// safety: Node runs the pipeline by stripping types, so the config only type-checks: erasable
+// syntax, explicit .ts imports, and NodeNext resolution of the SDK package.
+const typeScriptConfig = `{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["**/*.ts"]
+}
+`
 
 const typeScriptDocsPointer = "// TypeScript API: `sparkwing docs read --topic sdk` pairs each Go example with its\n" +
 	"// TypeScript form, and `sparkwing docs read --topic sdk-typescript-reference` lists every export.\n"
@@ -58,8 +82,11 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 	manifestPath := filepath.Join(dir, "package.json")
 	manifest, err := os.ReadFile(manifestPath)
 	if errors.Is(err, os.ErrNotExist) {
-		manifest = []byte(fmt.Sprintf("{\n  \"private\": true,\n  \"type\": \"module\",\n  \"main\": \"index.ts\",\n  \"dependencies\": {\"@sparkwing/sdk\": %s}\n}\n", strconv.Quote(typeScriptSDKVersion)))
+		manifest = []byte(fmt.Sprintf("{\n  \"private\": true,\n  \"type\": \"module\",\n  \"main\": \"index.ts\",\n  \"dependencies\": {\"@sparkwing/sdk\": %s},\n  \"devDependencies\": {\"typescript\": %s}\n}\n", strconv.Quote(typeScriptSDKVersion), strconv.Quote(typeScriptCompilerVersion)))
 		if err := os.WriteFile(manifestPath, manifest, 0o644); err != nil {
+			return err
+		}
+		if err := writeTypeScriptConfig(dir); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -113,6 +140,18 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 		return err
 	}
 	return finishScaffold(dir, file, name, !found, trigger, mode)
+}
+
+func writeTypeScriptConfig(dir string) error {
+	file, err := os.OpenFile(filepath.Join(dir, "tsconfig.json"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = file.WriteString(typeScriptConfig)
+	return errors.Join(err, file.Close())
 }
 
 // safety: the run installs the SDK with npm ci, which refuses a project without package-lock.json.

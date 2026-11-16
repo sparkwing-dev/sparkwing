@@ -121,7 +121,7 @@ func TestLoginAdminSavesAnHourOfAdministrationBesideTheMemberToken(t *testing.T)
 		t.Fatalf("an expired administration token is still reported: %+v", expiredRecord)
 	}
 
-	inv, err := clisurface.Parse("sparkwing", []string{"profiles", "remove", "--profile", "work", "-o", "json"})
+	inv, err := clisurface.Parse("sparkwing", []string{"profiles", "delete", "--profile", "work", "-o", "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestLoginAdminSavesAnHourOfAdministrationBesideTheMemberToken(t *testing.T)
 		}
 	})
 	if !f.revoked(t, *c.Token) || !f.revoked(t, *c.AdminToken) {
-		t.Fatal("profiles remove left the member or administration token live")
+		t.Fatal("profiles delete left the member or administration token live")
 	}
 }
 
@@ -408,7 +408,7 @@ func TestEveryReplacementFailsWhenTheOldControllerCannotRevokeTheAdminToken(t *t
 				t.Fatalf("%v = %v, want a failure naming the unreachable controller and %q", tc.args, err, tc.hint)
 			}
 			if strings.Contains(err.Error(), "--keep-token") {
-				t.Fatalf("the failure suggests a profiles remove flag: %v", err)
+				t.Fatalf("the failure suggests a profiles delete flag: %v", err)
 			}
 		})
 	}

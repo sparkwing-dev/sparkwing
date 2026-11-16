@@ -40,9 +40,6 @@ func (f *deviceLoginFixture) run(t *testing.T, args ...string) error {
 	if err != nil {
 		return err
 	}
-	if err := applyConfiguredProfile(&inv); err != nil {
-		return err
-	}
 	if inv.Command.Path == "sparkwing login" {
 		return login(inv, f.console)
 	}
@@ -129,7 +126,7 @@ func (f *deviceLoginFixture) browser(t *testing.T, decision, code string) int {
 }
 
 func TestLoginSavesTheTokenTheBrowserApproved(t *testing.T) {
-	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://controller.example }\n    default: true\n")
+	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://controller.example }\n")
 	f := newDeviceLoginFixture(t, "approve")
 	var err error
 	out := captureStdout(t, func() {
@@ -143,7 +140,7 @@ func TestLoginSavesTheTokenTheBrowserApproved(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved := profiles["work"]
-	if saved.Controller.URL != "https://controller.example" || saved.Controller.Token == nil || !saved.Default {
+	if saved.Controller.URL != "https://controller.example" || saved.Controller.Token == nil {
 		t.Fatalf("saved profile = %+v", saved)
 	}
 	if strings.Contains(out, *saved.Controller.Token) {
@@ -213,13 +210,13 @@ func TestBrowserApprovalRefusesScriptsAndSharedRunners(t *testing.T) {
 	}
 }
 
-func TestLoginWithControllerIgnoresTheSavedDefaultProfile(t *testing.T) {
-	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://elsewhere.example }\n    default: true\n")
+func TestLoginWithControllerKeepsOtherProfiles(t *testing.T) {
+	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://elsewhere.example }\n")
 	f := newDeviceLoginFixture(t, "approve")
 	var err error
 	captureStdout(t, func() { err = f.run(t, "login", "--controller", "https://controller.example", "--output", "json") })
 	if err != nil {
-		t.Fatalf("login beside a default profile: %v", err)
+		t.Fatalf("login beside another profile: %v", err)
 	}
 	profiles, _, err := loadProfiles()
 	if err != nil || profiles["work"].Controller.URL != "https://elsewhere.example" || profiles["controller-example"].Controller.Token == nil {

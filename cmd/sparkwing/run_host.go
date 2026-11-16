@@ -315,11 +315,11 @@ func validateLocalRunFlags(flags runFlags) error {
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
-	if flags.profile != "" && flags.route != "cloud" {
-		return errors.New("run: --profile requires --sw-route cloud")
+	if flags.profile != "" && flags.route != "cloud" && flags.route != "burst" {
+		return errors.New("run: --profile requires --route cloud or --route burst")
 	}
-	if flags.route != "" && flags.route != "local" && flags.route != "cloud" {
-		return errors.New("run: --sw-route must be local or cloud")
+	if flags.route != "" && flags.route != "local" && flags.route != "cloud" && flags.route != "burst" {
+		return errors.New("run: --route must be local, cloud or burst")
 	}
 	if flags.prioritySet || flags.priority != "" {
 		if _, err := validatePriorityFlag(flags.priority); err != nil {
@@ -327,7 +327,7 @@ func validateLocalRunFlags(flags runFlags) error {
 		}
 	}
 	if flags.allowUnadmitted && flags.detached {
-		return &clisurface.UsageError{Path: "sparkwing run", Message: "--sw-allow-unadmitted uses an in-process controller and cannot detach"}
+		return &clisurface.UsageError{Path: "sparkwing run", Message: "--allow-unadmitted uses an in-process controller and cannot detach"}
 	}
 	if !flags.detached {
 		return refuseDetachedOnlyFlags(flags)
@@ -337,7 +337,7 @@ func validateLocalRunFlags(flags runFlags) error {
 
 func refuseDetachedOnlyFlags(flags runFlags) error {
 	if flags.idempotencyKey != "" {
-		return fmt.Errorf("run: --sw-idempotency-key is read only by a detached launch; add --sw-detached, or drop the flag")
+		return fmt.Errorf("run: --idempotency-key is read only by a detached launch; add --detach, or drop the flag")
 	}
 	return nil
 }

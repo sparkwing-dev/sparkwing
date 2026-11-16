@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/tabwriter"
 )
@@ -55,12 +56,17 @@ type Example struct {
 type SubcommandRef struct {
 	Name     string
 	Synopsis string
+	Section  string
 }
 
 type Command struct {
 	Path        string
 	Synopsis    string
 	Description string
+	// Details is the reference text --help-all adds under Description.
+	Details string
+	// ShowAll renders Details and every flag, as --help-all asks.
+	ShowAll bool
 
 	SubcommandOrder    []string
 	SubcommandOptional bool
@@ -103,7 +109,7 @@ func (c Command) declaredFlags() map[string]bool {
 }
 
 func PrintHelp(cmd Command, w io.Writer) {
-	printHelpWithFlags(cmd, w, visibleFlagsForHelp(cmd, false))
+	printHelpWithFlags(cmd, w, visibleFlagsForHelp(cmd, !cmd.ShowAll))
 }
 
 func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
@@ -146,15 +152,16 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 		}
 		fmt.Fprintln(w)
 	}
+	if cmd.Details != "" && cmd.ShowAll {
+		fmt.Fprintln(w, "DETAILS")
+		for _, line := range strings.Split(strings.TrimRight(cmd.Details, "\n"), "\n") {
+			fmt.Fprint(w, "  ", line, "\n")
+		}
+		fmt.Fprintln(w)
+	}
 
 	if len(visible) > 0 {
-		fmt.Fprintln(w, "COMMANDS")
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		for _, s := range visible {
-			fmt.Fprint(tw, "  ", s.Name, "\t", s.Synopsis, "\n")
-		}
-		_ = tw.Flush()
-		fmt.Fprintln(w)
+		printSubcommands(w, visible)
 	}
 
 	if len(cmd.PosArgs) > 0 {
@@ -192,6 +199,40 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 				fmt.Fprintln(w)
 			}
 		}
+		fmt.Fprintln(w)
+	}
+}
+
+// hack: each section header is a tab-writer row, so its summary lines up with that section's synopses.
+func printSubcommands(w io.Writer, visible []SubcommandRef) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if !slices.ContainsFunc(visible, func(s SubcommandRef) bool { return s.Section != "" }) {
+		fmt.Fprintln(tw, "COMMANDS")
+		for _, s := range visible {
+			fmt.Fprint(tw, "  ", s.Name, "\t", s.Synopsis, "\n")
+		}
+		if tw.Flush() == nil {
+			fmt.Fprintln(w)
+		}
+		return
+	}
+	for i, section := range commandSectionOrder {
+		if i > 0 {
+			fmt.Fprintln(tw)
+		}
+		fmt.Fprintln(tw, strings.ToUpper(section)+"\t"+commandSectionSummaries[section])
+		names := []SubcommandRef{}
+		for _, s := range visible {
+			if s.Section == section {
+				names = append(names, s)
+			}
+		}
+		slices.SortFunc(names, func(a, b SubcommandRef) int { return strings.Compare(a.Name, b.Name) })
+		for _, s := range names {
+			fmt.Fprint(tw, "  ", s.Name, "\t", s.Synopsis, "\n")
+		}
+	}
+	if tw.Flush() == nil {
 		fmt.Fprintln(w)
 	}
 }
@@ -266,7 +307,7 @@ func filterSubcommands(parent Command, dropHideFromComplete bool) []SubcommandRe
 		if dropHideFromComplete && c.HideFromComplete {
 			return
 		}
-		out = append(out, SubcommandRef{Name: name, Synopsis: c.Synopsis})
+		out = append(out, SubcommandRef{Name: name, Synopsis: c.Synopsis, Section: commandSections[c.Path]})
 	}
 
 	for _, name := range parent.SubcommandOrder {

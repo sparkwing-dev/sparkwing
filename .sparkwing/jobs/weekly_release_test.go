@@ -86,7 +86,7 @@ printf '%s\n' "$@" > "$RELEASE_TEST_CALL"
 printf '%s\n' "$SPARKWING_HOME" >> "$RELEASE_TEST_CALL"
 git -C "$4" rev-parse HEAD >> "$RELEASE_TEST_CALL"
 if git -C "$4" symbolic-ref -q HEAD; then exit 90; fi
-case "$*" in *--sw-dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
+case "$*" in *--dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 `)
 			toolsHead := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
 			ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
@@ -110,18 +110,18 @@ case "$*" in *--sw-dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 					t.Fatal(readErr)
 				}
 				text := string(got)
-				for _, want := range []string{"run\nrelease-cut\n-C\n", "--version\nv0.1.0\n", "--commit\n" + head, "--sw-pipeline-ref\n" + toolsHead + "\n"} {
+				for _, want := range []string{"run\nrelease-cut\n-C\n", "--version\nv0.1.0\n", "--commit\n" + head, "--pipeline-ref\n" + toolsHead + "\n"} {
 					if !strings.Contains(text, want) {
 						t.Fatalf("cut call lacks %q: %s", want, text)
 					}
 				}
-				if got, want := strings.Contains(text, "--sw-start-at\nversion-freshness\n"), !strings.HasPrefix(mode, "manual-"); got != want {
+				if got, want := strings.Contains(text, "--start-at\nversion-freshness\n"), !strings.HasPrefix(mode, "manual-"); got != want {
 					t.Fatalf("CI reuse = %v, want %v: %s", got, want, text)
 				}
-				if strings.Contains(text, "--sw-dry-run") != (mode == "dry-run") {
+				if strings.Contains(text, "--dry-run") != (mode == "dry-run") {
 					t.Fatalf("dry-run propagation: %s", text)
 				}
-				if strings.Contains(text, "--sw-allow-risk") != (mode != "dry-run") {
+				if strings.Contains(text, "--allow-risk") != (mode != "dry-run") {
 					t.Fatalf("risk propagation: %s", text)
 				}
 				workflow, workflowErr := os.ReadFile(call + ".workflow")

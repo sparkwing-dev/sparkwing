@@ -40,7 +40,7 @@ func TestLocalReleaseRefusalPreservesPopulatedStoreAndShowsRemedy(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.CommandContext(t.Context(), os.Args[0], "run", "release", "--sw-dry-run", "--sw-no-update", "--sw-allow-unadmitted", "-o=plain")
+	command := exec.CommandContext(t.Context(), os.Args[0], "run", "release", "--dry-run", "--no-update", "--allow-unadmitted", "-o=plain")
 	command.Dir = root
 	diagnostic, err := command.CombinedOutput()
 	var refusal *exec.ExitError

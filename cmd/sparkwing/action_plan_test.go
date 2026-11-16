@@ -362,7 +362,7 @@ func main(){sw.Register("labels",func() sw.Pipeline[sw.NoInputs]{return pipeline
 
 func dryRunPreview(t *testing.T) planPreviewDoc {
 	t.Helper()
-	parsed, _, err := parsePipelinePlanArgs([]string{"--pipeline", "demo", "--sw-dry-run"})
+	parsed, _, err := parsePipelinePlanArgs([]string{"--pipeline", "demo", "--dry-run"})
 	if err != nil || !parsed.dryRun {
 		t.Fatalf("dry-run option: %+v, %v", parsed, err)
 	}

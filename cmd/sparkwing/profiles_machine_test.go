@@ -19,7 +19,7 @@ func TestProfilesEditPreservesOtherMachineSettings(t *testing.T) {
 	for _, args := range [][]string{
 		{"add", "--profile", "prod", "--controller", "https://api.example", "--no-probe"},
 		{"set", "--profile", "prod", "--token-stdin"},
-		{"remove", "--profile", "prod", "--keep-token"},
+		{"delete", "--profile", "prod", "--keep-token"},
 	} {
 		captureStdout(t, func() {
 			if err := runProfilesArgs(args); err != nil {
@@ -103,7 +103,7 @@ func TestProfilesRemoveRetainsConnectionChangedDuringRevocation(t *testing.T) {
 		}
 		return http.StatusNoContent, ""
 	})
-	err := runProfilesArgs([]string{"remove", "--profile", "prod"})
+	err := runProfilesArgs([]string{"delete", "--profile", "prod"})
 	if err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("removed a changed connection: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestProfileCommandsRejectTheWholeInvalidMachineFile(t *testing.T) {
 		if err := writePrivateConfigFixture(path, []byte(body)); err != nil {
 			t.Fatal(err)
 		}
-		for _, args := range [][]string{{"show", "--profile", "prod"}, {"set", "--profile", "prod", "--token-stdin"}, {"remove", "--profile", "prod", "--keep-token"}} {
+		for _, args := range [][]string{{"show", "--profile", "prod"}, {"set", "--profile", "prod", "--token-stdin"}, {"delete", "--profile", "prod", "--keep-token"}} {
 			err := runProfilesArgs(args)
 			if err == nil {
 				t.Fatalf("accepted invalid config through %s", args[0])

@@ -523,7 +523,7 @@ contains metadata, never the bearer.
 Retire an enrollment with:
 
 ```bash
-sparkwing runners remove --profile prod --runner dev-laptop
+sparkwing runners delete --profile prod --runner dev-laptop
 ```
 
 Removal validates its controller and credential kind before stopping the service

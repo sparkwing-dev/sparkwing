@@ -45,7 +45,7 @@ func TestReleaseRequiresIsolatedSparkwingHome(t *testing.T) {
 }
 
 func TestReleaseHelpExplainsIsolatedHomeRecovery(t *testing.T) {
-	if !strings.Contains((Release{}).Help(), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`) {
+	if !strings.Contains((Release{}).Help(), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" sparkwing run release --dry-run`) {
 		t.Fatal("release help lacks the isolated preview command")
 	}
 }
@@ -77,7 +77,7 @@ func TestReleaseDryRunRunsTheReadOnlyCutChecks(t *testing.T) {
 	}
 	for _, id := range []string{"version-freshness", "typescript-release", "go-directives", "sdk-pins", "changelog-links", "docs-sidebar"} {
 		if !safe[id] {
-			t.Errorf("release-cut-checks step %s skips under --sw-dry-run, so a preview passes a cut it refuses", id)
+			t.Errorf("release-cut-checks step %s skips under --dry-run, so a preview passes a cut it refuses", id)
 		}
 	}
 }

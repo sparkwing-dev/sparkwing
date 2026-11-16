@@ -9,7 +9,7 @@ func TestXrepoSubcommandsAreRegistered(t *testing.T) {
 	want := map[string]bool{
 		"sparkwing repos list":   false,
 		"sparkwing repos add":    false,
-		"sparkwing repos remove": false,
+		"sparkwing repos delete": false,
 		"sparkwing repos prune":  false,
 	}
 	for _, command := range allCommands {
@@ -75,7 +75,7 @@ func TestXrepoRegistryDescribesRuntimeInputs(t *testing.T) {
 	assertFlag(t, surfaceCommand("sparkwing repos list"), "output", "o")
 	assertFlag(t, surfaceCommand("sparkwing repos list"), "pipelines", "")
 
-	for _, command := range []Command{surfaceCommand("sparkwing repos add"), surfaceCommand("sparkwing repos remove"), surfaceCommand("sparkwing repos info")} {
+	for _, command := range []Command{surfaceCommand("sparkwing repos add"), surfaceCommand("sparkwing repos delete"), surfaceCommand("sparkwing repos info")} {
 		if len(command.PosArgs) != 0 {
 			t.Errorf("%s advertises positional arguments", command.Path)
 		}

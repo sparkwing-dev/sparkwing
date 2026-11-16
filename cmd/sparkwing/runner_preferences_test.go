@@ -102,7 +102,7 @@ func TestRunnerRemovalRefusesPublicCredentialBeforeStoppingOrRevoking(t *testing
 	if err := os.Chmod(filepath.Join(*cfg.Runner.CredentialsDir, "agent-token"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.run([]string{"remove", "--profile", "prod", "--config", f.config}); err == nil {
+	if err := f.run([]string{"delete", "--profile", "prod", "--config", f.config}); err == nil {
 		t.Fatal("public credential file was accepted")
 	}
 	if len(*f.calls) != 0 || f.tokens[0].RevokedAt != nil {
@@ -128,7 +128,7 @@ func TestRunnerRemovalUnsafeModesCannotStopOrRevokeProperty(t *testing.T) {
 		if err := os.Chmod(path, mode); err != nil {
 			t.Fatal(err)
 		}
-		err := f.run([]string{"remove", "--profile", "prod", "--config", f.config})
+		err := f.run([]string{"delete", "--profile", "prod", "--config", f.config})
 		return err != nil && len(*f.calls) == 0 && f.tokens[0].RevokedAt == nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {

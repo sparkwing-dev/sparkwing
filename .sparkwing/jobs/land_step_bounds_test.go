@@ -14,20 +14,20 @@ func TestLandRefusesStepBoundsThatKeepThePush(t *testing.T) {
 		queued            bool
 		wants             []string
 	}{
-		{name: "start at build", start: "build", wants: []string{"--sw-start-at build", "upstream of build"}},
-		{name: "stop at changelog", stop: "changelog", wants: []string{"--sw-stop-at changelog", "downstream of changelog"}},
-		{name: "start at push skips verify", start: "push", wants: []string{"--sw-start-at push", "upstream of push"}},
-		{name: "historical budget start", start: "budget", wants: []string{"--sw-start-at budget"}},
-		{name: "bounded window", start: "build", stop: "lint", wants: []string{"--sw-start-at build --sw-stop-at lint", "outside"}},
-		{name: "queued start at build", start: "build", queued: true, wants: []string{"--sw-start-at build"}},
+		{name: "start at build", start: "build", wants: []string{"--start-at build", "upstream of build"}},
+		{name: "stop at changelog", stop: "changelog", wants: []string{"--stop-at changelog", "downstream of changelog"}},
+		{name: "start at push skips verify", start: "push", wants: []string{"--start-at push", "upstream of push"}},
+		{name: "historical budget start", start: "budget", wants: []string{"--start-at budget"}},
+		{name: "bounded window", start: "build", stop: "lint", wants: []string{"--start-at build --stop-at lint", "outside"}},
+		{name: "queued start at build", start: "build", queued: true, wants: []string{"--start-at build"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			run := sparkwing.RunContext{StartAt: tc.start, StopAt: tc.stop}
 			_, err := newTestHost(t, sparkwingtest.Options{Run: run}).Plan(t.Context(), "Land", landBoundArgs(tc.queued))
 			if err == nil {
-				t.Fatalf("Land planned a pushing run with --sw-start-at=%q --sw-stop-at=%q", tc.start, tc.stop)
+				t.Fatalf("Land planned a pushing run with --start-at=%q --stop-at=%q", tc.start, tc.stop)
 			}
-			for _, want := range append(tc.wants, "--sw-stop-at verify", "--sw-dry-run") {
+			for _, want := range append(tc.wants, "--stop-at verify", "--dry-run") {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("refusal %q does not mention %q", err, want)
 				}

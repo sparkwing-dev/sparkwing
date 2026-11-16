@@ -28,7 +28,7 @@ var retiredNames = []struct{ name, use string }{
 	{"handle-trigger", "sparkwing run, which hosts the run itself"},
 	{"--sw-local-only", "nothing; a run records to this machine's store"},
 	{"SPARKWING_LOCAL_ONLY", "nothing; a run records to this machine's store"},
-	{"SPARKWING_ALLOW_UNADMITTED", "--sw-allow-unadmitted"},
+	{"SPARKWING_ALLOW_UNADMITTED", "--allow-unadmitted"},
 	{"SPARKWING_LEASE_TOKEN", "the admission daemon lease a child attaches to"},
 	{"SPARKWING_CHILD_LEASE_TOKEN", "the admission daemon lease a child attaches to"},
 	{"SPARKWING_API_SOCKET", "the node protocol channel"},
@@ -57,6 +57,10 @@ var retiredNames = []struct{ name, use string }{
 	{"--grace-seconds", "prepaid credits; there is no grace window"},
 	{"--max-charge-seconds", "prepaid credits; there is no post-paid charge"},
 	{"trigger_claim_tokens", "awarded claim capabilities (swk_/swn_)"},
+	{"sparks remove", "sparkwing pipeline sparks delete"},
+	{"profiles remove", "sparkwing profiles delete"},
+	{"repos remove", "sparkwing repos delete"},
+	{"runners remove", "sparkwing runners delete"},
 }
 
 var retiredExtraGlobs = []string{

@@ -149,7 +149,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 	}
 	t.Setenv("FOREGROUND_CAPTURE", "from-submitter")
 	t.Setenv("GOFLAGS", "-trimpath -p=1")
-	args := []string{"run", "ci", "--sw-no-update", "-o=json"}
+	args := []string{"run", "ci", "--no-update", "-o=json"}
 	var scratch, gate string
 	if detached {
 		scratch = t.TempDir()
@@ -162,7 +162,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 		}
 		t.Setenv("TMPDIR", scratch)
 		t.Setenv("TEMP_GATE", gate)
-		args = append(args, "--sw-detached")
+		args = append(args, "--detach")
 	}
 	command := procenv.ControlCommandContext(ctx, os.Environ(), submitter, args...)
 	command.Dir = repo

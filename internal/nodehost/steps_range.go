@@ -25,7 +25,7 @@ func validateStepRange(doc nodewire.PlanDoc, start, stop string) error {
 	}
 	slices.Sort(known)
 	known = slices.Compact(known)
-	for _, bound := range [][2]string{{"--sw-start-at", start}, {"--sw-stop-at", stop}} {
+	for _, bound := range [][2]string{{"--start-at", start}, {"--stop-at", stop}} {
 		flag, id := bound[0], bound[1]
 		if id == "" || slices.Contains(known, id) {
 			continue
@@ -50,7 +50,7 @@ func validateStepRange(doc nodewire.PlanDoc, start, stop string) error {
 			}
 		}
 		if len(rangeSkips(job.Steps, children, start, stop)) == len(job.Steps) {
-			return fmt.Errorf("sparkwing: --sw-start-at=%q --sw-stop-at=%q selects no steps in job %q; bounds must follow a dependency path (use a single bound or omit both to run parallel steps)", start, stop, job.ID)
+			return fmt.Errorf("sparkwing: --start-at=%q --stop-at=%q selects no steps in job %q; bounds must follow a dependency path (use a single bound or omit both to run parallel steps)", start, stop, job.ID)
 		}
 	}
 	return nil

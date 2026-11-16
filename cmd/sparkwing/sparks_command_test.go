@@ -17,7 +17,7 @@ func TestSparksCommandsUseDeclaredSelectorAndPreserveProject(t *testing.T) {
 			root := writeSparkFixture(t, map[string]string{
 				".sparkwing/sparkwing.yaml": "pipelines:\n  - name: ci\n    entrypoint: CI\n",
 			})
-			for _, action := range []string{"add", "remove"} {
+			for _, action := range []string{"add", "delete"} {
 				args := []string{"-C", root, "pipeline", "sparks", action, "--spark", "chosen", "-o", format}
 				if action == "add" {
 					args = append(args, "--source", "example.com/library", "--version", "v1.2.3")
@@ -66,8 +66,8 @@ func TestSparksCommandsRefuseInvalidSelectorsWithoutWriting(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"add", "--source", "example.com/library", "--spark", "existing"},
-		{"remove", "--spark", "missing"},
-		{"remove", "--name", "existing"},
+		{"delete", "--spark", "missing"},
+		{"delete", "--name", "existing"},
 		{"update", "--name", "existing"},
 	} {
 		var commandErr error

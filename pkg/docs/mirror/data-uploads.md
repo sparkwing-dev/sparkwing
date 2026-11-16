@@ -138,7 +138,7 @@ access. After exchange, execution uses the awarded claim and its current attempt
 
 ## Local cache reads and publication
 
-`run --sw-cache-from PROFILE`, or the machine's `run.cache_from`, opts into
+`run --cache-from PROFILE`, or the machine's `run.cache_from`, opts into
 repo-bound reads under the user's existing authority. Eligible entries come from
 verified default-branch runs. The interface exposes memo, artifact and depcache
 reads. Pipeline binaries stay in the local binary cache.

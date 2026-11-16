@@ -164,7 +164,7 @@ and `runner`.
 
 `RunContext` contains `RunID`, `Pipeline`, `Git`, `Trigger`, `StartedAt`, `DryRun`,
 `NoMemo`, `StartAt` and `StopAt`. These are the host's run snapshot. `StartAt`
-and `StopAt` hold the `--sw-start-at` and `--sw-stop-at` step bounds when the host
+and `StopAt` hold the `--start-at` and `--stop-at` step bounds when the host
 forwards them, so a `Plan` can refuse a selection it cannot honor. A host that does
 not forward them leaves both empty. `sw.Inputs[T](ctx)` reads typed
 pipeline inputs from an execution callback. `sw.Runner(ctx)` returns the granted
@@ -854,8 +854,8 @@ that name a file inline on the commit; see [Check runs](github-app.md#check-runs
 
 A step can declare `Risk(labels...)`, `DryRun(callback)` and
 `SafeWithoutDryRun()`. The host enforces approved risks and chooses the dry-run
-body. A run must allow, with `--sw-allow-risk`, every risk on a step its
-selection runs; steps that `--sw-only`, `--sw-start-at` or `--sw-stop-at` leave
+body. A run must allow, with `--allow-risk`, every risk on a step its
+selection runs; steps that `--only`, `--start-at` or `--stop-at` leave
 out need no allowance. `sw.IsDryRun(ctx)` reads the mode inside a callback.
 
 `cleanup.Register(ctx, cleanup.Spec{Argv: argv, Description: text})` registers an
@@ -940,7 +940,7 @@ of a shorter nested deadline. This leaves the job one budget for admission and
 execution.
 The cancellation probe waits for the long job's body log before requesting
 cancellation, so it exercises running work rather than SDK startup.
-Use `--sw-only dynamic-child` to focus that assertion. The child resolves its
+Use `--only dynamic-child` to focus that assertion. The child resolves its
 own job and step selections, so its `stamp` job still runs.
 
 ```bash

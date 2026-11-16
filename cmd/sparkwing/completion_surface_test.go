@@ -11,7 +11,7 @@ func TestCompletionUsesFinalCommandAndFlagVocabulary(t *testing.T) {
 		{"verbs", "", "profiles", "configure\t"},
 		{"verbs", "pipeline", "trigger", "worker\t"},
 		{"flags", "runs logs", "--job", "--node\t"},
-		{"flags", "run", "--sw-no-memo", "--sw-no-cache"},
+		{"flags", "run", "--no-memo", "--sw-no-cache"},
 	} {
 		out := captureStdout(t, func() {
 			if err := runInternalCompleteArgs([]string{"--kind", test.kind, "--word=" + test.word, "-o", "plain"}); err != nil {

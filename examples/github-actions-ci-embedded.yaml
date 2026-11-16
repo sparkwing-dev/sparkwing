@@ -24,4 +24,5 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: us-west-2
-        run: sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4 --sw-no-update
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+        run: sparkwing run release-prod --allow-unadmitted --workers=4 --no-update

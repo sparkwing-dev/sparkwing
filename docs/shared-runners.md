@@ -57,7 +57,7 @@ left out.
 Remove it with:
 
 ```sh
-sparkwing runners remove --profile work --service-user sparkwing-runner
+sparkwing runners delete --profile work --service-user sparkwing-runner
 ```
 
 This stops the service, revokes the credential and prints the command that

@@ -115,7 +115,6 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 		if previous, ok := profiles[name]; ok && (previous.Controller.AdminToken != nil || previous.Controller.Token != nil && *previous.Controller.Token != token.Capability) {
 			replaced = &namedProfile{Name: name, Profile: previous}
 		}
-		p.Default = profiles[name].Default
 		profiles[name] = p.Profile
 		return nil
 	})
