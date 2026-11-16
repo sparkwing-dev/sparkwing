@@ -774,6 +774,21 @@ only at the next cut, whose `version-freshness` step refuses with "scaffold
 fallback pin ... is behind latest release"; the fix then is this same command
 and a land before the cut, which is how v0.69.0 found v0.68.7's missing pin.
 
+After hosted publication, check a first user's upgrade path with the published
+CLI. `sdk-upgrade-e2e` scaffolds a Go and a TypeScript pipeline in private
+homes, pins the newest listed SDK older than the scaffold's, runs, runs
+`sparkwing pipeline upgrade`, and runs again, against the published engines,
+the signed index and the public module and npm registries. It needs network
+access and stays off the land path. Without `--binary` it builds the
+checkout's CLI, which still selects published engines, so engine-side fixes
+show only once released. A Go upgrade is a verified no-op while one Go SDK is
+listed. On a shared Linux host it took 35-42 seconds of test time with warm
+caches.
+
+```bash
+SPARKWING_HOME="$(mktemp -d)" sparkwing run sdk-upgrade-e2e -- --binary "$(command -v sparkwing)"
+```
+
 The scaffold fallback refuses pins ahead of the local release tags unless
 the exact tag exists on origin. This also verifies hosted release fixtures
 whose selected release tag was removed locally.
