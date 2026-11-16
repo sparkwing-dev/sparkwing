@@ -153,13 +153,20 @@ pipelines:
   - name: weather-report
     entrypoint: WeatherReport
 
-  # The Cloud's own targets, so a webhook run, which carries no arguments,
-  # probes them. The API server addresses are the EKS control-plane ENIs
-  # behind the kubernetes Service; recheck them after a control-plane upgrade
-  # with `kubectl get endpointslices -l kubernetes.io/service-name=kubernetes`.
-  - name: escape-probe
-    entrypoint: EscapeProbe
+  # Hostile-job conformance against staging Cloud from two dedicated
+  # conformance teams, whose CLI profiles share the teams' names. Every pod,
+  # service, node and API address is discovered from the cluster when it runs;
+  # pass --database host:port to probe the controller database as well.
+  - name: cloud-isolation
+    entrypoint: CloudIsolation
     args:
-      controller-url: https://api.sparkwing.dev
-      rds: kikd-prod-sparkwing-postgres.cv04yywoevz8.us-west-2.rds.amazonaws.com:5432
-      api-hosts: 10.0.41.86,10.0.59.73
+      team-a: stg-iso-a
+      team-b: stg-iso-b
+      controller-url: https://staging.sparkwing.dev
+      kube-context: kikd-prod
+      public-api-context: kikd-prod
+      controller-namespace: sparkwing-staging
+      job-namespace: sparkwing-staging-cloud-jobs
+      infra-node-pool: staging-infra
+      ingress-namespaces: traefik
+      vpc-resolver: 10.0.0.2

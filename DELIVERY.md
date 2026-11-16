@@ -1397,6 +1397,58 @@ sudo chown -R root:root /opt/sparkwing-deploy && sudo chmod -R go-w /opt/sparkwi
 ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
 ```
 
+### Cloud isolation conformance
+
+Run `cloud-isolation` against staging before each release that changes the
+launcher, the Job pod, the DinD sidecar, node classes or the network policy, and
+before a new paying team starts on Cloud. It attacks the execution plane from two
+dedicated conformance teams and fails on any breach:
+
+```bash
+sparkwing run cloud-isolation -- --database <staging database host>:5432 \
+  --evidence ~/evidence/cloud-isolation/$(date +%F)
+```
+
+The run uploads the `isolation-probe` fixture as each team, in three phases on
+three fresh nodes. The fixture's sources live in `.sparkwing/isolationprobe`.
+Each probe job does the following:
+
+- reaches for instance metadata over IPv4 and IPv6;
+- reaches for the controller's pods and services, cluster DNS and the database;
+- reaches for the kube API's private and public endpoints;
+- reaches for the other runs' nodes, kubelets, listeners and Docker ports, and
+  its own node;
+- checks its mounts, devices, sockets and user namespace;
+- repeats from a DinD container on Docker's bridge and from one holding every
+  privilege the sidecar grants, which also tries host kernel files, mounts,
+  device nodes and the syscalls the DinD seccomp profile refuses.
+
+The probes stay non-destructive:
+
+- they connect and close;
+- they open kernel files without writing to them;
+- they answer an unexpected connection with anonymous reads only;
+- each job is bounded at 20 minutes on two cores.
+
+The driver reads the cluster with kubectl to find targets and map each run to
+its pod and node. It writes `REPORT.md`, every probe result and the cluster
+captures to the evidence directory. The report lists every refusal by checklist
+item.
+
+It needs the following:
+
+- `sparkwing`, `kubectl`, `git` and Go on `PATH`;
+- read access through the kubeconfig contexts the repository configuration
+  names;
+- CLI profiles named `stg-iso-a` and `stg-iso-b`, holding run tokens for those
+  staging teams. The teams need Cloud credits, which only an operator console
+  grants.
+
+An operator-created team credential expires 30 days after the team is created,
+and every token minted from it expires with it. While that credential is still
+live, invite an owner who signs in to the staging console, so replacement run
+tokens can be minted after it lapses.
+
 ### Check tiers
 
 Current SDK verification runs the Go and TypeScript unit suites and the host
