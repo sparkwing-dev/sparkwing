@@ -221,7 +221,6 @@ For a TypeScript project, scaffold a minimal pipeline with:
 
 ```bash
 sparkwing pipeline new --pipeline hello --template typescript
-npm --prefix .sparkwing install --package-lock-only --ignore-scripts --no-audit --no-fund
 git add .sparkwing
 git commit -m "Add TypeScript pipeline"
 sparkwing pipeline list
@@ -231,12 +230,14 @@ sparkwing run hello
 ```
 
 This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin,
-`index.ts`, `jobs/hello.ts` and `sparkwing.yaml`. It uses the same `--on`,
+`index.ts`, `jobs/hello.ts`, `sparkwing.yaml` and `package-lock.json`. It uses the same `--on`,
 `--hidden` and `--short` flags as the Go shapes. Repeat the command with another
-pipeline name to add a pipeline to the TypeScript entry. Sparkwing installs
+pipeline name to add a pipeline to the TypeScript entry. The scaffold runs
+`npm install --package-lock-only` to write the lockfile, and Sparkwing installs
 the SDK dependencies when the pipeline runs. Commit `.sparkwing/package-lock.json` because
 the installer validates dependencies with `npm ci`. Node.js 22.18 or later and npm must be on
-PATH. `pipeline plan` explains the resolved jobs and steps without running them.
+PATH; without npm, or when npm fails, `pipeline new` keeps the files, exits
+non-zero and prints the npm command to run. `pipeline plan` explains the resolved jobs and steps without running them.
 `pipeline lint` analyzes Go source only. Its successful exit does not validate
 TypeScript source. See [TypeScript authoring](authoring-pipelines.md#typescript-authoring)
 for jobs, steps, outputs, runtime conditions and other authoring topics.

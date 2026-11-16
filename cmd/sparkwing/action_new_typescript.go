@@ -1,14 +1,23 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -100,4 +109,29 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 		return err
 	}
 	return finishScaffold(dir, file, name, !found, trigger, mode)
+}
+
+// safety: the run installs the SDK with npm ci, which refuses a project without package-lock.json.
+func lockTypeScriptSkeleton(ctx context.Context, sparkwingDir string) error {
+	args := engine.TypeScriptLockfileArgs()
+	rerun := "npm --prefix " + shellSingleQuote(sparkwingDir) + " " + strings.Join(args, " ")
+	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, procenv.Runtime{})
+	if err != nil {
+		return err
+	}
+	cmd, err := pipelineentry.NPMCommand(ctx, environment, runtime.GOOS, exec.LookPath, args...)
+	if err != nil {
+		return fmt.Errorf("pipeline new: the pipeline files are written, but npm is not on PATH to create package-lock.json; install Node.js 22.18 or later with npm, then run:\n  %s", rerun)
+	}
+	cmd.Dir = sparkwingDir
+	var captured bytes.Buffer
+	cmd.Stdout = &captured
+	cmd.Stderr = &captured
+	stop := startSpinner("resolving dependencies (`npm install --package-lock-only`)")
+	err = cmd.Run()
+	stop()
+	if err != nil {
+		return fmt.Errorf("pipeline new: the pipeline files are written, but creating package-lock.json failed: %w\n%s\nfix the error, then run:\n  %s", err, strings.TrimSpace(captured.String()), rerun)
+	}
+	return nil
 }

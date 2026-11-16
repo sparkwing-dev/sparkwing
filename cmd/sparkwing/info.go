@@ -253,8 +253,8 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"            scheduled-report (5, fan-out) | merge-queue (1, serial landing)\n" +
 	"    TypeScript: --template typescript creates a minimal TypeScript pipeline.\n" +
 	"    --template merge-queue-typescript creates the serial landing pipeline.\n" +
-	"    Requires Node 22.18+ and npm on PATH. Create and commit the npm lockfile\n" +
-	"    with the printed setup command before describe, plan or run.\n" +
+	"    Requires Node 22.18+ and npm on PATH. The scaffold writes the npm lockfile;\n" +
+	"    commit it with the pipeline.\n" +
 	"    Local foreground, detached CLI runs and schedules use the same pipeline.\n" +
 	"    See the authoring guide for TypeScript proof and pinning constraints.\n" +
 	"    TypeScript lint is unsupported; its zero exit does not validate source.\n" +

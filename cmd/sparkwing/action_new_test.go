@@ -544,7 +544,7 @@ func TestPipelineNewTypeScriptRejectsPathNames(t *testing.T) {
 func TestPipelineNewTypeScriptUpdatesDeclaredEntry(t *testing.T) {
 	repo := t.TempDir()
 	t.Chdir(repo)
-	t.Setenv("PATH", t.TempDir())
+	fakeNPM(t, 0)
 	dir := filepath.Join(repo, ".sparkwing")
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -587,7 +587,7 @@ func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 	}
 	repo := t.TempDir()
 	t.Chdir(repo)
-	t.Setenv("PATH", t.TempDir())
+	fakeNPM(t, 0)
 	for _, name := range []string{"hello", "second"} {
 		var commandErr error
 		captureStdout(t, func() {
