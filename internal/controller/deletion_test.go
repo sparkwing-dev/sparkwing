@@ -136,10 +136,24 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsRows(t *testing.T) {
 }
 
 func TestDeleteTeamRefusesTheOnlyTeam(t *testing.T) {
-	f := newIdentityFixture(t)
-	owner := f.user("o", "olga@example.com")
-	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": owner.team}, nil); code != http.StatusConflict {
-		t.Fatalf("deleting the only team = %d, want 409", code)
+	for _, tc := range []struct {
+		contact, want string
+	}{
+		{"", "this is your only team; delete your account instead"},
+		{"support@example.test", "this is your only team; to delete it, ask support@example.test to delete your account"},
+	} {
+		f := newIdentityFixtureWith(t, fixtureOpts{configure: func(srv *controller.Server) {
+			srv.WithDashboard(controller.Dashboard{SupportContact: tc.contact})
+		}})
+		owner := f.user("o", "olga@example.com")
+		var body struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": owner.team}, &body); code != http.StatusConflict || body.Error.Message != tc.want {
+			t.Fatalf("deleting the only team with contact %q = %d %q, want 409 %q", tc.contact, code, body.Error.Message, tc.want)
+		}
 	}
 }
 

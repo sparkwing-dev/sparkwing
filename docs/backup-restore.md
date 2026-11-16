@@ -324,6 +324,23 @@ when an earlier deployment reported failure.
    that revision is healthy. Use database restore only when roll-forward cannot
    repair the incident or data itself needs recovery.
 
+### Deleted data in backups
+
+Deleting a team or account removes its rows and objects from the live service.
+Copies remain in backups until those age out:
+
+- RDS automated backups keep point-in-time recovery for the instance's backup
+  retention period, 7 days on Sparkwing Cloud.
+- A versioned object bucket keeps a deleted object as a noncurrent version
+  until its lifecycle rule expires it, 7 days on Sparkwing Cloud.
+- Manual RDS snapshots never expire. Delete a manual snapshot within the same
+  retention period once the change it protected is verified, or record why it
+  must outlive that period.
+
+Restoring a backup taken before a deletion brings the deleted data back.
+Repeat any deletion that happened after the restore point before reopening the
+service.
+
 ### RDS point-in-time restore
 
 Use the deployed RDS PostgreSQL instance's automated backups. Check retention

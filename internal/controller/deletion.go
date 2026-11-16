@@ -61,7 +61,7 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, a capa
 	del, err := writer.DeleteAuthorizedTeam(r.Context(), a)
 	if err != nil {
 		if errors.Is(err, store.ErrOnlyTeam) {
-			return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
+			return &apierr.Error{Code: apierr.Conflict, Message: s.onlyTeamRefusal()}
 		}
 		return accountMutationError(err)
 	}
@@ -71,6 +71,13 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, a capa
 	s.logger.Info("team deletion requested", "team", string(del.Team), "by", a.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusAccepted, teamDeletionBody(del))
 	return nil
+}
+
+func (s *Server) onlyTeamRefusal() string {
+	if s.dashboard != nil && s.dashboard.SupportContact != "" {
+		return "this is your only team; to delete it, ask " + s.dashboard.SupportContact + " to delete your account"
+	}
+	return "this is your only team; delete your account instead"
 }
 
 func (s *Server) handleMyTeamDeletions(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
