@@ -20,6 +20,344 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.74.0] - 2026-11-16
+
+### Added
+
+- **runner:** Each dependency cache reports what it did
+  Every cache a job declares with `Cache(...)` writes one job-log line and one
+  job annotation when the job's last attempt finishes, such as
+  `cache npm: miss (key 3f2a91c04b1e); saved 4.1 MiB` or
+  `cache npm: present on this host (key ...); not restored or saved`.
+  `runs status -o json` lists them under `jobs[].annotations`. A cache the job
+  ran without says why: no key file in the checkout, a failed restore, or a
+  failed save. An empty cache directory after the job is named too. Lines mask
+  the job's secrets and show only paths inside the checkout.
+
+
+- **cli:** Common guesses suggest the real command
+  Typing runs show suggests `runs status`, pipelines list suggests `pipeline list`, secrets add
+  suggests `secrets set`, logout suggests `profiles delete`, and similar. The command still fails
+  with a usage error; nothing runs under the guessed name.
+- **cli:** Examples on the most-used commands
+  `runs`, `pipeline`, `secrets`, `schedules`, `profiles add`, `login`, `dashboard open`,
+  `daemon stop`, `docs search` and `cache explain` help pages show one to three invocations.
+
+
+- **github app:** Check runs on private repositories show job results and annotations
+  A completed check run on a private repository now carries the failed job count in its title, each failed job's and
+  step's first error line and every `Summary` in its summary, and the full masked errors in its text. Annotations that
+  name a file appear inline on the commit and pull request, up to 200 per check run. Jobs and steps appear by
+  position, never by ID. Public repositories keep the aggregate-only check, and the controller rereads visibility
+  before every write that carries details. See [Check runs](docs/github-app.md#check-runs).
+
+
+- **cli:** Run status and timing expose startup boundaries and executable-cache evidence
+  Cloud observations identify scheduling, image availability and container start.
+  Source preparation includes native claimed jobs, cache outcomes and transferred
+  prepared-artifact bytes. Owner claim milestones derive from persisted award
+  issuance on reads, without diagnostic writes on the claim path. Missing
+  measurements remain unknown. Image-event lookups stop after three polls before
+  the container starts and three more after it starts, so a Pod that never starts
+  adds bounded API traffic. Preparation timing frames are masked like other run
+  log frames.
+
+
+- **runners:** Run a shared runner under a dedicated OS user
+  `sparkwing runners add --service-user NAME` creates or reuses an unprivileged
+  OS user, stores the runner credential and Sparkwing home in that user's home,
+  and installs a systemd system service with `ProtectHome=yes` or a launchd
+  daemon running as it. Pipeline code then cannot read the teammate's SSH keys,
+  cloud credentials or browser data. `runners delete --service-user NAME` stops
+  it and revokes the credential. See the new shared-runners page.
+- **runners:** Warn about shared runners that can read personal credentials
+  `runners add` warns when a shared runner enrolls into an account holding SSH
+  keys, cloud credentials or browser profiles, and when `--repos` spans several
+  repositories, which can then claim each other's jobs and secrets.
+
+
+- **cli + runner:** `sparkwing runners pause` and `sparkwing runners resume`
+  Pause stops the runner enrolled on this machine from claiming new work while
+  its held jobs finish, and resume lets it claim again on its next poll without a
+  restart. The pause is a local file beside the runner credential, so
+  `sparkwing runners list` shows `paused` on this machine only; other machines and
+  the console see the runner idle.
+
+
+- **cli:** `sparkwing team delete` deletes the profile's team
+  An owner passes `--confirm SLUG` with the team's slug. The controller revokes
+  the team's tokens and cancels its runs at once, then removes its runs, logs,
+  artifacts, cache, secrets and subscriptions within minutes. Credit and payment
+  records stay. See [deleting a team or account](docs/auth.md#deleting-a-team-or-account)
+
+
+- **cli:** `sparkwing examples` lists TypeScript example pipelines beside the Go ones:
+  `lint-test-node-ts` installs once and lints and tests in parallel steps.
+  `test-matrix-artifacts-deploy-ts` runs a Node version matrix with
+  `plan.jobFanOut`, publishes `dist/` and deploys it from `main`.
+  `secret-and-cache-ts` tests with a cached npm install and deploys with a
+  declared, masked secret, a retry and timeouts. Every listed example now has a
+  `language` (`go` or `typescript`) in JSON and in the detail view, and
+  `--language typescript` lists only the TypeScript ones. `docs search` finds
+  them too, and `info --for-agent` points at `sparkwing examples --language`.
+
+
+- **sdk (TypeScript):** `plan.jobFanOut(id, items, fn)` declares one job per item:
+  `fn` returns an `[id, body]` pair for each item, and the jobs are grouped under
+  `id`, as Go's `JobFanOut` does. The returned group accepts `.needs`, `.cache`,
+  `.retry` and the other group modifiers. A dependent waits for every member, and
+  an empty list gives an empty group. Generators can also call
+  `generated.jobFanOut`.
+
+
+- **sdk:** Publish the TypeScript SDK as 0.74.0
+  It adds `plan.jobFanOut` and the reference tooling that changed since 0.72.4.
+  New TypeScript pipelines pin 0.74.0.
+
+### Changed
+
+- **cli (Breaking):** `delete` is the one removal verb
+  `pipeline sparks delete`, `profiles delete`, `repos delete` and
+  `runners delete` take the place of their `remove` forms and keep the same
+  flags. An old `remove` spelling is refused with a usage error that names the
+  `delete` command. `tokens revoke`, the `uninstall` verbs and the `prune` verbs
+  keep their names. See the [migration guide](docs/migrations/v0.74.0.md#delete-is-the-one-removal-verb)
+
+
+- **cli:** Root help groups commands into Local, Cloud, and Admin and help sections
+  JSON help adds a `section` field to each top-level subcommand.
+- **cli:** `run --help` opens with a plain description, common flags and examples
+  `run --help-all` adds the routing, publication and standalone CI rules as details and lists
+  every flag. JSON help carries the rules in a `details` field.
+
+
+- **cli:** A missing run, secret, schedule or other record names what was not found and exits 4
+  `runs logs --run nope` and its siblings print run "nope" not found with a hint such as
+  `list runs with sparkwing runs list`, carrying `--profile` when one was given, instead of the
+  controller route. Every not-found refusal exits 4, the code `runs status` already used, so
+  `runs cancel`, `secrets get` and `schedules show` no longer exit 1. JSON keeps code `not_found`.
+- **cli:** `secrets set` refuses empty stdin or an empty `--file`
+  An empty pipe stored an empty secret and exited 0. `--value ''` still stores an empty value.
+- **cli:** An unadmitted run against a running local controller says how to proceed
+  The refusal is a `conflict` that names `sparkwing daemon stop` or a private `SPARKWING_HOME`,
+  instead of an internal error.
+
+
+- **cli (Breaking):** `run` and `pipeline plan` flags drop their prefix and match `pipeline trigger`
+  Use `--detach`, `--dry-run`, `--ref`, `--pipeline-ref`, `--route`,
+  `--allow-risk`, `--only`, `--start-at`, `--stop-at` and the other plain
+  names. An old prefixed spelling is refused with a usage error that names its
+  replacement. A pipeline pinned to an older engine refuses the new names until
+  `sparkwing pipeline upgrade` moves its pin; the refusal says so. See the [migration guide](docs/migrations/v0.74.0.md#run-and-plan-flags-lose-their-prefix)
+
+
+- **cli (Breaking):** `runs grep` is the one log search; `runs logs` reads one run
+  `runs logs` loses `--grep` and the cross-run filters (`--pipeline`,
+  `--status`, `--branch`, `--sha`, `--started-after`, `--started-before`,
+  `--limit`, `--max-matches` and `--quiet`) and requires `--run`. Search across
+  runs with `runs grep --grep PATTERN`, or search one run's logs with
+  `runs grep --run RUN_ID --grep PATTERN`. A `--grep` on `runs logs` is refused
+  with a usage error that names `runs grep`. `--follow`, `--head`, `--tail`,
+  `--lines`, `--tree`, `--events-only` and `--no-events` no longer combine
+  with a pattern. The migration guide gives a plain-text pipe for the first
+  four; it matches rendered text with `grep -E` rules and can miss event and
+  field matches. See the [migration guide](docs/migrations/v0.74.0.md#runs-grep-is-the-one-log-search)
+
+
+- **cloud:** Launch Cloud jobs that become ready together in one launcher cycle
+  The launcher keeps claiming until the controller has no award for it, up to
+  eight per cycle, instead of claiming one job per poll. In a four-way fan-out
+  the last job was claimed about 13 s after the first; now all four start
+  launching at once.
+- **controller:** Answer repeated GitHub reads within one run request from the first answer
+  `POST /api/v1/runs` resolved the same repository, ref, commit and
+  installation tokens several times over while checking a fetched source.
+  Identical reads and token requests in one intake now go to GitHub once, which
+  shortens run creation without changing what is verified.
+
+
+- **local runs:** An idle local runner waits for work instead of polling for it
+  The local controller holds an idle runner's claim until a commit makes work
+  claimable, for at most 10 s, so a run submitted to an idle runner starts
+  within milliseconds. Jobs released while the runner holds the run's trigger
+  still start within its 500 ms poll. An idle machine sends one claim and writes
+  the runner's liveness once every 10 s instead of twice a second. Shared
+  controllers are unchanged.
+
+
+- **controller:** Name the support contact when refusing an owner's only team
+  Deleting the only team means deleting the account, which an operator does.
+  With `--support-contact` set, the 409 says whom to ask.
+
+
+- **cli (Breaking):** `pipeline new --template typescript` writes the npm lockfile itself
+  The TypeScript scaffold runs `npm install --package-lock-only` in `.sparkwing/`,
+  so `sparkwing run` works right after scaffolding. Without npm on PATH, or when
+  npm fails, the command keeps the written files, exits non-zero and prints the
+  npm command to run. JSON and plain output no longer carry the setup command.
+  See the [migration guide](docs/migrations/v0.74.0.md#the-typescript-scaffold-writes-its-own-lockfile)
+
+### Fixed
+
+- **runner:** `Cache(Npm())` restores and saves on a machine whose npm cache starts empty
+  The host asked npm for its cache directory before each job, and npm wrote a
+  debug log and an update-notifier stamp into that directory even when the
+  query failed. The cache then always looked populated, so it was never
+  restored or saved, including on fresh Cloud workers. The query now runs
+  with npm's log files and update notifier off.
+
+
+- **cli:** `daemon stop` without a reachable systemd user manager says so and how to repair it
+- **cli:** `pipeline list` shows each pipeline's description once the pipelines are built
+  The listing looked for the built binary under a different cache key than the build used, so
+  descriptions never appeared. Before the first build it says so and names `sparkwing cache warm`.
+- **cli:** `cache explain` help no longer promises a pipeline argument
+  It explains the repository's `.sparkwing` directory, whose pipelines share one binary.
+
+
+- **security:** The repository's gosec scan passes again
+  Six findings on paths and URLs that the operator or the run itself
+  chooses now carry rule-scoped exceptions with their reasons. No command
+  behaves differently.
+
+
+- **sdk:** `RunContext.Git` is never nil in a Go pipeline's Plan
+  Discovery, `pipeline describe` and planning calls without git facts passed a
+  nil `Git`, so reading `run.Git.Branch` in Plan panicked and every surface
+  printed only "details withheld". Plan now receives a `Git` rooted at the work
+  tree whose data fields are empty until a run supplies them; its live methods
+  such as `IsDirty` still work.
+
+
+- **cli + wingwire + api (Breaking):** `admission.budget: …,enforce` caps the local runner's jobs on Linux
+  The local runner's systemd user service starts with `CPUQuota` at the budget's
+  cores, `MemoryMax` when the budget names memory, and nice 10. Jobs the CLI hosts
+  are niced on Linux too. `sparkwing queue list` now reads the limits back from the
+  running runner and prints `OS-enforced: runner jobs capped at …` only when they
+  are in force, or `not enforced (<reason>); admission cap only` otherwise. It
+  previously printed "OS-enforced" from the setting alone while a 2-core budget let
+  one job use five cores. A controller restart replaces a runner started under
+  another budget. Queue JSON replaces `budget.enforce` with a `budget.enforcement`
+  object (`applied`, `cpu_cores`, `memory_bytes`, `nice`, `reason`), and the plain
+  `budget` row prints `enforced`, `not-enforced` or `-` in place of `true`/`false`.
+  See the [migration guide](docs/migrations/v0.74.0.md#queue-budget-reports-applied-enforcement).
+
+
+- **runner:** An enrolled runner with `local_admission` claims no jobs while no local controller runs
+  Previously each claimed job failed with the fix in its error. The runner now
+  withdraws its job capacity until the local controller runs a build it can speak
+  to, keeps planning, and logs one `runner idle` line with the fix. It logs
+  `runner takes jobs again` when the controller answers.
+
+
+- **cli:** `pipeline new` writes gofmt-clean Go for every shape
+  The build-test-deploy, ci-pr-check, release and scheduled-report shapes
+  indented their doc-comment diagram with spaces, so `gofmt -l` or golangci-lint
+  in a new project failed on the scaffolded file. The Plan comment in every shape
+  also named `run.Args`, which `RunContext` does not have, and trigger sources
+  that never occur; it now names `run.Git`, `run.Trigger` and the typed inputs
+  parameter.
+
+
+- **cli:** `pipeline new --template typescript` writes `.sparkwing/tsconfig.json`
+  It also adds `typescript` as a locked development dependency, so
+  `sparkwing pipeline upgrade` type-checks a new TypeScript pipeline with
+  `tsc --noEmit` instead of skipping that check. An existing `tsconfig.json` is
+  kept, and a project without one still upgrades with describe and plan as its check.
+
+
+- **cli:** `sparkwing pipeline upgrade` verifies a scaffolded TypeScript pipeline
+  It no longer runs `tsc` when `.sparkwing/tsconfig.json` is absent, which
+  printed tsc's help and reported that the pipeline code needed changes.
+- **engine:** A moved TypeScript SDK pin installs the new SDK into an existing `node_modules`
+  The run after an upgrade, or after any pin change, failed with "installed
+  TypeScript SDK differs from the native lockfile pin" until `node_modules` was
+  deleted.
+
+### Removed
+
+- **cli + config (Breaking):** The saved default profile is removed; commands use the local controller unless `--profile` names one
+  `profiles set` no longer takes `--default`, `profiles list` and `profiles show` drop the `default` field and
+  column, and `default: true` in the machine config fails the load with the migration instruction. Pass
+  `--profile NAME` on each command that should reach a controller. See the
+  [migration guide](docs/migrations/v0.74.0.md#the-saved-default-profile-and-machine-run-route-are-removed).
+- **cli + config (Breaking):** A bare `sparkwing run` stays local; machine `run.routing.route` is removed
+  `--route burst` applies the machine `run.routing` overflow preferences for one run, and
+  `--route cloud` still runs directly on Cloud. `run.routing.route` in the machine config fails
+  the load and names the replacement. Managed git hooks therefore always run locally. See the
+  [migration guide](docs/migrations/v0.74.0.md#machine-runroutingroute).
+
+### Security
+
+- **controller + runner:** Refuse a malformed OTLP endpoint at startup
+  An OTLP endpoint variable that is not an `http://` or `https://` URL with a
+  host now stops the service or runner with an error naming the variable.
+  The exporters used to fall back to `localhost:4318` and send
+  `OTEL_EXPORTER_OTLP_HEADERS` there.
+
+
+- **controller:** Require fresh approval when a failed-only retry re-executes protected work
+  Approval gates are reused only with all transitive dependents. An unreadable
+  source-output scope now emits a warning before reuse falls back to execution.
+
+### Docs
+
+- **docs:** Add a GitHub Actions migration guide and a known-limitations page
+  `migrate-from-github-actions` maps checkout, toolchains, caches, matrices,
+  `needs`, `if`, secrets, artifacts, concurrency, schedules, dispatch inputs,
+  deploys on `main`, status checks and notifications to Go and TypeScript
+  pipeline code, and marks each one as working today, working differently or
+  not yet available. `known-limitations` lists each missing piece with its
+  workaround, including shared-runner and secret-handling constraints.
+- **docs + examples:** Document run events and add a Slack receiver
+  `run-events` covers subscriptions, the event body, delivery and signature
+  verification. `examples/slack-run-events` verifies each delivery's Standard
+  Webhooks signature and posts it to a Slack incoming webhook.
+- **docs:** Label Windows support experimental
+  Getting started, the README and the limitations page recommend WSL2 with
+  systemd. The native-mode page no longer says Windows fires daemon
+  schedules; Windows records schedules and `schedules run` starts one.
+
+
+- **sdk:** State the SDK compatibility promise and the release cadence
+  The Go author SDK packages and `@sparkwing/sdk` take additive changes only;
+  an unavoidable break ships with a migration guide and a scripted
+  `sparkwing pipeline upgrade` path. `sparkwing/runtime`, `sparkwing/protocol`
+  and `sparkwing/testsupport` are not covered. Releases ship on a weekly train,
+  breaking changes ship only in its Monday minor release and never in a patch,
+  and an unchanged SDK pin keeps resolving a supported engine for at least
+  twelve months after the newest engine that accepts it was published. See
+  `VERSIONING.md` and `sparkwing docs read --topic versioning`.
+
+
+- **docs:** Add a support page
+  [Support](docs/support.md) says where to ask, what to include in a report and
+  how quickly to expect a reply. The README links it
+
+
+- **docs:** Document how long deleted team data stays in backups
+  See [deleted data in backups](docs/backup-restore.md#deleted-data-in-backups)
+
+
+- **sdk + docs:** Document the trigger sources a run actually carries
+  `TriggerInfo.Source` listed `manual`, `push`, `schedule` and `webhook`; runs
+  carry `local`, `trigger`, `github_app`, `schedule` or `child`. The guard docs
+  now say that a local run from `main` passes `when: [git:branch=main]` and that
+  `where:controller` keeps a pipeline off developer machines.
+
+
+- **docs (TypeScript):** The SDK page is now "Pipeline SDK" and pairs every Go
+  example with its TypeScript form, including retries and timeouts, fan-out,
+  child runs, secrets, caches and artifacts. The caching, artifacts, secrets,
+  pipelines and authoring pages gain TypeScript forms too. A new
+  [TypeScript API reference](docs/sdk-typescript-reference.md) is generated from the
+  package's `index.d.ts`, so `sparkwing docs read --topic sdk-typescript-reference`
+  lists every export without opening `node_modules`.
+- **cli:** `pipeline new --template typescript` and
+  `--template merge-queue-typescript` open the pipeline file with a comment
+  naming the TypeScript docs, and `info --for-agent` names the TypeScript API
+  reference.
+
 ## [v0.73.0] - 2026-11-16
 
 ### Added
