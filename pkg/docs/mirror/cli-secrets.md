@@ -44,6 +44,13 @@ Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and
 | `--pipeline NAME` | Pipeline name. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
+### Examples
+
+```sh
+# Delete a secret
+sparkwing secrets delete --secret DEPLOY_TOKEN
+```
+
 ## `sparkwing secrets get`
 
 Read a secret's value
@@ -63,6 +70,13 @@ Read a value stored with --variable. A masked secret is readable only by a pipel
 | `--pipeline NAME` | Pipeline name. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
+### Examples
+
+```sh
+# Read a variable
+sparkwing secrets get --secret REGION
+```
+
 ## `sparkwing secrets list`
 
 List secret names + metadata
@@ -81,6 +95,13 @@ List metadata without values, including each pipeline row's repository and pipel
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+
+### Examples
+
+```sh
+# List secret names without values
+sparkwing secrets list
+```
 
 ## `sparkwing secrets rotate`
 
@@ -127,3 +148,13 @@ Local unscoped writes are shared with local pipelines. Controller writes preserv
 | `--shared` | Store a team-wide secret that every pipeline of every repository in the team reads, including uploaded, local and --runner here runs. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--only-on POOL` | Release the secret only to jobs placed on this reserved runner pool, never to here machines; omitted when replacing a secret, its existing pool restriction is kept. |
+
+### Examples
+
+```sh
+# Store a secret from a file
+sparkwing secrets set --secret DEPLOY_TOKEN --file token.txt
+
+# Store a plain variable
+sparkwing secrets set --secret REGION --value us-east-1 --variable
+```

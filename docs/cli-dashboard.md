@@ -54,6 +54,13 @@ Print a one-time sign-in link for the local dashboard, starting the local contro
 | `--help-all` | Include uncommon flags in command help. |
 | `--host NAME` | Exact DNS name from dashboard.allowed_hosts for an HTTPS sign-in link through Tailscale Serve. |
 
+### Examples
+
+```sh
+# Print a sign-in link for the local dashboard
+sparkwing dashboard open
+```
+
 ## `sparkwing dashboard status`
 
 Report whether the controller runs and where the dashboard serves

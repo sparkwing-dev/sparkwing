@@ -45,6 +45,13 @@ Print one pipeline's full metadata
 | `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
 | `--show-withheld` | Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs. |
 
+### Examples
+
+```sh
+# Show a pipeline's jobs, arguments and triggers
+sparkwing pipeline describe --pipeline build
+```
+
 ## `sparkwing pipeline hooks`
 
 Install / uninstall git pre-commit + pre-push + post-commit hooks
@@ -134,6 +141,16 @@ Enumerate every pipeline with metadata
 | `--all` | Include entries that are hidden by default. |
 | `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
 
+### Examples
+
+```sh
+# List this repository's pipelines
+sparkwing pipeline list
+
+# Find pipelines about deploys
+sparkwing pipeline list --search deploy
+```
+
 ## `sparkwing pipeline new`
 
 Scaffold a new Go or TypeScript pipeline
@@ -151,6 +168,13 @@ Scaffold a new Go or TypeScript pipeline
 | `--on EVENT` | Trigger events to declare, comma separated, replacing the shape's default trigger; manual declares no trigger. |
 | `--hidden` | Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given. |
 | `--short TEXT` | One-line description to write into the generated pipeline source instead of a placeholder. |
+
+### Examples
+
+```sh
+# Add a pipeline to this repository
+sparkwing pipeline new --pipeline lint
+```
 
 ## `sparkwing pipeline plan`
 
@@ -330,6 +354,16 @@ Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repos
 | `--resume RUN` | Host an interrupted --runner here run again in this CLI, using the credential this machine saved and the run's original pipeline and arguments. |
 | `--ref REF` | Git revision of this checkout to run, resolved locally, HEAD by default. |
 | `--pipeline-ref REF` | Git revision to load the pipeline definitions from when it differs from the revision being run; it must match any source pin in the repository's configuration. |
+
+### Examples
+
+```sh
+# Run a pipeline on a controller
+sparkwing pipeline trigger deploy --profile prod
+
+# Return as soon as the controller accepts it
+sparkwing pipeline trigger deploy --profile prod --detach
+```
 
 ## `sparkwing pipeline upgrade`
 

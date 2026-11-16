@@ -207,6 +207,13 @@ Request cancellation of in-flight runs
 | `--run RUN_ID` | Run ID or per-team run number. (required) |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
+### Examples
+
+```sh
+# Cancel a run
+sparkwing runs cancel --run RUN_ID
+```
+
 ## `sparkwing runs grep`
 
 Search run log text
@@ -283,6 +290,16 @@ JSON emits compact run records and a page record with next_cursor and truncated.
 | `-f, --follow` | Keep streaming until the observed work finishes. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
+### Examples
+
+```sh
+# Show recent runs
+sparkwing runs list
+
+# Show failed runs of one pipeline
+sparkwing runs list --pipeline build --status failed
+```
+
 ## `sparkwing runs logs`
 
 Print a run's logs
@@ -323,6 +340,19 @@ JSON emits tagged log records. Plain emits log lines. Pretty starts each line wi
 | `--max-matches N` | When searching with --grep and no --run, the most matching lines returned from each log, 5 by default; zero removes the cap. |
 | `-q, --quiet` | When searching with --grep and no --run, print each matching run ID once instead of the matching lines. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
+
+### Examples
+
+```sh
+# Read a run's logs
+sparkwing runs logs --run RUN_ID
+
+# Follow one job's log while it runs
+sparkwing runs logs --run RUN_ID --job build --follow
+
+# Search the last day's logs
+sparkwing runs logs --grep timeout --since 24h
+```
 
 ## `sparkwing runs prune`
 
@@ -373,6 +403,13 @@ An agent retry without --reason exits 2 with bad_request. The repair hint asks f
 | `--reason TEXT` | Why the retry should pass, such as "flake: DNS timeout in TestX" or "fixed X in commit Y"; recorded on the new run and required when an agent retries. |
 | `--agent NAME` | Coding agent requesting the retry, such as claude-code:land-agent; an agent must give --reason, and none records no agent. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+
+### Examples
+
+```sh
+# Retry only the failed jobs of a run
+sparkwing runs retry --run RUN_ID --failed
+```
 
 ## `sparkwing runs stats`
 
@@ -429,6 +466,16 @@ Cloud awards awaiting activation show "Waiting for dedicated Cloud capacity" wit
 | `--timeout DURATION` | With --follow, stop after this Go duration, such as 30m, and exit 3 if the run has not ended; refused without --follow. |
 | `--poll DURATION` | Time between checks of the run with --follow, as a Go duration, 3s by default. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+
+### Examples
+
+```sh
+# Show a run's jobs and outcome
+sparkwing runs status --run RUN_ID
+
+# Wait until a run finishes
+sparkwing runs status --run RUN_ID --follow
+```
 
 ## `sparkwing runs timing`
 

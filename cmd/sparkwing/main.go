@@ -253,7 +253,9 @@ func runSparkwing(args []string) (result error) {
 	}
 	pipelineHelp := inv.Command.Path == "sparkwing run" && inv.Pipeline != ""
 	if inv.Help() && !pipelineHelp || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
-		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, invocationOutput(inv))
+		help := surfaceHelp(inv.Command)
+		help.ShowAll = inv.Bool("help-all")
+		return writeCommandHelp(help, os.Stdout, invocationOutput(inv))
 	}
 	if err := applyConfiguredProfile(&inv); err != nil {
 		return err

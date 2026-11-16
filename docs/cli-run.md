@@ -8,6 +8,14 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 
 Invoke a pipeline
 
+Run a pipeline from this repository on this machine. The local runner executes its jobs and the command prints their logs until the run finishes, then exits nonzero if the run failed.
+
+Pass the pipeline's own arguments after --. `sparkwing run <pipeline> --help` lists the arguments a pipeline takes.
+
+Look at past runs with `sparkwing runs list` and `sparkwing runs logs --run ID`. To run on a controller instead of this machine, use `sparkwing pipeline trigger <pipeline> --profile NAME`.
+
+`sparkwing run --help-all` adds Cloud routing, publication, CI use without the shared controller, step windows and every flag.
+
 Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. --sw-route cloud --profile NAME sends planning and jobs directly to Cloud, including without a terminal. --sw-detached returns after intake; otherwise the CLI follows logs. Explicit Cloud routing never falls back locally. --profile requires --sw-route cloud. Repository local restrictions still apply.
 
 ### Burst and overflow
@@ -66,3 +74,16 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--sw-allow-risk LABEL[,LABEL...]` | Authorize the listed pipeline risks. A run narrowed with --sw-only, --sw-start-at or --sw-stop-at needs only the risks of the steps it selects. Repeatable; comma-separated values are accepted. |
 | `--sw-index PATH` | Capture a Git index for local staged-content checks. |
 | `--sw-run-handle-file PATH` | Write the submitted run handle to this file once at intake; it names the run and does not track its status. |
+
+### Examples
+
+```sh
+# Run the hello pipeline on this machine
+sparkwing run hello
+
+# Pass arguments to the pipeline after --
+sparkwing run deploy -- --env staging
+
+# List the arguments a pipeline takes
+sparkwing run deploy --help
+```

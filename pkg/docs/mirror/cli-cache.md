@@ -39,6 +39,13 @@ Explain the .sparkwing directory found from the working directory or -C DIR. Eve
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 
+### Examples
+
+```sh
+# Show why the next run reuses or rebuilds the pipeline binary
+sparkwing cache explain
+```
+
 ## `sparkwing cache info`
 
 Print cache dir, size, ceilings, and recent entries

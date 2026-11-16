@@ -300,3 +300,48 @@ func TestRunStatusesMatchStoredRunStates(t *testing.T) {
 		t.Fatalf("RunStatuses() = %v, want %v", RunStatuses(), want)
 	}
 }
+
+func TestCommonGuessesSuggestTheRealCommandWithoutRunningIt(t *testing.T) {
+	registered := map[string]bool{}
+	for _, command := range Registry() {
+		registered[command.Path] = !command.Hidden
+	}
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"runs", "show", "--run", "r1"}, []string{"sparkwing runs status"}},
+		{[]string{"pipelines", "list"}, []string{"sparkwing pipeline list"}},
+		{[]string{"pipelines"}, []string{"sparkwing pipeline"}},
+		{[]string{"pipeline", "show", "--pipeline", "build"}, []string{"sparkwing pipeline describe"}},
+		{[]string{"secrets", "remove", "--secret", "X"}, []string{"sparkwing secrets delete"}},
+		{[]string{"secrets", "add", "--secret", "X"}, []string{"sparkwing secrets set"}},
+		{[]string{"profiles", "delete", "--profile", "p"}, []string{"sparkwing profiles remove", ""}},
+		{[]string{"profiles", "rm", "--profile", "p"}, []string{"sparkwing profiles remove", "sparkwing profiles delete"}},
+		{[]string{"schedules", "delete", "--schedule", "s"}, []string{"sparkwing schedules uninstall"}},
+		{[]string{"teams"}, []string{"sparkwing team"}},
+		{[]string{"teams", "settings"}, []string{"sparkwing team settings"}},
+		{[]string{"logout"}, []string{"sparkwing profiles remove", "sparkwing profiles delete"}},
+		{[]string{"tokens", "ls"}, []string{"sparkwing tokens list"}},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		if err == nil {
+			if !slices.Contains(tc.want, "") {
+				t.Errorf("%v ran instead of suggesting %v", tc.args, tc.want)
+			}
+			continue
+		}
+		var usage *UsageError
+		if !errors.As(err, &usage) {
+			t.Errorf("%v: %v is not a usage error", tc.args, err)
+			continue
+		}
+		suggested := ""
+		if _, rest, ok := strings.Cut(usage.Message, "did you mean "); ok {
+			suggested, _, _ = strings.Cut(rest, "?")
+		}
+		if !slices.Contains(tc.want, suggested) || !registered[suggested] {
+			t.Errorf("%v: suggested %q, want one of %v that is registered: %s", tc.args, suggested, tc.want, usage.Message)
+		}
+	}
+}
