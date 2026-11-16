@@ -13,17 +13,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func publishRelease(ctx context.Context, repo, source, commit, version string) error {
+func publishRelease(ctx context.Context, g releaseGitRunner, repo, source, commit, version string) error {
 	if source == "" {
 		return errors.New("release: missing selected source commit; use sparkwing run release -- --commit SHA")
 	}
 	var refused error
 	previousBase := ""
 	for attempt := 0; attempt <= landMaxMerges; attempt++ {
-		if err := fetchLandBase(ctx, releaseGitIn(repo), repo); err != nil {
+		if err := fetchLandBase(ctx, g.in(repo), repo); err != nil {
 			return err
 		}
-		base, err := releaseGit(ctx, repo, "rev-parse", landBaseRef)
+		base, err := g.git(ctx, repo, "rev-parse", landBaseRef)
 		if err != nil {
 			return err
 		}
@@ -31,17 +31,17 @@ func publishRelease(ctx context.Context, repo, source, commit, version string) e
 		if base == previousBase {
 			return refused
 		}
-		if _, err := releaseGit(ctx, repo, "merge-base", "--is-ancestor", source, base); err != nil {
+		if _, err := g.git(ctx, repo, "merge-base", "--is-ancestor", source, base); err != nil {
 			return fmt.Errorf("release: source %s is no longer on origin/main: %w", source, err)
 		}
-		merged, cleanup, err := mergeReleaseOnMain(ctx, repo, source, commit, base, version)
+		merged, cleanup, err := mergeReleaseOnMain(ctx, g, repo, source, commit, base, version)
 		if err != nil {
 			return err
 		}
 		// safety: the release ran its own gates; the checkout's pre-push hook
 		// would start another gate whose output never reaches this log.
 		sparkwing.Info(ctx, "release: skipping the repository's pre-push hook (--no-verify); the release already ran its own gates")
-		_, refused = releaseGit(ctx, merged, "push", "--no-verify", "--atomic", "origin", "HEAD:refs/heads/main", "refs/tags/"+version)
+		_, refused = g.git(ctx, merged, "push", "--no-verify", "--atomic", "origin", "HEAD:refs/heads/main", "refs/tags/"+version)
 		cleanup()
 		if refused == nil {
 			return nil
@@ -51,14 +51,14 @@ func publishRelease(ctx context.Context, repo, source, commit, version string) e
 	return fmt.Errorf("release: main kept moving during publication; detached release commit %s is retained, retry publication: %w", commit, refused)
 }
 
-func mergeReleaseOnMain(ctx context.Context, repo, source, commit, base, version string) (dir string, cleanup func(), err error) {
+func mergeReleaseOnMain(ctx context.Context, g releaseGitRunner, repo, source, commit, base, version string) (dir string, cleanup func(), err error) {
 	root, err := os.MkdirTemp("", "sparkwing-release-main-")
 	if err != nil {
 		return "", nil, err
 	}
 	dir = filepath.Join(root, "source")
 	cleanup = func() {
-		if _, removeErr := releaseGit(context.WithoutCancel(ctx), repo, "worktree", "remove", dir); removeErr != nil {
+		if _, removeErr := g.git(context.WithoutCancel(ctx), repo, "worktree", "remove", dir); removeErr != nil {
 			sparkwing.Warn(ctx, "remove publication worktree %s: %v", dir, removeErr)
 			return
 		}
@@ -66,21 +66,21 @@ func mergeReleaseOnMain(ctx context.Context, repo, source, commit, base, version
 			sparkwing.Warn(ctx, "remove publication directory %s: %v", root, removeErr)
 		}
 	}
-	if _, err := releaseGit(ctx, repo, "worktree", "add", "--detach", dir, base); err != nil {
+	if _, err := g.git(ctx, repo, "worktree", "add", "--detach", dir, base); err != nil {
 		return "", nil, errors.Join(err, os.RemoveAll(root))
 	}
-	if _, ancestorErr := releaseGit(ctx, repo, "merge-base", "--is-ancestor", commit, base); ancestorErr == nil {
+	if _, ancestorErr := g.git(ctx, repo, "merge-base", "--is-ancestor", commit, base); ancestorErr == nil {
 		return dir, cleanup, nil
 	}
 	fail := func(err error) (string, func(), error) {
 		return "", nil, fmt.Errorf("release: metadata merge retained at %s; resolve it before publication: %w", dir, err)
 	}
-	if _, err := releaseGit(ctx, dir, "merge", "--no-ff", "--no-commit", commit); err != nil {
+	if _, err := g.git(ctx, dir, "merge", "--no-ff", "--no-commit", commit); err != nil {
 		return fail(err)
 	}
 	var bodies []string
 	for _, ref := range []string{source, commit, base} {
-		body, err := releaseGit(ctx, repo, "show", ref+":CHANGELOG.md")
+		body, err := g.git(ctx, repo, "show", ref+":CHANGELOG.md")
 		if err != nil {
 			return fail(err)
 		}
@@ -96,11 +96,11 @@ func mergeReleaseOnMain(ctx context.Context, repo, source, commit, base, version
 	if err := CheckChangelogLint(ctx, dir); err != nil {
 		return fail(err)
 	}
-	if _, err := releaseGit(ctx, dir, "add", "--", "CHANGELOG.md", embeddedChangelogRel); err != nil {
+	if _, err := g.git(ctx, dir, "add", "--", "CHANGELOG.md", embeddedChangelogRel); err != nil {
 		return fail(err)
 	}
 	// safety: a merge commit cannot name paths; its index comes only from the two committed trees and the notes above.
-	if _, err := releaseGit(ctx, dir, "commit", "--no-verify", "-m", "chore(release): merge "+version+" metadata into main"); err != nil {
+	if _, err := g.git(ctx, dir, "commit", "--no-verify", "-m", "chore(release): merge "+version+" metadata into main"); err != nil {
 		return fail(err)
 	}
 	return dir, cleanup, nil

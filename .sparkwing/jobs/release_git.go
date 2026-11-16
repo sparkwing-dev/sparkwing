@@ -17,19 +17,25 @@ const (
 	releaseGitLocalTimeout  = 2 * time.Minute
 )
 
-var releaseGitBound = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, d)
+type releaseGitRunner struct {
+	remoteTimeout time.Duration
+	localTimeout  time.Duration
+	deadline      func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
-func releaseGit(ctx context.Context, dir string, args ...string) (string, error) {
-	timeout := releaseGitLocalTimeout
+func newReleaseGitRunner() releaseGitRunner {
+	return releaseGitRunner{remoteTimeout: releaseGitRemoteTimeout, localTimeout: releaseGitLocalTimeout, deadline: context.WithTimeout}
+}
+
+func (g releaseGitRunner) git(ctx context.Context, dir string, args ...string) (string, error) {
+	timeout := g.localTimeout
 	switch args[0] {
 	case "push", "fetch", "ls-remote":
-		timeout = releaseGitRemoteTimeout
+		timeout = g.remoteTimeout
 	}
 	command := "git " + strings.Join(args, " ")
 	sparkwing.Info(ctx, "release: %s (in %s, timeout %s)", command, dir, timeout)
-	bounded, cancel := releaseGitBound(ctx, timeout)
+	bounded, cancel := g.deadline(ctx, timeout)
 	defer cancel()
 	res, err := sparkwing.Exec(bounded, "git", args...).Dir(dir).Env("GIT_TERMINAL_PROMPT", "0").Capture()
 	if err == nil {
@@ -44,9 +50,9 @@ func releaseGit(ctx context.Context, dir string, args ...string) (string, error)
 	return "", fmt.Errorf("%s: %w", command, err)
 }
 
-func releaseGitIn(dir string) gitRunner {
+func (g releaseGitRunner) in(dir string) gitRunner {
 	return func(ctx context.Context, args ...string) (string, error) {
-		out, err := releaseGit(ctx, dir, args...)
+		out, err := g.git(ctx, dir, args...)
 		return strings.TrimSpace(out), err
 	}
 }
@@ -54,22 +60,22 @@ func releaseGitIn(dir string) gitRunner {
 // safety: a local tag origin lacks, on a commit no remote has, is what an
 // interrupted cut leaves behind; the retry replaces it. Anything else is
 // refused, and a tag already on origin never reaches here.
-func staleReleaseTag(ctx context.Context, repo, version string) (bool, error) {
-	target, err := releaseGit(ctx, repo, "for-each-ref", "--format=%(objectname)", "refs/tags/"+version)
+func (g releaseGitRunner) staleReleaseTag(ctx context.Context, repo, version string) (bool, error) {
+	target, err := g.git(ctx, repo, "for-each-ref", "--format=%(objectname)", "refs/tags/"+version)
 	if err != nil || strings.TrimSpace(target) == "" {
 		return false, err
 	}
-	commit, err := releaseGit(ctx, repo, "rev-parse", "refs/tags/"+version+"^{commit}")
+	commit, err := g.git(ctx, repo, "rev-parse", "refs/tags/"+version+"^{commit}")
 	if err != nil {
 		return false, err
 	}
 	commit = strings.TrimSpace(commit)
 	// safety: tracking refs are only as fresh as the last fetch, and another clone may have published the commit
 	// on a branch this checkout never fetched; refresh every origin head and keep the tag when that fails.
-	if _, err := releaseGit(ctx, repo, "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+	if _, err := g.git(ctx, repo, "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
 		return false, fmt.Errorf("release: local tag %s exists, and origin's branches could not be fetched to prove its commit %s is unpublished, so it is kept: %w", version, short(commit), err)
 	}
-	remotes, err := releaseGit(ctx, repo, "for-each-ref", "--format=%(refname)", "--contains", commit, "refs/remotes/")
+	remotes, err := g.git(ctx, repo, "for-each-ref", "--format=%(refname)", "--contains", commit, "refs/remotes/")
 	if err != nil {
 		return false, err
 	}

@@ -643,6 +643,14 @@ type pushTagJob struct {
 	Version sparkwing.Ref[string]
 	Commit  sparkwing.Ref[string]
 	RepoDir string
+	git     releaseGitRunner
+}
+
+func (j *pushTagJob) gitRunner() releaseGitRunner {
+	if j.git.deadline == nil {
+		return newReleaseGitRunner()
+	}
+	return j.git
 }
 
 func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -654,7 +662,8 @@ func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func (j *pushTagJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	remote, err := releaseGit(ctx, j.RepoDir, "ls-remote", "--tags", "origin", "refs/tags/"+version)
+	g := j.gitRunner()
+	remote, err := g.git(ctx, j.RepoDir, "ls-remote", "--tags", "origin", "refs/tags/"+version)
 	if err != nil {
 		return fmt.Errorf("release: re-check remote tags: %w", err)
 	}
@@ -668,7 +677,7 @@ func (j *pushTagJob) run(ctx context.Context) error {
 	if commit == "" {
 		return errors.New("release: missing changelog commit; run commit-changelog before push-tag")
 	}
-	stale, err := staleReleaseTag(ctx, j.RepoDir, version)
+	stale, err := g.staleReleaseTag(ctx, j.RepoDir, version)
 	if err != nil {
 		return err
 	}
@@ -676,10 +685,10 @@ func (j *pushTagJob) run(ctx context.Context) error {
 	if stale {
 		tag = []string{"tag", "-f", "-a", version, commit, "-m", "Release " + version}
 	}
-	if _, err := releaseGit(ctx, j.RepoDir, tag...); err != nil {
+	if _, err := g.git(ctx, j.RepoDir, tag...); err != nil {
 		return fmt.Errorf("release: create tag: %w", err)
 	}
-	return publishRelease(ctx, j.RepoDir, j.Source, commit, version)
+	return publishRelease(ctx, g, j.RepoDir, j.Source, commit, version)
 }
 
 func (j *pushTagJob) dryRun(ctx context.Context) error {

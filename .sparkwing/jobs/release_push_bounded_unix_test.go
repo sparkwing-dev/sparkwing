@@ -52,7 +52,12 @@ func newReleasePushFixture(t *testing.T) releasePushFixture {
 
 func (f releasePushFixture) run(t *testing.T, host sparkwingtest.Host) error {
 	t.Helper()
-	job := pushTagJob{RepoDir: f.detached, Source: f.source, Version: sparkwing.Ref[string]{JobID: "version"}, Commit: sparkwing.Ref[string]{JobID: "commit"}}
+	return f.runWith(t, host, newReleaseGitRunner())
+}
+
+func (f releasePushFixture) runWith(t *testing.T, host sparkwingtest.Host, git releaseGitRunner) error {
+	t.Helper()
+	job := pushTagJob{RepoDir: f.detached, Source: f.source, Version: sparkwing.Ref[string]{JobID: "version"}, Commit: sparkwing.Ref[string]{JobID: "commit"}, git: git}
 	return job.run(host.Context(t.Context()))
 }
 
@@ -126,15 +131,14 @@ exec '`+realGit+`' "$@"
 	// test waits on no clock and still proves a hung push is killed and named.
 	var mu sync.Mutex
 	var expire context.CancelCauseFunc
-	previous := releaseGitBound
-	releaseGitBound = func(ctx context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+	git := newReleaseGitRunner()
+	git.deadline = func(ctx context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
 		bounded, cancel := context.WithCancelCause(ctx)
 		mu.Lock()
 		expire = cancel
 		mu.Unlock()
 		return bounded, func() { cancel(nil) }
 	}
-	t.Cleanup(func() { releaseGitBound = previous })
 	go func() {
 		ready, err := os.ReadFile(started)
 		if err != nil || string(ready) != "started" {
@@ -148,7 +152,7 @@ exec '`+realGit+`' "$@"
 	}()
 
 	host := releasePushHost(t, f.commit)
-	err = f.run(t, host)
+	err = f.runWith(t, host, git)
 	if err == nil || !strings.Contains(err.Error(), "git push --no-verify --atomic") || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("hung push error = %v, want it to name the push and the timeout", err)
 	}
