@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -572,6 +573,9 @@ func TestPipelineNewTypeScriptUpdatesDeclaredEntry(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "index.ts")); !os.IsNotExist(err) {
 		t.Fatalf("unexpected default entry: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "tsconfig.json")); !os.IsNotExist(err) {
+		t.Fatalf("scaffold added a tsconfig.json to an existing package: %v", err)
+	}
 }
 
 func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
@@ -627,6 +631,67 @@ func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "go.mod")); !os.IsNotExist(err) {
 		t.Fatalf("TypeScript scaffold wrote a Go module: %v", err)
+	}
+	assertTypeScriptCheckable(t, dir)
+}
+
+// safety: `pipeline upgrade` runs `tsc --noEmit` from the project's own dependencies,
+// so a bootstrapped project needs both a tsconfig and a locked compiler.
+func assertTypeScriptCheckable(t *testing.T, dir string) {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, "tsconfig.json"))
+	if err != nil {
+		t.Fatalf("TypeScript scaffold wrote no tsconfig.json: %v", err)
+	}
+	var config struct {
+		CompilerOptions map[string]any `json:"compilerOptions"`
+		Include         []string       `json:"include"`
+	}
+	if err := json.Unmarshal(body, &config); err != nil {
+		t.Fatalf("tsconfig.json: %v", err)
+	}
+	for option, want := range map[string]any{"module": "NodeNext", "moduleResolution": "NodeNext", "strict": true, "noEmit": true, "allowImportingTsExtensions": true, "erasableSyntaxOnly": true} {
+		if config.CompilerOptions[option] != want {
+			t.Errorf("tsconfig %s = %v, want %v", option, config.CompilerOptions[option], want)
+		}
+	}
+	if !slices.Contains(config.Include, "**/*.ts") {
+		t.Errorf("tsconfig include %v misses the pipeline sources", config.Include)
+	}
+	manifest, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(manifest, &pkg); err != nil || pkg.DevDependencies["typescript"] == "" {
+		t.Fatalf("package.json declares no TypeScript compiler: %s: %v", manifest, err)
+	}
+}
+
+func TestPipelineNewTypeScriptKeepsExistingTSConfig(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	fakeNPM(t, 0)
+	dir := filepath.Join(repo, ".sparkwing")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const existing = `{"compilerOptions":{"strict":false}}`
+	if err := os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var commandErr error
+	captureStdout(t, func() {
+		commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "hello", "--template", "typescript", "-o", "json"})
+	})
+	if commandErr != nil {
+		t.Fatal(commandErr)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "tsconfig.json"))
+	if err != nil || string(body) != existing {
+		t.Fatalf("existing tsconfig.json changed: %q, %v", body, err)
 	}
 }
 

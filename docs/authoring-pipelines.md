@@ -504,6 +504,9 @@ TypeScript uses the same catalog, controller and job graph as Go. Start with
 must be on PATH. Commit the exact SDK pin and native npm lockfile in
 `.sparkwing/`. Sparkwing installs dependencies with `npm ci` and runs the
 TypeScript entry through Node, rather than compiling a standalone executable.
+Node only strips types, so run `npm exec -- tsc` in `.sparkwing/` to type-check
+the project against the scaffold's `tsconfig.json`. `sparkwing pipeline upgrade`
+runs the same check before it applies a new SDK pin.
 
 ### Registration and dependencies
 
