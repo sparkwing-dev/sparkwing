@@ -571,8 +571,24 @@ admission:
   budget: 50%,enforce
 ```
 
-Admission charges against that host's capacity. On Linux, an available writable
-cgroup can enforce the machine budget. macOS scheduling controls are advisory.
+Admission charges against that host's capacity. `enforce` also asks the OS to
+hold Sparkwing to the budget. On a systemd Linux host, the local runner's user
+service starts with `CPUQuota` at the budget's cores, `MemoryMax` when the budget
+names memory, and nice 10, so every job the runner hosts shares that cap. On
+Linux, jobs the CLI hosts itself are niced as well. A runner without systemd,
+macOS and Windows get no OS cap; macOS gives jobs background scheduling only.
+
+The controller reads the budget when it starts. After changing it, run
+`sparkwing daemon restart`. The restarted controller replaces a runner started
+under another budget; that runner finishes its held jobs under the old limits.
+
+`sparkwing queue list` reads the limits back from the running runner and reports
+what the OS applied: `OS-enforced: runner jobs capped at 2.0 cores, nice 10`, or
+`not enforced (<reason>); admission cap only` when a limit is missing, looser
+than the budget, or no runner is running yet. If the service manager refuses a
+limit, the runner still starts and the status says the budget is not enforced.
+These limits cover the local runner only. An enrolled `sparkwing-runner` service
+is not capped by them.
 Runner labels control job placement, rather than an
 OS resource sandbox. Operator ceilings refuse excessive author values instead
 of silently clamping them. See [machine settings](machine-config.md).
