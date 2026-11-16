@@ -67,15 +67,21 @@ type Target struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// Plan is everything one probe run needs that it cannot discover from inside the job.
+// Plan is everything one probe run needs that it cannot discover from inside the job. The kube API
+// grade tries to create a pod in each of KubeNamespaces and to rewrite each of KubePods, plus the
+// job's own pod in JobNamespace; SelfPod hands that pod's name to the DinD containers.
 type Plan struct {
-	Team          string   `json:"team"`
-	ControllerURL string   `json:"controller_url"`
-	ListenPort    int      `json:"listen_port"`
-	Canary        string   `json:"canary"`
-	PeerCanaries  []string `json:"peer_canaries,omitempty"`
-	PeerRuns      []string `json:"peer_runs,omitempty"`
-	Targets       []Target `json:"targets"`
+	Team           string   `json:"team"`
+	ControllerURL  string   `json:"controller_url"`
+	ListenPort     int      `json:"listen_port"`
+	Canary         string   `json:"canary"`
+	PeerCanaries   []string `json:"peer_canaries,omitempty"`
+	PeerRuns       []string `json:"peer_runs,omitempty"`
+	Targets        []Target `json:"targets"`
+	JobNamespace   string   `json:"job_namespace,omitempty"`
+	KubeNamespaces []string `json:"kube_namespaces,omitempty"`
+	KubePods       []PodRef `json:"kube_pods,omitempty"`
+	SelfPod        string   `json:"self_pod,omitempty"`
 }
 
 // ReadPlan loads and validates a plan file.
@@ -109,10 +115,41 @@ func (p Plan) Validate() error {
 	if !strings.HasPrefix(p.ControllerURL, "https://") && !strings.HasPrefix(p.ControllerURL, "http://") {
 		errs = append(errs, fmt.Errorf("controller_url %q must be an http(s) URL", p.ControllerURL))
 	}
+	kubeGraded := false
 	for i, t := range p.Targets {
 		if err := t.validate(); err != nil {
 			errs = append(errs, fmt.Errorf("target %d (%s): %w", i, t.Name, err))
 		}
+		kubeGraded = kubeGraded || t.Grade == GradeKubeAPI
+	}
+	if kubeGraded {
+		errs = append(errs, p.validateKubeGrade())
+	}
+	return errors.Join(errs...)
+}
+
+// safety: a kube API grade must know where to try forging pods, so a plan that cannot say fails
+// before any probe runs rather than grading fewer attempts.
+func (p Plan) validateKubeGrade() error {
+	var errs []error
+	if !validName(p.JobNamespace) {
+		errs = append(errs, fmt.Errorf("job_namespace %q must name the job namespace", p.JobNamespace))
+	}
+	if len(p.KubeNamespaces) == 0 {
+		errs = append(errs, errors.New("kube_namespaces must name the namespaces the kube API grade tries"))
+	}
+	for _, ns := range p.KubeNamespaces {
+		if !validName(ns) {
+			errs = append(errs, fmt.Errorf("kube namespace %q must be a plain name", ns))
+		}
+	}
+	for _, pod := range p.KubePods {
+		if !validName(pod.Namespace) || !validName(pod.Name) {
+			errs = append(errs, fmt.Errorf("kube pod %q/%q must be plain names", pod.Namespace, pod.Name))
+		}
+	}
+	if p.SelfPod != "" && !validName(p.SelfPod) {
+		errs = append(errs, fmt.Errorf("self_pod %q must be a plain name", p.SelfPod))
 	}
 	return errors.Join(errs...)
 }

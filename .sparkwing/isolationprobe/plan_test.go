@@ -10,7 +10,8 @@ import (
 func validPlan() Plan {
 	return Plan{
 		Team: "stg-iso-a", ControllerURL: "https://staging.sparkwing.dev", ListenPort: 18080, Canary: "isolation-canary-stg-iso-a",
-		PeerCanaries: []string{"isolation-canary-stg-iso-b"},
+		PeerCanaries: []string{"isolation-canary-stg-iso-b"}, JobNamespace: "jobs-ns", KubeNamespaces: []string{"jobs-ns", "staging-ns"},
+		KubePods: []PodRef{{Namespace: "staging-ns", Name: "controller-0"}},
 		Targets: []Target{
 			{Item: "C4", Name: "IMDS", Address: "169.254.169.254:80", Expect: ExpectBlocked, Listening: true, Grade: GradeIMDS},
 			{Item: "C7", Name: "public kube API", Address: "api.example.invalid:443", Expect: ExpectDenied, Listening: true, Grade: GradeKubeAPI, Namespace: "staging-ns"},
@@ -51,6 +52,9 @@ func TestValidateRefusesAPlanItCannotJudge(t *testing.T) {
 		"expect":             {func(p *Plan) { p.Targets[0].Expect = "maybe" }, "unknown expect"},
 		"ungraded denial":    {func(p *Plan) { p.Targets[1].Grade = "" }, "needs a grade"},
 		"kube API namespace": {func(p *Plan) { p.Targets[1].Namespace = "" }, "namespace it asks about"},
+		"job namespace":      {func(p *Plan) { p.JobNamespace = "" }, "job_namespace"},
+		"no kube namespaces": {func(p *Plan) { p.KubeNamespaces = nil }, "kube_namespaces"},
+		"kube pod path":      {func(p *Plan) { p.KubePods = []PodRef{{Namespace: "staging-ns", Name: "../x"}} }, "kube pod"},
 		"grade":              {func(p *Plan) { p.Targets[0].Grade = "ssh" }, "unknown grade"},
 		"unnamed target":     {func(p *Plan) { p.Targets[2].Name = "" }, "item and name"},
 		"unclassified probe": {func(p *Plan) { p.Targets[2].Item = "" }, "item and name"},

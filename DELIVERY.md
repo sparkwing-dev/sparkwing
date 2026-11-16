@@ -1429,12 +1429,13 @@ when all of these hold:
 - no evidence has gone missing.
 
 The first failure stops the sequence and cancels the runs it started, and the
-report is still written. The fixture's
-sources live in `.sparkwing/isolationprobe`. Each probe job does the following:
+report is still written. The fixture's sources live in
+`.sparkwing/isolationprobe`. Each probe job does the following:
 
 - reaches for instance metadata over IPv4 and IPv6;
 - reaches for the controller's pods and services, cluster DNS and the database;
-- reaches for the kube API's private and public endpoints;
+- reaches for the kube API's private and public endpoints, and wherever one
+  answers, tries to create and rewrite pods with every credential it can find;
 - reaches for the other runs' nodes, kubelets, listeners and Docker ports, and
   for its own node's ports and its own pod's Docker ports;
 - checks its mounts, devices, sockets, its user namespace and the peers' canary
@@ -1448,7 +1449,8 @@ The probes stay non-destructive:
 
 - they connect and close;
 - they open kernel files without writing to them;
-- they answer an unexpected connection with anonymous reads and dry runs only;
+- they answer an unexpected connection with reads and dry runs only, presenting
+  no credential beyond what the job itself can find;
 - each job is bounded at 20 minutes on Cloud's default two-core class, unless
   the run raises the anchors' limit.
 
@@ -1475,16 +1477,41 @@ The launcher creates placeholders only while a job waits for a node. If a
 report names one, rerun once the run's nodes are free of them.
 
 Placement rests on one assumption, which the report header states. Pod metadata
-cannot be authenticated from inside the cluster. Anyone able to create pods
-through the kube API could copy a real Job's or DaemonSet's UID into one, so
-the placement checks trust the owner references that cluster controllers
-write. That trust is sound only because the kube API grade passes in the same
-run: every run's kube API probes, the dry-run Job included, must report and
-pass, which shows tenant jobs cannot create pods. If any of those probes fails
-or did not run, the report marks placement untrusted and the run fails C2. Every result the plan owed must be present, from one manifest
-shared by the probe and the driver. `REPORT.md` counts the verdicts by
-checklist item, lists each failure, and lists every check that was not probed.
-`results.ndjson` holds every result.
+cannot be authenticated from inside the cluster. Anyone able to create or
+rewrite pods through the kube API could copy a real Job's or DaemonSet's UID
+into one, so the placement checks trust the owner references that cluster
+controllers write. The kube API grade tests that assumption from inside each
+hostile job.
+
+At every kube API endpoint the job can reach, the grade presents each of these
+identities in turn:
+
+- anonymous access;
+- a mounted token, or a token file the environment names;
+- a credential-named environment value;
+- a node role from instance metadata.
+
+With each identity it tries a dry-run pod create in the job namespace and in
+the controller namespace. It also tries a dry-run patch and update of the owner
+references and annotations of its own pod, each peer's pod and a controller
+pod. Both teams' jobs share the one job namespace, so trying it covers the other
+team's namespace as well. Every attempt must be refused, and an endpoint the
+job cannot reach passes because the job cannot use it either. These fail the
+grade:
+
+- an allowed attempt;
+- an answer that does not prove a refusal;
+- a credential the probe cannot present, such as AWS keys or a node role,
+  which need signing it does not do.
+
+Placement is trusted only when every run reported every kube API probe its plan
+owed and all of them passed. Otherwise the report marks placement untrusted and
+the run fails C2.
+
+Every result the plan owed must be present, from one manifest shared by the
+probe and the driver. `REPORT.md` counts the verdicts by checklist item, lists
+each failure, and lists every check that was not probed. `results.ndjson` holds
+every result.
 
 It needs the following:
 

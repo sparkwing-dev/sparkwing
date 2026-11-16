@@ -88,6 +88,7 @@ func TestGradeVerdictPassesOnlyAnonymousRefusals(t *testing.T) {
 	}{
 		"unauthorized and forbidden": {[]int{401, 403}, nil, Pass},
 		"one success":                {[]int{401, 200}, nil, Breach},
+		"a success beside a failure": {[]int{200}, errors.New("timeout"), Breach},
 		"created":                    {[]int{201}, nil, Breach},
 		"not found proves nothing":   {[]int{404}, nil, Inconclusive},
 		"no answer":                  {nil, errors.New("timeout"), Inconclusive},
@@ -320,8 +321,8 @@ func TestOwnPodDockerTargetsCoverLoopbackAndPodAddresses(t *testing.T) {
 	}
 }
 
-// The kube API grade asks about the deployment's own namespace: its secrets, the caller's rules
-// there and a dry-run Job that mounts a secret. All three must be refused.
+// The kube API grade also asks about the deployment's own namespace: its secrets, the caller's rules
+// there and a dry-run Job that mounts a secret, before trying to forge pods.
 func TestKubeAPIGradeAsksAboutTheDeploymentsNamespace(t *testing.T) {
 	var requests []string
 	status := http.StatusForbidden
@@ -329,28 +330,29 @@ func TestKubeAPIGradeAsksAboutTheDeploymentsNamespace(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		requests = append(requests, r.Method+" "+r.URL.RequestURI()+" "+string(body))
 		if r.Header.Get("Authorization") != "" {
-			t.Errorf("grade request carried a credential")
+			t.Errorf("an anonymous grade request carried a credential")
 		}
 		w.WriteHeader(status)
 	}))
 	defer srv.Close()
 	target := Target{Item: "C7", Name: "kube API public endpoint", Address: srv.Listener.Addr().String(), Expect: ExpectDenied, Listening: true, Grade: GradeKubeAPI, Namespace: "staging-ns"}
-	r := newNetwork().probe(t.Context(), ContextJob, target)
-	if r.Verdict != Pass || r.Outcome != "connected; http-403,http-403,http-403" {
-		t.Fatalf("refused kube API = %+v, want pass on three refusals", r)
+	n := gradingNetwork(Plan{JobNamespace: "jobs-ns", KubeNamespaces: []string{"jobs-ns"}}, []credential{{kind: "anonymous"}})
+	r := n.probe(t.Context(), ContextJob, target)
+	if r.Verdict != Pass || !strings.HasPrefix(r.Outcome, "connected; http-403,http-403,http-403,") {
+		t.Fatalf("refused kube API = %+v, want pass on refusals", r)
 	}
-	if len(requests) != 3 ||
+	if len(requests) < 3 ||
 		!strings.HasPrefix(requests[0], "GET /api/v1/namespaces/staging-ns/secrets ") ||
 		!strings.HasPrefix(requests[1], "POST /apis/authorization.k8s.io/v1/selfsubjectrulesreviews ") || !strings.Contains(requests[1], `"namespace":"staging-ns"`) ||
 		!strings.HasPrefix(requests[2], "POST /apis/batch/v1/namespaces/staging-ns/jobs?dryRun=All ") || !strings.Contains(requests[2], `"secretName"`) {
 		t.Fatalf("kube API grade requests = %q", requests)
 	}
 	requests, status = nil, http.StatusCreated
-	if r := newNetwork().probe(t.Context(), ContextJob, target); r.Verdict != Breach {
+	if r := n.probe(t.Context(), ContextJob, target); r.Verdict != Breach {
 		t.Fatalf("admitted dry-run Job = %+v, want breach", r)
 	}
 	target.Namespace = ""
-	if _, err := newNetwork().grade(t.Context(), target); err == nil {
+	if _, err := n.grade(t.Context(), target); err == nil {
 		t.Fatal("a kube API grade ran without the namespace it asks about")
 	}
 }

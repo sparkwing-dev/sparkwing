@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +37,7 @@ type network struct {
 	dialTimeout time.Duration
 	parallel    int
 	now         func() time.Time
+	kube        *kubeSpec
 }
 
 func newNetwork() network {
@@ -119,13 +118,10 @@ func dialVerdict(t Target, outcome string) Verdict {
 	}
 }
 
-// safety: a denied target that accepted a connection passes only when every anonymous answer is a
-// refusal; any success is a breach and anything else proves nothing.
+// safety: a denied target that accepted a connection passes only when every answer is a refusal;
+// any success is a breach even beside a failed request, and anything else proves nothing.
 func gradeVerdict(codes []int, err error) Verdict {
-	if err != nil || len(codes) == 0 {
-		return Inconclusive
-	}
-	refused := true
+	refused := err == nil && len(codes) > 0
 	for _, c := range codes {
 		if c >= 200 && c < 300 {
 			return Breach
@@ -146,7 +142,7 @@ func describeCodes(codes []int, err error) string {
 		parts = append(parts, "http-"+strconv.Itoa(c))
 	}
 	if err != nil {
-		parts = append(parts, "no-answer:"+classifyDial(err))
+		parts = append(parts, describeGradeError(err)...)
 	}
 	return strings.Join(parts, ",")
 }
@@ -189,21 +185,8 @@ func (n network) probe(ctx context.Context, where string, t Target) Result {
 	return r
 }
 
-// safety: the dry-run Job mounts a secret, so an API that admits it would let an anonymous caller
-// read the namespace's secrets through a pod; dryRun=All persists nothing either way.
-func kubeAPIRequests(base, namespace string) []gradeRequest {
-	ns := url.PathEscape(namespace)
-	rules, _ := json.Marshal(map[string]any{ //nolint:errcheck // a map of strings always marshals
-		"apiVersion": "authorization.k8s.io/v1", "kind": "SelfSubjectRulesReview", "spec": map[string]string{"namespace": namespace},
-	})
-	jsonHeader := map[string]string{"Content-Type": "application/json"}
-	return []gradeRequest{
-		{http.MethodGet, base + "/api/v1/namespaces/" + ns + "/secrets", nil, nil},
-		{http.MethodPost, base + "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews", rules, jsonHeader},
-		{http.MethodPost, base + "/apis/batch/v1/namespaces/" + ns + "/jobs?dryRun=All", []byte(dryRunJob), jsonHeader},
-	}
-}
-
+// safety: the dry-run Job mounts a secret, so an API that admits it would let the caller read the
+// namespace's secrets through a pod; dryRun=All persists nothing either way.
 const dryRunJob = `{"apiVersion":"batch/v1","kind":"Job","metadata":{"generateName":"isolation-probe-"},` +
 	`"spec":{"template":{"spec":{"restartPolicy":"Never","automountServiceAccountToken":false,` +
 	`"containers":[{"name":"probe","image":"isolation-probe.invalid/none","command":["true"],"volumeMounts":[{"name":"secret","mountPath":"/secret"}]}],` +
@@ -215,18 +198,15 @@ type gradeRequest struct {
 	header      map[string]string
 }
 
-// safety: grading requests carry no credential and either only read or are dry runs, so an open
-// endpoint answers with what an anonymous caller may do and nothing changes on it.
+// safety: grading requests either only read or are dry runs, so an open endpoint answers with what
+// the caller may do and nothing changes on it. Only the kube API grade presents credentials.
 func (n network) grade(ctx context.Context, t Target) ([]int, error) {
 	var reqs []gradeRequest
 	switch t.Grade {
 	case GradeKubelet:
 		reqs = []gradeRequest{{http.MethodGet, "https://" + t.Address + "/pods", nil, nil}}
 	case GradeKubeAPI:
-		if !validName(t.Namespace) {
-			return nil, errors.New("a kube API grade needs the namespace it asks about")
-		}
-		reqs = kubeAPIRequests("https://"+t.Address, t.Namespace)
+		return n.kubeGrade(ctx, t)
 	case GradeIMDS:
 		reqs = []gradeRequest{
 			{http.MethodPut, "http://" + t.Address + "/latest/api/token", nil, map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "60"}},

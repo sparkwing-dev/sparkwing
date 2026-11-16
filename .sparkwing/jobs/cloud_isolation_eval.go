@@ -122,10 +122,10 @@ func evaluateIsolation(namespace string, runs []isolationRun, nodes map[string]i
 	return verdict(fails)
 }
 
-// safety: pod metadata cannot be authenticated from inside the cluster, so the placement checks
-// trust the owner references cluster controllers write. Forging one takes the power to create pods
-// through the kube API, which the kube API grade, the dry-run Job included, shows tenant jobs lack.
-// That trust holds only when every run reported every kube API probe its plan owed, all passing.
+// safety: pod metadata cannot be authenticated from inside the cluster, so placement trusts the
+// owner references controllers write. The kube API grade tests whether a tenant job could forge one,
+// with dry-run pod creates and owner rewrites under every credential the job finds; the trust holds
+// only when every run reported every kube API probe its plan owed, all passing.
 func kubeAPIProof(runs []isolationRun) (bool, string) {
 	for _, r := range runs {
 		if r.RunID == "" || len(r.Ready) == 0 {

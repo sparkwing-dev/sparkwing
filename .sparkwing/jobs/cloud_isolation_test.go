@@ -168,7 +168,10 @@ func TestStaticTargetsCoverEveryItemFromTheCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := isolationprobe.Plan{ControllerURL: "https://staging.sparkwing.dev", ListenPort: 18080, Canary: "c", Targets: targets}
+	plan := isolationprobe.Plan{
+		ControllerURL: "https://staging.sparkwing.dev", ListenPort: 18080, Canary: "c", Targets: targets,
+		JobNamespace: isoJobNS, KubeNamespaces: []string{isoJobNS, "sparkwing-staging"},
+	}
 	if err := plan.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +370,10 @@ func fixturePlan(fx isoRunFixture) isolationprobe.Plan {
 	if err != nil {
 		panic(err)
 	}
-	plan := isolationprobe.Plan{Team: fx.team, ControllerURL: "https://staging.sparkwing.dev", ListenPort: fixtureListenPort, Canary: "isolation-canary-" + fx.label, Targets: targets}
+	plan := isolationprobe.Plan{
+		Team: fx.team, ControllerURL: "https://staging.sparkwing.dev", ListenPort: fixtureListenPort, Canary: "isolation-canary-" + fx.label, Targets: targets,
+		JobNamespace: isoJobNS, KubeNamespaces: []string{isoJobNS, "sparkwing-staging"}, KubePods: []isolationprobe.PodRef{{Namespace: "sparkwing-staging", Name: "controller"}},
+	}
 	for _, label := range fx.peers {
 		p := fixtureFor(label)
 		plan.PeerCanaries = append(plan.PeerCanaries, "isolation-canary-"+p.label)
@@ -469,6 +475,16 @@ func TestPlacementTrustNeedsThePassingKubeAPIGrade(t *testing.T) {
 		"a run that never probed": {func(r []isolationRun) {
 			r[2].RunID, r[2].Results, r[2].Summary, r[2].Pods = "", nil, nil, nil
 		}, []string{"C2", "C13"}},
+		"a kube API probe that was skipped": {func(r []isolationRun) {
+			i := slices.IndexFunc(r[0].Results, kubeAPI)
+			r[0].Results[i].Verdict = isolationprobe.NotProbed
+			resummarize(&r[0])
+		}, []string{"C2"}},
+		"a kube API probe only observed": {func(r []isolationRun) {
+			i := slices.IndexFunc(r[2].Results, kubeAPI)
+			r[2].Results[i].Verdict = isolationprobe.Observed
+			resummarize(&r[2])
+		}, []string{"C2"}},
 	} {
 		runs, nodes := evalFixture()
 		c.edit(runs)
@@ -1277,6 +1293,29 @@ func TestConformStopsAtTheFirstRunThatFails(t *testing.T) {
 		report, rerr := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
 		if rerr != nil || !strings.Contains(string(report), "A1 was not run") || !strings.Contains(string(report), "the sequence stopped") {
 			t.Errorf("%s: report = %.600s, %v", name, report, rerr)
+		}
+	}
+}
+
+// Each plan aims the kube API grade at the job and controller namespaces, at a controller pod and at
+// every peer's probe pod; the job adds its own pod when it runs.
+func TestPlansAimTheKubeAPIGradeAtEveryNamespaceAndPod(t *testing.T) {
+	fake, _, err := driveIsolation(t, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for run, want := range map[string]string{
+		"run-1": "sparkwing-staging/controller",
+		"run-2": "sparkwing-staging/controller " + isoJobNS + "/B1-probe",
+		"run-3": "sparkwing-staging/controller " + isoJobNS + "/A1-probe " + isoJobNS + "/B1-probe",
+	} {
+		plan := fake.plans[run]
+		var pods []string
+		for _, p := range plan.KubePods {
+			pods = append(pods, p.Namespace+"/"+p.Name)
+		}
+		if strings.Join(pods, " ") != want || plan.JobNamespace != isoJobNS || strings.Join(plan.KubeNamespaces, ",") != isoJobNS+",sparkwing-staging" {
+			t.Errorf("%s plan aims the kube API grade at pods %v in %v (job namespace %q), want %s", run, pods, plan.KubeNamespaces, plan.JobNamespace, want)
 		}
 	}
 }

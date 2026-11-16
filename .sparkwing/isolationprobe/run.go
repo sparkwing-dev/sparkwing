@@ -73,6 +73,10 @@ func Run(ctx context.Context, opts Options) (bool, error) {
 	opts.Emit(FormatLine(ReadyMarker, Ready{PodIPs: ips, ListenPort: plan.ListenPort, NetNS: netns, NodeIP: node, Home: home}))
 
 	n := newNetwork()
+	self, _ := os.Hostname() //nolint:errcheck // an unknown pod name leaves the kube API grade unproven
+	spec := kubeSpecFor(plan, self, findCredentials(os.Environ(), []string{"/"}, os.ReadFile, n.nodeRoleReadable(ctx, imdsBase)))
+	n.kube = &spec
+	plan.KubePods, plan.SelfPod = spec.pods, self
 	targets := append(append([]Target(nil), plan.Targets...), ownNodeTargets(node)...)
 	own := ownScratch(opts.Docker, runDir)
 	var routes, dind []Result
@@ -157,6 +161,12 @@ func hold(ctx context.Context, d time.Duration) {
 // pod owns as the job container sees them, which the privileged container finds under /host.
 func RunContext(ctx context.Context, where string, plan Plan, podNetNS, workDir string, own []string) []Result {
 	n := newNetwork()
+	roots := []string{"/"}
+	if where == ContextPrivileged {
+		roots = append(roots, "/host", "/proc/1/root")
+	}
+	spec := kubeSpecFor(plan, plan.SelfPod, findCredentials(os.Environ(), roots, os.ReadFile, n.nodeRoleReadable(ctx, imdsBase)))
+	n.kube = &spec
 	results := n.positive(ctx, where)
 	results = append(results, n.probeAll(ctx, where, plan.Targets)...)
 	if where != ContextPrivileged {

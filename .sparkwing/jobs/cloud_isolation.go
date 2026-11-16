@@ -226,16 +226,17 @@ func realIsolationTools() isolationTools {
 }
 
 type isolationDriver struct {
-	args     CloudIsolationArgs
-	repo     string
-	tmp      string
-	evidence string
-	session  string
-	tools    isolationTools
-	runs     []*isolationRun
-	seen     *placementLog
-	alive    map[string]bool
-	gaps     []string
+	args          CloudIsolationArgs
+	repo          string
+	tmp           string
+	evidence      string
+	session       string
+	tools         isolationTools
+	runs          []*isolationRun
+	controllerPod string
+	seen          *placementLog
+	alive         map[string]bool
+	gaps          []string
 }
 
 // safety: the fixture's origin is a non-GitHub URL, so its identity comes from the URL and a team
@@ -426,12 +427,15 @@ func (d *isolationDriver) plan(r *isolationRun, static []isolationprobe.Target, 
 	plan := isolationprobe.Plan{
 		Team: r.Team, ControllerURL: d.args.ControllerURL, ListenPort: fixtureListenPort,
 		Canary: d.canaryName(r), Targets: append([]isolationprobe.Target(nil), static...),
+		JobNamespace: d.args.JobNamespace, KubeNamespaces: slices.Compact([]string{d.args.JobNamespace, d.args.ControllerNS}),
+		KubePods: []isolationprobe.PodRef{{Namespace: d.args.ControllerNS, Name: d.controllerPod}},
 	}
 	for _, label := range r.Peers {
 		p := peers[label]
 		plan.PeerCanaries = append(plan.PeerCanaries, p.Canary)
 		plan.PeerRuns = append(plan.PeerRuns, p.RunID)
 		plan.Targets = append(plan.Targets, peerTargets(p)...)
+		plan.KubePods = append(plan.KubePods, isolationprobe.PodRef{Namespace: d.args.JobNamespace, Name: p.PodName})
 	}
 	return plan
 }
@@ -585,7 +589,24 @@ func (d *isolationDriver) discover(ctx context.Context) ([]isolationprobe.Target
 	}
 	in.ControllerPods, in.ControllerServices, in.DNSPods, in.DNSServices = pods.Items, services.Items, dnsPods.Items, dnsServices.Items
 	in.APIEndpoints, in.InfraNodes = endpoints.Items, infra.Items
+	d.controllerPod = gradedPod(in.ControllerPods)
 	return staticTargets(in)
+}
+
+// safety: the kube API grade tries to rewrite a real controller pod, so the first running pod on the
+// pod network, by name, is chosen the same way on every run.
+func gradedPod(pods []kubePod) string {
+	var names []string
+	for _, p := range pods {
+		if p.Status.Phase == "Running" && !p.Spec.HostNetwork && p.Status.PodIP != "" {
+			names = append(names, p.Metadata.Name)
+		}
+	}
+	slices.Sort(names)
+	if len(names) == 0 {
+		return ""
+	}
+	return names[0]
 }
 
 // safety: the fixture is the published SDK's own scaffold with this repository's probe packages
@@ -816,7 +837,7 @@ func (d *isolationDriver) awaitReady(ctx context.Context, r *isolationRun) (peer
 			return false, err
 		}
 		if p := d.seen.probePod(r.Label); p != nil && p.Status.PodIP != "" && p.Status.HostIP != "" {
-			facts = peerFacts{Label: r.Label, Team: r.Team, RunID: r.RunID, PodIP: p.Status.PodIP, HostIP: p.Status.HostIP, ListenPort: log.Ready[0].ListenPort, Canary: r.Plan.Canary}
+			facts = peerFacts{Label: r.Label, Team: r.Team, RunID: r.RunID, PodName: p.Metadata.Name, PodIP: p.Status.PodIP, HostIP: p.Status.HostIP, ListenPort: log.Ready[0].ListenPort, Canary: r.Plan.Canary}
 			return true, nil
 		}
 		return false, nil
@@ -1386,8 +1407,9 @@ func isolationReport(args CloudIsolationArgs, runs []isolationRun, eval isolatio
 	fmt.Fprintf(&b, "Controller %s, job namespace %s, teams %s and %s, anchor job limit %s. Every result is in results.ndjson.\n\n", args.ControllerURL, args.JobNamespace, args.TeamA, args.TeamB, limit)
 	if trusted, reason := kubeAPIProof(runs); trusted {
 		b.WriteString("Placement trusts the owner references that cluster controllers write on each pod. That trust holds only " +
-			"because the kube API grade passed in every run here, the dry-run Job included, which shows no tenant job could " +
-			"create or rewrite a pod to forge them.\n\n")
+			"because the kube API grade passed in every run here. From inside each hostile job, anonymously and with every " +
+			"credential the job found, every dry-run pod create in the job and controller namespaces and every dry-run patch " +
+			"and update of a pod's owner references and annotations was refused, or the API was out of the job's reach.\n\n")
 	} else {
 		fmt.Fprintf(&b, "**Placement is UNTRUSTED:** %s. The placement checks trust owner references that cluster controllers "+
 			"write, and that trust holds only when the kube API grade passes in the same run, so C2 fails.\n\n", reason)

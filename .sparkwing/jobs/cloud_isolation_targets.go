@@ -317,6 +317,7 @@ type peerFacts struct {
 	Label      string
 	Team       string
 	RunID      string
+	PodName    string
 	PodIP      string
 	HostIP     string
 	ListenPort int
