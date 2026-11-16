@@ -50,7 +50,15 @@ and a detached, risk-authorized run becomes:
 sparkwing run deploy --detach --allow-risk destructive,prod -- --region us-east
 ```
 
-**Edge cases:** a pipeline whose SDK pin selects an engine older than this
-release still names the old spellings in engine-side refusals, such as a step
-that needs `--allow-risk`. Pass the new flag names to the CLI regardless. The
+**Upgrade the pipeline first.** `sparkwing run` hands its flags to the engine
+that the pipeline's SDK pin selects. An engine older than v0.74.0 does not know
+the new names, and this CLI no longer accepts the old ones. Until the pin moves,
+a run that passes any of these flags is refused before it starts, with an error
+that says so. Run this in each repository after updating the CLI:
+
+```sh
+sparkwing pipeline upgrade
+```
+
+A run that passes none of these flags keeps working on the older engine. The
 internal SDK protocol arguments keep their names.
