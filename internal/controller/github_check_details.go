@@ -79,7 +79,7 @@ func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep) []githubCh
 	return out
 }
 
-// safety: an unreadable declaration yields no positions, so steps fall back to start order instead of failing the report.
+// safety: an unreadable declaration yields no positions, so steps take start order instead of failing the report.
 func githubDeclaredSteps(spec []byte) map[string]int {
 	var job nodewire.JobSpec
 	if len(spec) == 0 || json.Unmarshal(spec, &job) != nil {
