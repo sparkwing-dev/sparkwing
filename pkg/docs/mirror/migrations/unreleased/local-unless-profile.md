@@ -5,11 +5,17 @@
 optional `--profile` sent its request to that controller when the flag was
 omitted.
 
-**After:** a command reaches a controller only when `--profile NAME` is on that
-invocation. Without it, or with `--profile=`, the command uses the local
-controller. `profiles set --default` is gone, `profiles list` and `profiles show`
-no longer report `default`, and a config file that still carries
-`default: true` fails to load with `profiles.NAME.default: unknown key`.
+**After:** a command reaches a controller only when its invocation asks for one:
+`--profile NAME`, or for `sparkwing run` an explicit `--sw-route cloud` or
+`--sw-route burst`, which uses `run.routing.profile` when `--profile` is absent.
+Without either, or with `--profile=`, the command uses the local controller.
+`profiles set --default` is gone, `profiles list` and `profiles show` no longer
+report `default`, and a config file that still carries `default: true` fails to
+load with:
+
+```text
+profiles.NAME.default: line N: was removed; pass --profile NAME on each command that should reach that controller (see `sparkwing docs migrations`)
+```
 
 To migrate:
 
