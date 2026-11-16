@@ -59,6 +59,11 @@ pipelines:
   - name: local-controller-e2e
     entrypoint: LocalControllerE2E
 
+  # Scaffold, run, upgrade and run a Go and a TypeScript pipeline with a real
+  # CLI against the published engines; needs network, off the land path.
+  - name: sdk-upgrade-e2e
+    entrypoint: SDKUpgradeE2E
+
   # Manual synthetic workloads for comparing local admission modes. Keep each
   # shape under a stable pipeline name so learned profiles never mix costs.
   - name: admission-stress
