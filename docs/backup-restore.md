@@ -330,9 +330,14 @@ Deleting a team or account removes its rows and objects from the live service.
 Copies remain in backups until those age out:
 
 - RDS automated backups keep point-in-time recovery for the instance's backup
-  retention period, 7 days on Sparkwing Cloud.
+  retention period. On Sparkwing Cloud that is 7 days.
 - A versioned object bucket keeps a deleted object as a noncurrent version
-  until its lifecycle rule expires it, 7 days on Sparkwing Cloud.
+  until its lifecycle rule expires it. On Sparkwing Cloud the rule is 7 days.
+  S3 rounds each expiry up to the next midnight UTC and removes expired
+  versions asynchronously, so a deleted object is typically gone within 8 days.
+
+On Sparkwing Cloud, deleted data therefore leaves automated copies in about 7
+days, typically within 8.
 - Manual RDS snapshots never expire. Delete a manual snapshot within the same
   retention period once the change it protected is verified, or record why it
   must outlive that period.
